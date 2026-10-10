@@ -26,7 +26,7 @@ import (
 // capacity, refusals that write nothing, ordinal replay and conflicts, one
 // winner for the last dollar, host-transaction rollback, and a settlement
 // above the grown hold that posts the rest as owed.
-func TestOperationAuthorizationExtension(t *testing.T) {
+func TestProviderOperationIncrement(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "holds-"+uuid.NewString()[:8])
 	ctx := merchant.WithID(t.Context(), client.MerchantID())
@@ -41,14 +41,14 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 	}
 	open := func(customer billing.CustomerID, operationID string, amount int64) {
 		body := []byte(`{"rental":"` + operationID + `"}`)
-		_, err := client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{
+		_, err := client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
 			OperationID: operationID, CustomerID: customer, RecordOwner: "user:1", Currency: "USD", Amount: amount,
 			ClaimReference: "claim:" + operationID, AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
 		})
 		require.NoError(t, err)
 	}
-	extend := func(operationID string, ordinal, amount, minimum int64) (*billing.OperationAuthorizationExtension, error) {
-		return client.ExtendOperationAuthorization(ctx, billing.ExtendOperationAuthorizationParams{
+	extend := func(operationID string, ordinal, amount, minimum int64) (*billing.ProviderOperation, error) {
+		return client.IncrementProviderOperation(ctx, billing.IncrementProviderOperationParams{
 			OperationID: operationID, Ordinal: ordinal, Amount: amount, MinimumAmount: minimum,
 		})
 	}
@@ -74,11 +74,17 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 
 	full, err := extend("rental-a", 1, 3_000_000, 1_000_000)
 	require.NoError(t, err)
-	require.Equal(t, billing.OperationAuthorizationExtension{OperationID: "rental-a", Ordinal: 1, GrantedAmount: 3_000_000, AuthorizedAmount: 5_000_000}, *full)
-	auth, err := client.GetOperationAuthorization(ctx, "rental-a")
+	require.EqualValues(t, 5_000_000, full.AuthorizedAmount)
+	require.False(t, full.Replayed)
+	require.Equal(t, int64(1), full.LastIncrement.Ordinal)
+	require.EqualValues(t, 3_000_000, full.LastIncrement.Amount)
+	require.EqualValues(t, 1_000_000, full.LastIncrement.MinimumAmount)
+	require.EqualValues(t, 3_000_000, full.LastIncrement.GrantedAmount)
+	auth, err := client.GetProviderOperation(ctx, "rental-a")
 	require.NoError(t, err)
 	require.EqualValues(t, 2_000_000, auth.Amount)
 	require.EqualValues(t, 5_000_000, auth.AuthorizedAmount)
+	require.Equal(t, full.LastIncrement, auth.LastIncrement, "the read answers the latest increment")
 	bal := balance(customer)
 	require.EqualValues(t, 5_000_000, bal.HeldAmount)
 	require.EqualValues(t, 5_000_000, bal.AvailableAmount)
@@ -86,39 +92,40 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 	replay, err := extend("rental-a", 1, 3_000_000, 1_000_000)
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
-	require.EqualValues(t, 3_000_000, replay.GrantedAmount)
+	require.EqualValues(t, 3_000_000, replay.LastIncrement.GrantedAmount)
 	_, err = extend("rental-a", 1, 4_000_000, 1_000_000)
-	refused(err, 409, "operation_authorization_conflict", "amount")
+	refused(err, 409, "provider_operation_conflict", "amount")
 	_, err = extend("rental-a", 1, 3_000_000, 2_000_000)
-	refused(err, 409, "operation_authorization_conflict", "minimum_amount")
+	refused(err, 409, "provider_operation_conflict", "minimum_amount")
 	_, err = extend("rental-a", 3, 1_000_000, 1_000_000)
-	refused(err, 409, "operation_authorization_conflict", "ordinal")
+	refused(err, 409, "provider_operation_conflict", "ordinal")
 	_, err = extend("rental-a", 0, 1_000_000, 1_000_000)
 	refused(err, 400, "invalid_param", "")
 	_, err = extend("rental-a", 2, 1_000_000, 2_000_000)
 	refused(err, 400, "invalid_param", "")
 	_, err = extend("rental-missing", 1, 1_000_000, 1_000_000)
-	refused(err, 404, "operation_authorization_not_found", "")
+	refused(err, 404, "provider_operation_not_found", "")
 
 	// A second hold leaves 4 USD; a grant at exactly the minimum takes it all.
 	open(customer, "rental-b", 1_000_000)
 	partial, err := extend("rental-a", 2, 10_000_000, 4_000_000)
 	require.NoError(t, err)
-	require.EqualValues(t, 4_000_000, partial.GrantedAmount)
+	require.EqualValues(t, 4_000_000, partial.LastIncrement.GrantedAmount)
+	require.Equal(t, int64(2), partial.LastIncrement.Ordinal)
 	require.EqualValues(t, 9_000_000, partial.AuthorizedAmount)
 	require.EqualValues(t, 0, balance(customer).AvailableAmount)
 
 	// Below the minimum: refused, nothing written, ordinal 3 still free.
 	_, err = extend("rental-a", 3, 1_000_000, 1)
 	refused(err, 402, "insufficient_credits", "")
-	auth, err = client.GetOperationAuthorization(ctx, "rental-a")
+	auth, err = client.GetProviderOperation(ctx, "rental-a")
 	require.NoError(t, err)
 	require.EqualValues(t, 9_000_000, auth.AuthorizedAmount)
 
-	_, err = client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "rental-b", ReleaseReference: "never-created:b"})
+	_, err = client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "rental-b", ReleaseReference: "never-created:b"})
 	require.NoError(t, err)
 	_, err = extend("rental-b", 1, 1_000_000, 1)
-	refused(err, 409, "operation_authorization_not_open", "")
+	refused(err, 409, "provider_operation_not_open", "")
 	third, err := extend("rental-a", 3, 1_000_000, 1_000_000)
 	require.NoError(t, err)
 	require.EqualValues(t, 10_000_000, third.AuthorizedAmount)
@@ -157,17 +164,17 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 		open(customer, "host-tx", 100_000)
 		tx, err := f.pool.Begin(ctx)
 		require.NoError(t, err)
-		grown, err := client.ExtendOperationAuthorizationTx(ctx, tx, billing.ExtendOperationAuthorizationParams{OperationID: "host-tx", Ordinal: 1, Amount: 500_000, MinimumAmount: 500_000})
+		grown, err := client.IncrementProviderOperationTx(ctx, tx, billing.IncrementProviderOperationParams{OperationID: "host-tx", Ordinal: 1, Amount: 500_000, MinimumAmount: 500_000})
 		require.NoError(t, err)
 		require.EqualValues(t, 600_000, grown.AuthorizedAmount)
-		seen, err := client.GetOperationAuthorizationTx(ctx, tx, "host-tx")
+		seen, err := client.GetProviderOperationTx(ctx, tx, "host-tx")
 		require.NoError(t, err)
 		require.EqualValues(t, 600_000, seen.AuthorizedAmount)
-		_, err = client.ExtendOperationAuthorizationTx(ctx, tx, billing.ExtendOperationAuthorizationParams{OperationID: "host-tx", Ordinal: 2, Amount: 900_000, MinimumAmount: 900_000})
+		_, err = client.IncrementProviderOperationTx(ctx, tx, billing.IncrementProviderOperationParams{OperationID: "host-tx", Ordinal: 2, Amount: 900_000, MinimumAmount: 900_000})
 		require.ErrorIs(t, err, billing.ErrInsufficientCredits)
 		require.NoError(t, tx.Rollback(ctx))
 
-		after, err := client.GetOperationAuthorization(ctx, "host-tx")
+		after, err := client.GetProviderOperation(ctx, "host-tx")
 		require.NoError(t, err)
 		require.EqualValues(t, 100_000, after.AuthorizedAmount)
 		require.EqualValues(t, 100_000, balance(customer).HeldAmount)
@@ -182,9 +189,9 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 		_, err := extend("settle", 1, 2_000_000, 2_000_000)
 		require.NoError(t, err)
 
-		qual := settleProviderCost(t, ctx, database, client, "settle", 5_000_000)
-		require.Equal(t, billing.OperationAuthorizationSettled, billing.OperationAuthorizationState(qual.Authorization.State))
-		require.EqualValues(t, 3_000_000, qual.Authorization.AuthorizedAmount)
+		op := settleProviderCost(t, ctx, database, client, "settle", 5_000_000)
+		require.Equal(t, billing.ProviderOperationSettled, billing.ProviderOperationState(op.State))
+		require.EqualValues(t, 3_000_000, op.AuthorizedAmount)
 		var manifest struct {
 			Authorization struct {
 				OpeningAmount    string `json:"opening_amount"`
@@ -195,7 +202,7 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 				} `json:"extensions"`
 			} `json:"authorization"`
 		}
-		require.NoError(t, json.Unmarshal(qual.Authorization.SettlementBody, &manifest))
+		require.NoError(t, json.Unmarshal(op.SettlementBody, &manifest))
 		require.Equal(t, "1000000", manifest.Authorization.OpeningAmount)
 		require.Equal(t, "3000000", manifest.Authorization.AuthorizedAmount)
 		require.Len(t, manifest.Authorization.Extensions, 1)
@@ -207,7 +214,7 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 		require.EqualValues(t, 0, bal.HeldAmount)
 		require.EqualValues(t, 2_000_000, bal.OwedAmount)
 		_, err = extend("settle", 2, 1, 1)
-		refused(err, 409, "operation_authorization_not_open", "")
+		refused(err, 409, "provider_operation_not_open", "")
 		replayed, err := extend("settle", 1, 2_000_000, 2_000_000)
 		require.NoError(t, err)
 		require.True(t, replayed.Replayed)
@@ -216,7 +223,7 @@ func TestOperationAuthorizationExtension(t *testing.T) {
 
 // settleProviderCost drives two equal provider observations one quiescence
 // apart, which settles the authorization at cost in the second commit.
-func settleProviderCost(t *testing.T, ctx context.Context, database *db.DB, client *openrails.Client, operationID string, cost int64) *money.ProviderBillingQualification {
+func settleProviderCost(t *testing.T, ctx context.Context, database *db.DB, client *openrails.Client, operationID string, cost int64) *money.OperationAuthorization {
 	t.Helper()
 	clock := clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Microsecond))
 	svc := money.NewMoneyService(database, clock)
@@ -232,23 +239,22 @@ func settleProviderCost(t *testing.T, ctx context.Context, database *db.DB, clie
 		NormalizedQuery: "pod=" + operationID, QueryStartsAt: start, QueryEndsAt: end, RawBody: []byte(`[{"cost":1}]`),
 		Records: []billing.ProviderBillingRecord{{ProviderResourceID: "pod-" + operationID, BucketStart: start, Amount: cost, TimeBilledMS: 3_600_000}},
 	}
-	record := func() *money.ProviderBillingQualification {
+	record := func() *money.OperationAuthorization {
 		tx, err := database.Pool().Begin(ctx)
 		require.NoError(t, err)
 		defer func() { _ = tx.Rollback(context.Background()) }()
 		txCtx, txDB, err := database.BindMerchantTx(ctx, tx, client.MerchantID())
 		require.NoError(t, err)
-		qual, err := svc.RecordProviderBillingObservationInTx(txCtx, txDB, in, time.Second)
+		op, err := svc.RecordProviderBillingObservationInTx(txCtx, txDB, in, time.Second)
 		require.NoError(t, err)
 		require.NoError(t, tx.Commit(ctx))
-		return qual
+		return op
 	}
 	first := record()
-	require.Equal(t, money.ProviderBillingQualificationPending, first.State)
+	require.Equal(t, money.ProviderBillingQualificationPending, first.Qualification.State)
 	clock.Advance(2 * time.Second)
 	in.ObservationID = operationID + ":2"
-	qual := record()
-	require.Equal(t, money.ProviderBillingQualificationEligible, qual.State)
-	require.NotNil(t, qual.Authorization)
-	return qual
+	op := record()
+	require.Equal(t, money.ProviderBillingQualificationEligible, op.Qualification.State)
+	return op
 }

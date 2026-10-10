@@ -98,6 +98,24 @@ func Schema() SchemaDoc {
 			},
 		},
 		{
+			Intent: "one customer's usage this month by rate card, failed usage apart",
+			Query: Query{
+				Measures: []string{"usage_units", "usage_revenue", "forgiven_usage"},
+				By:       []string{"rate_card", "outcome"},
+				Range:    &QueryRange{From: "2026-06-01", To: "2026-06-30"},
+				Filters:  map[string][]string{"customer": {"0b9f6d3e-5c7a-4c1e-9f2a-6d8e1b2c3d4e"}},
+			},
+		},
+		{
+			Intent: "findings that need a person now, by severity (the console's bell)",
+			Query: Query{
+				Measures: []string{"open_findings"},
+				By:       []string{"severity"},
+				Range:    &QueryRange{Last: "1d"},
+				Filters:  map[string][]string{"finding_status": {"requires_review"}},
+			},
+		},
+		{
 			Intent: "new-card decline rate per day and PSP, by decline reason",
 			Query: Query{
 				Measures: []string{"failed_attempts", "attempt_failure_rate"},

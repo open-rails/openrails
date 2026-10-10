@@ -210,7 +210,7 @@ func (p *solanaPay) payments(req transferRequest) int {
 
 func (p *solanaPay) reviewAlerts(sig string) int {
 	var n int
-	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT count(*) FROM $schema.notifications WHERE data->>'transaction_id' = $1`), sig).Scan(&n))
+	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT count(*) FROM $schema.reconciliation_findings WHERE finding_type = 'consistency.ledger.unbooked' AND evidence->>'transaction_id' = $1`), sig).Scan(&n))
 	return n
 }
 

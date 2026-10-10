@@ -32,7 +32,7 @@ func TestProviderBillingEmptyReadNeverSettlesAtZero(t *testing.T) {
 	require.NoError(t, err)
 	open := func(operationID string) {
 		body := []byte(`{"rental":"` + operationID + `"}`)
-		_, err := client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{
+		_, err := client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
 			OperationID: operationID, CustomerID: customer, RecordOwner: "user:1", Currency: "USD", Amount: 200_000,
 			ClaimReference: "claim:" + operationID, AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
 		})
@@ -56,36 +56,37 @@ func TestProviderBillingEmptyReadNeverSettlesAtZero(t *testing.T) {
 	open("cpu-pod")
 	partial, err := client.RecordProviderBillingObservation(ctx, empty("cpu-pod", "cpu-pod:partial", start.Add(time.Minute)))
 	require.NoError(t, err)
-	require.Equal(t, billing.ProviderBillingQualificationPending, partial.State)
-	require.Equal(t, billing.ProviderBillingCoverageIncomplete, partial.Reason, "a read short of the lifetime is not yet evidence")
+	require.Equal(t, billing.ProviderBillingQualificationPending, partial.Qualification.State)
+	require.Equal(t, billing.ProviderBillingCoverageIncomplete, partial.Qualification.Reason, "a read short of the lifetime is not yet evidence")
 
 	refused, err := client.RecordProviderBillingObservation(ctx, empty("cpu-pod", "cpu-pod:whole", start))
 	require.NoError(t, err)
-	require.Equal(t, billing.ProviderBillingQualificationRefused, refused.State)
-	require.Equal(t, billing.ProviderBillingProviderEvidenceRefused, refused.Reason)
-	require.Equal(t, billing.OperationAuthorizationOpen, refused.Authorization.State)
-	require.Nil(t, refused.Authorization.SettlementAmount)
+	require.Equal(t, billing.ProviderBillingQualificationRefused, refused.Qualification.State)
+	require.Equal(t, billing.ProviderBillingProviderEvidenceRefused, refused.Qualification.Reason)
+	require.Equal(t, billing.ProviderOperationOpen, refused.State)
+	require.Nil(t, refused.SettlementAmount)
 	bal, err := client.GetBalance(ctx, customer, "USD")
 	require.NoError(t, err)
 	require.EqualValues(t, 200_000, bal.HeldAmount, "the hold stays reserved")
 	require.EqualValues(t, 1_000_000, bal.BalanceAmount)
 
-	stuck, err := client.ListProviderBillingQualifications(ctx, billing.ProviderBillingQualificationListParams{
-		State:              []billing.ProviderBillingQualificationState{billing.ProviderBillingQualificationRefused},
-		AuthorizationState: []billing.OperationAuthorizationState{billing.OperationAuthorizationOpen},
+	yes := true
+	stuck, err := client.ListProviderOperations(ctx, billing.ProviderOperationListParams{
+		State: []billing.ProviderOperationState{billing.ProviderOperationOpen}, Refused: &yes,
 	})
 	require.NoError(t, err)
 	require.Len(t, stuck.Items, 1)
 	invoiced := int64(46_000)
-	closed, err := client.ResolveProviderBillingQualification(ctx, billing.ResolveProviderBillingQualificationParams{
+	closed, err := client.CloseProviderOperation(ctx, billing.CloseProviderOperationParams{
 		OperationID: "cpu-pod", Kind: billing.ProviderBillingResolutionSettled, CostAmount: &invoiced,
 		AttestedBy: "operator:paul", Reference: "runpod-invoice:cpu-pod",
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, invoiced, *closed.Authorization.SettlementAmount)
+	require.EqualValues(t, invoiced, *closed.SettlementAmount)
+	require.Equal(t, billing.ProviderBillingQualificationRefused, closed.Qualification.State, "the close keeps the qualification it closed")
 
 	open("zero-records")
-	qual := settleProviderCost(t, ctx, database, client, "zero-records", 0)
-	require.Equal(t, billing.OperationAuthorizationSettled, billing.OperationAuthorizationState(qual.Authorization.State))
-	require.EqualValues(t, 0, *qual.Authorization.SettlementAmount, "records of zero are zero-cost evidence")
+	op := settleProviderCost(t, ctx, database, client, "zero-records", 0)
+	require.Equal(t, billing.ProviderOperationSettled, billing.ProviderOperationState(op.State))
+	require.EqualValues(t, 0, *op.SettlementAmount, "records of zero are zero-cost evidence")
 }

@@ -57,23 +57,6 @@ WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%
   AND (sqlc.narg(kind)::text IS NULL OR finding_type = 'catalog.' || sqlc.narg(kind)::text)
   AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text);
 
--- name: ListOpenCatalogDriftFiltered :many
--- One keyset page, newest first: rows after (after_at, after_id).
-SELECT * FROM billing.reconciliation_findings
-WHERE merchant_id=billing.current_merchant_id() AND finding_type LIKE 'catalog.%' AND resolved_at IS NULL
-  AND (sqlc.narg(rail)::text IS NULL OR rail = sqlc.narg(rail)::text)
-  AND (sqlc.narg(kind)::text IS NULL OR finding_type = 'catalog.' || sqlc.narg(kind)::text)
-  AND (sqlc.narg(resource_type)::text IS NULL OR openrails_resource_type = sqlc.narg(resource_type)::text)
-  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
-ORDER BY created_at DESC, id DESC
-LIMIT sqlc.arg(fetch_limit)::int;
-
--- name: ListCatalogDriftByIDs :many
--- Named drift findings, open or resolved, newest first.
-SELECT * FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[]) AND finding_type LIKE 'catalog.%'
-ORDER BY created_at DESC, id DESC;
-
 -- name: ResolveCatalogDriftForResource :execrows
 -- A per-price reconcile verified this PSP account in sync for the resource.
 UPDATE billing.reconciliation_findings

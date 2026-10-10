@@ -69,6 +69,8 @@ func TestPublicMeasureVocabulary(t *testing.T) {
 		"customers_at_depletion_risk", "outstanding_credit_liability", "outstanding_owed",
 		"webhook_silence_age_seconds", "webhook_rejects", "webhook_drift_events",
 		"nmi_history_authorizations", "nmi_history_approved", "nmi_history_refused", "nmi_history_refusal_rate",
+		"forgiven_usage", "open_findings", "orphaned_members", "freeloaders", "duplicate_coverage",
+		"verification_pressure", "verification_pressure_age_seconds",
 	}, PublicMeasureNames())
 }
 

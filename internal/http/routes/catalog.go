@@ -35,8 +35,6 @@ var catalogRoutes = []Route{
 		Request: catalog.Application{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 	{Method: POST, Path: "/v1/admin/catalog/entitlement-replacements", Group: CatalogWrite, Auth: AuthMerchant, Name: "ReplaceEntitlements", Sensitive: true,
 		Request: billing.ReplaceEntitlementsParams{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ReplaceEntitlements)},
-	{Method: GET, Path: "/v1/admin/catalog/drift", Group: Admin, Auth: AuthMerchant, Name: "ListCatalogDrift", Level: LevelRead,
-		Query: params(page, idsParam, queryOf(handlers.CatalogDriftQuery{})), Responses: []Reply{{200, billing.ListPage[billing.CatalogDrift]{}}}, Handler: h(handlers.ListCatalogDrift)},
 	{Method: POST, Path: "/v1/admin/catalog/drift/refresh", Group: CatalogWrite, Auth: AuthMerchant, Name: "RefreshCatalogDrift", Sensitive: true,
 		Responses: []Reply{{200, billing.CatalogDriftRefresh{}}}, Handler: h(handlers.RefreshCatalogDrift)},
 

@@ -257,7 +257,7 @@ ci/subscriptions	TestNewCardAttemptsSaleDeclined	7.4
 ci/subscriptions	TestOffChannelPaymentIdempotency	11.4
 ci/subscriptions	TestOfflineBillingHandoff	122.7
 ci/subscriptions	TestOneTimeAbandonedAuthenticationReleases	6.7
-ci/subscriptions	TestOperationalAlertsLandInTheMerchantInbox	6.1
+ci/subscriptions	TestOperationalProblemsAreFindings	6.1
 ci/subscriptions	TestOversizedIdempotencyKeyIsInvalid	10.5
 ci/subscriptions	TestPaymentAttemptRetention	10.8
 ci/subscriptions	TestPaymentHealthAlerts	5.3

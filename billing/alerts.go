@@ -102,37 +102,10 @@ type SetAlertWebhookURLParams struct {
 	URL string `json:"url"`
 }
 
-// MerchantNotification is one operational alert in the merchant's inbox.
-type MerchantNotification struct {
-	ID        NotificationID `json:"id"`
-	Severity  AlertSeverity  `json:"severity"`
-	Title     string         `json:"title"`
-	Body      string         `json:"body"`
-	Link      *string        `json:"link"`
-	CreatedAt time.Time      `json:"created_at"`
-	ReadAt    *time.Time     `json:"read_at"`
-}
-
 // MarkNotificationsReadParams names 1 to MaxBatchItems notifications to mark
 // read.
 type MarkNotificationsReadParams struct {
 	NotificationIDs []NotificationID `json:"notification_ids"`
-}
-
-// NotificationLookup answers every requested notification; one that does not
-// exist is null.
-type NotificationLookup struct {
-	Notifications map[NotificationID]*MerchantNotification `json:"notifications"`
-}
-
-// MerchantNotificationListParams pages the merchant's inbox, newest first.
-// IDs instead reads 1 to MaxBatchItems named notifications in one page, read
-// or not; unknown ones are absent.
-type MerchantNotificationListParams struct {
-	PageRequest
-	IDs []NotificationID
-	// UnreadOnly leaves out read notifications.
-	UnreadOnly bool
 }
 
 // UnreadCount is how many notifications are unread.

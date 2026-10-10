@@ -27,7 +27,6 @@ var policedTables = []string{"checkout_attempts", "payments", "product_access", 
 var allow = map[string]string{
 	"InvoiceRecoveryHasOtherPayment":          "a tombstoned payment still owns its provider transaction; recovery must not allocate it to another invoice",
 	"PSPRecoveryBookAge":                      "tombstones do not turn an established restored provider book into a fresh account or authorize new writes",
-	"CountErrorEpisodeTotals":                 "episode analytics end an access window at its tombstone (deleted_at), so tombstoned windows are read on purpose",
 	"GetInitialMembershipForUpdate":           "completion inspects tombstones to preserve later cancellation and never recreate the accepted ID",
 	"GetInitialMembershipForArchive":          "archive validates retained membership identity including later tombstones",
 	"ListObservedInitialMembershipPayments":   "archive validates observed first-payment history including tombstones",

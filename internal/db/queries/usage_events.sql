@@ -8,8 +8,10 @@
 INSERT INTO billing.usage_events (
     id, merchant_id, customer_id, invoker_id, currency, resource,
     event_type, dimensions, amount, source, source_id,
-    ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at
-) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, sqlc.arg(pricing_authority), $12, $13, $14);
+    ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at,
+    outcome, forgiven_amount
+) VALUES ($1, $2, $3, $4, sqlc.arg(currency), $5, $6, COALESCE(sqlc.arg(dimensions), '{}'::jsonb), $8, $9, $10, $11, sqlc.arg(pricing_authority), $12, $13, $14,
+    sqlc.arg(outcome)::text, sqlc.arg(forgiven_amount)::bigint);
 
 -- name: GetUsageEventByCoords :one
 SELECT * FROM billing.usage_events
@@ -51,8 +53,6 @@ GROUP BY ue.event_type, d.key;
 SELECT COALESCE(CASE sqlc.arg(group_by)::text
            WHEN 'resource' THEN ue.resource
            WHEN 'invoker' THEN ue.invoker_id
-           WHEN 'function' THEN ue.metadata->>'function_name'
-           WHEN 'tier' THEN ue.metadata->>'availability_tier'
        END, '')::text AS key,
        ue.currency,
        COUNT(*)::bigint AS event_count,

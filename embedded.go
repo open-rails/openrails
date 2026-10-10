@@ -298,52 +298,53 @@ func (c *Client) DeclarePSP(ctx context.Context, merchantID billing.MerchantID, 
 	return &psp, nil
 }
 
-// OpenOperationAuthorizationTx is OpenOperationAuthorization inside tx, a
-// transaction from the host's pool on the engine's database, so a provider
-// obligation commits atomically with host rows. OpenRails binds the declared
-// merchant and never commits or rolls tx back; after an error the host rolls
-// back. Embedded only: a remote client returns ErrRemoteClient.
-func (c *Client) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+// OpenProviderOperationTx is OpenProviderOperation inside tx, a transaction
+// from the host's pool on the engine's database, so a provider operation
+// commits atomically with host rows. OpenRails binds the declared merchant and
+// never commits or rolls tx back; after an error the host rolls back. Embedded
+// only: a remote client returns ErrRemoteClient.
+func (c *Client) OpenProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.OpenProviderOperationParams) (*billing.ProviderOperation, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	return e.OpenOperationAuthorizationTx(ctx, tx, req)
+	return e.OpenProviderOperationTx(ctx, tx, req)
 }
 
-// GetOperationAuthorizationTx is GetOperationAuthorization inside tx (see
-// OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.OperationAuthorization, error) {
+// GetProviderOperationTx is GetProviderOperation inside tx (see
+// OpenProviderOperationTx). Embedded only.
+func (c *Client) GetProviderOperationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderOperation, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	return e.GetOperationAuthorizationTx(ctx, tx, operationID)
+	return e.GetProviderOperationTx(ctx, tx, operationID)
 }
 
-// ExtendOperationAuthorizationTx is ExtendOperationAuthorization inside tx
-// (see OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
+// IncrementProviderOperationTx is IncrementProviderOperation inside tx (see
+// OpenProviderOperationTx). Embedded only.
+func (c *Client) IncrementProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.IncrementProviderOperationParams) (*billing.ProviderOperation, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	return e.ExtendOperationAuthorizationTx(ctx, tx, req)
+	return e.IncrementProviderOperationTx(ctx, tx, req)
 }
 
-// ReleaseOperationAuthorizationTx is ReleaseOperationAuthorization inside tx
-// (see OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+// ReleaseProviderOperationTx is ReleaseProviderOperation inside tx (see
+// OpenProviderOperationTx). Embedded only.
+func (c *Client) ReleaseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseProviderOperationParams) (*billing.ProviderOperation, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	return e.ReleaseOperationAuthorizationTx(ctx, tx, req)
+	return e.ReleaseProviderOperationTx(ctx, tx, req)
 }
 
 // RecordProviderBillingObservationTx is RecordProviderBillingObservation inside
-// tx (see OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
+// tx (see OpenProviderOperationTx), so evidence or the host's refusal commits
+// with the host's own due-work row. Embedded only.
+func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderOperation, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
@@ -351,43 +352,12 @@ func (c *Client) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.
 	return e.RecordProviderBillingObservationTx(ctx, tx, req)
 }
 
-// ResolveProviderBillingQualificationTx is ResolveProviderBillingQualification
-// inside tx (see OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) ResolveProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
+// CloseProviderOperationTx is CloseProviderOperation inside tx (see
+// OpenProviderOperationTx). Embedded only.
+func (c *Client) CloseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.CloseProviderOperationParams) (*billing.ProviderOperation, error) {
 	e, err := c.embedded()
 	if err != nil {
 		return nil, err
 	}
-	return e.ResolveProviderBillingQualificationTx(ctx, tx, req)
-}
-
-// RefuseProviderBillingQualificationTx is RefuseProviderBillingQualification
-// inside tx (see OpenOperationAuthorizationTx), so the host's refusal commits
-// with its own due-work row. Embedded only.
-func (c *Client) RefuseProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.RefuseProviderBillingQualificationTx(ctx, tx, req)
-}
-
-// CloseOperationAuthorizationTx is CloseOperationAuthorization inside tx (see
-// OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) CloseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.CloseOperationAuthorizationTx(ctx, tx, req)
-}
-
-// GetProviderBillingQualificationTx is GetProviderBillingQualification inside
-// tx (see OpenOperationAuthorizationTx). Embedded only.
-func (c *Client) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {
-	e, err := c.embedded()
-	if err != nil {
-		return nil, err
-	}
-	return e.GetProviderBillingQualificationTx(ctx, tx, operationID)
+	return e.CloseProviderOperationTx(ctx, tx, req)
 }

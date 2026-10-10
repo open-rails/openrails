@@ -123,7 +123,7 @@ func (s *MoneyService) CaptureAdmission(ctx context.Context, requestID string, a
 				InvokerID: terms.Invoker, Currency: row.Currency, Resource: nilIfEmpty(u.Resource),
 				EventType: u.EventType, Dimensions: dimensions, Metadata: metadata, Amount: amount, PricingAuthority: "host",
 				Source: u.Source, SourceID: u.SourceID, LedgerTransferID: ledgerTransferID,
-				OccurredAt: now, CreatedAt: now,
+				OccurredAt: now, CreatedAt: now, Outcome: UsageSucceeded,
 			})
 			if err != nil {
 				var conflict *pgconn.PgError

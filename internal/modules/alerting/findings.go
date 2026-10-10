@@ -1,4 +1,4 @@
-// Reconciliation findings produce immediate, deduplicated merchant notifications.
+// Reconciliation findings produce immediate, deduplicated alert deliveries.
 package alerting
 
 import (
@@ -8,7 +8,6 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/db/gen"
 	log "github.com/sirupsen/logrus"
 
@@ -70,28 +69,21 @@ func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord
 			}
 		}
 	}
-	// The durable console notification and episode claim commit together. A
-	// failed insert rolls the claim back; concurrent/stale callers cannot send
-	// duplicate hooks. External deliveries are best-effort after this commit.
-	claimed := false
-	if err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		st := newStore(s.db.NewWithPgxTx(tx))
-		n, err := st.db.Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{MerchantID: queryMerchant.UUID(),
+	// The episode claim keeps concurrent or stale callers from sending
+	// duplicate hooks; the finding itself is the console's record. External
+	// deliveries are best-effort after the claim commits.
+	var n int64
+	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+		var err error
+		n, err = s.db.Gen(ctx).ClaimReconciliationFindingNotification(ctx, gen.ClaimReconciliationFindingNotificationParams{MerchantID: queryMerchant.UUID(),
 			ID: rec.ID, NotifiedAt: alert.FiredAt, Severity: string(rec.Severity),
 		})
-		if err != nil || n == 0 {
-			return err
-		}
-		err = st.createNotification(ctx, Notification{
-			Severity: alert.Severity, Title: alertTitle(alert), Body: alert.Summary,
-			Link: alert.DashboardLink, Data: alert,
-		})
-		claimed = err == nil
 		return err
-	}); err != nil {
-		return fmt.Errorf("persist finding notification: %w", err)
+	})
+	if err != nil {
+		return fmt.Errorf("claim finding notification: %w", err)
 	}
-	if !claimed {
+	if n == 0 {
 		return nil
 	}
 	for _, result := range s.deliverer.dispatchFinding(ctx, channels, alert) {

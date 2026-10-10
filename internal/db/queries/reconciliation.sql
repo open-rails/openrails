@@ -249,6 +249,7 @@ WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
        END)
   AND (sqlc.narg(severity)::text IS NULL OR f.severity = sqlc.narg(severity)::text)
   AND (sqlc.narg(finding_type)::text IS NULL OR f.finding_type = sqlc.narg(finding_type)::text)
+  AND (sqlc.narg(type_prefix)::text IS NULL OR starts_with(f.finding_type, sqlc.narg(type_prefix)::text))
   AND (sqlc.narg(after_rank)::int IS NULL
        OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
           > (sqlc.narg(after_rank)::int, sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
@@ -263,16 +264,6 @@ FROM billing.reconciliation_findings f
 WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid AND f.id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          f.created_at, f.id;
-
--- Gauge input (#690): open-finding counts per (type, severity). The Go layer
--- folds these into the named gauges (freeloaders, duplicate_coverage,
--- open-by-severity) — the findings ledger IS the metric store.
--- name: CountOpenReconciliationFindingsByTypeSeverity :many
-SELECT finding_type, severity, count(*) AS open_count
-FROM billing.reconciliation_findings
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND status IN ('reconcile_required', 'requires_review')
-GROUP BY finding_type, severity;
 
 -- Approve: the recommendation executed; mark fixed/admin_fixed with operator
 -- notes + attribution, and record the execution evidence under
@@ -770,112 +761,6 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
 -- delays an operator decision rather than losing one.
 ORDER BY e.starts_at, e.id
 LIMIT sqlc.arg(row_limit)::int;
-
--- #690/#691 `verification_pressure` gauge input: subscriptions parked (or
--- stuck) in `unknown` whose recorded paid-through has passed — standing access
--- awaiting provider verification. A pressure reading over the LIVE table, not
--- an error count: nonzero is allowed; max_age trending UP means the
--- verification machinery (pull/probe/converge) is down.
--- name: CountUnknownSubsPastPaidThrough :one
-SELECT COUNT(*)::bigint AS pressure_count,
-       COALESCE(MAX(EXTRACT(EPOCH FROM (sqlc.arg(now)::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
-FROM billing.subscriptions s
-WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND s.deleted_at IS NULL
-  AND s.status = 'unverified'
-  AND s.current_period_ends_at IS NOT NULL
-  AND s.current_period_ends_at < sqlc.arg(now)::timestamptz;
-
--- Episode analytics totals for the gauges header. Freeloader episodes are spans
--- of entitlement access not covered by payment (accepted subscription access
--- snapshot, completed purchase payment, or a live matching grant); their cause
--- separates sanctioned unpaid access (sanctioned_dunning, awaiting_verification)
--- from failure (unsanctioned). Orphaned episodes are the mirror: payment
--- coverage with no entitlement window. Open = the span still accrues at now().
--- Approximations: coverage uses the current accepted access snapshot, and only the
--- uncovered tail is measured.
--- name: CountErrorEpisodeTotals :one
-WITH win AS (
-    SELECT e.product_id, e.source_type, e.starts_at,
-           LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                 COALESCE(e.ends_at, 'infinity'::timestamptz)) AS window_end,
-           s.status AS sub_status, s.next_retry_at,
-           CASE WHEN s.id IS NULL THEN NULL
-                ELSE COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
-                    s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) END AS paid_through,
-           p.status AS payment_status,
-           COALESCE((SELECT max(r.purchased_at) FROM billing.payments r
-                      WHERE r.merchant_id = e.merchant_id AND r.refunded_payment_id = p.id AND r.deleted_at IS NULL),
-                    p.purchased_at) AS refund_effective_at,
-           (SELECT max(COALESCE(g.ends_at, 'infinity'::timestamptz))
-              FROM billing.grants g
-             WHERE g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id
-               AND g.event = 'grant' AND g.kind = 'access' AND g.starts_at <= now()
-               AND (g.id = e.grant_id OR (g.source_id = e.source_id AND g.source_type = e.source_type))
-               AND NOT EXISTS (SELECT 1 FROM billing.grants t
-                                WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-                                  AND t.event IN ('revoke', 'expire', 'supersede'))) AS grant_covered_until
-      FROM billing.product_access e
-      LEFT JOIN billing.subscriptions s
-        ON e.source_type = 'subscription' AND s.merchant_id = e.merchant_id AND s.id::text = e.source_id AND s.deleted_at IS NULL
-      LEFT JOIN billing.payments p
-        ON e.source_type = 'purchase' AND p.merchant_id = e.merchant_id AND p.id = e.payment_id AND p.deleted_at IS NULL
-     WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
-       AND e.source_type IN ('subscription', 'purchase')
-), freeloader AS (
-    SELECT CASE WHEN w.sub_status = 'past_due' AND w.next_retry_at IS NOT NULL THEN 'sanctioned_dunning'
-                WHEN w.sub_status = 'unverified' THEN 'awaiting_verification'
-                ELSE 'unsanctioned' END AS cause,
-           w.window_end > now() AS open,
-           f.unpaid_from, f.unpaid_until
-      FROM win w
-      CROSS JOIN LATERAL (
-          SELECT GREATEST(w.starts_at,
-                     CASE WHEN w.source_type = 'subscription' THEN COALESCE(w.paid_through, '-infinity'::timestamptz)
-                          WHEN w.payment_status = 'completed' THEN 'infinity'::timestamptz
-                          WHEN w.payment_status = 'refunded' THEN w.refund_effective_at
-                          ELSE '-infinity'::timestamptz END,
-                     COALESCE(w.grant_covered_until, '-infinity'::timestamptz)) AS unpaid_from,
-                 LEAST(w.window_end, now()) AS unpaid_until
-      ) f
-     WHERE f.unpaid_from < f.unpaid_until
-), coverage AS (
-    SELECT s.merchant_id, s.customer_id, 'subscription'::text AS source_type, s.id AS source_id,
-           COALESCE(s.current_period_starts_at, s.started_at) AS cov_start,
-           COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
-               s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) AS cov_end
-      FROM billing.subscriptions s
-     WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
-       AND s.deleted_at IS NULL AND s.status <> 'pending'
-       AND s.cancel_type IS DISTINCT FROM 'chargeback'
-    UNION ALL
-    SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
-           p.purchased_at + make_interval(hours => pr.access_duration_hours)
-      FROM billing.payments p
-      JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id
-     WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
-       AND p.deleted_at IS NULL AND p.status = 'completed' AND p.amount > 0 AND p.subscription_id IS NULL
-       AND pr.access_duration_hours IS NOT NULL
-), orphaned AS (
-    SELECT c.cov_end > now() AS open,
-           GREATEST(c.cov_start, COALESCE((
-               SELECT max(LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                                COALESCE(e.ends_at, 'infinity'::timestamptz)))
-                 FROM billing.product_access e
-                WHERE e.merchant_id = c.merchant_id AND e.customer_id = c.customer_id
-                  AND e.source_type = c.source_type AND e.source_id = c.source_id::text AND e.starts_at <= now()),
-               '-infinity'::timestamptz)) AS uncovered_from,
-           LEAST(c.cov_end, now()) AS uncovered_until
-      FROM coverage c
-)
-SELECT (SELECT count(*) FROM freeloader)::bigint AS freeloader_total,
-       (SELECT count(*) FROM freeloader WHERE open)::bigint AS freeloader_open,
-       (SELECT count(*) FROM freeloader WHERE cause = 'unsanctioned')::bigint AS freeloader_unsanctioned,
-       (SELECT COALESCE(sum(EXTRACT(epoch FROM unpaid_until - unpaid_from) / 86400.0), 0) FROM freeloader)::double precision AS freeloader_days,
-       (SELECT count(*) FROM orphaned WHERE uncovered_from < uncovered_until)::bigint AS orphaned_total,
-       (SELECT count(*) FROM orphaned WHERE uncovered_from < uncovered_until AND open)::bigint AS orphaned_open,
-       (SELECT COALESCE(sum(EXTRACT(epoch FROM uncovered_until - uncovered_from) / 86400.0), 0)
-          FROM orphaned WHERE uncovered_from < uncovered_until)::double precision AS orphaned_days;
 
 -- #511 Phase E (Converge sweep worker): the no-GUC list of merchants
 -- to sweep. merchants is a GLOBAL control-plane table.

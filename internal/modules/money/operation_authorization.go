@@ -43,16 +43,16 @@ const (
 )
 
 var (
-	ErrOperationAuthorizationConflict           = billing.ErrOperationAuthorizationConflict
-	ErrOperationAuthorizationNotFound           = billing.ErrOperationAuthorizationNotFound
-	ErrOperationAuthorizationNotOpen            = billing.ErrOperationAuthorizationNotOpen
-	ErrOperationAuthorizationHasBillingEvidence = billing.ErrOperationAuthorizationHasBillingEvidence
+	ErrProviderOperationConflict           = billing.ErrProviderOperationConflict
+	ErrProviderOperationNotFound           = billing.ErrProviderOperationNotFound
+	ErrProviderOperationNotOpen            = billing.ErrProviderOperationNotOpen
+	ErrProviderOperationHasBillingEvidence = billing.ErrProviderOperationHasBillingEvidence
 )
 
-// OperationAuthorizationConflict means an operation id already committed with
+// ProviderOperationConflict means an operation id already committed with
 // a different immutable field. The field name is safe to report; body contents
 // are intentionally omitted from the error.
-type OperationAuthorizationConflict = billing.OperationAuthorizationConflict
+type ProviderOperationConflict = billing.ProviderOperationConflict
 
 type OperationAuthorizationInput struct {
 	OperationID             string
@@ -85,14 +85,16 @@ type OperationAuthorization struct {
 	SettlementAmount        *int64
 	SettlementBody          []byte
 	SettlementBodySHA256    [sha256.Size]byte
-	// Refusal and Resolution are loaded by the reads that answer a hold
-	// (attachHoldOutcomes); a fresh or released-as-never-created hold has neither.
-	Refusal    *ProviderBillingRefusal
-	Resolution *ProviderBillingResolution
-	CreatedAt  time.Time
-	ReleasedAt *time.Time
-	SettledAt  *time.Time
-	Replayed   bool
+	// LastIncrement, Qualification, Refusal and Resolution are loaded by the
+	// reads that answer an operation (attachOperationDetails).
+	LastIncrement *OperationAuthorizationExtension
+	Qualification *ProviderBillingQualification
+	Refusal       *ProviderBillingRefusal
+	Resolution    *ProviderBillingResolution
+	CreatedAt     time.Time
+	ReleasedAt    *time.Time
+	SettledAt     *time.Time
+	Replayed      bool
 }
 
 type passThroughProviderCostSettlementInput struct {
@@ -188,13 +190,13 @@ func (s *MoneyService) OpenOperationAuthorizationInTx(ctx context.Context, txDB 
 }
 
 // replayOperationAuthorizationWithOutcome answers a repeated open with the
-// hold as it stands, refusal and resolution included.
+// operation as it stands.
 func replayOperationAuthorizationWithOutcome(ctx context.Context, q *gen.Queries, row gen.BillingOperationAuthorization, in OperationAuthorizationInput) (*OperationAuthorization, error) {
 	auth, err := replayOperationAuthorization(row, in)
 	if err != nil {
 		return nil, err
 	}
-	return auth, attachHoldOutcomes(ctx, q, row.MerchantID, auth)
+	return auth, attachOperationDetails(ctx, q, row.MerchantID, auth)
 }
 
 // operationCapacity is what a new or grown hold may take, read under the payer
@@ -324,7 +326,7 @@ func replayOperationAuthorization(row gen.BillingOperationAuthorization, in Oper
 	}
 	for _, check := range checks {
 		if !check.same {
-			return nil, &OperationAuthorizationConflict{Field: check.field}
+			return nil, &ProviderOperationConflict{Field: check.field}
 		}
 	}
 	return operationAuthorizationFromRow(row, true), nil
@@ -361,7 +363,7 @@ func (s *MoneyService) settlePassThroughProviderCostInTx(ctx context.Context, tx
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -380,7 +382,7 @@ func (s *MoneyService) settlePassThroughProviderCostInTx(ctx context.Context, tx
 	case OperationAuthorizationSettled:
 		return replayPassThroughProviderCostSettlement(row, in)
 	case OperationAuthorizationReleased:
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
 	case OperationAuthorizationOpen:
 	default:
 		return nil, fmt.Errorf("operation authorization has invalid state %q", row.State)
@@ -410,7 +412,7 @@ func (s *MoneyService) settlePassThroughProviderCostInTx(ctx context.Context, tx
 		OperationID:          in.OperationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
 	}
 	if err != nil {
 		return nil, err
@@ -472,7 +474,7 @@ func replayPassThroughProviderCostSettlement(row gen.BillingOperationAuthorizati
 	}
 	for _, check := range checks {
 		if !check.same {
-			return nil, &OperationAuthorizationConflict{Field: check.field}
+			return nil, &ProviderOperationConflict{Field: check.field}
 		}
 	}
 	return operationAuthorizationFromRow(row, true), nil
@@ -507,13 +509,13 @@ func (s *MoneyService) GetOperationAuthorizationInTx(ctx context.Context, txDB *
 		MerchantID: merchantID.UUID(), OperationID: operationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
 	}
 	auth := operationAuthorizationFromRow(row, false)
-	return auth, attachHoldOutcomes(ctx, q, row.MerchantID, auth)
+	return auth, attachOperationDetails(ctx, q, row.MerchantID, auth)
 }
 
 func (s *MoneyService) ReleaseOperationAuthorization(ctx context.Context, operationID, releaseReference string) (*OperationAuthorization, error) {
@@ -549,7 +551,7 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 	params := gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: operationID}
 	row, err := q.GetOperationAuthorization(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -568,7 +570,7 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 		MerchantID: merchantID.UUID(), OperationID: operationID,
 	})
 	if err == nil {
-		return nil, ErrOperationAuthorizationHasBillingEvidence
+		return nil, ErrProviderOperationHasBillingEvidence
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
@@ -577,16 +579,17 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 	if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), operationID); err != nil {
 		return nil, err
 	} else if refused {
-		return nil, ErrProviderBillingQualificationRefused
+		return nil, ErrProviderOperationRefused
 	}
 	switch OperationAuthorizationState(row.State) {
 	case OperationAuthorizationReleased:
 		if row.TerminalReference == nil || *row.TerminalReference != releaseReference {
-			return nil, &OperationAuthorizationConflict{Field: "release_reference"}
+			return nil, &ProviderOperationConflict{Field: "release_reference"}
 		}
-		return operationAuthorizationFromRow(row, true), nil
+		auth := operationAuthorizationFromRow(row, true)
+		return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 	case OperationAuthorizationSettled:
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
 	case OperationAuthorizationOpen:
 	default:
 		return nil, fmt.Errorf("operation authorization has invalid state %q", row.State)
@@ -601,7 +604,8 @@ func (s *MoneyService) ReleaseOperationAuthorizationInTx(ctx context.Context, tx
 	if err != nil {
 		return nil, err
 	}
-	return operationAuthorizationFromRow(released, false), nil
+	auth := operationAuthorizationFromRow(released, false)
+	return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 }
 
 func operationAuthorizationFromRow(row gen.BillingOperationAuthorization, replayed bool) *OperationAuthorization {

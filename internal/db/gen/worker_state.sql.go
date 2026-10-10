@@ -10,6 +10,25 @@ import (
 	"time"
 )
 
+const clearWorkerHealthAlerted = `-- name: ClearWorkerHealthAlerted :exec
+UPDATE billing.worker_state
+SET last_alerted_at = NULL,
+    updated_at = GREATEST(updated_at, $2::timestamptz)
+WHERE worker_kind = $1 AND last_alerted_at = $3::timestamptz
+`
+
+type ClearWorkerHealthAlertedParams struct {
+	WorkerKind string
+	Now        time.Time
+	AlertedAt  time.Time
+}
+
+// A recovered kind's stall is over: the next stall alerts afresh.
+func (q *Queries) ClearWorkerHealthAlerted(ctx context.Context, arg ClearWorkerHealthAlertedParams) error {
+	_, err := q.db.Exec(ctx, clearWorkerHealthAlerted, arg.WorkerKind, arg.Now, arg.AlertedAt)
+	return err
+}
+
 const listWorkerHealth = `-- name: ListWorkerHealth :many
 SELECT worker_kind, cursor_merchant_id, cursor_version, registered_at, expected_period_seconds, last_success_at, last_error_at, last_error, consecutive_failures, last_alerted_at, updated_at FROM billing.worker_state ORDER BY worker_kind
 `

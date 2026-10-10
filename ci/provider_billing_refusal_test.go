@@ -25,10 +25,11 @@ import (
 )
 
 // A host that cannot qualify a hold's provider cost (no provable lifecycle, a
-// provider that reports no billing, evidence OpenRails rejects) refuses it. The
-// refused hold takes no evidence, growth or release; the list shows every stuck
-// hold with its reason, whoever refused it; and an operator's close, settled or
-// written off, is its only exit, with or without a qualification.
+// provider that reports no billing, evidence OpenRails rejects) refuses it with
+// an observation carrying no evidence. The refused hold takes no evidence,
+// growth or release; the list shows every stuck hold with its reason, whoever
+// refused it; and an operator's close, settled or written off, is its only
+// exit, with or without a qualification.
 func TestProviderBillingRefusal(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "refuse-"+uuid.NewString()[:8])
@@ -44,7 +45,7 @@ func TestProviderBillingRefusal(t *testing.T) {
 	open := func(customer billing.CustomerID, operationID string, amount int64) {
 		t.Helper()
 		body := []byte(`{"rental":"` + operationID + `"}`)
-		_, err := client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{
+		_, err := client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
 			OperationID: operationID, CustomerID: customer, RecordOwner: "user:1", Currency: "USD", Amount: amount,
 			ClaimReference: "claim:" + operationID, AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
 		})
@@ -69,6 +70,10 @@ func TestProviderBillingRefusal(t *testing.T) {
 		}
 		return in
 	}
+	refuse := func(operationID, observationID string, kind billing.ProviderBillingRefusalKind, detail string) billing.RecordProviderBillingObservationParams {
+		return billing.RecordProviderBillingObservationParams{OperationID: operationID, ObservationID: observationID,
+			Refusal: &billing.ProviderBillingObservationRefusal{Kind: kind, Detail: detail}}
+	}
 	balance := func(customer billing.CustomerID) billing.Balance {
 		bal, err := client.GetBalance(ctx, customer, "USD")
 		require.NoError(t, err)
@@ -87,12 +92,12 @@ func TestProviderBillingRefusal(t *testing.T) {
 	}
 	cost := func(v int64) *int64 { return &v }
 	yes, no := true, false
-	list := func(params billing.OperationAuthorizationListParams) map[string]string {
+	list := func(params billing.ProviderOperationListParams) map[string]string {
 		t.Helper()
 		out := map[string]string{}
 		var order []string
 		for {
-			page, err := client.ListOperationAuthorizations(ctx, params)
+			page, err := client.ListProviderOperations(ctx, params)
 			require.NoError(t, err)
 			for _, auth := range page.Items {
 				order = append(order, auth.OperationID)
@@ -108,11 +113,11 @@ func TestProviderBillingRefusal(t *testing.T) {
 			params.Cursor = page.Next
 		}
 	}
-	stuck := billing.OperationAuthorizationListParams{State: []billing.OperationAuthorizationState{billing.OperationAuthorizationOpen}, Refused: &yes}
+	stuck := billing.ProviderOperationListParams{State: []billing.ProviderOperationState{billing.ProviderOperationOpen}, Refused: &yes}
 
 	debtor, payer, evidence, other := fund(400_000), fund(1_000_000), fund(1_000_000), fund(1_000_000)
 	open(other, "released", 50_000)
-	_, err := client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "released", ReleaseReference: "never-created"})
+	_, err := client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "released", ReleaseReference: "never-created"})
 	require.NoError(t, err)
 	open(other, "live", 100_000)
 	open(debtor, "unprovable", 300_000)
@@ -120,83 +125,85 @@ func TestProviderBillingRefusal(t *testing.T) {
 	open(evidence, "rejected", 100_000)
 	baseline, err := client.RecordProviderBillingObservation(ctx, observation("rejected", "rejected:1", 30_000))
 	require.NoError(t, err)
-	require.Equal(t, billing.ProviderBillingAwaitingEqualObservation, baseline.Reason)
+	require.Equal(t, billing.ProviderBillingAwaitingEqualObservation, baseline.Qualification.Reason)
 
 	t.Run("the host refuses a hold it cannot qualify", func(t *testing.T) {
-		req := billing.RefuseProviderBillingQualificationParams{
-			OperationID: "unprovable", Reason: billing.ProviderBillingLifecycleUnprovable, Detail: "window 7 of an absent resource is open",
-		}
-		auth, err := client.RefuseProviderBillingQualification(ctx, req)
+		req := refuse("unprovable", "unprovable:host", billing.ProviderBillingRefusalLifecycleUnprovable, "window 7 of an absent resource is open")
+		op, err := client.RecordProviderBillingObservation(ctx, req)
 		require.NoError(t, err)
-		require.False(t, auth.Replayed)
-		require.Equal(t, billing.OperationAuthorizationOpen, auth.State)
-		require.NotNil(t, auth.Refusal)
-		require.Equal(t, billing.ProviderBillingLifecycleUnprovable, auth.Refusal.Reason)
-		require.Equal(t, req.Detail, auth.Refusal.Detail)
-		require.Nil(t, auth.Resolution)
+		require.False(t, op.Replayed)
+		require.Equal(t, billing.ProviderOperationOpen, op.State)
+		require.NotNil(t, op.Refusal)
+		require.Equal(t, billing.ProviderBillingLifecycleUnprovable, op.Refusal.Reason)
+		require.Equal(t, "observation unprovable:host: window 7 of an absent resource is open", op.Refusal.Detail)
+		require.Nil(t, op.Qualification, "a host refusal carries no evidence")
+		require.Nil(t, op.Resolution)
 
-		replay, err := client.RefuseProviderBillingQualification(ctx, req)
+		replay, err := client.RecordProviderBillingObservation(ctx, req)
 		require.NoError(t, err)
 		require.True(t, replay.Replayed)
-		require.Equal(t, auth.Refusal, replay.Refusal)
+		require.Equal(t, op.Refusal, replay.Refusal)
 		changed := req
-		changed.Detail = "another reason"
-		_, err = client.RefuseProviderBillingQualification(ctx, changed)
-		refused(err, 409, "provider_billing_refusal_conflict", "detail")
-		changed = req
-		changed.Reason = billing.ProviderBillingUnavailable
-		_, err = client.RefuseProviderBillingQualification(ctx, changed)
-		refused(err, 409, "provider_billing_refusal_conflict", "reason")
+		changed.Refusal = &billing.ProviderBillingObservationRefusal{Kind: req.Refusal.Kind, Detail: "another reason"}
+		_, err = client.RecordProviderBillingObservation(ctx, changed)
+		refused(err, 409, "provider_billing_observation_conflict", "refusal_detail")
+		changed.Refusal = &billing.ProviderBillingObservationRefusal{Kind: billing.ProviderBillingRefusalUnavailable, Detail: req.Refusal.Detail}
+		_, err = client.RecordProviderBillingObservation(ctx, changed)
+		refused(err, 409, "provider_billing_observation_conflict", "refusal_kind")
+		_, err = client.RecordProviderBillingObservation(ctx, refuse("unprovable", "unprovable:again", billing.ProviderBillingRefusalUnavailable, ""))
+		refused(err, 409, "provider_operation_refused", "")
 
-		for _, bad := range []billing.RefuseProviderBillingQualificationParams{
-			{OperationID: "live", Reason: billing.ProviderBillingProviderEvidenceRefused},
-			{OperationID: "live", Reason: "stuck"},
-			{OperationID: "live"},
-			{OperationID: "live", Reason: billing.ProviderBillingUnavailable, Detail: "trailing "},
+		withEvidence := observation("live", "live:host", 10)
+		withEvidence.Records, withEvidence.RawBody = nil, nil
+		withEvidence.Refusal = &billing.ProviderBillingObservationRefusal{Kind: billing.ProviderBillingRefusalUnavailable}
+		for _, bad := range []billing.RecordProviderBillingObservationParams{
+			refuse("live", "live:host", "stuck", ""),
+			refuse("live", "", billing.ProviderBillingRefusalUnavailable, ""),
+			refuse("live", "live:host", billing.ProviderBillingRefusalUnavailable, "trailing "),
+			withEvidence,
 		} {
-			_, err := client.RefuseProviderBillingQualification(ctx, bad)
+			_, err := client.RecordProviderBillingObservation(ctx, bad)
 			refused(err, 400, "invalid_param", "")
 		}
-		_, err = client.RefuseProviderBillingQualification(ctx, billing.RefuseProviderBillingQualificationParams{OperationID: "missing", Reason: billing.ProviderBillingUnavailable})
-		refused(err, 404, "operation_authorization_not_found", "")
-		_, err = client.RefuseProviderBillingQualification(ctx, billing.RefuseProviderBillingQualificationParams{OperationID: "released", Reason: billing.ProviderBillingUnavailable})
-		refused(err, 409, "operation_authorization_not_open", "")
+		_, err = client.RecordProviderBillingObservation(ctx, refuse("missing", "missing:host", billing.ProviderBillingRefusalUnavailable, ""))
+		refused(err, 404, "provider_operation_not_found", "")
+		_, err = client.RecordProviderBillingObservation(ctx, refuse("released", "released:host", billing.ProviderBillingRefusalUnavailable, ""))
+		refused(err, 409, "provider_operation_not_open", "")
+		_, err = client.RecordProviderBillingObservation(ctx, refuse("rejected", "rejected:1", billing.ProviderBillingRefusalObservationRejected, ""))
+		refused(err, 409, "provider_billing_observation_conflict", "refusal_kind")
 
-		got, err := client.GetOperationAuthorization(ctx, "live")
+		got, err := client.GetProviderOperation(ctx, "live")
 		require.NoError(t, err)
 		require.Nil(t, got.Refusal, "a refused refusal writes nothing")
 
-		_, err = client.RefuseProviderBillingQualification(ctx, billing.RefuseProviderBillingQualificationParams{OperationID: "unreadable", Reason: billing.ProviderBillingUnavailable})
+		_, err = client.RecordProviderBillingObservation(ctx, refuse("unreadable", "unreadable:host", billing.ProviderBillingRefusalUnavailable, ""))
 		require.NoError(t, err)
-		rejected, err := client.RefuseProviderBillingQualification(ctx, billing.RefuseProviderBillingQualificationParams{
-			OperationID: "rejected", Reason: billing.ProviderBillingObservationRejected, Detail: "provider_billing_observation_conflict: lifecycle_evidence_body",
-		})
+		rejected, err := client.RecordProviderBillingObservation(ctx, refuse("rejected", "rejected:host", billing.ProviderBillingRefusalObservationRejected,
+			"provider_billing_observation_conflict: lifecycle_evidence_body"))
 		require.NoError(t, err)
 		require.Equal(t, billing.ProviderBillingObservationRejected, rejected.Refusal.Reason)
-		qual, err := client.GetProviderBillingQualification(ctx, "rejected")
-		require.NoError(t, err)
-		require.Equal(t, billing.ProviderBillingQualificationPending, qual.State, "a host refusal leaves the qualification as it was")
-		require.Equal(t, rejected.Refusal, qual.Authorization.Refusal)
+		require.Equal(t, billing.ProviderBillingQualificationPending, rejected.Qualification.State, "a host refusal leaves the qualification as it was")
 	})
 
 	t.Run("a refused hold takes no evidence, growth or release", func(t *testing.T) {
 		_, err := client.RecordProviderBillingObservation(ctx, observation("unprovable", "unprovable:1", 10))
-		refused(err, 409, "provider_billing_qualification_refused", "")
-		_, err = client.GetProviderBillingQualification(ctx, "unprovable")
-		refused(err, 404, "provider_billing_qualification_not_found", "")
+		refused(err, 409, "provider_operation_refused", "")
+		unprovable, err := client.GetProviderOperation(ctx, "unprovable")
+		require.NoError(t, err)
+		require.Nil(t, unprovable.Qualification)
 		_, err = client.RecordProviderBillingObservation(ctx, observation("rejected", "rejected:2", 30_000))
-		refused(err, 409, "provider_billing_qualification_refused", "")
+		refused(err, 409, "provider_operation_refused", "")
 		replay, err := client.RecordProviderBillingObservation(ctx, observation("rejected", "rejected:1", 30_000))
 		require.NoError(t, err, "an observation recorded before the refusal still replays")
 		require.True(t, replay.Replayed)
-		require.Equal(t, billing.ProviderBillingObservationRejected, replay.Authorization.Refusal.Reason)
+		require.Equal(t, billing.ProviderBillingObservationRejected, replay.Refusal.Reason)
 
-		_, err = client.ExtendOperationAuthorization(ctx, billing.ExtendOperationAuthorizationParams{OperationID: "unprovable", Ordinal: 1, Amount: 10, MinimumAmount: 10})
-		refused(err, 409, "provider_billing_qualification_refused", "")
-		_, err = client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "unprovable", ReleaseReference: "never-created"})
-		refused(err, 409, "provider_billing_qualification_refused", "")
-		_, err = client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "rejected", ReleaseReference: "never-created"})
-		refused(err, 409, "operation_authorization_has_billing_evidence", "")
+		_, err = client.IncrementProviderOperation(ctx, billing.IncrementProviderOperationParams{OperationID: "unprovable", Ordinal: 1, Amount: 10, MinimumAmount: 10})
+		refused(err, 409, "provider_operation_refused", "")
+		_, err = client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "unprovable", ReleaseReference: "never-created"})
+		refused(err, 409, "provider_operation_refused", "")
+		_, err = client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "rejected", ReleaseReference: "never-created"})
+		refused(err, 409, "provider_operation_has_billing_evidence", "")
 		require.EqualValues(t, 300_000, balance(debtor).HeldAmount)
 	})
 
@@ -210,56 +217,53 @@ func TestProviderBillingRefusal(t *testing.T) {
 		paged.Limit = 1
 		require.Equal(t, want, list(paged))
 		require.Equal(t, map[string]string{"live": "", "order": "live"},
-			list(billing.OperationAuthorizationListParams{State: []billing.OperationAuthorizationState{billing.OperationAuthorizationOpen}, Refused: &no}))
-		require.Equal(t, "rejected,unreadable,unprovable,live,released", list(billing.OperationAuthorizationListParams{})["order"])
-		require.Equal(t, "rejected,unreadable,unprovable", list(billing.OperationAuthorizationListParams{Refused: &yes})["order"])
-		require.Equal(t, "released", list(billing.OperationAuthorizationListParams{State: []billing.OperationAuthorizationState{billing.OperationAuthorizationReleased}})["order"])
+			list(billing.ProviderOperationListParams{State: []billing.ProviderOperationState{billing.ProviderOperationOpen}, Refused: &no}))
+		require.Equal(t, "rejected,unreadable,unprovable,live,released", list(billing.ProviderOperationListParams{})["order"])
+		require.Equal(t, "rejected,unreadable,unprovable", list(billing.ProviderOperationListParams{Refused: &yes})["order"])
+		require.Equal(t, "released", list(billing.ProviderOperationListParams{State: []billing.ProviderOperationState{billing.ProviderOperationReleased}})["order"])
 
-		_, err := client.ListOperationAuthorizations(ctx, billing.OperationAuthorizationListParams{State: []billing.OperationAuthorizationState{"stuck"}})
+		_, err := client.ListProviderOperations(ctx, billing.ProviderOperationListParams{State: []billing.ProviderOperationState{"stuck"}})
 		refused(err, 400, "invalid_query", "state")
-		_, err = client.ListOperationAuthorizations(ctx, billing.OperationAuthorizationListParams{PageRequest: billing.PageRequest{Cursor: "not-a-cursor"}})
+		_, err = client.ListProviderOperations(ctx, billing.ProviderOperationListParams{PageRequest: billing.PageRequest{Cursor: "not-a-cursor"}})
 		refused(err, 400, "invalid_cursor", "cursor")
 	})
 
 	t.Run("close needs a refused hold", func(t *testing.T) {
-		settle := billing.CloseOperationAuthorizationParams{OperationID: "unprovable", Kind: billing.ProviderBillingResolutionSettled, CostAmount: cost(1), AttestedBy: "operator:paul", Reference: "invoice:1"}
-		for _, bad := range []func(*billing.CloseOperationAuthorizationParams){
-			func(r *billing.CloseOperationAuthorizationParams) { r.CostAmount = nil },
-			func(r *billing.CloseOperationAuthorizationParams) { r.CostAmount = cost(-1) },
-			func(r *billing.CloseOperationAuthorizationParams) {
+		settle := billing.CloseProviderOperationParams{OperationID: "unprovable", Kind: billing.ProviderBillingResolutionSettled, CostAmount: cost(1), AttestedBy: "operator:paul", Reference: "invoice:1"}
+		for _, bad := range []func(*billing.CloseProviderOperationParams){
+			func(r *billing.CloseProviderOperationParams) { r.CostAmount = nil },
+			func(r *billing.CloseProviderOperationParams) { r.CostAmount = cost(-1) },
+			func(r *billing.CloseProviderOperationParams) {
 				r.Kind = billing.ProviderBillingResolutionWrittenOff
 			},
-			func(r *billing.CloseOperationAuthorizationParams) { r.Kind = "refunded" },
-			func(r *billing.CloseOperationAuthorizationParams) { r.AttestedBy = "" },
-			func(r *billing.CloseOperationAuthorizationParams) { r.Reference = " invoice:1" },
+			func(r *billing.CloseProviderOperationParams) { r.Kind = "refunded" },
+			func(r *billing.CloseProviderOperationParams) { r.AttestedBy = "" },
+			func(r *billing.CloseProviderOperationParams) { r.Reference = " invoice:1" },
 		} {
 			req := settle
 			bad(&req)
-			_, err := client.CloseOperationAuthorization(ctx, req)
+			_, err := client.CloseProviderOperation(ctx, req)
 			refused(err, 400, "invalid_param", "")
 		}
 		req := settle
 		req.OperationID = "live"
-		_, err := client.CloseOperationAuthorization(ctx, req)
-		refused(err, 409, "provider_billing_qualification_not_refused", "")
+		_, err := client.CloseProviderOperation(ctx, req)
+		refused(err, 409, "provider_operation_not_refused", "")
 		req.OperationID = "missing"
-		_, err = client.CloseOperationAuthorization(ctx, req)
-		refused(err, 404, "operation_authorization_not_found", "")
-		resolve := billing.ResolveProviderBillingQualificationParams(settle)
-		_, err = client.ResolveProviderBillingQualification(ctx, resolve)
-		refused(err, 404, "provider_billing_qualification_not_found", "")
+		_, err = client.CloseProviderOperation(ctx, req)
+		refused(err, 404, "provider_operation_not_found", "")
 		require.EqualValues(t, 300_000, balance(debtor).HeldAmount, "a refused close writes nothing")
 	})
 
 	t.Run("settled closes a hold that has no evidence, above the hold as owed", func(t *testing.T) {
-		req := billing.CloseOperationAuthorizationParams{
+		req := billing.CloseProviderOperationParams{
 			OperationID: "unprovable", Kind: billing.ProviderBillingResolutionSettled, CostAmount: cost(450_000),
 			AttestedBy: "operator:paul", Reference: "runpod-invoice:2026-10", Note: "lifecycle unprovable; invoiced cost",
 		}
-		auth, err := client.CloseOperationAuthorization(ctx, req)
+		auth, err := client.CloseProviderOperation(ctx, req)
 		require.NoError(t, err)
 		require.False(t, auth.Replayed)
-		require.Equal(t, billing.OperationAuthorizationSettled, auth.State)
+		require.Equal(t, billing.ProviderOperationSettled, auth.State)
 		require.EqualValues(t, 450_000, *auth.SettlementCostAmount)
 		require.EqualValues(t, 450_000, *auth.SettlementAmount)
 		require.Equal(t, "sha256:"+auth.SettlementBodySHA256.String(), auth.TerminalReference)
@@ -292,7 +296,7 @@ func TestProviderBillingRefusal(t *testing.T) {
 		require.Nil(t, manifest.QualificationReason)
 		require.Equal(t, "null", string(manifest.RefusedObservation))
 		require.Equal(t, "lifecycle_unprovable", manifest.Refusal.Reason)
-		require.Equal(t, "window 7 of an absent resource is open", manifest.Refusal.Detail)
+		require.Equal(t, "observation unprovable:host: window 7 of an absent resource is open", manifest.Refusal.Detail)
 		require.Equal(t, "300000", manifest.Authorization.AuthorizedAmount)
 		require.Equal(t, "450000", manifest.CostAmount)
 		require.Equal(t, "operator:paul", manifest.AttestedBy)
@@ -303,7 +307,7 @@ func TestProviderBillingRefusal(t *testing.T) {
 		require.EqualValues(t, 0, bal.HeldAmount)
 		require.EqualValues(t, 50_000, bal.OwedAmount)
 
-		replay, err := client.CloseOperationAuthorization(ctx, req)
+		replay, err := client.CloseProviderOperation(ctx, req)
 		require.NoError(t, err)
 		require.True(t, replay.Replayed)
 		require.Equal(t, auth.TerminalReference, replay.TerminalReference)
@@ -311,29 +315,29 @@ func TestProviderBillingRefusal(t *testing.T) {
 		require.Equal(t, bal, balance(debtor), "a replay charges nothing")
 		changed := req
 		changed.CostAmount = cost(400_000)
-		_, err = client.CloseOperationAuthorization(ctx, changed)
-		refused(err, 409, "provider_billing_resolution_conflict", "cost_amount")
+		_, err = client.CloseProviderOperation(ctx, changed)
+		refused(err, 409, "provider_operation_conflict", "cost_amount")
 		changed = req
 		changed.AttestedBy = "operator:other"
-		_, err = client.CloseOperationAuthorization(ctx, changed)
-		refused(err, 409, "provider_billing_resolution_conflict", "attested_by")
+		_, err = client.CloseProviderOperation(ctx, changed)
+		refused(err, 409, "provider_operation_conflict", "attested_by")
 
-		got, err := client.GetOperationAuthorization(ctx, "unprovable")
+		got, err := client.GetProviderOperation(ctx, "unprovable")
 		require.NoError(t, err)
 		require.Equal(t, auth.Refusal, got.Refusal)
 		require.Equal(t, auth.Resolution, got.Resolution)
 		_, err = client.RecordProviderBillingObservation(ctx, observation("unprovable", "unprovable:2", 10))
-		refused(err, 409, "operation_authorization_not_open", "")
+		refused(err, 409, "provider_operation_not_open", "")
 	})
 
 	t.Run("written_off releases a refused hold uncharged", func(t *testing.T) {
-		req := billing.CloseOperationAuthorizationParams{
+		req := billing.CloseProviderOperationParams{
 			OperationID: "unreadable", Kind: billing.ProviderBillingResolutionWrittenOff, AttestedBy: "operator:paul", Reference: "th-045:vast-has-no-billing-reader",
 		}
 		require.EqualValues(t, 200_000, balance(payer).HeldAmount)
-		auth, err := client.CloseOperationAuthorization(ctx, req)
+		auth, err := client.CloseProviderOperation(ctx, req)
 		require.NoError(t, err)
-		require.Equal(t, billing.OperationAuthorizationReleased, auth.State)
+		require.Equal(t, billing.ProviderOperationReleased, auth.State)
 		require.Equal(t, req.Reference, auth.TerminalReference)
 		require.Nil(t, auth.SettlementAmount)
 		require.Equal(t, billing.ProviderBillingResolutionWrittenOff, auth.Resolution.Kind)
@@ -342,21 +346,21 @@ func TestProviderBillingRefusal(t *testing.T) {
 		require.EqualValues(t, 1_000_000, bal.BalanceAmount)
 		require.EqualValues(t, 0, bal.HeldAmount)
 		require.EqualValues(t, 0, bal.OwedAmount)
-		_, err = client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "unreadable", ReleaseReference: req.Reference})
-		refused(err, 409, "provider_billing_qualification_refused", "")
+		_, err = client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "unreadable", ReleaseReference: req.Reference})
+		refused(err, 409, "provider_operation_refused", "")
 	})
 
-	t.Run("the qualification-shaped close takes a host-refused pending qualification", func(t *testing.T) {
-		qual, err := client.ResolveProviderBillingQualification(ctx, billing.ResolveProviderBillingQualificationParams{
+	t.Run("close takes a host-refused hold with a pending qualification", func(t *testing.T) {
+		req := billing.CloseProviderOperationParams{
 			OperationID: "rejected", Kind: billing.ProviderBillingResolutionSettled, CostAmount: cost(40_000), AttestedBy: "operator:paul", Reference: "invoice:rejected",
-		})
+		}
+		op, err := client.CloseProviderOperation(ctx, req)
 		require.NoError(t, err)
-		require.Equal(t, billing.ProviderBillingQualificationPending, qual.State)
-		require.Equal(t, billing.ProviderBillingResolutionSettled, qual.Resolution.Kind)
-		require.Equal(t, qual.Resolution, qual.Authorization.Resolution)
-		require.Equal(t, billing.ProviderBillingObservationRejected, qual.Authorization.Refusal.Reason)
-		require.Equal(t, billing.OperationAuthorizationSettled, qual.Authorization.State)
-		require.EqualValues(t, 40_000, *qual.Authorization.SettlementAmount)
+		require.Equal(t, billing.ProviderBillingQualificationPending, op.Qualification.State)
+		require.Equal(t, billing.ProviderBillingResolutionSettled, op.Resolution.Kind)
+		require.Equal(t, billing.ProviderBillingObservationRejected, op.Refusal.Reason)
+		require.Equal(t, billing.ProviderOperationSettled, op.State)
+		require.EqualValues(t, 40_000, *op.SettlementAmount)
 		var manifest struct {
 			Provider              string          `json:"provider"`
 			QualificationReason   string          `json:"qualification_reason"`
@@ -366,7 +370,7 @@ func TestProviderBillingRefusal(t *testing.T) {
 				Reason string `json:"reason"`
 			} `json:"refusal"`
 		}
-		require.NoError(t, json.Unmarshal(qual.Authorization.SettlementBody, &manifest))
+		require.NoError(t, json.Unmarshal(op.SettlementBody, &manifest))
 		require.Equal(t, "provider", manifest.Provider)
 		require.Equal(t, "awaiting_equal_observation", manifest.QualificationReason)
 		require.Equal(t, "rejected:1", manifest.BaselineObservationID)
@@ -376,10 +380,8 @@ func TestProviderBillingRefusal(t *testing.T) {
 		require.EqualValues(t, 960_000, bal.BalanceAmount)
 		require.EqualValues(t, 0, bal.HeldAmount)
 
-		replay, err := client.CloseOperationAuthorization(ctx, billing.CloseOperationAuthorizationParams{
-			OperationID: "rejected", Kind: billing.ProviderBillingResolutionSettled, CostAmount: cost(40_000), AttestedBy: "operator:paul", Reference: "invoice:rejected",
-		})
-		require.NoError(t, err, "either close replays the other's resolution")
+		replay, err := client.CloseProviderOperation(ctx, req)
+		require.NoError(t, err)
 		require.True(t, replay.Replayed)
 		require.Empty(t, list(stuck)["order"])
 	})
@@ -387,28 +389,28 @@ func TestProviderBillingRefusal(t *testing.T) {
 	t.Run("a host transaction commits or rolls back the refusal", func(t *testing.T) {
 		customer := fund(100_000)
 		open(customer, "tx", 100_000)
-		req := billing.RefuseProviderBillingQualificationParams{OperationID: "tx", Reason: billing.ProviderBillingUnavailable}
+		req := refuse("tx", "tx:host", billing.ProviderBillingRefusalUnavailable, "")
 		tx, err := f.pool.Begin(ctx)
 		require.NoError(t, err)
-		seen, err := client.RefuseProviderBillingQualificationTx(ctx, tx, req)
+		seen, err := client.RecordProviderBillingObservationTx(ctx, tx, req)
 		require.NoError(t, err)
 		require.NotNil(t, seen.Refusal)
 		require.NoError(t, tx.Rollback(ctx))
-		after, err := client.GetOperationAuthorization(ctx, "tx")
+		after, err := client.GetProviderOperation(ctx, "tx")
 		require.NoError(t, err)
 		require.Nil(t, after.Refusal)
 
 		tx, err = f.pool.Begin(ctx)
 		require.NoError(t, err)
-		_, err = client.RefuseProviderBillingQualificationTx(ctx, tx, req)
+		_, err = client.RecordProviderBillingObservationTx(ctx, tx, req)
 		require.NoError(t, err)
-		closed, err := client.CloseOperationAuthorizationTx(ctx, tx, billing.CloseOperationAuthorizationParams{
+		closed, err := client.CloseProviderOperationTx(ctx, tx, billing.CloseProviderOperationParams{
 			OperationID: "tx", Kind: billing.ProviderBillingResolutionWrittenOff, AttestedBy: "operator:paul", Reference: "ticket:tx",
 		})
 		require.NoError(t, err)
-		require.Equal(t, billing.OperationAuthorizationReleased, closed.State)
+		require.Equal(t, billing.ProviderOperationReleased, closed.State)
 		require.NoError(t, tx.Commit(ctx))
-		after, err = client.GetOperationAuthorization(ctx, "tx")
+		after, err = client.GetProviderOperation(ctx, "tx")
 		require.NoError(t, err)
 		require.Equal(t, billing.ProviderBillingUnavailable, after.Refusal.Reason)
 		require.Equal(t, billing.ProviderBillingResolutionWrittenOff, after.Resolution.Kind)

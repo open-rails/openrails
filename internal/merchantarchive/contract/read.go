@@ -73,6 +73,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			return nil
 		}
 		p := profiles[table]
+		// Usage events before failed usage all succeeded and forgave nothing.
+		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-2 {
+			r.Values = append(r.Values, new("succeeded"), new("0"))
+		}
 		if !legacy {
 			return emit(p, r.Values)
 		}

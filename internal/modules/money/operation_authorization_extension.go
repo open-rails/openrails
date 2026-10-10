@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
@@ -24,19 +25,21 @@ type OperationAuthorizationExtensionInput struct {
 	OverdraftAmount int64
 }
 
+// OperationAuthorizationExtension is one committed increment.
 type OperationAuthorizationExtension struct {
-	OperationID      string
-	Ordinal          int64
-	GrantedAmount    int64
-	AuthorizedAmount int64
-	Replayed         bool
+	Ordinal         int64
+	RequestedAmount int64
+	MinimumAmount   int64
+	GrantedAmount   int64
+	CreatedAt       time.Time
 }
 
 // ExtendOperationAuthorizationInTx grows an open authorization by
 // min(Amount, capacity) when capacity covers MinimumAmount, under the same
-// payer lock and capacity rule as opening it. A refusal writes nothing. It
-// never commits or rolls back the caller's transaction.
-func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in OperationAuthorizationExtensionInput) (*OperationAuthorizationExtension, error) {
+// payer lock and capacity rule as opening it, and answers the operation. A
+// refusal writes nothing. It never commits or rolls back the caller's
+// transaction.
+func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txDB *db.DB, in OperationAuthorizationExtensionInput) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -55,7 +58,7 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 	params := gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
 	row, err := q.GetOperationAuthorization(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -73,19 +76,23 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID, Ordinal: in.Ordinal,
 	})
 	if err == nil {
-		return replayOperationAuthorizationExtension(committed, in)
+		if err := replayOperationAuthorizationExtension(committed, in); err != nil {
+			return nil, err
+		}
+		auth := operationAuthorizationFromRow(row, true)
+		return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
 	if OperationAuthorizationState(row.State) != OperationAuthorizationOpen {
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
 	}
 	// A refused hold waits for an operator's close; nothing grows it meanwhile.
 	if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), in.OperationID); err != nil {
 		return nil, err
 	} else if refused {
-		return nil, ErrProviderBillingQualificationRefused
+		return nil, ErrProviderOperationRefused
 	}
 	last, err := q.GetLastOperationAuthorizationExtensionOrdinal(ctx, gen.GetLastOperationAuthorizationExtensionOrdinalParams{
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
@@ -94,7 +101,7 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 		return nil, err
 	}
 	if in.Ordinal != last+1 {
-		return nil, &OperationAuthorizationConflict{Field: "ordinal"}
+		return nil, &ProviderOperationConflict{Field: "ordinal"}
 	}
 	if row.AuthorizedAmount > math.MaxInt64-in.Amount {
 		return nil, fmt.Errorf("%w: authorized amount plus amount exceeds int64", billing.ErrInvalid)
@@ -118,15 +125,15 @@ func (s *MoneyService) ExtendOperationAuthorizationInTx(ctx context.Context, txD
 	if err != nil {
 		return nil, err
 	}
-	ext, err := q.InsertOperationAuthorizationExtension(ctx, gen.InsertOperationAuthorizationExtensionParams{
+	if _, err := q.InsertOperationAuthorizationExtension(ctx, gen.InsertOperationAuthorizationExtensionParams{
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID, Ordinal: in.Ordinal,
 		RequestedAmount: in.Amount, MinimumAmount: in.MinimumAmount,
 		GrantedAmount: granted, AuthorizedAmount: grown.AuthorizedAmount,
-	})
-	if err != nil {
+	}); err != nil {
 		return nil, err
 	}
-	return operationAuthorizationExtensionFromRow(ext, false), nil
+	auth := operationAuthorizationFromRow(grown, false)
+	return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 }
 
 func validateOperationAuthorizationExtension(in OperationAuthorizationExtensionInput) error {
@@ -148,22 +155,22 @@ func validateOperationAuthorizationExtension(in OperationAuthorizationExtensionI
 	return nil
 }
 
-func replayOperationAuthorizationExtension(row gen.BillingOperationAuthorizationExtension, in OperationAuthorizationExtensionInput) (*OperationAuthorizationExtension, error) {
+func replayOperationAuthorizationExtension(row gen.BillingOperationAuthorizationExtension, in OperationAuthorizationExtensionInput) error {
 	if row.RequestedAmount != in.Amount {
-		return nil, &OperationAuthorizationConflict{Field: "amount"}
+		return &ProviderOperationConflict{Field: "amount"}
 	}
 	if row.MinimumAmount != in.MinimumAmount {
-		return nil, &OperationAuthorizationConflict{Field: "minimum_amount"}
+		return &ProviderOperationConflict{Field: "minimum_amount"}
 	}
-	return operationAuthorizationExtensionFromRow(row, true), nil
+	return nil
 }
 
-func operationAuthorizationExtensionFromRow(row gen.BillingOperationAuthorizationExtension, replayed bool) *OperationAuthorizationExtension {
+func operationAuthorizationExtensionFromRow(row gen.BillingOperationAuthorizationExtension) *OperationAuthorizationExtension {
 	return &OperationAuthorizationExtension{
-		OperationID:      row.OperationID,
-		Ordinal:          row.Ordinal,
-		GrantedAmount:    row.GrantedAmount,
-		AuthorizedAmount: row.AuthorizedAmount,
-		Replayed:         replayed,
+		Ordinal:         row.Ordinal,
+		RequestedAmount: row.RequestedAmount,
+		MinimumAmount:   row.MinimumAmount,
+		GrantedAmount:   row.GrantedAmount,
+		CreatedAt:       row.CreatedAt,
 	}
 }

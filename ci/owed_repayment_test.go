@@ -50,7 +50,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	}
 	open := func(customer billing.CustomerID, operationID string, amount int64) error {
 		body := []byte(`{"rental":"` + operationID + `"}`)
-		_, err := client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{
+		_, err := client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
 			OperationID: operationID, CustomerID: customer, RecordOwner: "user:1", Currency: "USD", Amount: amount,
 			ClaimReference: "claim:" + operationID, AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
 		})
@@ -134,7 +134,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.NoError(t, open(customer, "od-cap-a", 1_000_000))
 		require.NoError(t, open(customer, "od-cap-b", 1_000_000))
 		settleProviderCost(t, ctx, database, client, "od-cap-a", 1_500_000)
-		_, err := client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "od-cap-b", ReleaseReference: "never-created:b"})
+		_, err := client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "od-cap-b", ReleaseReference: "never-created:b"})
 		require.NoError(t, err)
 		bal := balance(customer)
 		require.EqualValues(t, 1_000_000, bal.BalanceAmount)
@@ -154,7 +154,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 
 		require.ErrorIs(t, open(customer, "od-cap-over", 500_001), billing.ErrInsufficientCredits)
 		require.NoError(t, open(customer, "od-cap-fit", 500_000))
-		_, err = client.ExtendOperationAuthorization(ctx, billing.ExtendOperationAuthorizationParams{OperationID: "od-cap-fit", Ordinal: 1, Amount: 1, MinimumAmount: 1})
+		_, err = client.IncrementProviderOperation(ctx, billing.IncrementProviderOperationParams{OperationID: "od-cap-fit", Ordinal: 1, Amount: 1, MinimumAmount: 1})
 		require.ErrorIs(t, err, billing.ErrInsufficientCredits)
 	})
 

@@ -13,16 +13,16 @@ import (
 type InvokerType string
 
 const (
-	// InvokerTypeCustomer is the paying customer's own credential: wasted spend
+	// InvokerTypeCustomer is the paying customer's own credential: failed usage
 	// draws the customer's grace, then is charged.
 	InvokerTypeCustomer InvokerType = "customer"
 	// InvokerTypeDelegated spends the customer's balance under a spend
-	// delegation: flat wasted-spend cutoffs apply.
+	// delegation: flat failed-usage cutoffs apply.
 	InvokerTypeDelegated InvokerType = "delegated"
 )
 
 // AdmitParams asks to admit one request against a customer's money: payer
-// capacity, delegated spend windows and wasted-spend cutoffs. An allowed admit
+// capacity, delegated spend windows and failed-usage cutoffs. An allowed admit
 // with a nonzero EstimatedAmount holds that much until it is captured,
 // released or reaches ExpiresAt.
 type AdmitParams struct {
@@ -214,78 +214,4 @@ func (r AdmissionResult) Err() error {
 // AdmissionBatchResult is one result per item, in request order.
 type AdmissionBatchResult struct {
 	Items []AdmissionResult `json:"items"`
-}
-
-// ReportWastedSpendParams reports spend a customer's invoker wasted (failed or
-// abusive work). Source and SourceID identify the report: a replay records
-// nothing new, one with a changed Amount is ErrIdempotencyKeyReused.
-type ReportWastedSpendParams struct {
-	CustomerID  CustomerID  `json:"customer_id"`
-	Invoker     string      `json:"invoker"`
-	InvokerType InvokerType `json:"invoker_type"`
-	Currency    string      `json:"currency"`
-	Amount      int64       `json:"amount,string"`
-	Source      string      `json:"source"`
-	SourceID    string      `json:"source_id"`
-	Reason      string      `json:"reason,omitempty"`
-}
-
-// ReportWastedSpendBatchParams reports 1 to MaxBatchItems wasted spends.
-type ReportWastedSpendBatchParams struct {
-	Items []ReportWastedSpendParams `json:"items"`
-}
-
-// WastedSpendResult is one report's outcome: Status is what reporting it
-// alone answers, with Report or Error.
-type WastedSpendResult struct {
-	Status int                `json:"status"`
-	Report *WastedSpendReport `json:"report"`
-	Error  *ErrorDetails      `json:"error"`
-}
-
-// Err is the item's refusal as the error reporting it alone would return, nil
-// when it was handled.
-func (r WastedSpendResult) Err() error {
-	if r.Error == nil {
-		return nil
-	}
-	return &StatusError{Status: r.Status, ErrorDetails: *r.Error}
-}
-
-// ReportWastedSpendBatchResult is one result per item, in request order.
-type ReportWastedSpendBatchResult struct {
-	Items []WastedSpendResult `json:"items"`
-}
-
-// WastedSpendAction is what OpenRails did with a wasted-spend report.
-type WastedSpendAction string
-
-const (
-	// WastedSpendIgnored: a zero amount; nothing to record.
-	WastedSpendIgnored WastedSpendAction = "ignored"
-	// WastedSpendForgiven: absorbed by the customer's grace window.
-	WastedSpendForgiven WastedSpendAction = "forgiven"
-	// WastedSpendCharged: the customer's grace was exhausted and the
-	// overage charged.
-	WastedSpendCharged WastedSpendAction = "charged"
-	// WastedSpendInvokerCutoffTracked: counted toward a delegated invoker's
-	// cutoff; nothing charged.
-	WastedSpendInvokerCutoffTracked WastedSpendAction = "invoker_cutoff_tracked"
-	// WastedSpendDuplicate: a replay of a report already handled. The money
-	// never moves twice.
-	WastedSpendDuplicate WastedSpendAction = "duplicate"
-)
-
-// WastedSpendReport is how OpenRails handled one wasted-spend report. The
-// Policy* amounts are in the policy's currency, null when no policy applied.
-type WastedSpendReport struct {
-	Currency             string            `json:"currency"`
-	PolicyCurrency       *string           `json:"policy_currency"`
-	RecordedAmount       int64             `json:"recorded_amount,string"`
-	PolicyRecordedAmount *int64            `json:"policy_recorded_amount,string"`
-	ForgivenAmount       int64             `json:"forgiven_amount,string"`
-	PolicyForgivenAmount *int64            `json:"policy_forgiven_amount,string"`
-	ChargedAmount        int64             `json:"charged_amount,string"`
-	PolicyChargedAmount  *int64            `json:"policy_charged_amount,string"`
-	Action               WastedSpendAction `json:"action"`
 }

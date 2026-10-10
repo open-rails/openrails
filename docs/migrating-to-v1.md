@@ -220,7 +220,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Revoke with a body on `DELETE` | `client.RevokeCreditGrant(` |
 | `GetCreditAccount` | `client.GetBalance(` answers `billing.Balance` (`balance_amount`, `held_amount`, `available_amount`, `owed_amount`) |
 | `Admit`, `AdmitBatch`, `Capture(ctx, id, amount, usage)`, `Release`, `ExtendHold` | `client.Admit(` takes a slice of `billing.AdmitParams` and answers one `billing.AdmissionVerdict` each; `client.GetAdmission(`, `client.CaptureAdmission(` (`billing.CaptureAdmissionParams`, amount required), `client.ReleaseAdmissions(`, `client.ExtendAdmissions(` (one `billing.AdmissionResult` per item). The caller's `request_id` is the id |
-| `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; `client.GetUsage(`. Resource revenue is removed |
+| `RecordUsage(RecordUsageInput)`, `UsageRollup`, `ResourceRevenueDaily` | `client.RecordUsage(` with `billing.RecordUsageParams`; usage reports through `client.QueryMetrics(`. Resource revenue is removed |
 | `SetCustomerSpendDelegations`, `SetCustomerSpendDelegation`, `DeleteCustomerSpendDelegation` | `client.ListSpendDelegations(`, `client.SetSpendDelegations(` (the whole set), `client.DeleteSpendDelegation(` |
 | `InvokerTypePayer` (`invoker_type: "payer"`) | `billing.InvokerTypeCustomer` (`"customer"`) |
 | `DeclaredTransaction.AmountCents` | `Amount`, in native units (micros for USD) |
@@ -254,8 +254,8 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
 | `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |
 | `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename is `PUT /v1/merchant/name` and a user's merchants `GET /v1/merchants` |
-| `GetUnreadNotificationCount` returned `int64` | It returns `billing.UnreadCount` |
-| `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical entries of `client.ListMerchantNotifications(` |
+| `GetUnreadNotificationCount` (merchant) | Removed: count open findings with `client.QueryMetrics(` (`open_findings`) |
+| `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical findings in `client.ListFindings(` |
 | `ListActiveMerchantIDs(ctx, limit, offset)` | The server's `ListActiveMerchantIDs` takes a `billing.PageRequest` and returns a page |
 | `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
 | Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | The inbox, findings and worker health are admin reads (`Permissions.AdminRead`) |
@@ -307,7 +307,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/admin/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
 | `PUT …/spend-delegations:upsert` | `PUT /v1/admin/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
 | `/v1/admin/admissions/{id}/…` | `/v1/admin/admissions/{request_id}`, `POST /v1/admin/admissions/release`, `POST /v1/admin/admissions/extend` |
-| `POST /v1/admin/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `GET /v1/admin/customers/{customer_id}/usage` |
+| `POST /v1/admin/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `POST /v1/admin/metrics/query` |
 | `/v1/admin/users/{user_id}/…` | `/v1/admin/customers/{customer_id}/product-access` and the checks beneath it |
 | `POST /v1/admin/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/admin/customers/{customer_id}/entitlements/check`, `POST /v1/admin/tiers/lookup` |
 | `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and collection cards; subscriptions, payments, cards, entitlements and product access are their own lists |

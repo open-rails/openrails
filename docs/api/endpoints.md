@@ -238,7 +238,15 @@ coded `402` refusal. See [customer payment recovery](../architecture/customer-pa
   [request admission](../admission-operations.md).
 - **Usage events** (`POST /v1/admin/usage-events`, up to 1,000 per call, one
   result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
-  up to 35 days old.
+  up to 35 days old. An item with `outcome: failed` is work that cost and did
+  not deliver: the customer's own failures are forgiven up to its policy's
+  `bad_spend_windows` and charged past them (`amount` is what was charged,
+  `forgiven_amount` what grace absorbed); a delegated invoker's
+  (`invoker_type: delegated`) are never charged and count toward
+  `delegated_invoker_wasted_spend_limits`, past which admission refuses it
+  `failure_rate_limited`. Usage is reported through
+  `POST /v1/admin/metrics/query` (`usage_units`, `usage_revenue`,
+  `forgiven_usage` by `customer`, `invoker`, `outcome`, `sku` or `rate_card`).
 - **Provider operations** authorize and settle upstream compute cost:
   [provider obligations](../architecture/provider-obligation-contract.md).
 - **Arrears**: [delinquency](../arrears-delinquency.md) and
@@ -265,8 +273,8 @@ A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has
 automatic revisions starting at zero. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
-copy and reports drift; `GET /v1/admin/catalog/drift` lists the open drift
-findings, each with the `psp_id` that was compared.
+copy and reports drift; `GET /v1/admin/findings?type=catalog.*` lists the open
+drift findings, each with the `psp_id` that was compared.
 
 ## PSPs
 

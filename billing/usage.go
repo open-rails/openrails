@@ -27,19 +27,39 @@ func (id *UsageEventID) UnmarshalText(text []byte) error {
 	return err
 }
 
+// UsageOutcome is whether the work a usage event records delivered.
+type UsageOutcome string
+
+const (
+	UsageSucceeded UsageOutcome = "succeeded"
+	// UsageFailed is work that cost the platform and did not deliver. The
+	// customer's own failures are forgiven up to the grace windows of its
+	// billing policy (bad_spend_windows) and charged past them; with no window
+	// nothing is charged. A delegated invoker's failures are never charged and
+	// count toward its cutoff (delegated_invoker_wasted_spend_limits), past
+	// which admission refuses it failure_rate_limited.
+	UsageFailed UsageOutcome = "failed"
+)
+
 // RecordUsageParams records one metered usage event for a customer. Source and
-// SourceID identify the event within its EventType: a retry with the same
-// Amount records nothing new, one with a different Amount is
-// ErrIdempotencyKeyReused.
+// SourceID identify the event within its EventType, whatever its outcome: a
+// retry with the same Amount and Outcome records nothing new, one with a
+// different Amount or Outcome is ErrIdempotencyKeyReused.
 type RecordUsageParams struct {
-	CustomerID CustomerID       `json:"customer_id"`
-	Invoker    string           `json:"invoker"`
-	Currency   string           `json:"currency"`
-	EventType  string           `json:"event_type"`
-	Dimensions map[string]int64 `json:"dimensions,omitempty"`
+	CustomerID CustomerID `json:"customer_id"`
+	Invoker    string     `json:"invoker"`
+	// InvokerType says whose credential the invoker presented (customer when
+	// empty); it decides how a failure is handled.
+	InvokerType InvokerType      `json:"invoker_type,omitempty"`
+	Currency    string           `json:"currency"`
+	EventType   string           `json:"event_type"`
+	Dimensions  map[string]int64 `json:"dimensions,omitempty"`
 	// Amount is the host-priced cost in native units. Zero records a
-	// metered-only event that the catalog's rate cards price.
-	Amount   int64          `json:"amount,string"`
+	// metered-only event that the catalog's rate cards price; a failed event's
+	// Amount is what the failure cost, and is never catalog-rated.
+	Amount int64 `json:"amount,string"`
+	// Outcome is succeeded when empty.
+	Outcome  UsageOutcome   `json:"outcome,omitempty"`
 	Resource string         `json:"resource,omitempty"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 	Source   string         `json:"source"`
@@ -50,20 +70,24 @@ type RecordUsageParams struct {
 	OccurredAt *time.Time `json:"occurred_at,omitempty"`
 }
 
-// UsageEvent is one recorded usage event. Replayed: the event was already
-// recorded and this call metered nothing.
+// UsageEvent is one recorded usage event. Amount is what it charged; a failed
+// event's ForgivenAmount is what its grace absorbed, so Amount +
+// ForgivenAmount is the cost the host reported. Replayed: the event was
+// already recorded and this call metered nothing.
 type UsageEvent struct {
-	ID         UsageEventID     `json:"id"`
-	CustomerID CustomerID       `json:"customer_id"`
-	Invoker    string           `json:"invoker"`
-	Currency   string           `json:"currency"`
-	EventType  string           `json:"event_type"`
-	Dimensions map[string]int64 `json:"dimensions"`
-	Amount     int64            `json:"amount,string"`
-	Resource   *string          `json:"resource"`
-	Metadata   map[string]any   `json:"metadata"`
-	Source     string           `json:"source"`
-	SourceID   string           `json:"source_id"`
+	ID             UsageEventID     `json:"id"`
+	CustomerID     CustomerID       `json:"customer_id"`
+	Invoker        string           `json:"invoker"`
+	Currency       string           `json:"currency"`
+	EventType      string           `json:"event_type"`
+	Dimensions     map[string]int64 `json:"dimensions"`
+	Outcome        UsageOutcome     `json:"outcome"`
+	Amount         int64            `json:"amount,string"`
+	ForgivenAmount int64            `json:"forgiven_amount,string"`
+	Resource       *string          `json:"resource"`
+	Metadata       map[string]any   `json:"metadata"`
+	Source         string           `json:"source"`
+	SourceID       string           `json:"source_id"`
 	// BalanceTransactionID is the ledger debit a priced event made.
 	BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
 	OccurredAt           time.Time             `json:"occurred_at"`
@@ -109,10 +133,6 @@ const (
 	UsageByEventType UsageGroupBy = "event_type"
 	UsageByResource  UsageGroupBy = "resource"
 	UsageByInvoker   UsageGroupBy = "invoker"
-	// UsageByFunction and UsageByTier group by the function_name and
-	// availability_tier keys of an event's metadata.
-	UsageByFunction UsageGroupBy = "function"
-	UsageByTier     UsageGroupBy = "tier"
 )
 
 // GetUsageParams selects a usage report: one currency over [From, To), grouped

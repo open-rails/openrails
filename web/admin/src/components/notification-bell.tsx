@@ -6,7 +6,7 @@ import {
 } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { useNavigate } from "react-router-dom"
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery } from "@tanstack/react-query"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -14,60 +14,28 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import type { MerchantNotification } from "@/lib/api/types"
+import type { Finding } from "@/lib/api/types"
 import { timeAgo } from "@/lib/format"
-import { normalizeLink } from "@/lib/mount"
-import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
-import { cn } from "@/lib/utils"
 
+// The bell is the findings queue: the open findings that need a person. A
+// finding leaves it when it is resolved, by an operator or by itself.
 export function NotificationBell() {
   const navigate = useNavigate()
-  const queryClient = useQueryClient()
-  const readNotification = useMutation(
-    adminMutations.markNotificationRead(queryClient)
-  )
-  const readNotifications = useMutation(
-    adminMutations.markNotificationsRead(queryClient)
-  )
   const [open, setOpen] = React.useState(false)
-  const unreadOptions = adminQueries.unreadNotifications()
-  const notificationsOptions = adminQueries.notifications(open)
-  const { data: unreadData } = useQuery(unreadOptions)
-  const { data: notificationData, isFetching: loading } =
-    useQuery(notificationsOptions)
-  const count = unreadData?.unread_count ?? 0
-  const items = notificationData?.data ?? []
+  const { data: count = 0 } = useQuery(adminQueries.unreadNotifications())
+  const { data, isFetching: loading } = useQuery(
+    adminQueries.notifications(open)
+  )
+  const items = data?.data ?? []
 
-  const handleOpen = (next: boolean) => {
-    setOpen(next)
-  }
-
-  const isUnread = (n: MerchantNotification) => !n.read_at
-
-  const onItemClick = async (n: MerchantNotification) => {
+  const onItemClick = (f: Finding) => {
     setOpen(false)
-    if (isUnread(n)) {
-      try {
-        await readNotification.mutateAsync(n.id)
-      } catch {
-        /* best effort */
-      }
-    }
-    const { path, href } = normalizeLink(n.link)
-    if (href) window.open(href, "_blank", "noopener,noreferrer")
-    else if (path) navigate(path)
-  }
-
-  // No bulk endpoint in the contract — mark each currently-listed unread item.
-  const markAll = () => {
-    const unread = items.filter(isUnread)
-    if (unread.length === 0) return
-    readNotifications.mutate(unread.map((notification) => notification.id))
+    navigate(`/ops?finding=${encodeURIComponent(f.id)}`)
   }
 
   return (
-    <DropdownMenu open={open} onOpenChange={handleOpen}>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger
         render={
           <Button
@@ -87,16 +55,18 @@ export function NotificationBell() {
       />
       <DropdownMenuContent align="end" className="w-80 p-0 sm:w-96">
         <div className="flex items-center justify-between border-b px-3 py-2">
-          <span className="text-sm font-medium">Notifications</span>
-          {items.some(isUnread) && (
+          <span className="text-sm font-medium">Needs attention</span>
+          {count > items.length && (
             <Button
               variant="ghost"
               size="sm"
               className="h-6 px-2 text-xs"
-              onClick={markAll}
-              disabled={readNotifications.isPending}
+              onClick={() => {
+                setOpen(false)
+                navigate("/ops")
+              }}
             >
-              {readNotifications.isPending ? "Marking…" : "Mark all read"}
+              View all {count}
             </Button>
           )}
         </div>
@@ -114,24 +84,17 @@ export function NotificationBell() {
               <p className="text-sm text-muted-foreground">
                 You&apos;re all caught up.
               </p>
-              <p className="max-w-[16rem] text-xs text-muted-foreground">
-                Threshold alerts land here. Configure rules in Settings →
-                Alerts.
-              </p>
             </div>
           ) : (
-            items.map((n) => (
+            items.map((f) => (
               <button
-                key={n.id}
+                key={f.id}
                 type="button"
-                onClick={() => onItemClick(n)}
-                className={cn(
-                  "flex w-full items-start gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/50",
-                  isUnread(n) && "bg-primary/[0.04]"
-                )}
+                onClick={() => onItemClick(f)}
+                className="flex w-full items-start gap-2 border-b px-3 py-2 text-left last:border-b-0 hover:bg-muted/50"
               >
                 <span className="mt-0.5 shrink-0">
-                  {n.severity === "critical" ? (
+                  {f.severity === "critical" || f.severity === "high" ? (
                     <HugeiconsIcon
                       icon={AlertCircleIcon}
                       className="size-4 text-failed"
@@ -145,30 +108,19 @@ export function NotificationBell() {
                 </span>
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-2">
-                    <span
-                      className={cn(
-                        "truncate text-sm",
-                        isUnread(n) && "font-medium"
-                      )}
-                    >
-                      {n.title}
+                    <span className="truncate text-sm font-medium">
+                      {f.finding_type}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {timeAgo(n.created_at)}
+                      {timeAgo(f.created_at)}
                     </span>
                   </span>
-                  {n.body && (
+                  {f.recommended_action && (
                     <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">
-                      {n.body}
+                      {f.recommended_action}
                     </span>
                   )}
                 </span>
-                {isUnread(n) && (
-                  <span
-                    className="mt-1.5 size-2 shrink-0 rounded-full bg-primary"
-                    aria-label="unread"
-                  />
-                )}
               </button>
             ))
           )}

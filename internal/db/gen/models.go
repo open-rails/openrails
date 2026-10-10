@@ -467,6 +467,19 @@ type BillingDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
+// Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.
+type BillingFailedUsageWindow struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	// Empty for the customer's own grace window; otherwise the delegated invoker the cutoff window meters.
+	Invoker     string
+	WindowKey   string
+	WindowStart time.Time
+	WindowEnd   time.Time
+	Amount      int64
+}
+
 // Merchant roles granted by invitation to users of trusted issuers (#1140): pending (email only) until a user of an issuer trusted for the merchant accepts with that verified email, then bound to (issuer, subject). Grants, not accounts; revoking deletes the row.
 type BillingFederatedGrant struct {
 	MerchantID uuid.UUID
@@ -1683,6 +1696,10 @@ type BillingUsageEvent struct {
 	// When the usage happened; the partition key. Accepted only within the ingest window, so every read and the idempotency lookup name a time range.
 	OccurredAt time.Time
 	CreatedAt  time.Time
+	// succeeded, or failed: work that cost the platform and did not deliver. A failed event charges only what the customer's grace leaves.
+	Outcome string
+	// The part of a failed event's reported cost its grace absorbed; amount + forgiven_amount is what the host reported. Zero for a succeeded event.
+	ForgivenAmount int64
 }
 
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.

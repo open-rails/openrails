@@ -12,8 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/pagination"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Catalog reconciliation (issue #209) runs the shared catalog.RunDriftPass:
@@ -91,76 +89,6 @@ func (s *Service) RunCatalogReconciliation(ctx context.Context) (*billing.Catalo
 	}, nil
 }
 
-// catalogDrift reads one catalog.* reconciliation finding.
-func catalogDrift(r gen.BillingReconciliationFinding) billing.CatalogDrift {
-	view := billing.CatalogDrift{
-		ID: billing.FindingID(r.ID), Rail: derefText(r.Rail), Kind: strings.TrimPrefix(r.FindingType, "catalog."), ResourceType: derefText(r.OpenrailsResourceType),
-		ResourceID: derefText(r.OpenrailsResourceID), ExternalResourceID: derefText(r.ExternalResourceID),
-		Field: derefText(r.Field), OpenRailsValue: derefText(r.OpenrailsValue), ExternalValue: derefText(r.ExternalValue),
-		DetectedAt: r.CreatedAt, ResolvedAt: r.ResolvedAt,
-	}
-	if r.PspID != nil {
-		view.PSPID = billing.PSPID(*r.PspID)
-	}
-	return view
-}
-
-func nilIfEmptyText(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func derefText(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
-}
-
-// ListCatalogDrift returns one page of open drift findings, newest first.
-func (s *Service) ListCatalogDrift(ctx context.Context, params billing.CatalogDriftListParams) (billing.ListPage[billing.CatalogDrift], error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return billing.ListPage[billing.CatalogDrift]{}, pinErr
-	}
-	defer release()
-	dbi, err := s.requireDB()
-	if err != nil {
-		return billing.ListPage[billing.CatalogDrift]{}, err
-	}
-	if params.IDs != nil {
-		mid, err := merchant.Require(ctx)
-		if err != nil {
-			return billing.ListPage[billing.CatalogDrift]{}, err
-		}
-		rows, err := dbi.Gen(ctx).ListCatalogDriftByIDs(ctx, gen.ListCatalogDriftByIDsParams{MerchantID: mid.UUID(), Ids: uuidutil.Of(params.IDs)})
-		if err != nil {
-			return billing.ListPage[billing.CatalogDrift]{}, fmt.Errorf("list drift findings: %w", err)
-		}
-		return pagination.Map(billing.ListPage[gen.BillingReconciliationFinding]{Items: rows}, catalogDrift), nil
-	}
-	limit, err := pagination.Limit(params.PageRequest)
-	if err != nil {
-		return billing.ListPage[billing.CatalogDrift]{}, err
-	}
-	afterAt, afterID, err := pagination.After(params.Cursor)
-	if err != nil {
-		return billing.ListPage[billing.CatalogDrift]{}, err
-	}
-	rows, err := dbi.Gen(ctx).ListOpenCatalogDriftFiltered(ctx, gen.ListOpenCatalogDriftFilteredParams{
-		Rail: nilIfEmptyText(strings.TrimSpace(params.Rail)), Kind: nilIfEmptyText(strings.TrimSpace(params.Kind)),
-		ResourceType: nilIfEmptyText(strings.TrimSpace(params.ResourceType)),
-		AfterAt:      afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit),
-	})
-	if err != nil {
-		return billing.ListPage[billing.CatalogDrift]{}, fmt.Errorf("list drift findings: %w", err)
-	}
-	page := pagination.Cut(rows, limit, func(r gen.BillingReconciliationFinding) any { return pagination.TimeID{At: r.CreatedAt, ID: r.ID} })
-	return pagination.Map(page, catalogDrift), nil
-}
-
 // ResolveDriftForResource closes open findings of one PSP account for a local
 // resource after reconcile verified that account in sync. Returns rows closed.
 func (s *Service) ResolveDriftForResource(ctx context.Context, pspID uuid.UUID, resourceType models.CatalogDriftResourceType, openRailsResourceID string) (int, error) {
@@ -207,4 +135,11 @@ func (s *Service) CountOpenDriftByKind(ctx context.Context) (map[string]int64, e
 		out[derefText(r.Rail)+"/"+r.Kind] = r.N
 	}
 	return out, nil
+}
+
+func derefText(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

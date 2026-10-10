@@ -45,16 +45,13 @@ var hostingMethods = map[string]string{
 // merchant route can carry it; the reason names the host that calls it. The
 // control plane's cross-merchant operations are package server's.
 var embeddedMethods = map[string]string{
-	"DeclarePSP":                            "the hosted product: a PSP identity without credentials, for imported billing facts",
-	"OpenOperationAuthorizationTx":          "host-four: OpenOperationAuthorization inside the host's transaction",
-	"GetOperationAuthorizationTx":           "host-four: GetOperationAuthorization inside the host's transaction",
-	"ExtendOperationAuthorizationTx":        "host-four: ExtendOperationAuthorization inside the host's transaction",
-	"ReleaseOperationAuthorizationTx":       "host-four: ReleaseOperationAuthorization inside the host's transaction",
-	"RecordProviderBillingObservationTx":    "host-four: RecordProviderBillingObservation inside the host's transaction",
-	"GetProviderBillingQualificationTx":     "host-four: GetProviderBillingQualification inside the host's transaction",
-	"ResolveProviderBillingQualificationTx": "host-four: ResolveProviderBillingQualification inside the host's transaction",
-	"RefuseProviderBillingQualificationTx":  "host-four: RefuseProviderBillingQualification inside the host's transaction",
-	"CloseOperationAuthorizationTx":         "host-four: CloseOperationAuthorization inside the host's transaction",
+	"DeclarePSP":                         "the hosted product: a PSP identity without credentials, for imported billing facts",
+	"OpenProviderOperationTx":            "host-four: OpenProviderOperation inside the host's transaction",
+	"GetProviderOperationTx":             "host-four: GetProviderOperation inside the host's transaction",
+	"IncrementProviderOperationTx":       "host-four: IncrementProviderOperation inside the host's transaction",
+	"ReleaseProviderOperationTx":         "host-four: ReleaseProviderOperation inside the host's transaction",
+	"RecordProviderBillingObservationTx": "host-four: RecordProviderBillingObservation inside the host's transaction",
+	"CloseProviderOperationTx":           "host-four: CloseProviderOperation inside the host's transaction",
 }
 
 // routeArguments are the arguments of the methods that refuse a request with

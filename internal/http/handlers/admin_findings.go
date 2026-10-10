@@ -42,6 +42,12 @@ func findingView(rec reconcile.FindingRecord) billing.Finding {
 		Status: billing.FindingStatus(rec.Status), Evidence: rec.Evidence, LastSeenAt: rec.LastSeenAt, ResolvedAt: rec.ResolvedAt,
 		Provider: optional(string(rec.Provider)), RecommendedAction: optional(rec.RecommendedAction), Resolution: optional(rec.Resolution),
 		ResolvedBy: optional(rec.ResolvedBy), Notes: optional(rec.Notes), CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
+		ResourceType: rec.ResourceType, ResourceID: rec.ResourceID, ExternalResourceID: rec.ExternalResourceID,
+		Field: rec.Field, OpenRailsValue: rec.OpenRailsValue, ExternalValue: rec.ExternalValue,
+	}
+	if rec.PSPID != nil {
+		psp := billing.PSPID(*rec.PSPID)
+		v.PSPID = &psp
 	}
 	if v.Evidence == nil {
 		v.Evidence = map[string]any{}
@@ -68,11 +74,12 @@ func optional(s string) *string {
 	return &s
 }
 
-// FindingsQuery is the findings list's filters.
+// FindingsQuery is the findings list's filters. Type is one finding type or a
+// prefix ending in ".*" (catalog.*: catalog drift).
 type FindingsQuery struct {
 	Status   string `form:"status"`
 	Severity string `form:"severity"`
-	Type     string `form:"finding_type"`
+	Type     string `form:"type"`
 }
 
 // AdminListFindings handles GET /v1/admin/findings: the operator work
@@ -102,24 +109,6 @@ func AdminListFindings(r *httprequest.Request) {
 		return
 	}
 	r.SuccessJSON(pagination.Map(items, findingView))
-}
-
-// GetFindingSummary handles GET /v1/admin/findings/summary: the queue at
-// a glance (#690). OrphanedMembers, Freeloaders and DuplicateCoverage are
-// error metrics, nonzero for a full sweep (15 min) means the billing state
-// machine is failing; VerificationPressure may be nonzero, but its age
-// trending up means verification (pull, probe, converge) is down.
-func GetFindingSummary(r *httprequest.Request) {
-	store, ok := findingsStore(r)
-	if !ok {
-		return
-	}
-	summary, err := store.Gauges(r.Request.Context())
-	if err != nil {
-		r.InternalError("compute finding summary failed", err)
-		return
-	}
-	r.SuccessJSON(summary)
 }
 
 // AdminGetFinding handles GET /v1/admin/findings/{id}.

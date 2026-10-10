@@ -478,9 +478,13 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 	// The fleet-level stall is the #895 signal: it fires even when every
 	// per-kind row still looks fine (nothing has been late long enough yet),
 	// and it is the ONLY one that can fire while River is completely dead.
-	if !report.Progressing {
-		fleetRow := byKind[fleetHealthKind]
-		fleetRow.WorkerKind = fleetHealthKind
+	fleetRow := byKind[fleetHealthKind]
+	fleetRow.WorkerKind = fleetHealthKind
+	if report.Progressing {
+		if err := m.resolveStall(ctx, fleetRow, report.CheckedAt); err != nil {
+			log.WithContext(ctx).WithError(err).Error("river progress: failed to resolve fleet stall")
+		}
+	} else {
 		if workerAlertDue(fleetRow, report.CheckedAt, m.reAlertEvery()) {
 			if err := m.raiseAlert(ctx, fleetRow, report.Reason, report.CheckedAt, report); err != nil {
 				failedAlerts++
@@ -498,12 +502,15 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 	}
 
 	for _, kp := range report.Kinds {
-		if kp.Reason == "" {
-			continue
-		}
 		row, ok := byKind[kp.Kind]
 		if !ok {
 			row = gen.BillingWorkerState{WorkerKind: kp.Kind}
+		}
+		if kp.Reason == "" {
+			if err := m.resolveStall(ctx, row, report.CheckedAt); err != nil {
+				log.WithContext(ctx).WithError(err).WithField("worker_kind", kp.Kind).Error("river progress: failed to resolve stall")
+			}
+			continue
 		}
 		if !workerAlertDue(row, report.CheckedAt, m.reAlertEvery()) {
 			continue
@@ -528,6 +535,27 @@ func (m *ProgressMonitor) RaiseAlerts(ctx context.Context, report ProgressReport
 		return fmt.Errorf("river progress: %d stall alerts failed to record", failedAlerts)
 	}
 	return nil
+}
+
+// resolveStall resolves an alerted kind's stall finding in every merchant
+// once the kind progresses again, then clears its alert.
+func (m *ProgressMonitor) resolveStall(ctx context.Context, row gen.BillingWorkerState, now time.Time) error {
+	if row.LastAlertedAt == nil {
+		return nil
+	}
+	merchantIDs, err := m.DB.GenDirectory().ListActiveMerchantIDs(ctx)
+	if err != nil {
+		return fmt.Errorf("list merchants: %w", err)
+	}
+	for _, mid := range merchantIDs {
+		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
+		if err := m.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
+			return alerting.ResolveWorkerStall(ctx, m.DB, row.WorkerKind)
+		}); err != nil {
+			return fmt.Errorf("merchant %s: %w", mid, err)
+		}
+	}
+	return m.DB.Gen(ctx).ClearWorkerHealthAlerted(ctx, gen.ClearWorkerHealthAlertedParams{WorkerKind: row.WorkerKind, Now: now, AlertedAt: *row.LastAlertedAt})
 }
 
 // fleetHealthKind is the pseudo-kind the fleet-level verdict alerts and dedupes
@@ -568,12 +596,11 @@ func (m *ProgressMonitor) raiseAlert(ctx context.Context, row gen.BillingWorkerS
 		metadata["fleet_last_completed_at"] = report.FleetLastCompletedAt.UTC().Format(time.RFC3339)
 	}
 	alertErrors := make([]error, 0)
-	idempotencyKey := workerHealthAlertIdempotencyKey(row, reason)
 	for _, mid := range merchantIDs {
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
 		if err := m.DB.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			return alerting.RecordWorkerStall(ctx, m.DB, now, alerting.WorkerStall{
-				WorkerKind: row.WorkerKind, Reason: reason, IdempotencyKey: idempotencyKey, Metadata: metadata,
+				WorkerKind: row.WorkerKind, Reason: reason, Metadata: metadata,
 			})
 		}); err != nil {
 			alertErrors = append(alertErrors, fmt.Errorf("merchant %s: %w", mid, err))

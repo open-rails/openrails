@@ -21,26 +21,23 @@ func newCodedError(code string, class error) *codedError {
 }
 
 var (
-	ErrOperationAuthorizationNotFound           error = newCodedError("operation_authorization_not_found", ErrNotFound)
-	ErrOperationAuthorizationConflict           error = newCodedError("operation_authorization_conflict", ErrConflict)
-	ErrOperationAuthorizationNotOpen            error = newCodedError("operation_authorization_not_open", ErrConflict)
-	ErrOperationAuthorizationHasBillingEvidence error = newCodedError("operation_authorization_has_billing_evidence", ErrConflict)
-	ErrProviderBillingQualificationNotFound     error = newCodedError("provider_billing_qualification_not_found", ErrNotFound)
-	ErrProviderBillingObservationConflict       error = newCodedError("provider_billing_observation_conflict", ErrConflict)
-	ErrProviderBillingQualificationRefused      error = newCodedError("provider_billing_qualification_refused", ErrConflict)
-	ErrProviderBillingQualificationNotRefused   error = newCodedError("provider_billing_qualification_not_refused", ErrConflict)
-	ErrProviderBillingResolutionConflict        error = newCodedError("provider_billing_resolution_conflict", ErrConflict)
-	ErrProviderBillingRefusalConflict           error = newCodedError("provider_billing_refusal_conflict", ErrConflict)
+	ErrProviderOperationNotFound           error = newCodedError("provider_operation_not_found", ErrNotFound)
+	ErrProviderOperationConflict           error = newCodedError("provider_operation_conflict", ErrConflict)
+	ErrProviderOperationNotOpen            error = newCodedError("provider_operation_not_open", ErrConflict)
+	ErrProviderOperationHasBillingEvidence error = newCodedError("provider_operation_has_billing_evidence", ErrConflict)
+	ErrProviderOperationRefused            error = newCodedError("provider_operation_refused", ErrConflict)
+	ErrProviderOperationNotRefused         error = newCodedError("provider_operation_not_refused", ErrConflict)
+	ErrProviderBillingObservationConflict  error = newCodedError("provider_billing_observation_conflict", ErrConflict)
 )
 
-// OperationAuthorizationConflict names the immutable field an operation id
-// reuse changed. Over HTTP the field is StatusError.Param.
-type OperationAuthorizationConflict struct{ Field string }
+// ProviderOperationConflict names the term a repeated open, increment, release
+// or close changed. Over HTTP the field is StatusError.Param.
+type ProviderOperationConflict struct{ Field string }
 
-func (e *OperationAuthorizationConflict) Error() string {
-	return fmt.Sprintf("operation authorization id reused with changed %s", e.Field)
+func (e *ProviderOperationConflict) Error() string {
+	return fmt.Sprintf("provider operation repeated with changed %s", e.Field)
 }
-func (e *OperationAuthorizationConflict) Unwrap() error { return ErrOperationAuthorizationConflict }
+func (e *ProviderOperationConflict) Unwrap() error { return ErrProviderOperationConflict }
 
 // ProviderBillingObservationConflict names the evidence field a replay changed.
 // Over HTTP the field is StatusError.Param.
@@ -51,26 +48,4 @@ func (e *ProviderBillingObservationConflict) Error() string {
 }
 func (e *ProviderBillingObservationConflict) Unwrap() error {
 	return ErrProviderBillingObservationConflict
-}
-
-// ProviderBillingResolutionConflict names the term a repeated resolution
-// changed. Over HTTP the field is StatusError.Param.
-type ProviderBillingResolutionConflict struct{ Field string }
-
-func (e *ProviderBillingResolutionConflict) Error() string {
-	return fmt.Sprintf("provider billing resolution conflicts on %s", e.Field)
-}
-func (e *ProviderBillingResolutionConflict) Unwrap() error {
-	return ErrProviderBillingResolutionConflict
-}
-
-// ProviderBillingRefusalConflict names the term a repeated refusal changed.
-// Over HTTP the field is StatusError.Param.
-type ProviderBillingRefusalConflict struct{ Field string }
-
-func (e *ProviderBillingRefusalConflict) Error() string {
-	return fmt.Sprintf("provider billing refusal conflicts on %s", e.Field)
-}
-func (e *ProviderBillingRefusalConflict) Unwrap() error {
-	return ErrProviderBillingRefusalConflict
 }

@@ -608,6 +608,19 @@ disappears. Two safety doctrines matter operationally:
   everything else is `requires_review` — provider failures, bad credentials,
   or a dead worker. The engine never touches intent rows (the
   executor/verifier own them); findings auto-resolve on recovery.
+- **Refused provider operations** (`life.provider_operation.refused`): an open
+  provider operation whose cost will not qualify automatically holds the
+  customer's capacity until an operator closes it
+  (`POST /v1/admin/provider-operations/{operation_id}/close`); the finding
+  clears with the close.
+- **Operational problems** outside the sweep are findings too:
+  `consistency.ledger.unbooked` (a provider event OpenRails could not book; the
+  merchant repairs the ledger and resolves the finding) and
+  `life.worker.stalled` (a periodic job kind stopped completing; it resolves
+  itself when the kind progresses). The findings queue is the one merchant
+  inbox, and its counts are metrics measures (`open_findings`,
+  `orphaned_members`, `freeloaders`, `duplicate_coverage`,
+  `verification_pressure`).
 
 ## Dunning
 
@@ -800,7 +813,7 @@ across all references.
 - The first transfer of at least the quoted amount that lands by quote expiry
   + 30 min is credited; an excess is credited and flagged `overpaid`.
 - Anything else is recorded with `disposition = 'review'` and a
-  critical `ledger_repair_required` notification in the merchant inbox
+  critical `consistency.ledger.unbooked` finding
   (`solana_pay_<reason>`):
   `already_paid`, `late`, `underpaid`, `session_closed`, `wrong_asset`,
   `unreadable`, `settle_failed`. Nothing is refunded automatically, and
@@ -846,10 +859,11 @@ Row retention:
 | `checkout_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
 | `checkout_sessions` | at `purge_at`, 24 hours after the session expired |
 | `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
-| `notifications` | 90 days once read, 180 days if never read |
+| `notifications` (customers') | 90 days once read, 180 days if never read |
 | `webhook_events` | 90 days after completion |
 | `host_outbox` | 30 days after delivery; an undelivered event is never deleted |
 | `idempotency_keys`, `card_attempt_failures`, `solana_pay_references` | at expiry, past the longest card-abuse window, and after the 7-day watch window |
+| `failed_usage_windows` | once the window has ended, on the merchant's next failed usage |
 
 What is kept on purpose:
 
@@ -961,7 +975,8 @@ up. "start" = RunOnStart.
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
 
 The health checker seeds `billing.worker_state` and raises a critical
-notification in the merchant inbox when a periodic kind stops completing. Its per-kind rows are written
+`life.worker.stalled` finding in every merchant when a periodic kind stops
+completing; the finding resolves itself when the kind progresses again. Its per-kind rows are written
 monotonically: job completions of one kind reach the row in any order, so a
 late write can only add what is newer (timestamps never move back, the error
 text is the newest failure's, a success resets the failure streak only when no

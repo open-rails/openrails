@@ -50,25 +50,6 @@ func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...Reque
 	return &out, nil
 }
 
-// ListCatalogDrift returns one page of open findings that a PSP's copy of the
-// catalog differs from OpenRails, newest first.
-func (c *Client) ListCatalogDrift(ctx context.Context, params billing.CatalogDriftListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CatalogDrift], error) {
-	q := pageValues(nil, params.PageRequest)
-	for name, value := range map[string]string{"rail": params.Rail, "kind": params.Kind, "resource_type": params.ResourceType} {
-		if value != "" {
-			q.Set(name, value)
-		}
-	}
-	if err := setIDs(q, params.IDs); err != nil {
-		return nil, err
-	}
-	var out billing.ListPage[billing.CatalogDrift]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/drift?"+q.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // RefreshCatalogDrift reads every linked PSP's catalog now and records the
 // drift it finds; it changes neither the PSPs nor the catalog.
 func (c *Client) RefreshCatalogDrift(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogDriftRefresh, error) {

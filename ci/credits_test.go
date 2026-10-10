@@ -121,13 +121,18 @@ func TestCustomerCreditsAdmissionsAndUsage(t *testing.T) {
 	}
 	require.Equal(t, map[billing.BalanceTransactionType]int64{billing.BalanceTransactionDeposit: 1_000_000, billing.BalanceTransactionSpend: -300_000}, types)
 
-	usage, err := client.GetUsage(ctx, customer, billing.GetUsageParams{Currency: "USD", From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour)})
+	usage, err := client.QueryMetrics(ctx, billing.MetricsQuery{
+		Measures: []string{"usage_units", "usage_revenue"}, By: []string{"rate_card"},
+		Range:   &billing.MetricsRange{From: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), To: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)},
+		Filters: map[string][]string{"customer": {customer.String()}},
+	})
 	require.NoError(t, err)
-	require.Equal(t, billing.UsageByEventType, usage.GroupBy)
-	require.Len(t, usage.Rows, 1)
-	require.Equal(t, "inference", usage.Rows[0].Key)
-	require.EqualValues(t, 2, usage.Rows[0].EventCount)
-	require.EqualValues(t, 300_000, usage.Rows[0].Amount)
+	rows := metricsRows(usage)
+	require.Len(t, rows, 1)
+	require.Equal(t, "inference", rows[0]["rate_card"])
+	require.Equal(t, "USD", rows[0]["currency"])
+	require.Equal(t, "2", rows[0]["usage_units"])
+	require.Equal(t, "300000", rows[0]["usage_revenue"])
 
 	_, err = client.UpdateCustomer(ctx, customer, billing.UpdateCustomerParams{TrustLevels: []billing.TrustLevel{{Currency: "USD", TrustLevel: "trusted"}}})
 	require.NoError(t, err)

@@ -103,11 +103,9 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/product-access",
 	"POST /v1/admin/provider-operations",
 	"POST /v1/admin/provider-operations/{operation_id}/close",
-	"POST /v1/admin/provider-operations/{operation_id}/extend",
+	"POST /v1/admin/provider-operations/{operation_id}/increment",
 	"POST /v1/admin/provider-operations/{operation_id}/observations",
-	"POST /v1/admin/provider-operations/{operation_id}/refusal",
 	"POST /v1/admin/provider-operations/{operation_id}/release",
-	"POST /v1/admin/provider-operations/{operation_id}/resolution",
 	"POST /v1/admin/provisioning-tokens",
 	"POST /v1/admin/psps",
 	"POST /v1/admin/psps/refresh",
@@ -116,7 +114,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/subscriptions/{id}/change-tier",
 	"POST /v1/admin/subscriptions/{id}/resume",
 	"POST /v1/admin/usage-events",
-	"POST /v1/admin/wasted-spend",
 	"POST /v1/merchant/api-keys",
 	"POST /v1/merchant/federated-grants",
 	"POST /v1/merchant/team/invites",
@@ -298,7 +295,7 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			require.Equal(t, want, rec.take(), "%s as %s", r.Key(), who.SubjectKind)
 			checked++
 		}
-		require.Greater(t, checked, 165)
+		require.Greater(t, checked, 150)
 		if billingauth.Interactive(who) {
 			require.Greater(t, sensitive, 20)
 		}
@@ -328,7 +325,7 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, code, r.Key())
 		gated++
 	}
-	require.Greater(t, gated, 165)
+	require.Greater(t, gated, 150)
 }
 
 // Every gated handler re-checks the verdict the gate bound: reached without

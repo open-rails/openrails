@@ -3,11 +3,7 @@
 package ci_test
 
 import (
-	"context"
-	"errors"
 	"net/http"
-	"os"
-	"strings"
 	"testing"
 	"time"
 
@@ -25,23 +21,6 @@ func refusedParam(t *testing.T, err error) string {
 	require.ErrorAs(t, err, &refusal)
 	require.NotNil(t, refusal.Param, "%v", err)
 	return *refusal.Param
-}
-
-// redisRuntime is a merchant's in-process client with the disposable Redis
-// wasted-spend tracking needs.
-func (f *fixture) redisRuntime(t *testing.T, slug string) *openrails.Client {
-	t.Helper()
-	addr := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_ADDR"))
-	if addr == "" {
-		t.Fatal("OPENRAILS_E2E_REDIS_ADDR must point at a disposable Redis")
-	}
-	cfg := f.config()
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
-	cfg.Redis = &openrails.RedisConfig{Addr: addr}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
-	require.NoError(t, err)
-	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
-	return client
 }
 
 func balanceOf(t *testing.T, client *openrails.Client, customer billing.CustomerID) int64 {
@@ -193,47 +172,5 @@ func TestAdmissionBatchesAnswerPerItem(t *testing.T) {
 	_, err = a.ReleaseAdmissions(ctx, make([]string, billing.MaxAdmissionBatchItems+1))
 	require.ErrorIs(t, err, billing.ErrInvalid)
 	_, err = a.ExtendAdmissions(ctx, nil)
-	require.ErrorIs(t, err, billing.ErrInvalid)
-}
-
-// Wasted spend is reported in batches, one result per report: a bad report
-// is refused alone, a retry is a duplicate, and another merchant's reports
-// never touch this merchant's customers.
-func TestWastedSpendBatchesAnswerPerItem(t *testing.T) {
-	f := newFixture(t)
-	a := f.redisRuntime(t, "waste-a-"+uuid.NewString()[:8])
-	b := f.redisRuntime(t, "waste-b-"+uuid.NewString()[:8])
-	ctx := t.Context()
-	customer := billing.CustomerID(uuid.New())
-	_, err := createCreditGrant(ctx, a, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 10_000_000, Source: "support", SourceID: "seed"})
-	require.NoError(t, err)
-	report := func(sourceID string, amount int64) billing.ReportWastedSpendParams {
-		return billing.ReportWastedSpendParams{CustomerID: customer, Invoker: customer.String(), InvokerType: billing.InvokerTypeCustomer,
-			Currency: "usd", Amount: amount, Source: "worker", SourceID: sourceID}
-	}
-
-	results, err := a.ReportWastedSpend(ctx, []billing.ReportWastedSpendParams{report("w-1", 10_000), report("w-2", -1), report("w-3", 20_000)})
-	require.NoError(t, err)
-	require.Len(t, results, 3)
-	require.Equal(t, http.StatusOK, results[0].Status, "%+v", results[0].Error)
-	require.NotEqual(t, billing.WastedSpendDuplicate, results[0].Report.Action)
-	require.ErrorIs(t, results[1].Err(), billing.ErrInvalid)
-	require.Equal(t, "amount", *results[1].Error.Param)
-	require.Equal(t, http.StatusOK, results[2].Status, "a bad report refuses only itself")
-	after := balanceOf(t, a, customer)
-
-	retry, err := a.ReportWastedSpend(ctx, []billing.ReportWastedSpendParams{report("w-1", 10_000), report("w-1", 11_000)})
-	require.NoError(t, err)
-	require.Equal(t, billing.WastedSpendDuplicate, retry[0].Report.Action, "a retry is handled once")
-	require.True(t, errors.Is(retry[1].Err(), billing.ErrIdempotencyKeyReused), "%+v", retry[1].Error)
-	require.Equal(t, after, balanceOf(t, a, customer), "money never moves twice")
-
-	foreign, err := b.ReportWastedSpend(ctx, []billing.ReportWastedSpendParams{report("w-1", 10_000)})
-	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, foreign[0].Status)
-	require.NotEqual(t, billing.WastedSpendDuplicate, foreign[0].Report.Action, "another merchant's report is its own")
-	require.Equal(t, after, balanceOf(t, a, customer))
-
-	_, err = a.ReportWastedSpend(ctx, make([]billing.ReportWastedSpendParams, billing.MaxBatchItems+1))
 	require.ErrorIs(t, err, billing.ErrInvalid)
 }

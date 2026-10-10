@@ -72,8 +72,8 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	// Zero-valued usage/capture and an unbilled item exercise their application
 	// JSON without fabricating a financial transfer or changing the paid book.
 	for _, insert := range []string{
-		`INSERT INTO billing.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at)
-		 VALUES ($1, $2, 'archive-application', 'USD', 'archive-metadata', '{}', 0, 'archive-test', 'usage-metadata', 'host', $3::jsonb, now())`,
+		`INSERT INTO billing.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at, outcome, forgiven_amount)
+		 VALUES ($1, $2, 'archive-application', 'USD', 'archive-metadata', '{}', 0, 'archive-test', 'usage-metadata', 'host', $3::jsonb, now(), 'failed', 5)`,
 		`INSERT INTO billing.invoice_items (merchant_id, customer_id, currency, source_type, source_id, invoice_at, amount, status, metadata)
 		 VALUES ($1, $2, 'USD', 'archive-test', 'invoice-metadata', now(), 0, 'pending', $3::jsonb)`,
 		`INSERT INTO billing.admission_operations (merchant_id, request_id, customer_id, currency, estimated_amount, available_amount, terms, window_keys, state, capture_terms, captured_amount, captured_at)
@@ -82,8 +82,8 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 		_, err := w.pool.Exec(t.Context(), w.q(insert), merchantID.UUID(), uuid.MustParse(e.c.id), metadata)
 		require.NoError(t, err)
 	}
-	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at)
-		SELECT $1, $2, 'archive-application', 'USD', 'archive-metadata', '{}', 0, 'archive-test', name, 'host', metadata, now()
+	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.usage_events (merchant_id, customer_id, invoker_id, currency, event_type, dimensions, amount, source, source_id, pricing_authority, metadata, occurred_at, outcome, forgiven_amount)
+		SELECT $1, $2, 'archive-application', 'USD', 'archive-metadata', '{}', 0, 'archive-test', name, 'host', metadata, now(), 'succeeded', 0
 		FROM (VALUES ('sql-null', NULL::jsonb), ('json-null', 'null'::jsonb), ('empty-object', '{}'::jsonb), ('array', '[1,true,null]'::jsonb), ('scalar', '"app note"'::jsonb)) AS cases(name, metadata)`), merchantID.UUID(), uuid.MustParse(e.c.id))
 	require.NoError(t, err)
 

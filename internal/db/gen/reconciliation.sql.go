@@ -79,12 +79,13 @@ WHERE f.merchant_id = $1::uuid
        END)
   AND ($3::text IS NULL OR f.severity = $3::text)
   AND ($4::text IS NULL OR f.finding_type = $4::text)
-  AND ($5::int IS NULL
+  AND ($5::text IS NULL OR starts_with(f.finding_type, $5::text))
+  AND ($6::int IS NULL
        OR (CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END, f.created_at, f.id)
-          > ($5::int, $6::timestamptz, $7::uuid))
+          > ($6::int, $7::timestamptz, $8::uuid))
 ORDER BY CASE f.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
          f.created_at, f.id
-LIMIT $8::int
+LIMIT $9::int
 `
 
 type AdminListReconciliationFindingsParams struct {
@@ -92,6 +93,7 @@ type AdminListReconciliationFindingsParams struct {
 	Status      *string
 	Severity    *string
 	FindingType *string
+	TypePrefix  *string
 	AfterRank   *int32
 	AfterAt     *time.Time
 	AfterID     *uuid.UUID
@@ -111,6 +113,7 @@ func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg Admin
 		arg.Status,
 		arg.Severity,
 		arg.FindingType,
+		arg.TypePrefix,
 		arg.AfterRank,
 		arg.AfterAt,
 		arg.AfterID,
@@ -385,160 +388,6 @@ func (q *Queries) ClaimReconciliationFindingNotification(ctx context.Context, ar
 	return result.RowsAffected(), nil
 }
 
-const countErrorEpisodeTotals = `-- name: CountErrorEpisodeTotals :one
-WITH win AS (
-    SELECT e.product_id, e.source_type, e.starts_at,
-           LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                 COALESCE(e.ends_at, 'infinity'::timestamptz)) AS window_end,
-           s.status AS sub_status, s.next_retry_at,
-           CASE WHEN s.id IS NULL THEN NULL
-                ELSE COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
-                    s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) END AS paid_through,
-           p.status AS payment_status,
-           COALESCE((SELECT max(r.purchased_at) FROM billing.payments r
-                      WHERE r.merchant_id = e.merchant_id AND r.refunded_payment_id = p.id AND r.deleted_at IS NULL),
-                    p.purchased_at) AS refund_effective_at,
-           (SELECT max(COALESCE(g.ends_at, 'infinity'::timestamptz))
-              FROM billing.grants g
-             WHERE g.merchant_id = e.merchant_id AND g.customer_id = e.customer_id
-               AND g.event = 'grant' AND g.kind = 'access' AND g.starts_at <= now()
-               AND (g.id = e.grant_id OR (g.source_id = e.source_id AND g.source_type = e.source_type))
-               AND NOT EXISTS (SELECT 1 FROM billing.grants t
-                                WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id
-                                  AND t.event IN ('revoke', 'expire', 'supersede'))) AS grant_covered_until
-      FROM billing.product_access e
-      LEFT JOIN billing.subscriptions s
-        ON e.source_type = 'subscription' AND s.merchant_id = e.merchant_id AND s.id::text = e.source_id AND s.deleted_at IS NULL
-      LEFT JOIN billing.payments p
-        ON e.source_type = 'purchase' AND p.merchant_id = e.merchant_id AND p.id = e.payment_id AND p.deleted_at IS NULL
-     WHERE e.merchant_id = $1::uuid
-       AND e.source_type IN ('subscription', 'purchase')
-), freeloader AS (
-    SELECT CASE WHEN w.sub_status = 'past_due' AND w.next_retry_at IS NOT NULL THEN 'sanctioned_dunning'
-                WHEN w.sub_status = 'unverified' THEN 'awaiting_verification'
-                ELSE 'unsanctioned' END AS cause,
-           w.window_end > now() AS open,
-           f.unpaid_from, f.unpaid_until
-      FROM win w
-      CROSS JOIN LATERAL (
-          SELECT GREATEST(w.starts_at,
-                     CASE WHEN w.source_type = 'subscription' THEN COALESCE(w.paid_through, '-infinity'::timestamptz)
-                          WHEN w.payment_status = 'completed' THEN 'infinity'::timestamptz
-                          WHEN w.payment_status = 'refunded' THEN w.refund_effective_at
-                          ELSE '-infinity'::timestamptz END,
-                     COALESCE(w.grant_covered_until, '-infinity'::timestamptz)) AS unpaid_from,
-                 LEAST(w.window_end, now()) AS unpaid_until
-      ) f
-     WHERE f.unpaid_from < f.unpaid_until
-), coverage AS (
-    SELECT s.merchant_id, s.customer_id, 'subscription'::text AS source_type, s.id AS source_id,
-           COALESCE(s.current_period_starts_at, s.started_at) AS cov_start,
-           COALESCE(COALESCE(s.current_period_starts_at, s.started_at) +
-               s.access_duration_hours_snapshot * interval '1 hour', 'infinity'::timestamptz) AS cov_end
-      FROM billing.subscriptions s
-     WHERE s.merchant_id = $1::uuid
-       AND s.deleted_at IS NULL AND s.status <> 'pending'
-       AND s.cancel_type IS DISTINCT FROM 'chargeback'
-    UNION ALL
-    SELECT p.merchant_id, p.customer_id, 'purchase'::text, p.id, p.purchased_at,
-           p.purchased_at + make_interval(hours => pr.access_duration_hours)
-      FROM billing.payments p
-      JOIN billing.prices pr ON pr.merchant_id = p.merchant_id AND pr.id = p.price_id
-     WHERE p.merchant_id = $1::uuid
-       AND p.deleted_at IS NULL AND p.status = 'completed' AND p.amount > 0 AND p.subscription_id IS NULL
-       AND pr.access_duration_hours IS NOT NULL
-), orphaned AS (
-    SELECT c.cov_end > now() AS open,
-           GREATEST(c.cov_start, COALESCE((
-               SELECT max(LEAST(COALESCE(e.revoked_at, 'infinity'::timestamptz), COALESCE(e.deleted_at, 'infinity'::timestamptz),
-                                COALESCE(e.ends_at, 'infinity'::timestamptz)))
-                 FROM billing.product_access e
-                WHERE e.merchant_id = c.merchant_id AND e.customer_id = c.customer_id
-                  AND e.source_type = c.source_type AND e.source_id = c.source_id::text AND e.starts_at <= now()),
-               '-infinity'::timestamptz)) AS uncovered_from,
-           LEAST(c.cov_end, now()) AS uncovered_until
-      FROM coverage c
-)
-SELECT (SELECT count(*) FROM freeloader)::bigint AS freeloader_total,
-       (SELECT count(*) FROM freeloader WHERE open)::bigint AS freeloader_open,
-       (SELECT count(*) FROM freeloader WHERE cause = 'unsanctioned')::bigint AS freeloader_unsanctioned,
-       (SELECT COALESCE(sum(EXTRACT(epoch FROM unpaid_until - unpaid_from) / 86400.0), 0) FROM freeloader)::double precision AS freeloader_days,
-       (SELECT count(*) FROM orphaned WHERE uncovered_from < uncovered_until)::bigint AS orphaned_total,
-       (SELECT count(*) FROM orphaned WHERE uncovered_from < uncovered_until AND open)::bigint AS orphaned_open,
-       (SELECT COALESCE(sum(EXTRACT(epoch FROM uncovered_until - uncovered_from) / 86400.0), 0)
-          FROM orphaned WHERE uncovered_from < uncovered_until)::double precision AS orphaned_days
-`
-
-type CountErrorEpisodeTotalsRow struct {
-	FreeloaderTotal        int64
-	FreeloaderOpen         int64
-	FreeloaderUnsanctioned int64
-	FreeloaderDays         float64
-	OrphanedTotal          int64
-	OrphanedOpen           int64
-	OrphanedDays           float64
-}
-
-// Episode analytics totals for the gauges header. Freeloader episodes are spans
-// of entitlement access not covered by payment (accepted subscription access
-// snapshot, completed purchase payment, or a live matching grant); their cause
-// separates sanctioned unpaid access (sanctioned_dunning, awaiting_verification)
-// from failure (unsanctioned). Orphaned episodes are the mirror: payment
-// coverage with no entitlement window. Open = the span still accrues at now().
-// Approximations: coverage uses the current accepted access snapshot, and only the
-// uncovered tail is measured.
-func (q *Queries) CountErrorEpisodeTotals(ctx context.Context, merchantID uuid.UUID) (CountErrorEpisodeTotalsRow, error) {
-	row := q.db.QueryRow(ctx, countErrorEpisodeTotals, merchantID)
-	var i CountErrorEpisodeTotalsRow
-	err := row.Scan(
-		&i.FreeloaderTotal,
-		&i.FreeloaderOpen,
-		&i.FreeloaderUnsanctioned,
-		&i.FreeloaderDays,
-		&i.OrphanedTotal,
-		&i.OrphanedOpen,
-		&i.OrphanedDays,
-	)
-	return i, err
-}
-
-const countOpenReconciliationFindingsByTypeSeverity = `-- name: CountOpenReconciliationFindingsByTypeSeverity :many
-SELECT finding_type, severity, count(*) AS open_count
-FROM billing.reconciliation_findings
-WHERE merchant_id = $1::uuid
-  AND status IN ('reconcile_required', 'requires_review')
-GROUP BY finding_type, severity
-`
-
-type CountOpenReconciliationFindingsByTypeSeverityRow struct {
-	FindingType string
-	Severity    string
-	OpenCount   int64
-}
-
-// Gauge input (#690): open-finding counts per (type, severity). The Go layer
-// folds these into the named gauges (freeloaders, duplicate_coverage,
-// open-by-severity) — the findings ledger IS the metric store.
-func (q *Queries) CountOpenReconciliationFindingsByTypeSeverity(ctx context.Context, merchantID uuid.UUID) ([]CountOpenReconciliationFindingsByTypeSeverityRow, error) {
-	rows, err := q.db.Query(ctx, countOpenReconciliationFindingsByTypeSeverity, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CountOpenReconciliationFindingsByTypeSeverityRow
-	for rows.Next() {
-		var i CountOpenReconciliationFindingsByTypeSeverityRow
-		if err := rows.Scan(&i.FindingType, &i.Severity, &i.OpenCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const countSubscriptionFunnel = `-- name: CountSubscriptionFunnel :one
 SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
        count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,
@@ -604,39 +453,6 @@ func (q *Queries) CountUnknownOperations(ctx context.Context, arg CountUnknownOp
 	row := q.db.QueryRow(ctx, countUnknownOperations, arg.Now, arg.MerchantID)
 	var i CountUnknownOperationsRow
 	err := row.Scan(&i.OpenCount, &i.OldestAgeSeconds)
-	return i, err
-}
-
-const countUnknownSubsPastPaidThrough = `-- name: CountUnknownSubsPastPaidThrough :one
-SELECT COUNT(*)::bigint AS pressure_count,
-       COALESCE(MAX(EXTRACT(EPOCH FROM ($1::timestamptz - s.current_period_ends_at)))::bigint, 0) AS max_age_seconds
-FROM billing.subscriptions s
-WHERE s.merchant_id = $2::uuid
-  AND s.deleted_at IS NULL
-  AND s.status = 'unverified'
-  AND s.current_period_ends_at IS NOT NULL
-  AND s.current_period_ends_at < $1::timestamptz
-`
-
-type CountUnknownSubsPastPaidThroughParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-}
-
-type CountUnknownSubsPastPaidThroughRow struct {
-	PressureCount int64
-	MaxAgeSeconds *int64
-}
-
-// #690/#691 `verification_pressure` gauge input: subscriptions parked (or
-// stuck) in `unknown` whose recorded paid-through has passed — standing access
-// awaiting provider verification. A pressure reading over the LIVE table, not
-// an error count: nonzero is allowed; max_age trending UP means the
-// verification machinery (pull/probe/converge) is down.
-func (q *Queries) CountUnknownSubsPastPaidThrough(ctx context.Context, arg CountUnknownSubsPastPaidThroughParams) (CountUnknownSubsPastPaidThroughRow, error) {
-	row := q.db.QueryRow(ctx, countUnknownSubsPastPaidThrough, arg.Now, arg.MerchantID)
-	var i CountUnknownSubsPastPaidThroughRow
-	err := row.Scan(&i.PressureCount, &i.MaxAgeSeconds)
 	return i, err
 }
 

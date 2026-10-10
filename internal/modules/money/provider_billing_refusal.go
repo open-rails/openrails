@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,18 +22,8 @@ import (
 
 // A refusal records that a hold's provider cost will not qualify automatically:
 // the qualifier refused its evidence, or the host cannot produce any. It is the
-// one mark of a stuck hold. It fences observation, extension and release, and an
+// one mark of a stuck hold. It fences observation, increment and release, and an
 // operator's close is its only exit.
-
-const (
-	ProviderBillingLifecycleUnprovable ProviderBillingQualificationReason = "lifecycle_unprovable"
-	ProviderBillingUnavailable         ProviderBillingQualificationReason = "provider_billing_unavailable"
-	ProviderBillingObservationRejected ProviderBillingQualificationReason = "observation_rejected"
-)
-
-var ErrProviderBillingRefusalConflict = billing.ErrProviderBillingRefusalConflict
-
-type ProviderBillingRefusalInput = billing.RefuseProviderBillingQualificationParams
 
 type ProviderBillingRefusal struct {
 	Reason    ProviderBillingQualificationReason
@@ -40,18 +31,12 @@ type ProviderBillingRefusal struct {
 	RefusedAt time.Time
 }
 
-// RefuseProviderBillingQualificationInTx records, in a caller-owned
-// transaction, that the host cannot qualify an open hold's provider cost. The
-// hold then waits for an operator's close. Repeating the same refusal replays;
-// a changed term conflicts.
-func (s *MoneyService) RefuseProviderBillingQualificationInTx(ctx context.Context, txDB *db.DB, in ProviderBillingRefusalInput) (*OperationAuthorization, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if txDB == nil {
-		return nil, fmt.Errorf("provider billing refusal requires a bound transaction")
-	}
-	if err := validateProviderBillingRefusal(in); err != nil {
+// recordHostRefusalInTx records, as an observation, that the host cannot
+// qualify an open hold's provider cost: it carries a host refusal kind and no
+// evidence. The refusal's detail names the observation, as the qualifier's
+// does. Repeating the observation replays; a changed term conflicts.
+func (s *MoneyService) recordHostRefusalInTx(ctx context.Context, txDB *db.DB, in ProviderBillingObservationInput) (*OperationAuthorization, error) {
+	if err := validateHostRefusal(in); err != nil {
 		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
 	}
 	merchantID, err := merchant.Require(ctx)
@@ -63,7 +48,7 @@ func (s *MoneyService) RefuseProviderBillingQualificationInTx(ctx context.Contex
 	params := gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
 	authRow, err := q.GetOperationAuthorization(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -75,54 +60,89 @@ func (s *MoneyService) RefuseProviderBillingQualificationInTx(ctx context.Contex
 	if authRow, err = q.GetOperationAuthorization(ctx, params); err != nil {
 		return nil, err
 	}
+	reason := string(in.Refusal.Kind)
+	detail := hostRefusalDetail(in)
 	key := gen.GetProviderBillingRefusalParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
 	if existing, getErr := q.GetProviderBillingRefusal(ctx, key); getErr == nil {
-		if err := replayProviderBillingRefusal(existing, in); err != nil {
-			return nil, err
+		if !observationRefused(existing, in.ObservationID) {
+			return nil, ErrProviderOperationRefused
+		}
+		switch {
+		case existing.Reason != reason:
+			return nil, &ProviderBillingObservationConflict{Field: "refusal_kind"}
+		case providerBillingOptionalString(existing.Detail) != detail:
+			return nil, &ProviderBillingObservationConflict{Field: "refusal_detail"}
 		}
 		auth := operationAuthorizationFromRow(authRow, true)
-		return auth, attachHoldOutcomes(ctx, q, merchantID.UUID(), auth)
+		return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
 	if OperationAuthorizationState(authRow.State) != OperationAuthorizationOpen {
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
+	}
+	// An observation id names one observation: evidence already recorded under
+	// it is not this refusal.
+	if _, err := q.GetProviderBillingObservation(ctx, gen.GetProviderBillingObservationParams{
+		MerchantID: merchantID.UUID(), OperationID: in.OperationID, ObservationID: in.ObservationID,
+	}); err == nil {
+		return nil, &ProviderBillingObservationConflict{Field: "refusal_kind"}
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
 	}
 	if _, err := q.InsertProviderBillingRefusal(ctx, gen.InsertProviderBillingRefusalParams{
-		MerchantID: merchantID.UUID(), OperationID: in.OperationID, Reason: string(in.Reason),
-		Detail: optionalText(in.Detail), RefusedAt: s.now().UTC(),
+		MerchantID: merchantID.UUID(), OperationID: in.OperationID, Reason: reason,
+		Detail: &detail, RefusedAt: s.now().UTC(),
 	}); err != nil {
 		return nil, err
 	}
 	auth := operationAuthorizationFromRow(authRow, false)
-	return auth, attachHoldOutcomes(ctx, q, merchantID.UUID(), auth)
+	return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 }
 
-func validateProviderBillingRefusal(in ProviderBillingRefusalInput) error {
+// validateHostRefusal requires a host refusal to carry no evidence.
+func validateHostRefusal(in ProviderBillingObservationInput) error {
 	if err := validateOperationID(in.OperationID); err != nil {
 		return err
 	}
-	switch ProviderBillingQualificationReason(in.Reason) {
-	case ProviderBillingLifecycleUnprovable, ProviderBillingUnavailable, ProviderBillingObservationRejected:
-	default:
-		return fmt.Errorf("reason must be %q, %q or %q", ProviderBillingLifecycleUnprovable, ProviderBillingUnavailable, ProviderBillingObservationRejected)
+	if err := validateOperationAuthorizationText("observation_id", in.ObservationID, operationAuthorizationMaxIDBytes); err != nil {
+		return err
 	}
-	if in.Detail != "" {
-		if err := validateOperationAuthorizationText("detail", in.Detail, providerBillingMaxNoteBytes); err != nil {
+	l := in.Lifecycle
+	if l.Provider != "" || l.ProviderResourceID != "" || !l.ProviderLifetimeStartsAt.IsZero() || !l.ProviderLifetimeEndsAt.IsZero() ||
+		!l.ProviderAbsentAt.IsZero() || l.ProviderAbsenceReference != "" || l.BillingStopReference != "" ||
+		!l.WindowsClosedAt.IsZero() || l.WindowsClosedReference != "" || len(l.LifecycleEvidenceBody) != 0 {
+		return fmt.Errorf("refusal %q carries no lifecycle", in.Refusal.Kind)
+	}
+	if in.NormalizedQuery != "" || !in.QueryStartsAt.IsZero() || !in.QueryEndsAt.IsZero() || len(in.RawBody) != 0 || len(in.Records) != 0 {
+		return fmt.Errorf("refusal %q carries no query, raw body or records", in.Refusal.Kind)
+	}
+	if in.Refusal.Detail != "" {
+		if err := validateOperationAuthorizationText("refusal.detail", in.Refusal.Detail, providerBillingMaxNoteBytes); err != nil {
 			return err
 		}
+	}
+	if len(hostRefusalDetail(in)) > providerBillingMaxNoteBytes {
+		return fmt.Errorf("refusal.detail with its observation id exceeds %d bytes", providerBillingMaxNoteBytes)
 	}
 	return nil
 }
 
-func replayProviderBillingRefusal(row gen.BillingCostRefusal, in ProviderBillingRefusalInput) error {
-	switch {
-	case row.Reason != string(in.Reason):
-		return &billing.ProviderBillingRefusalConflict{Field: "reason"}
-	case providerBillingOptionalString(row.Detail) != in.Detail:
-		return &billing.ProviderBillingRefusalConflict{Field: "detail"}
+// hostRefusalDetail is the refusal's detail: the observation that refused the
+// hold, then the host's note.
+func hostRefusalDetail(in ProviderBillingObservationInput) string {
+	detail := "observation " + in.ObservationID
+	if in.Refusal.Detail != "" {
+		detail += ": " + in.Refusal.Detail
 	}
-	return nil
+	return detail
+}
+
+// observationRefused reports whether the refusal names this observation.
+func observationRefused(row gen.BillingCostRefusal, observationID string) bool {
+	detail := providerBillingOptionalString(row.Detail)
+	prefix := "observation " + observationID
+	return detail == prefix || strings.HasPrefix(detail, prefix+": ")
 }
 
 // refuseProviderBillingQualification records the qualifier's own refusal, in
@@ -147,8 +167,9 @@ func providerBillingRefused(ctx context.Context, q *gen.Queries, merchantID uuid
 	return err == nil, err
 }
 
-// attachHoldOutcomes loads each hold's refusal and the resolution that closed it.
-func attachHoldOutcomes(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, auths ...*OperationAuthorization) error {
+// attachOperationDetails loads each operation's latest increment, its
+// qualification, its refusal and the resolution that closed it.
+func attachOperationDetails(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, auths ...*OperationAuthorization) error {
 	if len(auths) == 0 {
 		return nil
 	}
@@ -157,6 +178,20 @@ func attachHoldOutcomes(ctx context.Context, q *gen.Queries, merchantID uuid.UUI
 	for i, auth := range auths {
 		ids[i] = auth.OperationID
 		byID[auth.OperationID] = auth
+	}
+	increments, err := q.ListLastOperationAuthorizationExtensions(ctx, gen.ListLastOperationAuthorizationExtensionsParams{MerchantID: merchantID, OperationIds: ids})
+	if err != nil {
+		return err
+	}
+	for _, row := range increments {
+		byID[row.OperationID].LastIncrement = operationAuthorizationExtensionFromRow(row)
+	}
+	qualifications, err := q.ListProviderBillingQualificationsForOperations(ctx, gen.ListProviderBillingQualificationsForOperationsParams{MerchantID: merchantID, OperationIds: ids})
+	if err != nil {
+		return err
+	}
+	for _, row := range qualifications {
+		byID[row.OperationID].Qualification = providerBillingQualificationFromRow(row)
 	}
 	rows, err := q.ListProviderBillingRefusals(ctx, gen.ListProviderBillingRefusalsParams{MerchantID: merchantID, OperationIds: ids})
 	if err != nil {
@@ -178,10 +213,10 @@ func attachHoldOutcomes(ctx context.Context, q *gen.Queries, merchantID uuid.UUI
 	return nil
 }
 
-// ListOperationAuthorizations pages the merchant's holds, newest first, each
-// with its refusal and resolution. Refused true with state open lists the holds
+// ListOperationAuthorizations pages the merchant's operations, newest first,
+// each with its details. Refused true with state open lists the holds
 // waiting for an operator.
-func (s *MoneyService) ListOperationAuthorizations(ctx context.Context, filter billing.OperationAuthorizationListParams) (billing.ListPage[*OperationAuthorization], error) {
+func (s *MoneyService) ListOperationAuthorizations(ctx context.Context, filter billing.ProviderOperationListParams) (billing.ListPage[*OperationAuthorization], error) {
 	var page billing.ListPage[*OperationAuthorization]
 	limit, err := pagination.Limit(filter.PageRequest)
 	if err != nil {
@@ -202,7 +237,7 @@ func (s *MoneyService) ListOperationAuthorizations(ctx context.Context, filter b
 	states := []string{}
 	for _, state := range filter.State {
 		switch state {
-		case billing.OperationAuthorizationOpen, billing.OperationAuthorizationReleased, billing.OperationAuthorizationSettled:
+		case billing.ProviderOperationOpen, billing.ProviderOperationReleased, billing.ProviderOperationSettled:
 		default:
 			return page, apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, `state must be "open", "released" or "settled"`).WithParam("state")
 		}
@@ -240,7 +275,7 @@ func (s *MoneyService) ListOperationAuthorizations(ctx context.Context, filter b
 		}), func(row gen.BillingOperationAuthorization) *OperationAuthorization {
 			return operationAuthorizationFromRow(row, false)
 		})
-		return attachHoldOutcomes(ctx, q, merchantID.UUID(), page.Items...)
+		return attachOperationDetails(ctx, q, merchantID.UUID(), page.Items...)
 	})
 	return page, err
 }

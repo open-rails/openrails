@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,20 +15,15 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/pagination"
-	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 const providerBillingMaxNoteBytes = 4 << 10
 
-var (
-	ErrProviderBillingQualificationNotRefused = billing.ErrProviderBillingQualificationNotRefused
-	ErrProviderBillingResolutionConflict      = billing.ErrProviderBillingResolutionConflict
-)
+var ErrProviderOperationNotRefused = billing.ErrProviderOperationNotRefused
 
 type ProviderBillingResolutionKind = billing.ProviderBillingResolutionKind
 
-type ProviderBillingResolutionInput = billing.ResolveProviderBillingQualificationParams
+type ProviderBillingResolutionInput = billing.CloseProviderOperationParams
 
 type ProviderBillingResolution struct {
 	Kind       ProviderBillingResolutionKind
@@ -38,48 +32,6 @@ type ProviderBillingResolution struct {
 	Reference  string
 	Note       string
 	ResolvedAt time.Time
-}
-
-// ResolveProviderBillingQualificationInTx is CloseOperationAuthorizationInTx
-// answered as the hold's qualification, which it therefore needs.
-func (s *MoneyService) ResolveProviderBillingQualificationInTx(ctx context.Context, txDB *db.DB, in ProviderBillingResolutionInput) (*ProviderBillingQualification, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if txDB == nil {
-		return nil, fmt.Errorf("provider billing resolution requires a bound transaction")
-	}
-	if err := validateProviderBillingResolution(in); err != nil {
-		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	q := txDB.Gen(ctx)
-	if _, err := q.GetOperationAuthorization(ctx, gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}); errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
-	} else if err != nil {
-		return nil, err
-	}
-	// Unlocked: the close takes the payer lock before any qualification row.
-	key := gen.GetProviderBillingQualificationWithAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
-	if _, err := q.GetProviderBillingQualificationWithAuthorization(ctx, key); errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProviderBillingQualificationNotFound
-	} else if err != nil {
-		return nil, err
-	}
-	auth, err := s.CloseOperationAuthorizationInTx(ctx, txDB, in)
-	if err != nil {
-		return nil, err
-	}
-	qual, err := q.GetProviderBillingQualificationWithAuthorization(ctx, key)
-	if err != nil {
-		return nil, err
-	}
-	result := providerBillingQualificationFromRow(qual.BillingCostQualification, auth, auth.Replayed)
-	result.Resolution = auth.Resolution
-	return result, nil
 }
 
 // CloseOperationAuthorizationInTx closes a refused hold on an operator's
@@ -106,7 +58,7 @@ func (s *MoneyService) CloseOperationAuthorizationInTx(ctx context.Context, txDB
 	params := gen.GetOperationAuthorizationParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID}
 	authRow, err := q.GetOperationAuthorization(ctx, params)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -124,19 +76,19 @@ func (s *MoneyService) CloseOperationAuthorizationInTx(ctx context.Context, txDB
 			return nil, err
 		}
 		auth := operationAuthorizationFromRow(authRow, true)
-		return auth, attachHoldOutcomes(ctx, q, merchantID.UUID(), auth)
+		return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
 	refusal, err := q.GetProviderBillingRefusal(ctx, gen.GetProviderBillingRefusalParams{MerchantID: merchantID.UUID(), OperationID: in.OperationID})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProviderBillingQualificationNotRefused
+		return nil, ErrProviderOperationNotRefused
 	}
 	if err != nil {
 		return nil, err
 	}
 	if OperationAuthorizationState(authRow.State) != OperationAuthorizationOpen {
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
 	}
 
 	now := s.now().UTC()
@@ -179,7 +131,7 @@ func (s *MoneyService) CloseOperationAuthorizationInTx(ctx context.Context, txDB
 		}
 		auth = operationAuthorizationFromRow(released, false)
 	}
-	return auth, attachHoldOutcomes(ctx, q, merchantID.UUID(), auth)
+	return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 }
 
 func validateProviderBillingResolution(in ProviderBillingResolutionInput) error {
@@ -225,7 +177,7 @@ func replayProviderBillingResolution(row gen.BillingCostResolution, in ProviderB
 	}
 	for _, check := range checks {
 		if !check.same {
-			return &billing.ProviderBillingResolutionConflict{Field: check.field}
+			return &billing.ProviderOperationConflict{Field: check.field}
 		}
 	}
 	return nil
@@ -329,86 +281,4 @@ func providerBillingResolutionBody(ctx context.Context, q *gen.Queries, refusal 
 		return nil, fmt.Errorf("author provider billing resolution body: %w", err)
 	}
 	return body, nil
-}
-
-// ListProviderBillingQualifications pages the merchant's qualifications, newest
-// first, each with its authorization and any operator resolution.
-func (s *MoneyService) ListProviderBillingQualifications(ctx context.Context, filter billing.ProviderBillingQualificationListParams) (billing.ListPage[*ProviderBillingQualification], error) {
-	var page billing.ListPage[*ProviderBillingQualification]
-	limit, err := pagination.Limit(filter.PageRequest)
-	if err != nil {
-		return page, err
-	}
-	var after providerBillingQualificationCursor
-	present, err := pagination.Decode(filter.Cursor, &after)
-	if err != nil {
-		return page, err
-	}
-	if present && (after.At.IsZero() || after.OperationID == "") {
-		return page, pagination.ErrInvalidCursor
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return page, err
-	}
-	params := gen.ListProviderBillingQualificationsParams{
-		MerchantID: merchantID.UUID(), States: []string{}, AuthorizationStates: []string{}, RowLimit: pagination.Fetch(limit),
-	}
-	for _, state := range filter.State {
-		switch state {
-		case billing.ProviderBillingQualificationPending, billing.ProviderBillingQualificationRefused, billing.ProviderBillingQualificationEligible:
-		default:
-			return page, apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, `state must be "pending", "refused" or "eligible"`).WithParam("state")
-		}
-		params.States = append(params.States, string(state))
-	}
-	for _, state := range filter.AuthorizationState {
-		switch state {
-		case billing.OperationAuthorizationOpen, billing.OperationAuthorizationReleased, billing.OperationAuthorizationSettled:
-		default:
-			return page, apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, `authorization_state must be "open", "released" or "settled"`).WithParam("authorization_state")
-		}
-		params.AuthorizationStates = append(params.AuthorizationStates, string(state))
-	}
-	if present {
-		params.AfterAt, params.AfterOperationID = &after.At, &after.OperationID
-	}
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		rows, err := q.ListProviderBillingQualifications(ctx, params)
-		if err != nil {
-			return err
-		}
-		page = pagination.Map(pagination.Cut(rows, limit, func(row gen.ListProviderBillingQualificationsRow) any {
-			return providerBillingQualificationCursor{At: row.BillingCostQualification.CreatedAt, OperationID: row.BillingCostQualification.OperationID}
-		}), func(row gen.ListProviderBillingQualificationsRow) *ProviderBillingQualification {
-			return providerBillingQualificationFromRow(row.BillingCostQualification, operationAuthorizationFromRow(row.BillingOperationAuthorization, false), false)
-		})
-		auths := make([]*OperationAuthorization, len(page.Items))
-		for i, item := range page.Items {
-			auths[i] = item.Authorization
-		}
-		if err := attachHoldOutcomes(ctx, q, merchantID.UUID(), auths...); err != nil {
-			return err
-		}
-		for _, item := range page.Items {
-			item.Resolution = item.Authorization.Resolution
-		}
-		return nil
-	})
-	return page, err
-}
-
-type providerBillingQualificationCursor struct {
-	At          time.Time `json:"t"`
-	OperationID string    `json:"o"`
-}
-
-// withHoldOutcome attaches the hold's refusal and resolution to a qualification.
-func withHoldOutcome(ctx context.Context, q *gen.Queries, out *ProviderBillingQualification) (*ProviderBillingQualification, error) {
-	if err := attachHoldOutcomes(ctx, q, out.MerchantID, out.Authorization); err != nil {
-		return nil, err
-	}
-	out.Resolution = out.Authorization.Resolution
-	return out, nil
 }

@@ -5,6 +5,7 @@ package billingapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -141,12 +142,19 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("balance: %w", err)
 	}
 	r.Balance = balance.BalanceAmount
-	usage, err := client.GetUsage(ctx, payer, billing.GetUsageParams{Currency: in.Currency, From: time.Now().Add(-time.Hour), To: time.Now().Add(time.Hour), GroupBy: billing.UsageByResource})
+	usage, err := client.QueryMetrics(ctx, billing.MetricsQuery{
+		Measures: []string{"usage_units"},
+		Range:    &billing.MetricsRange{From: time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), To: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)},
+		Filters:  map[string][]string{"customer": {payer.String()}, "currency": {in.Currency}},
+	})
 	if err != nil {
 		return r, fmt.Errorf("usage: %w", err)
 	}
 	for _, row := range usage.Rows {
-		r.UsageEvents += row.EventCount
+		if n, ok := row[len(row)-1].(json.Number); ok {
+			count, _ := n.Int64()
+			r.UsageEvents += count
+		}
 	}
 
 	options, err := client.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{ProductKey: in.CheckoutProductKey, PriceKey: in.CheckoutPriceKey})

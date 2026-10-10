@@ -174,77 +174,6 @@ func (q *Queries) GetProviderBillingQualificationForUpdate(ctx context.Context, 
 	return i, err
 }
 
-const getProviderBillingQualificationWithAuthorization = `-- name: GetProviderBillingQualificationWithAuthorization :one
-SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_starts_at, q.provider_lifetime_ends_at, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest, a.extended_amount, a.authorized_amount
-FROM billing.cost_qualifications q
-JOIN billing.operation_authorizations a
-  ON a.merchant_id = q.merchant_id
- AND a.operation_id = q.operation_id
-WHERE q.merchant_id = $1::uuid
-  AND q.operation_id = $2::text
-`
-
-type GetProviderBillingQualificationWithAuthorizationParams struct {
-	MerchantID  uuid.UUID
-	OperationID string
-}
-
-type GetProviderBillingQualificationWithAuthorizationRow struct {
-	BillingCostQualification      BillingCostQualification
-	BillingOperationAuthorization BillingOperationAuthorization
-}
-
-func (q *Queries) GetProviderBillingQualificationWithAuthorization(ctx context.Context, arg GetProviderBillingQualificationWithAuthorizationParams) (GetProviderBillingQualificationWithAuthorizationRow, error) {
-	row := q.db.QueryRow(ctx, getProviderBillingQualificationWithAuthorization, arg.MerchantID, arg.OperationID)
-	var i GetProviderBillingQualificationWithAuthorizationRow
-	err := row.Scan(
-		&i.BillingCostQualification.MerchantID,
-		&i.BillingCostQualification.OperationID,
-		&i.BillingCostQualification.Provider,
-		&i.BillingCostQualification.ProviderResourceID,
-		&i.BillingCostQualification.ProviderLifetimeStartsAt,
-		&i.BillingCostQualification.ProviderLifetimeEndsAt,
-		&i.BillingCostQualification.ProviderAbsentAt,
-		&i.BillingCostQualification.ProviderAbsenceReference,
-		&i.BillingCostQualification.BillingStopReference,
-		&i.BillingCostQualification.WindowsClosedAt,
-		&i.BillingCostQualification.WindowsClosedReference,
-		&i.BillingCostQualification.LifecycleEvidenceBytes,
-		&i.BillingCostQualification.LifecycleEvidenceDigest,
-		&i.BillingCostQualification.QuiescenceSeconds,
-		&i.BillingCostQualification.State,
-		&i.BillingCostQualification.Reason,
-		&i.BillingCostQualification.BaselineObservationID,
-		&i.BillingCostQualification.QualifiedObservationID,
-		&i.BillingCostQualification.QualifiedCostAmount,
-		&i.BillingCostQualification.QualifiedAt,
-		&i.BillingCostQualification.CreatedAt,
-		&i.BillingCostQualification.UpdatedAt,
-		&i.BillingOperationAuthorization.OperationID,
-		&i.BillingOperationAuthorization.MerchantID,
-		&i.BillingOperationAuthorization.CustomerID,
-		&i.BillingOperationAuthorization.RecordOwner,
-		&i.BillingOperationAuthorization.LedgerAccountID,
-		&i.BillingOperationAuthorization.Currency,
-		&i.BillingOperationAuthorization.Amount,
-		&i.BillingOperationAuthorization.ClaimReference,
-		&i.BillingOperationAuthorization.AuthorizationBodyBytes,
-		&i.BillingOperationAuthorization.AuthorizationBodyDigest,
-		&i.BillingOperationAuthorization.State,
-		&i.BillingOperationAuthorization.TerminalReference,
-		&i.BillingOperationAuthorization.CreatedAt,
-		&i.BillingOperationAuthorization.ReleasedAt,
-		&i.BillingOperationAuthorization.SettledAt,
-		&i.BillingOperationAuthorization.SettlementCostAmount,
-		&i.BillingOperationAuthorization.SettlementAmount,
-		&i.BillingOperationAuthorization.SettlementBodyBytes,
-		&i.BillingOperationAuthorization.SettlementBodyDigest,
-		&i.BillingOperationAuthorization.ExtendedAmount,
-		&i.BillingOperationAuthorization.AuthorizedAmount,
-	)
-	return i, err
-}
-
 const getProviderBillingRefusal = `-- name: GetProviderBillingRefusal :one
 SELECT merchant_id, operation_id, reason, qualification_state, detail, refused_at
 FROM billing.cost_refusals
@@ -610,96 +539,50 @@ func (q *Queries) InsertProviderBillingResolution(ctx context.Context, arg Inser
 	return i, err
 }
 
-const listProviderBillingQualifications = `-- name: ListProviderBillingQualifications :many
-SELECT q.merchant_id, q.operation_id, q.provider, q.provider_resource_id, q.provider_lifetime_starts_at, q.provider_lifetime_ends_at, q.provider_absent_at, q.provider_absence_reference, q.billing_stop_reference, q.windows_closed_at, q.windows_closed_reference, q.lifecycle_evidence_bytes, q.lifecycle_evidence_digest, q.quiescence_seconds, q.state, q.reason, q.baseline_observation_id, q.qualified_observation_id, q.qualified_cost_amount, q.qualified_at, q.created_at, q.updated_at, a.operation_id, a.merchant_id, a.customer_id, a.record_owner, a.ledger_account_id, a.currency, a.amount, a.claim_reference, a.authorization_body_bytes, a.authorization_body_digest, a.state, a.terminal_reference, a.created_at, a.released_at, a.settled_at, a.settlement_cost_amount, a.settlement_amount, a.settlement_body_bytes, a.settlement_body_digest, a.extended_amount, a.authorized_amount
-FROM billing.cost_qualifications q
-JOIN billing.operation_authorizations a
-  ON a.merchant_id = q.merchant_id
- AND a.operation_id = q.operation_id
-WHERE q.merchant_id = $1::uuid
-  AND (cardinality($2::text[]) = 0 OR q.state = ANY($2::text[]))
-  AND (cardinality($3::text[]) = 0 OR a.state = ANY($3::text[]))
-  AND ($4::timestamptz IS NULL
-       OR (q.created_at, q.operation_id) < ($4::timestamptz, $5::text))
-ORDER BY q.created_at DESC, q.operation_id DESC
-LIMIT $6::int
+const listProviderBillingQualificationsForOperations = `-- name: ListProviderBillingQualificationsForOperations :many
+SELECT merchant_id, operation_id, provider, provider_resource_id, provider_lifetime_starts_at, provider_lifetime_ends_at, provider_absent_at, provider_absence_reference, billing_stop_reference, windows_closed_at, windows_closed_reference, lifecycle_evidence_bytes, lifecycle_evidence_digest, quiescence_seconds, state, reason, baseline_observation_id, qualified_observation_id, qualified_cost_amount, qualified_at, created_at, updated_at
+FROM billing.cost_qualifications
+WHERE merchant_id = $1::uuid
+  AND operation_id = ANY($2::text[])
 `
 
-type ListProviderBillingQualificationsParams struct {
-	MerchantID          uuid.UUID
-	States              []string
-	AuthorizationStates []string
-	AfterAt             *time.Time
-	AfterOperationID    *string
-	RowLimit            int32
+type ListProviderBillingQualificationsForOperationsParams struct {
+	MerchantID   uuid.UUID
+	OperationIds []string
 }
 
-type ListProviderBillingQualificationsRow struct {
-	BillingCostQualification      BillingCostQualification
-	BillingOperationAuthorization BillingOperationAuthorization
-}
-
-// Newest first; an empty filter admits every state.
-func (q *Queries) ListProviderBillingQualifications(ctx context.Context, arg ListProviderBillingQualificationsParams) ([]ListProviderBillingQualificationsRow, error) {
-	rows, err := q.db.Query(ctx, listProviderBillingQualifications,
-		arg.MerchantID,
-		arg.States,
-		arg.AuthorizationStates,
-		arg.AfterAt,
-		arg.AfterOperationID,
-		arg.RowLimit,
-	)
+func (q *Queries) ListProviderBillingQualificationsForOperations(ctx context.Context, arg ListProviderBillingQualificationsForOperationsParams) ([]BillingCostQualification, error) {
+	rows, err := q.db.Query(ctx, listProviderBillingQualificationsForOperations, arg.MerchantID, arg.OperationIds)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListProviderBillingQualificationsRow
+	var items []BillingCostQualification
 	for rows.Next() {
-		var i ListProviderBillingQualificationsRow
+		var i BillingCostQualification
 		if err := rows.Scan(
-			&i.BillingCostQualification.MerchantID,
-			&i.BillingCostQualification.OperationID,
-			&i.BillingCostQualification.Provider,
-			&i.BillingCostQualification.ProviderResourceID,
-			&i.BillingCostQualification.ProviderLifetimeStartsAt,
-			&i.BillingCostQualification.ProviderLifetimeEndsAt,
-			&i.BillingCostQualification.ProviderAbsentAt,
-			&i.BillingCostQualification.ProviderAbsenceReference,
-			&i.BillingCostQualification.BillingStopReference,
-			&i.BillingCostQualification.WindowsClosedAt,
-			&i.BillingCostQualification.WindowsClosedReference,
-			&i.BillingCostQualification.LifecycleEvidenceBytes,
-			&i.BillingCostQualification.LifecycleEvidenceDigest,
-			&i.BillingCostQualification.QuiescenceSeconds,
-			&i.BillingCostQualification.State,
-			&i.BillingCostQualification.Reason,
-			&i.BillingCostQualification.BaselineObservationID,
-			&i.BillingCostQualification.QualifiedObservationID,
-			&i.BillingCostQualification.QualifiedCostAmount,
-			&i.BillingCostQualification.QualifiedAt,
-			&i.BillingCostQualification.CreatedAt,
-			&i.BillingCostQualification.UpdatedAt,
-			&i.BillingOperationAuthorization.OperationID,
-			&i.BillingOperationAuthorization.MerchantID,
-			&i.BillingOperationAuthorization.CustomerID,
-			&i.BillingOperationAuthorization.RecordOwner,
-			&i.BillingOperationAuthorization.LedgerAccountID,
-			&i.BillingOperationAuthorization.Currency,
-			&i.BillingOperationAuthorization.Amount,
-			&i.BillingOperationAuthorization.ClaimReference,
-			&i.BillingOperationAuthorization.AuthorizationBodyBytes,
-			&i.BillingOperationAuthorization.AuthorizationBodyDigest,
-			&i.BillingOperationAuthorization.State,
-			&i.BillingOperationAuthorization.TerminalReference,
-			&i.BillingOperationAuthorization.CreatedAt,
-			&i.BillingOperationAuthorization.ReleasedAt,
-			&i.BillingOperationAuthorization.SettledAt,
-			&i.BillingOperationAuthorization.SettlementCostAmount,
-			&i.BillingOperationAuthorization.SettlementAmount,
-			&i.BillingOperationAuthorization.SettlementBodyBytes,
-			&i.BillingOperationAuthorization.SettlementBodyDigest,
-			&i.BillingOperationAuthorization.ExtendedAmount,
-			&i.BillingOperationAuthorization.AuthorizedAmount,
+			&i.MerchantID,
+			&i.OperationID,
+			&i.Provider,
+			&i.ProviderResourceID,
+			&i.ProviderLifetimeStartsAt,
+			&i.ProviderLifetimeEndsAt,
+			&i.ProviderAbsentAt,
+			&i.ProviderAbsenceReference,
+			&i.BillingStopReference,
+			&i.WindowsClosedAt,
+			&i.WindowsClosedReference,
+			&i.LifecycleEvidenceBytes,
+			&i.LifecycleEvidenceDigest,
+			&i.QuiescenceSeconds,
+			&i.State,
+			&i.Reason,
+			&i.BaselineObservationID,
+			&i.QualifiedObservationID,
+			&i.QualifiedCostAmount,
+			&i.QualifiedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

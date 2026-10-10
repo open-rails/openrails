@@ -361,21 +361,6 @@ export type CatalogDraftRefusal = {
   workaround: string
 }
 
-export type CatalogDrift = {
-  id: string
-  psp_id: string
-  rail: string
-  kind: string
-  resource_type: string
-  resource_id: string
-  external_resource_id: string
-  field: string
-  openrails_value: string
-  external_value: string
-  detected_at: string
-  resolved_at: string | null
-}
-
 export type CatalogDriftRefresh = {
   scanned_products: number
   scanned_prices: number
@@ -517,7 +502,7 @@ export type CheckoutSessionSavedMethod = {
   card: CardDetails | null
 }
 
-export type CloseOperationAuthorizationParams = {
+export type CloseProviderOperationParams = {
   kind?: "settled" | "written_off"
   cost_amount?: string | null
   attested_by?: string
@@ -935,17 +920,6 @@ export type EntitlementReplacement = {
   to?: string
 }
 
-export type EpisodeSummary = {
-  total: number
-  open: number
-  total_days: number
-}
-
-export type EpisodeTotals = {
-  freeloader: FreeloaderEpisodeSummary
-  orphaned: EpisodeSummary
-}
-
 export type ErrorDetails = {
   type: string
   code: string
@@ -962,13 +936,6 @@ export type ExtendAdmissionBatchParams = {
 export type ExtendAdmissionParams = {
   request_id?: string
   expires_at?: string
-}
-
-export type ExtendOperationAuthorizationParams = {
-  ordinal?: number
-  amount?: string
-  minimum_amount?: string
-  overdraft_amount?: string
 }
 
 export type FederatedGrant = {
@@ -991,6 +958,13 @@ export type Finding = {
   id: string
   finding_type: string
   provider: string | null
+  psp_id: string | null
+  resource_type: string | null
+  resource_id: string | null
+  external_resource_id: string | null
+  field: string | null
+  openrails_value: string | null
+  external_value: string | null
   subject_key: string
   severity: string
   status: string
@@ -1017,25 +991,8 @@ export type FindingResolution = {
   execution: Record<string, unknown> | null
 }
 
-export type FindingSummary = {
-  orphaned_members: number
-  freeloaders: number
-  duplicate_coverage: number
-  verification_pressure: VerificationPressure
-  episodes: EpisodeTotals
-  open_by_severity: Record<string, number> | null
-  total_open: number
-}
-
 export type FlatPrice = {
   amount?: string
-}
-
-export type FreeloaderEpisodeSummary = {
-  total: number
-  open: number
-  total_days: number
-  unsanctioned: number
 }
 
 export type GenerateDashboardWidgetParams = {
@@ -1076,6 +1033,13 @@ export type HostEvent = {
 
 export type HostEventLookup = {
   host_events: Record<string, HostEvent | null> | null
+}
+
+export type IncrementProviderOperationParams = {
+  ordinal?: number
+  amount?: string
+  minimum_amount?: string
+  overdraft_amount?: string
 }
 
 export type InviteTeamMemberParams = {
@@ -1229,16 +1193,6 @@ export type MerchantConfigurationState = {
 export type MerchantName = {
   id: string
   name: string
-}
-
-export type MerchantNotification = {
-  id: string
-  severity: "critical" | "warning"
-  title: string
-  body: string
-  link: string | null
-  created_at: string
-  read_at: string | null
 }
 
 export type MerchantProfile = {
@@ -1465,10 +1419,6 @@ export type NotificationData = {
   user_email?: string
 }
 
-export type NotificationLookup = {
-  notifications: Record<string, MerchantNotification | null> | null
-}
-
 export type Offer = {
   kind: "finite" | "permanent" | "recurring"
   product_id: string
@@ -1491,7 +1441,7 @@ export type OfferListParams = {
   cursors?: Record<string, string>
 }
 
-export type OpenOperationAuthorizationParams = {
+export type OpenProviderOperationParams = {
   operation_id?: string
   customer_id?: string
   record_owner?: string
@@ -1501,39 +1451,6 @@ export type OpenOperationAuthorizationParams = {
   authorization_body?: string | null
   authorization_body_sha256?: string
   overdraft_amount?: string
-}
-
-export type OperationAuthorization = {
-  operation_id: string
-  merchant_id: string
-  customer_id: string
-  record_owner: string
-  currency: string
-  amount: string
-  authorized_amount: string
-  claim_reference: string
-  authorization_body: string | null
-  authorization_body_sha256: string
-  state: "open" | "released" | "settled"
-  terminal_reference: string
-  settlement_cost_amount: string | null
-  settlement_amount: string | null
-  settlement_body: string | null
-  settlement_body_sha256: string | null
-  refusal: ProviderBillingRefusal | null
-  resolution: ProviderBillingResolution | null
-  created_at: string
-  released_at: string | null
-  settled_at: string | null
-  replayed: boolean
-}
-
-export type OperationAuthorizationExtension = {
-  operation_id: string
-  ordinal: number
-  granted_amount: string
-  authorized_amount: string
-  replayed: boolean
 }
 
 export type PSP = {
@@ -1973,12 +1890,11 @@ export type ProviderBillingLifecycleEvidence = {
 }
 
 export type ProviderBillingObservationRefusal = {
-  kind?: "amount_overflow" | "response_too_large" | "schema_ambiguity" | "submicro_amount"
+  kind?: "amount_overflow" | "lifecycle_unprovable" | "observation_rejected" | "provider_billing_unavailable" | "response_too_large" | "schema_ambiguity" | "submicro_amount"
+  detail?: string
 }
 
 export type ProviderBillingQualification = {
-  operation_id: string
-  merchant_id: string
   lifecycle: ProviderBillingLifecycleEvidence
   lifecycle_evidence_sha256: string
   quiescence_seconds: number
@@ -1988,11 +1904,8 @@ export type ProviderBillingQualification = {
   qualified_observation_id: string
   qualified_cost_amount: string | null
   qualified_at: string | null
-  resolution: ProviderBillingResolution | null
-  authorization: OperationAuthorization
   created_at: string
   updated_at: string
-  replayed: boolean
 }
 
 export type ProviderBillingRecord = {
@@ -2015,6 +1928,41 @@ export type ProviderBillingResolution = {
   reference: string
   note: string
   resolved_at: string
+}
+
+export type ProviderOperation = {
+  operation_id: string
+  merchant_id: string
+  customer_id: string
+  record_owner: string
+  currency: string
+  amount: string
+  authorized_amount: string
+  last_increment: ProviderOperationIncrement | null
+  claim_reference: string
+  authorization_body: string | null
+  authorization_body_sha256: string
+  state: "open" | "released" | "settled"
+  terminal_reference: string
+  qualification: ProviderBillingQualification | null
+  settlement_cost_amount: string | null
+  settlement_amount: string | null
+  settlement_body: string | null
+  settlement_body_sha256: string | null
+  refusal: ProviderBillingRefusal | null
+  resolution: ProviderBillingResolution | null
+  created_at: string
+  released_at: string | null
+  settled_at: string | null
+  replayed: boolean
+}
+
+export type ProviderOperationIncrement = {
+  ordinal: number
+  amount: string
+  minimum_amount: string
+  granted_amount: string
+  created_at: string
 }
 
 export type ProvisioningToken = {
@@ -2114,10 +2062,12 @@ export type RecordUsageBatchResult = {
 export type RecordUsageParams = {
   customer_id?: string
   invoker?: string
+  invoker_type?: "customer" | "delegated"
   currency?: string
   event_type?: string
   dimensions?: Record<string, number>
   amount?: string
+  outcome?: "failed" | "succeeded"
   resource?: string
   metadata?: Record<string, unknown>
   source?: string
@@ -2132,16 +2082,11 @@ export type RefundPaymentParams = {
   revoke_access?: boolean
 }
 
-export type RefuseProviderBillingQualificationParams = {
-  reason?: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "lifecycle_unprovable" | "negative_or_corrective_record" | "observation_changed" | "observation_rejected" | "provider_billing_unavailable" | "provider_evidence_refused"
-  detail?: string
-}
-
 export type ReleaseAdmissionBatchParams = {
   request_ids?: string[]
 }
 
-export type ReleaseOperationAuthorizationParams = {
+export type ReleaseProviderOperationParams = {
   release_reference?: string
 }
 
@@ -2159,37 +2104,10 @@ export type ReplacePaymentMethodCardParams = {
   billing_details?: BillingDetails
 }
 
-export type ReportWastedSpendBatchParams = {
-  items?: ReportWastedSpendParams[]
-}
-
-export type ReportWastedSpendBatchResult = {
-  items: WastedSpendResult[]
-}
-
-export type ReportWastedSpendParams = {
-  customer_id?: string
-  invoker?: string
-  invoker_type?: "customer" | "delegated"
-  currency?: string
-  amount?: string
-  source?: string
-  source_id?: string
-  reason?: string
-}
-
 export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
   override_params?: unknown
-}
-
-export type ResolveProviderBillingQualificationParams = {
-  kind?: "settled" | "written_off"
-  cost_amount?: string | null
-  attested_by?: string
-  reference?: string
-  note?: string
 }
 
 export type RetryInvoiceCollectionParams = {
@@ -2487,10 +2405,6 @@ export type TrustLevel = {
   trust_level: string
 }
 
-export type UnreadCount = {
-  unread_count: number
-}
-
 export type UpdateCustomerParams = {
   credit_limits?: CreditLimit[]
   trust_levels?: TrustLevel[]
@@ -2526,7 +2440,7 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "function" | "invoker" | "resource" | "tier"
+  group_by: "event_type" | "invoker" | "resource"
   rows: UsageRow[]
 }
 
@@ -2537,7 +2451,9 @@ export type UsageEvent = {
   currency: string
   event_type: string
   dimensions: Record<string, number> | null
+  outcome: "failed" | "succeeded"
   amount: string
+  forgiven_amount: string
   resource: string | null
   metadata: Record<string, unknown> | null
   source: string
@@ -2567,29 +2483,6 @@ export type UserMerchant = {
   display_name: string
   role: string
   permissions: string[]
-}
-
-export type VerificationPressure = {
-  count: number
-  max_age_seconds: number
-}
-
-export type WastedSpendReport = {
-  currency: string
-  policy_currency: string | null
-  recorded_amount: string
-  policy_recorded_amount: string | null
-  forgiven_amount: string
-  policy_forgiven_amount: string | null
-  charged_amount: string
-  policy_charged_amount: string | null
-  action: "charged" | "duplicate" | "forgiven" | "ignored" | "invoker_cutoff_tracked"
-}
-
-export type WastedSpendResult = {
-  status: number
-  report: WastedSpendReport | null
-  error: ErrorDetails | null
 }
 
 export type WebhookReceipt = {

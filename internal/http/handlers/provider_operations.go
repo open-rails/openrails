@@ -16,44 +16,48 @@ import (
 // commands. Request bodies decode strictly: an unknown field such as a
 // caller-rated settlement amount is refused, never ignored.
 
-func ServiceOpenOperationAuthorization(r *httprequest.Request) {
-	var req billing.OpenOperationAuthorizationParams
+func ServiceOpenProviderOperation(r *httprequest.Request) {
+	var req billing.OpenProviderOperationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
 	}
-	out, err := svc.OpenOperationAuthorization(r.Request.Context(), req)
+	out, err := svc.OpenProviderOperation(r.Request.Context(), req)
+	if err == nil && !out.Replayed {
+		r.JSON(http.StatusCreated, out)
+		return
+	}
 	writeProviderOperation(r, out, err)
 }
 
-func ServiceGetOperationAuthorization(r *httprequest.Request) {
+func ServiceGetProviderOperation(r *httprequest.Request) {
 	svc, ok := providerOperationService(r, nil)
 	if !ok {
 		return
 	}
-	out, err := svc.GetOperationAuthorization(r.Request.Context(), r.Param("operation_id"))
+	out, err := svc.GetProviderOperation(r.Request.Context(), r.Param("operation_id"))
 	writeProviderOperation(r, out, err)
 }
 
-func ServiceExtendOperationAuthorization(r *httprequest.Request) {
-	var req billing.ExtendOperationAuthorizationParams
+func ServiceIncrementProviderOperation(r *httprequest.Request) {
+	var req billing.IncrementProviderOperationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
 	}
 	req.OperationID = r.Param("operation_id")
-	out, err := svc.ExtendOperationAuthorization(r.Request.Context(), req)
+	out, err := svc.IncrementProviderOperation(r.Request.Context(), req)
 	writeProviderOperation(r, out, err)
 }
 
-func ServiceReleaseOperationAuthorization(r *httprequest.Request) {
-	var req billing.ReleaseOperationAuthorizationParams
+func ServiceReleaseProviderOperation(r *httprequest.Request) {
+	var req billing.ReleaseProviderOperationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
 	}
 	req.OperationID = r.Param("operation_id")
-	out, err := svc.ReleaseOperationAuthorization(r.Request.Context(), req)
+	out, err := svc.ReleaseProviderOperation(r.Request.Context(), req)
 	writeProviderOperation(r, out, err)
 }
 
@@ -68,52 +72,21 @@ func ServiceRecordProviderBillingObservation(r *httprequest.Request) {
 	writeProviderOperation(r, out, err)
 }
 
-func ServiceGetProviderBillingQualification(r *httprequest.Request) {
-	svc, ok := providerOperationService(r, nil)
-	if !ok {
-		return
-	}
-	out, err := svc.GetProviderBillingQualification(r.Request.Context(), r.Param("operation_id"))
-	writeProviderOperation(r, out, err)
-}
-
-func ServiceResolveProviderBillingQualification(r *httprequest.Request) {
-	var req billing.ResolveProviderBillingQualificationParams
+func ServiceCloseProviderOperation(r *httprequest.Request) {
+	var req billing.CloseProviderOperationParams
 	svc, ok := providerOperationService(r, &req)
 	if !ok {
 		return
 	}
 	req.OperationID = r.Param("operation_id")
-	out, err := svc.ResolveProviderBillingQualification(r.Request.Context(), req)
+	out, err := svc.CloseProviderOperation(r.Request.Context(), req)
 	writeProviderOperation(r, out, err)
 }
 
-func ServiceRefuseProviderBillingQualification(r *httprequest.Request) {
-	var req billing.RefuseProviderBillingQualificationParams
-	svc, ok := providerOperationService(r, &req)
-	if !ok {
-		return
-	}
-	req.OperationID = r.Param("operation_id")
-	out, err := svc.RefuseProviderBillingQualification(r.Request.Context(), req)
-	writeProviderOperation(r, out, err)
-}
-
-func ServiceCloseOperationAuthorization(r *httprequest.Request) {
-	var req billing.CloseOperationAuthorizationParams
-	svc, ok := providerOperationService(r, &req)
-	if !ok {
-		return
-	}
-	req.OperationID = r.Param("operation_id")
-	out, err := svc.CloseOperationAuthorization(r.Request.Context(), req)
-	writeProviderOperation(r, out, err)
-}
-
-// ServiceListOperationAuthorizations lists holds newest first.
+// ServiceListProviderOperations lists operations newest first.
 //
 //	GET /admin/provider-operations?state&refused&limit&cursor
-func ServiceListOperationAuthorizations(r *httprequest.Request) {
+func ServiceListProviderOperations(r *httprequest.Request) {
 	svc, ok := providerOperationService(r, nil)
 	if !ok {
 		return
@@ -123,9 +96,9 @@ func ServiceListOperationAuthorizations(r *httprequest.Request) {
 		return
 	}
 	q := queryReader{r: r}
-	filter := billing.OperationAuthorizationListParams{PageRequest: page}
+	filter := billing.ProviderOperationListParams{PageRequest: page}
 	for _, v := range q.list("state") {
-		filter.State = append(filter.State, billing.OperationAuthorizationState(v))
+		filter.State = append(filter.State, billing.ProviderOperationState(v))
 	}
 	if raw := strings.TrimSpace(r.Query("refused")); raw != "" {
 		refused, err := strconv.ParseBool(raw)
@@ -135,37 +108,9 @@ func ServiceListOperationAuthorizations(r *httprequest.Request) {
 		}
 		filter.Refused = &refused
 	}
-	out, err := svc.ListOperationAuthorizations(r.Request.Context(), filter)
+	out, err := svc.ListProviderOperations(r.Request.Context(), filter)
 	if err != nil {
-		writeRefusal(r, err, "operation authorizations could not be listed")
-		return
-	}
-	r.SuccessJSON(out)
-}
-
-// ServiceListProviderBillingQualifications lists qualifications newest first.
-//
-//	GET /admin/provider-qualifications?state&authorization_state&limit&cursor
-func ServiceListProviderBillingQualifications(r *httprequest.Request) {
-	svc, ok := providerOperationService(r, nil)
-	if !ok {
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
-	q := queryReader{r: r}
-	filter := billing.ProviderBillingQualificationListParams{PageRequest: page}
-	for _, v := range q.list("state") {
-		filter.State = append(filter.State, billing.ProviderBillingQualificationState(v))
-	}
-	for _, v := range q.list("authorization_state") {
-		filter.AuthorizationState = append(filter.AuthorizationState, billing.OperationAuthorizationState(v))
-	}
-	out, err := svc.ListProviderBillingQualifications(r.Request.Context(), filter)
-	if err != nil {
-		writeRefusal(r, err, "provider billing qualifications could not be listed")
+		writeRefusal(r, err, "provider operations could not be listed")
 		return
 	}
 	r.SuccessJSON(out)
@@ -209,19 +154,13 @@ func writeProviderOperationError(r *httprequest.Request, err error) {
 		r.InternalError("provider operation failed", err)
 		return
 	}
-	var authorizationConflict *billing.OperationAuthorizationConflict
+	var operationConflict *billing.ProviderOperationConflict
 	var observationConflict *billing.ProviderBillingObservationConflict
-	var resolutionConflict *billing.ProviderBillingResolutionConflict
-	var refusalConflict *billing.ProviderBillingRefusalConflict
 	switch {
-	case errors.As(err, &authorizationConflict):
-		out.Param = &authorizationConflict.Field
+	case errors.As(err, &operationConflict):
+		out.Param = &operationConflict.Field
 	case errors.As(err, &observationConflict):
 		out.Param = &observationConflict.Field
-	case errors.As(err, &resolutionConflict):
-		out.Param = &resolutionConflict.Field
-	case errors.As(err, &refusalConflict):
-		out.Param = &refusalConflict.Field
 	}
 	r.APIError(out)
 }

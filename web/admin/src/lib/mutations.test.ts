@@ -7,7 +7,6 @@ import type { MutationOptions, QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { adminMutations as M } from "@/lib/mutations"
-import { queryKeys } from "@/lib/queries"
 import {
   aPayment, calls, client, cursorPages, exec, invalidated, MAX_INT64, seedCache, selectMerchant,
   server, type Recorded, type Reply,
@@ -111,11 +110,6 @@ beforeEach(async () => {
   routes = {
     "/admin/catalog/products/by-key/pro/prices/by-key/monthly": { id: "price_1", product_id: "prod_1" },
     "POST /admin/product-access": { items: [{ id: "acc_1" }] },
-    "POST /admin/notifications/read": (request) => ({
-      notifications: Object.fromEntries(
-        (request.body as { notification_ids: string[] }).notification_ids.map((id) => [id, id === "note_2" ? null : { id }])
-      ),
-    }),
   }
   requests = await server(routes)
 })
@@ -159,42 +153,6 @@ it("sends the selected merchant, the caller's tier key and a fresh refund key", 
   expect(keys[0]).toMatch(/^[\da-f-]{36}$/)
   expect(keys[0]).not.toBe(keys[1])
   expect(requests[1].body).toEqual({ amount: "1000000", revoke_access: false })
-})
-
-describe("notification read state", () => {
-  const unreadKey = () => [...queryKeys.notifications(), "unread-count"]
-  const seed = (queryClient: QueryClient) => {
-    queryClient.setQueryData(queryKeys.notifications(), {
-      data: [{ id: "note_1", read_at: null }, { id: "note_2", read_at: null }],
-    })
-    queryClient.setQueryData(unreadKey(), { unread_count: 2 })
-  }
-  const started = () => {
-    const queryClient = client()
-    selectMerchant("merchant-a")
-    seed(queryClient)
-    return queryClient
-  }
-  const readFlags = (queryClient: QueryClient) =>
-    queryClient
-      .getQueryData<{ data: { read_at: string | null }[] }>(queryKeys.notifications())!
-      .data.map((notification) => notification.read_at !== null)
-
-  it("reconciles both caches from the ids the server accepted", async () => {
-    const queryClient = started()
-    // The harness answers note_2 as missing: only note_1 was read.
-    const readIds = await exec(queryClient, M.markNotificationsRead(queryClient), ["note_1", "note_2"])
-    expect(readIds).toEqual(["note_1"])
-    expect(readFlags(queryClient)).toEqual([true, false])
-    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread_count: 1 })
-  })
-
-  it("marks one notification read", async () => {
-    const queryClient = started()
-    await exec(queryClient, M.markNotificationRead(queryClient), "note_1")
-    expect(readFlags(queryClient)).toEqual([true, false])
-    expect(queryClient.getQueryData(unreadKey())).toEqual({ unread_count: 1 })
-  })
 })
 
 it("stores a saved dashboard on the merchant that saved it", async () => {

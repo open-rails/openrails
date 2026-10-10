@@ -129,10 +129,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
 | `name_reserved` | 409 | `invalid_request_error` | The merchant name is reserved. |
 | `name_taken` | 409 | `invalid_request_error` | The merchant name is taken. |
-| `operation_authorization_conflict` | 409 | `invalid_request_error` | The operation id was reused with a changed term; param names it. |
-| `operation_authorization_has_billing_evidence` | 409 | `invalid_request_error` | The operation authorization already carries provider billing evidence. |
-| `operation_authorization_not_found` | 404 | `invalid_request_error` | The operation authorization does not exist. |
-| `operation_authorization_not_open` | 409 | `invalid_request_error` | The operation authorization is no longer open. |
 | `payment_duplicate_refused` | 409 | `invalid_request_error` | The provider refused an identical charge it had just made; retry after its duplicate window. |
 | `payment_failed` | 402 | `card_error` | The payment was not made. |
 | `payment_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key belongs to another payment request. |
@@ -164,13 +160,14 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `product_not_found` | 404 | `invalid_request_error` | The product does not exist. |
 | `product_tier_group_conflict` | 409 | `invalid_request_error` | A customer holds live subscriptions to more than one product of the tier group. |
 | `product_tier_group_in_use` | 409 | `invalid_request_error` | The tier group cannot change while a subscription has a plan change in flight. |
-| `provider_billing_observation_conflict` | 409 | `invalid_request_error` | The provider billing evidence conflicts with a recorded observation; param names it. |
-| `provider_billing_qualification_not_found` | 404 | `invalid_request_error` | The operation has no provider billing qualification. |
-| `provider_billing_qualification_not_refused` | 409 | `invalid_request_error` | Only a refused hold can be closed by an operator. |
-| `provider_billing_qualification_refused` | 409 | `invalid_request_error` | The operation's provider cost was refused automatic qualification; only an operator's close ends its hold. |
-| `provider_billing_refusal_conflict` | 409 | `invalid_request_error` | The operation was already refused with a different term; param names it. |
-| `provider_billing_resolution_conflict` | 409 | `invalid_request_error` | The operation was already resolved with a different term; param names it. |
+| `provider_billing_observation_conflict` | 409 | `invalid_request_error` | The observation conflicts with a recorded one; param names the term. |
 | `provider_cancel_held` | 409 | `invalid_request_error` | Cancelling needs a destructive provider action that is not armed for this merchant. |
+| `provider_operation_conflict` | 409 | `invalid_request_error` | The provider operation call repeats a committed one with a changed term; param names it. |
+| `provider_operation_has_billing_evidence` | 409 | `invalid_request_error` | The provider operation already carries provider billing evidence, so it cannot be released. |
+| `provider_operation_not_found` | 404 | `invalid_request_error` | The provider operation does not exist. |
+| `provider_operation_not_open` | 409 | `invalid_request_error` | The provider operation's hold is no longer open. |
+| `provider_operation_not_refused` | 409 | `invalid_request_error` | Only a refused provider operation can be closed by an operator. |
+| `provider_operation_refused` | 409 | `invalid_request_error` | The provider operation's cost was refused automatic qualification; only an operator's close ends its hold. |
 | `provider_outcome_unknown` | 409 | `api_error` | The provider did not confirm the outcome; read the resource before retrying. |
 | `psp_claim_requires_proof` | 403 | `authorization_error` | Claiming a provider account needs credentials that prove control of it. |
 | `psp_credentials_rejected` | 400 | `invalid_request_error` | The provider rejected the credentials. |

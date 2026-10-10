@@ -42,17 +42,29 @@ const (
 	FindingIgnore FindingOutcome = "ignore"
 )
 
-// Finding is one discrepancy reconciliation found between OpenRails and a
-// provider, or within OpenRails' own books, and what to do about it.
+// Finding is a problem OpenRails found that needs a person, or that it is
+// repairing: a discrepancy between OpenRails and a provider (catalog drift
+// included), within OpenRails' own books, or in its operation (a provider
+// operation refused, a provider event unbooked, stalled background work), and
+// what to do about it. A catalog or pull.* finding names the PSP whose read
+// raised it; a catalog finding also names the resource, the field and both
+// values.
 type Finding struct {
-	ID                FindingID      `json:"id"`
-	Type              string         `json:"finding_type"`
-	Provider          *string        `json:"provider"`
-	SubjectKey        string         `json:"subject_key"`
-	Severity          string         `json:"severity"`
-	Status            FindingStatus  `json:"status"`
-	RecommendedAction *string        `json:"recommended_action"`
-	Evidence          map[string]any `json:"evidence"`
+	ID                 FindingID      `json:"id"`
+	Type               string         `json:"finding_type"`
+	Provider           *string        `json:"provider"`
+	PSPID              *PSPID         `json:"psp_id"`
+	ResourceType       *string        `json:"resource_type"`
+	ResourceID         *string        `json:"resource_id"`
+	ExternalResourceID *string        `json:"external_resource_id"`
+	Field              *string        `json:"field"`
+	OpenRailsValue     *string        `json:"openrails_value"`
+	ExternalValue      *string        `json:"external_value"`
+	SubjectKey         string         `json:"subject_key"`
+	Severity           string         `json:"severity"`
+	Status             FindingStatus  `json:"status"`
+	RecommendedAction  *string        `json:"recommended_action"`
+	Evidence           map[string]any `json:"evidence"`
 	// Recommendation is the mechanical fix approving runs; nil when the
 	// finding has none and only ignoring resolves it.
 	Recommendation *FindingRecommendation `json:"recommendation"`
@@ -74,7 +86,8 @@ type FindingRecommendation struct {
 }
 
 // FindingListParams pages the findings queue: most severe first, then
-// oldest. Status empty lists the open findings.
+// oldest. Status empty lists the open findings. Type is one finding type or a
+// prefix ending in ".*" ("catalog.*" lists catalog drift).
 //
 // IDs instead reads 1 to MaxBatchItems named findings in one page, open or
 // resolved; unknown ones are absent.
@@ -98,46 +111,4 @@ type ResolveFindingParams struct {
 type FindingResolution struct {
 	Finding   Finding        `json:"finding"`
 	Execution map[string]any `json:"execution"`
-}
-
-// FindingSummary is the findings queue at a glance. OrphanedMembers (paying
-// without access), Freeloaders (access without paying) and DuplicateCoverage
-// (billed twice) should always be zero; VerificationPressure may not be, but
-// its age should not grow.
-type FindingSummary struct {
-	OrphanedMembers      int64                `json:"orphaned_members"`
-	Freeloaders          int64                `json:"freeloaders"`
-	DuplicateCoverage    int64                `json:"duplicate_coverage"`
-	VerificationPressure VerificationPressure `json:"verification_pressure"`
-	Episodes             EpisodeTotals        `json:"episodes"`
-	OpenBySeverity       map[string]int64     `json:"open_by_severity"`
-	TotalOpen            int64                `json:"total_open"`
-}
-
-// VerificationPressure counts subscriptions awaiting provider verification
-// past their paid-through date, and the oldest one's age.
-type VerificationPressure struct {
-	Count         int64 `json:"count"`
-	MaxAgeSeconds int64 `json:"max_age_seconds"`
-}
-
-// EpisodeTotals sums the spans of access without payment (freeloader) and
-// payment without access (orphaned).
-type EpisodeTotals struct {
-	Freeloader FreeloaderEpisodeSummary `json:"freeloader"`
-	Orphaned   EpisodeSummary           `json:"orphaned"`
-}
-
-// EpisodeSummary is how many spans, how many still open, and their days.
-type EpisodeSummary struct {
-	Total     int64   `json:"total"`
-	Open      int64   `json:"open"`
-	TotalDays float64 `json:"total_days"`
-}
-
-// FreeloaderEpisodeSummary adds the spans no policy sanctions (dunning and
-// awaiting verification are policy).
-type FreeloaderEpisodeSummary struct {
-	EpisodeSummary
-	Unsanctioned int64 `json:"unsanctioned"`
 }

@@ -35,14 +35,11 @@ INSERT INTO billing.cost_qualifications (
 ON CONFLICT (merchant_id, operation_id) DO NOTHING
 RETURNING *;
 
--- name: GetProviderBillingQualificationWithAuthorization :one
-SELECT sqlc.embed(q), sqlc.embed(a)
-FROM billing.cost_qualifications q
-JOIN billing.operation_authorizations a
-  ON a.merchant_id = q.merchant_id
- AND a.operation_id = q.operation_id
-WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND q.operation_id = sqlc.arg(operation_id)::text;
+-- name: ListProviderBillingQualificationsForOperations :many
+SELECT *
+FROM billing.cost_qualifications
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid
+  AND operation_id = ANY(sqlc.arg(operation_ids)::text[]);
 
 -- name: GetProviderBillingQualificationForUpdate :one
 SELECT *
@@ -156,21 +153,6 @@ SELECT *
 FROM billing.cost_resolutions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text;
-
--- Newest first; an empty filter admits every state.
--- name: ListProviderBillingQualifications :many
-SELECT sqlc.embed(q), sqlc.embed(a)
-FROM billing.cost_qualifications q
-JOIN billing.operation_authorizations a
-  ON a.merchant_id = q.merchant_id
- AND a.operation_id = q.operation_id
-WHERE q.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND (cardinality(sqlc.arg(states)::text[]) = 0 OR q.state = ANY(sqlc.arg(states)::text[]))
-  AND (cardinality(sqlc.arg(authorization_states)::text[]) = 0 OR a.state = ANY(sqlc.arg(authorization_states)::text[]))
-  AND (sqlc.narg(after_at)::timestamptz IS NULL
-       OR (q.created_at, q.operation_id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_operation_id)::text))
-ORDER BY q.created_at DESC, q.operation_id DESC
-LIMIT sqlc.arg(row_limit)::int;
 
 -- name: InsertProviderBillingRefusal :one
 INSERT INTO billing.cost_refusals (

@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -48,6 +49,14 @@ type FindingRecord struct {
 	// Cleared on every resolution (see the reconciliation.sql resolve queries).
 	NotifiedAt       *time.Time `json:"notified_at,omitempty"`
 	NotifiedSeverity string     `json:"notified_severity,omitempty"`
+	// PSPID and the resource columns are set on catalog and pull.* findings.
+	PSPID              *uuid.UUID `json:"-"`
+	ResourceType       *string    `json:"-"`
+	ResourceID         *string    `json:"-"`
+	ExternalResourceID *string    `json:"-"`
+	Field              *string    `json:"-"`
+	OpenRailsValue     *string    `json:"-"`
+	ExternalValue      *string    `json:"-"`
 }
 
 // RunRecord is a persisted reconciliation run.
@@ -502,7 +511,9 @@ func (s *PGStore) ListQueueFindings(ctx context.Context, filter QueueFilter) (bi
 	if filter.Severity != "" {
 		params.Severity = &filter.Severity
 	}
-	if filter.Type != "" {
+	if prefix, ok := strings.CutSuffix(filter.Type, "*"); ok {
+		params.TypePrefix = &prefix
+	} else if filter.Type != "" {
 		params.FindingType = &filter.Type
 	}
 	rows, err := s.DB.Gen(ctx).AdminListReconciliationFindings(ctx, params)
@@ -538,78 +549,44 @@ func severityRank(s Severity) int32 {
 	return 3
 }
 
-// QueueGauges is the #690 dashboard header (billing.FindingSummary).
-type (
-	QueueGauges              = billing.FindingSummary
-	EpisodeTotals            = billing.EpisodeTotals
-	EpisodeSummary           = billing.EpisodeSummary
-	FreeloaderEpisodeSummary = billing.FreeloaderEpisodeSummary
-	VerificationPressure     = billing.VerificationPressure
-)
+// RaisedFinding is a finding raised outside a run: it needs a person.
+type RaisedFinding struct {
+	Type              FindingType
+	SubjectKey        string
+	Severity          Severity
+	RecommendedAction string
+	Evidence          map[string]any
+}
 
-// Gauges folds open-finding counts into the named gauges and reads the live
-// verification pressure.
-func (s *PGStore) Gauges(ctx context.Context) (QueueGauges, error) {
-	g := QueueGauges{OpenBySeverity: map[string]int64{}}
+// RaiseFinding opens, or observes again, a finding raised outside a run.
+func (s *PGStore) RaiseFinding(ctx context.Context, f RaisedFinding) (FindingRecord, error) {
+	var action *string
+	if f.RecommendedAction != "" {
+		action = &f.RecommendedAction
+	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return g, err
+		return FindingRecord{}, err
 	}
-	rows, err := s.DB.Gen(ctx).CountOpenReconciliationFindingsByTypeSeverity(ctx, tid.UUID())
-	if err != nil {
-		return g, err
-	}
-	inSet := func(set []string, t string) bool {
-		for _, s := range set {
-			if s == t {
-				return true
-			}
-		}
-		return false
-	}
-	for _, row := range rows {
-		g.TotalOpen += row.OpenCount
-		g.OpenBySeverity[row.Severity] += row.OpenCount
-		if inSet(OrphanedFindingTypes, row.FindingType) {
-			g.OrphanedMembers += row.OpenCount
-		}
-		if inSet(FreeloaderFindingTypes, row.FindingType) {
-			g.Freeloaders += row.OpenCount
-		}
-		if inSet(DuplicateCoverageFindingTypes, row.FindingType) {
-			g.DuplicateCoverage += row.OpenCount
-		}
-	}
-	pressure, err := s.DB.Gen(ctx).CountUnknownSubsPastPaidThrough(ctx, gen.CountUnknownSubsPastPaidThroughParams{
-		MerchantID: tid.UUID(), Now: s.now(),
+	row, err := s.DB.Gen(ctx).UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
+		MerchantID: tid.UUID(), FindingType: string(f.Type), SubjectKey: f.SubjectKey, Severity: string(f.Severity),
+		Status: string(FindingStatusRequiresReview), RecommendedAction: action, Evidence: marshalEvidence(f.Evidence),
 	})
 	if err != nil {
-		return g, err
+		return FindingRecord{}, err
 	}
-	g.VerificationPressure.Count = pressure.PressureCount
-	if pressure.MaxAgeSeconds != nil {
-		g.VerificationPressure.MaxAgeSeconds = *pressure.MaxAgeSeconds
-	}
-	episodes, err := s.DB.Gen(ctx).CountErrorEpisodeTotals(ctx, tid.UUID())
+	return FindingRecordFromRow(row), nil
+}
+
+// ResolveRaisedFinding closes an open finding whose subject recovered.
+func (s *PGStore) ResolveRaisedFinding(ctx context.Context, findingType FindingType, subjectKey string) error {
+	tid, err := merchant.Require(ctx)
 	if err != nil {
-		return g, err
+		return err
 	}
-	g.Episodes = EpisodeTotals{
-		Freeloader: FreeloaderEpisodeSummary{
-			EpisodeSummary: EpisodeSummary{
-				Total:     episodes.FreeloaderTotal,
-				Open:      episodes.FreeloaderOpen,
-				TotalDays: episodes.FreeloaderDays,
-			},
-			Unsanctioned: episodes.FreeloaderUnsanctioned,
-		},
-		Orphaned: EpisodeSummary{
-			Total:     episodes.OrphanedTotal,
-			Open:      episodes.OrphanedOpen,
-			TotalDays: episodes.OrphanedDays,
-		},
-	}
-	return g, nil
+	return s.DB.Gen(ctx).AutoResolveFindingBySubject(ctx, gen.AutoResolveFindingBySubjectParams{
+		MerchantID: tid.UUID(), FindingType: string(findingType), SubjectKey: subjectKey,
+	})
 }
 
 // ResolveFindingFixed marks an OPEN finding fixed/admin_fixed with operator
@@ -683,6 +660,14 @@ func FindingRecordFromRow(row gen.BillingReconciliationFinding) FindingRecord {
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 		NotifiedAt:     row.NotifiedAt,
+
+		PSPID:              row.PspID,
+		ResourceType:       row.OpenrailsResourceType,
+		ResourceID:         row.OpenrailsResourceID,
+		ExternalResourceID: row.ExternalResourceID,
+		Field:              row.Field,
+		OpenRailsValue:     row.OpenrailsValue,
+		ExternalValue:      row.ExternalValue,
 	}
 	if row.RecommendedAction != nil {
 		rec.RecommendedAction = *row.RecommendedAction

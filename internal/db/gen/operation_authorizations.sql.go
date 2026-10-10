@@ -289,6 +289,114 @@ func (q *Queries) InsertOperationAuthorizationExtension(ctx context.Context, arg
 	return i, err
 }
 
+const listLastOperationAuthorizationExtensions = `-- name: ListLastOperationAuthorizationExtensions :many
+SELECT x.merchant_id, x.operation_id, x.ordinal, x.requested_amount, x.minimum_amount, x.granted_amount, x.authorized_amount, x.created_at
+FROM unnest($1::text[]) AS ids(operation_id)
+JOIN LATERAL (
+    SELECT e.merchant_id, e.operation_id, e.ordinal, e.requested_amount, e.minimum_amount, e.granted_amount, e.authorized_amount, e.created_at
+    FROM billing.operation_authorization_extensions e
+    WHERE e.merchant_id = $2::uuid
+      AND e.operation_id = ids.operation_id
+    ORDER BY e.ordinal DESC
+    LIMIT 1
+) x ON true
+`
+
+type ListLastOperationAuthorizationExtensionsParams struct {
+	OperationIds []string
+	MerchantID   uuid.UUID
+}
+
+// Each named operation's latest increment: one primary-key probe apiece.
+func (q *Queries) ListLastOperationAuthorizationExtensions(ctx context.Context, arg ListLastOperationAuthorizationExtensionsParams) ([]BillingOperationAuthorizationExtension, error) {
+	rows, err := q.db.Query(ctx, listLastOperationAuthorizationExtensions, arg.OperationIds, arg.MerchantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingOperationAuthorizationExtension
+	for rows.Next() {
+		var i BillingOperationAuthorizationExtension
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.OperationID,
+			&i.Ordinal,
+			&i.RequestedAmount,
+			&i.MinimumAmount,
+			&i.GrantedAmount,
+			&i.AuthorizedAmount,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenRefusedOperationAuthorizations = `-- name: ListOpenRefusedOperationAuthorizations :many
+SELECT a.operation_id, a.customer_id, a.currency, a.authorized_amount, a.created_at,
+       r.reason, r.detail, r.refused_at
+FROM billing.operation_authorizations a
+JOIN billing.cost_refusals r
+  ON r.merchant_id = a.merchant_id
+ AND r.operation_id = a.operation_id
+WHERE a.merchant_id = $1::uuid
+  AND a.state = 'open'
+ORDER BY r.refused_at, a.operation_id
+LIMIT $2::int
+`
+
+type ListOpenRefusedOperationAuthorizationsParams struct {
+	MerchantID uuid.UUID
+	RowLimit   int32
+}
+
+type ListOpenRefusedOperationAuthorizationsRow struct {
+	OperationID      string
+	CustomerID       uuid.UUID
+	Currency         string
+	AuthorizedAmount int64
+	CreatedAt        time.Time
+	Reason           string
+	Detail           *string
+	RefusedAt        time.Time
+}
+
+// Open holds a refusal stopped: each waits for an operator's close. Driven by
+// the open holds, so a scan costs what is open, not every refusal ever made.
+func (q *Queries) ListOpenRefusedOperationAuthorizations(ctx context.Context, arg ListOpenRefusedOperationAuthorizationsParams) ([]ListOpenRefusedOperationAuthorizationsRow, error) {
+	rows, err := q.db.Query(ctx, listOpenRefusedOperationAuthorizations, arg.MerchantID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListOpenRefusedOperationAuthorizationsRow
+	for rows.Next() {
+		var i ListOpenRefusedOperationAuthorizationsRow
+		if err := rows.Scan(
+			&i.OperationID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.AuthorizedAmount,
+			&i.CreatedAt,
+			&i.Reason,
+			&i.Detail,
+			&i.RefusedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOperationAuthorizationExtensions = `-- name: ListOperationAuthorizationExtensions :many
 SELECT merchant_id, operation_id, ordinal, requested_amount, minimum_amount, granted_amount, authorized_amount, created_at
 FROM billing.operation_authorization_extensions

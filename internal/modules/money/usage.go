@@ -20,6 +20,12 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
+// A usage event's outcome.
+const (
+	UsageSucceeded = "succeeded"
+	UsageFailed    = "failed"
+)
+
 // ErrUsageOutsideIngestWindow refuses an event dated before the ingest window
 // or ahead of the clock: its month may have no partition, and its key could
 // not be looked up.
@@ -55,6 +61,13 @@ type RecordUsageParams struct {
 	// OccurredAt defaults to now when zero. It must lie within the ingest
 	// window (retention.UsageIngestWindow back, retention.UsageClockSkew ahead).
 	OccurredAt time.Time
+	// Failed marks usage that failed; Amount is what the failure cost. The
+	// customer's own failure is forgiven up to FailedWindows (its grace) and
+	// charged past them; no window forgives it all. A Delegated invoker's
+	// failure is never charged and counts toward FailedWindows, its cutoff.
+	Failed        bool
+	Delegated     bool
+	FailedWindows []FailedUsageWindow
 }
 
 // RecordUsage durably records a metered usage event AND debits the credit ledger
@@ -97,6 +110,9 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 	if err != nil {
 		return nil, err
 	}
+	if params.Delegated && (!params.Failed || strings.TrimSpace(params.Invoker) == "") {
+		return nil, fmt.Errorf("a delegated invoker's usage is failed usage naming its invoker")
+	}
 
 	s.db.EnsurePartitions(ctx, s.now())
 	var ev *models.UsageEvent
@@ -124,9 +140,14 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return err
 		}
 
+		// A failed event's amount is final: it is never rated by the catalog.
 		pricingAuthority := "catalog"
-		if params.Amount > 0 {
+		if params.Amount > 0 || params.Failed {
 			pricingAuthority = "host"
+		}
+		outcome := UsageSucceeded
+		if params.Failed {
+			outcome = UsageFailed
 		}
 		// or#891 item 3: same key, different charging term = refusal, never the
 		// first event answered for a corrected one.
@@ -135,16 +156,24 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			if ev, rerr = usageEventFromGen(row); rerr != nil {
 				return rerr
 			}
+			if ev.Outcome != outcome {
+				return &IdempotencyConflict{
+					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
+					Field: "outcome", Committed: ev.Outcome, Retried: outcome,
+				}
+			}
 			if ev.PricingAuthority != pricingAuthority {
 				return &IdempotencyConflict{
 					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
 					Field: "pricing_authority", Committed: ev.PricingAuthority, Retried: pricingAuthority,
 				}
 			}
-			if ev.Amount != params.Amount {
+			// A failed event charged what its grace left: the host reported
+			// its amount plus what was forgiven.
+			if reported := ev.Amount + ev.ForgivenAmount; reported != params.Amount {
 				return &IdempotencyConflict{
 					Operation: string(params.Key.Operation()), Source: params.Key.Source(), SourceID: params.Key.SourceID(),
-					Field: "amount", Committed: ev.Amount, Retried: params.Amount,
+					Field: "amount", Committed: reported, Retried: params.Amount,
 				}
 			}
 			// or#903: say so. A caller that must not repeat a NON-ledger side
@@ -168,20 +197,48 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			return gerr
 		}
 
+		// A failure is charged what its grace does not forgive, and counts
+		// toward its windows in this transaction.
+		charge, forgiven := params.Amount, int64(0)
+		if params.Failed {
+			periods, perr := failedUsagePeriods(params.FailedWindows, now)
+			if perr != nil {
+				return perr
+			}
+			key := failedUsageKey{merchant: tenantID, customer: payerID, currency: cur}
+			switch {
+			case params.Delegated:
+				key.invoker = params.Invoker
+				charge = 0
+			case len(periods) == 0:
+				charge = 0
+			default:
+				left, gerr := key.graceLeft(ctx, q, periods)
+				if gerr != nil {
+					return gerr
+				}
+				charge = max(params.Amount-left, 0)
+			}
+			forgiven = params.Amount - charge
+			if err := key.count(ctx, q, periods, params.Amount, now); err != nil {
+				return err
+			}
+		}
+
 		// Debit the ledger for the host-priced amount (skip for zero-cost events).
 		// Unified credit line (#302): draw prepaid balance first, then accrue to
 		// owed up to the credit line. Prepay-only accounts (no line) deny when the
 		// amount exceeds available balance.
 		var debitID *uuid.UUID
-		if params.Amount == 0 {
+		if charge == 0 {
 			// A metered payer's first event opens its balance account: the
 			// permanent first-activity mark invoice periods are anchored on.
 			if _, err := ledger.New(q, tenantID).EnsureCustomerBalance(ctx, payerID, cur); err != nil {
 				return err
 			}
 		}
-		if params.Amount > 0 {
-			_, _, applied, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false)
+		if charge > 0 {
+			_, _, applied, derr := s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, charge, false)
 			if derr != nil {
 				return derr
 			}
@@ -221,7 +278,9 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Currency:         cur,
 			EventType:        params.EventType,
 			Dimensions:       params.Dimensions,
-			Amount:           params.Amount,
+			Amount:           charge,
+			ForgivenAmount:   forgiven,
+			Outcome:          outcome,
 			Source:           params.Key.Source(),
 			SourceID:         params.Key.SourceID(),
 			LedgerTransferID: debitID,
@@ -255,6 +314,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Metadata:         meta,
 			OccurredAt:       ev.OccurredAt,
 			CreatedAt:        ev.CreatedAt,
+			Outcome:          ev.Outcome,
+			ForgivenAmount:   ev.ForgivenAmount,
 		})
 	})
 	if err != nil {

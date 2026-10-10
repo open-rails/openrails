@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/budgets"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
@@ -104,12 +102,8 @@ func (s *Service) Admit(ctx context.Context, in AdmitInput) (*billing.Admission,
 		admission.NewInvokerSpendLimitStore(s.rt.DB),
 		s.rt.FXProvider,
 	)
-	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
-	if err != nil {
-		return nil, err
-	}
 	adm := admission.NewAdmitter(s.moneyService(), gate, loader).
-		WithWastedSpend(s.wastedSpendGuard(), invokerWindows).
+		WithFailedUsageCutoff(failedUsageCutoff{s}).
 		WithDenialRecorder(admission.NewDenialRecorder(s.rt.RedisClient)).
 		WithDelinquency(s.delinquencyService()).
 		WithAccrualRateMeter(admission.NewAccrualRateMeter(s.rt.DB))
@@ -760,321 +754,48 @@ func (s *Service) payerWastedWindows(ctx context.Context, payer identity.Custome
 	return out, nil
 }
 
-// WastedSpendInput is one host-reported failed attempt that cost the platform
-// money.
-//
-// Source+SourceID are required (enforced below) and must be REPRODUCIBLE across
-// retries of the same failed attempt: together with the engine-composed
-// operation "usage:wasted_spend" they ARE the report's identity (or#894 keeps
-// that operation distinct so the charge never aliases the CAPTURE of the same
-// request id).
-//
-// ONE guarantee now, not two layers (or#903). Every report writes a durable
-// usage_events row under a structural unique key, so the duplicate verdict, the
-// no-re-accounting-of-grace property and the money are all the same fact: a
-// replay is answered Duplicate with no side effect however long ago the first
-// one landed and whatever happened to Redis in between, and a replay whose
-// chargeable amount changed is refused with money.ErrIdempotencyKeyReused
-// rather than silently dropped. There is no TTL to reason about, and a host
-// needs no claim table of its own.
-//
-// Reported measurements: or#891, or#903, and DESIGN-RULINGS §4.23.
-type WastedSpendInput struct {
-	CustomerID  identity.CustomerID
-	Invoker     string
-	InvokerType billing.InvokerType
-	Currency    string
-	Amount      int64
-	Source      string
-	SourceID    string
-	Reason      string
-}
-
-// wastedSpendEventType is the metered event kind a charged overage posts under.
-const wastedSpendEventType = "wasted_spend"
-
-// ReportWastedSpend records host-reported WASTED $ (#497): delegated invokers
-// accrue against their flat Redis cutoff, while direct payer credentials accrue
-// against trust-level-graduated payer grace and charge overage through the normal
-// usage ledger.
-//
-// # or#903 — the ordering, and why it is this way round
-//
-// Every report writes ONE durable usage_events row at operation
-// "usage:wasted_spend" over (source, source_id), whatever its money outcome:
-// the charged overage, a fully forgiven report (amount 0) and a delegated
-// invoker's report (amount 0) all land the same row under the same unique
-// index. That row IS the once-only claim, and the Redis windows are advanced
-// only when it APPLIES. Before or#903 the order was inverted — a SetNX claimed
-// the report and the ledger was reached only for a chargeable overage — so the
-// claim was a cache: it expired, it did not survive a flush, and a replay after
-// a flush was re-graded and re-counted against the payer's grace. It also made
-// the engine's own changed-amount refusal unreachable inside the TTL, which is
-// why a durable claim is required.
-//
-// Consequences worth stating, because they are the contract now:
-//
-//   - A replay is answered Duplicate=true and consumes no grace, forever, not
-//     for a TTL, and across a Redis flush.
-//   - A replay whose chargeable amount CHANGED is refused with
-//     money.ErrIdempotencyKeyReused instead of being silently dropped.
-//   - A crash between the durable row and the counter advance leaves grace
-//     UNCONSUMED, never double-consumed: the residual error is in the payer's
-//     favour.
-//   - The free/delegated path now writes a Postgres row per report. That is a
-//     deliberate reversal of "no event table for free reports": a report the
-//     platform cannot recognise as already-seen is not free, it is just
-//     unaccounted somewhere else.
-func (s *Service) ReportWastedSpend(ctx context.Context, in WastedSpendInput) (*billing.WastedSpendReport, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
+// failedUsageWindows resolves the windows a failed usage event counts toward,
+// in currency: a delegated invoker's cutoff (the merchant's configuration, or
+// DefaultInvokerWastedWindows), else the customer's grace (its billing policy's
+// bad_spend_windows at its trust level). Limits in another currency are
+// converted, as spend windows are.
+func (s *Service) failedUsageWindows(ctx context.Context, customer identity.CustomerID, invokerType billing.InvokerType, currency string) ([]money.FailedUsageWindow, error) {
+	var windows []abuse.WastedWindow
+	var err error
+	if invokerType == billing.InvokerTypeDelegated {
+		windows, err = s.invokerWastedSpendPolicy(ctx)
+	} else {
+		windows, err = s.payerWastedWindows(ctx, customer, currency, "")
 	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return nil, fmt.Errorf("service not initialized")
-	}
-	if s.rt.RedisClient == nil {
-		return nil, fmt.Errorf("wasted-spend tracking unavailable: redis not configured")
-	}
-	if in.CustomerID.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	if in.Amount < 0 {
-		return nil, fmt.Errorf("amount must be >= 0")
-	}
-	cur, err := requireCurrency(in.Currency)
 	if err != nil {
 		return nil, err
 	}
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return nil, err
-	}
-	in.Source = strings.TrimSpace(in.Source)
-	in.SourceID = strings.TrimSpace(in.SourceID)
-	if in.Source == "" || in.SourceID == "" {
-		return nil, fmt.Errorf("source and source_id required")
-	}
-	if in.Amount == 0 {
-		return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendIgnored}, nil
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	guard := s.wastedSpendGuard()
-	payerWindows, err := s.payerWastedWindows(ctx, in.CustomerID, cur, "")
-	if err != nil {
-		return nil, err
-	}
-	payerPolicyCurrency, err := serviceWastedCurrency(cur, payerWindows)
-	if err != nil {
-		return nil, err
-	}
-	invokerWindows, err := s.invokerWastedSpendPolicy(ctx)
-	if err != nil {
-		return nil, err
-	}
-	invokerPolicyCurrency, err := serviceWastedCurrency(cur, invokerWindows)
-	if err != nil {
-		return nil, err
-	}
-	merchantID := tid.UUID().String()
-	payerID := in.CustomerID.UUID().String()
-
-	// or#894: the row posts at operation "usage:wasted_spend", NOT at the bare
-	// (source, source_id) the caller reported. Without the operation it aliased
-	// the CAPTURE of the same rendered request — the capture then moved 0 micros
-	// and returned the waste transfer.
-	wasteKey, err := money.NewIdempotencyKey(money.UsageOperation(wastedSpendEventType), in.Source, in.SourceID)
-	if err != nil {
-		return nil, err
-	}
-
-	// THE CLAIM CHECK, ahead of everything that reads or writes a counter.
-	// Grading consumes nothing, but it READS the grace window, and the window
-	// already contains this report's own first application — so a replay grades
-	// to a different chargeable amount than the one on file. Deciding "already
-	// seen" from the durable row instead of from the re-derived number is what
-	// makes an identical retry a duplicate rather than a spurious conflict.
-	if claimed, err := s.claimedWasteReport(ctx, in, cur, wasteKey); err != nil || claimed != nil {
-		return claimed, err
-	}
-
-	if identity.IsDirectPayerInvoker(in.InvokerType) {
-		policyAmount, _, err := fx.ConvertAmount(ctx, s.rt.FXProvider, cur, payerPolicyCurrency, in.Amount)
-		if err != nil {
-			return nil, err
-		}
-		// GRADE against grace without consuming it — the durable row below
-		// decides whether this report gets to consume anything at all.
-		chargeablePolicy, err := guard.PayerGraceOverage(ctx, merchantID, payerID, payerPolicyCurrency, policyAmount, payerWindows)
-		if err != nil {
-			return nil, err
-		}
-		chargeable, _, err := fx.ConvertAmount(ctx, s.rt.FXProvider, payerPolicyCurrency, cur, chargeablePolicy)
-		if err != nil {
-			return nil, err
-		}
-		if chargeable > in.Amount {
-			chargeable = in.Amount
-		}
-		policyForgiven := policyAmount - chargeablePolicy
-		res := &billing.WastedSpendReport{
-			Currency:             cur,
-			PolicyCurrency:       &payerPolicyCurrency,
-			RecordedAmount:       in.Amount,
-			PolicyRecordedAmount: &policyAmount,
-			ForgivenAmount:       in.Amount - chargeable,
-			PolicyForgivenAmount: &policyForgiven,
-			ChargedAmount:        chargeable,
-			PolicyChargedAmount:  &chargeablePolicy,
-			Action:               billing.WastedSpendForgiven,
-		}
-		// The durable claim. Amount is the overage (often 0) and the ledger is
-		// debited only when it is positive, but the ROW is written either way:
-		// that is what makes a forgiven report as replay-proof as a charged one.
-		ev, err := s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
-			Payer:      &in.CustomerID,
-			Invoker:    strings.TrimSpace(in.Invoker),
-			Currency:   cur,
-			EventType:  wastedSpendEventType,
-			Amount:     chargeable,
-			Key:        wasteKey,
-			Dimensions: map[string]int64{wastedReportedDimension: in.Amount},
-			Metadata: map[string]any{
-				"reason":                   in.Reason,
-				"reported_amount":          strconv.FormatInt(in.Amount, 10),
-				"forgiven_amount":          strconv.FormatInt(res.ForgivenAmount, 10),
-				"policy_currency":          payerPolicyCurrency,
-				"policy_amount":            strconv.FormatInt(policyAmount, 10),
-				"policy_chargeable_amount": strconv.FormatInt(chargeablePolicy, 10),
-				"invoker_type":             string(identity.InvokerTypeCustomer),
-				"chargeable_amount":        strconv.FormatInt(chargeable, 10),
-			},
-		})
-		if err != nil {
-			return s.wasteWriteRaceLost(ctx, in, cur, wasteKey, err)
-		}
-		if ev.Replayed {
-			return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendDuplicate}, nil
-		}
-		if err := guard.ConsumePayerGrace(ctx, merchantID, payerID, payerPolicyCurrency, policyAmount, payerWindows); err != nil {
-			return nil, err
-		}
-		if chargeable > 0 {
-			res.Action = billing.WastedSpendCharged
-		}
-		return res, nil
-	}
-
-	policyAmount, _, err := fx.ConvertAmount(ctx, s.rt.FXProvider, cur, invokerPolicyCurrency, in.Amount)
-	if err != nil {
-		return nil, err
-	}
-	// A delegated invoker is never charged, so the durable row carries amount 0.
-	// It exists for one reason: to be the thing that says "already seen" when the
-	// flat cutoff counter — a cache — cannot.
-	ev, err := s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
-		Payer:      &in.CustomerID,
-		Invoker:    strings.TrimSpace(in.Invoker),
-		Currency:   cur,
-		EventType:  wastedSpendEventType,
-		Amount:     0,
-		Key:        wasteKey,
-		Dimensions: map[string]int64{wastedReportedDimension: in.Amount},
-		Metadata: map[string]any{
-			"reason":          in.Reason,
-			"reported_amount": strconv.FormatInt(in.Amount, 10),
-			"policy_currency": invokerPolicyCurrency,
-			"policy_amount":   strconv.FormatInt(policyAmount, 10),
-			"invoker_type":    string(in.InvokerType),
-		},
-	})
-	if err != nil {
-		return s.wasteWriteRaceLost(ctx, in, cur, wasteKey, err)
-	}
-	if ev.Replayed {
-		return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendDuplicate}, nil
-	}
-	if err := guard.RecordInvokerCutoff(ctx, merchantID, payerID, in.Invoker, invokerPolicyCurrency, policyAmount, invokerWindows); err != nil {
-		return nil, err
-	}
-	return &billing.WastedSpendReport{Currency: cur, PolicyCurrency: &invokerPolicyCurrency, RecordedAmount: in.Amount, PolicyRecordedAmount: &policyAmount, Action: billing.WastedSpendInvokerCutoffTracked}, nil
-}
-
-// wastedReportedDimension carries the REPORTED wasted amount on the durable
-// row. It is a typed dimension rather than a metadata entry because it is
-// compared on every replay: metadata round-trips through JSONB as float64, and
-// a money comparison must not go anywhere near a float.
-const wastedReportedDimension = "reported_amount"
-
-// claimedWasteReport answers whether this report's key is already claimed.
-//
-//   - unclaimed            -> (nil, nil), the caller proceeds
-//   - claimed, same body   -> the duplicate verdict, no side effect
-//   - claimed, CHANGED body-> money.ErrIdempotencyKeyReused
-//
-// The comparison is on the REPORTED amount, not on what was charged: two
-// different reports can both be fully forgiven, and answering the second with
-// "duplicate" would silently drop a real number. This is the refusal a host
-// used to have to build itself out of a body fingerprint.
-func (s *Service) claimedWasteReport(ctx context.Context, in WastedSpendInput, cur string, key money.IdempotencyKey) (*billing.WastedSpendReport, error) {
-	ev, err := s.moneyService().FindUsageEvent(ctx, in.CustomerID, cur, wastedSpendEventType, key)
-	if err != nil || ev == nil {
-		return nil, err
-	}
-	if committed, ok := ev.Dimensions[wastedReportedDimension]; ok && committed != in.Amount {
-		return nil, &money.IdempotencyConflict{
-			Operation: string(key.Operation()), Source: key.Source(), SourceID: key.SourceID(),
-			Field: wastedReportedDimension, Committed: committed, Retried: in.Amount,
-		}
-	}
-	return &billing.WastedSpendReport{Currency: cur, Action: billing.WastedSpendDuplicate}, nil
-}
-
-// wasteWriteRaceLost interprets a refusal from the durable write. Two identical
-// reports racing each other grade against the same window, so they normally
-// agree and the loser is answered Replayed; but if the winner's ConsumePayerGrace
-// lands between the loser's grading and its write, the loser computes a larger
-// overage and is refused for an amount that is not actually a changed body. Only
-// the durable row can tell those apart, so ask it.
-func (s *Service) wasteWriteRaceLost(ctx context.Context, in WastedSpendInput, cur string, key money.IdempotencyKey, cause error) (*billing.WastedSpendReport, error) {
-	if !errors.Is(cause, money.ErrIdempotencyKeyReused) {
-		return nil, cause
-	}
-	claimed, err := s.claimedWasteReport(ctx, in, cur, key)
-	if err != nil || claimed == nil {
-		return nil, cause
-	}
-	return claimed, nil
-}
-
-func serviceWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
-	cur := money.NormalizeCurrency(requestCurrency)
-	explicit := false
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return "", err
-	}
+	out := make([]money.FailedUsageWindow, 0, len(windows))
 	for _, w := range windows {
-		if strings.TrimSpace(w.Currency) == "" {
+		if w.Limit <= 0 || w.Window < time.Second {
 			continue
 		}
-		wc := money.NormalizeCurrency(w.Currency)
-		if err := moneyutil.ValidateCurrency(wc); err != nil {
-			return "", err
+		limit := w.Limit
+		if wc := money.NormalizeCurrency(w.Currency); wc != "" && wc != currency {
+			if limit, _, err = fx.ConvertAmount(ctx, s.rt.FXProvider, wc, currency, w.Limit); err != nil {
+				return nil, err
+			}
 		}
-		if !explicit {
-			cur = wc
-			explicit = true
-			continue
-		}
-		if cur != wc {
-			return "", fmt.Errorf("mixed wasted-spend currencies are not supported: %s and %s", cur, wc)
-		}
+		out = append(out, money.FailedUsageWindow{Key: w.Key, Duration: w.Window, Limit: limit})
 	}
-	return cur, nil
+	return out, nil
+}
+
+// failedUsageCutoff is admission's view of delegated invokers' failed usage.
+type failedUsageCutoff struct{ s *Service }
+
+func (c failedUsageCutoff) CutoffReached(ctx context.Context, customer identity.CustomerID, invoker, currency string) (bool, error) {
+	windows, err := c.s.failedUsageWindows(ctx, customer, billing.InvokerTypeDelegated, currency)
+	if err != nil || len(windows) == 0 {
+		return false, err
+	}
+	reached, _, err := c.s.moneyService().FailedUsageCutoffReached(ctx, customer, invoker, currency, windows)
+	return reached, err
 }
 
 // ErrInvalidBillingPolicy identifies caller-owned billing-policy input errors so
@@ -1257,12 +978,4 @@ func nonEmptyString(v string) *string {
 		return nil
 	}
 	return &v
-}
-
-// wastedSpendGuard meters wasted spend in Redis; without Redis it is off.
-func (s *Service) wastedSpendGuard() *abuse.WastedSpendGuard {
-	if s.rt.RedisClient == nil {
-		return abuse.NewWastedSpendGuard(nil)
-	}
-	return abuse.NewWastedSpendGuard(ratelimit.NewLimiter(s.rt.RedisClient))
 }

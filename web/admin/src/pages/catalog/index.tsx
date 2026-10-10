@@ -1019,11 +1019,11 @@ function DriftTab() {
             <TableBody>
               {data.data.map((e) => (
                 <TableRow key={e.id}>
-                  <TableCell>{e.rail}</TableCell>
-                  <TableCell>{e.kind}</TableCell>
+                  <TableCell>{e.provider ?? "—"}</TableCell>
+                  <TableCell>{e.finding_type.replace(/^catalog\./, "")}</TableCell>
                   <TableCell className="text-xs">
                     {e.resource_type}{" "}
-                    {shortId(e.resource_id || e.external_resource_id, 13)}
+                    {shortId(e.resource_id || e.external_resource_id || "", 13)}
                   </TableCell>
                   <TableCell>{e.field || "—"}</TableCell>
                   <TableCell className="max-w-40 truncate">
@@ -1032,7 +1032,7 @@ function DriftTab() {
                   <TableCell className="max-w-40 truncate">
                     {e.external_value || "—"}
                   </TableCell>
-                  <TableCell>{formatDate(e.detected_at)}</TableCell>
+                  <TableCell>{formatDate(e.created_at)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

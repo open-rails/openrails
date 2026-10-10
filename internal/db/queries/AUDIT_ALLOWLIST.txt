@@ -103,7 +103,6 @@ unpruned-partition HasUsageActivity             # default dashboard: any retaine
 # today. Fixing one means deleting its line.
 unbounded-many ListActiveSolanaMerchantWallets             # or#837 converge scan
 unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge scan
-unbounded-many CountOpenReconciliationFindingsByTypeSeverity  # or#837 converge scan
 unbounded-many ListStuckProviderIntents                        # or#837 scan of all live intents
 unbounded-many ListInvoicePayers                           # or#837 aggregate over all ledger transfers and catalog usage
 unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices

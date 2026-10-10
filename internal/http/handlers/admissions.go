@@ -311,63 +311,6 @@ func admissionFailure(r *httprequest.Request, err error, requestID, message stri
 	return api.Coded(billing.CodeInternalError, message)
 }
 
-// ReportWastedSpend records spend customers' invokers wasted, one result per
-// report in order: each is handled or refused on its own, exactly as
-// reporting it alone would be.
-func ReportWastedSpend(r *httprequest.Request) {
-	var params billing.ReportWastedSpendBatchParams
-	if !r.BindJSON(&params) {
-		return
-	}
-	if !batchItems(r, len(params.Items), billing.MaxBatchItems) || !requireMerchantRoutePrincipal(r) {
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	out := make([]billing.WastedSpendResult, len(params.Items))
-	for i, item := range params.Items {
-		out[i] = reportWastedSpendItem(r, svc, item)
-		if out[i].Error != nil {
-			out[i].Error.RequestID = r.RequestID()
-		}
-	}
-	r.JSON(http.StatusOK, billing.ReportWastedSpendBatchResult{Items: out})
-}
-
-func wastedSpendRefusal(err *api.APIError) billing.WastedSpendResult {
-	details := err.ToResponse().Error
-	return billing.WastedSpendResult{Status: err.HTTPStatus, Error: &details}
-}
-
-func reportWastedSpendItem(r *httprequest.Request, svc *billingservice.Service, params billing.ReportWastedSpendParams) billing.WastedSpendResult {
-	switch {
-	case params.Amount < 0:
-		return wastedSpendRefusal(api.Coded(billing.CodeInvalidParam, "amount must be nonnegative").WithParam("amount"))
-	case params.CustomerID.IsZero():
-		return wastedSpendRefusal(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
-	case strings.TrimSpace(params.Source) == "" || strings.TrimSpace(params.SourceID) == "" || len(params.SourceID) > maxSourceIDBytes:
-		return wastedSpendRefusal(api.Coded(billing.CodeInvalidParam, "source and source_id (at most 255 bytes) required").WithParam("source_id"))
-	case !serviceCustomerScopeAllows(r, params.CustomerID):
-		return wastedSpendRefusal(api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, ""))
-	}
-	report, err := svc.ReportWastedSpend(r.Request.Context(), billingservice.WastedSpendInput{
-		CustomerID: params.CustomerID, Invoker: strings.TrimSpace(params.Invoker), InvokerType: params.InvokerType,
-		Currency: params.Currency, Amount: params.Amount, Source: params.Source, SourceID: params.SourceID, Reason: params.Reason,
-	})
-	if err != nil {
-		refusal := moneyRefusal(err)
-		if refusal == nil {
-			log.WithContext(r.Request.Context()).WithError(err).WithFields(log.Fields{"customer_id": params.CustomerID, "source_id": params.SourceID}).
-				Error("wasted spend report failed")
-			refusal = api.Coded(billing.CodeInternalError, "wasted spend report failed")
-		}
-		return wastedSpendRefusal(refusal)
-	}
-	return billing.WastedSpendResult{Status: http.StatusOK, Report: report}
-}
-
 // RecordUsage records a batch of usage events, one result per item in
 // order. The batch answers 200; each item is recorded or refused on its own,
 // exactly as recording it alone would be.
@@ -409,6 +352,12 @@ func recordUsageItem(r *httprequest.Request, svc *billingservice.Service, params
 		return usageRefusal(api.Coded(billing.CodeInvalidParam, "customer_id required").WithParam("customer_id"))
 	case len(params.SourceID) > maxSourceIDBytes:
 		return usageRefusal(api.Coded(billing.CodeInvalidParam, "source_id must be at most 255 bytes").WithParam("source_id"))
+	case params.Outcome != "" && params.Outcome != billing.UsageSucceeded && params.Outcome != billing.UsageFailed:
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, `outcome must be "succeeded" or "failed"`).WithParam("outcome"))
+	case params.InvokerType != "" && params.InvokerType != billing.InvokerTypeCustomer && params.InvokerType != billing.InvokerTypeDelegated:
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, `invoker_type must be "customer" or "delegated"`).WithParam("invoker_type"))
+	case params.InvokerType == billing.InvokerTypeDelegated && (params.Outcome != billing.UsageFailed || strings.TrimSpace(params.Invoker) == ""):
+		return usageRefusal(api.Coded(billing.CodeInvalidParam, "a delegated invoker records only failed usage, and names its invoker").WithParam("invoker_type"))
 	case !serviceCustomerScopeAllows(r, params.CustomerID):
 		return usageRefusal(api.Coded(billing.CodeServiceCredentialCustomerScopeDenied, ""))
 	}
@@ -417,8 +366,9 @@ func recordUsageItem(r *httprequest.Request, svc *billingservice.Service, params
 		return usageRefusal(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("source_id"))
 	}
 	in := billingservice.RecordUsageInput{
-		CustomerID: params.CustomerID, Invoker: params.Invoker, Currency: params.Currency, EventType: params.EventType,
+		CustomerID: params.CustomerID, Invoker: params.Invoker, InvokerType: params.InvokerType, Currency: params.Currency, EventType: params.EventType,
 		Dimensions: params.Dimensions, Amount: params.Amount, Resource: params.Resource, Metadata: params.Metadata, Key: key,
+		Failed: params.Outcome == billing.UsageFailed,
 	}
 	if params.OccurredAt != nil {
 		in.OccurredAt = params.OccurredAt.UTC()
@@ -439,13 +389,4 @@ func recordUsageItem(r *httprequest.Request, svc *billingservice.Service, params
 		status = http.StatusOK
 	}
 	return billing.UsageEventResult{Status: status, Event: event}
-}
-
-// GetCustomerUsage reports a customer's usage.
-func GetCustomerUsage(r *httprequest.Request) {
-	customer, ok := customerParam(r)
-	if !ok {
-		return
-	}
-	getUsage(r, customer)
 }

@@ -14,17 +14,13 @@ import {
   getRebillCycle,
   getSubscription,
   getUsageMeter,
-  getUnreadCount,
   listApiKeys,
-  listCatalogDrift,
   listCustomerEntitlements,
   listCustomerPaymentMethods,
   listCustomerProductAccess,
   listCustomers,
   listCustomerUsageRateOverrides,
-  getFindingSummary,
   listFindings,
-  listNotifications,
   listPaymentAttempts,
   listPSPs,
   listRails,
@@ -51,8 +47,19 @@ import {
 import {
   getDashboard,
   metricsQuery,
+  type MetricsCell,
   type MetricsQuery,
+  type MetricsResult,
 } from "@/lib/api/metrics"
+import type { FindingsGauges } from "@/lib/api/types"
+
+// metricsRow reads a query without a group-by: its one row, by column name.
+function metricsRow(result: MetricsResult): Record<string, MetricsCell> {
+  const row = result.rows[0] ?? []
+  return Object.fromEntries(
+    result.columns.map((column, i) => [column.name, row[i] ?? null])
+  )
+}
 
 // Complete collections are explicit: selectors need every eligible record,
 // while catalog screens fetch only their visible page.
@@ -138,7 +145,12 @@ export const adminQueries = {
     queryOptions({
       queryKey: [...queryKeys.customer(id), "subscriptions", { limit, cursor }],
       queryFn: ({ signal }) =>
-        listSubscriptions({ customer_id: id }, limit, cursor || undefined, signal),
+        listSubscriptions(
+          { customer_id: id },
+          limit,
+          cursor || undefined,
+          signal
+        ),
       enabled: Boolean(id),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load subscriptions" },
@@ -147,16 +159,28 @@ export const adminQueries = {
     queryOptions({
       queryKey: [...queryKeys.customer(id), "payments", { limit, cursor }],
       queryFn: ({ signal }) =>
-        listPayments({ customer_id: id }, { limit, cursor: cursor || undefined }, signal),
+        listPayments(
+          { customer_id: id },
+          { limit, cursor: cursor || undefined },
+          signal
+        ),
       enabled: Boolean(id),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load payments" },
     }),
   customerPaymentMethodsPage: (id: string, limit: number, cursor: string) =>
     queryOptions({
-      queryKey: [...queryKeys.customer(id), "payment-methods", { limit, cursor }],
+      queryKey: [
+        ...queryKeys.customer(id),
+        "payment-methods",
+        { limit, cursor },
+      ],
       queryFn: ({ signal }) =>
-        listCustomerPaymentMethods(id, { limit, cursor: cursor || undefined }, signal),
+        listCustomerPaymentMethods(
+          id,
+          { limit, cursor: cursor || undefined },
+          signal
+        ),
       enabled: Boolean(id),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load payment methods" },
@@ -165,16 +189,28 @@ export const adminQueries = {
     queryOptions({
       queryKey: [...queryKeys.customer(id), "entitlements", { limit, cursor }],
       queryFn: ({ signal }) =>
-        listCustomerEntitlements(id, { limit, cursor: cursor || undefined }, signal),
+        listCustomerEntitlements(
+          id,
+          { limit, cursor: cursor || undefined },
+          signal
+        ),
       enabled: Boolean(id),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load entitlements" },
     }),
   customerProductAccess: (id: string, limit: number, cursor: string) =>
     queryOptions({
-      queryKey: [...queryKeys.customer(id), "product-access", { limit, cursor }],
+      queryKey: [
+        ...queryKeys.customer(id),
+        "product-access",
+        { limit, cursor },
+      ],
       queryFn: ({ signal }) =>
-        listCustomerProductAccess(id, { limit, cursor: cursor || undefined }, signal),
+        listCustomerProductAccess(
+          id,
+          { limit, cursor: cursor || undefined },
+          signal
+        ),
       enabled: Boolean(id),
       placeholderData: keepPreviousData,
       meta: { errorAction: "Load product access" },
@@ -380,7 +416,8 @@ export const adminQueries = {
   catalogDrift: (limit = 200, cursor?: string) =>
     queryOptions({
       queryKey: [...queryKeys.catalogDrift(), { limit, cursor }],
-      queryFn: ({ signal }) => listCatalogDrift(limit, cursor, signal),
+      queryFn: ({ signal }) =>
+        listFindings({ type: "catalog.*" }, limit, signal),
       meta: { errorAction: "Load drift" },
     }),
   checkoutRouting: (priceId: string) =>
@@ -432,7 +469,28 @@ export const adminQueries = {
   findingSummary: () =>
     queryOptions({
       queryKey: [...queryKeys.ops(), "findings", "summary"],
-      queryFn: ({ signal }) => getFindingSummary(signal),
+      queryFn: async ({ signal }): Promise<FindingsGauges> => {
+        const row = metricsRow(
+          await metricsQuery(
+            {
+              measures: [
+                "open_findings",
+                "orphaned_members",
+                "freeloaders",
+                "duplicate_coverage",
+              ],
+              range: { last: "1d" },
+            },
+            signal
+          )
+        )
+        return {
+          total_open: Number(row.open_findings ?? 0),
+          orphaned_members: Number(row.orphaned_members ?? 0),
+          freeloaders: Number(row.freeloaders ?? 0),
+          duplicate_coverage: Number(row.duplicate_coverage ?? 0),
+        }
+      },
       meta: { errorAction: "Load the findings summary" },
     }),
   workerHealth: () =>
@@ -504,16 +562,30 @@ export const adminQueries = {
       queryFn: ({ signal }) => metricsQuery(query!, signal),
       enabled: Boolean(query),
     }),
+  // The bell lists the open findings that need a person and counts them.
   notifications: (enabled: boolean) =>
     queryOptions({
       queryKey: queryKeys.notifications(),
-      queryFn: ({ signal }) => listNotifications(undefined, signal),
+      queryFn: ({ signal }) =>
+        listFindings({ status: "requires_review" }, 10, signal),
       enabled,
     }),
   unreadNotifications: () =>
     queryOptions({
-      queryKey: [...queryKeys.notifications(), "unread-count"],
-      queryFn: ({ signal }) => getUnreadCount(signal),
+      queryKey: [...queryKeys.notifications(), "count"],
+      queryFn: async ({ signal }) =>
+        Number(
+          metricsRow(
+            await metricsQuery(
+              {
+                measures: ["open_findings"],
+                range: { last: "1d" },
+                filters: { finding_status: ["requires_review"] },
+              },
+              signal
+            )
+          ).open_findings ?? 0
+        ),
       refetchInterval: 30_000,
       retry: false,
     }),

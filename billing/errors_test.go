@@ -55,13 +55,13 @@ func TestCodedSentinelsClassifyAcrossTransports(t *testing.T) {
 		{ErrPaymentMethodStale, http.StatusPaymentRequired, ErrPaymentRefused},
 		{ErrPaymentProviderRejected, http.StatusBadGateway, ErrInternal},
 		{ErrRequestBodyTooLarge, http.StatusRequestEntityTooLarge, ErrInvalid},
-		{ErrOperationAuthorizationNotFound, http.StatusNotFound, ErrNotFound},
-		{ErrProviderBillingQualificationNotFound, http.StatusNotFound, ErrNotFound},
-		{ErrOperationAuthorizationConflict, http.StatusConflict, ErrConflict},
-		{ErrOperationAuthorizationNotOpen, http.StatusConflict, ErrConflict},
-		{ErrOperationAuthorizationHasBillingEvidence, http.StatusConflict, ErrConflict},
+		{ErrProviderOperationNotFound, http.StatusNotFound, ErrNotFound},
+		{ErrProviderOperationConflict, http.StatusConflict, ErrConflict},
+		{ErrProviderOperationNotOpen, http.StatusConflict, ErrConflict},
+		{ErrProviderOperationHasBillingEvidence, http.StatusConflict, ErrConflict},
+		{ErrProviderOperationRefused, http.StatusConflict, ErrConflict},
+		{ErrProviderOperationNotRefused, http.StatusConflict, ErrConflict},
 		{ErrProviderBillingObservationConflict, http.StatusConflict, ErrConflict},
-		{ErrProviderBillingQualificationRefused, http.StatusConflict, ErrConflict},
 	}
 	for _, tc := range cases {
 		code := tc.sentinel.(interface{ ErrorCode() string }).ErrorCode()
@@ -76,9 +76,9 @@ func TestCodedSentinelsClassifyAcrossTransports(t *testing.T) {
 			}
 		}
 	}
-	for _, typed := range []error{&OperationAuthorizationConflict{Field: "authorization_body"}, &ProviderBillingObservationConflict{Field: "cost"}} {
+	for _, typed := range []error{&ProviderOperationConflict{Field: "authorization_body"}, &ProviderBillingObservationConflict{Field: "cost"}} {
 		require.ErrorIs(t, typed, ErrConflict)
 	}
-	require.ErrorIs(t, &OperationAuthorizationConflict{}, ErrOperationAuthorizationConflict)
+	require.ErrorIs(t, &ProviderOperationConflict{}, ErrProviderOperationConflict)
 	require.ErrorIs(t, &ProviderBillingObservationConflict{}, ErrProviderBillingObservationConflict)
 }

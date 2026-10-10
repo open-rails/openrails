@@ -141,6 +141,8 @@ func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 		Resource:         r.Resource,
 		EventType:        r.EventType,
 		Amount:           r.Amount,
+		Outcome:          r.Outcome,
+		ForgivenAmount:   r.ForgivenAmount,
 		Source:           r.Source,
 		SourceID:         r.SourceID,
 		LedgerTransferID: r.LedgerTransferID,

@@ -68,7 +68,7 @@ func TestSolanaSubscribeHoldsSlotBeforeFirstPull(t *testing.T) {
 		_, err = b.confirm(c, sig)
 		require.Error(t, err, "no membership is created for a taken slot")
 		var repairs int
-		require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT count(*) FROM billing.notifications WHERE data->>'transaction_id' = $1`), sig).Scan(&repairs))
+		require.NoError(t, s.w.pool.QueryRow(t.Context(), s.w.q(`SELECT count(*) FROM billing.reconciliation_findings WHERE finding_type = 'consistency.ledger.unbooked' AND evidence->>'transaction_id' = $1`), sig).Scan(&repairs))
 		require.Equal(t, 1, repairs, "the landed first pull is queued for refund")
 	})
 }

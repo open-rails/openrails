@@ -9,7 +9,6 @@ import {
 import type {
   Allowance,
   CatalogApplicationReceipt,
-  CatalogDrift,
   CatalogDriftRefresh,
   CreateOffChannelPaymentParams,
   CreatePriceParams,
@@ -35,10 +34,8 @@ import type {
   AdminSubscription,
   CustomerEntitlement,
   Finding,
-  FindingsGauges,
   MerchantAPIKey,
   MerchantConfiguration,
-  MerchantNotification,
   MerchantSettings,
   MerchantWebhook,
   MintedAPIKey,
@@ -593,23 +590,15 @@ export const applyCatalog = (document: string) =>
     headers: { "Content-Type": "application/yaml" },
   })
 
-export const listCatalogDrift = (
-  limit: number,
-  cursor?: string,
-  signal?: AbortSignal
-) =>
-  api<ListPage<CatalogDrift>>("/admin/catalog/drift", {
-    query: { limit, cursor },
-    signal,
-  })
-
 export const refreshCatalogDrift = () =>
   api<CatalogDriftRefresh>("/admin/catalog/drift/refresh", { method: "POST" })
 
 // --- Ops ---
 
+// listFindings reads the findings queue; type is one finding type or a prefix
+// ending in ".*" (catalog.*: catalog drift).
 export const listFindings = (
-  filters: { status?: string; severity?: string },
+  filters: { status?: string; severity?: string; type?: string },
   limit: number,
   signal?: AbortSignal
 ) =>
@@ -617,9 +606,6 @@ export const listFindings = (
     query: { ...filters, limit },
     signal,
   })
-
-export const getFindingSummary = (signal?: AbortSignal) =>
-  api<FindingsGauges>("/admin/findings/summary", { signal })
 
 export const getFinding = (id: string) => api<Finding>(`/admin/findings/${id}`)
 
@@ -793,24 +779,3 @@ export const rotateWebhookURL = (id: string, url: string) =>
 
 export const deleteWebhook = (id: string) =>
   api<void>(`/admin/alert-webhooks/${id}`, { method: "DELETE" })
-
-// --- Alerting: notifications (in_app store / header bell, #736) ---
-
-export const listNotifications = (unread?: boolean, signal?: AbortSignal) =>
-  api<ListPage<MerchantNotification>>("/admin/notifications", {
-    query: unread !== undefined ? { unread } : undefined,
-    signal,
-  })
-
-// markNotificationsRead marks up to 100 notifications read; an id that does
-// not exist answers null.
-export const markNotificationsRead = (ids: string[]) =>
-  api<{ notifications: Record<string, MerchantNotification | null> }>(
-    "/admin/notifications/read",
-    { method: "POST", body: { notification_ids: ids } }
-  )
-
-export const getUnreadCount = (signal?: AbortSignal) =>
-  api<{ unread_count: number }>("/admin/notifications/unread-count", {
-    signal,
-  })

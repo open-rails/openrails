@@ -43,16 +43,21 @@ func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotenc
 // Amount is the host-priced cost in the currency's internal precision;
 // 0 records a free/metered-only event whose Dimensions still aggregate
 // through rate-card rating (gauge meters report unit-second quantities).
+//
+// Failed records usage that failed (see billing.UsageFailed): the windows it
+// counts toward are resolved here from InvokerType.
 type RecordUsageInput struct {
-	CustomerID identity.CustomerID
-	Invoker    string
-	Currency   string
-	EventType  string
-	Dimensions map[string]int64
-	Amount     int64
-	Resource   string
-	Metadata   map[string]any
-	Key        UsageIdempotencyKey
+	CustomerID  identity.CustomerID
+	Invoker     string
+	InvokerType billing.InvokerType
+	Failed      bool
+	Currency    string
+	EventType   string
+	Dimensions  map[string]int64
+	Amount      int64
+	Resource    string
+	Metadata    map[string]any
+	Key         UsageIdempotencyKey
 	// OccurredAt places the event in its rating window (zero = now).
 	OccurredAt time.Time
 }
@@ -88,7 +93,7 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		}
 	}
 	payer := in.CustomerID
-	ev, err := s.moneyService().RecordUsage(ctx, money.RecordUsageParams{
+	params := money.RecordUsageParams{
 		Payer:      &payer,
 		Invoker:    strings.TrimSpace(in.Invoker),
 		Currency:   cur,
@@ -98,13 +103,22 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		Key:        in.Key,
 		Metadata:   metadata,
 		OccurredAt: in.OccurredAt,
-	})
+		Failed:     in.Failed,
+		Delegated:  in.InvokerType == billing.InvokerTypeDelegated,
+	}
+	if in.Failed {
+		if params.FailedWindows, err = s.failedUsageWindows(ctx, payer, in.InvokerType, cur); err != nil {
+			return nil, err
+		}
+	}
+	ev, err := s.moneyService().RecordUsage(ctx, params)
 	if err != nil {
 		return nil, err
 	}
 	out := &billing.UsageEvent{
 		ID: billing.UsageEventID(ev.ID), CustomerID: billing.CustomerID(ev.CustomerID), Invoker: ev.Invoker, Currency: ev.Currency,
-		EventType: ev.EventType, Dimensions: ev.Dimensions, Amount: ev.Amount, Resource: ev.Resource, Metadata: ev.Metadata,
+		EventType: ev.EventType, Dimensions: ev.Dimensions, Outcome: billing.UsageOutcome(ev.Outcome), Amount: ev.Amount, ForgivenAmount: ev.ForgivenAmount,
+		Resource: ev.Resource, Metadata: ev.Metadata,
 		Source: ev.Source, SourceID: ev.SourceID, OccurredAt: ev.OccurredAt, CreatedAt: ev.CreatedAt, Replayed: ev.Replayed,
 	}
 	if ev.LedgerTransferID != nil {

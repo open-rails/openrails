@@ -37,6 +37,7 @@ migration 0033_customer_contacts.up.sql sha256:a55bddd0d2832d76f7758c8127452b7dd
 migration 0034_price_migrations.up.sql sha256:735de097e54d63bbbe0f019648714ce9516c07e888a1ae6933efd20a42860f3c
 migration 0035_psp_credential_fingerprint.up.sql sha256:26ed2be2aa9c819c86cfc7e29ad416368e5a584739f448847e57ef837dce3d6f
 migration 0036_invoice_overdue_is_a_filter.up.sql sha256:4d1c199b499f2a956ea1adbba79a47ba5c48444ca6a7ea51d6b55b3046164f48
+migration 0037_failed_usage.up.sql sha256:440a0bea4b34c76571c07a94918d935e1ce94c889b5e583c9c68ec0b52901cba
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -661,6 +662,26 @@ table billing.destructive_run_before_images
   index CREATE UNIQUE INDEX destructive_run_before_images_identity_key ON billing.destructive_run_before_images USING btree (merchant_id, destructive_run_id, table_name, row_id)
   index CREATE UNIQUE INDEX destructive_run_before_images_pkey ON billing.destructive_run_before_images USING btree (merchant_id, id)
   trigger CREATE TRIGGER immutable_destructive_before_images BEFORE DELETE OR UPDATE ON billing.destructive_run_before_images FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('restored_at', 'destructive_run_class')
+
+table billing.failed_usage_windows
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column invoker text NOT NULL
+  column window_key text NOT NULL
+  column window_start timestamp with time zone NOT NULL
+  column window_end timestamp with time zone NOT NULL
+  column amount bigint NOT NULL
+  constraint failed_usage_windows_amount_check CHECK ((amount > 0))
+  constraint failed_usage_windows_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint failed_usage_windows_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint failed_usage_windows_invoker_check CHECK ((octet_length(invoker) <= 255))
+  constraint failed_usage_windows_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint failed_usage_windows_pkey PRIMARY KEY (merchant_id, customer_id, currency, invoker, window_key, window_start)
+  constraint failed_usage_windows_window_check CHECK ((window_end > window_start))
+  constraint failed_usage_windows_window_key_check CHECK (((window_key <> ''::text) AND (octet_length(window_key) <= 255)))
+  index CREATE UNIQUE INDEX failed_usage_windows_pkey ON billing.failed_usage_windows USING btree (merchant_id, customer_id, currency, invoker, window_key, window_start)
+  index CREATE INDEX failed_usage_windows_window_end_idx ON billing.failed_usage_windows USING btree (merchant_id, window_end)
 
 table billing.federated_grants
   column merchant_id uuid NOT NULL
@@ -2430,11 +2451,16 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   column metadata jsonb
   column occurred_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column outcome text NOT NULL
+  column forgiven_amount bigint NOT NULL
   constraint usage_events_amount_check CHECK ((amount >= 0))
   constraint usage_events_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_events_customer_id_currency_ledger_transfer_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES billing.ledger_transfers(merchant_id, customer_id, currency, id)
   constraint usage_events_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint usage_events_failed_host_priced_check CHECK (((outcome = 'succeeded'::text) OR (pricing_authority = 'host'::text)))
+  constraint usage_events_forgiven_amount_check CHECK (((forgiven_amount >= 0) AND ((outcome = 'failed'::text) OR (forgiven_amount = 0))))
   constraint usage_events_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint usage_events_outcome_check CHECK ((outcome = ANY (ARRAY['succeeded'::text, 'failed'::text])))
   constraint usage_events_pkey PRIMARY KEY (merchant_id, id, occurred_at)
   constraint usage_events_pricing_authority_check CHECK ((pricing_authority = ANY (ARRAY['host'::text, 'catalog'::text])))
   constraint usage_events_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 255)))
@@ -3027,6 +3053,7 @@ function billing.guard_billing_restore_receipt()
                     'customer_invoice_profiles',
                     'customers',
                     'dashboard_configs',
+                    'failed_usage_windows',
                     'destructive_run_before_images',
                     'grants',
                     'host_outbox',

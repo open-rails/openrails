@@ -139,11 +139,9 @@ func TestListsReadNamedRecords(t *testing.T) {
 		{CustomerID: d.cid(), Currency: "USD", Amount: 30_000_000, Source: "support", SourceID: uuid.NewString()},
 	})
 	require.NoError(t, err)
-	// What detectors and alerting leave: an inbox, findings, catalog drift and
-	// an alert webhook.
+	// What detectors and alerting leave: findings, catalog drift among them,
+	// and an alert webhook.
 	for _, stmt := range []string{
-		`INSERT INTO billing.notifications (merchant_id, recipient_kind, event_type, severity, title, body, data)
-			SELECT id, 'merchant', 'operator.alert', 'warning', 'Heads up', 'Something to read', '{}' FROM billing.merchants WHERE slug = $1`,
 		`INSERT INTO billing.merchant_webhooks (merchant_id, name, destination_host, secret_version, format, enabled)
 			SELECT id, 'ops', 'hooks.example.test', 1, 'generic', true FROM billing.merchants WHERE slug = $1`,
 	} {
@@ -175,7 +173,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/customers":                                    {"/v1/admin/customers", "", "customers", "", ""},
 		"GET /v1/admin/catalog/products":                             {"/v1/admin/catalog/products", "", "products", "", ""},
 		"GET /v1/admin/catalog/prices":                               {"/v1/admin/catalog/prices", "", "prices", "", ""},
-		"GET /v1/admin/catalog/drift":                                {"/v1/admin/catalog/drift", "", "reconciliation_findings", "", ""},
 		"GET /v1/admin/subscriptions":                                {"/v1/admin/subscriptions", "", "subscriptions", "", ""},
 		"GET /v1/admin/price-migrations":                             {"/v1/admin/price-migrations", "", "price_migrations", "", ""},
 		"GET /v1/admin/customers/{customer_id}/product-access":       {customer + "/product-access", "", "product_access", "", ""},
@@ -192,7 +189,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "merchant_webhooks", "", ""},
 		"GET /v1/admin/provisioning-tokens":                          {"/v1/admin/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
 		"GET /v1/admin/host-events":                                  {"/v1/admin/host-events", "include_acknowledged=true", "host_outbox", "", ""},
-		"GET /v1/admin/notifications":                                {"/v1/admin/notifications", "", "notifications", "", ""},
 		"GET /v1/admin/findings":                                     {"/v1/admin/findings", "", "reconciliation_findings", "", ""},
 	}
 	listed := 0
@@ -347,9 +343,6 @@ func TestBatchRoutesReplaceTheSingles(t *testing.T) {
 		"/v1/admin/admissions/release": {"request_ids": many(billing.MaxAdmissionBatchItems+1, func(i int) any { return fmt.Sprint("r", i) })},
 		"/v1/admin/admissions/extend": {"items": many(billing.MaxAdmissionBatchItems+1, func(i int) any {
 			return map[string]any{"request_id": fmt.Sprint("r", i), "expires_at": expires}
-		})},
-		"/v1/admin/wasted-spend": {"items": many(billing.MaxBatchItems+1, func(i int) any {
-			return map[string]any{"customer_id": c.id, "invoker": c.id, "currency": "USD", "amount": "1", "source": "s", "source_id": fmt.Sprint(i)}
 		})},
 		"/v1/admin/credit-grants": {"items": many(billing.MaxBatchItems+1, func(i int) any {
 			return map[string]any{"customer_id": c.id, "currency": "USD", "amount": "1", "source": "s", "source_id": fmt.Sprint(i)}

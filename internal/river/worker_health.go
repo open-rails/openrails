@@ -13,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // #689/#895: per-worker health bookkeeping. The middleware is attached to every
@@ -131,27 +130,4 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(runes[:n])
-}
-
-// workerHealthAlertIdempotencyKey identifies one alerting incident. Retry-
-// volatile health details are deliberately excluded so a partial merchant
-// fan-out retries only the deliveries that did not already persist.
-func workerHealthAlertIdempotencyKey(row gen.BillingWorkerState, reason string) string {
-	lastSuccessAt := ""
-	if row.LastSuccessAt != nil {
-		lastSuccessAt = row.LastSuccessAt.UTC().Format(time.RFC3339Nano)
-	}
-	lastAlertedAt := ""
-	if row.LastAlertedAt != nil {
-		lastAlertedAt = row.LastAlertedAt.UTC().Format(time.RFC3339Nano)
-	}
-	return uuidutil.DeterministicID(
-		uuidutil.DeterministicNamespace,
-		"worker_health_alert",
-		row.WorkerKind,
-		reason,
-		row.RegisteredAt.UTC().Format(time.RFC3339Nano),
-		lastSuccessAt,
-		lastAlertedAt,
-	).String()
 }

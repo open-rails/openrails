@@ -49,9 +49,8 @@ const (
 )
 
 var (
-	ErrProviderBillingObservationConflict   = billing.ErrProviderBillingObservationConflict
-	ErrProviderBillingQualificationRefused  = billing.ErrProviderBillingQualificationRefused
-	ErrProviderBillingQualificationNotFound = billing.ErrProviderBillingQualificationNotFound
+	ErrProviderBillingObservationConflict = billing.ErrProviderBillingObservationConflict
+	ErrProviderOperationRefused           = billing.ErrProviderOperationRefused
 )
 
 type ProviderBillingObservationConflict = billing.ProviderBillingObservationConflict
@@ -60,18 +59,19 @@ type ProviderBillingLifecycleEvidence = billing.ProviderBillingLifecycleEvidence
 
 type ProviderBillingRecord = billing.ProviderBillingRecord
 
-type ProviderBillingEvidenceRefusalKind = billing.ProviderBillingEvidenceRefusalKind
+type ProviderBillingRefusalKind = billing.ProviderBillingRefusalKind
 
 const (
-	ProviderBillingRefusalSchemaAmbiguity  ProviderBillingEvidenceRefusalKind = "schema_ambiguity"
-	ProviderBillingRefusalSubmicroAmount   ProviderBillingEvidenceRefusalKind = "submicro_amount"
-	ProviderBillingRefusalAmountOverflow   ProviderBillingEvidenceRefusalKind = "amount_overflow"
-	ProviderBillingRefusalResponseTooLarge ProviderBillingEvidenceRefusalKind = "response_too_large"
+	ProviderBillingRefusalSchemaAmbiguity  = billing.ProviderBillingRefusalSchemaAmbiguity
+	ProviderBillingRefusalSubmicroAmount   = billing.ProviderBillingRefusalSubmicroAmount
+	ProviderBillingRefusalAmountOverflow   = billing.ProviderBillingRefusalAmountOverflow
+	ProviderBillingRefusalResponseTooLarge = billing.ProviderBillingRefusalResponseTooLarge
 )
 
 // ProviderBillingObservationRefusal is a stable typed refusal supplied by a
-// provider adapter or SDK. OpenRails persists it but never parses provider raw
-// bodies. RawBody may be empty when the provider response exceeded its bound.
+// provider adapter or SDK, or the host's own. OpenRails persists it but never
+// parses provider raw bodies. RawBody may be empty when the provider response
+// exceeded its bound.
 type ProviderBillingObservationRefusal = billing.ProviderBillingObservationRefusal
 
 type ProviderBillingObservationInput = billing.RecordProviderBillingObservationParams
@@ -97,11 +97,8 @@ type ProviderBillingQualification struct {
 	QualifiedObservationID   string
 	QualifiedCostAmount      *int64
 	QualifiedAt              *time.Time
-	Resolution               *ProviderBillingResolution
-	Authorization            *OperationAuthorization
 	CreatedAt                time.Time
 	UpdatedAt                time.Time
-	Replayed                 bool
 }
 
 type normalizedProviderBillingRecord struct {
@@ -126,19 +123,23 @@ type preparedProviderBillingObservation struct {
 
 // RecordProviderBillingObservationInTx appends one exact provider-neutral
 // billing read, advances durable post-absence qualification, and is the only
-// caller of pass-through provider-cost settlement. It owns no transaction
+// caller of pass-through provider-cost settlement; or it records the host's
+// refusal to produce one. It answers the operation, and owns no transaction
 // boundary and never calls a provider or request admission.
 func (s *MoneyService) RecordProviderBillingObservationInTx(
 	ctx context.Context,
 	txDB *db.DB,
 	in ProviderBillingObservationInput,
 	quiescence time.Duration,
-) (*ProviderBillingQualification, error) {
+) (*OperationAuthorization, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
 	if txDB == nil {
 		return nil, fmt.Errorf("provider billing observation requires a bound transaction")
+	}
+	if in.Refusal != nil && in.Refusal.Kind.HostRefusal() {
+		return s.recordHostRefusalInTx(ctx, txDB, in)
 	}
 	if quiescence < time.Second {
 		return nil, fmt.Errorf("provider billing quiescence must be at least one second")
@@ -163,7 +164,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		MerchantID: merchantID.UUID(), OperationID: in.OperationID,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrOperationAuthorizationNotFound
+		return nil, ErrProviderOperationNotFound
 	}
 	if err != nil {
 		return nil, err
@@ -199,12 +200,12 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		// Evidence may start only while the authorization is open; a host that
 		// ignores this error must not be able to commit orphan evidence.
 		if OperationAuthorizationState(authRow.State) != OperationAuthorizationOpen {
-			return nil, ErrOperationAuthorizationNotOpen
+			return nil, ErrProviderOperationNotOpen
 		}
 		if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), in.OperationID); err != nil {
 			return nil, err
 		} else if refused {
-			return nil, ErrProviderBillingQualificationRefused
+			return nil, ErrProviderOperationRefused
 		}
 		qual, err = q.InsertProviderBillingQualification(ctx, gen.InsertProviderBillingQualificationParams{
 			MerchantID:               merchantID.UUID(),
@@ -236,22 +237,23 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 		if err := replayProviderBillingObservation(existing, in, prepared); err != nil {
 			return nil, err
 		}
-		return withHoldOutcome(ctx, q, providerBillingQualificationFromRow(qual, operationAuthorizationFromRow(authRow, false), true))
+		auth := operationAuthorizationFromRow(authRow, true)
+		return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return nil, getErr
 	}
 
 	if OperationAuthorizationState(authRow.State) != OperationAuthorizationOpen {
-		return nil, ErrOperationAuthorizationNotOpen
+		return nil, ErrProviderOperationNotOpen
 	}
 	if ProviderBillingQualificationState(qual.State) == ProviderBillingQualificationRefused {
-		return nil, ErrProviderBillingQualificationRefused
+		return nil, ErrProviderOperationRefused
 	}
 	// The host may have refused a pending qualification it can no longer advance.
 	if refused, err := providerBillingRefused(ctx, q, merchantID.UUID(), in.OperationID); err != nil {
 		return nil, err
 	} else if refused {
-		return nil, ErrProviderBillingQualificationRefused
+		return nil, ErrProviderOperationRefused
 	}
 	if ProviderBillingQualificationState(qual.State) == ProviderBillingQualificationEligible {
 		return nil, fmt.Errorf("provider billing qualification is eligible while authorization remains open")
@@ -320,7 +322,7 @@ func (s *MoneyService) RecordProviderBillingObservationInTx(
 			return nil, err
 		}
 	}
-	return withHoldOutcome(ctx, q, providerBillingQualificationFromRow(qual, auth, false))
+	return auth, attachOperationDetails(ctx, q, merchantID.UUID(), auth)
 }
 
 func evaluateProviderBillingObservation(
@@ -468,6 +470,9 @@ func validateProviderBillingInput(in ProviderBillingObservationInput) error {
 			}
 		default:
 			return fmt.Errorf("unsupported provider billing refusal kind %q", in.Refusal.Kind)
+		}
+		if in.Refusal.Detail != "" {
+			return fmt.Errorf("provider billing refusal %q takes no detail", in.Refusal.Kind)
 		}
 	}
 	return nil
@@ -731,7 +736,7 @@ func providerBillingSettlementObservationFromRow(row gen.GetProviderBillingObser
 	}
 }
 
-func providerBillingQualificationFromRow(row gen.BillingCostQualification, auth *OperationAuthorization, replayed bool) *ProviderBillingQualification {
+func providerBillingQualificationFromRow(row gen.BillingCostQualification) *ProviderBillingQualification {
 	var lifecycleDigest [sha256.Size]byte
 	copy(lifecycleDigest[:], row.LifecycleEvidenceDigest)
 	return &ProviderBillingQualification{
@@ -755,10 +760,8 @@ func providerBillingQualificationFromRow(row gen.BillingCostQualification, auth 
 		QualifiedObservationID:   providerBillingOptionalString(row.QualifiedObservationID),
 		QualifiedCostAmount:      row.QualifiedCostAmount,
 		QualifiedAt:              row.QualifiedAt,
-		Authorization:            auth,
 		CreatedAt:                row.CreatedAt,
 		UpdatedAt:                row.UpdatedAt,
-		Replayed:                 replayed,
 	}
 }
 
@@ -767,34 +770,4 @@ func providerBillingOptionalString(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-// GetProviderBillingQualification reads the bound merchant's durable
-// qualification state. It does not attempt settlement.
-func (s *MoneyService) GetProviderBillingQualification(ctx context.Context, operationID string) (*ProviderBillingQualification, error) {
-	return s.GetProviderBillingQualificationInTx(ctx, s.db, operationID)
-}
-
-// GetProviderBillingQualificationInTx reads through a caller-owned transaction
-// and observes its uncommitted qualification and settlement.
-func (s *MoneyService) GetProviderBillingQualificationInTx(ctx context.Context, txDB *db.DB, operationID string) (*ProviderBillingQualification, error) {
-	if err := validateOperationID(operationID); err != nil {
-		return nil, fmt.Errorf("%w: %v", billing.ErrInvalid, err)
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	q := txDB.Gen(ctx)
-	row, err := q.GetProviderBillingQualificationWithAuthorization(ctx, gen.GetProviderBillingQualificationWithAuthorizationParams{
-		MerchantID: merchantID.UUID(), OperationID: operationID,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, ErrProviderBillingQualificationNotFound
-	}
-	if err != nil {
-		return nil, err
-	}
-	auth := operationAuthorizationFromRow(row.BillingOperationAuthorization, false)
-	return withHoldOutcome(ctx, q, providerBillingQualificationFromRow(row.BillingCostQualification, auth, false))
 }

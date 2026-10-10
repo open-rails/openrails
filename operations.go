@@ -17,10 +17,11 @@ func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption)
 }
 
 // ListFindings pages the findings queue: open findings unless req.Status
-// names another, most severe first, then oldest.
+// names another, most severe first, then oldest. req.Type is one finding type
+// or a prefix ending in ".*" ("catalog.*" lists catalog drift).
 func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams, options ...RequestOption) (*billing.ListPage[billing.Finding], error) {
 	q := cursorQuery(req.PageRequest)
-	for key, value := range map[string]string{"status": string(req.Status), "severity": req.Severity, "finding_type": req.Type} {
+	for key, value := range map[string]string{"status": string(req.Status), "severity": req.Severity, "type": req.Type} {
 		if value != "" {
 			q.Set(key, value)
 		}
@@ -30,15 +31,6 @@ func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams
 	}
 	var out billing.ListPage[billing.Finding]
 	if err := c.do(ctx, http.MethodGet, "/v1/admin/findings?"+q.Encode(), nil, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// GetFindingSummary returns the findings queue at a glance.
-func (c *Client) GetFindingSummary(ctx context.Context, options ...RequestOption) (*billing.FindingSummary, error) {
-	var out billing.FindingSummary
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/findings/summary", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

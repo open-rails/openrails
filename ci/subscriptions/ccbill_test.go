@@ -351,7 +351,7 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 	require.Empty(t, subs.Items, "no CCBill agreement is enrolled")
 	require.False(t, stranger.entitled(m.ent))
 
-	status, raw := w.staff(http.MethodGet, "/v1/admin/notifications")
+	status, raw := w.staff(http.MethodGet, "/v1/admin/findings?type=consistency.ledger.unbooked")
 	require.Equal(t, http.StatusOK, status, raw)
 	require.Contains(t, raw, "ccbill_new_sale_refused")
 	require.Contains(t, raw, txn)

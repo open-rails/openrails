@@ -33,6 +33,7 @@ var ownedTables = []string{
 	"dashboard_configs",
 	"destructive_action_switch",
 	"destructive_run_before_images",
+	"failed_usage_windows",
 	"federated_grants",
 	"grants",
 	"host_outbox",

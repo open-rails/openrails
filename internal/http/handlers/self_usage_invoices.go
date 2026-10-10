@@ -66,9 +66,9 @@ func getUsage(r *httprequest.Request, customer billing.CustomerID) {
 	query := r.Request.URL.Query()
 	params := billing.GetUsageParams{Currency: query.Get("currency"), From: from, To: to, GroupBy: billing.UsageGroupBy(query.Get("group_by"))}
 	switch params.GroupBy {
-	case "", billing.UsageByEventType, billing.UsageByResource, billing.UsageByInvoker, billing.UsageByFunction, billing.UsageByTier:
+	case "", billing.UsageByEventType, billing.UsageByResource, billing.UsageByInvoker:
 	default:
-		r.APIError(api.Coded(billing.CodeInvalidQuery, "group_by must be event_type, resource, invoker, function or tier").WithParam("group_by"))
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "group_by must be event_type, resource or invoker").WithParam("group_by"))
 		return
 	}
 	svc, ok := billingService(r)

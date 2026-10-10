@@ -1020,109 +1020,6 @@
         ]
       }
     },
-    "/v1/admin/catalog/drift": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ids",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "kind",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "rail",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "resource_type",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/CatalogDrift"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/admin/catalog/drift/refresh": {
       "post": {
         "tags": [
@@ -6189,52 +6086,6 @@
         ]
       }
     },
-    "/v1/admin/wasted-spend": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReportWastedSpendBatchParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReportWastedSpendBatchResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/admin/usage-events": {
       "post": {
         "tags": [
@@ -6274,82 +6125,6 @@
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/usage": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "from",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "group_by",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "to",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Usage"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "currency_unsupported",
-          "invalid_customer_id",
-          "service_credential_customer_scope_denied"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6431,18 +6206,28 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/OpenOperationAuthorizationParams"
+                "$ref": "#/components/schemas/OpenProviderOperationParams"
               }
             }
           }
         },
         "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderOperation"
+                }
+              }
+            }
+          },
           "200": {
             "description": "OK",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationAuthorization"
+                  "$ref": "#/components/schemas/ProviderOperation"
                 }
               }
             }
@@ -6462,7 +6247,7 @@
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
-          "operation_authorization_conflict"
+          "provider_operation_conflict"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6514,7 +6299,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/OperationAuthorization"
+                        "$ref": "#/components/schemas/ProviderOperation"
                       }
                     },
                     "next_cursor": {
@@ -6574,7 +6359,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationAuthorization"
+                  "$ref": "#/components/schemas/ProviderOperation"
                 }
               }
             }
@@ -6592,14 +6377,14 @@
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
           "invalid_param",
-          "operation_authorization_not_found"
+          "provider_operation_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
       }
     },
-    "/v1/admin/provider-operations/{operation_id}/extend": {
+    "/v1/admin/provider-operations/{operation_id}/increment": {
       "post": {
         "tags": [
           "admin"
@@ -6618,7 +6403,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ExtendOperationAuthorizationParams"
+                "$ref": "#/components/schemas/IncrementProviderOperationParams"
               }
             }
           }
@@ -6629,7 +6414,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationAuthorizationExtension"
+                  "$ref": "#/components/schemas/ProviderOperation"
                 }
               }
             }
@@ -6649,10 +6434,10 @@
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
-          "operation_authorization_conflict",
-          "operation_authorization_not_found",
-          "operation_authorization_not_open",
-          "provider_billing_qualification_refused"
+          "provider_operation_conflict",
+          "provider_operation_not_found",
+          "provider_operation_not_open",
+          "provider_operation_refused"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6679,7 +6464,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ReleaseOperationAuthorizationParams"
+                "$ref": "#/components/schemas/ReleaseProviderOperationParams"
               }
             }
           }
@@ -6690,7 +6475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationAuthorization"
+                  "$ref": "#/components/schemas/ProviderOperation"
                 }
               }
             }
@@ -6709,11 +6494,11 @@
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
-          "operation_authorization_conflict",
-          "operation_authorization_has_billing_evidence",
-          "operation_authorization_not_found",
-          "operation_authorization_not_open",
-          "provider_billing_qualification_refused"
+          "provider_operation_conflict",
+          "provider_operation_has_billing_evidence",
+          "provider_operation_not_found",
+          "provider_operation_not_open",
+          "provider_operation_refused"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6751,7 +6536,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderBillingQualification"
+                  "$ref": "#/components/schemas/ProviderOperation"
                 }
               }
             }
@@ -6771,176 +6556,10 @@
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
-          "operation_authorization_not_found",
-          "operation_authorization_not_open",
           "provider_billing_observation_conflict",
-          "provider_billing_qualification_refused"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/provider-operations/{operation_id}/qualification": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "operation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderBillingQualification"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "provider_billing_qualification_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/provider-operations/{operation_id}/resolution": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "operation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResolveProviderBillingQualificationParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProviderBillingQualification"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param",
-          "operation_authorization_not_found",
-          "operation_authorization_not_open",
-          "provider_billing_qualification_not_found",
-          "provider_billing_qualification_not_refused",
-          "provider_billing_resolution_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/provider-operations/{operation_id}/refusal": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "operation_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RefuseProviderBillingQualificationParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OperationAuthorization"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param",
-          "operation_authorization_not_found",
-          "operation_authorization_not_open",
-          "provider_billing_refusal_conflict"
+          "provider_operation_not_found",
+          "provider_operation_not_open",
+          "provider_operation_refused"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -6967,7 +6586,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CloseOperationAuthorizationParams"
+                "$ref": "#/components/schemas/CloseProviderOperationParams"
               }
             }
           }
@@ -6978,7 +6597,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OperationAuthorization"
+                  "$ref": "#/components/schemas/ProviderOperation"
                 }
               }
             }
@@ -6997,95 +6616,10 @@
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
-          "operation_authorization_not_found",
-          "operation_authorization_not_open",
-          "provider_billing_qualification_not_refused",
-          "provider_billing_resolution_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/provider-qualifications": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "authorization_state",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "state",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/ProviderBillingQualification"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_query"
+          "provider_operation_conflict",
+          "provider_operation_not_found",
+          "provider_operation_not_open",
+          "provider_operation_not_refused"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -11840,179 +11374,6 @@
         ]
       }
     },
-    "/v1/admin/notifications": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ids",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "unread",
-            "in": "query",
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/MerchantNotification"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/notifications/unread-count": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UnreadCount"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/notifications/read": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/MarkNotificationsReadParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/NotificationLookup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/admin/worker-health": {
       "get": {
         "tags": [
@@ -12078,13 +11439,6 @@
             }
           },
           {
-            "name": "finding_type",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
             "name": "ids",
             "in": "query",
             "style": "form",
@@ -12114,6 +11468,13 @@
           },
           {
             "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
             "in": "query",
             "schema": {
               "type": "string"
@@ -12167,41 +11528,6 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
-        ]
-      }
-    },
-    "/v1/admin/findings/summary": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FindingSummary"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
         ]
       }
     },
@@ -14782,70 +14108,6 @@
           "workaround"
         ]
       },
-      "CatalogDrift": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "psp_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string"
-          },
-          "resource_type": {
-            "type": "string"
-          },
-          "resource_id": {
-            "type": "string"
-          },
-          "external_resource_id": {
-            "type": "string"
-          },
-          "field": {
-            "type": "string"
-          },
-          "openrails_value": {
-            "type": "string"
-          },
-          "external_value": {
-            "type": "string"
-          },
-          "detected_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "resolved_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "psp_id",
-          "rail",
-          "kind",
-          "resource_type",
-          "resource_id",
-          "external_resource_id",
-          "field",
-          "openrails_value",
-          "external_value",
-          "detected_at",
-          "resolved_at"
-        ]
-      },
       "CatalogDriftRefresh": {
         "type": "object",
         "properties": {
@@ -15486,7 +14748,7 @@
           "card"
         ]
       },
-      "CloseOperationAuthorizationParams": {
+      "CloseProviderOperationParams": {
         "type": "object",
         "properties": {
           "kind": {
@@ -17072,40 +16334,6 @@
           }
         }
       },
-      "EpisodeSummary": {
-        "type": "object",
-        "properties": {
-          "total": {
-            "type": "integer"
-          },
-          "open": {
-            "type": "integer"
-          },
-          "total_days": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "total",
-          "open",
-          "total_days"
-        ]
-      },
-      "EpisodeTotals": {
-        "type": "object",
-        "properties": {
-          "freeloader": {
-            "$ref": "#/components/schemas/FreeloaderEpisodeSummary"
-          },
-          "orphaned": {
-            "$ref": "#/components/schemas/EpisodeSummary"
-          }
-        },
-        "required": [
-          "freeloader",
-          "orphaned"
-        ]
-      },
       "ErrorDetails": {
         "type": "object",
         "properties": {
@@ -17155,26 +16383,6 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
-          }
-        }
-      },
-      "ExtendOperationAuthorizationParams": {
-        "type": "object",
-        "properties": {
-          "ordinal": {
-            "type": "integer"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "minimum_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "overdraft_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
           }
         }
       },
@@ -17265,6 +16473,76 @@
             "type": "string"
           },
           "provider": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "psp_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource_type": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "external_resource_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "field": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "openrails_value": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "external_value": {
             "oneOf": [
               {
                 "type": "string"
@@ -17372,6 +16650,13 @@
           "id",
           "finding_type",
           "provider",
+          "psp_id",
+          "resource_type",
+          "resource_id",
+          "external_resource_id",
+          "field",
+          "openrails_value",
+          "external_value",
           "subject_key",
           "severity",
           "status",
@@ -17440,51 +16725,6 @@
           "execution"
         ]
       },
-      "FindingSummary": {
-        "type": "object",
-        "properties": {
-          "orphaned_members": {
-            "type": "integer"
-          },
-          "freeloaders": {
-            "type": "integer"
-          },
-          "duplicate_coverage": {
-            "type": "integer"
-          },
-          "verification_pressure": {
-            "$ref": "#/components/schemas/VerificationPressure"
-          },
-          "episodes": {
-            "$ref": "#/components/schemas/EpisodeTotals"
-          },
-          "open_by_severity": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "integer"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "total_open": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "orphaned_members",
-          "freeloaders",
-          "duplicate_coverage",
-          "verification_pressure",
-          "episodes",
-          "open_by_severity",
-          "total_open"
-        ]
-      },
       "FlatPrice": {
         "type": "object",
         "properties": {
@@ -17493,29 +16733,6 @@
             "description": "A number as a decimal string."
           }
         }
-      },
-      "FreeloaderEpisodeSummary": {
-        "type": "object",
-        "properties": {
-          "total": {
-            "type": "integer"
-          },
-          "open": {
-            "type": "integer"
-          },
-          "total_days": {
-            "type": "number"
-          },
-          "unsanctioned": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "total",
-          "open",
-          "total_days",
-          "unsanctioned"
-        ]
       },
       "GenerateDashboardWidgetParams": {
         "type": "object",
@@ -17704,6 +16921,26 @@
         "required": [
           "host_events"
         ]
+      },
+      "IncrementProviderOperationParams": {
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "minimum_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "overdraft_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
       },
       "InviteTeamMemberParams": {
         "type": "object",
@@ -18587,61 +17824,6 @@
           "name"
         ]
       },
-      "MerchantNotification": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "severity": {
-            "type": "string",
-            "enum": [
-              "critical",
-              "warning"
-            ]
-          },
-          "title": {
-            "type": "string"
-          },
-          "body": {
-            "type": "string"
-          },
-          "link": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "read_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "severity",
-          "title",
-          "body",
-          "link",
-          "created_at",
-          "read_at"
-        ]
-      },
       "MerchantProfile": {
         "type": "object",
         "properties": {
@@ -19515,34 +18697,6 @@
           }
         }
       },
-      "NotificationLookup": {
-        "type": "object",
-        "properties": {
-          "notifications": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/MerchantNotification"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "notifications"
-        ]
-      },
       "Offer": {
         "type": "object",
         "properties": {
@@ -19648,7 +18802,7 @@
           }
         }
       },
-      "OpenOperationAuthorizationParams": {
+      "OpenProviderOperationParams": {
         "type": "object",
         "properties": {
           "operation_id": {
@@ -19688,205 +18842,6 @@
             "description": "A number as a decimal string."
           }
         }
-      },
-      "OperationAuthorization": {
-        "type": "object",
-        "properties": {
-          "operation_id": {
-            "type": "string"
-          },
-          "merchant_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "record_owner": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "authorized_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "claim_reference": {
-            "type": "string"
-          },
-          "authorization_body": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "authorization_body_sha256": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "open",
-              "released",
-              "settled"
-            ]
-          },
-          "terminal_reference": {
-            "type": "string"
-          },
-          "settlement_cost_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "settlement_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "settlement_body": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "settlement_body_sha256": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "refusal": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ProviderBillingRefusal"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "resolution": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ProviderBillingResolution"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "released_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "settled_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "operation_id",
-          "merchant_id",
-          "customer_id",
-          "record_owner",
-          "currency",
-          "amount",
-          "authorized_amount",
-          "claim_reference",
-          "authorization_body",
-          "authorization_body_sha256",
-          "state",
-          "terminal_reference",
-          "settlement_cost_amount",
-          "settlement_amount",
-          "settlement_body",
-          "settlement_body_sha256",
-          "refusal",
-          "resolution",
-          "created_at",
-          "released_at",
-          "settled_at",
-          "replayed"
-        ]
-      },
-      "OperationAuthorizationExtension": {
-        "type": "object",
-        "properties": {
-          "operation_id": {
-            "type": "string"
-          },
-          "ordinal": {
-            "type": "integer"
-          },
-          "granted_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "authorized_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "operation_id",
-          "ordinal",
-          "granted_amount",
-          "authorized_amount",
-          "replayed"
-        ]
       },
       "PSP": {
         "type": "object",
@@ -22056,22 +21011,22 @@
             "type": "string",
             "enum": [
               "amount_overflow",
+              "lifecycle_unprovable",
+              "observation_rejected",
+              "provider_billing_unavailable",
               "response_too_large",
               "schema_ambiguity",
               "submicro_amount"
             ]
+          },
+          "detail": {
+            "type": "string"
           }
         }
       },
       "ProviderBillingQualification": {
         "type": "object",
         "properties": {
-          "operation_id": {
-            "type": "string"
-          },
-          "merchant_id": {
-            "type": "string"
-          },
           "lifecycle": {
             "$ref": "#/components/schemas/ProviderBillingLifecycleEvidence"
           },
@@ -22133,19 +21088,6 @@
               }
             ]
           },
-          "resolution": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ProviderBillingResolution"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "authorization": {
-            "$ref": "#/components/schemas/OperationAuthorization"
-          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -22153,14 +21095,9 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
-          },
-          "replayed": {
-            "type": "boolean"
           }
         },
         "required": [
-          "operation_id",
-          "merchant_id",
           "lifecycle",
           "lifecycle_evidence_sha256",
           "quiescence_seconds",
@@ -22170,11 +21107,8 @@
           "qualified_observation_id",
           "qualified_cost_amount",
           "qualified_at",
-          "resolution",
-          "authorization",
           "created_at",
-          "updated_at",
-          "replayed"
+          "updated_at"
         ]
       },
       "ProviderBillingRecord": {
@@ -22272,6 +21206,229 @@
           "reference",
           "note",
           "resolved_at"
+        ]
+      },
+      "ProviderOperation": {
+        "type": "object",
+        "properties": {
+          "operation_id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "record_owner": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "authorized_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "last_increment": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderOperationIncrement"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "claim_reference": {
+            "type": "string"
+          },
+          "authorization_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "authorization_body_sha256": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "open",
+              "released",
+              "settled"
+            ]
+          },
+          "terminal_reference": {
+            "type": "string"
+          },
+          "qualification": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingQualification"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_cost_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_amount": {
+            "oneOf": [
+              {
+                "type": "string",
+                "description": "A number as a decimal string."
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_body": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settlement_body_sha256": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "refusal": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingRefusal"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ProviderBillingResolution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "released_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "settled_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "replayed": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "operation_id",
+          "merchant_id",
+          "customer_id",
+          "record_owner",
+          "currency",
+          "amount",
+          "authorized_amount",
+          "last_increment",
+          "claim_reference",
+          "authorization_body",
+          "authorization_body_sha256",
+          "state",
+          "terminal_reference",
+          "qualification",
+          "settlement_cost_amount",
+          "settlement_amount",
+          "settlement_body",
+          "settlement_body_sha256",
+          "refusal",
+          "resolution",
+          "created_at",
+          "released_at",
+          "settled_at",
+          "replayed"
+        ]
+      },
+      "ProviderOperationIncrement": {
+        "type": "object",
+        "properties": {
+          "ordinal": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "minimum_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "granted_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "ordinal",
+          "amount",
+          "minimum_amount",
+          "granted_amount",
+          "created_at"
         ]
       },
       "ProvisioningToken": {
@@ -22695,6 +21852,13 @@
           "invoker": {
             "type": "string"
           },
+          "invoker_type": {
+            "type": "string",
+            "enum": [
+              "customer",
+              "delegated"
+            ]
+          },
           "currency": {
             "type": "string"
           },
@@ -22710,6 +21874,13 @@
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "succeeded"
+            ]
           },
           "resource": {
             "type": "string"
@@ -22748,30 +21919,6 @@
           }
         }
       },
-      "RefuseProviderBillingQualificationParams": {
-        "type": "object",
-        "properties": {
-          "reason": {
-            "type": "string",
-            "enum": [
-              "awaiting_equal_observation",
-              "awaiting_quiescence",
-              "coverage_incomplete",
-              "decreasing_provider_cost",
-              "eligible",
-              "lifecycle_unprovable",
-              "negative_or_corrective_record",
-              "observation_changed",
-              "observation_rejected",
-              "provider_billing_unavailable",
-              "provider_evidence_refused"
-            ]
-          },
-          "detail": {
-            "type": "string"
-          }
-        }
-      },
       "ReleaseAdmissionBatchParams": {
         "type": "object",
         "properties": {
@@ -22783,7 +21930,7 @@
           }
         }
       },
-      "ReleaseOperationAuthorizationParams": {
+      "ReleaseProviderOperationParams": {
         "type": "object",
         "properties": {
           "release_reference": {
@@ -22824,65 +21971,6 @@
           }
         }
       },
-      "ReportWastedSpendBatchParams": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ReportWastedSpendParams"
-            }
-          }
-        }
-      },
-      "ReportWastedSpendBatchResult": {
-        "type": "object",
-        "properties": {
-          "items": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/WastedSpendResult"
-            }
-          }
-        },
-        "required": [
-          "items"
-        ]
-      },
-      "ReportWastedSpendParams": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "invoker": {
-            "type": "string"
-          },
-          "invoker_type": {
-            "type": "string",
-            "enum": [
-              "customer",
-              "delegated"
-            ]
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "source": {
-            "type": "string"
-          },
-          "source_id": {
-            "type": "string"
-          },
-          "reason": {
-            "type": "string"
-          }
-        }
-      },
       "ResolveFindingParams": {
         "type": "object",
         "properties": {
@@ -22897,38 +21985,6 @@
             "type": "string"
           },
           "override_params": {}
-        }
-      },
-      "ResolveProviderBillingQualificationParams": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "settled",
-              "written_off"
-            ]
-          },
-          "cost_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "attested_by": {
-            "type": "string"
-          },
-          "reference": {
-            "type": "string"
-          },
-          "note": {
-            "type": "string"
-          }
         }
       },
       "RetryInvoiceCollectionParams": {
@@ -24166,17 +23222,6 @@
           "trust_level"
         ]
       },
-      "UnreadCount": {
-        "type": "object",
-        "properties": {
-          "unread_count": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "unread_count"
-        ]
-      },
       "UpdateCustomerParams": {
         "type": "object",
         "properties": {
@@ -24368,10 +23413,8 @@
             "type": "string",
             "enum": [
               "event_type",
-              "function",
               "invoker",
-              "resource",
-              "tier"
+              "resource"
             ]
           },
           "rows": {
@@ -24421,7 +23464,18 @@
               }
             ]
           },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "failed",
+              "succeeded"
+            ]
+          },
           "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "forgiven_amount": {
             "type": "string",
             "description": "A number as a decimal string."
           },
@@ -24481,7 +23535,9 @@
           "currency",
           "event_type",
           "dimensions",
+          "outcome",
           "amount",
+          "forgiven_amount",
           "resource",
           "metadata",
           "source",
@@ -24587,138 +23643,6 @@
           "display_name",
           "role",
           "permissions"
-        ]
-      },
-      "VerificationPressure": {
-        "type": "object",
-        "properties": {
-          "count": {
-            "type": "integer"
-          },
-          "max_age_seconds": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "max_age_seconds"
-        ]
-      },
-      "WastedSpendReport": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "policy_currency": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "recorded_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "policy_recorded_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "forgiven_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "policy_forgiven_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "charged_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "policy_charged_amount": {
-            "oneOf": [
-              {
-                "type": "string",
-                "description": "A number as a decimal string."
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "action": {
-            "type": "string",
-            "enum": [
-              "charged",
-              "duplicate",
-              "forgiven",
-              "ignored",
-              "invoker_cutoff_tracked"
-            ]
-          }
-        },
-        "required": [
-          "currency",
-          "policy_currency",
-          "recorded_amount",
-          "policy_recorded_amount",
-          "forgiven_amount",
-          "policy_forgiven_amount",
-          "charged_amount",
-          "policy_charged_amount",
-          "action"
-        ]
-      },
-      "WastedSpendResult": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "integer"
-          },
-          "report": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/WastedSpendReport"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/ErrorDetails"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "status",
-          "report",
-          "error"
         ]
       },
       "WebhookReceipt": {
@@ -25629,26 +24553,6 @@
       "type": "invalid_request_error",
       "meaning": "The merchant name is taken."
     },
-    "operation_authorization_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The operation id was reused with a changed term; param names it."
-    },
-    "operation_authorization_has_billing_evidence": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The operation authorization already carries provider billing evidence."
-    },
-    "operation_authorization_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The operation authorization does not exist."
-    },
-    "operation_authorization_not_open": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The operation authorization is no longer open."
-    },
     "payment_duplicate_refused": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25807,37 +24711,42 @@
     "provider_billing_observation_conflict": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The provider billing evidence conflicts with a recorded observation; param names it."
-    },
-    "provider_billing_qualification_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The operation has no provider billing qualification."
-    },
-    "provider_billing_qualification_not_refused": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "Only a refused hold can be closed by an operator."
-    },
-    "provider_billing_qualification_refused": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The operation's provider cost was refused automatic qualification; only an operator's close ends its hold."
-    },
-    "provider_billing_refusal_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The operation was already refused with a different term; param names it."
-    },
-    "provider_billing_resolution_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The operation was already resolved with a different term; param names it."
+      "meaning": "The observation conflicts with a recorded one; param names the term."
     },
     "provider_cancel_held": {
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "Cancelling needs a destructive provider action that is not armed for this merchant."
+    },
+    "provider_operation_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The provider operation call repeats a committed one with a changed term; param names it."
+    },
+    "provider_operation_has_billing_evidence": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The provider operation already carries provider billing evidence, so it cannot be released."
+    },
+    "provider_operation_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "The provider operation does not exist."
+    },
+    "provider_operation_not_open": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The provider operation's hold is no longer open."
+    },
+    "provider_operation_not_refused": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Only a refused provider operation can be closed by an operator."
+    },
+    "provider_operation_refused": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The provider operation's cost was refused automatic qualification; only an operator's close ends its hold."
     },
     "provider_outcome_unknown": {
       "status": 409,

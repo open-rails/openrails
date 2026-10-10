@@ -35,7 +35,6 @@ import {
   listCustomers,
   listPayments,
   listSubscriptions,
-  markNotificationsRead,
   applyMerchantSettings,
   putDefaultUsageRateCard,
   putCustomerUsageRateOverride,
@@ -78,16 +77,10 @@ import type {
   CreateOffChannelPaymentParams,
   Customer,
 } from "@/lib/api/generated/wire"
-import type {
-  MerchantSettings,
-  MerchantNotification,
-  AdminSubscription,
-} from "@/lib/api/types"
+import type { MerchantSettings, AdminSubscription } from "@/lib/api/types"
 import { merchantQueryKeys } from "@/lib/queries"
 
 const EXPORT_PAGE = 200
-// MAX_BATCH_ITEMS is billing.MaxBatchItems: one batch write's bound.
-const MAX_BATCH_ITEMS = 100
 
 const collectAllCursorPages = async <T>(
   listPage: (
@@ -118,36 +111,6 @@ const invalidateTreeOnSuccess =
   (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
     queryClient.invalidateQueries({ queryKey })
 
-const updateNotificationReadCache = (
-  queryClient: QueryClient,
-  notificationsKey: readonly unknown[],
-  unreadKey: readonly unknown[],
-  readIds: string[]
-) => {
-  if (readIds.length === 0) return
-  const ids = new Set(readIds)
-  const readAt = new Date().toISOString()
-  queryClient.setQueryData<{ data: MerchantNotification[] | null }>(
-    notificationsKey,
-    (current) =>
-      current
-        ? {
-            ...current,
-            data: (current.data ?? []).map((notification) =>
-              ids.has(notification.id)
-                ? { ...notification, read_at: readAt }
-                : notification
-            ),
-          }
-        : current
-  )
-  queryClient.setQueryData<{ unread_count: number }>(unreadKey, (current) =>
-    current
-      ? { unread_count: Math.max(0, current.unread_count - readIds.length) }
-      : current
-  )
-}
-
 // Every factory pins the selected merchant once, up front, with
 // merchantQueryKeys(). Callbacks fire after the request returns, by which time
 // the operator may have switched merchants, so a key built inside onSuccess /
@@ -155,49 +118,6 @@ const updateNotificationReadCache = (
 // initiating merchant's screens stay stale and an untouched merchant's cache is
 // invalidated. Importing the live queryKeys here is blocked by lint.
 export const adminMutations = {
-  markNotificationRead: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    const notificationsKey = keys.notifications()
-    const unreadKey = [...notificationsKey, "unread-count"] as const
-    return mutationOptions({
-      mutationKey: [...notificationsKey, "mark-read"],
-      mutationFn: (id: string) => markNotificationsRead([id]),
-      onSuccess: (_result, id) =>
-        updateNotificationReadCache(queryClient, notificationsKey, unreadKey, [
-          id,
-        ]),
-    })
-  },
-  markNotificationsRead: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    const notificationsKey = keys.notifications()
-    const unreadKey = [...notificationsKey, "unread-count"] as const
-    return mutationOptions({
-      mutationKey: [...notificationsKey, "mark-all-read"],
-      mutationFn: async (ids: string[]) => {
-        const batches = []
-        for (let i = 0; i < ids.length; i += MAX_BATCH_ITEMS)
-          batches.push(ids.slice(i, i + MAX_BATCH_ITEMS))
-        const results = await Promise.allSettled(
-          batches.map((batch) => markNotificationsRead(batch))
-        )
-        return results.flatMap((result) =>
-          result.status === "fulfilled"
-            ? Object.entries(result.value.notifications).flatMap(
-                ([id, note]) => (note ? [id] : [])
-              )
-            : []
-        )
-      },
-      onSuccess: (readIds) =>
-        updateNotificationReadCache(
-          queryClient,
-          notificationsKey,
-          unreadKey,
-          readIds
-        ),
-    })
-  },
   saveDashboard: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     const dashboardKey = keys.dashboard()

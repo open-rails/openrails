@@ -774,7 +774,7 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "function" | "invoker" | "resource" | "tier"
+  group_by: "event_type" | "invoker" | "resource"
   rows: UsageRow[]
 }
 

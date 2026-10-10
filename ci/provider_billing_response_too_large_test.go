@@ -27,7 +27,7 @@ func TestProviderBillingResponseTooLargeHasNoBody(t *testing.T) {
 	_, err := createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	body := []byte(`{"rental":"too-large"}`)
-	_, err = client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{
+	_, err = client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
 		OperationID: "too-large", CustomerID: customer, RecordOwner: "user:1", Currency: "USD", Amount: 400_000,
 		ClaimReference: "claim:too-large", AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
 	})
@@ -47,12 +47,14 @@ func TestProviderBillingResponseTooLargeHasNoBody(t *testing.T) {
 		Refusal: &billing.ProviderBillingObservationRefusal{Kind: billing.ProviderBillingRefusalResponseTooLarge},
 	}
 
-	qual, err := client.RecordProviderBillingObservation(ctx, in)
+	op, err := client.RecordProviderBillingObservation(ctx, in)
 	require.NoError(t, err)
-	require.Equal(t, billing.ProviderBillingQualificationRefused, qual.State)
-	require.Equal(t, billing.ProviderBillingProviderEvidenceRefused, qual.Reason)
-	require.False(t, qual.Replayed)
-	require.Equal(t, billing.OperationAuthorizationOpen, qual.Authorization.State)
+	require.Equal(t, billing.ProviderBillingQualificationRefused, op.Qualification.State)
+	require.Equal(t, billing.ProviderBillingProviderEvidenceRefused, op.Qualification.Reason)
+	require.False(t, op.Replayed)
+	require.Equal(t, billing.ProviderOperationOpen, op.State)
+	require.Equal(t, billing.ProviderBillingProviderEvidenceRefused, op.Refusal.Reason)
+	require.Equal(t, "observation too-large:1: response_too_large", op.Refusal.Detail)
 	bal, err := client.GetBalance(ctx, customer, "USD")
 	require.NoError(t, err)
 	require.EqualValues(t, 400_000, bal.HeldAmount)
@@ -72,6 +74,6 @@ func TestProviderBillingResponseTooLargeHasNoBody(t *testing.T) {
 		replay, err := client.RecordProviderBillingObservationTx(ctx, tx, in)
 		require.NoError(t, err)
 		require.True(t, replay.Replayed)
-		require.Equal(t, billing.ProviderBillingQualificationRefused, replay.State)
+		require.Equal(t, billing.ProviderBillingQualificationRefused, replay.Qualification.State)
 	}
 }

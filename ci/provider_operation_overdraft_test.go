@@ -37,15 +37,15 @@ func TestOperationAuthorizationOverdraft(t *testing.T) {
 	}
 	open := func(c billing.CustomerID, operationID string, amount, overdraft int64) error {
 		body := []byte(`{"rental":"` + operationID + `"}`)
-		_, err := client.OpenOperationAuthorization(ctx, billing.OpenOperationAuthorizationParams{
+		_, err := client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
 			OperationID: operationID, CustomerID: c, RecordOwner: "user:1", Currency: "USD", Amount: amount,
 			ClaimReference: "claim:" + operationID, AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
 			OverdraftAmount: overdraft,
 		})
 		return err
 	}
-	extend := func(operationID string, ordinal, amount, minimum, overdraft int64) (*billing.OperationAuthorizationExtension, error) {
-		return client.ExtendOperationAuthorization(ctx, billing.ExtendOperationAuthorizationParams{
+	extend := func(operationID string, ordinal, amount, minimum, overdraft int64) (*billing.ProviderOperation, error) {
+		return client.IncrementProviderOperation(ctx, billing.IncrementProviderOperationParams{
 			OperationID: operationID, Ordinal: ordinal, Amount: amount, MinimumAmount: minimum, OverdraftAmount: overdraft,
 		})
 	}
@@ -80,7 +80,7 @@ func TestOperationAuthorizationOverdraft(t *testing.T) {
 	invalid(func() error { _, err := extend("od-a", 1, 1_000_000, 400_000, -1); return err }())
 	grown, err := extend("od-a", 1, 1_000_000, 400_000, floor)
 	require.NoError(t, err)
-	require.EqualValues(t, 500_000, grown.GrantedAmount)
+	require.EqualValues(t, 500_000, grown.LastIncrement.GrantedAmount)
 	require.EqualValues(t, 3_000_000, grown.AuthorizedAmount)
 	require.EqualValues(t, -floor, balance(payer).AvailableAmount)
 	_, err = extend("od-a", 2, 1, 1, floor)
@@ -99,7 +99,7 @@ func TestOperationAuthorizationOverdraft(t *testing.T) {
 	// The floor counts the debt: 0.2 USD of room is left.
 	require.ErrorIs(t, open(payer, "od-b", 300_000, floor), billing.ErrInsufficientCredits)
 	require.NoError(t, open(payer, "od-b", 200_000, floor))
-	_, err = client.ReleaseOperationAuthorization(ctx, billing.ReleaseOperationAuthorizationParams{OperationID: "od-b", ReleaseReference: "never-created:b"})
+	_, err = client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "od-b", ReleaseReference: "never-created:b"})
 	require.NoError(t, err)
 
 	// The next funding repays the debt first.

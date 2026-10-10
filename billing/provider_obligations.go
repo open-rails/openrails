@@ -39,15 +39,15 @@ func (d *SHA256) UnmarshalText(text []byte) error {
 	return err
 }
 
-type OperationAuthorizationState string
+type ProviderOperationState string
 
 const (
-	OperationAuthorizationOpen     OperationAuthorizationState = "open"
-	OperationAuthorizationReleased OperationAuthorizationState = "released"
-	OperationAuthorizationSettled  OperationAuthorizationState = "settled"
+	ProviderOperationOpen     ProviderOperationState = "open"
+	ProviderOperationReleased ProviderOperationState = "released"
+	ProviderOperationSettled  ProviderOperationState = "settled"
 )
 
-// OpenOperationAuthorizationParams is exact host-authored authority for one
+// OpenProviderOperationParams is exact host-authored authority for one
 // provider operation, reserving Amount of the customer's capacity in
 // Currency (USD is the only currency accepted for now). OperationID is also
 // the provider operation's idempotency identity. OpenRails verifies the
@@ -56,9 +56,9 @@ const (
 // OverdraftAmount lets a prepaid customer's capacity reach below zero: the hold
 // is granted while balance - holds - owed - Amount >= -OverdraftAmount. Spend past
 // the balance settles as owed, and the next funding repays it. It is policy for
-// this call, not part of the authorization's identity; arrears accounts use their
+// this call, not part of the operation's identity; arrears accounts use their
 // credit line instead.
-type OpenOperationAuthorizationParams struct {
+type OpenProviderOperationParams struct {
 	OperationID             string     `json:"operation_id"` // canonical, at most 255 bytes
 	CustomerID              CustomerID `json:"customer_id"`
 	RecordOwner             string     `json:"record_owner"` // canonical, at most 255 bytes
@@ -70,45 +70,51 @@ type OpenOperationAuthorizationParams struct {
 	OverdraftAmount         int64      `json:"overdraft_amount,omitempty,string"`
 }
 
-// OperationAuthorization is the durable reservation. Amount is the opening
-// hold and AuthorizedAmount the hold now: Amount plus every extension grant.
-// Settlement fields are null until OpenRails settles qualified provider
-// evidence: SettlementCostAmount is the qualified provider cost,
-// SettlementAmount what the customer is charged (equal under the pass-through
-// contract, and never clamped to AuthorizedAmount). Refusal is set once the
-// hold's provider cost will not qualify automatically, and Resolution once an
-// operator closed it.
-type OperationAuthorization struct {
-	OperationID             string                      `json:"operation_id"`
-	MerchantID              MerchantID                  `json:"merchant_id"`
-	CustomerID              CustomerID                  `json:"customer_id"`
-	RecordOwner             string                      `json:"record_owner"`
-	Currency                string                      `json:"currency"`
-	Amount                  int64                       `json:"amount,string"`
-	AuthorizedAmount        int64                       `json:"authorized_amount,string"`
-	ClaimReference          string                      `json:"claim_reference"`
-	AuthorizationBody       []byte                      `json:"authorization_body"`
-	AuthorizationBodySHA256 SHA256                      `json:"authorization_body_sha256"`
-	State                   OperationAuthorizationState `json:"state"`
-	TerminalReference       string                      `json:"terminal_reference"`
-	SettlementCostAmount    *int64                      `json:"settlement_cost_amount,string"`
-	SettlementAmount        *int64                      `json:"settlement_amount,string"`
-	SettlementBody          []byte                      `json:"settlement_body"`
-	SettlementBodySHA256    *SHA256                     `json:"settlement_body_sha256"`
-	Refusal                 *ProviderBillingRefusal     `json:"refusal"`
-	Resolution              *ProviderBillingResolution  `json:"resolution"`
-	CreatedAt               time.Time                   `json:"created_at"`
-	ReleasedAt              *time.Time                  `json:"released_at"`
-	SettledAt               *time.Time                  `json:"settled_at"`
-	Replayed                bool                        `json:"replayed"`
+// ProviderOperation is the durable hold on a customer's capacity for one
+// upstream provider operation, and every route on it answers this shape.
+// Amount is the opening hold and AuthorizedAmount the hold now: Amount plus
+// every increment's grant, the latest of which is LastIncrement. Qualification
+// is how far the provider's billing evidence qualifies the operation for
+// settlement, null before the first observation. Settlement fields are null
+// until OpenRails settles: SettlementCostAmount is the qualified provider
+// cost, SettlementAmount what the customer is charged (equal under the
+// pass-through contract, and never clamped to AuthorizedAmount). Refusal is
+// set once the provider cost will not qualify automatically, and Resolution
+// once an operator closed the hold. Replayed: the call repeated one already
+// committed and changed nothing.
+type ProviderOperation struct {
+	OperationID             string                        `json:"operation_id"`
+	MerchantID              MerchantID                    `json:"merchant_id"`
+	CustomerID              CustomerID                    `json:"customer_id"`
+	RecordOwner             string                        `json:"record_owner"`
+	Currency                string                        `json:"currency"`
+	Amount                  int64                         `json:"amount,string"`
+	AuthorizedAmount        int64                         `json:"authorized_amount,string"`
+	LastIncrement           *ProviderOperationIncrement   `json:"last_increment"`
+	ClaimReference          string                        `json:"claim_reference"`
+	AuthorizationBody       []byte                        `json:"authorization_body"`
+	AuthorizationBodySHA256 SHA256                        `json:"authorization_body_sha256"`
+	State                   ProviderOperationState        `json:"state"`
+	TerminalReference       string                        `json:"terminal_reference"`
+	Qualification           *ProviderBillingQualification `json:"qualification"`
+	SettlementCostAmount    *int64                        `json:"settlement_cost_amount,string"`
+	SettlementAmount        *int64                        `json:"settlement_amount,string"`
+	SettlementBody          []byte                        `json:"settlement_body"`
+	SettlementBodySHA256    *SHA256                       `json:"settlement_body_sha256"`
+	Refusal                 *ProviderBillingRefusal       `json:"refusal"`
+	Resolution              *ProviderBillingResolution    `json:"resolution"`
+	CreatedAt               time.Time                     `json:"created_at"`
+	ReleasedAt              *time.Time                    `json:"released_at"`
+	SettledAt               *time.Time                    `json:"settled_at"`
+	Replayed                bool                          `json:"replayed"`
 }
 
-// ExtendOperationAuthorizationParams grows an open reservation by up to Amount,
+// IncrementProviderOperationParams grows an open hold by up to Amount,
 // accepting no less than MinimumAmount (0 < MinimumAmount <= Amount), under the
-// same capacity rule as opening it. Ordinal numbers the operation's extensions
+// same capacity rule as opening it. Ordinal numbers the operation's increments
 // from 1 without gaps; repeating a committed ordinal with the same amounts
-// replays its grant. OverdraftAmount is as for opening.
-type ExtendOperationAuthorizationParams struct {
+// replays it. OverdraftAmount is as for opening.
+type IncrementProviderOperationParams struct {
 	OperationID     string `json:"-"` // carried by the route path
 	Ordinal         int64  `json:"ordinal"`
 	Amount          int64  `json:"amount,string"`
@@ -116,20 +122,20 @@ type ExtendOperationAuthorizationParams struct {
 	OverdraftAmount int64  `json:"overdraft_amount,omitempty,string"`
 }
 
-// OperationAuthorizationExtension is one committed grant. AuthorizedAmount is
-// the reservation's total after it: the opening Amount plus every grant.
-type OperationAuthorizationExtension struct {
-	OperationID      string `json:"operation_id"`
-	Ordinal          int64  `json:"ordinal"`
-	GrantedAmount    int64  `json:"granted_amount,string"`
-	AuthorizedAmount int64  `json:"authorized_amount,string"`
-	Replayed         bool   `json:"replayed"`
+// ProviderOperationIncrement is one committed growth of a hold: what the host
+// asked for (Amount, at least MinimumAmount) and what it was granted.
+type ProviderOperationIncrement struct {
+	Ordinal       int64     `json:"ordinal"`
+	Amount        int64     `json:"amount,string"`
+	MinimumAmount int64     `json:"minimum_amount,string"`
+	GrantedAmount int64     `json:"granted_amount,string"`
+	CreatedAt     time.Time `json:"created_at"`
 }
 
-// ReleaseOperationAuthorizationParams releases an open reservation after the
-// host proves the provider operation never happened. Any billing evidence or
-// refusal refuses release.
-type ReleaseOperationAuthorizationParams struct {
+// ReleaseProviderOperationParams releases an open hold after the host proves
+// the provider operation never happened. Any billing evidence or refusal
+// refuses release.
+type ReleaseProviderOperationParams struct {
 	OperationID      string `json:"-"`                 // carried by the route path
 	ReleaseReference string `json:"release_reference"` // canonical opaque proof, at most 1024 bytes
 }
@@ -154,17 +160,10 @@ const (
 	ProviderBillingDecreasingProviderCost   ProviderBillingQualificationReason = "decreasing_provider_cost"
 	ProviderBillingEligible                 ProviderBillingQualificationReason = "eligible"
 
-	// The host's reasons for refusing qualification (RefuseProviderBillingQualification).
+	// The host's refusal kinds are also the reasons of the refusal they record.
 	// They appear only on a ProviderBillingRefusal.
-
-	// ProviderBillingLifecycleUnprovable: the host cannot prove the provider
-	// resource's lifecycle (its lifetime, absence and closed windows).
 	ProviderBillingLifecycleUnprovable ProviderBillingQualificationReason = "lifecycle_unprovable"
-	// ProviderBillingUnavailable: the provider reports no billing the host can
-	// read for the resource.
-	ProviderBillingUnavailable ProviderBillingQualificationReason = "provider_billing_unavailable"
-	// ProviderBillingObservationRejected: OpenRails rejects the host's evidence
-	// as invalid or conflicting, so it can never qualify.
+	ProviderBillingUnavailable         ProviderBillingQualificationReason = "provider_billing_unavailable"
 	ProviderBillingObservationRejected ProviderBillingQualificationReason = "observation_rejected"
 )
 
@@ -184,7 +183,7 @@ type ProviderBillingLifecycleEvidence struct {
 }
 
 // ProviderBillingRecord is one provider-reported cost bucket, decoded exactly by
-// the provider adapter, in the authorization's currency. It is evidence, not a
+// the provider adapter, in the operation's currency. It is evidence, not a
 // customer charge.
 type ProviderBillingRecord struct {
 	ProviderResourceID string    `json:"provider_resource_id"`
@@ -193,24 +192,50 @@ type ProviderBillingRecord struct {
 	TimeBilledMS       int64     `json:"time_billed_ms,string"`
 }
 
-type ProviderBillingEvidenceRefusalKind string
+// ProviderBillingRefusalKind is why an observation carries no usable records.
+type ProviderBillingRefusalKind string
 
 const (
-	ProviderBillingRefusalSchemaAmbiguity  ProviderBillingEvidenceRefusalKind = "schema_ambiguity"
-	ProviderBillingRefusalSubmicroAmount   ProviderBillingEvidenceRefusalKind = "submicro_amount"
-	ProviderBillingRefusalAmountOverflow   ProviderBillingEvidenceRefusalKind = "amount_overflow"
-	ProviderBillingRefusalResponseTooLarge ProviderBillingEvidenceRefusalKind = "response_too_large"
+	// The adapter read the provider but cannot decode its answer exactly. The
+	// observation carries the lifecycle and query, and the raw body except for
+	// response_too_large.
+	ProviderBillingRefusalSchemaAmbiguity  ProviderBillingRefusalKind = "schema_ambiguity"
+	ProviderBillingRefusalSubmicroAmount   ProviderBillingRefusalKind = "submicro_amount"
+	ProviderBillingRefusalAmountOverflow   ProviderBillingRefusalKind = "amount_overflow"
+	ProviderBillingRefusalResponseTooLarge ProviderBillingRefusalKind = "response_too_large"
+
+	// The host cannot produce evidence at all: it cannot prove the provider
+	// resource's lifecycle, the provider reports no billing it can read, or
+	// OpenRails rejected its evidence. The observation carries no evidence (no
+	// lifecycle, query, raw body or records) and refuses the hold at once.
+	ProviderBillingRefusalLifecycleUnprovable ProviderBillingRefusalKind = "lifecycle_unprovable"
+	ProviderBillingRefusalUnavailable         ProviderBillingRefusalKind = "provider_billing_unavailable"
+	ProviderBillingRefusalObservationRejected ProviderBillingRefusalKind = "observation_rejected"
 )
 
-// ProviderBillingObservationRefusal is a typed adapter refusal. OpenRails
-// persists it and never parses the raw provider body. RawBody is empty only for
-// ProviderBillingRefusalResponseTooLarge.
-type ProviderBillingObservationRefusal struct {
-	Kind ProviderBillingEvidenceRefusalKind `json:"kind"`
+// HostRefusal reports whether the kind is the host's statement that it has no
+// evidence, rather than an adapter's refusal of evidence it read.
+func (k ProviderBillingRefusalKind) HostRefusal() bool {
+	switch k {
+	case ProviderBillingRefusalLifecycleUnprovable, ProviderBillingRefusalUnavailable, ProviderBillingRefusalObservationRejected:
+		return true
+	}
+	return false
 }
 
-// RecordProviderBillingObservationParams appends one immutable provider billing read.
-// It carries no rated amount; eligible evidence settles inside the same commit.
+// ProviderBillingObservationRefusal is a typed refusal. OpenRails persists it
+// and never parses a raw provider body. Detail is an optional canonical note
+// (at most 4096 bytes) for a host refusal.
+type ProviderBillingObservationRefusal struct {
+	Kind   ProviderBillingRefusalKind `json:"kind"`
+	Detail string                     `json:"detail"`
+}
+
+// RecordProviderBillingObservationParams appends one immutable provider billing
+// read, or the host's refusal to produce one. It carries no rated amount;
+// eligible evidence settles inside the same commit. ObservationID names the
+// observation: repeating it with the same terms replays, with a changed term
+// it is refused.
 type RecordProviderBillingObservationParams struct {
 	OperationID     string                             `json:"-"` // carried by the route path
 	ObservationID   string                             `json:"observation_id"`
@@ -224,12 +249,9 @@ type RecordProviderBillingObservationParams struct {
 }
 
 // ProviderBillingQualification is whether an operation's provider evidence
-// qualifies for settlement. QualifiedCostAmount is in the authorization's
-// currency, null until eligible. Resolution is null unless an operator closed
-// the hold (as is Authorization.Resolution).
+// qualifies for settlement. QualifiedCostAmount is in the operation's
+// currency, null until eligible.
 type ProviderBillingQualification struct {
-	OperationID             string                             `json:"operation_id"`
-	MerchantID              MerchantID                         `json:"merchant_id"`
 	Lifecycle               ProviderBillingLifecycleEvidence   `json:"lifecycle"`
 	LifecycleEvidenceSHA256 SHA256                             `json:"lifecycle_evidence_sha256"`
 	QuiescenceSeconds       int64                              `json:"quiescence_seconds"`
@@ -239,20 +261,8 @@ type ProviderBillingQualification struct {
 	QualifiedObservationID  string                             `json:"qualified_observation_id"`
 	QualifiedCostAmount     *int64                             `json:"qualified_cost_amount,string"`
 	QualifiedAt             *time.Time                         `json:"qualified_at"`
-	Resolution              *ProviderBillingResolution         `json:"resolution"`
-	Authorization           OperationAuthorization             `json:"authorization"`
 	CreatedAt               time.Time                          `json:"created_at"`
 	UpdatedAt               time.Time                          `json:"updated_at"`
-	Replayed                bool                               `json:"replayed"`
-}
-
-// ProviderBillingQualificationListParams filters ListProviderBillingQualifications.
-// An empty filter admits every value; State refused with AuthorizationState
-// open lists the holds only an operator can close.
-type ProviderBillingQualificationListParams struct {
-	PageRequest
-	State              []ProviderBillingQualificationState
-	AuthorizationState []OperationAuthorizationState
 }
 
 type ProviderBillingResolutionKind string
@@ -267,18 +277,6 @@ const (
 	ProviderBillingResolutionWrittenOff ProviderBillingResolutionKind = "written_off"
 )
 
-// ResolveProviderBillingQualificationParams is CloseOperationAuthorizationParams
-// for ResolveProviderBillingQualification, which answers the hold's
-// qualification and so needs one.
-type ResolveProviderBillingQualificationParams struct {
-	OperationID string                        `json:"-"` // carried by the route path
-	Kind        ProviderBillingResolutionKind `json:"kind"`
-	CostAmount  *int64                        `json:"cost_amount,string"`
-	AttestedBy  string                        `json:"attested_by"` // at most 255 bytes
-	Reference   string                        `json:"reference"`   // at most 1024 bytes
-	Note        string                        `json:"note"`        // at most 4096 bytes
-}
-
 // ProviderBillingResolution is the operator's recorded close of a refused
 // hold. Immutable.
 type ProviderBillingResolution struct {
@@ -290,35 +288,24 @@ type ProviderBillingResolution struct {
 	ResolvedAt time.Time                     `json:"resolved_at"`
 }
 
-// RefuseProviderBillingQualificationParams records that the host cannot qualify
-// an open authorization's provider cost, so automatic settlement never will:
-// Reason is ProviderBillingLifecycleUnprovable, ProviderBillingUnavailable or
-// ProviderBillingObservationRejected, Detail an optional canonical note (at
-// most 4096 bytes). The hold then accepts no observation, extension or release;
-// it waits for CloseOperationAuthorization. Repeating the same refusal replays.
-type RefuseProviderBillingQualificationParams struct {
-	OperationID string                             `json:"-"` // carried by the route path
-	Reason      ProviderBillingQualificationReason `json:"reason"`
-	Detail      string                             `json:"detail"`
-}
-
 // ProviderBillingRefusal records that an operation's provider cost will not
 // qualify automatically: refused by OpenRails' qualifier (Reason is the
-// qualification's) or by the host. Its hold waits for an operator. Immutable.
+// qualification's) or by the host (Reason is its refusal kind). Detail names
+// the observation that refused it. Its hold waits for an operator. Immutable.
 type ProviderBillingRefusal struct {
 	Reason    ProviderBillingQualificationReason `json:"reason"`
 	Detail    string                             `json:"detail"`
 	RefusedAt time.Time                          `json:"refused_at"`
 }
 
-// CloseOperationAuthorizationParams closes a refused hold on an operator's
+// CloseProviderOperationParams closes a refused hold on an operator's
 // attestation, since automatic settlement never will. Kind settled charges
-// CostAmount (in the authorization's currency) under the pass-through contract,
+// CostAmount (in the operation's currency) under the pass-through contract,
 // above the hold as owed; written_off releases the hold without charging the
 // customer, and CostAmount is null. AttestedBy names the operator and Reference
 // the evidence (a provider invoice or ticket), both opaque and canonical; Note
 // is optional. Repeating the same close replays; a changed term is refused.
-type CloseOperationAuthorizationParams struct {
+type CloseProviderOperationParams struct {
 	OperationID string                        `json:"-"` // carried by the route path
 	Kind        ProviderBillingResolutionKind `json:"kind"`
 	CostAmount  *int64                        `json:"cost_amount,string"`
@@ -327,11 +314,11 @@ type CloseOperationAuthorizationParams struct {
 	Note        string                        `json:"note"`        // at most 4096 bytes
 }
 
-// OperationAuthorizationListParams filters ListOperationAuthorizations. An empty
-// State admits every state and a nil Refused both; Refused true with State open
-// lists the holds waiting for an operator.
-type OperationAuthorizationListParams struct {
+// ProviderOperationListParams filters ListProviderOperations. An empty State
+// admits every state and a nil Refused both; Refused true with State open lists
+// the holds waiting for an operator.
+type ProviderOperationListParams struct {
 	PageRequest
-	State   []OperationAuthorizationState
+	State   []ProviderOperationState
 	Refused *bool
 }

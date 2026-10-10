@@ -84,6 +84,19 @@ FROM billing.operation_authorization_extensions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND operation_id = sqlc.arg(operation_id)::text;
 
+-- Each named operation's latest increment: one primary-key probe apiece.
+-- name: ListLastOperationAuthorizationExtensions :many
+SELECT x.*
+FROM unnest(sqlc.arg(operation_ids)::text[]) AS ids(operation_id)
+JOIN LATERAL (
+    SELECT e.*
+    FROM billing.operation_authorization_extensions e
+    WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
+      AND e.operation_id = ids.operation_id
+    ORDER BY e.ordinal DESC
+    LIMIT 1
+) x ON true;
+
 -- name: ListOperationAuthorizationExtensions :many
 SELECT *
 FROM billing.operation_authorization_extensions
@@ -163,4 +176,18 @@ WHERE r.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(after_at)::timestamptz IS NULL
        OR (a.created_at, a.operation_id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_operation_id)::text))
 ORDER BY a.created_at DESC, a.operation_id DESC
+LIMIT sqlc.arg(row_limit)::int;
+
+-- Open holds a refusal stopped: each waits for an operator's close. Driven by
+-- the open holds, so a scan costs what is open, not every refusal ever made.
+-- name: ListOpenRefusedOperationAuthorizations :many
+SELECT a.operation_id, a.customer_id, a.currency, a.authorized_amount, a.created_at,
+       r.reason, r.detail, r.refused_at
+FROM billing.operation_authorizations a
+JOIN billing.cost_refusals r
+  ON r.merchant_id = a.merchant_id
+ AND r.operation_id = a.operation_id
+WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND a.state = 'open'
+ORDER BY r.refused_at, a.operation_id
 LIMIT sqlc.arg(row_limit)::int;

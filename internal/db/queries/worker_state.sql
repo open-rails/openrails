@@ -53,3 +53,10 @@ UPDATE billing.worker_state
 SET last_alerted_at = GREATEST(last_alerted_at, sqlc.arg(now)::timestamptz),
     updated_at = GREATEST(updated_at, sqlc.arg(now)::timestamptz)
 WHERE worker_kind = $1;
+
+-- A recovered kind's stall is over: the next stall alerts afresh.
+-- name: ClearWorkerHealthAlerted :exec
+UPDATE billing.worker_state
+SET last_alerted_at = NULL,
+    updated_at = GREATEST(updated_at, sqlc.arg(now)::timestamptz)
+WHERE worker_kind = $1 AND last_alerted_at = sqlc.arg(alerted_at)::timestamptz;

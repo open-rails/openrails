@@ -2,6 +2,7 @@ import * as React from "react"
 import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useSearchParams } from "react-router-dom"
 
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -77,6 +78,9 @@ function FindingsTab() {
   const { data, isPending: loading } = useQuery(adminQueries.findings())
   const { data: gauges } = useQuery(adminQueries.findingSummary())
   const [resolving, setResolving] = React.useState<Finding | null>(null)
+  // The bell and alert emails link one finding: ?finding=<id>.
+  const [params] = useSearchParams()
+  const linked = params.get("finding")
 
   return (
     <div className="flex flex-col gap-4">
@@ -127,7 +131,10 @@ function FindingsTab() {
             </TableHeader>
             <TableBody>
               {data.data.map((f) => (
-                <TableRow key={f.id}>
+                <TableRow
+                  key={f.id}
+                  className={f.id === linked ? "bg-primary/[0.06]" : undefined}
+                >
                   <TableCell>
                     <Badge
                       variant="secondary"

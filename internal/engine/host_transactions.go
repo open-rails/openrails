@@ -12,52 +12,52 @@ import (
 
 // The Tx methods run the same commands as the Client inside tx, a
 // transaction from the host's pool on this engine's database, for provider
-// obligations that must commit atomically with host rows. OpenRails binds the
+// operations that must commit atomically with host rows. OpenRails binds the
 // engine's merchant to tx and never commits or rolls it back; after an error
 // the host rolls back.
 
-// OpenOperationAuthorization reserves capacity; commit it with the host's
+// OpenProviderOperationTx reserves capacity; commit it with the host's
 // provider obligation before calling the provider.
-func (e *Engine) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+func (e *Engine) OpenProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.OpenProviderOperationParams) (*billing.ProviderOperation, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return e.svc.OpenOperationAuthorizationTx(ctx, tx, req)
+	return e.svc.OpenProviderOperationTx(ctx, tx, req)
 }
 
-// GetOperationAuthorization observes tx's own uncommitted changes.
-func (e *Engine) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.OperationAuthorization, error) {
+// GetProviderOperationTx observes tx's own uncommitted changes.
+func (e *Engine) GetProviderOperationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderOperation, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return e.svc.GetOperationAuthorizationTx(ctx, tx, operationID)
+	return e.svc.GetProviderOperationTx(ctx, tx, operationID)
 }
 
-// ExtendOperationAuthorization grows an open reservation; a refusal writes
-// nothing to tx.
-func (e *Engine) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
+// IncrementProviderOperationTx grows an open hold; a refusal writes nothing
+// to tx.
+func (e *Engine) IncrementProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.IncrementProviderOperationParams) (*billing.ProviderOperation, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return e.svc.ExtendOperationAuthorizationTx(ctx, tx, req)
+	return e.svc.IncrementProviderOperationTx(ctx, tx, req)
 }
 
-// ReleaseOperationAuthorization commits with the host's proven provider
+// ReleaseProviderOperationTx commits with the host's proven provider
 // non-creation fact. Billing evidence refuses it.
-func (e *Engine) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+func (e *Engine) ReleaseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseProviderOperationParams) (*billing.ProviderOperation, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return e.svc.ReleaseOperationAuthorizationTx(ctx, tx, req)
+	return e.svc.ReleaseProviderOperationTx(ctx, tx, req)
 }
 
-// RecordProviderBillingObservation appends provider evidence; eligible evidence
-// is rated and settled by OpenRails inside tx.
-func (e *Engine) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderBillingQualification, error) {
+// RecordProviderBillingObservationTx appends provider evidence, or the host's
+// refusal to produce it; eligible evidence is rated and settled inside tx.
+func (e *Engine) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderOperation, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
@@ -65,42 +65,14 @@ func (e *Engine) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.
 	return e.svc.RecordProviderBillingObservationTx(ctx, tx, req)
 }
 
-// ResolveProviderBillingQualification is CloseOperationAuthorizationTx answered
-// as the hold's qualification.
-func (e *Engine) ResolveProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.ResolveProviderBillingQualificationParams) (*billing.ProviderBillingQualification, error) {
+// CloseProviderOperationTx closes a refused hold on an operator's attestation
+// inside tx.
+func (e *Engine) CloseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.CloseProviderOperationParams) (*billing.ProviderOperation, error) {
 	ctx, err := e.bind(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return e.svc.ResolveProviderBillingQualificationTx(ctx, tx, req)
-}
-
-// RefuseProviderBillingQualificationTx records that the host cannot qualify a
-// hold's provider cost inside tx, so its hold waits for an operator.
-func (e *Engine) RefuseProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
-	ctx, err := e.bind(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return e.svc.RefuseProviderBillingQualificationTx(ctx, tx, req)
-}
-
-// CloseOperationAuthorizationTx closes a refused hold on an operator's
-// attestation inside tx.
-func (e *Engine) CloseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
-	ctx, err := e.bind(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return e.svc.CloseOperationAuthorizationTx(ctx, tx, req)
-}
-
-func (e *Engine) GetProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderBillingQualification, error) {
-	ctx, err := e.bind(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return e.svc.GetProviderBillingQualificationTx(ctx, tx, operationID)
+	return e.svc.CloseProviderOperationTx(ctx, tx, req)
 }
 
 // bind applies the engine's merchant exactly as the in-process Client does.

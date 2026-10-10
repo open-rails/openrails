@@ -400,18 +400,18 @@ The shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
-| Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions`, `ReportWastedSpend` |
-| Usage | `RecordUsage` (metered events outside the hold/capture cycle), `GetUsage` |
+| Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
+| Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
 | Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `DeleteSpendDelegation` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, collection cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTiers`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `ListCatalogDrift`, `RefreshCatalogDrift` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `RefreshCatalogDrift` (drift is `ListFindings` with type `catalog.*`) |
 | Checkout | `CreateCheckoutSession`, `ListCheckoutOptions`, `GetPublicConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeTier`, `PreviewTierChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
 | Payments | `GetPayment`, `ListPayments`, `CreateOffChannelPayment`, `RefundPayment`, `GetPaymentSettlementStatus`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRebillCycles`, `GetRebillCycle`, `ListPaymentMethods`, `DeletePaymentMethod` |
 | Invoices | `ListInvoices`, `GetInvoice`, `ListInvoicePayments`, `CreateInvoicePayment`, `RetryInvoiceCollection`, `MarkInvoiceUncollectible`, `VoidInvoice` |
-| Provider obligations | `OpenOperationAuthorization`, `GetOperationAuthorization`, `ListOperationAuthorizations`, `ReleaseOperationAuthorization`, `RecordProviderBillingObservation`, `GetProviderBillingQualification`, `ListProviderBillingQualifications`, `RefuseProviderBillingQualification`, `CloseOperationAuthorization`, `ResolveProviderBillingQualification` |
+| Provider obligations | `OpenProviderOperation`, `IncrementProviderOperation`, `ReleaseProviderOperation`, `RecordProviderBillingObservation`, `ListProviderOperations`, `GetProviderOperation`, `CloseProviderOperation` |
 | Host feed / import | `ListHostEvents`, `AcknowledgeHostEvents`, `ImportBilling` |
 
 ```go
@@ -445,7 +445,7 @@ too. See [checkout](api/commerce.md).
 
 A host that must commit its own provider obligation atomically with the OpenRails
 authorization, release or settlement uses the embedded Client's `Tx` operations
-(`OpenOperationAuthorizationTx` and siblings) with a transaction from its pool.
+(`OpenProviderOperationTx` and siblings) with a transaction from its pool.
 See [provider obligations](architecture/provider-obligation-contract.md).
 
 The in-process transport resolves and pins the selected immutable merchant for

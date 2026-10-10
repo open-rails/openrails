@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -95,31 +94,13 @@ func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdm
 	return out.Items, nil
 }
 
-// ReportWastedSpend records 1 to billing.MaxBatchItems reports of spend a
-// customer's invoker wasted (failed or abusive work), one result per report in
-// order: each is handled or refused on its own. Source and SourceID identify a
-// report; a retry is handled once (action duplicate).
-func (c *Client) ReportWastedSpend(ctx context.Context, items []billing.ReportWastedSpendParams, requestOptions ...RequestOption) ([]billing.WastedSpendResult, error) {
-	if err := batchSize(len(items), billing.MaxBatchItems); err != nil {
-		return nil, err
-	}
-	body := billing.ReportWastedSpendBatchParams{Items: make([]billing.ReportWastedSpendParams, len(items))}
-	for i, item := range items {
-		item.Currency = normalizeCurrency(item.Currency)
-		body.Items[i] = item
-	}
-	var out billing.ReportWastedSpendBatchResult
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/wasted-spend", body, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return out.Items, nil
-}
-
 // RecordUsage records 1 to billing.MaxUsageBatchItems usage events, one
 // result per item in order: each is recorded or refused on its own, exactly
 // as recording it alone would be. An event's source and source id make a
 // retry record and charge it once (Status 200, Replayed); a retry with a
-// different amount is refused with idempotency_key_reused.
+// different amount or outcome is refused with idempotency_key_reused. An
+// item with Outcome failed is forgiven up to the customer's grace and charged
+// past it (see billing.UsageFailed).
 func (c *Client) RecordUsage(ctx context.Context, items []billing.RecordUsageParams, requestOptions ...RequestOption) ([]billing.UsageEventResult, error) {
 	if err := batchSize(len(items), billing.MaxUsageBatchItems); err != nil {
 		return nil, err
@@ -134,28 +115,4 @@ func (c *Client) RecordUsage(ctx context.Context, items []billing.RecordUsagePar
 		return nil, err
 	}
 	return out.Items, nil
-}
-
-// GetUsage reports a customer's usage in one currency over [From, To),
-// grouped by GroupBy. A zero window is the month before now.
-func (c *Client) GetUsage(ctx context.Context, customer billing.CustomerID, params billing.GetUsageParams, requestOptions ...RequestOption) (*billing.Usage, error) {
-	path, err := customerIDPath(customer)
-	if err != nil {
-		return nil, err
-	}
-	q := url.Values{"currency": {normalizeCurrency(params.Currency)}}
-	if !params.From.IsZero() {
-		q.Set("from", params.From.UTC().Format(time.RFC3339Nano))
-	}
-	if !params.To.IsZero() {
-		q.Set("to", params.To.UTC().Format(time.RFC3339Nano))
-	}
-	if params.GroupBy != "" {
-		q.Set("group_by", string(params.GroupBy))
-	}
-	var out billing.Usage
-	if err := c.do(ctx, http.MethodGet, withQuery(path+"/usage", q), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }

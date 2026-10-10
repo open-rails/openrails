@@ -37,6 +37,10 @@ type UsageEvent struct {
 	// Amount is the cost or meter input in Currency's internal precision (>= 0).
 	// PricingAuthority determines whether catalog rating may consume this event.
 	Amount int64 `json:"amount"`
+	// Outcome is succeeded or failed; ForgivenAmount is what a failed event's
+	// grace absorbed, so Amount + ForgivenAmount is what the host reported.
+	Outcome        string `json:"outcome"`
+	ForgivenAmount int64  `json:"forgiven_amount"`
 	// Source + SourceID form the idempotency key (SourceID is typically the request id).
 	Source   string `json:"source"`
 	SourceID string `json:"source_id"`

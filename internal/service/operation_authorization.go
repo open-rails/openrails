@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -14,22 +17,24 @@ import (
 // Provider-operation commands exist in two forms with identical semantics: the
 // plain form commits its own merchant transaction (the Client routes), and the
 // Tx form rides a transaction owned by an embedding host, which alone commits
-// or rolls it back.
+// or rolls it back. Every command answers the operation.
 
-func (s *Service) OpenOperationAuthorization(ctx context.Context, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+// inOperationTx runs fn in a merchant transaction of its own.
+func (s *Service) inOperationTx(ctx context.Context, fn func(context.Context, pgx.Tx) (*billing.ProviderOperation, error)) (*billing.ProviderOperation, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	var out *billing.OperationAuthorization
+	var out *billing.ProviderOperation
 	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		out, err = s.OpenOperationAuthorizationTx(ctx, tx, req)
+		out, err = fn(ctx, tx)
 		return err
 	})
 	return out, err
 }
 
-func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.OpenOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+// bindOperationTx binds the merchant to the host's tx and runs fn on it.
+func (s *Service) bindOperationTx(ctx context.Context, tx pgx.Tx, fn func(context.Context, *db.DB) (*money.OperationAuthorization, error)) (*billing.ProviderOperation, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -42,24 +47,36 @@ func (s *Service) OpenOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, r
 	if err != nil {
 		return nil, err
 	}
-	auth, err := s.moneyService().OpenOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationInput{
-		OperationID:             req.OperationID,
-		CustomerID:              identity.CustomerID(req.CustomerID),
-		RecordOwner:             req.RecordOwner,
-		Currency:                req.Currency,
-		Amount:                  req.Amount,
-		ClaimReference:          req.ClaimReference,
-		AuthorizationBody:       req.AuthorizationBody,
-		AuthorizationBodySHA256: req.AuthorizationBodySHA256,
-		OverdraftAmount:         req.OverdraftAmount,
-	})
+	auth, err := fn(ctx, txDB)
 	if err != nil {
 		return nil, err
 	}
-	return operationAuthorizationFromMoney(auth), nil
+	return providerOperationFromMoney(auth), nil
 }
 
-func (s *Service) GetOperationAuthorization(ctx context.Context, operationID string) (*billing.OperationAuthorization, error) {
+func (s *Service) OpenProviderOperation(ctx context.Context, req billing.OpenProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.inOperationTx(ctx, func(ctx context.Context, tx pgx.Tx) (*billing.ProviderOperation, error) {
+		return s.OpenProviderOperationTx(ctx, tx, req)
+	})
+}
+
+func (s *Service) OpenProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.OpenProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.bindOperationTx(ctx, tx, func(ctx context.Context, txDB *db.DB) (*money.OperationAuthorization, error) {
+		return s.moneyService().OpenOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationInput{
+			OperationID:             req.OperationID,
+			CustomerID:              identity.CustomerID(req.CustomerID),
+			RecordOwner:             req.RecordOwner,
+			Currency:                req.Currency,
+			Amount:                  req.Amount,
+			ClaimReference:          req.ClaimReference,
+			AuthorizationBody:       req.AuthorizationBody,
+			AuthorizationBodySHA256: req.AuthorizationBodySHA256,
+			OverdraftAmount:         req.OverdraftAmount,
+		})
+	})
+}
+
+func (s *Service) GetProviderOperation(ctx context.Context, operationID string) (*billing.ProviderOperation, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
 		return nil, err
@@ -69,103 +86,105 @@ func (s *Service) GetOperationAuthorization(ctx context.Context, operationID str
 	if err != nil {
 		return nil, err
 	}
-	return operationAuthorizationFromMoney(auth), nil
+	return providerOperationFromMoney(auth), nil
 }
 
-func (s *Service) GetOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	auth, err := s.moneyService().GetOperationAuthorizationInTx(ctx, txDB, operationID)
-	if err != nil {
-		return nil, err
-	}
-	return operationAuthorizationFromMoney(auth), nil
-}
-
-func (s *Service) ExtendOperationAuthorization(ctx context.Context, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	var out *billing.OperationAuthorizationExtension
-	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		out, err = s.ExtendOperationAuthorizationTx(ctx, tx, req)
-		return err
+func (s *Service) GetProviderOperationTx(ctx context.Context, tx pgx.Tx, operationID string) (*billing.ProviderOperation, error) {
+	return s.bindOperationTx(ctx, tx, func(ctx context.Context, txDB *db.DB) (*money.OperationAuthorization, error) {
+		return s.moneyService().GetOperationAuthorizationInTx(ctx, txDB, operationID)
 	})
-	return out, err
 }
 
-func (s *Service) ExtendOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ExtendOperationAuthorizationParams) (*billing.OperationAuthorizationExtension, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	ext, err := s.moneyService().ExtendOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationExtensionInput{
-		OperationID: req.OperationID, Ordinal: req.Ordinal, Amount: req.Amount, MinimumAmount: req.MinimumAmount,
-		OverdraftAmount: req.OverdraftAmount,
+func (s *Service) IncrementProviderOperation(ctx context.Context, req billing.IncrementProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.inOperationTx(ctx, func(ctx context.Context, tx pgx.Tx) (*billing.ProviderOperation, error) {
+		return s.IncrementProviderOperationTx(ctx, tx, req)
 	})
-	if err != nil {
-		return nil, err
-	}
-	return &billing.OperationAuthorizationExtension{
-		OperationID: ext.OperationID, Ordinal: ext.Ordinal, GrantedAmount: ext.GrantedAmount,
-		AuthorizedAmount: ext.AuthorizedAmount, Replayed: ext.Replayed,
-	}, nil
 }
 
-func (s *Service) ReleaseOperationAuthorization(ctx context.Context, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	var out *billing.OperationAuthorization
-	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		out, err = s.ReleaseOperationAuthorizationTx(ctx, tx, req)
-		return err
+func (s *Service) IncrementProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.IncrementProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.bindOperationTx(ctx, tx, func(ctx context.Context, txDB *db.DB) (*money.OperationAuthorization, error) {
+		return s.moneyService().ExtendOperationAuthorizationInTx(ctx, txDB, money.OperationAuthorizationExtensionInput{
+			OperationID: req.OperationID, Ordinal: req.Ordinal, Amount: req.Amount, MinimumAmount: req.MinimumAmount,
+			OverdraftAmount: req.OverdraftAmount,
+		})
 	})
-	return out, err
 }
 
-func (s *Service) ReleaseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
+func (s *Service) ReleaseProviderOperation(ctx context.Context, req billing.ReleaseProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.inOperationTx(ctx, func(ctx context.Context, tx pgx.Tx) (*billing.ProviderOperation, error) {
+		return s.ReleaseProviderOperationTx(ctx, tx, req)
+	})
+}
+
+func (s *Service) ReleaseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.ReleaseProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.bindOperationTx(ctx, tx, func(ctx context.Context, txDB *db.DB) (*money.OperationAuthorization, error) {
+		return s.moneyService().ReleaseOperationAuthorizationInTx(ctx, txDB, req.OperationID, req.ReleaseReference)
+	})
+}
+
+// RecordProviderBillingObservation records exact provider/lifecycle facts, or
+// the host's refusal to produce them, in an OpenRails-owned transaction.
+// OpenRails alone qualifies, rates, and settles.
+func (s *Service) RecordProviderBillingObservation(ctx context.Context, req billing.RecordProviderBillingObservationParams) (*billing.ProviderOperation, error) {
+	return s.inOperationTx(ctx, func(ctx context.Context, tx pgx.Tx) (*billing.ProviderOperation, error) {
+		return s.RecordProviderBillingObservationTx(ctx, tx, req)
+	})
+}
+
+// RecordProviderBillingObservationTx is the host-transaction form. It never
+// calls a provider and accepts no caller-rated amount.
+func (s *Service) RecordProviderBillingObservationTx(ctx context.Context, tx pgx.Tx, req billing.RecordProviderBillingObservationParams) (*billing.ProviderOperation, error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
 	}
-	merchantID, err := merchant.Require(ctx)
+	if rt.Config == nil {
+		return nil, fmt.Errorf("provider billing qualification requires runtime config")
+	}
+	quiescence, err := config.ProviderBillingQuiescence(rt.Config)
 	if err != nil {
 		return nil, err
 	}
-	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	auth, err := s.moneyService().ReleaseOperationAuthorizationInTx(ctx, txDB, req.OperationID, req.ReleaseReference)
-	if err != nil {
-		return nil, err
-	}
-	return operationAuthorizationFromMoney(auth), nil
+	return s.bindOperationTx(ctx, tx, func(ctx context.Context, txDB *db.DB) (*money.OperationAuthorization, error) {
+		return s.moneyService().RecordProviderBillingObservationInTx(ctx, txDB, req, quiescence)
+	})
 }
 
-func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billing.OperationAuthorization {
-	out := &billing.OperationAuthorization{
+// CloseProviderOperation closes a refused hold on an operator's attestation in
+// an OpenRails-owned transaction.
+func (s *Service) CloseProviderOperation(ctx context.Context, req billing.CloseProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.inOperationTx(ctx, func(ctx context.Context, tx pgx.Tx) (*billing.ProviderOperation, error) {
+		return s.CloseProviderOperationTx(ctx, tx, req)
+	})
+}
+
+// CloseProviderOperationTx is the host-transaction form.
+func (s *Service) CloseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.CloseProviderOperationParams) (*billing.ProviderOperation, error) {
+	return s.bindOperationTx(ctx, tx, func(ctx context.Context, txDB *db.DB) (*money.OperationAuthorization, error) {
+		return s.moneyService().CloseOperationAuthorizationInTx(ctx, txDB, req)
+	})
+}
+
+// ListProviderOperations pages operations, newest first.
+func (s *Service) ListProviderOperations(ctx context.Context, filter billing.ProviderOperationListParams) (*billing.ListPage[billing.ProviderOperation], error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	page, err := s.moneyService().ListOperationAuthorizations(ctx, filter)
+	if err != nil {
+		return nil, err
+	}
+	out := billing.ListPage[billing.ProviderOperation]{Items: make([]billing.ProviderOperation, len(page.Items)), Next: page.Next}
+	for i, item := range page.Items {
+		out.Items[i] = *providerOperationFromMoney(item)
+	}
+	return &out, nil
+}
+
+func providerOperationFromMoney(auth *money.OperationAuthorization) *billing.ProviderOperation {
+	out := &billing.ProviderOperation{
 		OperationID:             auth.OperationID,
 		MerchantID:              billing.MerchantID(auth.MerchantID),
 		CustomerID:              billing.CustomerID(auth.CustomerID),
@@ -176,7 +195,7 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billin
 		ClaimReference:          auth.ClaimReference,
 		AuthorizationBody:       auth.AuthorizationBody,
 		AuthorizationBodySHA256: auth.AuthorizationBodySHA256,
-		State:                   billing.OperationAuthorizationState(auth.State),
+		State:                   billing.ProviderOperationState(auth.State),
 		TerminalReference:       auth.TerminalReference,
 		SettlementCostAmount:    auth.SettlementCostAmount,
 		SettlementAmount:        auth.SettlementAmount,
@@ -190,108 +209,45 @@ func operationAuthorizationFromMoney(auth *money.OperationAuthorization) *billin
 		out.SettlementBody = auth.SettlementBody
 		out.SettlementBodySHA256 = &digest
 	}
+	if inc := auth.LastIncrement; inc != nil {
+		out.LastIncrement = &billing.ProviderOperationIncrement{
+			Ordinal: inc.Ordinal, Amount: inc.RequestedAmount, MinimumAmount: inc.MinimumAmount,
+			GrantedAmount: inc.GrantedAmount, CreatedAt: inc.CreatedAt,
+		}
+	}
+	if q := auth.Qualification; q != nil {
+		out.Qualification = &billing.ProviderBillingQualification{
+			Lifecycle: billing.ProviderBillingLifecycleEvidence{
+				Provider:                 q.Provider,
+				ProviderResourceID:       q.ProviderResourceID,
+				ProviderLifetimeStartsAt: q.ProviderLifetimeStartsAt,
+				ProviderLifetimeEndsAt:   q.ProviderLifetimeEndsAt,
+				ProviderAbsentAt:         q.ProviderAbsentAt,
+				ProviderAbsenceReference: q.ProviderAbsenceReference,
+				BillingStopReference:     q.BillingStopReference,
+				WindowsClosedAt:          q.WindowsClosedAt,
+				WindowsClosedReference:   q.WindowsClosedReference,
+				LifecycleEvidenceBody:    q.LifecycleEvidenceBody,
+			},
+			LifecycleEvidenceSHA256: q.LifecycleEvidenceSHA256,
+			QuiescenceSeconds:       int64(q.Quiescence.Seconds()),
+			State:                   billing.ProviderBillingQualificationState(q.State),
+			Reason:                  billing.ProviderBillingQualificationReason(q.Reason),
+			BaselineObservationID:   q.BaselineObservationID,
+			QualifiedObservationID:  q.QualifiedObservationID,
+			QualifiedCostAmount:     q.QualifiedCostAmount,
+			QualifiedAt:             q.QualifiedAt,
+			CreatedAt:               q.CreatedAt,
+			UpdatedAt:               q.UpdatedAt,
+		}
+	}
 	if r := auth.Refusal; r != nil {
 		out.Refusal = &billing.ProviderBillingRefusal{Reason: billing.ProviderBillingQualificationReason(r.Reason), Detail: r.Detail, RefusedAt: r.RefusedAt}
 	}
-	out.Resolution = providerBillingResolutionFromMoney(auth.Resolution)
+	if r := auth.Resolution; r != nil {
+		out.Resolution = &billing.ProviderBillingResolution{
+			Kind: r.Kind, CostAmount: r.CostAmount, AttestedBy: r.AttestedBy, Reference: r.Reference, Note: r.Note, ResolvedAt: r.ResolvedAt,
+		}
+	}
 	return out
-}
-
-func providerBillingResolutionFromMoney(r *money.ProviderBillingResolution) *billing.ProviderBillingResolution {
-	if r == nil {
-		return nil
-	}
-	return &billing.ProviderBillingResolution{
-		Kind: r.Kind, CostAmount: r.CostAmount, AttestedBy: r.AttestedBy, Reference: r.Reference, Note: r.Note, ResolvedAt: r.ResolvedAt,
-	}
-}
-
-// RefuseProviderBillingQualification records, in an OpenRails-owned
-// transaction, that the host cannot qualify a hold's provider cost.
-func (s *Service) RefuseProviderBillingQualification(ctx context.Context, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	var out *billing.OperationAuthorization
-	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		out, err = s.RefuseProviderBillingQualificationTx(ctx, tx, req)
-		return err
-	})
-	return out, err
-}
-
-// RefuseProviderBillingQualificationTx is the host-transaction form.
-func (s *Service) RefuseProviderBillingQualificationTx(ctx context.Context, tx pgx.Tx, req billing.RefuseProviderBillingQualificationParams) (*billing.OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	auth, err := s.moneyService().RefuseProviderBillingQualificationInTx(ctx, txDB, req)
-	if err != nil {
-		return nil, err
-	}
-	return operationAuthorizationFromMoney(auth), nil
-}
-
-// CloseOperationAuthorization closes a refused hold on an operator's
-// attestation in an OpenRails-owned transaction.
-func (s *Service) CloseOperationAuthorization(ctx context.Context, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	var out *billing.OperationAuthorization
-	err = rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		out, err = s.CloseOperationAuthorizationTx(ctx, tx, req)
-		return err
-	})
-	return out, err
-}
-
-// CloseOperationAuthorizationTx is the host-transaction form.
-func (s *Service) CloseOperationAuthorizationTx(ctx context.Context, tx pgx.Tx, req billing.CloseOperationAuthorizationParams) (*billing.OperationAuthorization, error) {
-	rt, err := s.runtime()
-	if err != nil {
-		return nil, err
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ctx, txDB, err := rt.DB.BindMerchantTx(ctx, tx, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	auth, err := s.moneyService().CloseOperationAuthorizationInTx(ctx, txDB, billing.ResolveProviderBillingQualificationParams(req))
-	if err != nil {
-		return nil, err
-	}
-	return operationAuthorizationFromMoney(auth), nil
-}
-
-// ListOperationAuthorizations pages holds, newest first.
-func (s *Service) ListOperationAuthorizations(ctx context.Context, filter billing.OperationAuthorizationListParams) (*billing.ListPage[billing.OperationAuthorization], error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer release()
-	page, err := s.moneyService().ListOperationAuthorizations(ctx, filter)
-	if err != nil {
-		return nil, err
-	}
-	out := billing.ListPage[billing.OperationAuthorization]{Items: make([]billing.OperationAuthorization, len(page.Items)), Next: page.Next}
-	for i, item := range page.Items {
-		out.Items[i] = *operationAuthorizationFromMoney(item)
-	}
-	return &out, nil
 }

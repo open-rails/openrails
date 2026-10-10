@@ -159,6 +159,15 @@ export interface Recommendation {
 export interface Finding {
   id: string
   provider: string | null
+  // Catalog and pull.* findings name the PSP whose read raised them; a catalog
+  // finding also names the resource, the field and both values.
+  psp_id?: string | null
+  resource_type?: string | null
+  resource_id?: string | null
+  external_resource_id?: string | null
+  field?: string | null
+  openrails_value?: string | null
+  external_value?: string | null
   finding_type: string
   subject_key: string
   severity: "critical" | "high" | "medium" | "low"
@@ -175,13 +184,12 @@ export interface Finding {
   recommendation?: Recommendation
 }
 
-// GET /admin/findings/summary: the queue at a glance.
+// The findings queue at a glance, from the metrics query's findings measures.
 export interface FindingsGauges {
+  total_open: number
   orphaned_members: number
   freeloaders: number
   duplicate_coverage: number
-  open_by_severity: Record<string, number>
-  total_open: number
 }
 
 export interface WorkerHealth {
@@ -396,14 +404,3 @@ export interface MerchantWebhook {
   updated_at?: string
 }
 
-// MerchantNotification is the in_app store — MERCHANT-operator-facing (distinct
-// from customer recipients in notifications). Surfaced as the header bell.
-export interface MerchantNotification {
-  id: string
-  severity: AlertSeverity
-  title: string
-  body: string
-  link?: string | null
-  created_at: string
-  read_at?: string | null
-}

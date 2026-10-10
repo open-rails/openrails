@@ -24,10 +24,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/admission/spendgate"
 	"github.com/open-rails/openrails/internal/modules/money"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // DefaultTrustLevel is assigned to actors with no explicit trust level — the
@@ -76,10 +74,9 @@ type Admitter struct {
 	// it (the amount cap still applies — the two axes are independent).
 	delinquency DelinquencyGate
 
-	// wasted is the optional $-valued delegated-invoker wasted-spend cutoff (#497);
-	// nil disables it. invokerWastedWindows is the flat per-invoker backstop.
-	wasted               *abuse.WastedSpendGuard
-	invokerWastedWindows []abuse.WastedWindow
+	// failedCutoff is the optional delegated-invoker failed-usage cutoff (#497);
+	// nil disables it.
+	failedCutoff FailedUsageCutoff
 
 	// denials is the optional #733 denial counter (Redis hourly aggregates);
 	// nil disables recording.
@@ -115,10 +112,15 @@ func (a *Admitter) WithDelinquency(g DelinquencyGate) *Admitter {
 	return a
 }
 
-// WithWastedSpend enables the delegated-invoker wasted-spend admit gate (#497).
-func (a *Admitter) WithWastedSpend(guard *abuse.WastedSpendGuard, invokerWindows []abuse.WastedWindow) *Admitter {
-	a.wasted = guard
-	a.invokerWastedWindows = invokerWindows
+// FailedUsageCutoff answers whether a delegated invoker's failed usage has
+// reached its cutoff.
+type FailedUsageCutoff interface {
+	CutoffReached(ctx context.Context, customer identity.CustomerID, invoker, currency string) (bool, error)
+}
+
+// WithFailedUsageCutoff enables the delegated-invoker failed-usage admit gate (#497).
+func (a *Admitter) WithFailedUsageCutoff(c FailedUsageCutoff) *Admitter {
+	a.failedCutoff = c
 	return a
 }
 
@@ -238,15 +240,10 @@ func (a *Admitter) admitLocked(ctx context.Context, q *gen.Queries, req AdmitReq
 		}
 	}
 
-	// Delegated-invoker wasted-spend cutoff (#497): direct payer credentials are
-	// not cut off here (their over-grace waste is charged at report time).
-	if a.wasted != nil && a.wasted.Enabled() &&
-		!identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" && len(a.invokerWastedWindows) > 0 {
-		wastedCurrency, werr := effectiveWastedCurrency(req.Currency, a.invokerWastedWindows)
-		if werr != nil {
-			return AdmitDecision{}, werr
-		}
-		over, _, werr := a.wasted.InvokerOverBudget(ctx, merchantID, req.CustomerID.UUID().String(), req.Invoker, wastedCurrency, a.invokerWastedWindows)
+	// Delegated-invoker failed-usage cutoff (#497): direct payer credentials are
+	// not cut off here (their failures past grace are charged when recorded).
+	if a.failedCutoff != nil && !identity.IsDirectPayerInvoker(req.InvokerType) && req.Invoker != "" {
+		over, werr := a.failedCutoff.CutoffReached(ctx, req.CustomerID, req.Invoker, money.NormalizeCurrency(req.Currency))
 		if werr != nil {
 			return AdmitDecision{}, werr
 		}
@@ -391,41 +388,3 @@ var ErrHoldDeadlineRequired = errors.New("admission: expires_at is required when
 
 // ErrHoldDeadlinePassed: the declared deadline is already in the past.
 var ErrHoldDeadlinePassed = errors.New("admission: expires_at is already in the past")
-
-// effectiveWastedCurrency validates the wasted-spend windows resolve to one
-// currency (cross-currency wasted policies are unsupported in one policy).
-func effectiveWastedCurrency(requestCurrency string, windows []abuse.WastedWindow) (string, error) {
-	cur := money.NormalizeCurrency(requestCurrency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return "", err
-	}
-	explicit := false
-	for _, w := range windows {
-		if w.Currency == "" {
-			continue
-		}
-		wc := money.NormalizeCurrency(w.Currency)
-		if err := moneyutil.ValidateCurrency(wc); err != nil {
-			return "", err
-		}
-		if !explicit {
-			cur = wc
-			explicit = true
-			continue
-		}
-		if wc != cur {
-			return "", errMixedWastedCurrency(cur, wc)
-		}
-	}
-	return cur, nil
-}
-
-func errMixedWastedCurrency(a, b string) error {
-	return &mixedCurrencyError{a: a, b: b}
-}
-
-type mixedCurrencyError struct{ a, b string }
-
-func (e *mixedCurrencyError) Error() string {
-	return "mixed wasted-spend currencies are not supported in one policy: " + e.a + " and " + e.b
-}

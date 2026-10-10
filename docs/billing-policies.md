@@ -157,7 +157,7 @@ next admission in every runtime, without waiting for a process-local cache TTL.
 
 | Field | Applies to | Meaning |
 |---|---|---|
-| `bad_spend_windows` | any kind | Per-customer wasted-spend grace: at most `limit` of host-reported failed spend forgiven per window; overage is charged at report time. |
+| `bad_spend_windows` | any kind | Per-customer grace for failed usage: at most `limit` of usage events recorded with `outcome: failed` is forgiven per window; past it the failure is charged when it is recorded. |
 | `collection_threshold_amount` | any kind | When this customer's accrued arrears is invoiced. Overrides the merchant's `collection_threshold` for customers bound here. |
 | `delinquency_grace_days` / `delinquency_amount_floor` | any kind | This customer's [delinquency](arrears-delinquency.md) policy. Overrides the merchant's `arrears_grace_days` and `arrears_delinquency_floor`. |
 | `policy_currency` | any kind | Currency for checks whose window carries none. Blank means the request's currency. |

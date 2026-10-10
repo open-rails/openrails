@@ -258,8 +258,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"delete delegation key": func(id string) error {
 			return c.DeleteSpendDelegation(ctx, billing.CustomerID(uuid.New()), billing.SpendDelegationInvoker, id)
 		},
-		"operation authorization": func(id string) error { _, err := c.GetOperationAuthorization(ctx, id); return err },
-		"billing qualification":   func(id string) error { _, err := c.GetProviderBillingQualification(ctx, id); return err },
+		"provider operation": func(id string) error { _, err := c.GetProviderOperation(ctx, id); return err },
 	}
 	// Opaque host strings (request ids, deposit keys, migration prices): only blankness is refused.
 	blankOnly := map[string]func(id string) error{
@@ -432,10 +431,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.ExtendAdmissions(ctx, make([]billing.ExtendAdmissionParams, billing.MaxAdmissionBatchItems+1))
 			return err
 		},
-		"wasted spend empty": func() error {
-			_, err := c.ReportWastedSpend(ctx, nil)
-			return err
-		},
 		"credit grants empty": func() error {
 			_, err := c.CreateCreditGrants(ctx, nil)
 			return err
@@ -446,10 +441,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"tiers group": func() error {
 			_, err := c.GetEffectiveTiers(ctx, billing.GetEffectiveTiersParams{CustomerIDs: []billing.CustomerID{customerID}})
-			return err
-		},
-		"notifications empty": func() error {
-			_, err := c.MarkNotificationsRead(ctx, nil)
 			return err
 		},
 		"host events empty": func() error {
@@ -506,7 +497,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 	zero := billing.CustomerID{}
 	typedCustomerScoped := map[string]func() error{
 		"balance":       func() error { _, err := c.GetBalance(ctx, zero, "USD"); return err },
-		"usage":         func() error { _, err := c.GetUsage(ctx, zero, billing.GetUsageParams{Currency: "USD"}); return err },
 		"credit grants": func() error { _, err := c.ListCreditGrants(ctx, zero, billing.CreditGrantListParams{}); return err },
 		"create credit": func() error {
 			_, err := c.CreateCreditGrants(ctx, []billing.CreateCreditGrantParams{{CustomerID: zero}})
@@ -537,10 +527,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		"cancel price migration": func() error { _, err := c.CancelPriceMigration(ctx, billing.PriceMigrationID{}); return err },
 		"acknowledge host event": func() error {
 			_, err := c.AcknowledgeHostEvents(ctx, []billing.HostEventID{{}})
-			return err
-		},
-		"mark notification read": func() error {
-			_, err := c.MarkNotificationsRead(ctx, []billing.NotificationID{{}})
 			return err
 		},
 	}

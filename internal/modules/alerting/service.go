@@ -17,10 +17,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -243,50 +241,3 @@ func (s *Service) SetWebhookURL(ctx context.Context, webhookID billing.AlertWebh
 	}
 	return billing.AlertWebhook{}, pgx.ErrNoRows
 }
-
-// --- notifications -----------------------------------------------------------
-
-// ListNotifications pages the merchant's inbox, newest first.
-func (s *Service) ListNotifications(ctx context.Context, req billing.MerchantNotificationListParams) (billing.ListPage[billing.MerchantNotification], error) {
-	if req.IDs != nil {
-		rows, err := s.store.notificationsByIDs(ctx, uuidutil.Of(req.IDs))
-		return pagination.Map(billing.ListPage[gen.BillingNotification]{Items: rows}, notificationFromRow), err
-	}
-	limit, err := pagination.Limit(req.PageRequest)
-	if err != nil {
-		return billing.ListPage[billing.MerchantNotification]{}, err
-	}
-	afterAt, afterID, err := pagination.After(req.Cursor)
-	if err != nil {
-		return billing.ListPage[billing.MerchantNotification]{}, err
-	}
-	rows, err := s.store.listNotifications(ctx, req.UnreadOnly, afterAt, afterID, pagination.Fetch(limit))
-	if err != nil {
-		return billing.ListPage[billing.MerchantNotification]{}, err
-	}
-	page := pagination.Cut(rows, limit, func(r gen.BillingNotification) any { return pagination.TimeID{At: r.CreatedAt, ID: r.ID} })
-	return pagination.Map(page, notificationFromRow), nil
-}
-
-// MarkNotificationsRead marks the merchant's notifications read; one that
-// does not exist maps to nil.
-func (s *Service) MarkNotificationsRead(ctx context.Context, ids []billing.NotificationID) (map[billing.NotificationID]*billing.MerchantNotification, error) {
-	keys := make([]uuid.UUID, len(ids))
-	out := make(map[billing.NotificationID]*billing.MerchantNotification, len(ids))
-	for i, id := range ids {
-		keys[i] = id.UUID()
-		out[id] = nil
-	}
-	rows, err := s.store.markNotificationsRead(ctx, keys)
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		note := notificationFromRow(row)
-		out[note.ID] = &note
-	}
-	return out, nil
-}
-
-// UnreadCount is the bell badge count.
-func (s *Service) UnreadCount(ctx context.Context) (int64, error) { return s.store.unreadCount(ctx) }

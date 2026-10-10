@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (224), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (213), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
@@ -87,7 +87,6 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/checkout-sessions` | merchant | `AdminWrite` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
 | GET | `/v1/admin/checkout-options` | merchant | `AdminRead` | — | 200 `ListPage<CheckoutOption>` |  |
 | GET | `/v1/admin/catalog/revision` | merchant | `AdminRead` | — | 200 `CatalogRevision` |  |
-| GET | `/v1/admin/catalog/drift` | merchant | `AdminRead` | — | 200 `ListPage<CatalogDrift>` |  |
 | GET | `/v1/admin/catalog/meters` | merchant | `AdminRead` | — | 200 `ListPage<Meter>` |  |
 | GET | `/v1/admin/catalog/meters/{key}` | merchant | `AdminRead` | — | 200 `Meter` |  |
 | GET | `/v1/admin/catalog/meters/{key}/rate-overrides` | merchant | `AdminRead` | — | 200 `ListPage<RateOverride>` |  |
@@ -139,20 +138,14 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/admissions/{request_id}/capture` | merchant | `AdminWrite` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | sensitive |
 | POST | `/v1/admin/admissions/release` | merchant | `AdminWrite` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | sensitive |
 | POST | `/v1/admin/admissions/extend` | merchant | `AdminWrite` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | sensitive |
-| POST | `/v1/admin/wasted-spend` | merchant | `AdminWrite` | `ReportWastedSpendBatchParams` | 200 `ReportWastedSpendBatchResult` | sensitive |
 | POST | `/v1/admin/usage-events` | merchant | `AdminWrite` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | sensitive |
-| GET | `/v1/admin/customers/{customer_id}/usage` | merchant | `AdminRead` | — | 200 `Usage` |  |
-| POST | `/v1/admin/provider-operations` | merchant | `AdminWrite` | `OpenOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
-| GET | `/v1/admin/provider-operations` | merchant | `AdminRead` | — | 200 `ListPage<OperationAuthorization>` |  |
-| GET | `/v1/admin/provider-operations/{operation_id}` | merchant | `AdminRead` | — | 200 `OperationAuthorization` |  |
-| POST | `/v1/admin/provider-operations/{operation_id}/extend` | merchant | `AdminWrite` | `ExtendOperationAuthorizationParams` | 200 `OperationAuthorizationExtension` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/release` | merchant | `AdminWrite` | `ReleaseOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/observations` | merchant | `AdminWrite` | `RecordProviderBillingObservationParams` | 200 `ProviderBillingQualification` | sensitive |
-| GET | `/v1/admin/provider-operations/{operation_id}/qualification` | merchant | `AdminRead` | — | 200 `ProviderBillingQualification` |  |
-| POST | `/v1/admin/provider-operations/{operation_id}/resolution` | merchant | `AdminWrite` | `ResolveProviderBillingQualificationParams` | 200 `ProviderBillingQualification` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/refusal` | merchant | `AdminWrite` | `RefuseProviderBillingQualificationParams` | 200 `OperationAuthorization` | sensitive |
-| POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `AdminWrite` | `CloseOperationAuthorizationParams` | 200 `OperationAuthorization` | sensitive |
-| GET | `/v1/admin/provider-qualifications` | merchant | `AdminRead` | — | 200 `ListPage<ProviderBillingQualification>` |  |
+| POST | `/v1/admin/provider-operations` | merchant | `AdminWrite` | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | sensitive |
+| GET | `/v1/admin/provider-operations` | merchant | `AdminRead` | — | 200 `ListPage<ProviderOperation>` |  |
+| GET | `/v1/admin/provider-operations/{operation_id}` | merchant | `AdminRead` | — | 200 `ProviderOperation` |  |
+| POST | `/v1/admin/provider-operations/{operation_id}/increment` | merchant | `AdminWrite` | `IncrementProviderOperationParams` | 200 `ProviderOperation` | sensitive |
+| POST | `/v1/admin/provider-operations/{operation_id}/release` | merchant | `AdminWrite` | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
+| POST | `/v1/admin/provider-operations/{operation_id}/observations` | merchant | `AdminWrite` | `RecordProviderBillingObservationParams` | 200 `ProviderOperation` | sensitive |
+| POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `AdminWrite` | `CloseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
 | GET | `/v1/admin/invoices` | merchant | `AdminRead` | — | 200 `ListPage<Invoice>` |  |
 | GET | `/v1/admin/invoices/{id}` | merchant | `AdminRead` | — | 200 `Invoice` |  |
 | GET | `/v1/admin/invoices/{id}/payments` | merchant | `AdminRead` | — | 200 `ListPage<InvoicePayment>` |  |
@@ -177,12 +170,8 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/metrics/query` | merchant | `AdminRead` | `MetricsQuery` | 200 `MetricsResult` |  |
 | GET | `/v1/admin/metrics/schema` | merchant | `AdminRead` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/admin/dashboard` | merchant | `AdminRead` | — | 200 `Dashboard` |  |
-| GET | `/v1/admin/notifications` | merchant | `AdminRead` | — | 200 `ListPage<MerchantNotification>` |  |
-| GET | `/v1/admin/notifications/unread-count` | merchant | `AdminRead` | — | 200 `UnreadCount` |  |
-| POST | `/v1/admin/notifications/read` | merchant | `AdminRead` | `MarkNotificationsReadParams` | 200 `NotificationLookup` |  |
 | GET | `/v1/admin/worker-health` | merchant | `AdminRead` | — | 200 `ListPage<WorkerHealth>` |  |
 | GET | `/v1/admin/findings` | merchant | `AdminRead` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/admin/findings/summary` | merchant | `AdminRead` | — | 200 `FindingSummary` |  |
 | GET | `/v1/admin/findings/{id}` | merchant | `AdminRead` | — | 200 `Finding` |  |
 | POST | `/v1/admin/findings/{id}/resolve` | merchant | `AdminWrite` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
 | POST | `/v1/admin/metrics/ask` | merchant | `AdminRead` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |

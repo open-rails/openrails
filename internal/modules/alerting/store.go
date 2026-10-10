@@ -4,14 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 )
@@ -97,70 +94,6 @@ func (s *store) deleteWebhook(ctx context.Context, id uuid.UUID) (int64, error) 
 	return s.db.Gen(ctx).DeleteMerchantWebhook(ctx, gen.DeleteMerchantWebhookParams{MerchantID: queryMerchant.UUID(), ID: id})
 }
 
-// --- notifications -----------------------------------------------------------
-
-func (s *store) createNotification(ctx context.Context, n Notification) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	data, err := marshalJSON(n.Data, "")
-	if err != nil {
-		return err
-	}
-	if len(data) == 0 {
-		data = nil
-	}
-	var id *uuid.UUID
-	if n.ID != uuid.Nil {
-		id = &n.ID
-	}
-	_, err = s.db.Gen(ctx).CreateMerchantNotification(ctx, gen.CreateMerchantNotificationParams{
-		MerchantID: mid.UUID(),
-		ID:         id,
-		Severity:   string(n.Severity),
-		Title:      n.Title,
-		Body:       n.Body,
-		Link:       n.Link,
-		Data:       data,
-	})
-	return err
-}
-
-func (s *store) listNotifications(ctx context.Context, unreadOnly bool, afterAt *time.Time, afterID *uuid.UUID, limit int32) ([]gen.BillingNotification, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.db.Gen(ctx).ListMerchantNotifications(ctx, gen.ListMerchantNotificationsParams{
-		MerchantID: mid.UUID(), UnreadOnly: unreadOnly, AfterAt: afterAt, AfterID: afterID, RowLimit: limit,
-	})
-}
-
-func (s *store) notificationsByIDs(ctx context.Context, ids []uuid.UUID) ([]gen.BillingNotification, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.db.Gen(ctx).ListMerchantNotificationsByIDs(ctx, gen.ListMerchantNotificationsByIDsParams{MerchantID: mid.UUID(), Ids: ids})
-}
-
-func (s *store) markNotificationsRead(ctx context.Context, ids []uuid.UUID) ([]gen.BillingNotification, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return s.db.Gen(ctx).MarkMerchantNotificationsRead(ctx, gen.MarkMerchantNotificationsReadParams{MerchantID: mid.UUID(), Ids: ids})
-}
-
-func (s *store) unreadCount(ctx context.Context) (int64, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return s.db.Gen(ctx).CountUnreadMerchantNotifications(ctx, mid.UUID())
-}
-
 // --- row mapping -------------------------------------------------------------
 
 func webhookFromRow(row gen.BillingMerchantWebhook) Webhook {
@@ -169,14 +102,6 @@ func webhookFromRow(row gen.BillingMerchantWebhook) Webhook {
 		Format: WebhookFormat(row.Format), Enabled: row.Enabled,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
-}
-
-func notificationFromRow(row gen.BillingNotification) billing.MerchantNotification {
-	n := billing.MerchantNotification{
-		ID: billing.NotificationID(row.ID), Severity: billing.AlertSeverity(models.DerefStr(row.Severity)), Title: models.DerefStr(row.Title), Body: models.DerefStr(row.Body),
-		Link: row.Link, CreatedAt: row.CreatedAt, ReadAt: row.ReadAt,
-	}
-	return n
 }
 
 // marshalJSON encodes v, substituting empty for a nil/zero value.

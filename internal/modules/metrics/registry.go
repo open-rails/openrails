@@ -3,8 +3,10 @@ package metrics
 import (
 	"fmt"
 	"slices"
+	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/reconcile"
 )
 
 // The registry is the single source of truth for the metrics vocabulary:
@@ -45,6 +47,7 @@ const (
 	FamCheckouts      Family = "checkouts"       // flow over checkouts, one per checkout_id (first attempt)
 	FamRebillCycles   Family = "rebill_cycles"   // cohort over rebill_cycles (due_at: the period that came due)
 	FamNMIHistory     Family = "nmi_history"     // flow over nmi_history_months (month_at, #1120)
+	FamFindings       Family = "findings"        // snapshot over reconciliation_findings: open at t
 )
 
 // familySpec describes how a family's single statement is assembled.
@@ -138,6 +141,8 @@ var Dimensions = []Dimension{
 	{Name: "cancel_type", Description: "cancellation type recorded on the subscription (e.g. user, merchant, chargeback, failed_payment, expired)"},
 	{Name: "status", Description: "subscription status; snapshot measures group/filter by the CURRENT status of subs whose interval covers t", Values: []string{"pending", "active", "past_due", "canceled", "awaiting_method", "unverified"}},
 	{Name: "customer", Description: "the customer id (usage and admission measures)", Parse: typedDimValue(func(s string) (fmt.Stringer, error) { return billing.ParseCustomerID(s) })},
+	{Name: "invoker", Description: "the invoker that fired a usage event (usage measures)"},
+	{Name: "outcome", Description: "usage outcome: succeeded | failed (failed usage is charged only past the customer's grace)", Values: []string{"succeeded", "failed"}},
 	{Name: "sku", Description: "usage resource slug (usage_events.resource)"},
 	{Name: "rate_card", Description: "metered event type (usage_events.event_type; the key rate cards price)"},
 	{Name: "card_brand", Description: "card brand on the payment (empty when not card-based)"},
@@ -167,6 +172,10 @@ var Dimensions = []Dimension{
 	{Name: "recovered_by", Description: "what collected a cycle whose first outcome failed: dunning_retry | customer_retry | updated_card | late_provider_charge (empty otherwise)", Values: []string{"", "dunning_retry", "customer_retry", "updated_card", "late_provider_charge"}},
 	{Name: "recovery_attempt", Description: "the attempt that collected a failed cycle, counting the first: 1 (a missed cycle's first attempt) | 2 | 3 | 4 | 5+ (empty otherwise)", Values: []string{"", "1", "2", "3", "4", "5+"}},
 	{Name: "days_to_recover", Description: "whole days from a cycle's first failure to its collection (empty otherwise)"},
+	// Findings: problems OpenRails found.
+	{Name: "finding_type", Description: "finding type, e.g. life.provider_operation.refused or catalog.price.missing"},
+	{Name: "severity", Description: "finding severity", Values: []string{"critical", "high", "medium", "low"}},
+	{Name: "finding_status", Description: "requires_review (needs a person; the console's bell counts these) | reconcile_required (OpenRails is repairing it)", Values: []string{"requires_review", "reconcile_required"}},
 	// #1120 NMI history.
 	{Name: "nmi_kind", Description: "what NMI's own history tells apart: verification ($0 card verification) | one_off_sale (initial sales, upgrades and retries of declined rebills, whoever sent them) | scheduled_rebill (NMI's own schedule charge)", Values: []string{"verification", "one_off_sale", "scheduled_rebill"}},
 }
@@ -264,6 +273,8 @@ var families = map[Family]familySpec{
 		DimExprs: map[string]string{
 			"currency":  `ue.currency`,
 			"customer":  `ue.customer_id::text`,
+			"invoker":   `ue.invoker_id`,
+			"outcome":   `ue.outcome`,
 			"sku":       `COALESCE(ue.resource, '')`,
 			"rate_card": `ue.event_type`,
 		},
@@ -403,6 +414,18 @@ var families = map[Family]familySpec{
 				ELSE floor(EXTRACT(EPOCH FROM cy.won_at - COALESCE(cy.missed_at, cy.first_at)) / 86400)::bigint::text END`,
 		},
 	},
+	FamFindings: {
+		Kind: "snapshot",
+		From: `billing.reconciliation_findings f`,
+		// Open at t: seen by t and unresolved then. A finding that reopened
+		// counts from its first sighting.
+		BaseWhere: `f.created_at <= edge.bucket AND ((f.resolved_at IS NULL AND f.status IN ('requires_review','reconcile_required')) OR f.resolved_at > edge.bucket)`,
+		DimExprs: map[string]string{
+			"finding_type":   `f.finding_type`,
+			"severity":       `f.severity`,
+			"finding_status": `CASE WHEN f.status IN ('reconcile_required','auto_fixed') THEN 'reconcile_required' ELSE 'requires_review' END`,
+		},
+	},
 	FamNMIHistory: {
 		Kind:     "flow",
 		From:     `billing.nmi_history_months h`,
@@ -480,6 +503,21 @@ var (
 	cycleDims    = []string{"currency", "rail", "psp", "owner", "first_outcome", "first_failure_category", "first_failure_reason", "miss_reason", "recovered_by", "recovery_attempt", "days_to_recover"}
 	nmiHistDims  = []string{"psp", "nmi_kind", "category", "reason"}
 )
+
+// verificationPressure is an unverified subscription past its paid-through
+// date at t.
+const verificationPressure = `s.status = 'unverified' AND s.deleted_at IS NULL AND s.current_period_ends_at < edge.bucket`
+
+// countFindingTypes counts open findings of one registry-declared type set.
+func countFindingTypes(types []string) string {
+	quoted := make([]string, len(types))
+	for i, t := range types {
+		quoted[i] = "'" + t + "'"
+	}
+	return `COUNT(f.id) FILTER (WHERE f.finding_type IN (` + strings.Join(quoted, ", ") + `))`
+}
+
+func typeList(types []string) string { return strings.Join(types, "|") }
 
 // UnitMoney marks a measure whose cells are MoneyCell values: exact native
 // units of the row's currency (the registry scale, not always millionths).
@@ -739,15 +777,20 @@ var Measures = []Measure{
 		Formula:     "repeat top-ups / all top-ups",
 		Dims:        []string{"currency", "product_id"}},
 	{Name: "usage_revenue", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
-		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold",
+		Description: "consumed (recognized) usage spend in native currency units, from usage events; cash-in is credits_sold; failed usage counts only what was charged past grace",
 		Formula:     "SUM(amount) of usage events",
 		Expr:        `COALESCE(SUM(ue.amount), 0)::bigint`,
-		Dims:        []string{"currency", "customer", "sku", "rate_card"}},
+		Dims:        []string{"currency", "customer", "invoker", "outcome", "sku", "rate_card"}},
 	{Name: "usage_units", Class: ClassAdditive, Family: FamUsage, Unit: "count",
 		Description: "count of metered usage events (raw volume; per-dimension token counts live host-side)",
 		Formula:     "COUNT(usage events)",
 		Expr:        `COUNT(*)`,
-		Dims:        []string{"currency", "customer", "sku", "rate_card"}},
+		Dims:        []string{"currency", "customer", "invoker", "outcome", "sku", "rate_card"}},
+	{Name: "forgiven_usage", Class: ClassAdditive, Family: FamUsage, Money: true, Unit: "money",
+		Description: "failed usage the customer's grace absorbed (native currency units): what failures cost the merchant",
+		Formula:     "SUM(forgiven_amount) of failed usage events",
+		Expr:        `COALESCE(SUM(ue.forgiven_amount), 0)::bigint`,
+		Dims:        []string{"currency", "customer", "invoker", "outcome", "sku", "rate_card"}},
 	{Name: "active_customers", Class: ClassDistinct, Family: FamUsage, Unit: "count",
 		Description: "distinct customers with any usage in the bucket (the API platform's WAU/MAU)",
 		Formula:     "COUNT(DISTINCT customers) over usage events",
@@ -802,6 +845,37 @@ var Measures = []Measure{
 		Formula:     "COUNT(customers with balance / (7d burn / 7) <= 7 days)",
 		Dims:        []string{}},
 	// --- webhook health (#786) --------------------------------------------------------
+	// --- findings and verification: the operator's queue at t -----------------
+	{Name: "open_findings", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
+		Description: "findings open at t: problems OpenRails found that need a person or that it is repairing (finding_status)",
+		Formula:     "COUNT(findings open at t)",
+		Expr:        `COUNT(f.id)`,
+		Dims:        []string{"finding_type", "severity", "finding_status"}},
+	{Name: "orphaned_members", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
+		Description: "open findings of payment without access (a paid grant missing); nonzero after a full sweep means the billing state machine is failing",
+		Formula:     "COUNT(open " + typeList(reconcile.OrphanedFindingTypes) + " findings)",
+		Expr:        countFindingTypes(reconcile.OrphanedFindingTypes),
+		Dims:        []string{"severity"}},
+	{Name: "freeloaders", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
+		Description: "open findings of access without payment (its source proven absent or reversed)",
+		Formula:     "COUNT(open " + typeList(reconcile.FreeloaderFindingTypes) + " findings)",
+		Expr:        countFindingTypes(reconcile.FreeloaderFindingTypes),
+		Dims:        []string{"severity"}},
+	{Name: "duplicate_coverage", Class: ClassSnapshot, Family: FamFindings, Unit: "count",
+		Description: "open findings of one customer holding the same product's paid coverage twice",
+		Formula:     "COUNT(open " + typeList(reconcile.DuplicateCoverageFindingTypes) + " findings)",
+		Expr:        countFindingTypes(reconcile.DuplicateCoverageFindingTypes),
+		Dims:        []string{"severity"}},
+	{Name: "verification_pressure", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "count",
+		Description: "subscriptions awaiting provider verification past their paid-through date at t; its age trending up means verification (pull, probe, converge) is down",
+		Formula:     "COUNT(unverified subscriptions past paid-through at t)",
+		Expr:        `COUNT(s.id) FILTER (WHERE ` + verificationPressure + `)`,
+		Dims:        []string{"rail", "psp"}},
+	{Name: "verification_pressure_age_seconds", Class: ClassSnapshot, Family: FamSubsSnapshot, Unit: "seconds",
+		Description: "seconds the oldest unverified subscription is past its paid-through date at t (0 when none)",
+		Formula:     "MAX(t - paid-through) over unverified subscriptions past it",
+		Expr:        `COALESCE(MAX(EXTRACT(EPOCH FROM (edge.bucket - s.current_period_ends_at))) FILTER (WHERE ` + verificationPressure + `), 0)::float8`,
+		Dims:        []string{"rail", "psp"}},
 	{Name: "webhook_silence_age_seconds", Class: ClassSnapshot, Family: FamWebhookHealth, Unit: "seconds",
 		Description: "seconds since the last signature-VERIFIED inbound webhook per PSP at t (since tracking began when none was ever accepted); rejects never advance it",
 		Formula:     "t - the last accepted webhook (or the PSP's creation), per PSP",
