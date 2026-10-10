@@ -48,6 +48,7 @@ migration 0044_rate_windows.up.sql sha256:1656c9714e62a2a701e6faa8b608f29e91a7bc
 migration 0045_fx_rates.up.sql sha256:ee2d349edc70458abfb37b11d5717ac0d6b66c899fb01f78f50d6e401bd2c7cb
 migration 0046_drop_spend_delegations.up.sql sha256:d4cc778cfc0b467450c9480bad97bbaddeeb0100690bd918985c40fe29df37e0
 migration 0047_fx_rates_in_memory.up.sql sha256:d0d8e5e0ed5edff4e6508fac80dcc21dfdea09f045f4ad52b2d7be03dd841eeb
+migration 0048_drop_rate_windows.up.sql sha256:01a6fd529836c146961ab75ce3c57f8ceb83703a2e58faa4edae80dad260d90d
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2273,16 +2274,6 @@ table billing.psps
   index CREATE UNIQUE INDEX psps_live_key_key ON billing.psps USING btree (merchant_id, environment, lower(key)) WHERE (NOT archived)
   index CREATE UNIQUE INDEX psps_pkey ON billing.psps USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psps_rail_environment_account_id_key ON billing.psps USING btree (rail, environment, account_id)
-
-table billing.rate_windows
-  column key text NOT NULL
-  column hits bigint NOT NULL
-  column expires_at timestamp with time zone NOT NULL
-  constraint rate_windows_hits_check CHECK ((hits > 0))
-  constraint rate_windows_key_check CHECK (((key <> ''::text) AND (length(key) <= 512)))
-  constraint rate_windows_pkey PRIMARY KEY (key)
-  index CREATE INDEX rate_windows_expires_at_idx ON billing.rate_windows USING btree (expires_at)
-  index CREATE UNIQUE INDEX rate_windows_pkey ON billing.rate_windows USING btree (key)
 
 table billing.rebill_cycles
   column id uuid NOT NULL DEFAULT uuidv7()

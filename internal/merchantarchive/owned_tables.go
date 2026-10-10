@@ -87,7 +87,6 @@ var ownedTables = []string{
 	"provisioning_tokens",
 	"psp_refresh_watermarks",
 	"psps",
-	"rate_windows",
 	"rebill_cycles",
 	"reconciliation_findings",
 	"reconciliation_state",

@@ -91,11 +91,13 @@ func (in *abuseInstances) remove(i int) *httptest.ResponseRecorder {
 	return in.call(in.staff[i%len(in.staff)], http.MethodDelete, "/v1/admin/catalog/rate-overrides/"+uuid.NewString()+"/meter", "198.51.100.8:4711")
 }
 
-// postgresRows is how many rows abuse state left in PostgreSQL.
-func (in *abuseInstances) postgresRows(t *testing.T) (n int) {
+// noPostgres asserts PostgreSQL has nowhere to keep abuse state: no
+// rate_windows table, which counted limits, lockouts and challenges before.
+func (in *abuseInstances) noPostgres(t *testing.T) {
 	t.Helper()
-	require.NoError(t, in.f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{in.f.schema, "rate_windows"}.Sanitize()).Scan(&n))
-	return n
+	var table *string
+	require.NoError(t, in.f.pool.QueryRow(t.Context(), "SELECT to_regclass($1)::text", pgx.Identifier{in.f.schema, "rate_windows"}.Sanitize()).Scan(&table))
+	require.Nil(t, table, "abuse state is never in PostgreSQL")
 }
 
 // freshAddr is a client address no earlier run used: Redis outlives a test.
@@ -171,7 +173,7 @@ func (in *abuseInstances) limitsHold(t *testing.T, shared bool) {
 func TestOneInstanceWithoutRedisEnforcesAbuseLimits(t *testing.T) {
 	in := newAbuseInstances(t, 1, nil)
 	in.limitsHold(t, false)
-	require.Zero(t, in.postgresRows(t), "abuse state is never in PostgreSQL")
+	in.noPostgres(t)
 }
 
 // Instances with Redis share every limit: a window counted, a lockout set or
@@ -183,7 +185,7 @@ func TestInstancesWithRedisShareAbuseLimits(t *testing.T) {
 		require.Eventually(t, func() bool { dep, ok := redisState(t, client); return ok && dep.Available }, 15*time.Second, 50*time.Millisecond, "instance %d reaches Redis", i)
 	}
 	in.limitsHold(t, true)
-	require.Zero(t, in.postgresRows(t), "abuse state is never in PostgreSQL")
+	in.noPostgres(t)
 }
 
 // A configured Redis that does not answer costs sharing, not service: every
@@ -198,7 +200,7 @@ func TestRedisDownKeepsAbuseLimitsPerInstance(t *testing.T) {
 		require.Eventually(t, func() bool { return degraded(t, client) }, 15*time.Second, 50*time.Millisecond, "instance %d is ready with Redis degraded", i)
 	}
 	in.limitsHold(t, false)
-	require.Zero(t, in.postgresRows(t), "abuse state is never in PostgreSQL")
+	in.noPostgres(t)
 	for i, client := range in.clients {
 		require.Positive(t, engine.Graph(client).Runtime.AbuseState.Fallbacks(), "instance %d counts what memory took", i)
 	}

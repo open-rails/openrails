@@ -430,14 +430,9 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	require.Positive(t, before["ledger_transfers"])
 	require.Positive(t, before["grants"])
 
-	// Spent DPoP proofs: one expired, one still live.
-	w.exec(`INSERT INTO billing.rate_windows (key, hits, expires_at) VALUES ('dpop:proof:expired', 1, now() - interval '1 second'), ('dpop:proof:live', 1, now() + interval '1 minute')`)
-
 	// A pass is bounded: with a budget of 150 rows it deletes 150, oldest
 	// first, and says the merchant has more.
 	first := w.sweep(150)
-	require.EqualValues(t, 1, first.RateWindows)
-	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.rate_windows WHERE expires_at > now()`))
 	require.EqualValues(t, 150, first.SubscriptionTransitions)
 	require.Equal(t, 1, first.MerchantsBudgetCapped)
 	require.Equal(t, 254, transitions())

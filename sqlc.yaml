@@ -44,6 +44,7 @@ sql:
       - "internal/migrate/postgres/0045_fx_rates.up.sql"
       - "internal/migrate/postgres/0046_drop_spend_delegations.up.sql"
       - "internal/migrate/postgres/0047_fx_rates_in_memory.up.sql"
+      - "internal/migrate/postgres/0048_drop_rate_windows.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

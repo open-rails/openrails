@@ -47,7 +47,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -367,7 +366,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		CardAbuseGuard:         cardAbuseGuard,
 		AbuseState:             abuseState,
 		CaptchaStore:           captchaStore,
-		RateWindows:            ratelimit.NewWindows(database),
 		CardFailureLedger:      cardFailureLedger,
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
