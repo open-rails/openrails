@@ -16,11 +16,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #1099: a checkout session's payment claims its attempt's key in
-// PostgreSQL. Replicas racing one session charge once, and a replica that dies
-// after its provider charge left the claim processing: the claim lapses, a
-// pay on another replica reclaims it and resumes the same sale operation,
-// never charging again.
+// A checkout session's payment claims its attempt's key in PostgreSQL.
+// Replicas racing one session charge once, and a replica that dies after its
+// provider charge left the claim processing: the claim lapses, a pay on
+// another replica reclaims it and resumes the same sale operation, never
+// charging again.
 func TestReplicasCheckoutIdempotency(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -154,11 +154,11 @@ func requireStatus(t *testing.T, err error, want int) *billing.StatusError {
 	return status
 }
 
-// #1099 interleavings, each asserting the provider's own journal: an owner
-// whose lease lapses while it is still alive (inside its vault call) never
-// charges a session another request settled; a session whose attempt failed
-// moves to its next attempt, and a stale pay never re-runs the failed one; a
-// declined card fails its attempt at once.
+// Lease-lapse interleavings, each asserting the provider's own journal: an
+// owner whose lease lapses while it is still alive (inside its vault call)
+// never charges a session another request settled; a session whose attempt
+// failed moves to its next attempt, and a stale pay never re-runs the failed
+// one; a declined card fails its attempt at once.
 func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 	t.Parallel()
 	f := newFleet(t, 2)
@@ -245,11 +245,11 @@ func (f *fleet) submissionCount(rail string) int {
 	return len(f.base.nmi.Attempts())
 }
 
-// #1099: an owner frozen past its lease before it creates its attempt cannot
-// create or confirm it once another request reclaimed the key: every
-// transaction it opens proves the claim first. Here the reclaiming pay's new
-// card is refused and fails the attempt, the session moves on, and the frozen
-// owner then wakes with an approvable card.
+// An owner frozen past its lease before it creates its attempt cannot create
+// or confirm it once another request reclaimed the key: every transaction it
+// opens proves the claim first. Here the reclaiming pay's new card is refused
+// and fails the attempt, the session moves on, and the frozen owner then
+// wakes with an approvable card.
 func TestReplicasCheckoutFrozenOwnerRefusedAtCommit(t *testing.T) {
 	t.Parallel()
 	f := newFleet(t, 2)

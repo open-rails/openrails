@@ -18,10 +18,9 @@ import (
 	"github.com/open-rails/openrails/openrailstest/stripemock"
 )
 
-// A Checkout Session opened as OpenRails opens one is paid on Stripe's page:
-// Stripe charges it and the host receives checkout.session.completed, signed
-// with its endpoint's secret, in the pinned API version; Redeliver sends the
-// same event again, and a host's refusal is the caller's error.
+// Paying a Checkout Session charges it and sends checkout.session.completed,
+// signed and in the pinned API version; Redeliver resends it and a host's
+// refusal is the caller's error.
 func TestCheckoutSessionCompletesWithASignedWebhook(t *testing.T) {
 	stripe := stripemock.New(stripemock.Options{})
 	t.Cleanup(stripe.Close)

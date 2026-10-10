@@ -33,9 +33,8 @@ func stripeDedupForm(method string) url.Values {
 	return url.Values{"amount": {"999"}, "currency": {"usd"}, "customer": {"cus_fixture"}, "payment_method": {method}}
 }
 
-// These prove the simulator's provider boundary, not Stripe account behavior.
-// A result survives a lost response; concurrent requests do not execute twice;
-// parameters are part of the key binding; and a key is not a permanent fence.
+// An idempotency key survives a lost response, never executes twice
+// concurrently, is bound to its parameters and expires.
 func TestStripeSimulatorIdempotencyBoundary(t *testing.T) {
 	f := NewUnstarted(Options{})
 	clock := clockwork.NewFakeClockAt(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))

@@ -21,7 +21,7 @@ import (
 )
 
 // A merchant-initiated charge names the agreement its customer gave for the
-// card it charges (#1166). A replaced card or one reissued under another brand
+// card it charges. A replaced card or one reissued under another brand
 // carries none until a customer-initiated charge anchors one.
 
 const agreementRequired = "stored_credential_required"
@@ -231,7 +231,7 @@ func TestReplacedCardDropsUnscheduledAgreement(t *testing.T) {
 // billing on the same card. A reissue under another brand holds the card's
 // agreements for reconsent: the member is asked to act, the renewal is not
 // sent, and the customer's verification of the same card anchors the
-// agreement renewals name (#1168).
+// agreement renewals name.
 func TestNMIAccountUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -71,10 +71,9 @@ func (m *Mock) SetLegacyPrice(id string, amount int64) {
 	m.amounts[id] = amount
 }
 
-// AddSubscription seeds a provider-owned subscription in the pinned API
-// version's shape (the period on the item, the invoice's charge under
-// invoice.payments), billed and paid for its current period. It returns the
-// subscription id.
+// AddSubscription seeds a provider-owned subscription paid for its current
+// period, in the pinned API version's shape (period on the item, charge under
+// invoice.payments). It returns the subscription id.
 func (m *Mock) AddSubscription(customer, method, price string, amount int64, start, end time.Time) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

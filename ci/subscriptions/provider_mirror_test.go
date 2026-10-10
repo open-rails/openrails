@@ -19,9 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// #1089: Stripe and CCBill bill the subscriptions they own; OpenRails mirrors
-// them. Access follows payment evidence, and revoking access stops provider
-// billing.
+// Stripe and CCBill bill the subscriptions they own; OpenRails mirrors them.
+// Access follows payment evidence, and revoking access stops provider billing.
 
 func (l *legacy) stripeSubWrites() []providerCall {
 	return l.w.stripe.Mutations("/v1/subscriptions/" + l.railSub)
@@ -224,9 +223,9 @@ func newDataLinkWorld(t *testing.T, dl *dataLinkFake) *world {
 	return w
 }
 
-// The DataLink roster is a status fact, never payment (#1094): a member it
-// lists as active while the local row is past due is a finding once the
-// merchant is armed, never access. CCBill's RenewalSuccess restores it.
+// The DataLink roster is a status fact, never payment: a member it lists as
+// active while the local row is past due is a finding once the merchant is
+// armed, never access. CCBill's RenewalSuccess restores it.
 func TestCCBillDataLinkNeverGrantsAccess(t *testing.T) {
 	t.Parallel()
 	dl := newDataLinkFake(t)

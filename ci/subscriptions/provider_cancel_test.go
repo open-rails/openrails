@@ -11,8 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// #1102: when OpenRails ends a provider-billed membership, the provider cancel
-// is a durable intent queued in the same transaction, on every rail.
+// When OpenRails ends a provider-billed membership, the provider cancel is a
+// durable intent queued in the same transaction, on every rail.
 
 // providerCancels counts the provider-cancel intents queued for a subscription.
 func (w *world) providerCancels(intentType string, sub uuid.UUID) int {

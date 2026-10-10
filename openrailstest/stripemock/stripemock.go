@@ -1,7 +1,6 @@
-// Package stripemock is a fake Stripe for a host's end-to-end tests. It
-// serves the Stripe APIs OpenRails calls on a loopback listener, sells
-// through hosted Checkout and delivers Stripe's signed webhooks to the host,
-// so a test drives a real OpenRails through a Stripe purchase without Stripe.
+// Package stripemock is a fake Stripe for a host's end-to-end tests: it serves
+// the Stripe APIs OpenRails calls, sells through hosted Checkout and delivers
+// signed webhooks, so a test drives a real OpenRails through a Stripe purchase.
 //
 // Point a sandbox engine at it, mount OpenRails, and tell the mock where its
 // webhooks go:
@@ -19,16 +18,10 @@
 //	// … openrailshttp.Mount(mux, client, routes); srv := httptest.NewServer(mux)
 //	stripe.SendWebhooksTo(srv.URL+"/v1/webhooks/stripe/acct_test", "whsec_test")
 //
-// Without a publishable key a customer pays Stripe on its hosted Checkout:
-// paying a checkout session's Stripe option answers a redirect to the
-// session's URL. CompleteCheckoutSession is the customer paying there:
-// Stripe charges the session and sends checkout.session.completed, signed,
-// to the host, which grants what was bought. Redeliver sends an event again,
-// as Stripe retries one. Ledger and CheckoutSessions read what Stripe holds;
-// Unexpected lists requests the mock does not model.
-//
-// Deps.StripeTransport takes Transport instead of a listener. Only test code
-// may import it.
+// Without a publishable key, paying a checkout session's Stripe option
+// redirects to Stripe's hosted Checkout; CompleteCheckoutSession is the
+// customer paying there. Deps.StripeTransport takes Transport instead of a
+// listener. Only test code may import it.
 package stripemock
 
 import (

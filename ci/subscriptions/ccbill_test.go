@@ -323,9 +323,9 @@ func TestCCBillRetainedCohortWebhooks(t *testing.T) {
 	})
 }
 
-// A NewSaleSuccess can still arrive from a FlexForm link OpenRails no longer
-// issues. It never enrolls a new CCBill agreement: the refusal is explicit
-// and leaves an operator repair alert for the money CCBill took.
+// A NewSaleSuccess (from a FlexForm link OpenRails does not issue) never
+// enrolls a CCBill agreement: it is refused explicitly, leaving an operator
+// repair alert for the money CCBill took.
 func TestCCBillNewSaleIsRefused(t *testing.T) {
 	w := newWorld(t)
 	m := importCCBill(t, w)

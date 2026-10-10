@@ -20,7 +20,7 @@ import (
 //	evidenced: every completed local rail payment is a provider charge;
 //	once:      no subscription period holds two completed charges;
 //	moved:     payments holds only money that moved: a declined charge is a
-//	           payment attempt, never a failed payments row (#1111).
+//	           payment attempt, never a failed payments row.
 //
 // A test whose scenario deliberately breaks one opts out with its reason.
 type moneyInvariants struct{ waived map[string]string }

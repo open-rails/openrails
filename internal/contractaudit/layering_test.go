@@ -15,9 +15,9 @@ import (
 	"testing"
 )
 
-// The public interface is these packages (#1121): the Client, its nouns, the
-// catalog model, the router adapters and the hosts' test kit.
-// Everything else is internal/ or main.
+// The public interface is these packages: the Client, its nouns, the catalog
+// model, the router adapters and the hosts' test kit. Everything else is
+// internal/ or main.
 var publicPackages = []string{".", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "openrailstest/stripemock", "server", "web/admin"}
 
 func TestPublicPackages(t *testing.T) {
@@ -66,8 +66,8 @@ func TestPublicPackages(t *testing.T) {
 	}
 }
 
-// The root package is the client; it will construct the engine, so nothing
-// under internal/ may import it. Shared nouns live in package billing (#1121).
+// The root package is the client that constructs the engine, so nothing under
+// internal/ may import it. Shared nouns live in package billing.
 func TestInternalDoesNotImportRoot(t *testing.T) {
 	fsys := repositoryFS(t)
 	err := fs.WalkDir(fsys, "internal", func(name string, entry fs.DirEntry, err error) error {
@@ -94,7 +94,7 @@ func TestInternalDoesNotImportRoot(t *testing.T) {
 	}
 }
 
-// Root's only aliases are the Config and Deps family (#1121): defined once in
+// Root's only aliases are the Config and Deps family: defined in
 // internal/config (auth hook types in internal/billingauth) and named in
 // root's config.go. Every other root type is the Client's own.
 func TestRootAliasesAreTheConfigFamily(t *testing.T) {

@@ -14,12 +14,12 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Engine-owned tier changes (#1071). A customer's upgrade is one engine
-// charge of new price − unused credit on the membership's card, effective
-// now: a successor membership opens a period of the new cadence and replaces
-// the old one. A downgrade, by the customer or by staff, takes effect at
-// period end: nothing is charged or refunded now, and the renewal bills the
-// new price for a period of its cadence.
+// Engine-owned tier changes. A customer's upgrade is one engine charge of new
+// price − unused credit on the membership's card, effective now: a successor
+// membership opens a period of the new cadence and replaces the old one. A
+// downgrade, by the customer or by staff, takes effect at period end: nothing
+// is charged or refunded now, and the renewal bills the new price for a
+// period of its cadence.
 
 func (w *world) engineMember(rail string, tp topology, from tier) (*customer, billing.SubscriptionID) {
 	w.t.Helper()

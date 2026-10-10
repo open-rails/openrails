@@ -1,8 +1,6 @@
-// Package apisurface lists the Go API that OpenRails v1 freezes, one feature
-// per line: every exported constant, variable, function, type, field (with its
-// struct tag) and method of the public packages. api/go.txt holds the list;
-// go run ./scripts/contracts -write rewrites it and TestGoAPISurface fails
-// when it is stale.
+// Package apisurface lists the Go API that OpenRails v1 freezes: every exported
+// constant, variable, function, type, field (with its struct tag) and method of
+// the public packages, one per line, in api/go.txt (TestGoAPISurface).
 package apisurface
 
 import (

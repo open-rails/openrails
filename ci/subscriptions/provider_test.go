@@ -102,7 +102,7 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	require.Equal(t, l.railSub, str(sub.RailSubscriptionID))
 	wantPolicy := "provider"
 	if rail == "nmi" {
-		wantPolicy = "nmi_schedule" // every NMI schedule is dunned by OpenRails (Paul, 2026-09-25)
+		wantPolicy = "nmi_schedule" // every NMI schedule is dunned by OpenRails
 	}
 	require.Equal(t, wantPolicy, sub.CollectionPolicy)
 	require.NotNil(t, sub.PaymentMethodID)
@@ -126,7 +126,7 @@ func (l *legacy) periodEnd() time.Time {
 	return *l.w.subscription(l.tp, l.sub).CurrentPeriodEndsAt
 }
 
-// engineWrites counts provider mutations OpenRails could use to charge.
+// engineCharges counts provider mutations OpenRails could use to charge.
 func (l *legacy) engineCharges() int {
 	if l.rail == "stripe" {
 		return len(l.w.stripe.Mutations("/v1/payment_intents"))

@@ -290,12 +290,12 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 }
 
 // Scenario 2: the documented decline policy (docs/operations.md, Dunning):
-// a soft decline (do-not-honor included, #1109) on a monthly cycle retries at
-// +2d, +5d, +9d and +13d from the first failure and terminates (canceled,
-// access revoked) on the fifth failure; a card-fixable decline (a lost card
+// a soft decline (do-not-honor included) on a monthly cycle retries at +2d,
+// +5d, +9d and +13d from the first failure and terminates (canceled, access
+// revoked) on the fifth failure; a card-fixable decline (a lost card
 // included) stops retrying and waits for a new method; a non-recoverable
-// decline terminates at once. Engine access is bounded by
-// the paid period, so a declined renewal has no grace window.
+// decline terminates at once. Engine access is bounded by the paid period,
+// so a declined renewal has no grace window.
 func TestEngineDeclinePolicy(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -782,11 +782,10 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 }
 
 // Scenario 6: a process dies mid-renewal and a new one takes over the same
-// database. Before submission the renewal simply runs after restart. After a
-// submission whose response was lost, recovery adopts the provider's charge.
-// After a submission fence, only Stripe can safely replay its provider key.
-// NMI cannot distinguish a lost request from a delayed receipt and remains
-// pending until provider evidence resolves it.
+// database. Before submission the renewal runs after restart; after a lost
+// response, recovery adopts the provider's charge. Past the submission fence
+// only Stripe can replay its provider key; NMI cannot tell a lost request
+// from a delayed receipt and stays pending until provider evidence resolves it.
 func TestEngineCrashDurability(t *testing.T) {
 	t.Parallel()
 	submit := map[string]func(*http.Request) bool{
@@ -991,10 +990,10 @@ func TestEngineLostSubmission(t *testing.T) {
 	})
 }
 
-// One membership the due pass cannot process never fails the pass: every
-// other due renewal still runs, the pass completes, and the refusal is a
-// standing operator finding. (The broken row is the soak's shape: a paid
-// period end moved without a matching accepted agreement.)
+// One membership the due pass cannot process (a paid period end moved without
+// a matching accepted agreement) never fails the pass: every other due
+// renewal still runs, the pass completes, and the refusal is a standing
+// operator finding.
 func TestEngineDuePassIsolatesRefusals(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

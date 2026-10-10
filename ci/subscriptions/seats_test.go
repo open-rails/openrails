@@ -15,11 +15,11 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// Seats (#1168): a recurring price is per seat only when the catalog gives
-// its bounds. More seats charge the added ones for the rest of the period,
-// fewer apply at the next renewal, a tier change keeps them, and a change by
-// staff never charges and waits for the renewal. Renewals, cycles, payments,
-// access and entitlement checks carry the seats.
+// Seats: a recurring price is per seat only when the catalog gives its
+// bounds. More seats charge the added ones for the rest of the period, fewer
+// apply at the next renewal, a tier change keeps them, and a change by staff
+// never charges and waits for the renewal. Renewals, cycles, payments, access
+// and entitlement checks carry the seats.
 
 // seatPrice is a per-seat tier price of cents per seat for a 30-day cycle.
 func (w *world) seatPrice(group string, rank int, cents int64, bounds catalog.Quantity) tier {

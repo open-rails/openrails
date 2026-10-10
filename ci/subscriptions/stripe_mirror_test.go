@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #1094: Stripe bills the subscriptions it owns; OpenRails mirrors them and a
-// tier follows only a paid invoice for it.
+// Stripe bills the subscriptions it owns; OpenRails mirrors them and a tier
+// follows only a paid invoice for it.
 
 // A portal upgrade whose proration invoice is still open grants nothing: the
 // member keeps the paid tier. The new tier takes effect with Stripe's paid

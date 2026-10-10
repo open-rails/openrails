@@ -72,12 +72,10 @@ type replicaEnv struct {
 // fleetDeadline bounds a fleet test, its cleanup included.
 const fleetDeadline = 5 * time.Minute
 
-// newFleet starts n replicas; skews offsets each replica's engine clock.
-// The replicas run only the passes their test starts. River's own schedule
-// (the leader's due pass on taking leadership, a few seconds into the fleet's
-// life, then every minute) would land mid-scenario: a pass that renews the
-// membership between a test's setup and its barrier leaves the contenders
-// nothing to race.
+// newFleet starts n replicas; skews offsets each replica's engine clock. The
+// replicas run only the passes their test starts: River's own schedule (a due
+// pass on taking leadership, then every minute) could renew a membership
+// between a test's setup and its barrier, leaving nothing to race.
 func newFleet(t *testing.T, n int, skews ...time.Duration) *fleet {
 	return startFleet(t, n, false, skews)
 }

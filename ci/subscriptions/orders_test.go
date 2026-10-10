@@ -21,8 +21,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Orders (#1168): a customer buys priced lines on /v1/me with their own
-// credential and a saved card, as billing-ui does on the host's own site.
+// Orders: a customer buys priced lines on /v1/me with their own credential
+// and a saved card, as billing-ui does on the host's own site.
 
 func orderWorld(t *testing.T) *world {
 	t.Helper()

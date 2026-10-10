@@ -364,7 +364,7 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 		}
 		return 404, stripeErr("resource_missing")
 	case r.Method == http.MethodGet && seg[0] == "prices" && len(seg) == 2 && strings.HasPrefix(seg[1], "price_legacy_"):
-		// A legacy book's monthly 9.99 price, created at Stripe long ago.
+		// A legacy monthly price: 9.99 unless SetLegacyPrice set it.
 		amount, ok := m.amounts[seg[1]]
 		if !ok {
 			amount = 999

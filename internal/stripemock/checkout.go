@@ -96,9 +96,8 @@ func (m *Mock) CheckoutSessions() []Object {
 var ErrNoWebhook = errors.New("stripemock: no webhook endpoint; call SendWebhooksTo")
 
 // CompleteCheckoutSession is the customer paying an open payment-mode
-// Checkout Session: Stripe charges amount_total (a PaymentIntent with its
-// charge; a zero total charges nothing), completes the session and sends
-// checkout.session.completed. It returns the event's id.
+// Checkout Session: Stripe charges amount_total (nothing when zero), completes
+// the session and sends checkout.session.completed, returning the event's id.
 func (m *Mock) CompleteCheckoutSession(ctx context.Context, id string) (string, error) {
 	m.mu.Lock()
 	s, ok := m.sessions[id]

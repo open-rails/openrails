@@ -17,9 +17,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Multi-replica exactly-once rebilling (#1075). Every scenario runs N
-// embedded replicas over one database and asserts, from the providers' own
-// journals, one charge and one local payment per membership period.
+// Multi-replica exactly-once rebilling. Every scenario runs N embedded
+// replicas over one database and asserts, from the providers' own journals,
+// one charge and one local payment per membership period.
 
 // Scenario 1: every replica runs its due pass at once over many memberships
 // that fell due together; each is renewed once, none twice, none lost.

@@ -24,9 +24,8 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 )
 
-// Exercise the operator's real CLI over separate databases, then resume through
-// the ordinary Client. This is core embedded/HTTP qualification, not a claim
-// that the separately versioned SaaS host has adopted the current archive.
+// The operator's real CLI exports a merchant's book and imports it into a
+// separate database, which resumes through the ordinary Client.
 func TestOfflineBillingHandoff(t *testing.T) {
 	t.Parallel()
 	binary := filepath.Join(t.TempDir(), "openrails")

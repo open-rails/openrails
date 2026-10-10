@@ -12,8 +12,7 @@ import (
 )
 
 // Only tests, test harnesses and the sandbox command may import the mock or
-// its public face, openrailstest/stripemock: production code paths must never
-// reach a fake gateway.
+// openrailstest/stripemock: production code must never reach a fake gateway.
 func TestOnlyTestsAndSandboxImportTheMock(t *testing.T) {
 	mocks := []string{"github.com/open-rails/openrails/internal/stripemock", "github.com/open-rails/openrails/openrailstest/stripemock"}
 	allowed := []string{"internal/stripemock/", "openrailstest/stripemock/", "server/cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
