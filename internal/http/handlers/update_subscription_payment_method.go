@@ -179,15 +179,15 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
-	// #674: the swap goes through the durable nmi_payment_source_update intent
-	// (write-through) — a lost provider response can never leave local and NMI
-	// silently billing different cards; the intent ledger converges them.
+	// The swap goes through the durable nmi_payment_source_update intent
+	// (write-through), so a lost provider response never leaves local and NMI
+	// billing different cards; the intent ledger converges them.
 	out, err := r.State.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, subscription, paymentMethod, move.Swap, origin, originReason)
 	if err != nil {
 		switch {
 		case errors.Is(err, subscriptions.ErrPaymentMethodProviderAccountMismatch):
 			// The durable seam re-read the target under its row lock and found
-			// it attributed to another PSP (#657): a refusal, not a fault.
+			// it attributed to another PSP: a refusal, not a fault.
 			writePaymentMethodPSPMismatch(r)
 		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
 			r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
@@ -265,7 +265,7 @@ func writeUpdatedSubscription(r *httprequest.Request, userID string, customer bo
 // writePaymentMethodPSPMismatch renders billing.CodePaymentMethodPSPMismatch:
 // the named method was vaulted by another provider account than the
 // subscription's; nothing reached the provider. Same answer at the HTTP
-// pre-check and at the durable seam (#657).
+// pre-check and at the durable seam.
 func writePaymentMethodPSPMismatch(r *httprequest.Request) {
 	r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodePaymentMethodPSPMismatch,
 		"This payment method belongs to a different provider account than the subscription. Add the card again on the subscription's provider."))

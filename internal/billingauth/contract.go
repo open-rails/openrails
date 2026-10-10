@@ -8,14 +8,11 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Auth is the host's auth: helpers/auth's Auth, plain net/http middleware
-// that AuthKit's *authkit.Client implements. OpenRails stacks it on each of
-// its own routes by the route's catalog tier: Required on a customer route;
-// RequirePermission (which authenticates by itself) on a merchant route, then
-// Sensitive on one that moves money or removes access when the subject is a
-// user acting in person (automation has no sign-in to renew). Refusals are
-// the middleware's own responses. After them OpenRails reads Identity and
-// refuses a request it finds no identity on.
+// Auth is the host's auth (helpers/auth's Auth; AuthKit's *authkit.Client
+// implements it). The route gate stacks Required on a customer route,
+// RequirePermission on a merchant route, plus Sensitive where the operation
+// moves money or removes access and a user acts in person. OpenRails then
+// refuses a request with no Identity.
 type Auth = auth.Auth
 
 // Identity is who Auth admitted (helpers/auth): Subject, the native account

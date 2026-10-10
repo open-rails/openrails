@@ -1,7 +1,6 @@
-// Package billingauth is OpenRails' auth contract: the verdict-function
-// Auth interface a host supplies at Mount, the refusals the route gate
-// answers with, and the credential admission (cookies) every mount shares.
-// It imports no auth provider.
+// Package billingauth is OpenRails' auth contract: the host's Auth
+// (helpers/auth), the identities the route gate binds, its refusals, and the
+// cookie admission every mount shares. It imports no auth provider.
 package billingauth
 
 import (
@@ -36,7 +35,6 @@ func (uc UserContext) ValidateSubject() error {
 	return nil
 }
 
-// userContextCtxKey is the context key for storing user context.
 type userContextCtxKey struct{}
 
 // SetUserContext returns a child context with user context attached.

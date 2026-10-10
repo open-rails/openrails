@@ -1,9 +1,7 @@
 // Package customerscope is the customer a customer route acts as. Only the
-// route gate binds one, from the identity the host's Required admitted:
-// handlers and services read it, and never take the acting customer from the
-// path, query or body. Loads under a scope are scoped to (merchant,
-// customer) in SQL, so another customer's resource reads exactly like a
-// missing one.
+// route gate binds it, from the identity Required admitted; nothing takes the
+// acting customer from the path, query or body. Loads are scoped to (merchant,
+// customer) in SQL, so another customer's resource reads as missing.
 package customerscope
 
 import (

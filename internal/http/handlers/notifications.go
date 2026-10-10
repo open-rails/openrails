@@ -135,7 +135,3 @@ func customerNotificationPage(page billing.PageRequest, fetch func(*time.Time, *
 	}
 	return out, nil
 }
-
-// #528: GetAdminProviderIntents (the #358 provider-intent ledger debug view) was
-// dropped — it lived only on the retired per-user admin surface.
-// #666: GetAdminManualRebillAttempts (never routed) was dropped with it.

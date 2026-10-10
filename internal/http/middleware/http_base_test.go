@@ -21,7 +21,7 @@ import (
 )
 
 // The body cap is enforced on the whole body before any handler runs, webhook
-// routes included (OR2-DOS-1), so no route can mutate state on a partial read.
+// routes included, so no route can mutate state on a partial read.
 func TestBodyLimitHTTP(t *testing.T) {
 	for _, tc := range []struct {
 		path, body string
@@ -109,8 +109,8 @@ func TestArchiveBodyLimit(t *testing.T) {
 	require.Contains(t, w.Body.String(), `"code":"request_body_too_large"`)
 }
 
-// #765: bearer JWTs, never cookies, authorize requests, so the browser tier
-// gets a static wildcard without credentials and everything else gets no CORS.
+// The browser tier gets a static wildcard without credentials; everything
+// else gets no CORS.
 func TestPermissiveCORSHTTP(t *testing.T) {
 	tier := NewBrowserTierRoutes()
 	tier.Add("GET /v1/products")
@@ -207,7 +207,7 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 	require.Zero(t, buf.Len(), "skipped paths are not logged")
 }
 
-// #336: there is no default merchant; an unresolved merchant pins nothing so
+// There is no default merchant: an unresolved merchant pins nothing, so
 // downstream merchant.Require fails. A resolved Host also pins the host marker.
 func TestResolveMerchant(t *testing.T) {
 	id := billing.MerchantID(uuid.New())

@@ -36,7 +36,7 @@ func siteverify(t *testing.T, provider string, status int, body string) (Verifie
 	return v, &form
 }
 
-// FC-13: anything short of a clean provider success is not a pass.
+// Anything short of a clean provider success is not a pass.
 func TestVerifierFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	v, form := siteverify(t, config.CaptchaProviderTurnstile, 200, `{"success":true}`)

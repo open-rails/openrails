@@ -27,7 +27,7 @@ func groupsOf(digits, sep string, sizes ...int) string {
 	return strings.Join(append(parts, digits), sep)
 }
 
-// SAQ A firewall (#795 B5): every shape a human or form writes a card in is refused.
+// Every shape a human or form writes a card in is refused.
 func TestContainsPANRefusesCardShapes(t *testing.T) {
 	for _, pan := range testPANs {
 		spaced := groupsOf(pan, " ")
@@ -82,7 +82,7 @@ func TestContainsPANGroupingRules(t *testing.T) {
 }
 
 // UUIDs whose digit groups form a Luhn-valid run once dashes read as card
-// formatting; each was refused before the grouping rule. Fixed regression corpus.
+// formatting.
 var luhnTrippingUUIDs = []string{
 	"a544fda7-1958-4199-9417-3263a6c4b369", "463d4942-14ef-4eec-9436-151088257692",
 	"a9ac5110-4c89-4917-8028-24049a3a1644", "40ac552b-c48b-45fc-8968-269009312aae",
@@ -112,7 +112,7 @@ func acceptsIdentifier(t *testing.T, id string) {
 	}
 }
 
-// A uuid.NewString() Idempotency-Key was once refused ~1 in 480 times.
+// A UUID or typed id, bare or as an Idempotency-Key, is never a card number.
 func TestContainsPANAcceptsStructuredIdentifiers(t *testing.T) {
 	for _, id := range luhnTrippingUUIDs {
 		acceptsIdentifier(t, id)

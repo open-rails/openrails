@@ -13,11 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
-// cardFieldAdmitted applies the request-level rules for the typed `card` field
-// (#1129), writing the refusal when one fails: never beside a payment_token,
-// never over plain HTTP in live posture, and no card number in any other
-// field. Whether the PSP takes cards on the server is decided where the PSP
-// is resolved.
+// cardFieldAdmitted applies the request-level rules for the typed `card` field,
+// writing the refusal when one fails: never beside a payment_token, never over
+// plain HTTP in live posture, and no card number in any other field. Whether
+// the PSP takes cards on the server is decided where the PSP is resolved.
 func cardFieldAdmitted(r *httprequest.Request, hasToken bool, others ...string) bool {
 	if hasToken {
 		r.ErrorCode(billing.CodeInvalidParam, paymentmethods.ErrCardWithToken.Error())

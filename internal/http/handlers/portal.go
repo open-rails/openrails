@@ -42,8 +42,8 @@ func CreatePortalSession(r *httprequest.Request) {
 }
 
 // portalReturnOrigin returns the browser's origin only when it is an allowed
-// return origin (SEC-33), else the first allowed origin. Request headers never
-// choose an unlisted destination.
+// return origin, else the first allowed origin. Request headers never choose
+// an unlisted destination.
 func portalReturnOrigin(r *httprequest.Request) string {
 	if r == nil || r.State == nil || r.State.Config == nil {
 		return ""

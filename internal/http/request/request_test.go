@@ -48,8 +48,8 @@ func errorBody(t *testing.T, rec *httptest.ResponseRecorder) api.ErrorResponse {
 	return body
 }
 
-// The net/http binder must match gin's: binding tags validate, nested/inline
-// structs recurse, time_format and TextUnmarshaler fields decode.
+// The binder validates binding tags, recurses into nested and inline structs,
+// and decodes time_format and TextUnmarshaler fields.
 func TestBindingMatchesGinSemantics(t *testing.T) {
 	type body struct {
 		Name     string         `json:"name" binding:"required"`

@@ -16,11 +16,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// #692 operator findings queue. The reconciliation_findings ledger IS the
-// queue: these endpoints list it, show one item, and resolve one item at a
-// time (approve executes the structured recommendation; ignore silences the
-// subject permanently). Deliberately NO bulk endpoint — bulk destructive ops
-// are what the #679 breaker guards against.
+// The reconciliation_findings ledger is the operator queue: these endpoints
+// list it, show one item and resolve one at a time (approve runs the
+// structured recommendation; ignore silences the subject for good). There is
+// no bulk endpoint: bulk destructive operations are what the volume breaker
+// guards against.
 
 func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 	if r.State == nil || r.State.DB == nil {

@@ -29,15 +29,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Per-rail webhook body caps. The primary memory-exhaustion fix is the
-// global 1 MiB BodyLimit now applying to webhook routes (the blanket exemption
-// was removed); these per-rail caps are tighter defense-in-depth. They are
-// sized with headroom above real payloads to avoid 413-ing legitimate webhooks:
-//   - CCBill background posts are form-encoded but carry many customer/transaction
-//     fields, so 16 KiB rather than a couple KiB.
-//   - Stripe "snapshot" events embed the full object (subscriptions, invoices with
-//     line items) and can be tens of KiB, so 256 KiB.
-//   - NMI JSON transaction webhooks are modest; 64 KiB is ample.
+// Per-rail webhook body caps, tighter than DefaultMaxBodyBytes and sized with
+// headroom above real payloads:
+//   - CCBill form posts carry many customer/transaction fields: 16 KiB.
+//   - Stripe snapshot events embed the full object: 256 KiB.
+//   - NMI JSON transaction webhooks are modest: 64 KiB.
 const (
 	maxCCBillWebhookBytes int64 = 16 << 10  // 16 KiB
 	maxStripeWebhookBytes int64 = 256 << 10 // 256 KiB
@@ -95,21 +91,10 @@ func Webhook(r *httprequest.Request) {
 }
 
 // pinWebhookMerchantConn pins the resolved merchant's DB connection (the
-// openrails.merchant_id GUC) on the request for the rest of the dispatch, and returns
-// the release the caller must defer.
-//
-// The webhook surfaces resolve their merchant INSIDE the handler — from the URL
-// configured runtime binding or provider account
-// identity (processPSPWebhook) — so middleware.MerchantDBConnMW
-// cannot have run: at middleware time there is no merchant to pin. Without this,
-// downstream reads and writes would not share the resolved merchant's request
-// connection and transaction context. Queries enforce merchant predicates;
-// this pin preserves that scope across the webhook dispatch. It does not set
-// a PostgreSQL role or rely on row-level security.
-//
-// Nested calls are a no-op (db.WithMerchantConn returns the existing pin), so
-// the Stripe-by-account path that re-enters processResolvedMerchantWebhook is
-// safe.
+// openrails.merchant_id GUC) for the rest of the dispatch and returns the
+// release the caller must defer. A webhook resolves its merchant inside the
+// handler, so MerchantDBConnMW cannot have pinned it. Nested calls are a
+// no-op, so re-entering processResolvedMerchantWebhook is safe.
 func pinWebhookMerchantConn(r *httprequest.Request, merchantID billing.MerchantID) (func(), bool) {
 	if r != nil && r.State != nil {
 		if bound := r.State.ConfiguredMerchant(); !bound.IsZero() && bound != merchantID {
@@ -211,9 +196,8 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 	if s := strings.TrimSpace(creds.WebhookSigningThin); s != "" {
 		secrets = append(secrets, s)
 	}
-	// #856: through an api_version rollover the superseded endpoint keeps
-	// delivering with the OLD secret. Accepting it is what makes the rollover
-	// gapless — deliveries already queued there still verify.
+	// Through an api_version rollover the superseded endpoint keeps delivering
+	// with the previous secret; accepting it keeps the rollover gapless.
 	if s := strings.TrimSpace(creds.WebhookSigningPrevious); s != "" {
 		secrets = append(secrets, s)
 	}
@@ -350,9 +334,8 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			r.ErrorCode(billing.CodeInvalidParam, "Webhook account does not match payload")
 			return true, false
 		}
-		// or#880: a custodian event routes by the CUSTODIAN's tenant identity.
-		// It resolves a CUSTODIAN, not a PSP — one custodian may back several
-		// PSPs, and the event is about the instrument, not about a gateway.
+		// A custodian event routes by the custodian's tenant identity: it
+		// resolves a custodian, not a PSP (one custodian may back several).
 		custodian, release, ok := resolveWebhookCustodianAccount(r, models.CustodianBasisTheory, environment, tenantID)
 		if !ok {
 			return true, false
@@ -365,11 +348,9 @@ func processPSPWebhook(r *httprequest.Request, rail, routeAccountID, clientIP st
 			return true, false
 		}
 		defer release()
-		// SEC-24 item 7: handled=true, accepted=FALSE. processResolvedMerchantWebhook
-		// writes its OWN response — 401 on a failed signature, 200 on success.
-		// Returning accepted=true made the caller write {"status":"accepted"}
-		// again on top, so a body-parsing monitor saw a REJECTED FORGERY
-		// reported as accepted. The status was always right; the body lied.
+		// handled=true, accepted=false: processResolvedMerchantWebhook writes
+		// its own response (401 on a bad signature, 200 on success), so the
+		// caller must not write "accepted" on top of a refused forgery.
 		processResolvedMerchantWebhook(r, subscriptions.RailStripe, account.MerchantID, account.AccountID)
 		return true, false
 	default:
@@ -411,10 +392,9 @@ func resolveWebhookPSP(r *httprequest.Request, rail, environment, accountID stri
 		r.State.Merchants.ResolvePSPByIdentity)
 }
 
-// resolveWebhookCustodianAccount is the custody sibling: it resolves the
-// CUSTODIAN a tenant identity belongs to (or#880) and pins its merchant.
-// Unlike a rail-routed webhook it pins NO psp id — a custodian may back
-// several PSPs, and a custodian event is about the instrument, not a gateway.
+// resolveWebhookCustodianAccount resolves the custodian a tenant identity
+// belongs to and pins its merchant, but no PSP id: a custodian may back
+// several PSPs, and its event is about the instrument, not a gateway.
 func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, tenantID string) (merchants.CustodianIdentity, func(), bool) {
 	noop := func() {}
 	custodian, ok, err := r.State.Merchants.ResolveCustodianByIdentity(r.Request.Context(), kind, environment, tenantID)
@@ -427,10 +407,8 @@ func resolveWebhookCustodianAccount(r *httprequest.Request, kind, environment, t
 		rejectWebhook(r)
 		return merchants.CustodianIdentity{}, noop, false
 	}
-	// or#893/or#795: pin the custodian the event demonstrably came from, the way
-	// the PSP routes pin theirs. Nothing on this plane enqueues an intent today,
-	// but anything that starts to is custodian-addressed by construction — the
-	// event identifies a custodian that backs many PSPs, never one of them.
+	// Pin the custodian the event came from, as the PSP routes pin theirs, so
+	// anything enqueued here is custodian-addressed, never one of its PSPs.
 	ctx := merchant.WithID(r.Request.Context(), custodian.MerchantID)
 	r.Request = r.Request.WithContext(db.WithCustodianID(ctx, custodian.ID))
 	release, ok := pinWebhookMerchantConn(r, custodian.MerchantID)
@@ -498,16 +476,13 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 	if !bindResolvedWebhookPSP(r, pspID, found, resolveErr) {
 		return false
 	}
-	// or#893: ONE signature header. NMI sends `Webhook-Signature: t=<ts>,s=<hex>`
-	// (docs/rails/nmi.md, live-verified in tests/nmi_webhook_signature_http_test.go),
-	// and the embedded service seam has only ever read that name. The three
-	// X-… spellings were speculative aliases: accepting them widened the set of
-	// headers an attacker could aim a forged signature at for no gateway that
-	// ever sends them.
+	// NMI sends one signature header, `Webhook-Signature: t=<ts>,s=<hex>`
+	// (docs/rails/nmi.md). No other spelling is accepted, so a forged
+	// signature has one header to aim at.
 	header := strings.TrimSpace(r.Request.Header.Get("Webhook-Signature"))
 	signingKey := keys.Current
 	prepared, err := webhookutil.PrepareNMI(provider, body, signingKey, header)
-	// SEC-29: the rotated-out secret verifies only inside its bounded overlap.
+	// The rotated-out secret verifies only inside its bounded overlap.
 	if errors.Is(err, webhookutil.ErrNMIWebhookSignatureInvalid) && strings.TrimSpace(keys.Previous) != "" {
 		if again, againErr := webhookutil.PrepareNMI(provider, body, keys.Previous, header); againErr == nil {
 			prepared, err, signingKey = again, nil, keys.Previous
@@ -640,9 +615,9 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 		r.ErrorCode(billing.CodeInternalError, "Webhook processing unavailable")
 		return false
 	}
-	// Stamp the routed PSP so every row this event materialises is attributable
-	// (or#893). The per-account route pins it in resolveWebhookPSP;
-	// the merchant-slug route resolves it from the payload's own account identity.
+	// Stamp the routed PSP so every row this event materialises is
+	// attributable: the caller usually pinned it, else the payload's account
+	// identity resolves it.
 	ctx := r.Request.Context()
 	if accountID != "" && r.State.Merchants != nil {
 		if mid, ok := merchant.FromContext(ctx); ok && !mid.IsZero() {
@@ -669,9 +644,8 @@ func processMerchantCCBillWebhookPrepared(r *httprequest.Request, clientIP strin
 }
 
 // ccbillWebhookMessage builds the dispatch message for a CCBill event. CCBill
-// has no signature — authentication is the source-IP allowlist — so
-// SignatureValid is deliberately left nil (never claimed, #668), matching the
-// River path (Prepared.QueueArgs on an unverified Prepared).
+// has no signature (the source-IP allowlist authenticates it), so
+// SignatureValid stays nil: never claimed.
 func ccbillWebhookMessage(clientIP string, prepared webhookutil.Prepared, accountID string) *webhooks.WebhookMessage {
 	msg := &webhooks.WebhookMessage{
 		Rail:       subscriptions.RailCCBill,
@@ -742,14 +716,14 @@ func ccbillWebhookAccountID(body []byte) string {
 	if clientSubacc == "" || clientSubacc == "<nil>" {
 		return clientAccnum
 	}
-	// #697: composite CCBill identity is dash-joined (clientAccnum-clientSubacc),
-	// matching CCBill's own convention and the declared account_id format.
+	// The composite CCBill identity is dash-joined (clientAccnum-clientSubacc),
+	// CCBill's own convention and the declared account_id format.
 	return clientAccnum + "-" + clientSubacc
 }
 
 // canonicalWebhookRail resolves the URL's rail segment, writing a 400 with the
-// rename when the segment is a retired alias (or#893). The rail segment is the
-// gateway kind; a PSP is named by :account_id or the payload's account identity.
+// rename when the segment is a retired alias. The rail segment is the gateway
+// kind; a PSP is named by :account_id or the payload's account identity.
 func canonicalWebhookRail(r *httprequest.Request) (string, bool) {
 	provider, err := webhookutil.CanonicalRail(r.Param("rail"))
 	if err != nil {
@@ -768,8 +742,8 @@ func readRequestBody(body io.ReadCloser) ([]byte, error) {
 }
 
 // rejectWebhook answers an unknown account, an unconfigured secret and a bad
-// signature identically (SEC-33), so a webhook route never reveals which
-// provider accounts a deployment serves.
+// signature identically, so a webhook route never reveals which provider
+// accounts a deployment serves.
 func rejectWebhook(r *httprequest.Request) {
 	r.ErrorCode(billing.CodeAuthenticationRequired, "Invalid webhook signature")
 }

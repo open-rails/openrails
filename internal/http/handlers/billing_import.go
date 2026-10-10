@@ -11,14 +11,11 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// ImportDeclaredBilling handles POST /v1/admin/billing-import (#737): the HTTP door
-// into the DeclaredBilling import seam (billingimport.Import — the same body/
-// result vocabulary as pkg/embedded.ImportBilling). The merchant comes from the
-// authenticated credential; times are RFC3339, amounts provider-wire CENTS
-// (amount_cents). Idempotency and batching semantics are the seam's: re-posting
-// the same book at the same as_of is a no-op, and the global body cap forces
-// large books to batch — batched calls MUST NOT set subscriptions_exhaustive
-// (absence reasoning is only valid over a whole book in one call).
+// ImportDeclaredBilling handles POST /v1/admin/billing-import: the HTTP door to
+// billingimport.Import (Client.ImportBilling's body and result). The merchant
+// is the credential's. Re-posting the same book at the same as_of is a no-op;
+// the body cap forces large books into batches, which must not set
+// subscriptions_exhaustive (absence is only provable over a whole book).
 func ImportDeclaredBilling(r *httprequest.Request) {
 	var book billingimport.DeclaredBilling
 	if !r.BindJSON(&book) {

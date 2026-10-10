@@ -16,10 +16,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 )
 
-// Basis Theory webhook ingestion (#795, route /webhooks/basistheory → event
-// source basis_theory, the CUSTODIAN — not a rail, or#879). Signature = RSA-PSS SHA-256 against BT's CDN-published
-// public key (BT-SIGNATURE / BT-SIGNATURE-VERSION) — no per-merchant secret,
-// so one process-wide verifier per key URL serves every merchant.
+// Basis Theory webhooks: the event source is basis_theory, a custodian, not a
+// rail. The signature is RSA-PSS SHA-256 against BT's CDN-published public key
+// (BT-SIGNATURE / BT-SIGNATURE-VERSION), with no per-merchant secret, so one
+// process-wide verifier per key URL serves every merchant.
 
 var (
 	btVerifierMu       sync.Mutex
@@ -46,7 +46,7 @@ func basisTheoryVerifier(r *httprequest.Request) *basistheory.WebhookVerifier {
 }
 
 // basisTheoryWebhookTenantID extracts the tenant identity the payload-derived
-// surface routes by — the custodian's own account_id (or#880).
+// surface routes by: the custodian's own account_id.
 func basisTheoryWebhookTenantID(body []byte) string {
 	var evt basistheory.Event
 	if err := json.Unmarshal(body, &evt); err != nil {
@@ -112,9 +112,8 @@ func processMerchantBasisTheoryWebhookBody(r *httprequest.Request, merchantID bi
 		Signature:      sig,
 		SignatureValid: &verified,
 		ReceivedAt:     time.Now(),
-		// or#880: a custodian event carries the CUSTODIAN's identity, never a
-		// PSP's. Keeping them in separate fields is the whole point of the
-		// issue — a tenant id in a field named PspID is the category error.
+		// A custodian event carries the custodian's identity, never a PSP's: a
+		// tenant id in a field named PspID would be a category error.
 		CustodianAccountID: tenantID,
 	}
 	if err := r.State.WebhookDispatcher.Process(r.Request.Context(), msg); err != nil {

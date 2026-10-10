@@ -28,9 +28,8 @@ func (f AuthenticatorFunc) Authenticate(ctx context.Context, r *http.Request) (U
 	return f(ctx, r)
 }
 
-// Optional is framework-neutral net/http middleware that attempts authentication
-// but allows the request through with no UserContext when it fails. Mirrors
-// authkit's http.Optional.
+// Optional is net/http middleware that attempts authentication and lets the
+// request through without a UserContext when it fails.
 func Optional(a Authenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -44,10 +43,8 @@ func Optional(a Authenticator) func(http.Handler) http.Handler {
 	}
 }
 
-// UnauthenticatedMessage maps an authentication error to a client-safe message:
-// the generic "authentication required" for a nil/ErrUnauthenticated error, or
-// the error's own text otherwise. Shared by the net/http, gin, and neutral-router
-// auth middleware so the 401 message is identical across all surfaces.
+// UnauthenticatedMessage is the client-safe 401 message for err: "authentication
+// required" for nil or ErrUnauthenticated, else err's own text.
 func UnauthenticatedMessage(err error) string {
 	if err == nil || errors.Is(err, ErrUnauthenticated) {
 		return "authentication required"
@@ -55,10 +52,9 @@ func UnauthenticatedMessage(err error) string {
 	return err.Error()
 }
 
-// Unauthenticated is the 401 for an authentication error: a refusal the
-// authenticator already coded keeps its code, an expired or revoked credential
-// gets its own, and anything else is authentication_required with the error's
-// client-safe text.
+// Unauthenticated is the 401 for an authentication error: a coded 401 keeps
+// its code, an expired, revoked or unproven credential gets its own, and
+// anything else is authentication_required.
 func Unauthenticated(err error) GateError {
 	var gate GateError
 	switch {
@@ -74,11 +70,9 @@ func Unauthenticated(err error) GateError {
 	return Refusal(billing.CodeAuthenticationRequired, UnauthenticatedMessage(err))
 }
 
-// WriteJSONError writes the one OpenRails error envelope
-// ({"error":{"type","code","message","request_id"}}) from a plain
-// http.ResponseWriter, for middleware that answers before a handler exists.
-// code is the stable machine code; the type is the status's category. The
-// request id is the one the request-log middleware already put on the response.
+// WriteJSONError writes the OpenRails error envelope from a plain
+// http.ResponseWriter, for middleware that answers before a handler exists,
+// with the request id the request-log middleware set on the response.
 func WriteJSONError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

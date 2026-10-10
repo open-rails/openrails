@@ -12,14 +12,13 @@ import (
 const Redacted = "[card]"
 
 // Card is a payment card as its holder typed it, for a PSP whose card_entry is
-// server (#1129). It lives only between the request that carried it and the
-// gateway call that vaults it: every formatter and encoder renders Redacted,
-// and Zero wipes the number and security code. Only the gateway integration
-// reads them (Unseal).
+// server. It lives only between the request that carried it and the gateway
+// call that vaults it: every formatter and encoder renders Redacted, Zero
+// wipes the number and security code, and only Unseal reads them.
 //
-// The value holds one closure, so a reflective printer that cannot call its
-// methods (an unexported field under %+v, a test differ) shows an address,
-// never the card.
+// It holds one closure, so a reflective printer that cannot call its methods
+// (an unexported field under %+v, a test differ) shows an address, never the
+// card.
 type Card struct{ open func() *cardSecret }
 
 func (c *Card) secret() *cardSecret {

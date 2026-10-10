@@ -1,14 +1,7 @@
-// Package cardguard is the single card-number detector behind the OpenRails
-// PAN firewall (#795 B5, SAQ A). A raw card number pasted into any request
-// field would silently escalate the PCI posture (SAQ A -> SAQ D), so
-// card-number-shaped input is refused loudly, never stored or forwarded.
-//
-// One detector, one set of rules. Callers scan fields; they never carve out
-// per-field exemptions, because a rule good enough to exempt a field is a rule
-// that belongs here.
-//
-// Card (#1129) is the one admitted exception: the typed `card` field of a PSP
-// whose card_entry is server.
+// Package cardguard is the one card-number detector behind OpenRails' PAN
+// firewall (SAQ A): a card number in any request field is refused, never
+// stored or forwarded, with no per-field exemptions. The one exception is
+// Card, the typed `card` field of a PSP whose card_entry is server.
 package cardguard
 
 const (
@@ -16,30 +9,20 @@ const (
 	maxPANDigits = 19
 )
 
-// ContainsPAN reports whether s contains a payment card number.
+// ContainsPAN reports whether s contains a payment card number. A candidate is
+// a run of digit groups joined only by card formatting (spaces, at most one
+// dash per gap); it is a PAN when:
 //
-// A candidate is a run of digit groups joined only by card formatting (spaces
-// and at most one dash per gap). It is a PAN only when all four hold:
+//  1. Grouping: issuers print it so (one run, 4-4-4-… with a short tail, or
+//     Amex/Diners 4-6-5 and 4-6-4).
+//  2. Standalone: a separated candidate touches no letter at either end, as
+//     an identifier's digit groups always do.
+//  3. Luhn: the check digit passes.
+//  4. Range: its leading digits and length are an issued range (issuedRange).
 //
-//  1. Grouping: the group lengths spell a grouping an issuer actually prints —
-//     one unbroken run, the 4-4-4-… grouping with a short tail, or the
-//     Amex/Diners 4-6-5 and 4-6-4.
-//  2. Standalone: a candidate written WITH separators does not butt against a
-//     letter on either end. Nobody writes a card number glued to a word; an
-//     identifier's digit groups always are (UUID hex, a typed id's body).
-//  3. Luhn: the digits pass the check digit.
-//  4. Range: the leading digits and total length fall inside an issuer
-//     identification range some network issues (see issuedRange).
-//
-// Rules 1 and 2 are what keep structured identifiers out, and together they are
-// exact for UUIDs, not merely unlikely: rule 2 confines a separated candidate
-// to whole 8-4-4-4-12 segments, and no window of those lengths is a card
-// grouping. Rule 4 drops the other common non-card run — epoch
-// millisecond/microsecond/nanosecond keys are 13/16/19 digits starting with 1,
-// a length no airline-range card is issued at.
-//
-// An UNSEPARATED 13-19 digit run is always a candidate, letters on either side
-// or not, so the ordinary paste of a card number is caught wherever it lands.
+// Rules 1 and 2 exclude UUIDs exactly; rule 4 excludes 13/16/19-digit epoch
+// keys starting with 1. An unseparated 13-19 digit run is a candidate wherever
+// it sits.
 func ContainsPAN(s string) bool {
 	if len(s) < minPANDigits {
 		return false

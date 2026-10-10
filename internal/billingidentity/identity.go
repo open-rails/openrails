@@ -1,5 +1,4 @@
-// Package identity provides explicit, mutually-distinct identity types for
-// OpenRails openrails.
+// Package billingidentity holds OpenRails' mutually distinct identity types.
 package billingidentity
 
 import (
@@ -9,11 +8,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// CustomerID identifies a billing.customers row: the OpenRails payable
-// subject whose balance, invoices, reservations, and entitlements are
-// recorded. It is the shared wire type billing.CustomerID (one family, one
-// spelling), distinct from any invoker or operator identity so the compiler
-// rejects passing the wrong one.
+// CustomerID identifies a billing.customers row: the payable subject whose
+// balance, invoices and entitlements are recorded. Its own type, so the
+// compiler refuses an invoker or operator id in its place.
 type CustomerID = billing.CustomerID
 
 // InvokerType is the wire vocabulary billing.InvokerType.
@@ -24,8 +21,8 @@ const (
 	InvokerTypeCustomer  = billing.InvokerTypeCustomer
 )
 
-// IsDirectPayerInvoker reports whether t is the direct-payer credential type.
-// Anything else is delegated: the stricter abuse cutoff.
+// IsDirectPayerInvoker reports whether t is InvokerTypeCustomer. Anything else
+// is delegated: the stricter abuse cutoff.
 func IsDirectPayerInvoker[T ~string](t T) bool {
 	return strings.TrimSpace(string(t)) == string(InvokerTypeCustomer)
 }

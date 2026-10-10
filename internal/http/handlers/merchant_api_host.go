@@ -1,9 +1,9 @@
 package handlers
 
-// The merchant's api_host (#850, #1107): the Host-header value public routes
-// resolve the merchant from. Operators bind it through the merchant manifest
-// or the server's SetMerchantAPIHost; a hosted product claims and proves one
-// through the server's ClaimMerchantAPIHost and VerifyMerchantAPIHost.
+// The merchant's api_host: the Host-header value public routes resolve the
+// merchant from. Operators bind it through the merchant manifest or the
+// server's SetMerchantAPIHost; a hosted product claims and proves one through
+// the server's ClaimMerchantAPIHost and VerifyMerchantAPIHost.
 
 import (
 	"errors"

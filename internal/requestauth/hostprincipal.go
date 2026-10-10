@@ -6,12 +6,10 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// HostPrincipal is the identity an IN-PROCESS transport attaches to the request
-// context when an embedding host calls its own engine through the unified SDK
-// client (#685). It is deliberately a CONTEXT VALUE, not a header: context
-// values cannot arrive on a network request, so a gate that finds one can trust
-// it without any shared secret — unforgeable from the wire by construction.
-// The in-process host is its merchant's owner: trusted for its own merchant.
+// HostPrincipal is the identity the in-process transport attaches when an
+// embedding host calls its own engine through the Go client. A context value,
+// never a header, so it cannot arrive over the network and needs no shared
+// secret. The host is trusted for its own merchant.
 type HostPrincipal struct {
 	MerchantID   billing.MerchantID
 	MerchantSlug string

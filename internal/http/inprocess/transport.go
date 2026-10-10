@@ -43,11 +43,10 @@ func newTransport(handler http.Handler, configuredMerchant func() billing.Mercha
 	return &inprocessTransport{handler: handler, configuredMerchant: configuredMerchant, hostCredential: capability, subject: subject}, capability
 }
 
-// inprocessTransport dispatches SDK requests directly into the in-process
-// neutral handler — no socket, no serialization loss, one JSON round-trip. It
-// attaches the host principal as a CONTEXT VALUE (requestauth.WithHostPrincipal);
-// only for the internal default host credential. Explicit customer credentials
-// use normal verification. Network mounts never use this transport.
+// inprocessTransport dispatches Client requests straight into the in-process
+// handler: no socket, one JSON round trip. Only the internal default host
+// credential gets the host principal (a context value); explicit customer
+// credentials verify normally. Network mounts never use it.
 type inprocessTransport struct {
 	resolveTarget      func(context.Context, *http.Request) (billingauth.Target, error)
 	handler            http.Handler
@@ -65,12 +64,10 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 		defer req.Body.Close()
 	}
 	ctx := req.Context()
-	// The client carries its construction-time binding in ctx (#445): an
-	// unbound in-process client, and a runtime bound to another merchant after
-	// that client was built, are both refused before any handler runs (#772).
-	// Synthesized as a response (not a RoundTrip error): an error here would
-	// surface via remote.go's doRaw as ErrUnreachable, which is wrong for a
-	// well-formed request the engine deliberately refuses.
+	// An unbound in-process client, and a runtime bound to another merchant
+	// after the client was built, are refused before any handler runs, as a
+	// 409 response: a RoundTrip error would surface as ErrUnreachable, wrong
+	// for a well-formed request the engine refuses.
 	mid, _ := merchant.FromContext(ctx)
 	refuse := func(message string) (*http.Response, error) {
 		if stream && req.Body != nil {
@@ -98,7 +95,7 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	if mid.IsZero() {
 		return refuse("openrails: in-process client is not bound to a merchant")
 	}
-	// Live read: EnsureMerchant/provisioning may bind the merchant after New.
+	// Live read: the runtime may be bound after its client was built.
 	if bound := t.configuredMerchant(); !bound.IsZero() && mid != bound {
 		return refuse(merchantMismatchMsg(bound, mid))
 	}
@@ -119,11 +116,9 @@ func (t *inprocessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return w.response(req), nil
 }
 
-// conflictResponse synthesizes a 409 response in the internal/api Stripe error
-// envelope shape ({"error":{"type","code","message"}}) for a merchant binding
-// conflict (#772). remote.go's do/statusErrorFromBody parses this envelope
-// like any real non-2xx wire response, so the call surfaces as a StatusError
-// (ErrConflict) identically to every other in-process rejection.
+// conflictResponse synthesizes a 409 in the OpenRails error envelope for a
+// merchant binding conflict. The remote client parses it like any non-2xx
+// response, so the call surfaces as a StatusError (ErrConflict).
 func conflictResponse(req *http.Request, message string) *http.Response {
 	body, _ := json.Marshal(api.Coded(billing.CodeMerchantBindingMismatch, message).ToResponse())
 	header := make(http.Header)
@@ -188,12 +183,10 @@ func merchantMismatchMsg(bound, pinned billing.MerchantID) string {
 	return fmt.Sprintf("openrails: client is bound to merchant %s but the runtime is bound to merchant %s", pinned, bound)
 }
 
-// engineContext derives the context the engine serves an in-process call under.
-// It keeps only the host's cancellation and deadline: every host context value
-// — the session user the host is serving, request auth caches, a pinned
-// merchant connection, rate-limit subjects — is dropped, so the engine
-// attributes the call to the Client's bound merchant exactly as it attributes a
-// standalone API-key request, never to the host's own caller.
+// engineContext keeps only the host's cancellation and deadline: every host
+// context value (session user, auth caches, a pinned connection, rate-limit
+// subjects) is dropped, so the engine attributes the call to the Client's
+// bound merchant, never to the host's own caller.
 func engineContext(host context.Context) context.Context {
 	return detachedValues{Context: host}
 }

@@ -200,7 +200,7 @@ func checkAdminRefundRail(ctx context.Context, r *httprequest.Request, paymentID
 	return nil
 }
 
-// Refund refusal codes (openrails.ErrRefund*); each fixes its status.
+// Refund refusal codes (billing.ErrRefund*); each fixes its status.
 const (
 	codePaymentNotFound       = "payment_not_found"
 	refundCodeRailUnavailable = "refund_rail_unavailable"
@@ -214,11 +214,9 @@ type adminRefundPrepared struct {
 	intentID      uuid.UUID
 }
 
-// refundAmountCents converts an admin refund request amount (internal units at
-// the PAYMENT's currency scale) to the provider minor amount. Refunds must be
-// exact: a sub-minor remainder is an error, never rounded. Registry-driven
-// (or#863) — a payment whose currency is blank or unregistered cannot be
-// refunded at a guessed scale.
+// refundAmountCents converts a refund amount at the payment's currency scale to
+// the provider minor amount, exactly: a sub-minor remainder or an unregistered
+// currency is an error, never rounded or guessed.
 func refundAmountCents(currency string, amountNative int64) (moneyutil.Cents, error) {
 	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {

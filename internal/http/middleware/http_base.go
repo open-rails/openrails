@@ -17,11 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// This file holds the net/http base middleware (issue #282; sole stack since
-// #670): security headers, body limits, CORS, merchant resolution, recovery,
-// request logging. Both the standalone server and the embedded surface wrap
-// their muxes with these. Rate-limiting + the captcha challenge flow live in
-// ratelimit_neutral.go (EvaluateRateLimit / RateLimitHTTP).
+// The net/http base middleware: security headers, body limits, CORS, merchant
+// resolution, recovery and request logging, around both the standalone server
+// and the embedded surface. Rate limits and captcha are in ratelimit_neutral.go.
 
 // HTTPMiddleware is a standard net/http middleware (outermost wrapper).
 type HTTPMiddleware func(http.Handler) http.Handler
@@ -34,7 +32,8 @@ func ChainHTTP(h http.Handler, mw ...HTTPMiddleware) http.Handler {
 	return h
 }
 
-// SecurityHeadersHTTP is the net/http analogue of SecurityHeaders.
+// SecurityHeadersHTTP sets the API's security headers: no framing, no
+// sniffing, a strict referrer policy and a locked-down CSP.
 func SecurityHeadersHTTP() HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -99,18 +98,10 @@ func RequestLimitsHTTP(maxBytes int64) HTTPMiddleware {
 	}
 }
 
-// BrowserTierRoutes tracks which route patterns belong to the permissive-CORS
-// browser tier (#765): checkout and self-service routes
-// register their pattern here as they mount; PermissiveCORSHTTP consults it to
-// decide whether an inbound request qualifies for the static `*` policy.
-//
-// Matching is by PATH, independent of method: an OPTIONS preflight is never
-// itself a registered route method (routes register GET/POST/etc, never
-// OPTIONS), so membership can't be tested by asking the real serving mux "do
-// you have a handler for OPTIONS <path>" — it never does. Registering each
-// browser-tier pattern here a second time, method-agnostic, lets Match answer
-// "is this path browser tier" for ANY method, preflight included, using the
-// exact same pattern syntax (incl. wildcards) the real mux was given.
+// BrowserTierRoutes is the set of route patterns in the permissive-CORS
+// browser tier; checkout and self-service routes register as they mount.
+// Matching is by path, whatever the method: a preflight is OPTIONS, which no
+// route registers, so the serving mux cannot answer it.
 type BrowserTierRoutes struct {
 	mux  *http.ServeMux
 	seen map[string]bool
@@ -122,11 +113,9 @@ func NewBrowserTierRoutes() *BrowserTierRoutes {
 	return &BrowserTierRoutes{mux: http.NewServeMux(), seen: make(map[string]bool)}
 }
 
-// Add registers pattern as browser tier. pattern may be a bare ServeMux path
-// ("/v1/me/{id}") or a "METHOD path" pattern (the method prefix, if present,
-// is stripped — CORS eligibility never depends on method). Idempotent: the
-// same path may be added once per method without panicking on the underlying
-// mux's duplicate-registration check.
+// Add registers pattern, a bare path or "METHOD path" (the method is stripped:
+// CORS eligibility never depends on it), as browser tier. The same path may be
+// added once per method.
 func (b *BrowserTierRoutes) Add(pattern string) {
 	if b == nil {
 		return
@@ -153,22 +142,15 @@ func (b *BrowserTierRoutes) Match(r *http.Request) bool {
 	return pattern != ""
 }
 
-// AllRequests is a browser-tier matcher that matches unconditionally — for
-// handlers whose ENTIRE mounted surface is already browser tier by
-// construction (e.g. the embedded self-service handler, which serves only
-// /me and /customers), so no per-pattern registry is needed.
+// AllRequests is a browser-tier matcher that matches everything, for a
+// handler whose whole surface is browser tier (the embedded self-service one).
 func AllRequests(*http.Request) bool { return true }
 
-// PermissiveCORSHTTP is the #765 static browser-tier CORS policy: bearer JWTs,
-// never ambient cookies, authorize every request this engine accepts, so an
-// origin allow-list protects nothing here — a stolen token is replayed from
-// curl, where CORS doesn't exist. Every browser-tier request (per match, e.g.
-// BrowserTierRoutes.Match) gets `Access-Control-Allow-Origin: *`; every other
-// request gets NO CORS headers at all, so a browser refuses cross-origin
-// script access to it by default (the free, correct posture for surfaces only
-// bearer-JWT curl/service callers use, never a browser page's fetch/XHR).
-// Access-Control-Allow-Credentials is NEVER set — OpenRails never uses
-// cookies, and a wildcard origin with credentials is invalid CORS besides.
+// PermissiveCORSHTTP is the static browser-tier CORS policy. Bearer tokens
+// authorize these requests (cookie admission checks Origin itself), so an
+// origin allow-list protects nothing: a stolen token replays from curl. A
+// browser-tier request gets `Access-Control-Allow-Origin: *` and never
+// Allow-Credentials; every other request gets no CORS headers.
 func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	const (
 		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,DPoP,OpenRails-Merchant,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
@@ -196,11 +178,10 @@ func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	}
 }
 
-// IssuerOriginCORSHTTP admits the admin API (match) from the browser
-// origins trusted issuers declared (#1140): a host's admin UI calls it
-// directly with its users' access tokens. Those are Authorization and DPoP
-// headers, never cookies, so credentials mode stays off; every other origin
-// gets no CORS headers.
+// IssuerOriginCORSHTTP admits the admin API (match) from the browser origins
+// trusted issuers declared: a host's admin UI calls it with its users' access
+// tokens. Those are Authorization and DPoP headers, never cookies, so
+// credentials mode stays off; every other origin gets no CORS headers.
 func IssuerOriginCORSHTTP(match func(*http.Request) bool, allowed func(string) bool) HTTPMiddleware {
 	const (
 		allowHeaders  = "Authorization,DPoP,Content-Type,OpenRails-Merchant,Idempotency-Key,X-Request-ID"
@@ -229,8 +210,8 @@ func IssuerOriginCORSHTTP(match func(*http.Request) bool, allowed func(string) b
 	}
 }
 
-// RecoverHTTP converts handler panics into a 500 response (the net/http
-// analogue of gin.Recovery, kept for the standalone flip #670).
+// RecoverHTTP converts a handler panic into a 500 envelope; http.ErrAbortHandler
+// keeps propagating.
 func RecoverHTTP() HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -250,9 +231,8 @@ func RecoverHTTP() HTTPMiddleware {
 	}
 }
 
-// RequestLogHTTP logs one line per request (method, path, status, latency) —
-// the neutral analogue of the gin logger the standalone server used. skipPaths
-// are not logged (health probes).
+// RequestLogHTTP logs one line per request (method, path, status, latency);
+// skipPaths (health probes) are not logged.
 func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
 	skip := make(map[string]bool, len(skipPaths))
 	for _, p := range skipPaths {
@@ -298,8 +278,8 @@ func (s *statusWriter) Write(b []byte) (int, error) {
 	return s.ResponseWriter.Write(b)
 }
 
-// Unwrap lets http.ResponseController reach the underlying connection
-// (route budgets lift the write deadline through it, xs-007 row 37).
+// Unwrap lets http.ResponseController reach the underlying connection, through
+// which route budgets lift the write deadline.
 func (s *statusWriter) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 func (s *statusWriter) status() int {
@@ -309,19 +289,11 @@ func (s *statusWriter) status() int {
 	return s.code
 }
 
-// ResolveMerchantHTTP is the net/http analogue of ResolveMerchant. It pins the
-// engine's configured merchant onto the request context BEFORE any
-// merchant-owned DB access, so MerchantDBConnMW pins the connection to the
-// correct merchant (issue #223/#227). An OpenRails engine is bound to a
-// single merchant — there is NO default merchant (#336).
-//
-// resolve is called on each request. Pass the runtime's ConfiguredMerchant
-// accessor so privileged restore/bootstrap integrations cannot leave a stale
-// merchant snapshot in an already constructed handler.
-//
-// If resolve is nil or returns zero, NOTHING is pinned: downstream
-// merchant.Require fails, so a missing merchant is a hard error rather than a
-// silent default.
+// ResolveMerchantHTTP pins the engine's configured merchant on the request
+// context before any merchant-owned DB access, so MerchantDBConnMW pins the
+// right connection. resolve runs per request (pass Runtime.ConfiguredMerchant),
+// so a later binding is never stale. With no merchant nothing is pinned and
+// merchant.Require fails: there is no default merchant.
 func ResolveMerchantHTTP(resolve func() billing.MerchantID) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -348,22 +320,10 @@ func StaticMerchant(id billing.MerchantID) func() billing.MerchantID {
 }
 
 // ResolveMerchantFromHostHTTP resolves the merchant owning the request's Host
-// header (#734) and, when resolved, pins it BOTH as the ordinary "configured
-// merchant" (merchant.WithID — the same key ResolveMerchantHTTP sets, so
-// unauthenticated merchant-scoped routes such as public catalog reads work
-// per-Host in a multi-merchant deployment) AND as merchant.WithHostMerchant, a
-// marker the control plane's JWT-issuer resolution (server/internal/controlplane)
-// reads to enforce Host-merchant == issuer-merchant, fail closed on mismatch.
-//
-// resolve is called ON EVERY REQUEST (live per call, #734: no boot-time host
-// map — a merchant registered after this process started resolves on its very
-// next request, on every process sharing the database). resolve == nil, or an
-// unresolvable Host (unknown/disabled/ambiguous merchant), is a NO-OP: this
-// middleware only ever narrows context, never blocks a request outright, so
-// health/platform routes and Hosts with no configured merchant keep working
-// exactly as before. A deployment that configures no Host resolver never calls
-// this middleware at all — single-merchant self-hosters see no behavior change
-// without opting in.
+// on every request (no boot-time map) and pins it both as merchant.WithID, so
+// public merchant-scoped routes work per Host, and as WithHostMerchant, which
+// credential resolution checks: another merchant's credential fails closed. A
+// nil resolver or an unresolvable Host is a no-op; it only narrows context.
 func ResolveMerchantFromHostHTTP(resolve merchant.HostResolver) HTTPMiddleware {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

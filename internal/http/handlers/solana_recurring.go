@@ -128,9 +128,9 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	}
 
 	if isUpgrade {
-		// Model-B prorated first charge (new_full - old_unused) in micros, then
-		// micros -> base units at the token's CONFIGURED decimals (#817), $1 peg
-		// (depeg failsafe inside).
+		// Model-B prorated first charge in micros (the new price less the old
+		// plan's unused part), then base units at the mint's on-chain decimals,
+		// $1 peg (depeg failsafe inside).
 		quote, err := checkout.QuoteModelBUpgrade(checkout.ModelBUpgrade{
 			Old: checkout.PriceAmountOf(oldPrice), New: checkout.PriceAmountOf(newPrice),
 			PeriodStart: oldSub.CurrentPeriodStartsAt, PeriodEnd: oldSub.CurrentPeriodEndsAt,

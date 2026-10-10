@@ -34,9 +34,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// Transport is the backend behind a Request. Since #670 the only production
-// backend is the net/http one (NewHTTP); the interface remains the seam that
-// keeps handlers framework-agnostic.
+// Transport is the backend behind a Request: in production only the net/http
+// one (NewHTTP); the interface keeps handlers framework-agnostic.
 type Transport interface {
 	WriteJSON(code int, body any)
 	AbortJSON(code int, body any)
@@ -65,11 +64,9 @@ type Request struct {
 
 	t Transport
 
-	// uc is the authenticated principal pinned by the auth middleware
-	// (SetUserContext). It is the source of truth for UserContext()/GetUser so
-	// the identity survives middleware reassigning r.Request — the net/http
-	// Transport caches its own *http.Request and would otherwise not see a
-	// UserContext stored only on a re-wrapped request context.
+	// uc is the user the auth middleware pinned (SetUserContext). It survives
+	// middleware reassigning r.Request, which the net/http Transport's cached
+	// *http.Request would not see.
 	uc    billingauth.UserContext
 	ucSet bool
 
@@ -91,7 +88,7 @@ func NewWithTransport(runtime *app.Runtime, r *http.Request, t Transport) *Reque
 	}
 }
 
-// NewHTTP builds a net/http-backed Request (embedded surface) — no gin.
+// NewHTTP builds a net/http-backed Request.
 func NewHTTP(w http.ResponseWriter, r *http.Request, runtime *app.Runtime) *Request {
 	return NewWithTransport(runtime, r, newHTTPTransport(w, r))
 }
@@ -102,21 +99,12 @@ type writeDeadliner interface {
 	SetWriteDeadline(deadline time.Time) error
 }
 
-// Budget bounds the handler's own work by d — the route's declared budget,
-// derived from the provider round-trips it makes — and lifts the connection's
-// write deadline for the duration (xs-007 row 37).
-//
-// A server-level WriteTimeout is set when the request is read, before the
-// handler knows what it is about to do. The standalone server used to carry
-// 30 s while the payment-method replacement route declared 50 s: the provider
-// write committed at the provider, the durable rows landed, and the client
-// received EOF instead of the response. A host mounting this handler in its
-// own server can carry any number. The route is the only place that knows its
-// budget, so the route is where the connection learns it: the write deadline
-// is cleared here for the request's life and the route's ctx is the one bound.
-// Response bodies here are small JSON; their write completes into the socket
-// buffer regardless of the peer, so no second clock is needed after the
-// budget ends.
+// Budget bounds the handler's own work by d, the route's declared budget, and
+// lifts the connection's write deadline for the duration. A server-level
+// WriteTimeout is set before the handler knows its work, so a slow provider
+// write could commit while the client gets EOF; only the route knows its
+// budget. Response bodies are small JSON, so no second clock is needed after
+// the budget ends.
 func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) {
 	if wd, ok := r.t.(writeDeadliner); ok {
 		if err := wd.SetWriteDeadline(time.Time{}); err != nil {
@@ -127,10 +115,8 @@ func (r *Request) Budget(d time.Duration) (context.Context, context.CancelFunc) 
 }
 
 // logRefusal records a response the handler itself chose. A 4xx is the
-// contract answering as designed — not found, conflict, precondition failed,
-// refused input — so it is logged at info; only a 5xx is an error an operator
-// must act on. Before this, every expected refusal (a get-or-create probe's
-// 404, an idempotent ensure's 412) reached the log as an error.
+// contract answering as designed and logs at info; only a 5xx is an error an
+// operator must act on.
 func (r *Request) logRefusal(code int, fields logrus.Fields, msg string) {
 	entry := logrus.WithFields(fields).WithFields(logrus.Fields{"status": code, "request_id": r.RequestID()})
 	if code >= http.StatusInternalServerError {
@@ -144,7 +130,7 @@ func (r *Request) logRefusal(code int, fields logrus.Fields, msg string) {
 // verbatim against the request id. Every 500 that has an error in hand uses
 // this, so an internal failure never reaches the operator as a bare constant.
 func (r *Request) InternalError(msg string, cause error) {
-	// A saturated database pool is a retryable 503, never a 500 (#1105).
+	// A saturated database pool is a retryable 503, never a 500.
 	var refusal *apperr.Error
 	if errors.As(cause, &refusal) && refusal.Status == http.StatusServiceUnavailable {
 		r.APIError(api.NewAPIError(refusal.Status, api.ErrorTypeForStatus(refusal.Status), refusal.Code, refusal.Message))
@@ -377,21 +363,17 @@ func (r *Request) Query(key string) string {
 	return r.t.Query(key)
 }
 
-// Header returns a request header value, framework-neutral counterpart of the
-// former r.GinCtx.GetHeader(...).
+// Header returns a request header value.
 func (r *Request) Header(key string) string {
 	return r.t.Header(key)
 }
 
-// SetHeader sets a response header (framework-neutral). Used e.g. for
-// x-ratelimit-* and Retry-After on the admission endpoint (#298).
+// SetHeader sets a response header.
 func (r *Request) SetHeader(key, value string) {
 	r.t.SetHeader(key, value)
 }
 
-// UserContext returns the authenticated principal, framework-neutral counterpart
-// of the former billingauth.UserContextFromGin(r.GinCtx). Works on both the gin
-// and net/http backends.
+// UserContext returns the signed-in user the auth middleware pinned.
 func (r *Request) UserContext() (billingauth.UserContext, bool) {
 	if r.ucSet {
 		return r.uc, true
@@ -399,11 +381,9 @@ func (r *Request) UserContext() (billingauth.UserContext, bool) {
 	return r.t.UserContext()
 }
 
-// SetUserContext pins the authenticated principal on this request. The auth
-// middleware calls it after Authenticate succeeds; handlers read it via
-// UserContext()/GetUser(). It also propagates the principal into the request
-// context (billingauth.SetUserContext) for any downstream that reads it from
-// r.Request.Context() directly.
+// SetUserContext pins the signed-in user on this request and its context
+// (billingauth.SetUserContext); the auth middleware calls it after
+// Authenticate succeeds.
 func (r *Request) SetUserContext(uc billingauth.UserContext) {
 	r.uc = uc
 	r.ucSet = true
@@ -467,14 +447,11 @@ func (r *Request) Staff() (billingauth.Staff, bool) {
 	return billingauth.StaffFromContext(r.Request.Context())
 }
 
-// ClientIP returns the resolved client IP for this request (#746): the raw
-// socket peer, or — when that peer is inside a configured trusted_proxies
-// CIDR — the first untrusted address found walking X-Forwarded-For
-// right-to-left. Every consumer that needs "the client's IP" (rate limiting,
-// abuse tracking, webhook IPAddress recording, the CCBill IP allowlist) MUST
-// resolve through this (or the same Runtime.TrustedProxies resolver) so proxy
-// trust is enforced identically everywhere. With no trusted_proxies
-// configured this is exactly GetRemoteIP.
+// ClientIP is the request's client IP: the socket peer, or, when that peer is
+// inside a configured trusted_proxies CIDR, the first untrusted address
+// walking X-Forwarded-For right to left. Rate limits, abuse tracking, webhook
+// IP recording and the CCBill allowlist all resolve through it, so proxy trust
+// is enforced identically everywhere.
 func (r *Request) ClientIP() string {
 	if r.Request == nil {
 		return ""
@@ -627,8 +604,6 @@ func isRequestBodyTooLarge(err error) bool {
 	return err != nil && strings.Contains(strings.ToLower(err.Error()), "request body too large")
 }
 
-// --- net/http backend (the only backend since #670) ---
-
 type httpTransport struct {
 	w     http.ResponseWriter
 	r     *http.Request
@@ -641,8 +616,7 @@ func newHTTPTransport(w http.ResponseWriter, r *http.Request) *httpTransport {
 }
 
 // SetWriteDeadline reaches the connection through net/http's
-// ResponseController, which unwraps the middleware writers (statusWriter,
-// captureWriter) via their Unwrap.
+// ResponseController, which unwraps the middleware writers via their Unwrap.
 func (h *httpTransport) SetWriteDeadline(deadline time.Time) error {
 	return http.NewResponseController(h.w).SetWriteDeadline(deadline)
 }
@@ -682,8 +656,8 @@ func (h *httpTransport) BindJSON(data any) error {
 	if err != nil {
 		return err
 	}
-	// The body may carry a card (#1129); decoded values are copies, so the
-	// bytes read from the wire are wiped once decoding is done.
+	// The body may carry a card; decoded values are copies, so the bytes read
+	// from the wire are wiped once decoding is done.
 	defer clear(raw)
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return io.EOF
@@ -743,9 +717,8 @@ func (h *httpTransport) UserContext() (billingauth.UserContext, bool) {
 	return billingauth.FromContext(h.r.Context())
 }
 
-// bindingValidator matches gin's binding: it reads the `binding:"..."` struct
-// tag with the go-playground/validator rule set gin uses, so net/http binding
-// validates identically to the gin server.
+// bindingValidator reads the `binding:"..."` struct tag with the
+// go-playground/validator rule set.
 var bindingValidator = func() *validator.Validate {
 	v := validator.New()
 	v.SetTagName("binding")
@@ -769,12 +742,11 @@ func validateBinding(data any) error {
 	return bindingValidator.Struct(data)
 }
 
-// decodeTaggedValues populates dst's fields from get(), matching them by the
-// given struct tag (gin used "form" for query and "uri" for path params; the
-// neutral binder keeps those tag conventions). Like gin's form binding it
-// RECURSES into nested/embedded struct fields (e.g. query.QueryOptions[T]'s
-// Filters), parses time.Time via the `time_format` tag (default RFC3339), and
-// supports encoding.TextUnmarshaler fields (uuid.UUID etc.).
+// decodeTaggedValues populates dst's fields from get(), matched by the given
+// struct tag ("form" for query, "uri" for path). It recurses into nested and
+// embedded struct fields (e.g. query.QueryOptions[T]'s Filters), parses
+// time.Time by its `time_format` tag (default RFC 3339), and decodes
+// encoding.TextUnmarshaler fields (uuid.UUID etc.).
 func decodeTaggedValues(dst any, tag string, get func(string) string) error {
 	v := reflect.ValueOf(dst)
 	if v.Kind() != reflect.Ptr || v.IsNil() {
@@ -806,7 +778,7 @@ func decodeStructValues(v reflect.Value, tag string, get func(string) string) er
 		}
 
 		// Recurse into struct-typed fields that are not directly bindable
-		// (nested filter structs, embedded structs) — gin binding parity.
+		// (nested filter structs, embedded structs).
 		ft := field.Type
 		elem := ft
 		if ft.Kind() == reflect.Ptr {
@@ -844,7 +816,7 @@ func setField(fv reflect.Value, raw string, tag reflect.StructTag) error {
 	if !fv.CanSet() {
 		return nil
 	}
-	// time.Time honors the `time_format` tag (gin convention); default RFC3339.
+	// time.Time honors the `time_format` tag; default RFC 3339.
 	if fv.Type() == timeType {
 		layout := tag.Get("time_format")
 		if layout == "" {
@@ -857,7 +829,7 @@ func setField(fv reflect.Value, raw string, tag reflect.StructTag) error {
 		fv.Set(reflect.ValueOf(parsed))
 		return nil
 	}
-	// encoding.TextUnmarshaler (uuid.UUID etc.), matching gin's trySetCustom.
+	// encoding.TextUnmarshaler (uuid.UUID etc.).
 	if fv.CanAddr() {
 		if tu, ok := fv.Addr().Interface().(encoding.TextUnmarshaler); ok {
 			return tu.UnmarshalText([]byte(raw))

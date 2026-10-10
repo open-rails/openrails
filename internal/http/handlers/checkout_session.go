@@ -10,10 +10,10 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// Checkout sessions (#1124). Minting needs the signed-in customer or the
-// merchant; reading and paying need only the session id, which is never
-// logged. Saved cards are shown to, and pay for, only the session's own
-// customer, as the customer gate verifies them.
+// Checkout sessions. Minting needs the signed-in customer or the merchant;
+// reading and paying need only the session id, which is never logged. Saved
+// cards are shown to, and pay for, only the session's own customer, as the
+// customer gate verifies them.
 
 // MintCheckoutSessionParams is the signed-in customer's mint body.
 type MintCheckoutSessionParams struct {

@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// or#863: a finding-approve refund amount is exact micros; a float is refused,
-// never truncated, on every route the amount can arrive by.
+// A finding-approve refund amount is exact micros; a float is refused, never
+// truncated, on every route the amount can arrive by.
 func TestFindingAmountMicrosIsExact(t *testing.T) {
 	const beyondFloat64 int64 = 9_007_199_254_740_993 // 2^53 + 1
 	require.NotEqual(t, beyondFloat64, int64(float64(beyondFloat64)))
@@ -53,7 +53,7 @@ func TestFindingAmountMicrosIsExact(t *testing.T) {
 	require.Nil(t, empty)
 }
 
-// #671: a refund converts to the rail's minor unit exactly or not at all.
+// A refund converts to the rail's minor unit exactly or not at all.
 func TestRefundAmountCentsIsExact(t *testing.T) {
 	for _, tc := range []struct {
 		currency string

@@ -9,13 +9,9 @@ import (
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
-// Self-service money surface: the authenticated merchant_subject reads its own
-// balance and transaction history and chooses its invoice collection method.
-//
-// The payer is resolved exactly like the rest of /v1/me
-// (identity.CustomerIDFromString over the acting subject — see
-// GetMyUsage/GetMyInvoices), and every query is scoped to the request
-// merchant.
+// Self-service money surface: the customer reads its own balance and ledger.
+// The customer is the route gate's scope, and every query is scoped to the
+// request merchant.
 
 // selfAccountPayer is the customer route's verified customer, or writes the
 // 401 and returns false.

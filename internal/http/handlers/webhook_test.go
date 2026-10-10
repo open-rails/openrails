@@ -38,7 +38,7 @@ func signStripeAt(secret string, at time.Time, body []byte) string {
 	return fmt.Sprintf("t=%s,v1=%s", ts, hex.EncodeToString(mac.Sum(nil)))
 }
 
-// FC-7: the signature, not the routed merchant, is the trust boundary; any
+// The signature, not the routed merchant, is the trust boundary; any
 // configured secret may sign (snapshot and thin destinations share an endpoint).
 func TestStripeSignatureIsTheTrustBoundary(t *testing.T) {
 	body := []byte(`{"id":"evt_1","type":"checkout.session.completed","data":{"object":{}}}`)
@@ -194,8 +194,8 @@ func TestThinStripeEventHydratesToSnapshot(t *testing.T) {
 	require.Error(t, err, "a thin event cannot be hydrated without a secret key")
 }
 
-// SEC-24 item 5: the notice is attacker-shaped input; nothing in it can steer
-// the fetch off Stripe, onto another object or another account.
+// The notice is attacker-shaped input; nothing in it can steer the fetch off
+// Stripe, onto another object or another account.
 func TestStripeRelatedObjectURLIsAlwaysAPath(t *testing.T) {
 	refuse := func(t *testing.T, mutate func(map[string]any)) {
 		t.Helper()
@@ -329,9 +329,9 @@ func ccbillProbe(presence merchants.LiveRailPresence, err error) webhookauth.Liv
 	return func(context.Context) (merchants.LiveRailPresence, error) { return presence, err }
 }
 
-// #668/SEC-19: CCBill has no HMAC, so its source address is its only
-// authentication. A declared dev source is honoured only in sandbox posture,
-// only when a probe PROVES no live CCBill PSP exists, and only if declared.
+// CCBill has no HMAC, so its source address is its only authentication. A
+// declared dev source is honoured only in sandbox posture, only when a probe
+// proves no live CCBill PSP exists, and only if declared.
 func TestCCBillSourceAllowlist(t *testing.T) {
 	declared := []string{"203.0.113.0/24"}
 	const ccbillIP, devIP, strangerIP = "64.38.212.5", "203.0.113.5", "198.51.100.7"
@@ -371,8 +371,8 @@ func TestCCBillSourceAllowlist(t *testing.T) {
 	require.False(t, ccbillWebhookIPAllowed(r, devIP), "no runtime never bypasses")
 }
 
-// #746: the allowlist sees the resolved client address through a trusted
-// proxy only; a spoofed X-Forwarded-For from anyone else changes nothing.
+// The allowlist sees the resolved client address through a trusted proxy only;
+// a spoofed X-Forwarded-For from anyone else changes nothing.
 func TestCCBillWebhookDispatchResolvesClientIP(t *testing.T) {
 	stubCCBillProbe(t, ccbillProbe(merchants.LiveRailAbsent, nil))
 	for _, tc := range []struct {

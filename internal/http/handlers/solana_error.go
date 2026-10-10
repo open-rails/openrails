@@ -18,9 +18,8 @@ const (
 )
 
 // solanaUnavailable is the refusal for a transient Solana outage, or nil. An
-// RPC failure's text is third-party-formatted and carries endpoint URLs, which
-// carry the merchant's provider credential (#SEC-17): it is logged, never
-// answered.
+// RPC failure's text carries endpoint URLs, which carry the merchant's
+// provider credential: it is logged, never answered.
 func solanaUnavailable(err error) *api.APIError {
 	switch {
 	case errors.Is(err, vault.ErrUnavailable):

@@ -120,7 +120,7 @@ func TestClassifyBucket(t *testing.T) {
 }
 
 // Limits are per bucket and per subject (IP and user); either tripping blocks.
-// #746: the IP subject is the proxy-resolved client, never a spoofable header.
+// The IP subject is the proxy-resolved client, never a spoofable header.
 func TestRateLimitSubjects(t *testing.T) {
 	const a, b, lb = "203.0.113.10", "203.0.113.11", "10.0.0.5"
 	const user = "11111111-1111-1111-1111-111111111111"
@@ -245,16 +245,16 @@ func TestCaptchaChallenges(t *testing.T) {
 		}
 	})
 
-	// FC-13: a verifier error is invalid, never a pass.
+	// A verifier error is invalid, never a pass.
 	t.Run("verifier error fails closed", func(t *testing.T) {
 		deps := newDeps(limits, captchaOn, &stubVerifier{err: errors.New("siteverify down")})
 		require.NoError(t, deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute))
 		call{path: "/v1/me/checkout-sessions", ip: ip, token: "anything", want: 403, body: "captcha verification failed"}.do(t, engine(deps, okHandler()))
 	})
 
-	// #371: attack mode challenges everyone on the attacked merchant's card
-	// routes, and one solve does not lift it. Other merchants, and every
-	// merchant or API route, are never challenged.
+	// Attack mode challenges everyone on the attacked merchant's card routes,
+	// and one solve does not lift it. Other merchants, and every merchant or
+	// API route, are never challenged.
 	t.Run("card attack mode", func(t *testing.T) {
 		attacked, other := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 		deps := newDeps(limits, captchaOn, &stubVerifier{valid: "good"})
@@ -279,7 +279,7 @@ func TestCaptchaChallenges(t *testing.T) {
 
 	// Without a captcha to solve, neither a challenged subject nor a merchant's
 	// attack flag refuses anyone here: the durable ledger blocks card attempts
-	// per subject (SEC-30), so attack mode never becomes a blanket 429.
+	// per subject, so attack mode never becomes a blanket 429.
 	t.Run("captcha disabled never refuses on a challenge", func(t *testing.T) {
 		attacked := billing.MerchantID(uuid.New())
 		deps := newDeps(limits, nil, nil)

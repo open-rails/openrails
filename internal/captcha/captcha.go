@@ -26,10 +26,9 @@ const (
 )
 
 // CardAttackModeSubject is the challenge subject set while merchantID is under
-// a card-testing attack (#371). While it is challenged, every request to that
-// merchant's captcha buckets must solve a captcha. It is apart from the
-// per-user/per-IP subjects, so one solve never clears it, and apart per
-// merchant, so one merchant's declines never challenge another's traffic.
+// a card-testing attack: every request to its captcha buckets must solve a
+// captcha. It is apart from per-user/per-IP subjects (one solve never clears
+// it) and per merchant (one merchant's declines never challenge another's).
 func CardAttackModeSubject(merchantID uuid.UUID) string {
 	return "__card_attack_mode__:" + merchantID.String()
 }
@@ -58,8 +57,8 @@ type VerifyResult struct {
 type siteVerifyVerifier struct {
 	cfg    *config.CaptchaConfig
 	client *http.Client
-	// verifyURLOverride lets in-package tests point verification at an
-	// httptest server; the URL is otherwise hardcoded per provider (#353).
+	// verifyURLOverride points in-package tests at an httptest server; the URL
+	// is otherwise hardcoded per provider.
 	verifyURLOverride string
 }
 

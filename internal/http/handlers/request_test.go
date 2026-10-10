@@ -66,8 +66,8 @@ func TestCustomerActionRequiresTheAdmittedCustomer(t *testing.T) {
 	require.Equal(t, billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: mid, SubjectID: payer.String(), Issuer: "host", Email: "a@example.test", EmailVerified: true}, checkoutVerifiedPrincipal(r))
 }
 
-// The payment Idempotency-Key is who text that may be logged: it is
-// bounded and scanned for card numbers before it is used.
+// The payment Idempotency-Key is text that may be logged: it is bounded and
+// scanned for card numbers before it is used.
 func TestPaymentActionKeyRefusesCardData(t *testing.T) {
 	for key, ok := range map[string]bool{
 		"archive-key-1461":           true,
@@ -126,8 +126,8 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 	require.Equal(t, []string{}, out.DefaultCurrencies)
 }
 
-// #589: a method is active unless its card expired or its last charge failed;
-// a card is valid through the end of its expiry month.
+// A method is active unless its card expired or its last charge failed; a
+// card is valid through the end of its expiry month.
 func TestPaymentMethodHealth(t *testing.T) {
 	now := time.Date(2026, 6, 24, 0, 0, 0, 0, time.UTC)
 	status := func(c models.Card) *billing.CardExpiryStatus { return paymentMethodHealth(c, nil, now).ExpiryStatus }
@@ -187,9 +187,9 @@ func TestUsageWindow(t *testing.T) {
 	}
 }
 
-// #335: every batch item gets its own verdict; one item's bad input, scope
-// denial, deny or backend error never fails the others, and the cause of a
-// backend error reaches the operator log without reaching the wire.
+// Every batch item gets its own verdict; one item's bad input, scope denial,
+// deny or backend error never fails the others, and the cause of a backend
+// error reaches the operator log without reaching the wire.
 func TestAdmitVerdictsIsolateItems(t *testing.T) {
 	var logs bytes.Buffer
 	prevOut, prevLevel := log.StandardLogger().Out, log.GetLevel()
@@ -271,8 +271,8 @@ func (r fakeMintReader) GetAccountData(context.Context, solanago.PublicKey) ([]b
 	return blob, nil
 }
 
-// #352: the browser config never carries an RPC URL; #817: decimals come
-// from the mint on chain, not configuration.
+// The browser config never carries an RPC URL, and decimals come from the
+// mint on chain, not configuration.
 func TestSolanaConfigIsBrowserSafe(t *testing.T) {
 	const mint = "5CVTPbcqPuzQd9bMCViire6zQVSr7TUTWTjM21aE4TZ"
 	rt := &app.Runtime{

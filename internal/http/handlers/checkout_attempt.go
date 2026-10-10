@@ -54,9 +54,9 @@ func writeCheckoutAttemptError(r *httprequest.Request, err error) {
 		writePaymentMethodRequired(r)
 		return
 	}
-	// Pre-flight insufficient-USDC (#286): a typed, actionable user state (NOT an
-	// internal failure). Surface a clear payment-error code + the have/need amounts
-	// so the frontend can show "need $X, have $Y -> buy USDC" (MoonPay).
+	// Insufficient USDC is an actionable customer state, not an internal
+	// failure: 402 with the have/need amounts, so the client can offer to buy
+	// USDC.
 	var insufficientUSDC *recurring.InsufficientUSDCError
 	if errors.As(err, &insufficientUSDC) {
 		param := "usdc_balance"

@@ -15,8 +15,8 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// Orders (#1168) on /v1/me: the customer's own purchases. Paying, and every
-// read of a payment's next action, is the customer in person.
+// Orders on /v1/me: the customer's own purchases. Paying, and every read of a
+// payment's next action, is the customer in person.
 
 // orderActor is the request's customer, nil after answering a refusal.
 // present demands the customer in person, as paying does.

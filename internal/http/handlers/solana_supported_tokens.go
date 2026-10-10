@@ -84,15 +84,9 @@ type TokenBalance struct {
 	Sufficient bool   `json:"sufficient"`
 }
 
-// effectiveSolanaRailConfig resolves the Solana runtime knobs for THIS request's
-// merchant (#711): the boot-plane rail config overlaid with the merchant's
-// declared rail-account `settings` (store-wins, #699). This is how standalone
-// reaches the knobs — its boot plane is empty; the manifest declares them per
-// merchant. nil (with nil error) means no Solana account on either plane.
 // effectiveSolanaRailConfig resolves the ctx merchant's armed Solana rail
-// config (#775/#788): the psps row's settings materialized
-// over the test_mode-derived network + curated token defaults. nil = not
-// armed (callers fail closed with their "not configured" errors).
+// config: its PSP's settings over the test_mode-derived network and curated
+// token defaults. nil = not armed, or a signer change awaits approval.
 func effectiveSolanaRailConfig(r *httprequest.Request) (*config.SolanaRailConfig, error) {
 	if r.State.RailConfigs == nil {
 		return nil, nil
@@ -130,9 +124,8 @@ func GetSupportedTokens(r *httprequest.Request) {
 		return
 	}
 
-	// or#881: the advertised set IS the accepted set. There is no registry
-	// fallback — falling back would advertise tokens this merchant does not
-	// accept, and a buyer would pay in one of them.
+	// The advertised set is the accepted set. No registry fallback: it would
+	// advertise tokens this merchant does not accept.
 	tokenMap := normalizeTokenMap(solanaConf.Tokens)
 
 	mintSet := make(map[string]struct{})
@@ -198,9 +191,8 @@ func GetSupportedTokens(r *httprequest.Request) {
 		mint := strings.TrimSpace(t.Mint)
 		price := prices[symbol]
 
-		// #817: decimals are the MINT's, read on-chain. A mint we cannot read is
-		// a token we cannot price or render — drop it loudly rather than publish
-		// an invented precision.
+		// Decimals are the mint's, read on chain. A mint that cannot be read is
+		// a token that cannot be priced: drop it loudly, never invent precision.
 		decimals, err := solanamodule.RequireMintDecimals(ctx, r.State.SolanaMintDecimals, mint)
 		if err != nil {
 			log.WithError(err).WithField("token", symbol).Warn("solana token dropped: mint decimals unreadable on-chain")
@@ -234,8 +226,8 @@ func GetSupportedTokens(r *httprequest.Request) {
 	r.SuccessJSON(SupportedTokensResponse{Tokens: tokens})
 }
 
-// acceptedSolanaTokens lists exactly the tokens the merchant accepts (or#881:
-// no registry fallback), dropping any whose mint decimals cannot be read.
+// acceptedSolanaTokens lists exactly the tokens the merchant accepts (no
+// registry fallback), dropping any whose mint decimals cannot be read.
 func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailConfig) []TokenInfo {
 	tokenMap := normalizeTokenMap(solanaConf.Tokens)
 	symbols := make([]string, 0, len(tokenMap))
@@ -329,8 +321,8 @@ func resolvePriceFromID(ctx context.Context, r *httprequest.Request, priceIDStr 
 	return price.Amount, price.Currency, ""
 }
 
-// merchantSolanaRPC arms the ctx merchant's Solana RPC client through the
-// #728 resolver. nil = not armed (callers answer "unavailable" — fail closed).
+// merchantSolanaRPC arms the ctx merchant's Solana RPC client through its
+// resolver. nil = not armed (callers answer "unavailable": fail closed).
 func merchantSolanaRPC(ctx context.Context, r *httprequest.Request) *solanarpc.RPCClient {
 	if r.State == nil || r.State.SolanaRPCResolver == nil {
 		return nil
@@ -348,7 +340,7 @@ func merchantSolanaRPC(ctx context.Context, r *httprequest.Request) *solanarpc.R
 }
 
 func fetchWalletBalances(ctx context.Context, r *httprequest.Request, walletStr string, mints []string) (map[string]uint64, uint64, string) {
-	// #788: chain reads arm from the ctx merchant's declared solana account.
+	// Chain reads arm from the ctx merchant's declared Solana account.
 	rpc := merchantSolanaRPC(ctx, r)
 	if rpc == nil {
 		return nil, 0, "solana rpc unavailable"

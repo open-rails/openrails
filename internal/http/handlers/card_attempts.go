@@ -17,9 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 )
 
-// SEC-30: every card save, checkout and confirmation consults the durable
-// failure ledger before the provider sees the card, and every refused card is
-// counted, on whichever replica served it.
+// Every card save, checkout and confirmation consults the durable failure
+// ledger before the provider sees the card, and every refused card is counted,
+// on whichever replica served it.
 
 func cardAttemptLedger(r *httprequest.Request) (*abuse.FailureLedger, uuid.UUID, bool) {
 	if r == nil || r.State == nil || r.State.CardFailureLedger == nil {
@@ -60,8 +60,8 @@ func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
 
 // recordCardFailure counts one card the provider refused: against subjects in
 // the durable ledger, then against this request's captcha subjects, with the
-// ledger's attack verdict (#371). Best-effort: the response is unchanged when
-// either write fails.
+// ledger's attack verdict. Best-effort: a failed write never changes the
+// response.
 func recordCardFailure(r *httprequest.Request, subjects ...string) {
 	if r == nil || r.State == nil {
 		return

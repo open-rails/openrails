@@ -7,8 +7,8 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 )
 
-// The self route and service both require the operation's interactive payer;
-// merchant/service credentials cannot acquire a payment's client secret.
+// GetStripePaymentAuthentication answers a payment operation's client secret
+// to its interactive payer only; a merchant credential cannot acquire one.
 func GetStripePaymentAuthentication(r *httprequest.Request) {
 	r.SetHeader("Cache-Control", "no-store")
 	operation, err := billing.ParsePaymentOperationID(r.Param("id"))

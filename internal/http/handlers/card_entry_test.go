@@ -21,8 +21,8 @@ import (
 
 const cardBody = `"card":{"number":"4111 1111 1111 1111","exp_month":10,"exp_year":2027,"cvc":"999"}`
 
-// #1129: the typed card field is refused beside a token, with a card number in
-// any other field, and in live posture over plain HTTP.
+// The typed card field is refused beside a token, with a card number in any
+// other field, and in live posture over plain HTTP.
 func TestCardFieldRequestRules(t *testing.T) {
 	live := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureLive}, TrustedProxies: iputil.ParseTrustedProxies([]string{"10.0.0.0/8"})}
 	sandbox := &app.Runtime{Config: &config.Config{TestMode: config.CredentialPostureSandbox}}
@@ -59,7 +59,7 @@ func TestCardFieldRequestRules(t *testing.T) {
 }
 
 // A card decodes into the request and never back out of it; with neither a
-// token nor a card the request is refused exactly as a tokenless one was.
+// token nor a card the request is refused as tokenless.
 func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 	bind := func(body string, into any) *httptest.ResponseRecorder {
 		rec := httptest.NewRecorder()

@@ -29,16 +29,12 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/recommend"
 )
 
-// #692 action executor: a THIN composer over EXISTING machinery only — the
-// lifecycle cancel chokepoint + the durable NMI-delete intent (queue-always
-// #679, breaker-guarded), the admin refund producer (rail-intents ledger,
-// effectively-once), the entitlement service's as-of revoke, and the
-// product-access admin grant. It introduces NO new mutation logic.
-//
-// Semantics: idempotent per step (an already-canceled subscription /
-// already-revoked window / already-recorded grant no-ops); a partial failure
-// returns the completed steps alongside the error so the caller can leave the
-// finding OPEN with the compensation state documented.
+// The finding action executor composes existing machinery only: the lifecycle
+// cancel chokepoint with its durable provider-cancel intent (breaker-gated),
+// the admin refund producer, the entitlement service's as-of revoke and the
+// product-access grant. Each step is idempotent; a partial failure returns
+// the completed steps with the error, so the finding stays open with its
+// compensation state.
 
 // findingParamError marks operator-fixable input problems (bad/missing
 // params, unsupported rail).
@@ -76,13 +72,9 @@ func compactJSON(v any) string {
 	return string(b)
 }
 
-// paramAmountMicros parses a recommendation/override `amount` param into
-// MICROS as an exact int64. or#863: this used to be `int64(raw.(float64))` —
-// a float64 truncation on a value that feeds a real provider refund and an
-// intents-ledger write. A float64 is now REJECTED rather than truncated
-// (params are decoded with UseNumber, so an integer literal arrives as an
-// exact json.Number); a decimal string is accepted for clients that prefer to
-// keep money out of JSON numbers entirely.
+// paramAmountMicros parses an `amount` param as exact int64 micros: a
+// json.Number integer (params decode with UseNumber) or a decimal string. A
+// float64 is refused, never truncated.
 func paramAmountMicros(raw any) (int64, error) {
 	var text string
 	switch v := raw.(type) {
@@ -160,7 +152,7 @@ func executeFindingAction(r *httprequest.Request, finding reconcile.FindingRecor
 	switch action {
 	case recommend.ActionAckResume:
 		// Plain resolution: machinery keyed off the finding status (e.g. the
-		// #679 breaker) re-arms once the finding leaves the open states.
+		// volume breaker) re-arms once the finding leaves the open states.
 		return result, nil
 	case recommend.ActionRevokeProductAccess:
 		return result, executeRevokeProductAccess(r, params, result)
@@ -245,11 +237,10 @@ func executeGrantProduct(r *httprequest.Request, finding reconcile.FindingRecord
 	return nil
 }
 
-// executeCancelAndRefund: cancel FIRST (idempotent), then refund. A refund
-// failure after a successful cancel is a partial failure — the result map
-// documents the completed cancel so the finding's notes carry the
-// compensation state. Both ids are optional (#690: a pure one-off ownership
-// duplicate has no subscription — refund-only), but at least one is required.
+// executeCancelAndRefund cancels first (idempotent), then refunds; a refund
+// failure after the cancel is a partial failure that carries the completed
+// cancel. Either id may be absent (a one-off duplicate has no subscription),
+// not both.
 func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRecord, params map[string]any, notes string, result map[string]any) error {
 	typedSubID, hasCancel, err := paramOptionalTypedID(params, "subscription_id", billing.ParseSubscriptionID)
 	if err != nil {
@@ -294,12 +285,9 @@ func executeCancelAndRefund(r *httprequest.Request, finding reconcile.FindingRec
 	return refundPaymentForFinding(r, finding, paymentID, params, reason, result)
 }
 
-// cancelSubscriptionForFinding cancels one LOCAL subscription through the
-// lifecycle chokepoint; the remote side of NMI-backed rails rides the durable
-// nmi_delete_subscription intent (queue-always #679 — the breaker gates its
-// EXECUTION, never the enqueue). Mirrors the ResolveCanceledRemoteAlive
-// pattern: cancellation UPDATE (with the marker) and intent enqueue commit in
-// ONE transaction.
+// cancelSubscriptionForFinding cancels one local subscription through the
+// lifecycle chokepoint and schedules its provider cancel in the same
+// transaction; the breaker gates the intent's execution, never its enqueue.
 func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reason string, result map[string]any) error {
 	if r.State.SubscriptionService == nil || r.State.SubscriptionLifecycleService == nil {
 		return errors.New("subscription services unavailable")
@@ -368,12 +356,9 @@ func cancelSubscriptionForFinding(r *httprequest.Request, subID uuid.UUID, reaso
 	}
 }
 
-// refundPaymentForFinding executes the refund through the EXISTING admin
-// refund producer: reservation + durable rail intent
-// (effectively-once), recorded on the payments ledger by the handler's
-// finalize — identical to POST /admin/payments/{id}/refunds. The
-// idempotency key is derived from the finding, so a re-approve retries the
-// SAME refund instead of minting a second one.
+// refundPaymentForFinding refunds through the admin refund producer, as POST
+// /v1/admin/payments/{id}/refunds does. The idempotency key derives from the
+// finding, so a re-approve retries the same refund.
 func refundPaymentForFinding(r *httprequest.Request, finding reconcile.FindingRecord, paymentID uuid.UUID, params map[string]any, reason string, result map[string]any) error {
 	if r.State.PaymentService == nil {
 		return errors.New("payment service unavailable")
