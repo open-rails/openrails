@@ -76,7 +76,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.event = 'grant'
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants t
-      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
 ORDER BY g.created_at;
 
@@ -144,7 +144,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.starts_at <= sqlc.arg(as_of)::timestamptz
   AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(as_of)::timestamptz)
   AND NOT EXISTS (
-      SELECT 1 FROM billing.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
 ORDER BY g.ends_at ASC NULLS LAST, g.created_at ASC;
 
@@ -163,7 +163,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = sqlc.arg(currency)::text
   AND g.ends_at IS NOT NULL AND g.ends_at <= sqlc.arg(as_of)::timestamptz
   AND NOT EXISTS (
-      SELECT 1 FROM billing.grants tt WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
+      SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'supersede')
   )
 ORDER BY g.ends_at ASC;
 
@@ -219,7 +219,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.payment_id IS NOT NULL
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants tt
-      WHERE tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
+      WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
   AND EXISTS (
       SELECT 1 FROM billing.payments p
@@ -237,7 +237,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.event = 'grant'
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants t
-      WHERE t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
+      WHERE t.merchant_id = g.merchant_id AND t.supersedes_id = g.id AND t.event IN ('revoke', 'expire', 'supersede')
   )
   AND (
     (g.kind = 'access' AND NOT EXISTS (
