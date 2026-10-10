@@ -33,23 +33,6 @@ build/
 bin/
 /openrails
 
-# IDE files
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS generated files
-.DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
-Thumbs.db
-Desktop.ini
-
 # Configuration files (keep examples)
 config.yaml
 config.local.yaml
@@ -161,8 +144,8 @@ plans/
 # Local contract qualification receipts
 .reports/
 
-# Python bytecode
-__pycache__/
+.playwright-mcp
 
-# Playwright MCP browser session output
-.playwright-mcp/
+# Local research notes and reports (not part of the repo)
+research_notes/
+reports/
