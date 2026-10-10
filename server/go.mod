@@ -3,7 +3,7 @@ module github.com/open-rails/openrails/server
 go 1.26.9
 
 // The root module at the same release; scripts/release pins it.
-require github.com/open-rails/openrails v0.234.0
+require github.com/open-rails/openrails v0.235.0
 
 require (
 	github.com/gagliardetto/solana-go v1.20.0
