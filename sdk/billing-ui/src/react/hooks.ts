@@ -3,6 +3,7 @@ import { useCallback, useMemo, useState } from "react"
 import {
   isWalletAction,
   signWalletAction,
+  type ProductListOptions,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
 } from "../client/client"
@@ -244,12 +245,22 @@ export interface ProductsState {
   refetch: () => void
 }
 
-/** The catalog: active products with their active prices. */
-export function useProducts(options: { limit?: number } = {}): ProductsState {
+/** The catalog's filters and page size: `ProductListOptions`. */
+export type ProductsOptions = Pick<
+  ProductListOptions,
+  "entitlement" | "keys" | "limit"
+>
+
+/**
+ * The catalog: products on sale with their active prices, those granting
+ * `entitlement` or named by `keys` when given.
+ */
+export function useProducts(options: ProductsOptions = {}): ProductsState {
   const { client } = useBillingContext()
+  const { entitlement, keys } = options
   const limit = options.limit ?? 100
-  const remote = useRemote(`${limit}`, (signal) =>
-    client.listProducts({ limit, signal })
+  const remote = useRemote(JSON.stringify([entitlement, keys, limit]), (signal) =>
+    client.listProducts({ entitlement, keys, limit, signal })
   )
   return {
     products: remote.data?.data ?? null,

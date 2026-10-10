@@ -44,8 +44,19 @@ export const zh: BillingUiMessageBundle = {
       day: { other: "{count} 天访问权限" },
       week: { other: "{count} 周访问权限" },
     },
+    duration: {
+      hour: { other: "{count} 小时" },
+      day: { other: "{count} 天" },
+      week: { other: "{count} 周" },
+    },
     once: "一次性",
     permanent: "无预定到期时间的访问权限",
+  },
+  offers: {
+    empty: "没有可解锁此内容的商品",
+    once: "{amount}",
+    rent: "租用 {period}，{amount}",
+    recurring: "{amount} {every}",
   },
   subscriptions: {
     title: "订阅",

@@ -13,6 +13,7 @@ export {
   type BillingClientOptions,
   type CheckoutSourceOptions,
   type ListOptions,
+  type ProductListOptions,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
 } from "./client"

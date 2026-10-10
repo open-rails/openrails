@@ -2,6 +2,7 @@
 // fixtures. Real-server coverage lives in the Playwright e2e suite.
 import { vi, type Mock } from "vitest"
 
+import { fixtureSession } from "../fixtures"
 import currenciesFixture from "../../../../testdata/wire/currencies.json"
 import subscriptionFixture from "../../../../testdata/wire/subscription.json"
 
@@ -348,8 +349,27 @@ export function fakeBilling(
           currencies: state.currencies,
           payment: { psps: state.psps, solana: null },
         })
-      if (key === "GET /catalog/products")
-        return json(200, { data: state.products, next_cursor: null })
+      if (key === "GET /catalog/products") {
+        const entitlements = url.searchParams.getAll("entitlement")
+        const keys = url.searchParams.getAll("keys")
+        if (!entitlements.length && !keys.length)
+          return apiError(400, "invalid_param", "entitlement or keys is required")
+        const data = state.products.filter(
+          (p) =>
+            (!keys.length || keys.includes(String(p.key))) &&
+            (!entitlements.length ||
+              (p.entitlements as string[]).some((e) => entitlements.includes(e)))
+        )
+        return json(200, { data, next_cursor: null })
+      }
+      if (key === "POST /me/checkout-sessions")
+        return json(201, {
+          id: `ocs_${body.price_id}`,
+          url: null,
+          expires_at: "2036-09-01T00:30:00Z",
+        })
+      if ((m = key.match(/^GET \/me\/checkout-sessions\/([^/]+)$/)))
+        return json(200, fixtureSession({ id: m[1], status: "succeeded" }))
       if (key === "GET /me/payments")
         return json(200, cursorPage(state.payments, limit, cursor))
       return apiError(404, "resource_not_found", `no route ${key}`)

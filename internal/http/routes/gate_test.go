@@ -112,7 +112,7 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 			sensitive = append(sensitive, key)
 		}
 		require.False(t, r.Sensitive && r.Auth != AuthMerchant, "%s: only a merchant route steps up", key)
-		if r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn {
+		if r.ClientMethod() {
 			require.NotEmpty(t, r.Name, "%s: a Client method calls it", key)
 			require.Empty(t, names[r.Name], "%s: %s already names %s", key, r.Name, names[r.Name])
 			names[r.Name] = key

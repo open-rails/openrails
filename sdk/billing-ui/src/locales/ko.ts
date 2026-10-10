@@ -44,8 +44,19 @@ export const ko: BillingUiMessageBundle = {
       day: { other: "{count}일 이용" },
       week: { other: "{count}주 이용" },
     },
+    duration: {
+      hour: { other: "{count}시간" },
+      day: { other: "{count}일" },
+      week: { other: "{count}주" },
+    },
     once: "일회성",
     permanent: "예정된 만료일이 없는 이용권",
+  },
+  offers: {
+    empty: "이용할 수 있는 상품이 없습니다",
+    once: "{amount}",
+    rent: "{period} 대여, {amount}",
+    recurring: "{amount} {every}",
   },
   subscriptions: {
     title: "구독",

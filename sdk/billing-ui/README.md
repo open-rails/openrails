@@ -140,16 +140,32 @@ card PSPs are temporarily unavailable; amounts use its currency registry over
 the pinned copy. `useConfig()` and `useCurrencyScales()` read the same copy
 for host components.
 
+## Offers
+
+`<Offers>` sells an entitlement: every product on sale granting it, one
+button per price ("$4.99", "Rent for 3 days, $1.99", "$10.00 every 30 days"),
+each opening `CheckoutModal`. It needs a `BillingProvider`. Signing in is the
+host's: with `signedIn={false}`, or when OpenRails answers 401, it calls
+`onSignInRequired` instead of checking out.
+
+```tsx
+<Offers
+  entitlement="course:101" // or products={...} from your server's Client.ListOffers
+  signedIn={signedIn}
+  onSignInRequired={() => openSignIn()}
+  onPaid={() => navigate("/courses/css-101")} // your gate now admits them
+/>
+```
+
 ## Catalog and plan changes
 
 The client also reads the public catalog and changes a subscription's plan.
-No UI ships for these; hosts render their own. The catalog and Solana reads
-are public routes, served only when the host mounts OpenRails' checkout
-routes; `GET /config` is always served.
+The catalog and Solana reads are public routes, served only when the host
+mounts OpenRails' checkout routes; `GET /config` is always served.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts()` (each product embeds its prices on sale)                                           | `GET /catalog/products`                                         |
+| `listProducts({ entitlement?, keys? })`: the products on sale granting `entitlement` and named by `keys` (one is required), each with its prices; `useProducts` reads the same | `GET /catalog/products` |
 | `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
 | `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |

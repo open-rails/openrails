@@ -1,5 +1,14 @@
 # Changelog
 
+## Offers sell an entitlement
+
+- `<Offers entitlement onPaid onSignInRequired>` lists every product on sale
+  granting the entitlement, a button per price, each opening `CheckoutModal`;
+  `products` feeds it from the host's server instead.
+- `listProducts({ entitlement, keys })` and `useProducts({ entitlement, keys })`
+  filter the public catalog. One of them is required: OpenRails no longer
+  lists the whole catalog publicly.
+
 ## Checkout saves a new card under its PSP
 
 - Inside a `BillingProvider`, `Checkout` saved a new card with the session

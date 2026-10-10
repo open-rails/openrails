@@ -1335,6 +1335,32 @@
             }
           },
           {
+            "name": "entitlement",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "keys",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {

@@ -294,8 +294,5 @@ func TestClientIsTheMerchantAPI(t *testing.T) {
 	}
 }
 
-// clientRoute reports a route the Client has a method for: a staff,
-// programmatic or access route.
-func clientRoute(r routes.Route) bool {
-	return r.Staff() || r.Auth == routes.AuthApplication || r.Auth == routes.AuthSignedIn
-}
+// clientRoute reports a route the Client has a method for.
+func clientRoute(r routes.Route) bool { return r.ClientMethod() }

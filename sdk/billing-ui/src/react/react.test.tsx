@@ -166,11 +166,15 @@ describe("useSubscriptions", () => {
 })
 
 describe("plan change", () => {
-  it("lists the catalog", async () => {
+  it("lists the products granting an entitlement", async () => {
     const server = fakeBilling({
-      products: [product(), product({ id: "prod_pro", display_name: "Pro" })],
+      products: [
+        product(),
+        product({ id: "prod_pro", display_name: "Pro" }),
+        product({ id: "prod_other", entitlements: ["other"] }),
+      ],
     })
-    const { result } = setup(() => useProducts(), server)
+    const { result } = setup(() => useProducts({ entitlement: "plus" }), server)
     await waitFor(() => expect(result.current.products).toHaveLength(2))
     expect(result.current.nextCursor).toBeNull()
     expect(result.current.products![0].prices[0]).toMatchObject({

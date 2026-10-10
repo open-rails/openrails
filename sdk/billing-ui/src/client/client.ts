@@ -82,6 +82,20 @@ export interface CheckoutSourceOptions {
   customerBase?: string
 }
 
+/**
+ * The public catalog's filters, one required: `entitlement` keeps the
+ * products granting that key, `keys` those products; given both, a product
+ * must match both.
+ */
+export interface ProductListOptions {
+  entitlement?: string
+  keys?: string[]
+  limit?: number
+  /** The previous page's `next_cursor`. */
+  cursor?: string
+  signal?: AbortSignal
+}
+
 export interface ListOptions {
   limit?: number
   offset?: number
@@ -157,7 +171,7 @@ export async function signWalletAction(
   return signature
 }
 
-type Query = Record<string, string | number | boolean | undefined>
+type Query = Record<string, string | number | boolean | string[] | undefined>
 
 interface RequestOptions {
   method?: string
@@ -225,7 +239,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   function url(path: string, query?: Query, root = base): string {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(query ?? {}))
-      if (v !== undefined && v !== "") qs.set(k, String(v))
+      if (Array.isArray(v)) for (const item of v) qs.append(k, item)
+      else if (v !== undefined && v !== "") qs.set(k, String(v))
     const q = qs.toString()
     return `${root}${path}${q ? `?${q}` : ""}`
   }
@@ -565,9 +580,14 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /** Products on sale, each with its current prices. */
-    listProducts(opts: ListOptions = {}): Promise<Page<Product>> {
+    listProducts(opts: ProductListOptions = {}): Promise<Page<Product>> {
       return json(productPage, "/catalog/products", {
-        query: { limit: opts.limit ?? 100, cursor: opts.cursor },
+        query: {
+          entitlement: opts.entitlement,
+          keys: opts.keys,
+          limit: opts.limit ?? 100,
+          cursor: opts.cursor,
+        },
         signal: opts.signal,
       })
     },

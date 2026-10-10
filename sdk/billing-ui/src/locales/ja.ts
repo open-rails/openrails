@@ -44,8 +44,19 @@ export const ja: BillingUiMessageBundle = {
       day: { other: "{count}日間のアクセス" },
       week: { other: "{count}週間のアクセス" },
     },
+    duration: {
+      hour: { other: "{count}時間" },
+      day: { other: "{count}日間" },
+      week: { other: "{count}週間" },
+    },
     once: "買い切り",
     permanent: "有効期限のないアクセス",
+  },
+  offers: {
+    empty: "これを利用できる商品はありません",
+    once: "{amount}",
+    rent: "{period}レンタル、{amount}",
+    recurring: "{amount} {every}",
   },
   subscriptions: {
     title: "サブスクリプション",

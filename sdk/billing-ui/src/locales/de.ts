@@ -44,8 +44,19 @@ export const de: BillingUiMessageBundle = {
       day: { one: "1 Tag Zugang", other: "{count} Tage Zugang" },
       week: { one: "1 Woche Zugang", other: "{count} Wochen Zugang" },
     },
+    duration: {
+      hour: { one: "1 Stunde", other: "{count} Stunden" },
+      day: { one: "1 Tag", other: "{count} Tage" },
+      week: { one: "1 Woche", other: "{count} Wochen" },
+    },
     once: "einmalig",
     permanent: "Zugriff ohne geplantes Ablaufdatum",
+  },
+  offers: {
+    empty: "Nichts im Angebot schaltet dies frei",
+    once: "{amount}",
+    rent: "{period} leihen, {amount}",
+    recurring: "{amount} {every}",
   },
   subscriptions: {
     title: "Abonnements",

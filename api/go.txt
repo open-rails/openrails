@@ -100,6 +100,7 @@ pkg openrails, method (*Client) ListFindings(context.Context, billing.FindingLis
 pkg openrails, method (*Client) ListHostEvents(context.Context, billing.HostEventListParams, ...RequestOption) (*billing.ListPage[billing.HostEvent], error)
 pkg openrails, method (*Client) ListInvoices(context.Context, billing.InvoiceListParams, ...RequestOption) (*billing.ListPage[billing.Invoice], error)
 pkg openrails, method (*Client) ListMeters(context.Context, billing.PageRequest, ...RequestOption) (*billing.ListPage[billing.Meter], error)
+pkg openrails, method (*Client) ListOffers(context.Context, billing.OfferListParams, ...RequestOption) (*billing.ListPage[billing.Product], error)
 pkg openrails, method (*Client) ListOrders(context.Context, billing.OrderListParams, ...RequestOption) (*billing.ListPage[billing.Order], error)
 pkg openrails, method (*Client) ListPSPs(context.Context, billing.PSPListParams, ...RequestOption) (*billing.ListPage[billing.PSP], error)
 pkg openrails, method (*Client) ListPaymentAttempts(context.Context, billing.PaymentAttemptListParams, ...RequestOption) (*billing.ListPage[billing.PaymentAttempt], error)
@@ -2229,6 +2230,10 @@ pkg openrails/billing, type NotificationData struct, TransactionID string `json:
 pkg openrails/billing, type NotificationData struct, UserEmail string `json:"user_email,omitempty"`
 pkg openrails/billing, type NotificationID [16]byte
 pkg openrails/billing, type OfferKind string
+pkg openrails/billing, type OfferListParams struct
+pkg openrails/billing, type OfferListParams struct, Entitlements []string
+pkg openrails/billing, type OfferListParams struct, Keys []string
+pkg openrails/billing, type OfferListParams struct, embedded PageRequest
 pkg openrails/billing, type OpenProviderOperationParams struct
 pkg openrails/billing, type OpenProviderOperationParams struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type OpenProviderOperationParams struct, AuthorizationBody []byte `json:"authorization_body"`

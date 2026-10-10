@@ -23,6 +23,7 @@ export {
   type PaymentMethodsState,
   type PaymentsOptions,
   type PaymentsState,
+  type ProductsOptions,
   type ProductsState,
   type SubscriptionAction,
   type SubscriptionsOptions,

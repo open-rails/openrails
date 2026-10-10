@@ -422,3 +422,19 @@ describe("checkout sessions", () => {
     })
   })
 })
+
+describe("listProducts", () => {
+  it("sends the catalog's filters, a key per value", async () => {
+    const server = fakeBilling({
+      products: [
+        product({ id: "prod_a", key: "a", entitlements: ["course:101"] }),
+        product({ id: "prod_b", key: "b", entitlements: ["course:102"] }),
+      ],
+    })
+    const client = createBillingClient({ fetch: server.fetch })
+    const page = await client.listProducts({ entitlement: "course:101", keys: ["a", "c"] })
+    expect(page.data.map((p) => p.key)).toEqual(["a"])
+    const [url] = server.fetch.mock.calls[0]!
+    expect(String(url)).toBe("/billing/v1/catalog/products?entitlement=course%3A101&keys=a&keys=c&limit=100")
+  })
+})

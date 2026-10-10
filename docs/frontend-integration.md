@@ -70,8 +70,10 @@ POST /v1/me/billing-portal-sessions       → {"url": ...} (Stripe-portal deploy
 GET  /v1/me/notifications                 billing notifications
 ```
 
-The public catalog needs no auth: `GET /v1/catalog/products` returns each product on sale with
-its current prices, which is everything your pricing page needs.
+The public catalog needs no auth: `GET /v1/catalog/products?entitlement=course:101` returns
+each product on sale granting that key, with its current prices; `?keys=` names products
+(given both, a product matches both). One of them is required: there is no unfiltered listing. A host's server reads the
+same with the Go `Client.ListOffers`.
 
 ### Public configuration: `GET /v1/config`
 

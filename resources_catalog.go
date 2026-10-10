@@ -44,6 +44,32 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 	return &out, nil
 }
 
+// ListOffers lists what a customer may buy, as the public catalog shows it
+// (GET /v1/catalog/products): the products on sale granting any of
+// params.Entitlements and named by params.Keys (either may be empty, not
+// both), each with its live prices.
+// A host's server reads it to decide what its storefront offers.
+func (c *Client) ListOffers(ctx context.Context, params billing.OfferListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Product], error) {
+	if len(params.Entitlements) == 0 && len(params.Keys) == 0 {
+		return nil, invalidErr("entitlements or keys is required")
+	}
+	if len(params.Keys) > billing.MaxBatchItems || len(params.Entitlements) > billing.MaxBatchItems {
+		return nil, invalidErr(fmt.Sprintf("keys and entitlements each name at most %d values", billing.MaxBatchItems))
+	}
+	q := pageValues(nil, params.PageRequest)
+	for _, key := range params.Entitlements {
+		q.Add("entitlement", key)
+	}
+	for _, key := range params.Keys {
+		q.Add("keys", key)
+	}
+	var out billing.ListPage[billing.Product]
+	if err := c.do(ctx, http.MethodGet, "/v1/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // ListProducts returns one page of products, newest first, each with its
 // current prices. params.Keys reads products by key.
 func (c *Client) ListProducts(ctx context.Context, params billing.ProductListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Product], error) {

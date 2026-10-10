@@ -4,13 +4,15 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
-// ListPublicProducts lists the products on sale, each with its current
-// prices, as a buyer sees them. A product no live price sells is granted
-// only and is not listed.
+// ListPublicProducts lists what a buyer may buy: the products on sale granting
+// any ?entitlement= and named by ?keys= (one is required; there is no
+// unfiltered listing), each with its live prices. A product no live price sells is
+// granted only and is not listed.
 func ListPublicProducts(r *httprequest.Request) {
 	page, ok := r.Page()
 	if !ok {
@@ -21,7 +23,13 @@ func ListPublicProducts(r *httprequest.Request) {
 		return
 	}
 	archived, forSale := false, true
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: &archived, ForSale: &forSale})
+	values := r.Request.URL.Query()
+	if len(values["entitlement"]) == 0 && len(values["keys"]) == 0 {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "entitlement or keys is required").WithParam("entitlement"))
+		return
+	}
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, Archived: &archived, ForSale: &forSale,
+		Keys: values["keys"], Entitlements: values["entitlement"]})
 	if err != nil {
 		writeCatalogError(r, err)
 		return

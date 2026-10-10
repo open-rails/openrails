@@ -43,8 +43,19 @@ export const en = {
       day: { one: "1 day of access", other: "{count} days of access" },
       week: { one: "1 week of access", other: "{count} weeks of access" },
     },
+    duration: {
+      hour: { one: "1 hour", other: "{count} hours" },
+      day: { one: "1 day", other: "{count} days" },
+      week: { one: "1 week", other: "{count} weeks" },
+    },
     once: "one-time",
     permanent: "Access with no scheduled expiry",
+  },
+  offers: {
+    empty: "Nothing on sale unlocks this",
+    once: "{amount}",
+    rent: "Rent for {period}, {amount}",
+    recurring: "{amount} {every}",
   },
   subscriptions: {
     title: "Subscriptions",

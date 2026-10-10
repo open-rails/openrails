@@ -32,11 +32,11 @@ func (e *Engine) Transport() (http.RoundTripper, string) {
 	})
 }
 
-// newServiceHandler mounts the staff and programmatic routes the Go client calls, gated by
-// the transport's own credential: the host's merchant-owner authority, a
-// context value no network request carries. Ambient host context is stripped
-// before it. It serves no customer routes: the Go client has no customer
-// methods.
+// newServiceHandler mounts the routes the Go client calls (the staff,
+// programmatic and public ones it names), gated by the transport's own
+// credential: the host's merchant-owner authority, a context value no network
+// request carries. Ambient host context is stripped before it. It serves no
+// customer routes: the Go client has no customer methods.
 func newServiceHandler(rt *app.Runtime) http.Handler {
 	mux := &router.Table{}
 	opts := httproutes.HostOptions()
@@ -44,6 +44,7 @@ func newServiceHandler(rt *app.Runtime) http.Handler {
 	opts.Capabilities = &caps
 	httproutes.RegisterStaffRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	httproutes.RegisterAppRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
+	httproutes.RegisterPublicClientRoutes(router.NewMux(mux, "/v1", rt), rt, opts)
 	router.ResolveMerchantSelectors(mux, "", func(ctx context.Context, r *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, r, rt.Merchants, rt.ConfiguredMerchant(), "")
 	})

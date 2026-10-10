@@ -347,6 +347,13 @@ func RegisterStaffRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, p
 // mounts reports a staff route its group's permission mounts.
 func (p Permissions) mounts(r Route) bool { return r.Staff() && p.For(r) != "" }
 
+// RegisterPublicClientRoutes mounts the public routes the Go Client calls
+// (ClientMethod), on a router rooted at /v1: the in-process transport serves
+// them beside the staff routes.
+func RegisterPublicClientRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return r.Auth == AuthPublic && r.ClientMethod() })
+}
+
 // RegisterWebhookRoutes mounts the canonical callback surface under /webhooks.
 // The configured provider identity resolves its merchant in the runtime
 // environment; runtime bindings and signatures remain mandatory.

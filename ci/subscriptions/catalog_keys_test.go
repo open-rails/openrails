@@ -221,7 +221,7 @@ func TestProductsWithoutALivePriceAreNotForSale(t *testing.T) {
 
 	public := func() map[string]bool {
 		listed := map[string]bool{}
-		for _, item := range w.public("/v1/catalog/products")["data"].([]any) {
+		for _, item := range w.public("/v1/catalog/products?keys=" + sold.Key + "&keys=" + granted.Key)["data"].([]any) {
 			listed[item.(map[string]any)["key"].(string)] = true
 		}
 		return listed
@@ -263,4 +263,65 @@ func TestProductKeyCap(t *testing.T) {
 	require.Len(t, full.Entitlements, catalog.MaxProductEntitlements)
 	_, err = c.UpdateProduct(t.Context(), full.ID, billing.UpdateProductParams{Entitlements: catalog.Value(keys)})
 	require.ErrorIs(t, err, billing.ErrInvalid)
+}
+
+// The public catalog is a narrow read: the products on sale granting an
+// entitlement or named by key, never the whole catalog. The Go client's
+// ListOffers reads the same, in process and remote.
+func TestOffersAreAFilteredRead(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	c := w.client[embedded]
+	n := uuid.NewString()[:6]
+	product := func(key string, entitlements []string, priced, archived bool) *billing.Product {
+		p, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: key + "-" + n, DisplayName: key, Entitlements: entitlements})
+		require.NoError(t, err)
+		if priced {
+			_, err = c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: p.ID, Key: "purchase", UnitAmount: 4_990_000, Currency: "USD"})
+			require.NoError(t, err)
+		}
+		if archived {
+			_, err = c.UpdateProduct(t.Context(), p.ID, billing.UpdateProductParams{Archived: catalog.Value(true)})
+			require.NoError(t, err)
+		}
+		return p
+	}
+	course := product("course-101", []string{"course:101"}, true, false)
+	bundle := product("bundle", []string{"course:101", "course:102"}, true, false)
+	member := product("membership", []string{"channel:membership"}, true, false)
+	product("granted", []string{"course:101"}, false, false)
+	product("retired", []string{"course:101"}, true, true)
+
+	public := func(query string) []string {
+		var keys []string
+		for _, item := range w.public("/v1/catalog/products?" + query)["data"].([]any) {
+			keys = append(keys, item.(map[string]any)["key"].(string))
+		}
+		slices.Sort(keys)
+		return keys
+	}
+	sorted := func(keys ...string) []string { slices.Sort(keys); return keys }
+	require.Equal(t, sorted(course.Key, bundle.Key), public("entitlement=course:101"), "on sale and granting it")
+	require.Equal(t, sorted(bundle.Key, member.Key), public("entitlement=course:102&entitlement=channel:membership"), "granting any of them")
+	require.Equal(t, []string{member.Key}, public("keys="+member.Key))
+	require.Equal(t, []string{bundle.Key}, public("entitlement=course:102&keys="+bundle.Key+"&keys="+course.Key), "both filters apply")
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/catalog/products", nil)
+	require.NoError(t, err)
+	req.Header.Set("OpenRails-Merchant", w.slug)
+	res, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer res.Body.Close()
+	require.Equal(t, http.StatusBadRequest, res.StatusCode, "no unfiltered listing")
+
+	for _, top := range []topology{embedded, remote} {
+		page, err := w.client[top].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"course:101"}})
+		require.NoError(t, err, top)
+		require.Equal(t, sorted(course.Key, bundle.Key), productKeys(t, page), top)
+		for _, p := range page.Items {
+			require.Len(t, p.Prices, 1, top)
+		}
+		_, err = w.client[top].ListOffers(t.Context(), billing.OfferListParams{})
+		require.Error(t, err, top)
+	}
 }

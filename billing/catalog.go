@@ -87,6 +87,16 @@ type ProductListParams struct {
 	ForSale      *bool
 }
 
+// OfferListParams asks what a customer may buy: the products on sale granting
+// any of Entitlements, or named by Keys, or both when both are given (at
+// least one is required, each at most MaxBatchItems), each with its live
+// prices.
+type OfferListParams struct {
+	PageRequest
+	Entitlements []string
+	Keys         []string
+}
+
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
 // AccessDurationHours of access (null: no scheduled expiry). BillingIntervalHours
 // separately sets its recurring cadence (null: one-time charge).

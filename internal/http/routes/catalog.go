@@ -27,8 +27,8 @@ var (
 // applies as the apply manager and the edits as the edit manager: a document
 // skips an object whose field an edit set differently.
 var catalogRoutes = []Route{
-	{Method: GET, Path: "/v1/catalog/products", Group: Checkout, Auth: AuthPublic,
-		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Handler: h(handlers.ListPublicProducts)},
+	{Method: GET, Path: "/v1/catalog/products", Group: Checkout, Auth: AuthPublic, Name: "ListOffers",
+		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Handler: h(handlers.ListPublicProducts)},
 
 	{Method: GET, Path: "/v1/admin/catalog/revision", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetCatalogRevision", Level: LevelRead,
 		Responses: []Reply{{200, billing.CatalogRevision{}}}, Handler: h(handlers.GetCatalogRevision)},

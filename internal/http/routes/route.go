@@ -254,7 +254,8 @@ type Route struct {
 	Group Group
 	// Auth is the tier the route enforces before its handler runs.
 	Auth Tier
-	// Name is a staff route's Go client method.
+	// Name is the route's Go client method: every staff, programmatic and
+	// access route has one, and a public route may (ClientMethod).
 	Name string
 	// Level is an admin route's: read or write.
 	Level Level
@@ -294,6 +295,12 @@ func (r Route) Key() string { return r.Method + " " + r.Path }
 // CatalogAdmin's, MerchantConfig's and Metrics'.
 func (r Route) Staff() bool {
 	return r.Group == Admin || r.Group == CatalogAdmin || r.Group == MerchantConfig || r.Group == Metrics
+}
+
+// ClientMethod reports a route the Go Client calls: the staff, programmatic
+// and access routes, and the public reads it names (the catalog's offers).
+func (r Route) ClientMethod() bool {
+	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn || r.Auth == AuthPublic && r.Name != ""
 }
 
 // CatalogUpdate reports a catalog edit or document application.
