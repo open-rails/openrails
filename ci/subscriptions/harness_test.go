@@ -630,16 +630,20 @@ func (w *world) settleQuiet() {
 }
 
 // wake makes every snoozed operation runnable now, as an operator retry
-// does, after the engine clock passed its next attempt.
+// does, after the engine clock passed its next attempt. An operation running
+// as the clock moved may have read the old time and snoozed past it, so wake
+// retries once more after the first round settles.
 func (w *world) wake() {
 	w.t.Helper()
-	page, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable).First(100))
-	require.NoError(w.t, err)
-	for _, job := range page.Jobs {
-		_, err := w.jobs.JobRetry(w.t.Context(), job.ID)
+	for range 2 {
+		page, err := w.jobs.JobList(w.t.Context(), river.NewJobListParams().Kinds("openrails.provider_operation").States(rivertype.JobStateScheduled, rivertype.JobStateRetryable).First(100))
 		require.NoError(w.t, err)
+		for _, job := range page.Jobs {
+			_, err := w.jobs.JobRetry(w.t.Context(), job.ID)
+			require.NoError(w.t, err)
+		}
+		w.settle()
 	}
-	w.settle()
 }
 
 // advanceHealthyTo models ordinary observation immediately before a planned
