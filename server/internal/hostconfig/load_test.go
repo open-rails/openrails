@@ -10,17 +10,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// testDatabaseURL is the database bootEnv names.
+const testDatabaseURL = "postgres://openrails@db.test:5432/openrails?sslmode=require"
+
 // bootEnv isolates Load from the working directory (.env, config.yaml), the
-// host's mounted secrets and ambient database env, and declares the two
-// required dials.
+// host's mounted secrets and ambient database env, and declares the database
+// and the two required dials.
 func bootEnv(t *testing.T) (secretsDir string) {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	for _, key := range []string{"DB_URL", "DB_PASSWORD", "OPENRAILS_CONFIG", "BILLING_CONFIG"} {
+	for _, key := range []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "OPENRAILS_CONFIG", "BILLING_CONFIG"} {
 		unsetenv(t, key)
 	}
 	secretsDir = t.TempDir()
 	t.Setenv("VAULT_SECRETS_PATH", secretsDir)
+	t.Setenv("DB_URL", testDatabaseURL)
 	t.Setenv("TEST_MODE", "sandbox")
 	t.Setenv("PROVIDER_WRITE_MODE", "full")
 	return secretsDir
@@ -44,12 +48,13 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 	require.Equal(t, billing.DefaultSchema, cfg.Database.Schema)
-	require.NotEmpty(t, cfg.DB.URL, "the DSN is assembled from the atomic parts")
+	require.Equal(t, testDatabaseURL, cfg.DB.URL)
 	require.NotNil(t, cfg.Auth)
 	require.Empty(t, cfg.Auth.Issuer, "no URL setting supplies an issuer fallback")
 
+	unsetenv(t, "DB_URL")
 	for key, value := range map[string]string{
-		"DB_HOST": "  example.com  ", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DATABASE_SCHEMA": "  Custom_Billing  ", "DATABASE_RIVER_SCHEMA": "jobs",
+		"DB_HOST": "  example.com  ", "DB_PORT": "5432", "DB_DATABASE": "openrails", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DATABASE_SCHEMA": "  Custom_Billing  ", "DATABASE_RIVER_SCHEMA": "jobs",
 		"VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root",
 		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "EMAIL_SMTP_HOST": "smtp.sendgrid.net", "EMAIL_SMTP_PORT": "587", "EMAIL_SMTP_USERNAME": "apikey", "EMAIL_SMTP_PASSWORD": "SG.test-key", "EMAIL_SMTP_FROM": "Billing <noreply@billing.example>",
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
@@ -65,7 +70,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.True(t, cfg.DB.SQLTrace)
 	require.Equal(t, "custom_billing", cfg.Database.Schema)
 	require.Equal(t, "jobs", cfg.Database.RiverSchema)
-	require.Contains(t, cfg.DB.URL, "@example.com:")
+	require.Equal(t, "postgresql://user:pass@example.com:5432/openrails?sslmode=require", cfg.DB.URL, "parts without db.sslmode require TLS")
 	require.NotNil(t, cfg.Vault, "a VAULT_* setting declares the connection")
 	require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
 	require.Equal(t, billing.SecretBackendDB, billing.SecretStoreBackend(cfg.Config))
@@ -239,7 +244,7 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 func TestAuthTransportIsExplicit(t *testing.T) {
 	f := defaults()
 	f.TestMode, f.ProviderWriteMode = "sandbox", billing.ProviderWriteModeFull
-	f.DB.URL = billing.DBConnectionString(f.DB)
+	f.DB.URL = testDatabaseURL
 	cfg, err := f.config()
 	require.NoError(t, err)
 	require.NoError(t, Validate(cfg))
@@ -270,4 +275,28 @@ func TestAuthTransportIsExplicit(t *testing.T) {
 	}
 	require.False(t, cfg.Auth.AllowMemory || cfg.Auth.AllowPrivateNetworkJWKS || cfg.Auth.AllowMissingSenders || cfg.Auth.AllowEphemeralSigningKey)
 	require.ErrorContains(t, Validate(&Config{}), "standalone config is required")
+}
+
+// No database is assumed: without one every loader refuses and names the
+// settings; parts never borrow a local default.
+func TestLoadRequiresDatabase(t *testing.T) {
+	bootEnv(t)
+	unsetenv(t, "DB_URL")
+	const none = "no database configured: set db.url (DB_URL), or db.host, db.port, db.database and db.username (DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME)"
+	_, err := Load("")
+	require.EqualError(t, err, none)
+	_, err = LoadDatabase("")
+	require.EqualError(t, err, none)
+
+	t.Setenv("DB_HOST", "db.internal")
+	t.Setenv("DB_PASSWORD", "secret")
+	_, err = Load("")
+	require.EqualError(t, err, "database: db.url (DB_URL) is unset and its parts are incomplete: set db.port (DB_PORT), db.database (DB_DATABASE), db.username (DB_USERNAME)")
+
+	t.Setenv("DB_PORT", "5432")
+	t.Setenv("DB_DATABASE", "openrails")
+	t.Setenv("DB_USERNAME", "openrails")
+	cfg, err := Load("")
+	require.NoError(t, err)
+	require.Equal(t, "postgresql://openrails:secret@db.internal:5432/openrails?sslmode=require", cfg.DB.URL)
 }

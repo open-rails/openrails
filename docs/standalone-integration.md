@@ -38,7 +38,9 @@ there is no separate private/service listener.
 - **Postgres 18+.** OpenRails owns one schema (`database.schema` /
   `DATABASE_SCHEMA`, default `billing`); it can share your app's database. The
   server creates or upgrades its tables at boot; `openrails migrate up` does it
-  ahead of a rollout.
+  ahead of a rollout. Name it with `db.url` (`DB_URL`), or with `db.host`,
+  `db.port`, `db.database` and `db.username` (`db.sslmode` defaults to
+  `require`). There is no default: without one the server refuses to start.
 - **A Redis-compatible service** (we recommend Garnet) — optional, backs
   rate limiting. If omitted or unreachable, limits are in-memory per-process
   and readiness remains green.

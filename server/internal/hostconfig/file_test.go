@@ -67,7 +67,7 @@ func TestPort(t *testing.T) {
 	for value, ok := range map[int]bool{44553: true, 70000: false, -20983: false} {
 		f := defaults()
 		f.TestMode, f.ProviderWriteMode, f.Port = "sandbox", "full", port(value)
-		f.DB.URL = billing.DBConnectionString(f.DB)
+		f.DB.URL = testDatabaseURL
 		cfg, err := f.config()
 		require.NoError(t, err)
 		require.Equal(t, ok, Validate(cfg) == nil, value)
@@ -79,6 +79,7 @@ func TestConfigExampleLoads(t *testing.T) {
 	example, err := filepath.Abs(filepath.Join("..", "..", "..", "config.example.yaml"))
 	require.NoError(t, err)
 	bootEnv(t)
+	unsetenv(t, "DB_URL")
 	unsetenv(t, "TEST_MODE")
 	unsetenv(t, "PROVIDER_WRITE_MODE")
 	cfg, err := Load(example)

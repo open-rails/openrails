@@ -110,17 +110,14 @@ type fileConfig struct {
 	LocalSignIn    bool                  `koanf:"local_sign_in"`
 }
 
-// defaults is the file before any source is read: local infrastructure and
-// the engine's protective limits, with no security exception.
+// defaults is the file before any source is read: the listener and the
+// engine's protective limits, with no security exception. There is no
+// default database: one is always named (databaseURL).
 func defaults() *fileConfig {
 	return &fileConfig{
-		Host: "0.0.0.0",
-		Port: 3053,
-		DB: &billing.DBConfig{
-			Host: "localhost", Port: "5434", Database: "openrails_db",
-			// Application login used by the local Docker setup.
-			Username: "app", Password: "app_password", SSLMode: "disable",
-		},
+		Host:     "0.0.0.0",
+		Port:     3053,
+		DB:       &billing.DBConfig{},
 		Database: billing.DatabaseConfig{Schema: billing.DefaultSchema},
 		// Match docker-compose's host-published Garnet port.
 		Redis:      &billing.RedisConfig{Addr: "localhost:6380"},
@@ -128,6 +125,34 @@ func defaults() *fileConfig {
 		RateLimits: billing.DefaultRateLimits(),
 		Captcha:    billing.DefaultCaptcha(),
 		Auth:       &AuthConfig{},
+	}
+}
+
+// databaseURL is db.url, or the URL db's parts assemble. A missing part
+// refuses boot: nothing stands in for it.
+func databaseURL(db *billing.DBConfig) (string, error) {
+	if db == nil {
+		db = &billing.DBConfig{}
+	}
+	if url := strings.TrimSpace(db.URL); url != "" {
+		return url, nil
+	}
+	var missing []string
+	for _, part := range []struct{ key, value string }{
+		{"db.host (DB_HOST)", db.Host}, {"db.port (DB_PORT)", db.Port},
+		{"db.database (DB_DATABASE)", db.Database}, {"db.username (DB_USERNAME)", db.Username},
+	} {
+		if strings.TrimSpace(part.value) == "" {
+			missing = append(missing, part.key)
+		}
+	}
+	switch len(missing) {
+	case 0:
+		return billing.DBConnectionString(db), nil
+	case 4:
+		return "", fmt.Errorf("no database configured: set db.url (DB_URL), or db.host, db.port, db.database and db.username (DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME)")
+	default:
+		return "", fmt.Errorf("database: db.url (DB_URL) is unset and its parts are incomplete: set %s", strings.Join(missing, ", "))
 	}
 }
 

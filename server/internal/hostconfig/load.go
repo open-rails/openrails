@@ -321,7 +321,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		databaseConfig := &Config{Config: &billing.Config{DB: dbConfig, Database: billing.DatabaseConfig{
 			Schema: k.String("database.schema"), RiverSchema: k.String("database.river_schema"),
 		}}}
-		databaseConfig.DB.URL = billing.DBConnectionString(databaseConfig.DB)
+		if databaseConfig.DB.URL, err = databaseURL(databaseConfig.DB); err != nil {
+			return nil, err
+		}
 		databaseConfig.Database.Schema = billing.SchemaName(databaseConfig.Config)
 		if err := billing.ValidateDatabase(databaseConfig.Config); err != nil {
 			return nil, err
@@ -465,9 +467,8 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	if err != nil {
 		return nil, err
 	}
-	// Assemble DB URL from pieces if not explicitly set
-	if cfg.DB != nil {
-		cfg.DB.URL = billing.DBConnectionString(cfg.DB)
+	if cfg.DB.URL, err = databaseURL(cfg.DB); err != nil {
+		return nil, err
 	}
 
 	// Normalize the OpenRails Postgres schema to its canonical form (#165) so the
