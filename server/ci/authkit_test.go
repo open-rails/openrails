@@ -51,9 +51,9 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	ownerKey, err := cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "owner key", Role: "owner"})
 	require.NoError(t, err)
 	require.True(t, strings.HasPrefix(ownerKey.Prefix, "openrails_st_"))
-	viewerKey, err := cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantRead, server.MerchantWrite, server.MerchantAdmin}), mid, billing.CreateAPIKeyParams{Name: "viewer key", Role: "viewer"})
+	viewerKey, err := cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantBillingRead, server.MerchantBillingManage, server.MerchantConfigManage}), mid, billing.CreateAPIKeyParams{Name: "viewer key", Role: "viewer"})
 	require.NoError(t, err, "a credential mints within its own authority")
-	_, err = cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantRead}), mid, billing.CreateAPIKeyParams{Name: "escalated", Role: "owner"})
+	_, err = cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantBillingRead}), mid, billing.CreateAPIKeyParams{Name: "escalated", Role: "owner"})
 	require.ErrorIs(t, err, server.ErrRoleEscalation)
 	_, err = cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "x", Role: "admin"})
 	require.ErrorIs(t, err, server.ErrUnknownMerchantRole)
@@ -67,6 +67,10 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	require.Equal(t, http.StatusOK, findings(viewerKey.Secret))
 	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code, "a viewer reads no merchant configuration")
 	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code)
+	check := map[string]any{"customer_id": billing.CustomerID(uuid.New()).String(), "entitlements": []string{"content:any"}}
+	w := call(t, handler, viewerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", "", check)
+	require.Equal(t, http.StatusForbidden, w.Code, "a viewer key holds no programmatic permission: %s", w.Body.String())
+	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", "", check).Code, "the owner's merchant:* holds merchant:entitlements:read")
 	attempt := billing.CheckoutAttemptID(uuid.New()).String()
 	for _, route := range []struct{ method, path string }{
 		{http.MethodPost, "/v1/admin/checkout-attempts"},

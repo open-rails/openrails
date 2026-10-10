@@ -2,12 +2,15 @@ package routes
 
 import "fmt"
 
-// Permissions are the host's permissions for the staff route groups, as the
-// gate asks the Verified's Can for them: the admin group's reads and
-// updates, the catalog, the merchant's configuration and its business
-// metrics. Each group is independent; an empty one leaves its routes
-// unmounted. The programmatic routes need none.
-type Permissions struct{ AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics string }
+// Permissions are the host's permissions, as the gate asks the Verified's Can
+// for them: the staff groups' (the admin group's reads and updates, the
+// catalog, the merchant's configuration, its business metrics) and the
+// programmatic routes' (entitlement checks, usage, provider costs, host
+// events). An empty one leaves its routes unmounted.
+type Permissions struct {
+	AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics string
+	Entitlements, Usage, Costs, Events                       string
+}
 
 // Validate refuses AdminUpdate without AdminRead.
 func (p Permissions) Validate() error {
@@ -17,39 +20,78 @@ func (p Permissions) Validate() error {
 	return nil
 }
 
-// For is the permission a staff route checks: "" when its group is not
-// mounted.
+// Staff is p's staff groups' permissions alone.
+func (p Permissions) Staff() Permissions {
+	return Permissions{AdminRead: p.AdminRead, AdminUpdate: p.AdminUpdate, Catalog: p.Catalog, MerchantConfig: p.MerchantConfig, Metrics: p.Metrics}
+}
+
+// App is p's programmatic routes' permissions alone.
+func (p Permissions) App() Permissions {
+	return Permissions{Entitlements: p.Entitlements, Usage: p.Usage, Costs: p.Costs, Events: p.Events}
+}
+
+// For is the permission a route checks: "" when it needs none, or its
+// permission is not given and it is not mounted.
 func (p Permissions) For(r Route) string {
 	switch r.Needs() {
-	case "AdminRead":
+	case NeedAdminRead:
 		return p.AdminRead
-	case "AdminUpdate":
+	case NeedAdminUpdate:
 		return p.AdminUpdate
-	case "Catalog":
+	case NeedCatalog:
 		return p.Catalog
-	case "MerchantConfig":
+	case NeedMerchantConfig:
 		return p.MerchantConfig
-	case "Metrics":
+	case NeedMetrics:
 		return p.Metrics
+	case NeedEntitlements:
+		return p.Entitlements
+	case NeedUsage:
+		return p.Usage
+	case NeedCosts:
+		return p.Costs
+	case NeedEvents:
+		return p.Events
 	}
 	return ""
 }
 
+// Need names the Routes.Permissions field a route's caller holds.
+type Need string
+
+const (
+	NeedAdminRead      Need = "AdminRead"
+	NeedAdminUpdate    Need = "AdminUpdate"
+	NeedCatalog        Need = "Catalog"
+	NeedMerchantConfig Need = "MerchantConfig"
+	NeedMetrics        Need = "Metrics"
+	// The programmatic routes': a route declares its own (Route.Permission).
+	NeedEntitlements Need = "Entitlements"
+	NeedUsage        Need = "Usage"
+	NeedCosts        Need = "Costs"
+	NeedEvents       Need = "Events"
+)
+
+// appNeeds are the permissions a programmatic route may declare.
+var appNeeds = []Need{NeedEntitlements, NeedUsage, NeedCosts, NeedEvents}
+
 // Needs names the Routes.Permissions field a route checks: a staff route's
-// group's, none for a programmatic route (#1179 leaves that open).
-func (r Route) Needs() string {
+// group's (and level's), a programmatic route's own, none for SCIM.
+func (r Route) Needs() Need {
 	switch r.Group {
 	case CatalogAdmin:
-		return "Catalog"
+		return NeedCatalog
 	case MerchantConfig:
-		return "MerchantConfig"
+		return NeedMerchantConfig
 	case Metrics:
-		return "Metrics"
+		return NeedMetrics
 	case Admin:
 		if r.Level == LevelUpdate {
-			return "AdminUpdate"
+			return NeedAdminUpdate
 		}
-		return "AdminRead"
+		return NeedAdminRead
+	case App:
+		return r.Permission
 	}
 	return ""
 }

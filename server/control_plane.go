@@ -95,20 +95,27 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 	return operator.ListActiveMerchantIDs(ctx, s.cp, page)
 }
 
-// The permissions the server's merchant persona declares: its staff routes'
-// AdminRead, AdminUpdate, Catalog and MerchantConfig (MerchantAdmin), and
-// Metrics (MerchantMetrics). Owners hold all four, support MerchantRead and
-// MerchantWrite, viewers MerchantRead.
+// The permissions the server's merchant persona declares, held in each
+// merchant's group: its staff routes' (AdminRead, AdminUpdate, Catalog,
+// MerchantConfig, Metrics) and its programmatic routes' (Entitlements,
+// Usage, Costs, Events). Owners hold them all, support MerchantBillingRead
+// and MerchantBillingManage, viewers MerchantBillingRead.
 const (
-	MerchantRead    = staffperm.Read
-	MerchantWrite   = staffperm.Write
-	MerchantAdmin   = staffperm.Admin
-	MerchantMetrics = staffperm.Metrics
+	MerchantBillingRead   = staffperm.BillingRead
+	MerchantBillingManage = staffperm.BillingManage
+	MerchantCatalogManage = staffperm.CatalogManage
+	MerchantConfigManage  = staffperm.ConfigManage
+	MerchantMetricsRead   = staffperm.MetricsRead
+
+	MerchantEntitlementsRead = staffperm.EntitlementsRead
+	MerchantUsageManage      = staffperm.UsageManage
+	MerchantCostsManage      = staffperm.CostsManage
+	MerchantEventsRead       = staffperm.EventsRead
 )
 
 // ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole
 // merchant when empty), then checks live that the user r authenticates as
-// holds permission on it (MerchantRead, MerchantWrite or MerchantAdmin). The
+// holds permission on it (one of the Merchant* permissions). The
 // slug is display metadata; carry the ID.
 func (s *Server) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, ref, permission string) (billing.MerchantID, string, error) {
 	return s.cp.ResolveAuthorizedMerchant(ctx, r, ref, permission)

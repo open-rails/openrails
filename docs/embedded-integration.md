@@ -338,26 +338,33 @@ verdict again before it runs.
   `CredentialAccessToken`, with its id for audit. Only a user acting in person
   (not with an API key or signed token) starts a payment for itself.
 
-OpenRails names no staff permissions: you turn staff route groups on in
+OpenRails names no permissions: you turn route groups on in
 `Routes.RouteGroups`, give each its permission of your own in
-`Routes.Permissions`, and grant them to staff roles in your RBAC. The admin
+`Routes.Permissions`, and grant them to roles in your RBAC, named
+`root:<resource>:<action>` as [auth](auth.md#permissions) lists:
+`root:billing:read`, `root:billing:manage`, `root:catalog:manage`,
+`root:config:manage`, `root:metrics:read`, `root:entitlements:read`,
+`root:usage:manage`, `root:costs:manage`, `root:events:read`. The admin
 group's reads need `AdminRead` and its updates `AdminUpdate` (each route's
 level is OpenRails'; without `AdminUpdate` the group is read-only), the catalog
 `Catalog`, the merchant's own configuration `MerchantConfig` and the business
 metrics `Metrics`. The groups are independent; one turned on without its
 permission, or a permission given for a group that is off, fails the mount.
 The programmatic routes your backend calls over HTTP (`/v1/app/*`,
-`RouteGroups.Programmatic`) need no permission: they admit the application
-your `Auth` says a request is, by its `Identity.SubjectKind`, and refuse a
-person. `Routes.Scope` is where callers hold the staff permissions: AuthKit's
+`RouteGroups.Programmatic`) admit the application your `Auth` says a request
+is, by its `Identity.SubjectKind`, holding the route's permission, and refuse
+a person: `Entitlements` for the content gate, `Usage` for admissions and
+usage events, `Costs` for provider operations, `Events` for host events. Each
+mounts only with its permission, so a program gets only what its task needs.
+`Routes.Scope` is where callers hold the permissions: AuthKit's
 `ak.Scope(ctx, iam.RootGroup())` for root roles, with `Auth:
-ak.Authenticator()`. It is required with any staff group on and refused
+ak.Authenticator()`. It is required with any permission given and refused
 without one; a permission your Authenticator says it does not know
 (`auth.PermissionCatalog`) fails the mount. A host with its own sessions
 implements `Authenticate` and its `Verified` directly (the README's
 "Using your own auth"); its `Identity` must name a person `SubjectUser` and an
 application's credential `SubjectApplication`, since the programmatic routes
-admit by that alone. `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
+refuse a person whatever it holds. `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
 checks an implementation in your CI with helpers' conformance kit
 (`github.com/open-rails/helpers/auth/authtest`): anonymous, refused, staff, a
 user holding nothing, one-permission holders, a stale sign-in and your
@@ -389,7 +396,7 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
 | `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
-| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): usage events, admissions, provider operations, host events and SCIM provisioning. They refuse a person and need no permission; each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
+| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each mounts only with its permission, `Permissions.Entitlements`, `Usage`, `Costs` or `Events` (SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |
 
 The customer surface, `/v1/me`, serves `Config.Merchant`. Every customer route

@@ -42,6 +42,8 @@ func TestCapabilities(t *testing.T) {
 func TestRoutesValidation(t *testing.T) {
 	auth := &authtest.Fake{}
 	read, update, catalog, admin, metrics := authtest.Perm("r"), authtest.Perm("u"), authtest.Perm("c"), authtest.Perm("a"), authtest.Perm("m")
+	usage, events := authtest.Perm("g"), authtest.Perm("e")
+	programmatic := config.RouteGroups{Programmatic: true}
 	for _, tc := range []struct {
 		name string
 		sel  config.Routes
@@ -61,10 +63,16 @@ func TestRoutesValidation(t *testing.T) {
 		{"merchant configuration alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{MerchantConfig: true}, Permissions: config.Permissions{MerchantConfig: admin}}, ""},
 		{"metrics alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Metrics: true}, Permissions: config.Permissions{Metrics: metrics}}, ""},
 		{"metrics given, off", config.Routes{Auth: auth, Permissions: config.Permissions{Metrics: metrics}}, "RouteGroups.Metrics is off"},
-		{"programmatic needs no permission", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Programmatic: true}}, ""},
+		{"programmatic with SCIM alone", config.Routes{Auth: auth, RouteGroups: programmatic}, ""},
+		{"programmatic usage", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: programmatic, Permissions: config.Permissions{Usage: usage}}, ""},
+		{"programmatic usage and events", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: programmatic, Permissions: config.Permissions{Usage: usage, Events: events}}, ""},
+		{"a programmatic permission without Scope", config.Routes{Auth: auth, RouteGroups: programmatic, Permissions: config.Permissions{Events: events}}, "without Routes.Scope"},
+		{"a programmatic permission, programmatic off", config.Routes{Auth: auth, Scope: authtest.Scope, Permissions: config.Permissions{Usage: usage}}, "Permissions.Usage is given, but RouteGroups.Programmatic is off"},
+		{"a programmatic permission with only staff on", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read, Events: events}}, "Permissions.Events is given, but RouteGroups.Programmatic is off"},
+		{"a programmatic permission the Auth does not know", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: programmatic, Permissions: config.Permissions{Costs: authtest.Perm("misspelled")}}, `does not know the permission "misspelled"`},
 		{"a staff group without Scope", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, "without Routes.Scope"},
 		{"a Scope without its ID", config.Routes{Auth: auth, Scope: billingauth.Scope{Authority: "test"}, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, "without Routes.Scope"},
-		{"a Scope without a staff group", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Programmatic: true}}, "Routes.Scope is given, but no staff route group is on"},
+		{"a Scope without a permission", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: programmatic}, "Routes.Scope is given, but no permission is"},
 		{"a permission the Auth does not know", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: authtest.Perm("misspelled")}}, `does not know the permission "misspelled"`},
 		{"permissions the Auth knows", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
 	} {
@@ -77,10 +85,12 @@ func TestRoutesValidation(t *testing.T) {
 	}
 }
 
-// catalogued knows the permissions r, u, c, a and m.
+// catalogued knows the permissions r, u, c, a, m, g and e.
 type catalogued struct{ *authtest.Fake }
 
-func (catalogued) KnownPermission(p string) bool { return strings.Contains("rucam", p) && len(p) == 1 }
+func (catalogued) KnownPermission(p string) bool {
+	return strings.Contains("rucamge", p) && len(p) == 1
+}
 
 // The combined handler refuses to mount the admin API without its Auth,
 // and only the configuration and checkout routes join the permissive-CORS

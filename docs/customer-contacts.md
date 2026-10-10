@@ -43,8 +43,8 @@ AuthKit's provisioning, Okta or Entra ID at them.
 
 **Authentication** is per merchant, one of:
 
-- An application credential your `Routes.Auth` admits, as on every
-  programmatic route: AuthKit's provisioning client, for one. On a standalone
+- An application credential your `Routes.Auth` admits, with no permission:
+  AuthKit's provisioning client, for one. On a standalone
   server, a client-credentials `at+jwt` from one of the merchant's trusted
   issuers (`OpenRails-Merchant` names the merchant when the issuer serves
   several). A person is refused.

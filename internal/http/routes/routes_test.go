@@ -157,7 +157,7 @@ func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
 		}
 		rt := &app.Runtime{Config: cfg}
 		table := &router.Table{}
-		RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: "staff:admin"}})
+		RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: "root:config:manage"}})
 		keys := routeKeys(table)
 		for _, key := range reads {
 			require.Contains(t, keys, key, "editable=%v", editable)
@@ -177,8 +177,8 @@ func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
 func TestCatalogWritePolicy(t *testing.T) {
 	rt := &app.Runtime{Config: &config.Config{}}
 	staff, edits := &router.Table{}, &router.Table{}
-	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
-	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Catalog: "staff:catalog"}})
+	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
+	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Catalog: "root:catalog:manage"}})
 	for _, key := range []string{"POST /admin/credit-grants", "POST /admin/psps/refresh"} {
 		require.Contains(t, routeKeys(staff), key)
 	}
@@ -207,7 +207,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(abusestate.New(nil)), Scope: testScope, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(abusestate.New(nil)), Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.

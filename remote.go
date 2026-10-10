@@ -328,7 +328,7 @@ func (c *Client) ListEntitlements(ctx context.Context, params billing.Entitlemen
 // prefix is in the answer. One call checks at most
 // billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
 // prefixes; more is refused with invalid_param, not split. It needs an
-// application credential and RouteGroups.Programmatic.
+// application holding Permissions.Entitlements (RouteGroups.Programmatic).
 func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
 	switch {
 	case params.CustomerID.IsZero():

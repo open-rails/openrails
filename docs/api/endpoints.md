@@ -77,14 +77,13 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
 | Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: a user session, or a trusted issuer's access token with scope `openrails:merchant`; on a hosted product, a merchant API key |
-| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, with no permission; each write sends an `Idempotency-Key`. SCIM also takes the merchant's provisioning token |
+| Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. SCIM names no permission and also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
-Every staff route is gated by the host's permission for its route group
+Every staff and programmatic route is gated by the host's permission for it
 (`Routes.Permissions`; each route's is in [routes.md](routes.md)), whatever
 the credential. On the standalone server the permissions are its merchant
-persona's `server.MerchantRead`, `server.MerchantWrite`,
-`server.MerchantAdmin` and `server.MerchantMetrics`: an API key carries its role's, a trusted issuer's token
+persona's ([auth](../auth.md#permissions)): an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
 role in the merchant's group. A person also needs a recent sign-in on a
 `sensitive` route: otherwise `401 step_up_required` (RFC 9470: `WWW-Authenticate:

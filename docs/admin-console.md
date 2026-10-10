@@ -40,7 +40,7 @@ err := openrailsgin.Mount(r, client, openrails.Routes{
     Scope:        staff,      // ak.Scope(ctx, iam.RootGroup()): where staff hold the permissions
     Prefix:       "/billing", // the API at /billing/v1/*, the console at /billing/admin
     RouteGroups:  openrails.RouteGroups{Admin: true},
-    Permissions:  openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
+    Permissions:  openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage}, // root:billing:read, root:billing:manage
     AdminConsole: true,
 })
 ```

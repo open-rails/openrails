@@ -41,7 +41,7 @@ func TestDPoPProofSpentOnce(t *testing.T) {
 			edit := func(cfg *server.Config, _ *server.Deps) {
 				cfg.ResourceServer = &server.ResourceServerConfig{
 					Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-					TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{staffperm.Read}}},
+					TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{staffperm.BillingRead}}},
 				}
 				if tc.redis != "" {
 					cfg.Engine.Redis = &openrails.RedisConfig{Addr: tc.redis}

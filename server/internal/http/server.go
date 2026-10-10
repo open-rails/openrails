@@ -247,7 +247,7 @@ func New(deps Dependencies) (*Server, error) {
 		consoleAssets:      deps.ConsoleAssets,
 		adminConsole:       deps.AdminConsole,
 		groups:             deps.RouteGroups,
-		permissions:        staffPermissionsFor(deps.RouteGroups),
+		permissions:        permissionsFor(deps.RouteGroups),
 		browserTierRoutes:  middleware.NewBrowserTierRoutes(),
 		merchantTierRoutes: middleware.NewBrowserTierRoutes(),
 	}

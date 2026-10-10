@@ -56,7 +56,7 @@ func (session) Identity() openrails.Identity {
   Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}
 }
 func (session) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
- return scope == staff && permission == "billing:read", nil
+ return scope == staff && permission == "root:billing:read", nil
 }
 func (s session) CheckRecentSignIn(context.Context) error {
  if time.Since(s.signedIn) > 15*time.Minute { return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute} }
@@ -64,7 +64,7 @@ func (s session) CheckRecentSignIn(context.Context) error {
 }
 func main() {
  var a openrails.Authenticator = ownAuth{}
- routes := openrails.Routes{Auth: a, Scope: staff, RouteGroups: openrails.RouteGroups{Admin: true}, Permissions: openrails.Permissions{AdminRead: perm("billing:read")}}
+ routes := openrails.Routes{Auth: a, Scope: staff, RouteGroups: openrails.RouteGroups{Admin: true}, Permissions: openrails.Permissions{AdminRead: perm("root:billing:read")}}
  cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
  if routes.Auth == nil || cfg.TestMode != openrails.Sandbox { panic("unreachable") }
 }

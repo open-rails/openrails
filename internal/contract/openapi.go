@@ -332,6 +332,6 @@ func (m *model) openAPI() ([]byte, error) {
 	return marshalIndent(doc)
 }
 
-// routePermission is what a route's caller must hold: a staff route's
-// Routes.Permissions field.
-func routePermission(r routes.Route) string { return r.Needs() }
+// routePermission is what a route's caller must hold: a staff or
+// programmatic route's Routes.Permissions field.
+func routePermission(r routes.Route) string { return string(r.Needs()) }

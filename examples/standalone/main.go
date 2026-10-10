@@ -81,10 +81,10 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		// OpenRails is a resource server this AuthKit mints tokens for.
 		AuthorizationServer: authkit.AuthorizationServerConfig{
 			Resources: []authkit.ResourceServerConfig{{
-				ID:            s.OpenRailsURL,                                   // the tokens' aud
-				Scopes:        []string{"openrails:self", "openrails:merchant"}, // a customer's own billing; the merchant API
-				Permissions:   []string{"merchant:billing:read"},                // the most a token may carry
-				ContactClaims: true,                                             // the user's email in every token: a receipt reaches a brand-new buyer
+				ID:            s.OpenRailsURL,                                                  // the tokens' aud
+				Scopes:        []string{"openrails:self", "openrails:merchant"},                // a customer's own billing; the merchant API
+				Permissions:   []string{"merchant:billing:read", "merchant:entitlements:read"}, // the most a token may carry
+				ContactClaims: true,                                                            // the user's email in every token: a receipt reaches a brand-new buyer
 			}},
 			Clients: []authkit.OAuthClientConfig{{
 				ID:         webClient, // public: the browser proves a DPoP key instead of a secret
@@ -95,7 +95,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				ID:           backendClient, // confidential: this server and the SCIM pushes
 				SecretSHA256: hex.EncodeToString(secret[:]),
 				Resources:    []string{s.OpenRailsURL},
-				Permissions:  []string{"merchant:billing:read"}, // customer support's reads, beside /v1/app
+				Permissions:  []string{"merchant:billing:read", "merchant:entitlements:read"}, // customer support's reads; the content gate
 				GrantTypes:   []authkit.OAuthGrantType{authkit.GrantClientCredentials},
 			}},
 		},

@@ -20,7 +20,7 @@ func (p perm) String() string { return string(p) }
 // each its own permission, held in staffScope.
 var (
 	staffGroups      = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true}
-	staffPermissions = openrails.Permissions{AdminRead: perm("host:billing:read"), AdminUpdate: perm("host:billing:update"), Catalog: perm("host:catalog"), MerchantConfig: perm("host:billing:admin"), Metrics: perm("host:metrics")}
+	staffPermissions = openrails.Permissions{AdminRead: perm("root:billing:read"), AdminUpdate: perm("root:billing:manage"), Catalog: perm("root:catalog:manage"), MerchantConfig: perm("root:config:manage"), Metrics: perm("root:metrics:read")}
 	staffScope       = openrails.Scope{Authority: "test", ID: "staff"}
 )
 

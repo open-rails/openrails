@@ -309,10 +309,11 @@ product mints merchant API keys with the server's `CreateMerchantAPIKey`
 secret is in the result once and never stored; the non-secret `prefix`
 (`openrails_st_<key_id>`) identifies the key afterwards.
 
-Roles are the fixed merchant catalog: `viewer` (`server.MerchantRead`:
-read-only, the right choice for LLM agents), `support` (`server.MerchantRead`
-and `server.MerchantWrite`: acts on customers), `owner` (everything, the
-merchant's configuration included). A key is minted as an `Actor`, never with
+Roles are the fixed merchant catalog: `viewer` (`server.MerchantBillingRead`:
+read-only, the right choice for LLM agents), `support`
+(`server.MerchantBillingRead` and `server.MerchantBillingManage`: acts on
+customers), `owner` (everything, the merchant's configuration and the
+programmatic routes included). A key is minted as an `Actor`, never with
 authority beyond the actor's own.
 
 ## Webhook routing

@@ -25,8 +25,8 @@ type Options struct {
 	// Auth is the mount's Authenticator: who a request on a staff or
 	// programmatic route is and, on checkout sessions, who presents one.
 	Auth billingauth.Authenticator
-	// Scope is where a merchant's staff hold Permissions; every staff route
-	// needs it.
+	// Scope is where a merchant's staff and applications hold Permissions;
+	// every route behind one needs it.
 	Scope ScopeFunc
 	// ResolveMerchant finds the merchant an authenticated request acts on
 	// when its credential names none (the standalone server's sessions);
@@ -44,8 +44,8 @@ type Options struct {
 	// untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
-	// Permissions are what a caller holds in Scope for each staff route; a
-	// staff route without one is not mounted.
+	// Permissions are what a caller holds in Scope for each staff and
+	// programmatic route; a route without its permission is not mounted.
 	Permissions Permissions
 
 	// Capabilities is what the assembly mounts, as GET /v1/config reports
@@ -336,7 +336,7 @@ func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
 		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.AbuseState)
 	}
-	any := opts.Permissions != (Permissions{})
+	any := opts.Permissions.Staff() != (Permissions{})
 	newEnv(rt, opts).mount(rr, "/v1", func(r Route) bool { return opts.Permissions.mounts(r) || any && r.Group == Access })
 }
 
@@ -363,12 +363,15 @@ func RegisterWebhookRoutes(rr router.Router, rt *app.Runtime) {
 	newEnv(rt, Options{}).mount(rr, "/v1/webhooks", in(Webhooks))
 }
 
-// RegisterAppRoutes mounts the programmatic routes (Routes.Programmatic) on
-// a router rooted at /v1: SCIM provisioning too, unless the runtime reads the
-// host's user directory instead of keeping a pushed copy.
+// RegisterAppRoutes mounts the programmatic routes (Routes.Programmatic)
+// opts.Permissions gives a permission, each behind it, on a router rooted at
+// /v1: SCIM provisioning too, unless the runtime reads the host's user
+// directory instead of keeping a pushed copy.
 func RegisterAppRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	scim := rt != nil && !rt.HostUserInfo
-	newEnv(rt, opts).mount(rr, "/v1", in(App, func(r Route) bool { return r.Auth == AuthApplication || scim }))
+	newEnv(rt, opts).mount(rr, "/v1", in(App, func(r Route) bool {
+		return r.Auth == AuthApplication && opts.Permissions.For(r) != "" || r.Auth == AuthProvisioning && scim
+	}))
 }
 
 // RegisterSCIMRoutes mounts the SCIM routes for merchant, without a

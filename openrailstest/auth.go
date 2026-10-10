@@ -19,7 +19,7 @@ import (
 // it fills into c (a Scope or Permissions c sets must be the same), and
 // OpenRails' own rule that a person's subject is a canonical UUID, as its
 // customers are. With RouteGroups.Programmatic, c.Application is required.
-// A mount with no staff group gives no Scope or Permissions: c names its
+// A mount with no permission gives no Scope or Permissions: c names its
 // own.
 func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 	t.Helper()
@@ -60,10 +60,10 @@ func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 	authtest.Check(t, routes.Auth, c)
 }
 
-// permissions are each staff group's permission, once each.
+// permissions are each permission routes gives, once each.
 func permissions(p openrails.Permissions) []string {
 	var out []string
-	for _, perm := range []fmt.Stringer{p.AdminRead, p.AdminUpdate, p.Catalog, p.MerchantConfig, p.Metrics} {
+	for _, perm := range []fmt.Stringer{p.AdminRead, p.AdminUpdate, p.Catalog, p.MerchantConfig, p.Metrics, p.Entitlements, p.Usage, p.Costs, p.Events} {
 		if perm == nil {
 			continue
 		}

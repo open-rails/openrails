@@ -28,11 +28,12 @@ func ValidateRoutes(sel config.Routes) error {
 	return err
 }
 
-// RoutePermissions is sel's staff route groups as the routes check them:
-// each group that is on, with its permission. It refuses a group on without
-// its permission, a permission for a group that is off or the Auth does not
-// know, a staff group without Routes.Scope or a Scope without one, and any
-// group without Routes.Auth: nothing is ever mounted open.
+// RoutePermissions is sel's route groups as the routes check them: each
+// staff group that is on, with its permission, and each programmatic
+// permission. It refuses a staff group on without its permission, a
+// permission for a group that is off or the Auth does not know, a
+// permission without Routes.Scope or a Scope without one, and any group
+// without Routes.Auth: nothing is ever mounted open.
 func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 	b, p := sel.RouteGroups, sel.Permissions
 	perms := httproutes.Permissions{
@@ -41,6 +42,10 @@ func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 		Catalog:        permissionText(p.Catalog),
 		MerchantConfig: permissionText(p.MerchantConfig),
 		Metrics:        permissionText(p.Metrics),
+		Entitlements:   permissionText(p.Entitlements),
+		Usage:          permissionText(p.Usage),
+		Costs:          permissionText(p.Costs),
+		Events:         permissionText(p.Events),
 	}
 	for _, c := range []struct {
 		on         bool
@@ -59,24 +64,32 @@ func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 			return perms, fmt.Errorf("openrails: Permissions.%s is given, but RouteGroups.%s is off", c.name, c.group)
 		}
 	}
-	if !b.Admin && perms.AdminUpdate != "" {
-		return perms, fmt.Errorf("openrails: Permissions.AdminUpdate is given, but RouteGroups.Admin is off")
+	for _, c := range []struct{ perm, name string }{
+		{perms.AdminUpdate, "AdminUpdate"}, {perms.Entitlements, "Entitlements"}, {perms.Usage, "Usage"}, {perms.Costs, "Costs"}, {perms.Events, "Events"},
+	} {
+		group, on := "Admin", b.Admin
+		if c.name != "AdminUpdate" {
+			group, on = "Programmatic", b.Programmatic
+		}
+		if !on && c.perm != "" {
+			return perms, fmt.Errorf("openrails: Permissions.%s is given, but RouteGroups.%s is off", c.name, group)
+		}
 	}
 	if err := perms.Validate(); err != nil {
 		return perms, err
 	}
-	staff := perms != (httproutes.Permissions{})
-	if (staff || b.Programmatic) && httproutes.IsNilAuth(sel.Auth) {
+	given := perms != (httproutes.Permissions{})
+	if (given || b.Programmatic) && httproutes.IsNilAuth(sel.Auth) {
 		return perms, fmt.Errorf("openrails: RouteGroups need Routes.Auth (it says who each staff and programmatic request is)")
 	}
 	switch {
-	case staff && (strings.TrimSpace(sel.Scope.Authority) == "" || strings.TrimSpace(sel.Scope.ID) == ""):
-		return perms, fmt.Errorf("openrails: a staff route group is on without Routes.Scope (where callers hold Permissions), or with its Authority or ID empty")
-	case !staff && sel.Scope != (billingauth.Scope{}):
-		return perms, fmt.Errorf("openrails: Routes.Scope is given, but no staff route group is on")
+	case given && (strings.TrimSpace(sel.Scope.Authority) == "" || strings.TrimSpace(sel.Scope.ID) == ""):
+		return perms, fmt.Errorf("openrails: a permission is given without Routes.Scope (where callers hold Permissions), or with its Authority or ID empty")
+	case !given && sel.Scope != (billingauth.Scope{}):
+		return perms, fmt.Errorf("openrails: Routes.Scope is given, but no permission is")
 	}
 	if catalog, ok := sel.Auth.(auth.PermissionCatalog); ok {
-		for _, perm := range []string{perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics} {
+		for _, perm := range []string{perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics, perms.Entitlements, perms.Usage, perms.Costs, perms.Events} {
 			if perm != "" && !catalog.KnownPermission(perm) {
 				return perms, fmt.Errorf("openrails: Routes.Auth does not know the permission %q (Routes.Permissions)", perm)
 			}

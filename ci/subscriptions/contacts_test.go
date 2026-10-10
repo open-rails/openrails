@@ -83,7 +83,7 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 	require.Equal(t, "renamed@host.test", *profile.Contact.Email)
 
 	// One source of truth: the programmatic routes mount without SCIM.
-	routes, err := w.rt.Routes(openrails.Routes{Auth: w.auth, Prefix: "/other", RouteGroups: openrails.RouteGroups{Programmatic: true}})
+	routes, err := w.rt.Routes(openrails.Routes{Auth: w.auth, Scope: staffScope, Prefix: "/other", RouteGroups: openrails.RouteGroups{Programmatic: true}, Permissions: openrails.Permissions{Events: appEvents}})
 	require.NoError(t, err)
 	var app, scim int
 	for _, route := range routes {

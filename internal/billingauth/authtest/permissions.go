@@ -9,21 +9,21 @@ func (p Perm) String() string { return string(p) }
 
 // The permissions Permissions names.
 const (
-	StaffRead    = "staff:read"
-	StaffWrite   = "staff:write"
-	StaffCatalog = "staff:catalog"
-	StaffAdmin   = "staff:admin"
-	StaffMetrics = "staff:metrics"
+	BillingRead   = "root:billing:read"
+	BillingManage = "root:billing:manage"
+	CatalogManage = "root:catalog:manage"
+	ConfigManage  = "root:config:manage"
+	MetricsRead   = "root:metrics:read"
 )
 
 // Permissions gives each group a permission naming it.
 func Permissions() config.Permissions {
-	return config.Permissions{AdminRead: Perm(StaffRead), AdminUpdate: Perm(StaffWrite), Catalog: Perm(StaffCatalog), MerchantConfig: Perm(StaffAdmin), Metrics: Perm(StaffMetrics)}
+	return config.Permissions{AdminRead: Perm(BillingRead), AdminUpdate: Perm(BillingManage), Catalog: Perm(CatalogManage), MerchantConfig: Perm(ConfigManage), Metrics: Perm(MetricsRead)}
 }
 
 // AdminPermissions is the admin group alone.
 func AdminPermissions() config.Permissions {
-	return config.Permissions{AdminRead: Perm(StaffRead), AdminUpdate: Perm(StaffWrite)}
+	return config.Permissions{AdminRead: Perm(BillingRead), AdminUpdate: Perm(BillingManage)}
 }
 
 // Groups turns on every staff route group Permissions names.

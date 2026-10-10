@@ -149,8 +149,12 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 	require.Equal(t, sensitiveRoutes, sensitive, "the routes that step up")
 }
 
-// staffPermissions gives each group a permission naming it.
-var staffPermissions = Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write", Catalog: "staff:catalog", MerchantConfig: "staff:admin", Metrics: "staff:metrics"}
+// staffPermissions gives each group and programmatic task a permission
+// naming it.
+var staffPermissions = Permissions{
+	AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage", Catalog: "root:catalog:manage", MerchantConfig: "root:config:manage", Metrics: "root:metrics:read",
+	Entitlements: "root:entitlements:read", Usage: "root:usage:manage", Costs: "root:costs:manage", Events: "root:events:read",
+}
 
 // testScope is where recordingAuth's subjects hold their permissions.
 var testScope = FixedScope(authtest.Scope)
@@ -236,7 +240,7 @@ func everyGatedSurface(t *testing.T, a billingauth.Authenticator) (*router.Table
 	table := &router.Table{}
 	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers})
 	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Scope: testScope, Permissions: staffPermissions})
-	RegisterAppRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a})
+	RegisterAppRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Scope: testScope, Permissions: staffPermissions})
 	RegisterCustomerRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
 	RegisterWebhookRoutes(router.NewMux(table, "/v1/webhooks", rt), rt)
 	return table, rt
@@ -259,9 +263,10 @@ func serveSafely(h http.Handler, r *http.Request) (code int) {
 
 // Each tier asks the host's auth exactly what it needs, once: who the
 // request is on every gated route; a staff route's permission in the
-// mount's Scope; a person's recent sign-in on a route that moves money or
-// removes access, never an application's; the access read each mounted
-// group's permission; nothing on an open route.
+// mount's Scope, and an application's on a programmatic route; a person's
+// recent sign-in on a route that moves money or removes access, never an
+// application's; the access read each mounted group's permission; nothing
+// on an open route.
 func TestGatesAskTheVerified(t *testing.T) {
 	for _, who := range []billingauth.Identity{authtest.User(userA), authtest.Application(userA)} {
 		rec := &recordingAuth{who: who}
@@ -278,8 +283,13 @@ func TestGatesAskTheVerified(t *testing.T) {
 			}
 			var want []string
 			switch r.Auth {
-			case AuthCustomer, AuthApplication, AuthProvisioning:
+			case AuthCustomer, AuthProvisioning:
 				want = []string{"Authenticate"}
+			case AuthApplication:
+				want = []string{"Authenticate"}
+				if who.SubjectKind == billingauth.SubjectApplication {
+					want = append(want, "Can:"+staffPermissions.For(r))
+				}
 			case AuthSignedIn:
 				want = []string{"Authenticate"}
 				for _, perm := range []string{staffPermissions.AdminRead, staffPermissions.AdminUpdate, staffPermissions.Catalog, staffPermissions.MerchantConfig, staffPermissions.Metrics} {
@@ -533,15 +543,20 @@ func TestStaffGate(t *testing.T) {
 	got = runRoute(t, rt, &recordingAuth{who: person, signInErr: stepUp}, "GET /v1/admin/payments", nil)
 	require.Equal(t, http.StatusNoContent, got.status, "a read asks no sign-in")
 
-	// A programmatic route takes only an application: a person is refused,
-	// whatever their roles grant or their credential is.
+	// A programmatic route takes only an application holding its
+	// permission: a person is refused, whatever their roles grant or their
+	// credential is.
 	for _, who := range []billingauth.Identity{person, personalKey} {
 		got = runRoute(t, rt, &recordingAuth{who: who}, "GET /v1/app/host-events", nil)
 		require.Equal(t, http.StatusForbidden, got.status, who.Credential.Kind)
 		require.Equal(t, "application_required", got.code)
 	}
-	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[string]bool{}}, "GET /v1/app/host-events", nil)
-	require.Equal(t, http.StatusNoContent, got.status, "no permission is involved")
+	p := staffPermissions
+	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[string]bool{p.Usage: true, p.Costs: true, p.Entitlements: true}}, "GET /v1/app/host-events", nil)
+	require.Equal(t, http.StatusForbidden, got.status, "every permission but Events")
+	require.Equal(t, "permission_required", got.code)
+	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[string]bool{p.Events: true}}, "GET /v1/app/host-events", nil)
+	require.Equal(t, http.StatusNoContent, got.status, "Events alone")
 	require.Equal(t, "GET /v1/app/host-events", got.staff.Route)
 	// Its writes run once per Idempotency-Key.
 	got = runRoute(t, rt, &recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
@@ -590,7 +605,13 @@ func TestMountFailsClosed(t *testing.T) {
 			RegisterCustomerRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
 		},
 		"programmatic without Auth": func() {
-			RegisterAppRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{})
+			RegisterAppRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Scope: testScope, Permissions: staffPermissions})
+		},
+		"programmatic without Scope": func() {
+			RegisterAppRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{Usage: "root:usage:manage"}})
+		},
+		"a blank programmatic permission": func() {
+			RegisterAppRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Events: " "}})
 		},
 	} {
 		require.PanicsWithError(t, mountErrorFor(t, mount), mount, name)
@@ -599,6 +620,16 @@ func TestMountFailsClosed(t *testing.T) {
 	none := &router.Table{}
 	RegisterStaffRoutes(router.NewMux(none, "/v1", rt), rt, Options{Auth: authtest.Deny{}})
 	require.Empty(t, none.Entries)
+	// A programmatic route mounts only with its permission; SCIM names none.
+	app := &router.Table{}
+	RegisterAppRoutes(router.NewMux(app, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Usage: "root:usage:manage"}})
+	for _, r := range Catalog() {
+		if r.Group != App {
+			continue
+		}
+		mounted := slices.ContainsFunc(app.Entries, func(e router.Entry) bool { return e.Method == r.Method && e.Path == r.Path })
+		require.Equal(t, r.Permission == NeedUsage || r.Auth == AuthProvisioning, mounted, r.Key())
+	}
 }
 
 func mountErrorFor(t *testing.T, mount func()) (msg string) {

@@ -4290,6 +4290,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Entitlements",
         "x-openrails-errors": [
           "invalid_param",
           "service_credential_customer_scope_denied"
@@ -5384,6 +5385,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5446,6 +5448,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
         "x-openrails-errors": [
           "admission_not_found",
           "idempotency_key_reused",
@@ -5504,6 +5507,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5558,6 +5562,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5612,6 +5617,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
         "x-openrails-errors": [
           "invalid_param"
         ],
@@ -5741,6 +5747,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Costs",
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -5936,6 +5943,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Costs",
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -6003,6 +6011,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Costs",
         "x-openrails-errors": [
           "invalid_param",
           "provider_operation_conflict",
@@ -6070,6 +6079,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Costs",
         "x-openrails-errors": [
           "insufficient_credits",
           "invalid_param",
@@ -9426,6 +9436,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Events",
         "x-openrails-errors": [
           "invalid_cursor",
           "invalid_host_event_request"
@@ -9480,6 +9491,7 @@
           }
         ],
         "x-openrails-auth": "application",
+        "x-openrails-permission": "Events",
         "x-openrails-errors": [
           "invalid_param"
         ],

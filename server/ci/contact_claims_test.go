@@ -51,7 +51,7 @@ func TestStandaloneRecordsVerifiedContactClaims(t *testing.T) {
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 		cfg.ResourceServer = &server.ResourceServerConfig{
 			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{staffperm.Read}}},
+			TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{staffperm.BillingRead}}},
 		}
 		cfg.Engine.SMTP = &openrails.SMTPConfig{Host: mail.Host, Port: mail.Port, Username: "apikey", Password: "SG.e2e-key",
 			From: openrails.EmailAddress{Name: "Claims", Address: "billing@claims.test"}}

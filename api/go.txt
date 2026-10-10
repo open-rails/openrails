@@ -334,8 +334,12 @@ pkg openrails, type Permissions struct
 pkg openrails, type Permissions struct, AdminRead fmt.Stringer
 pkg openrails, type Permissions struct, AdminUpdate fmt.Stringer
 pkg openrails, type Permissions struct, Catalog fmt.Stringer
+pkg openrails, type Permissions struct, Costs fmt.Stringer
+pkg openrails, type Permissions struct, Entitlements fmt.Stringer
+pkg openrails, type Permissions struct, Events fmt.Stringer
 pkg openrails, type Permissions struct, MerchantConfig fmt.Stringer
 pkg openrails, type Permissions struct, Metrics fmt.Stringer
+pkg openrails, type Permissions struct, Usage fmt.Stringer
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
 pkg openrails, type Probe struct, Name string
@@ -3473,10 +3477,15 @@ pkg openrails/openrailstest/stripemock, type Options struct, Clock func() time.T
 pkg openrails/server, const FormerNamesFinite config.FormerNamesMode = "finite"
 pkg openrails/server, const FormerNamesForever config.FormerNamesMode = "forever"
 pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immediate"
-pkg openrails/server, const MerchantAdmin untyped string = "merchant:billing:admin"
-pkg openrails/server, const MerchantMetrics untyped string = "merchant:billing:metrics"
-pkg openrails/server, const MerchantRead untyped string = "merchant:billing:read"
-pkg openrails/server, const MerchantWrite untyped string = "merchant:billing:write"
+pkg openrails/server, const MerchantBillingManage untyped string = "merchant:billing:manage"
+pkg openrails/server, const MerchantBillingRead untyped string = "merchant:billing:read"
+pkg openrails/server, const MerchantCatalogManage untyped string = "merchant:catalog:manage"
+pkg openrails/server, const MerchantConfigManage untyped string = "merchant:config:manage"
+pkg openrails/server, const MerchantCostsManage untyped string = "merchant:costs:manage"
+pkg openrails/server, const MerchantEntitlementsRead untyped string = "merchant:entitlements:read"
+pkg openrails/server, const MerchantEventsRead untyped string = "merchant:events:read"
+pkg openrails/server, const MerchantMetricsRead untyped string = "merchant:metrics:read"
+pkg openrails/server, const MerchantUsageManage untyped string = "merchant:usage:manage"
 pkg openrails/server, func CredentialActor([]string) Actor
 pkg openrails/server, func CredentialRefusal(error) (Refusal, bool)
 pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)

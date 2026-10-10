@@ -18,16 +18,16 @@ func TestCredentialPermissionGlob(t *testing.T) {
 		perm   string
 		want   bool
 	}{
-		{[]string{"merchant:*"}, staffperm.Admin, true},
-		{[]string{staffperm.Admin}, staffperm.Admin, true},
-		{[]string{staffperm.Admin}, staffperm.Read, false},
-		{[]string{"merchant:*:read"}, staffperm.Read, true},
-		{[]string{"merchant:*:read"}, staffperm.Admin, false},
-		{[]string{"customer:*"}, staffperm.Admin, false},
-		{[]string{"root:*"}, staffperm.Write, false},
-		{[]string{"*"}, staffperm.Admin, false},
-		{[]string{staffperm.Read}, staffperm.Write, false},
-		{nil, staffperm.Admin, false},
+		{[]string{"merchant:*"}, staffperm.ConfigManage, true},
+		{[]string{staffperm.ConfigManage}, staffperm.ConfigManage, true},
+		{[]string{staffperm.ConfigManage}, staffperm.BillingRead, false},
+		{[]string{"merchant:*:read"}, staffperm.BillingRead, true},
+		{[]string{"merchant:*:read"}, staffperm.ConfigManage, false},
+		{[]string{"customer:*"}, staffperm.ConfigManage, false},
+		{[]string{"root:*"}, staffperm.BillingManage, false},
+		{[]string{"*"}, staffperm.ConfigManage, false},
+		{[]string{staffperm.BillingRead}, staffperm.BillingManage, false},
+		{nil, staffperm.ConfigManage, false},
 	} {
 		require.Equal(t, tc.want, (&credential.ResolvedDelegated{Permissions: tc.grants}).HasPermission(tc.perm), "delegated %v %s", tc.grants, tc.perm)
 		require.Equal(t, tc.want, (&credential.ResolvedResourceAccess{Permissions: tc.grants}).HasPermission(tc.perm), "resource %v %s", tc.grants, tc.perm)

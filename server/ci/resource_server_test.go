@@ -69,7 +69,7 @@ func (k issuerKey) mintAs(t *testing.T, typ string, edit func(jwt.MapClaims)) st
 	claims := jwt.MapClaims{
 		"iss": k.iss, "aud": resourceID, "sub": "user-" + uuid.NewString()[:8], "client_id": "admin-ui",
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": uuid.NewString(), "auth_time": now.Unix(),
-		"scope": "openrails:merchant", "permissions": []string{staffperm.Read},
+		"scope": "openrails:merchant", "permissions": []string{staffperm.BillingRead},
 	}
 	if edit != nil {
 		edit(claims)
@@ -170,7 +170,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 			TrustedIssuers: []server.TrustedIssuerConfig{
 				{
 					Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop},
-					Permissions:    []string{staffperm.Read, staffperm.Admin},
+					Permissions:    []string{staffperm.BillingRead, staffperm.ConfigManage},
 					AllowedOrigins: []string{adminOrigin},
 					GroupRoles:     map[string]string{"billing-admins": "owner"},
 				},
@@ -261,7 +261,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 		require.Len(t, list, 1)
 		require.Equal(t, shop, list[0].Slug)
 		require.Equal(t, "custom", list[0].Role, "owner grants capped by the ceiling are no named role")
-		require.ElementsMatch(t, []string{staffperm.Read, staffperm.Admin}, list[0].Permissions)
+		require.ElementsMatch(t, []string{staffperm.BillingRead, staffperm.ConfigManage}, list[0].Permissions)
 
 		w = serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") }))})
 		require.Equal(t, http.StatusOK, w.Code)
@@ -375,7 +375,7 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 					{ID: console, RedirectURIs: []string{callback}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode, authkit.GrantRefreshToken}},
 					{ID: adminUI, Origins: []string{adminOrigin}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantTokenExchange}},
 					{ID: worker, SecretSHA256: authtest.ClientSecretSHA256(workerSecret), Resources: []string{resourceID},
-						Permissions: []string{staffperm.Read}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
+						Permissions: []string{staffperm.BillingRead}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
 				},
 			}
 		}))

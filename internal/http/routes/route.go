@@ -58,8 +58,9 @@ const (
 	// staff group.
 	Access Group = "access"
 	// App is the host backend's programmatic routes (/v1/app), mounted with
-	// Routes.Programmatic: an application's credential, never a person's.
-	// Each write takes an Idempotency-Key. SCIM provisioning is here too.
+	// Routes.Programmatic: an application's credential, never a person's,
+	// each route behind its own permission (Route.Permission). Each write
+	// takes an Idempotency-Key. SCIM provisioning is here too.
 	App Group = "app"
 	// Webhooks is inbound provider callbacks.
 	Webhooks Group = "webhooks"
@@ -262,6 +263,9 @@ type Route struct {
 	Name string
 	// Level is an admin route's: read or write.
 	Level Level
+	// Permission is a programmatic route's: the Routes.Permissions field its
+	// caller holds. A staff route's follows from its Group and Level.
+	Permission Need
 	// Sensitive: the route moves money or removes access; a person needs a
 	// recent sign-in for it.
 	Sensitive bool
@@ -359,6 +363,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		}
 		if r.Group == App && (r.Sensitive || r.IdempotencyKey != r.AppWrite() || !strings.HasPrefix(r.Path, "/v1/app/")) {
 			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and each write takes an Idempotency-Key")
+		}
+		if (r.Auth == AuthApplication) != (r.Permission != "") || r.Permission != "" && !slices.Contains(appNeeds, r.Permission) {
+			panic("routes: " + r.Key() + ": a programmatic route, and only one, names its permission: Entitlements, Usage, Costs or Events")
 		}
 		byKey[r.Key()] = r
 	}

@@ -62,28 +62,41 @@ const (
 	remote   topology = "remote"
 )
 
-// The harness host's own permissions, for the staff route groups it mounts.
+// The harness host's own permissions, held in its root scope, for the staff
+// route groups and the programmatic routes it mounts.
 type perm string
 
 func (p perm) String() string { return string(p) }
 
 const (
-	staffReads   perm = "e2e:billing:read"
-	staffWrites  perm = "e2e:billing:write"
-	staffCatalog perm = "e2e:catalog:write"
-	staffConfig  perm = "e2e:billing:admin"
-	staffMetrics perm = "e2e:billing:metrics"
+	staffReads   perm = "root:billing:read"
+	staffWrites  perm = "root:billing:manage"
+	staffCatalog perm = "root:catalog:manage"
+	staffConfig  perm = "root:config:manage"
+	staffMetrics perm = "root:metrics:read"
+
+	appEntitlements perm = "root:entitlements:read"
+	appUsage        perm = "root:usage:manage"
+	appCosts        perm = "root:costs:manage"
+	appEvents       perm = "root:events:read"
 )
 
-var permissions = openrails.Permissions{AdminRead: staffReads, AdminUpdate: staffWrites, Catalog: staffCatalog, MerchantConfig: staffConfig, Metrics: staffMetrics}
+var permissions = openrails.Permissions{
+	AdminRead: staffReads, AdminUpdate: staffWrites, Catalog: staffCatalog, MerchantConfig: staffConfig, Metrics: staffMetrics,
+	Entitlements: appEntitlements, Usage: appUsage, Costs: appCosts, Events: appEvents,
+}
+
+// everyPermission is what the "staff" and host roles hold.
+var everyPermission = []perm{staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics, appEntitlements, appUsage, appCosts, appEvents}
 
 // routeGroups turns on every route group the harness mounts.
 var routeGroups = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 
 // verifier is a neutral host's Authenticator: HS256 tokens. Its "staff"
 // role holds every permission, "support" the staff reads and writes but not
-// the merchant's configuration, "reader" the reads, and "host" the host's
-// own backend (an application with an API key) all of them, in staffScope.
+// the merchant's configuration, "reader" the reads, "host" the host's own
+// backend (an application with an API key) all of them, "only:<perm>" that
+// one permission and "but:<perm>" every other, in staffScope.
 // A token's role is its subject unless it names one; UUID subjects are
 // native customers. Like AuthKit, its checks are live: a session revoked
 // after its token was minted is refused as a revoked credential. A sign-in
@@ -168,9 +181,15 @@ func (got verified) Can(_ context.Context, scope openrails.Scope, permission str
 		return false, nil
 	}
 	held := map[string][]perm{
-		"staff": {staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics}, hostApp: {staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics},
+		"staff": everyPermission, hostApp: everyPermission,
 		"support": {staffReads, staffWrites}, "reader": {staffReads},
 	}[got.role]
+	if only, ok := strings.CutPrefix(got.role, "only:"); ok {
+		held = []perm{perm(only)}
+	}
+	if but, ok := strings.CutPrefix(got.role, "but:"); ok {
+		held = slices.DeleteFunc(slices.Clone(everyPermission), func(p perm) bool { return p == perm(but) })
+	}
 	return slices.Contains(held, perm(permission)), nil
 }
 

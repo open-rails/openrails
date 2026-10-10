@@ -126,7 +126,10 @@ func TestDocsNameWhatExists(t *testing.T) {
 				}
 			}
 			for _, m := range prosePerm.FindAllStringSubmatch(line, -1) {
-				if !goAPI["permissions"][m[1]] {
+				// An embedded host holds the server's merchant permissions in
+				// its root group: the same resource and action as root:.
+				merchant, embedded := strings.CutPrefix(m[1], "root:")
+				if !goAPI["permissions"][m[1]] && !(embedded && goAPI["permissions"]["merchant:"+merchant]) {
 					t.Errorf("%s: %s is not a permission in api/go.txt", at, m[1])
 				}
 			}
@@ -322,15 +325,15 @@ func routeNamed(method, path string) string {
 }
 
 // readGoAPI maps each listed identifier ("billing.Price") to its fields and
-// methods, "permissions" to the permission names, and "names" to every
-// exported name the list mentions.
+// methods, "permissions" to the permission names billing and server declare,
+// and "names" to every exported name the list mentions.
 func readGoAPI(t *testing.T, file string) map[string]map[string]bool {
 	t.Helper()
 	body, err := os.ReadFile(file)
 	require.NoError(t, err)
 	decl := regexp.MustCompile(`^pkg openrails(?:/(\w+))?, (?:const|var|func|type) (\w+)`)
 	member := regexp.MustCompile(`^pkg openrails(?:/(\w+))?, (?:type (\w+) (?:struct|interface), |method \(\*?(\w+)(?:\[[^\]]*\])?\) )(\w+)`)
-	permission := regexp.MustCompile(`^pkg openrails/billing, const \w+ untyped string = "((?:merchant|root):[^"]+)"`)
+	permission := regexp.MustCompile(`^pkg openrails/(?:billing|server), const \w+ untyped string = "((?:merchant|root):[^"]+)"`)
 	word := regexp.MustCompile(`\b[A-Z]\w+`)
 	out := map[string]map[string]bool{"permissions": {}, "names": {}}
 	for _, line := range strings.Split(string(body), "\n") {

@@ -98,14 +98,14 @@ func run(ctx context.Context) error {
 
 	rbac := authkit.NewRoles()
 
-	customersRead := rbac.Root.Permission("customers", "read")
-	customersUpdate := rbac.Root.Permission("customers", "update")
-	catalogUpdate := rbac.Root.Permission("catalog", "update")
-	billingConfig := rbac.Root.Permission("billing-config", "update")
+	billingRead := rbac.Root.Permission("billing", "read")
+	billingManage := rbac.Root.Permission("billing", "manage")
+	catalogManage := rbac.Root.Permission("catalog", "manage")
+	configManage := rbac.Root.Permission("config", "manage")
 	metricsRead := rbac.Root.Permission("metrics", "read")
 
-	rbac.Root.Role("support", customersRead, customersUpdate)
-	rbac.Root.Role("operator", customersRead, customersUpdate, catalogUpdate, billingConfig, metricsRead)
+	rbac.Root.Role("support", billingRead, billingManage)
+	rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configManage, metricsRead)
 
 	ak, err := newAuth(ctx, db, rbac) // see AuthKit's README
 	if err != nil {
@@ -142,10 +142,10 @@ func run(ctx context.Context) error {
 		Prefix:      "/billing",         // the API is served at /billing/v1/*
 		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true},
 		Permissions: openrails.Permissions{
-			AdminRead:      customersRead,
-			AdminUpdate:    customersUpdate,
-			Catalog:        catalogUpdate, // edits share the catalog with catalog.yaml
-			MerchantConfig: billingConfig,
+			AdminRead:      billingRead,
+			AdminUpdate:    billingManage,
+			Catalog:        catalogManage, // edits share the catalog with catalog.yaml
+			MerchantConfig: configManage,
 			Metrics:        metricsRead,
 		},
 	})

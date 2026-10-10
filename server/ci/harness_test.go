@@ -77,7 +77,7 @@ type perm string
 func (p perm) String() string { return string(p) }
 
 // staffPermissions give every staff route group its own permission.
-var staffPermissions = openrails.Permissions{AdminRead: perm("host:billing:read"), AdminUpdate: perm("host:billing:write"), Catalog: perm("host:catalog:write"), MerchantConfig: perm("host:billing:admin"), Metrics: perm("host:billing:metrics")}
+var staffPermissions = openrails.Permissions{AdminRead: perm("root:billing:read"), AdminUpdate: perm("root:billing:manage"), Catalog: perm("root:catalog:manage"), MerchantConfig: perm("root:config:manage"), Metrics: perm("root:metrics:read")}
 
 // adminPermissions are the admin group's alone.
 var adminPermissions = openrails.Permissions{AdminRead: staffPermissions.AdminRead, AdminUpdate: staffPermissions.AdminUpdate}

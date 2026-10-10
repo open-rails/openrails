@@ -78,8 +78,8 @@ func hostTarget(r *http.Request, hp *requestauth.HostPrincipal) (billingauth.Tar
 	return target, nil
 }
 
-// HostOptions mounts every staff route for the in-process transport, whose
-// host holds every permission at its own merchant.
+// HostOptions mounts every staff and programmatic route for the in-process
+// transport, whose host holds every permission at its own merchant.
 func HostOptions() Options {
 	return Options{
 		Auth:            HostAuth{},
@@ -87,6 +87,9 @@ func HostOptions() Options {
 		Scope: func(_ context.Context, mid billing.MerchantID) (billingauth.Scope, error) {
 			return billingauth.HostScope(mid), nil
 		},
-		Permissions: Permissions{AdminRead: "host", AdminUpdate: "host", Catalog: "host", MerchantConfig: "host", Metrics: "host"},
+		Permissions: Permissions{
+			AdminRead: "host", AdminUpdate: "host", Catalog: "host", MerchantConfig: "host", Metrics: "host",
+			Entitlements: "host", Usage: "host", Costs: "host", Events: "host",
+		},
 	}
 }

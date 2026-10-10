@@ -11,7 +11,7 @@ OpenRails authenticates nobody itself, and the host writes no middleware for
 it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
 `Routes.Auth`, who the request is (`Authenticate`, once per request), and
 builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
-for a staff route's permission in `Routes.Scope`, and its
+for a staff or programmatic route's permission in `Routes.Scope`, and its
 `CheckRecentSignIn` for a person's recent sign-in. AuthKit provides one as
 `ak.Authenticator()`. The standalone server supplies its trusted issuers, API
 keys and control-plane sessions through the same contract, and the in-process
@@ -24,7 +24,7 @@ Go client its own host authority.
 | customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
 | merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's group permission (`Routes.Permissions`) in the merchant's scope, then `CheckRecentSignIn` when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
-| application (`/v1/app`) | `Authenticate` | an application (its `Identity.SubjectKind`), never a person; no permission |
+| application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission in the merchant's scope | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
 OpenRails binds the merchant a customer route serves before it asks
 `Authenticate`; the host reads it with `openrails.RequestMerchant` rather than
@@ -43,9 +43,35 @@ error="insufficient_user_authentication", max_age="900"` and the provider's
 challenge as the error's metadata. A Verified without `Can` holds nothing; an
 identity without a subject or invoker is refused, so an Authenticator that
 checks nothing admits no one; each handler checks the verdict again before it
-runs. A mount whose groups need `Auth`, or a staff group without `Scope`,
+runs. A mount whose groups need `Auth`, or a permission without `Scope`,
 fails. `openrailstest.CheckAuth` checks an Authenticator against this contract
 in the host's CI.
+
+## Permissions
+
+A permission is `persona:resource:action`, with AuthKit's actions `read` and
+`manage`. The resource and action are fixed; the persona is where the
+permission is held. Embedded, the host's staff and programs hold them in the
+site's root group (`Scope: ak.Scope(ctx, iam.RootGroup())`), so they are
+`root:…`, and the host passes them in `Routes.Permissions`: OpenRails names
+none itself. On the standalone server they are held in each merchant's group,
+so they are `merchant:…`, the server's constants below.
+
+| `Routes.Permissions` | Embedded | Standalone server | Covers |
+|---|---|---|---|
+| `AdminRead` | `root:billing:read` | `server.MerchantBillingRead` | customer support's reads |
+| `AdminUpdate` | `root:billing:manage` | `server.MerchantBillingManage` | refunds, cancellations, credits |
+| `Catalog` | `root:catalog:manage` | `server.MerchantCatalogManage` | catalog edits |
+| `MerchantConfig` | `root:config:manage` | `server.MerchantConfigManage` | PSPs, settings |
+| `Metrics` | `root:metrics:read` | `server.MerchantMetricsRead` | metrics and their assistants |
+| `Entitlements` | `root:entitlements:read` | `server.MerchantEntitlementsRead` | `POST /v1/app/entitlements/check` |
+| `Usage` | `root:usage:manage` | `server.MerchantUsageManage` | admissions and usage events |
+| `Costs` | `root:costs:manage` | `server.MerchantCostsManage` | provider operations |
+| `Events` | `root:events:read` | `server.MerchantEventsRead` | host events |
+
+The last four are the programmatic routes' (`RouteGroups.Programmatic`): each
+`/v1/app` route mounts only with its permission, so a program gets only what
+its task needs. `Mount` refuses a permission for a group that is off.
 
 An identity has three parts:
 
@@ -89,9 +115,7 @@ billing (`/v1/me`). A token never names its merchant; the request does
 (`OpenRails-Merchant` or the merchant's API host), and it must be one the
 issuer is trusted for. Permissions are the token's `permissions`, the issuer's
 group roles and the user's accepted federated grants, within the ceiling: the
-server's merchant persona permissions `server.MerchantRead`,
-`server.MerchantWrite` and `server.MerchantAdmin`, which guard the merchant
-API's reads, writes and configuration. A
+server's merchant permissions ([Permissions](#permissions)). A
 token whose `sub` equals its `client_id` is a client acting for itself.
 
 A token bound to a key (`cnf.jkt`) is accepted only as `Authorization: DPoP`

@@ -215,11 +215,12 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 
 All merchant-admin operations live under `/v1/admin/*` (same public port; each
 route behind its group's permission: on the standalone server
-`server.MerchantRead` for reads, `server.MerchantWrite` for actions on
-customers, `server.MerchantAdmin` for the catalog and the merchant's
-configuration, `server.MerchantMetrics` for business metrics); your backend's
-own calls live under `/v1/app/*`, taking its application credential with no
-permission. Auth is a trusted issuer's access token (client credentials
+`server.MerchantBillingRead` for reads, `server.MerchantBillingManage` for
+actions on customers, `server.MerchantCatalogManage` for the catalog,
+`server.MerchantConfigManage` for the merchant's configuration,
+`server.MerchantMetricsRead` for business metrics); your backend's own calls
+live under `/v1/app/*`, taking its application credential holding each
+route's permission ([auth](auth.md#permissions)). Auth is a trusted issuer's access token (client credentials
 for a backend), a user session, or, on a hosted product, a merchant API key. Full
 reference: [api/routes.md](api/routes.md).
 

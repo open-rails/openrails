@@ -228,9 +228,9 @@ func startApp(t *testing.T) *app {
 	db := freshDatabase(t, dsn, queries)
 
 	rbac := authkit.NewRoles()
-	customersRead := rbac.Root.Permission("customers", "read")
-	customersUpdate := rbac.Root.Permission("customers", "update")
-	rbac.Root.Role("support", customersRead, customersUpdate)
+	billingRead := rbac.Root.Permission("billing", "read")
+	billingManage := rbac.Root.Permission("billing", "manage")
+	rbac.Root.Role("support", billingRead, billingManage)
 	ak, err := newAuth(ctx, db, rbac)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = ak.Close(context.Background()) })
@@ -269,7 +269,7 @@ func startApp(t *testing.T) *app {
 		Scope:       staff,
 		Prefix:      "/billing",
 		RouteGroups: openrails.RouteGroups{Admin: true},
-		Permissions: openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
+		Permissions: openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage},
 	}))
 	courseRoutes(r, ak, bill, testMediaKey)
 	serveApp(r, "web/dist")

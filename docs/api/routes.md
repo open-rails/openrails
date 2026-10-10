@@ -6,7 +6,7 @@ Every route of the HTTP API (171), from the API root: a standalone server serves
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
-**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.
+**Permission** is, for a staff or programmatic route, the `Routes.Permissions` field the host's Auth checks; the route is mounted only when it is given.
 
 **Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
@@ -214,22 +214,22 @@ What the signed-in caller may use of each staff route group that is on: any pers
 
 ## Programmatic (`/v1/app`)
 
-The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, and no permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`.
+The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission: `Permissions.Entitlements` for the content gate, `Usage` for admissions and usage events, `Costs` for provider operations, `Events` for host events. A route mounts only with its permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/app/entitlements/check` | application | — | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
-| POST | `/v1/app/admissions` | application | — | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/{request_id}/capture` | application | — | `CaptureAdmissionParams` | 200 `CaptureReceipt` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/release` | application | — | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/extend` | application | — | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/usage-events` | application | — | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations` | application | — | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations/{operation_id}/increment` | application | — | `IncrementProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations/{operation_id}/release` | application | — | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations/{operation_id}/observations` | application | — | `RecordProviderBillingObservationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
-| GET | `/v1/app/host-events` | application | — | — | 200 `ListPage<HostEvent>` |  |
-| POST | `/v1/app/host-events/acknowledge` | application | — | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
+| POST | `/v1/app/entitlements/check` | application | `Entitlements` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
+| POST | `/v1/app/admissions` | application | `Usage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/{request_id}/capture` | application | `Usage` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/release` | application | `Usage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/extend` | application | `Usage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/usage-events` | application | `Usage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations` | application | `Costs` | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations/{operation_id}/increment` | application | `Costs` | `IncrementProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations/{operation_id}/release` | application | `Costs` | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
+| POST | `/v1/app/provider-operations/{operation_id}/observations` | application | `Costs` | `RecordProviderBillingObservationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
+| GET | `/v1/app/host-events` | application | `Events` | — | 200 `ListPage<HostEvent>` |  |
+| POST | `/v1/app/host-events/acknowledge` | application | `Events` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |
 | GET | `/v1/app/scim/v2/ResourceTypes` | provisioning | — | — | 200 `application/scim+json` |  |
 | GET | `/v1/app/scim/v2/ResourceTypes/{id}` | provisioning | — | — | 200 `application/scim+json` |  |

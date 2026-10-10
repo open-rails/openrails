@@ -57,11 +57,11 @@ func TestStandaloneAuthPassesCheckAuth(t *testing.T) {
 	session := authtest.SignIn(t, ak, owner).AccessToken
 	openrailstest.CheckAuth(t, openrails.Routes{
 		Auth: sa, Scope: scope, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
-		Permissions: openrails.Permissions{AdminRead: perm(server.MerchantRead), AdminUpdate: perm(server.MerchantWrite)},
+		Permissions: openrails.Permissions{AdminRead: perm(server.MerchantBillingRead), AdminUpdate: perm(server.MerchantBillingManage)},
 	}, helpersauthtest.Cases{
 		Staff:       request(session),
 		User:        request(authtest.SignIn(t, ak, stranger).AccessToken),
-		Holders:     map[string]func() *http.Request{server.MerchantRead: request(authtest.SignIn(t, ak, viewer).AccessToken)},
+		Holders:     map[string]func() *http.Request{server.MerchantBillingRead: request(authtest.SignIn(t, ak, viewer).AccessToken)},
 		Stale:       request(authtest.StaleSession(t, ak, authtest.SignIn(t, ak, owner).AccessToken)),
 		Application: request(key.Secret),
 		Refused:     map[string]func() *http.Request{"forged": request(session + "x"), "signed out": request(signedOut), "a forged key": request(key.Secret + "x")},

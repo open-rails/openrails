@@ -186,7 +186,8 @@ func TestServerSetup(t *testing.T) {
 		return err == nil && c.Contact != nil && c.Contact.Email != nil && *c.Contact.Email == "erin@example.com"
 	}, 30*time.Second, 250*time.Millisecond, "the admin customer read shows the email SCIM pushed")
 
-	// The backend's token carries merchant:billing:read: support's writes are refused.
+	// The backend's token carries merchant:billing:read: support's writes
+	// (merchant:billing:manage) are refused.
 	_, err = app.bill.UpdateCustomer(ctx, erin, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 1_000_000}}})
 	require.ErrorIs(t, err, billing.ErrDenied)
 

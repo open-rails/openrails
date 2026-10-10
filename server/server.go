@@ -116,9 +116,9 @@ type Config struct {
 	ResourceServer *ResourceServerConfig
 
 	// RouteGroups turns the merchant route groups on, each off by default:
-	// Admin, Catalog, MerchantConfig and Metrics behind the server's own
-	// merchant permissions (MerchantRead, MerchantWrite, MerchantAdmin,
-	// MerchantMetrics), and Programmatic.
+	// Admin, Catalog, MerchantConfig and Metrics, and Programmatic, each
+	// route behind the server's own merchant permission (the Merchant*
+	// permissions).
 	RouteGroups openrails.RouteGroups
 	// AdminConsole serves the merchant admin console; nil serves none. It
 	// needs a staff route group on. Its AuthBaseURL defaults to this server's

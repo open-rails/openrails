@@ -32,11 +32,14 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		return out
 	}
 	require.Equal(t, []string{staffperm.All}, held(controlplane.MerchantOwner))
-	require.ElementsMatch(t, []string{staffperm.Read, staffperm.Write}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
-	require.Equal(t, []string{staffperm.Read}, held(controlplane.MerchantViewer), "viewer is read-only")
+	require.ElementsMatch(t, []string{staffperm.BillingRead, staffperm.BillingManage}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
+	require.Equal(t, []string{staffperm.BillingRead}, held(controlplane.MerchantViewer), "viewer is read-only")
 	for _, role := range []iam.Role{controlplane.MerchantSupport, controlplane.MerchantViewer} {
 		grants := held(role)
-		for _, p := range []string{staffperm.Admin, staffperm.CredentialsManage, staffperm.MembersRead, staffperm.MembersManage} {
+		for _, p := range []string{
+			staffperm.CatalogManage, staffperm.ConfigManage, staffperm.MetricsRead, staffperm.CredentialsManage, staffperm.MembersRead, staffperm.MembersManage,
+			staffperm.EntitlementsRead, staffperm.UsageManage, staffperm.CostsManage, staffperm.EventsRead,
+		} {
 			require.False(t, (&controlplane.ResolvedServiceCredential{Permissions: grants}).HasPermission(p), "%s must not hold %s", role, p)
 		}
 	}

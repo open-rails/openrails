@@ -11,7 +11,7 @@ Ordinary billing code uses `*openrails.Client` in every deployment. Each command
 commits in an OpenRails-owned transaction, with the same types, HTTP codes and
 error classes; the embedded Client dispatches to the same handlers. The
 `/v1/app` routes take the host backend's application credential, never a
-person's, with no permission, and an `Idempotency-Key` on each write.
+person's, holding `Permissions.Costs`, and an `Idempotency-Key` on each write.
 
 | Command | Route | Caller |
 |---|---|---|

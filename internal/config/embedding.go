@@ -18,8 +18,8 @@ type Routes struct {
 	// CheckRecentSignIn. Required.
 	Auth billingauth.Authenticator
 	// Scope is where callers hold Permissions, such as AuthKit's
-	// ak.Scope(ctx, iam.RootGroup()). Required with any staff group on, and
-	// refused without one.
+	// ak.Scope(ctx, iam.RootGroup()). Required with any permission given,
+	// and refused without one.
 	Scope billingauth.Scope
 	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.
 	// Empty is the root.
@@ -27,8 +27,9 @@ type Routes struct {
 	// RouteGroups turns route groups on; each is off by default.
 	RouteGroups RouteGroups
 	// Permissions are what a caller must hold for each staff group that is
-	// on. Mount fails when a staff group is on without its permission, or a
-	// permission is given for a group that is off.
+	// on, and for each programmatic route. Mount fails when a staff group is
+	// on without its permission, or a permission is given for a group that
+	// is off.
 	Permissions Permissions
 	// AdminConsole serves the staff dashboard at Prefix's /admin, over the
 	// staff routes, signing staff in through AuthKit's /api/v1 on the same
@@ -59,19 +60,26 @@ type RouteGroups struct {
 	// the metrics queries and the dashboard. It needs Permissions.Metrics.
 	Metrics bool
 	// Programmatic is the routes the host's backend calls over HTTP at
-	// /v1/app: usage, admissions, provider operations, host events and SCIM
-	// provisioning. They take any application Auth says a request is (its
-	// Identity's SubjectKind) and refuse a person; no permission is involved. SCIM also
-	// takes the merchant's provisioning token, and is not mounted with
-	// Deps.UserInfo, which reads the directory instead. Embedded, the Client
-	// calls the same operations in process without it.
+	// /v1/app: entitlement checks, usage and admissions, provider
+	// operations, host events and SCIM provisioning. They take an
+	// application Auth says a request is (its Identity's SubjectKind) and
+	// refuse a person. Each route mounts only with its permission
+	// (Permissions.Entitlements, Usage, Costs, Events), which the
+	// application holds in Routes.Scope, so a program gets only what its
+	// task needs. SCIM takes any application at the merchant or the
+	// merchant's provisioning token, and is not mounted with Deps.UserInfo,
+	// which reads the directory instead. Embedded, the Client calls the same
+	// operations in process without it.
 	Programmatic bool
 }
 
 // Permissions are Routes.Permissions: the host's permissions, such as
-// AuthKit's iam.Perm, one per staff group that is on, which callers hold in
-// Routes.Scope. Mount reads each String() once, and refuses one the Auth
-// does not know when it can say (auth.PermissionCatalog).
+// AuthKit's iam.Perm, one per staff group that is on and per programmatic
+// task, which callers hold in Routes.Scope. Mount reads each String() once,
+// and refuses one the Auth does not know when it can say
+// (auth.PermissionCatalog). Name them persona:resource:action, the persona
+// being where they are held: root:billing:read in AuthKit's root group,
+// merchant:billing:read in a merchant's group on the standalone server.
 type Permissions struct {
 	// AdminRead is what the admin group's callers hold.
 	AdminRead fmt.Stringer
@@ -85,6 +93,17 @@ type Permissions struct {
 	// Metrics is what the metrics group's callers hold. Support staff who
 	// help customers need only AdminRead.
 	Metrics fmt.Stringer
+
+	// The programmatic routes' (RouteGroups.Programmatic), each mounting
+	// only its routes. Entitlements is the content gate
+	// (POST /v1/app/entitlements/check).
+	Entitlements fmt.Stringer
+	// Usage charges customers: admissions and usage events.
+	Usage fmt.Stringer
+	// Costs is provider operations: the host's own upstream costs.
+	Costs fmt.Stringer
+	// Events is host events: reading and acknowledging them.
+	Events fmt.Stringer
 }
 
 // ConsoleMount is where a standalone server serves the admin console, and

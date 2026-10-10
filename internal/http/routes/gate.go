@@ -718,17 +718,25 @@ func (e *Env) Guarded(route Route) router.Handler {
 	return recheck(route, h)
 }
 
-// appGates gates a programmatic route: an application, at the request's
-// merchant. A person is refused whatever it holds.
+// appGates gates a programmatic route: an application holding the route's
+// permission at the request's merchant. A person is refused whatever it
+// holds. SCIM's routes name no permission.
 func (e *Env) appGates(route Route) []router.Middleware {
 	a := e.Auth
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "a programmatic route needs Routes.Auth"})
 	}
-	return append(e.preAuth(), verify(route, a), e.appCheck(route, a))
+	perm := e.Permissions.For(route)
+	switch {
+	case route.Auth == AuthApplication && strings.TrimSpace(perm) == "":
+		panic(MountError{Route: route.Key(), Reason: "no permission (Routes.Permissions." + string(route.Needs()) + ")"})
+	case perm != "" && e.Scope == nil:
+		panic(MountError{Route: route.Key(), Reason: "a programmatic route needs Routes.Scope"})
+	}
+	return append(e.preAuth(), verify(route, a), e.appCheck(route, a, perm))
 }
 
-func (e *Env) appCheck(route Route, a billingauth.Authenticator) router.Middleware {
+func (e *Env) appCheck(route Route, a billingauth.Authenticator, perm string) router.Middleware {
 	return func(next router.Handler) router.Handler {
 		return func(r *httprequest.Request) {
 			v, c, ok := subject(r, route, a)
@@ -743,11 +751,7 @@ func (e *Env) appCheck(route Route, a billingauth.Authenticator) router.Middlewa
 			if !ok {
 				return
 			}
-			// The application check above is the whole gate: Permissions
-			// holds no permission for the programmatic routes (open with the
-			// owner, #1179). Given one (Route.Needs naming it), it is asked
-			// here like a staff route's.
-			if perm := e.Permissions.For(route); perm != "" && !e.permitted(r, route, a, v, target.MerchantID, perm) {
+			if perm != "" && !e.permitted(r, route, a, v, target.MerchantID, perm) {
 				return
 			}
 			bindStaff(r, c, route, target)

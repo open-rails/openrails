@@ -66,7 +66,9 @@ var catalogPerms = func() map[string]iam.Perm {
 			out[perm] = p.Permission(resource, action)
 		}
 	}
-	declare(merchantPersona, staffperm.Read, staffperm.Write, staffperm.Admin, staffperm.Metrics)
+	declare(merchantPersona,
+		staffperm.BillingRead, staffperm.BillingManage, staffperm.CatalogManage, staffperm.ConfigManage, staffperm.MetricsRead,
+		staffperm.EntitlementsRead, staffperm.UsageManage, staffperm.CostsManage, staffperm.EventsRead)
 	declare(Roles.Root.PersonaDef,
 		billing.RootMerchantsRead, billing.RootMerchantsDelete, billing.RootMerchantsRestore,
 		billing.RootWorkerHealthRead, billing.RootAdminRateLimitsUnlock)
@@ -76,8 +78,8 @@ var catalogPerms = func() map[string]iam.Perm {
 func declared(perm string) iam.Perm { return catalogPerms[perm] }
 
 var (
-	supportGrants = []string{staffperm.Read, staffperm.Write}
-	viewerGrants  = []string{staffperm.Read}
+	supportGrants = []string{staffperm.BillingRead, staffperm.BillingManage}
+	viewerGrants  = []string{staffperm.BillingRead}
 )
 
 // merchantRoleGrants are a merchant role's permissions as wire strings, for

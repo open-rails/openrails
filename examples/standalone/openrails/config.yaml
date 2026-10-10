@@ -38,12 +38,12 @@ resource_server:
     - name: courses
       issuer: http://localhost:8080   # the app's AuthKit; keys from its /.well-known/jwks.json
       merchants: [onlydemo]           # its tokens act for this merchant only
-      permissions: ["merchant:billing:read"] # the most its tokens may grant
+      permissions: ["merchant:billing:read", "merchant:entitlements:read"] # the most its tokens may grant
 
 # Route groups beyond the public, customer (/v1/me) and webhook routes.
 route_groups:
   admin: true        # customer support; the app's backend reads customers with merchant:billing:read
-  programmatic: true # /v1/app: the backend's entitlement checks, and SCIM
+  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read), and SCIM
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:

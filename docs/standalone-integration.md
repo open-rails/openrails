@@ -105,9 +105,11 @@ staff edit configuration over HTTP at the revision they read. See
 [merchant configuration](merchant-configuration.md) and [vault.md](vault.md).
 
 The server mounts the admin API and the merchant's configuration, guarded by
-its merchant persona's permissions: `server.MerchantRead` for reads,
-`server.MerchantWrite` for actions on customers, `server.MerchantAdmin` for the
-configuration (PSPs, settings, catalog edits, billing import and export).
+its merchant persona's permissions ([auth](auth.md#permissions)):
+`server.MerchantBillingRead` for reads, `server.MerchantBillingManage` for
+actions on customers, `server.MerchantConfigManage` for the configuration
+(PSPs, settings, billing import and export), `server.MerchantCatalogManage`
+for catalog edits.
 
 Catalogs always use database state, edited over HTTP (the remote Client
 included). `openrails apply-catalog` and the
@@ -349,10 +351,12 @@ resource_server:
   true`, `name`, `preferred_username`, `updated_at`) become the customer's
   contact, newest first against SCIM pushes, so a user who registers and buys at
   once gets the receipt ([customer contacts](customer-contacts.md)).
-- A client-credentials token (an application, no permission) calls the
-  programmatic routes, `/v1/app/*` with `route_groups.programmatic`, and
-  provisions the merchant's users at `/v1/app/scim/v2`, as a provisioning token
-  does; a person's token is refused there.
+- A client-credentials token (an application) calls the programmatic routes,
+  `/v1/app/*` with `route_groups.programmatic`, each holding its permission
+  (`merchant:entitlements:read`, `merchant:usage:manage`,
+  `merchant:costs:manage`, `merchant:events:read`), and provisions the
+  merchant's users at `/v1/app/scim/v2`, as a provisioning token does; a
+  person's token is refused there.
 - Refusals: `access_token_issuer_unknown` (untrusted `iss`),
   `access_token_invalid` (signature, audience or lifetime), `credential_expired`,
   `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,

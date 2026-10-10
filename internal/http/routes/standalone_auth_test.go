@@ -144,7 +144,7 @@ func runStaff(t *testing.T, a *StandaloneAuth, key string, header map[string]str
 	route, ok := Lookup(method, path)
 	require.True(t, ok, key)
 	rt := &app.Runtime{Config: &config.Config{}}
-	env := newEnv(rt, Options{Auth: a, Scope: a.Scope, ResolveMerchant: a.ResolveMerchant, Permissions: Permissions{AdminRead: staffperm.Read, AdminUpdate: staffperm.Write, MerchantConfig: staffperm.Admin}})
+	env := newEnv(rt, Options{Auth: a, Scope: a.Scope, ResolveMerchant: a.ResolveMerchant, Permissions: Permissions{AdminRead: staffperm.BillingRead, AdminUpdate: staffperm.BillingManage, MerchantConfig: staffperm.ConfigManage}})
 	table := &router.Table{}
 	var out served
 	router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) {
@@ -176,7 +176,7 @@ const configuration = "GET /v1/admin/configuration"
 // own verified merchant and an explicit permission there; failures keep
 // distinct, stable codes.
 func TestStandaloneAuthEachCredentialKind(t *testing.T) {
-	admin := staffperm.Admin
+	admin := staffperm.ConfigManage
 	user := authtest.User(userA)
 	user.Issuer, user.Invoker.Issuer = "cp", "cp"
 	member := sessions{who: user, granted: map[string][]string{"group_1": {admin}}}
@@ -234,7 +234,7 @@ func TestStandaloneAuthEachCredentialKind(t *testing.T) {
 // A key or token holds exactly its permissions, in exactly its merchant's
 // scope, and proves no sign-in a key does not have.
 func TestStandaloneCredentialsHoldExactly(t *testing.T) {
-	a := &StandaloneAuth{Issuer: "cp", ServiceCredentialResolver: credResolver{key: serviceCredential("merchant:*", staffperm.Read)}, Directory: &directory{}}
+	a := &StandaloneAuth{Issuer: "cp", ServiceCredentialResolver: credResolver{key: serviceCredential("merchant:*", staffperm.BillingRead)}, Directory: &directory{}}
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.Header.Set("Authorization", "Bearer sk_1")
 	v, err := a.Authenticate(r)
@@ -245,13 +245,13 @@ func TestStandaloneCredentialsHoldExactly(t *testing.T) {
 		perm  string
 		want  bool
 	}{
-		{own, staffperm.Read, true},
+		{own, staffperm.BillingRead, true},
 		{own, "", false},
 		{own, "*", false},
 		{own, "merchant:*", false},
-		{billingauth.Scope{Authority: "cp", ID: "group_2"}, staffperm.Read, false},
-		{billingauth.Scope{Authority: "other", ID: "group_1"}, staffperm.Read, false},
-		{billingauth.Scope{}, staffperm.Read, false},
+		{billingauth.Scope{Authority: "cp", ID: "group_2"}, staffperm.BillingRead, false},
+		{billingauth.Scope{Authority: "other", ID: "group_1"}, staffperm.BillingRead, false},
+		{billingauth.Scope{}, staffperm.BillingRead, false},
 	} {
 		ok, err := v.(auth.PermissionChecker).Can(t.Context(), tc.scope, tc.perm)
 		require.NoError(t, err)
@@ -261,13 +261,13 @@ func TestStandaloneCredentialsHoldExactly(t *testing.T) {
 
 	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
 	signedIn := func(at time.Time, machine bool) error {
-		token := &credential.ResolvedResourceAccess{Issuer: "https://issuer.example", Subject: userB, ClientID: "client", Machine: machine, MerchantID: merchantA, Permissions: []string{staffperm.Write}, AuthTime: at}
+		token := &credential.ResolvedResourceAccess{Issuer: "https://issuer.example", Subject: userB, ClientID: "client", Machine: machine, MerchantID: merchantA, Permissions: []string{staffperm.BillingManage}, AuthTime: at}
 		a := &StandaloneAuth{Issuer: "cp", ResourceTokenResolver: tokenResolver{token: token}, Directory: &directory{}, Now: func() time.Time { return now }}
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
 		r.Header.Set("Authorization", "Bearer eyJ0eXAiOiJhdCtqd3QifQ.e30.sig")
 		v, err := a.Authenticate(r)
 		require.NoError(t, err)
-		ok, err := v.(auth.PermissionChecker).Can(t.Context(), own, staffperm.Write)
+		ok, err := v.(auth.PermissionChecker).Can(t.Context(), own, staffperm.BillingManage)
 		require.NoError(t, err)
 		require.True(t, ok)
 		return v.(auth.RecentSignInChecker).CheckRecentSignIn(t.Context())
@@ -299,16 +299,16 @@ func TestStandaloneUserSessionMerchantSelection(t *testing.T) {
 		merchant       billing.MerchantID
 		asked          string
 	}{
-		{name: "explicit selector", selector: " b ", dir: directory{named: map[string]billing.MerchantID{"b": merchantB}}, granted: map[string][]string{"group_2": {staffperm.Admin}}, status: 204, merchant: merchantB, asked: "b"},
-		{name: "single membership inferred", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}, inferred: "a"}, granted: map[string][]string{"group_1": {staffperm.Admin}}, status: 204, merchant: merchantA, asked: ""},
+		{name: "explicit selector", selector: " b ", dir: directory{named: map[string]billing.MerchantID{"b": merchantB}}, granted: map[string][]string{"group_2": {staffperm.ConfigManage}}, status: 204, merchant: merchantB, asked: "b"},
+		{name: "single membership inferred", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}, inferred: "a"}, granted: map[string][]string{"group_1": {staffperm.ConfigManage}}, status: 204, merchant: merchantA, asked: ""},
 		{name: "no selector and no single membership", status: 403, code: "merchant_unresolved", asked: ""},
-		{name: "selected merchant without live permission", selector: "b", dir: directory{named: map[string]billing.MerchantID{"b": merchantB}}, granted: map[string][]string{"group_1": {staffperm.Admin}}, status: 403, code: "permission_required", asked: "b"},
+		{name: "selected merchant without live permission", selector: "b", dir: directory{named: map[string]billing.MerchantID{"b": merchantB}}, granted: map[string][]string{"group_1": {staffperm.ConfigManage}}, status: 403, code: "permission_required", asked: "b"},
 		{name: "selected merchant that does not resolve", selector: "b", dir: directory{named: map[string]billing.MerchantID{"b": {}}}, status: 403, code: "merchant_unresolved", asked: "b"},
-		{name: "must match the Host merchant", selector: "a", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}}, granted: map[string][]string{"group_1": {staffperm.Admin}},
+		{name: "must match the Host merchant", selector: "a", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}}, granted: map[string][]string{"group_1": {staffperm.ConfigManage}},
 			ctx: func(ctx context.Context) context.Context { return merchant.WithHostMerchant(ctx, merchantB) }, status: 403, code: "host_merchant_mismatch", asked: "a"},
-		{name: "must match the pinned merchant", selector: "a", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}}, granted: map[string][]string{"group_1": {staffperm.Admin}},
+		{name: "must match the pinned merchant", selector: "a", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}}, granted: map[string][]string{"group_1": {staffperm.ConfigManage}},
 			ctx: func(ctx context.Context) context.Context { return merchant.WithID(ctx, merchantB) }, status: 403, code: "merchant_context_mismatch", asked: "a"},
-		{name: "agreeing pins", selector: "a", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}}, granted: map[string][]string{"group_1": {staffperm.Admin}},
+		{name: "agreeing pins", selector: "a", dir: directory{named: map[string]billing.MerchantID{"a": merchantA}}, granted: map[string][]string{"group_1": {staffperm.ConfigManage}},
 			ctx: func(ctx context.Context) context.Context {
 				return merchant.WithHostMerchant(merchant.WithID(ctx, merchantA), merchantA)
 			}, status: 204, merchant: merchantA, asked: "a"},

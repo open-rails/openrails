@@ -7,24 +7,32 @@ import (
 	"github.com/open-rails/openrails/internal/staffperm"
 )
 
-// staffPermissions are the server's own permissions on its merchant persona.
-var staffPermissions = httproutes.Permissions{AdminRead: staffperm.Read, AdminUpdate: staffperm.Write, Catalog: staffperm.Admin, MerchantConfig: staffperm.Admin, Metrics: staffperm.Metrics}
+// merchantPermissions are the server's own permissions on its merchant
+// persona.
+var merchantPermissions = httproutes.Permissions{
+	AdminRead: staffperm.BillingRead, AdminUpdate: staffperm.BillingManage, Catalog: staffperm.CatalogManage,
+	MerchantConfig: staffperm.ConfigManage, Metrics: staffperm.MetricsRead,
+	Entitlements: staffperm.EntitlementsRead, Usage: staffperm.UsageManage, Costs: staffperm.CostsManage, Events: staffperm.EventsRead,
+}
 
-// staffPermissionsFor is staffPermissions for the staff route groups that
-// are on.
-func staffPermissionsFor(groups config.RouteGroups) httproutes.Permissions {
+// permissionsFor is merchantPermissions for the route groups that are on.
+func permissionsFor(groups config.RouteGroups) httproutes.Permissions {
 	var p httproutes.Permissions
 	if groups.Admin {
-		p.AdminRead, p.AdminUpdate = staffPermissions.AdminRead, staffPermissions.AdminUpdate
+		p.AdminRead, p.AdminUpdate = merchantPermissions.AdminRead, merchantPermissions.AdminUpdate
 	}
 	if groups.Catalog {
-		p.Catalog = staffPermissions.Catalog
+		p.Catalog = merchantPermissions.Catalog
 	}
 	if groups.MerchantConfig {
-		p.MerchantConfig = staffPermissions.MerchantConfig
+		p.MerchantConfig = merchantPermissions.MerchantConfig
 	}
 	if groups.Metrics {
-		p.Metrics = staffPermissions.Metrics
+		p.Metrics = merchantPermissions.Metrics
+	}
+	if groups.Programmatic {
+		app := merchantPermissions.App()
+		p.Entitlements, p.Usage, p.Costs, p.Events = app.Entitlements, app.Usage, app.Costs, app.Events
 	}
 	return p
 }

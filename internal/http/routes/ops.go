@@ -8,9 +8,9 @@ import (
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
 // worker health, metrics, the dashboard and host events.
 var opsRoutes = []Route{
-	{Method: GET, Path: "/v1/app/host-events", Group: App, Auth: AuthApplication, Name: "ListHostEvents",
+	{Method: GET, Path: "/v1/app/host-events", Group: App, Auth: AuthApplication, Permission: NeedEvents, Name: "ListHostEvents",
 		Query: params(queryOf(handlers.HostEventsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
-	{Method: POST, Path: "/v1/app/host-events/acknowledge", Group: App, Auth: AuthApplication, Name: "AcknowledgeHostEvents", IdempotencyKey: true,
+	{Method: POST, Path: "/v1/app/host-events/acknowledge", Group: App, Auth: AuthApplication, Permission: NeedEvents, Name: "AcknowledgeHostEvents", IdempotencyKey: true,
 		Request: billing.AcknowledgeHostEventsParams{}, Responses: []Reply{{200, billing.HostEventLookup{}}}, Errors: codes("invalid_param"), Handler: h(handlers.ServiceAcknowledgeHostEvents)},
 	{Method: GET, Path: "/v1/admin/access", Group: Access, Auth: AuthSignedIn, Name: "GetAdminAccess",
 		Responses: []Reply{{200, billing.AdminAccess{}}}, Bind: adminAccess},

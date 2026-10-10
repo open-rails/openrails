@@ -24,7 +24,7 @@ var groupTitles = []struct {
 	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, with `RouteGroups.MerchantConfig`, every route behind the host's `Permissions.MerchantConfig`."},
 	{routes.Metrics, "Business metrics", "Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`, every route behind the host's `Permissions.Metrics`."},
 	{routes.Access, "Access", "What the signed-in caller may use of each staff route group that is on: any person or application the host's Auth admits, mounted with any staff group."},
-	{routes.App, "Programmatic (`/v1/app`)", "The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, and no permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`."},
+	{routes.App, "Programmatic (`/v1/app`)", "The host backend's own calls, with `RouteGroups.Programmatic`: an application the host's Auth admits, never a person, holding the route's permission: `Permissions.Entitlements` for the content gate, `Usage` for admissions and usage events, `Costs` for provider operations, `Events` for host events. A route mounts only with its permission. Each write takes an `Idempotency-Key` and answers a retry with the first response. The SCIM 2.0 routes (RFC 7643, RFC 7644) also take the merchant's provisioning token, which opens nothing else; their bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves them out, and they are not mounted with `Deps.UserInfo`; they name no permission."},
 	{routes.Webhooks, "Provider webhooks", "Inbound provider callbacks."},
 }
 
@@ -47,7 +47,7 @@ func (m *model) routesMD() []byte {
 	b.WriteString("Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. ")
 	b.WriteString("Error codes are in [error-codes.md](error-codes.md).\n\n")
 	b.WriteString("**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).\n\n")
-	b.WriteString("**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.\n\n")
+	b.WriteString("**Permission** is, for a staff or programmatic route, the `Routes.Permissions` field the host's Auth checks; the route is mounted only when it is given.\n\n")
 	b.WriteString("**Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog update` a catalog edit or document application, which a document applied later skips where the edit set a field differently; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.\n")
 	titled := map[routes.Group]bool{}
 	for _, g := range groupTitles {
@@ -73,7 +73,7 @@ func (m *model) routesMD() []byte {
 		for _, r := range list {
 			perm := "—"
 			if needs := r.Needs(); needs != "" {
-				perm = "`" + needs + "`"
+				perm = "`" + string(needs) + "`"
 			}
 			var replies []string
 			for _, reply := range r.Responses {

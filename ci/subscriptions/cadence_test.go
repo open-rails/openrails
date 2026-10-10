@@ -164,9 +164,15 @@ func (w *world) hostJSON(method, path string, body any) (int, map[string]any) {
 // merchantJSON calls a merchant route with token.
 func (w *world) merchantJSON(token, method, path string, body any) (int, map[string]any) {
 	w.t.Helper()
+	return w.merchantJSONAt(w.server.URL, token, method, path, body)
+}
+
+// merchantJSONAt calls a merchant route of the mount at base with token.
+func (w *world) merchantJSONAt(base, token, method, path string, body any) (int, map[string]any) {
+	w.t.Helper()
 	raw, err := json.Marshal(body)
 	require.NoError(w.t, err)
-	req, err := http.NewRequestWithContext(w.t.Context(), method, w.server.URL+mountPrefix+path, bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(w.t.Context(), method, base+mountPrefix+path, bytes.NewReader(raw))
 	require.NoError(w.t, err)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("OpenRails-Merchant", w.slug)

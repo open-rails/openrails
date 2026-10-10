@@ -27,7 +27,8 @@ for its holders.
 ## Reading access
 
 Your backend gates content with the programmatic route (an application
-credential, `RouteGroups.Programmatic`; in process, the `Client`):
+holding `Permissions.Entitlements`, `RouteGroups.Programmatic`; in process,
+the `Client`):
 
 - `POST /v1/app/entitlements/check` —
   `{"customer_id", "entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers

@@ -48,7 +48,7 @@ func TestUserMerchantsListing(t *testing.T) {
 	listed := list(memberToken)
 	require.Len(t, listed, 2)
 	require.Equal(t, []string{"merchant:*"}, listed[0].Permissions, "an owner holds the namespace")
-	require.Equal(t, []string{staffperm.Read}, listed[1].Permissions, "a viewer reads only")
+	require.Equal(t, []string{staffperm.BillingRead}, listed[1].Permissions, "a viewer reads only")
 	viewerGrants := listed[1].Permissions
 	require.Equal(t, []billing.UserMerchant{
 		{ID: mine.MerchantID, Slug: own, DisplayName: "Own Shop", Role: "owner", Permissions: []string{"merchant:*"}},

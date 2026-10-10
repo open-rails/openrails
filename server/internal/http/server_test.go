@@ -93,7 +93,7 @@ func TestCaptchaDiscoveryRoutes(t *testing.T) {
 func TestStandaloneMetaRoutes(t *testing.T) {
 	mux := http.NewServeMux()
 	groups := config.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
-	srv := &Server{groups: groups, permissions: staffPermissionsFor(groups)}
+	srv := &Server{groups: groups, permissions: permissionsFor(groups)}
 	srv.registerStandaloneMetaRoutes(mux)
 	require.True(t, srv.nativeBrowser["GET /v1/config"], "a browser reads the configuration from any origin")
 	require.False(t, srv.nativeBrowser["GET /health/live"])
@@ -128,7 +128,7 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	// merchant-config group on.
 	for _, kvMount := range []string{"", "kv"} {
 		mux := http.NewServeMux()
-		(&Server{cfg: &config.Config{}, groups: groups, permissions: staffPermissionsFor(groups), runtime: &app.Runtime{
+		(&Server{cfg: &config.Config{}, groups: groups, permissions: permissionsFor(groups), runtime: &app.Runtime{
 			Config: &config.Config{Vault: &config.VaultConfig{KVMount: kvMount}},
 		}}).registerStandaloneMetaRoutes(mux)
 		w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/config", nil))

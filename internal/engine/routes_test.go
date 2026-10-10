@@ -125,8 +125,8 @@ func TestCapabilitiesReportTheMount(t *testing.T) {
 		return doc.Capabilities.RouteGroups
 	}
 	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": false, "metrics": false, "app": false}, read(config.Routes{Auth: fake}))
-	require.Equal(t, map[string]bool{"admin": true, "catalog": false, "merchant_config": false, "metrics": false, "app": false}, read(config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Scope: authtest.Scope, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead)}}))
-	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": true, "metrics": false, "app": false}, read(config.Routes{Auth: fake, RouteGroups: config.RouteGroups{MerchantConfig: true}, Scope: authtest.Scope, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.StaffAdmin)}}))
+	require.Equal(t, map[string]bool{"admin": true, "catalog": false, "merchant_config": false, "metrics": false, "app": false}, read(config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups(), Scope: authtest.Scope, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.BillingRead)}}))
+	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": true, "metrics": false, "app": false}, read(config.Routes{Auth: fake, RouteGroups: config.RouteGroups{MerchantConfig: true}, Scope: authtest.Scope, Permissions: config.Permissions{MerchantConfig: authtest.Perm(authtest.ConfigManage)}}))
 	all := authtest.Groups()
 	all.Programmatic = true
 	require.Equal(t, map[string]bool{"admin": true, "catalog": true, "merchant_config": true, "metrics": true, "app": true}, read(config.Routes{Auth: fake, RouteGroups: all, Scope: authtest.Scope, Permissions: authtest.Permissions()}))
@@ -159,7 +159,7 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 	}
 	// Mounts choose independently; a host's catalog document never closes them.
 	rt.App.Config.Catalog = &pkgcatalog.Application{}
-	reads, n = writes(rt, config.Routes{Auth: fake, RouteGroups: config.RouteGroups{Catalog: true}, Scope: authtest.Scope, Permissions: config.Permissions{Catalog: authtest.Perm(authtest.StaffCatalog)}})
+	reads, n = writes(rt, config.Routes{Auth: fake, RouteGroups: config.RouteGroups{Catalog: true}, Scope: authtest.Scope, Permissions: config.Permissions{Catalog: authtest.Perm(authtest.CatalogManage)}})
 	require.Positive(t, reads)
 	require.Positive(t, n)
 	_, err := rt.Routes(config.Routes{Auth: fake})

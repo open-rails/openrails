@@ -45,8 +45,9 @@ type Options struct {
 	ProviderRoutes *routesurface.ProviderRoutes
 	// Capabilities is what GET /v1/config reports; nil derives it.
 	Capabilities *Capabilities
-	// Programmatic mounts the programmatic routes (/v1/app), SCIM included
-	// unless the runtime reads the host's directory.
+	// Programmatic mounts the programmatic routes (/v1/app) Permissions
+	// gives a permission, and SCIM unless the runtime reads the host's
+	// directory.
 	Programmatic bool
 }
 
@@ -121,7 +122,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 			CaptchaScript: http.HandlerFunc(s.captchaClientScriptHandler),
 		},
 	})
-	if opts.Permissions != (httproutes.Permissions{}) {
+	if opts.Permissions.Staff() != (httproutes.Permissions{}) {
 		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
 			Scope:        httproutes.FixedScope(s.Scope),
@@ -136,6 +137,8 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Programmatic {
 		httproutes.RegisterAppRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
+			Scope:        httproutes.FixedScope(s.Scope),
+			Permissions:  opts.Permissions.App(),
 			Capabilities: &capabilities,
 		})
 	}

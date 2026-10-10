@@ -11,7 +11,7 @@ import (
 var entitlementsRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/entitlements", Group: Admin, Auth: AuthMerchant, Name: "ListEntitlements", Level: LevelRead,
 		Query: params(text("at"), text("customer_id"), repeated("entitlement"), text("prefix"), pageParams), Responses: []Reply{{200, billing.ListPage[billing.CustomerEntitlement]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_credential_customer_scope_denied"), Handler: h(handlers.ListEntitlements)},
-	{Method: POST, Path: "/v1/app/entitlements/check", Group: App, Auth: AuthApplication, Name: "CheckEntitlements", Level: LevelRead,
+	{Method: POST, Path: "/v1/app/entitlements/check", Group: App, Auth: AuthApplication, Permission: NeedEntitlements, Name: "CheckEntitlements", Level: LevelRead,
 		Request: billing.CheckEntitlementsParams{}, Responses: []Reply{{200, billing.EntitlementCheck{}}}, Errors: codes("invalid_param", "service_credential_customer_scope_denied"), Handler: h(handlers.AppCheckEntitlements)},
 	{Method: GET, Path: "/v1/admin/product-access", Group: Admin, Auth: AuthMerchant, Name: "ListProductAccess", Level: LevelRead,
 		Query: params(text("customer_id"), Param{Name: "live", Kind: "boolean"}, idsParam, pageParams, text("product_id")), Responses: []Reply{{200, billing.ListPage[billing.ProductAccessGrant]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_credential_customer_scope_denied"), Handler: h(handlers.ListProductAccess)},

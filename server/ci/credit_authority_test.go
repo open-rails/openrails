@@ -15,7 +15,7 @@ import (
 )
 
 // SEC: minting money is a staff write on the standalone server: a support
-// member or API key, holding merchant:billing:write, grants credit and opens a
+// member or API key, holding merchant:billing:manage, grants credit and opens a
 // credit line as an owner does; a viewer key, holding only the reads, does
 // neither and edits no customer.
 func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
