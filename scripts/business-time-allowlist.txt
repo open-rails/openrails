@@ -57,7 +57,6 @@ internal/modules/subscriptions/admin_service.go|return time.Now()|business_time_
 internal/modules/subscriptions/email_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/lifecycle_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/notification_service.go|if err := s.repo.MarkEmailed(ctx, notification.ID, time.Now().UTC()); err != nil {|infrastructure_time|Actual email delivery completion stamp|1
-internal/modules/subscriptions/reprice_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/stripe_service.go|startDate = time.Now().UTC().Unix()|external_protocol_time|Default provider event search window uses physical time|1
 internal/modules/subscriptions/subscription.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/subscriptions/subscription_repo.go|now = time.Now()|business_time_boundary|Standalone repository convenience defaults; services use explicit-time variants|2
