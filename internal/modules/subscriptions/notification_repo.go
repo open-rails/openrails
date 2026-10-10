@@ -115,7 +115,7 @@ func (r *NotificationQueueRepo) GetByUserID(ctx context.Context, userID string) 
 	return notificationsFromGen(rows)
 }
 
-// MarkEmailed stamps emailed_at once (#789); already-stamped rows are a no-op.
+// MarkEmailed stamps emailed_at once; already-stamped rows are a no-op.
 func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, at time.Time) error {
 	_, err := r.db.Gen(ctx).MarkNotificationEmailed(ctx, gen.MarkNotificationEmailedParams{ID: id, EmailedAt: at})
 	return err

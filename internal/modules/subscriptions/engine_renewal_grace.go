@@ -16,21 +16,18 @@ import (
 // boundary until the engine's own renewal decides. A qualified renewal
 // supersedes it; a decline, cancellation or terminal outcome revokes it.
 //
-// A renewal with no outcome past its allowance is held: collection is stopped
-// (fleet halted, admission hold, breaker, readonly). By default the member
-// keeps access until the renewal is attempted, and life.renewal.held reports
-// the backlog; access_while_renewal_held=suspend ends access at the allowance.
+// A renewal with no outcome past its allowance is held (collection stopped:
+// fleet halted, admission hold, breaker, readonly). By default the member keeps
+// access until the renewal is attempted, and life.renewal.held reports the
+// backlog; access_while_renewal_held=suspend ends access at the allowance.
 //
-// The allowance is a bounded share of the period, never a fixed day (a fixed
-// 24h gave an hourly member 24 free periods):
+// The allowance is a bounded share of the period, never a fixed day (24h would
+// give an hourly member 24 free periods):
 //
 //	grace(period) = min(24h, max(5m, period/10))
 //
-// period/10 caps unpaid access at 10% of what was paid for; 24h caps it for
-// long periods (from 10 days up, a day is ample for a renewal to settle); 5m is
-// five due passes (the due pass runs every minute), the least time a renewal
-// needs to be admitted and charged. Periods are whole hours, so the floor
-// never binds and the free fraction is at most 10% for every cadence:
+// 10% caps unpaid access; 24h caps long periods; 5m is five per-minute due
+// passes, the least a renewal needs to be admitted and charged.
 // 1h -> 6m, 1d -> 2h24m, 7d -> 16h48m, 30d/90d/365d -> 24h.
 const (
 	engineGraceCap      = 24 * time.Hour

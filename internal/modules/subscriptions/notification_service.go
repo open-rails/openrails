@@ -114,11 +114,10 @@ func (s *NotificationService) EmailEnabled() bool {
 	return s.emailService.IsEnabled()
 }
 
-// DeliverEmail sends the appropriate email for an already-created notification
-// and stamps emailed_at on success (#789). No armed email service ⇒ the row is
-// left undelivered (emailed_at NULL) so the sweep retries once email is wired;
-// a rendered no-op (unsupported type, user without email) still stamps so the
-// sweep never rescans it.
+// DeliverEmail sends the email for an already-created notification and stamps
+// emailed_at on success. Without an armed email service the row stays
+// undelivered for the sweep to retry; a rendered no-op (unsupported type, no
+// email address) still stamps so the sweep never rescans it.
 func (s *NotificationService) DeliverEmail(ctx context.Context, notification *models.NotificationQueue) error {
 	if !s.EmailEnabled() {
 		log.WithContext(ctx).Debug("email service not available - leaving notification undelivered")
@@ -153,7 +152,7 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 			reason = ParsePremiumEndReason(notification.Data.Reason)
 		}
 		if reason == PremiumEndReasonAccessEnded {
-			// #789: subscription-row-free path; ended_at rides in the row data.
+			// No subscription row needed; ended_at rides in the row data.
 			endedAt := s.emailService.now().UTC()
 			if notification.Data.EndedAt != nil {
 				endedAt = notification.Data.EndedAt.UTC()
@@ -171,7 +170,7 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 		log.WithContext(ctx).Debug("payment method auto-updated - no email sent")
 		return nil
 	case models.NotificationPaymentMethodUpdateRequired:
-		// or#870 bucket 2: charging stopped, access retained, customer must act.
+		// Bucket 2: charging stopped, access retained, customer must act.
 		return s.emailService.SendPaymentMethodUpdateRequired(ctx, notification.CustomerID.String())
 	default:
 		log.WithContext(ctx).WithField("event_type", notification.EventType).Warn("unknown notification event type for email delivery")

@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// #789: access-ended mail goes to often long-lapsed users, so its copy stays
+// Access-ended mail goes to often long-lapsed users, so its copy stays
 // neutral, and the CTA exists only when there is somewhere to send them.
 func TestRenderAccessEndedEmail(t *testing.T) {
 	endedAt := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)

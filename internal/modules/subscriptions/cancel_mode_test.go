@@ -69,7 +69,7 @@ func TestCancelModeAndResumable(t *testing.T) {
 			require.Equal(t, tc.mode, CancelModeFor(tc.sub, now))
 			require.Equal(t, tc.resumable, Resumable(tc.sub, now))
 			require.Equal(t, tc.scheduled, CancelScheduled(tc.sub, now))
-			// #696: no rail sends the customer to an external portal.
+			// No rail sends the customer to an external portal.
 			if tc.sub != nil {
 				require.Nil(t, CancelPortalURL(tc.sub, now))
 			}
@@ -107,8 +107,8 @@ func TestNMIDeferredDeleteAt(t *testing.T) {
 	}
 }
 
-// or#842: automated terminal cancels get a cooling-off window, clamped so the
-// delete still precedes a known rebill; with no safe room it is due now.
+// Automated terminal cancels get a cooling-off window, clamped so the delete
+// still precedes a known rebill; with no safe room it is due now.
 func TestSystemDeferredDeleteAt(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	full := now.Add(SystemDeleteCoolingOff)

@@ -16,14 +16,14 @@ const (
 	PremiumEndReasonRefund     PremiumEndReason = "refund"
 	PremiumEndReasonAdmin      PremiumEndReason = "admin"
 	PremiumEndReasonRail       PremiumEndReason = "rail_cancel"
-	// PremiumEndReasonAccessEnded (#789): the converge NOTIFY pass detected the
-	// customer's last entitlement window closed with no transition-site email —
-	// neutral "access ended" copy, no charge/dunning language.
+	// PremiumEndReasonAccessEnded: the converge pass saw the customer's last
+	// entitlement window close with no transition-site email. Neutral copy, no
+	// charge or dunning language.
 	PremiumEndReasonAccessEnded PremiumEndReason = "access_ended"
-	// PremiumEndReasonNonRecoverable (or#870 bucket 3): the issuer withdrew the
-	// recurring mandate, or the instrument is permanently dead. We canceled the
-	// schedule at the rail — their stored payment method is untouched — and the
-	// copy invites them to re-subscribe.
+	// PremiumEndReasonNonRecoverable (bucket 3): the issuer withdrew the
+	// recurring mandate or the instrument is dead. The rail schedule was
+	// canceled, the stored payment method untouched; the copy invites a
+	// re-subscribe.
 	PremiumEndReasonNonRecoverable PremiumEndReason = "non_recoverable"
 	PremiumEndReasonUnknown        PremiumEndReason = "unknown"
 )

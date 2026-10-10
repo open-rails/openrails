@@ -13,10 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// CancelMode describes how a subscription's cancellation behaves for a given
-// rail (and, for NMI, the subscription's current lifecycle state). Registry-
-// owned since #686 (rails.CancelMode); aliased here for the existing exported
-// surface (handlers, internal/service).
+// CancelMode describes how a subscription's cancellation behaves on its rail
+// (for NMI, also its lifecycle state). It is rails.CancelMode.
 type CancelMode = rails.CancelMode
 
 const (
@@ -25,29 +23,16 @@ const (
 	CancelModeExternalPortal = rails.CancelModeExternalPortal
 )
 
-// NMIDeleteSafetyMargin is how far ahead of the paid-period end we fire the
-// deferred NMI delete_subscription (issue 216).
-//
-// Timing assumption: NMI attempts the recurring auto-charge AT the period end
-// (current_period_ends_at). We must delete the recurring subscription on the NMI
-// side strictly BEFORE that charge fires, or the user gets billed after they
-// canceled. A 48h margin gives River ample room to run the job (and retry on
-// transient failures) before NMI's rebill window opens, while still preserving
-// the user's full paid access right up to ~48h before expiry as an undo window.
-//
-// Corollary: if a cancel arrives when there is less than this margin left
-// (now >= current_period_ends_at - 48h), or the period end is unknown/past, we
-// must delete IMMEDIATELY — there is no safe room to defer.
+// NMIDeleteSafetyMargin is how far ahead of the paid-period end the deferred
+// NMI delete_subscription fires. NMI rebills at current_period_ends_at, so the
+// delete must land strictly before it or a canceled customer is billed; the
+// margin leaves River room to retry. With less margin left, or an unknown or
+// past period end, the delete is immediate.
 const NMIDeleteSafetyMargin = 48 * time.Hour
 
-// NMIDeferredDeleteAt returns (deleteAt, true) when an NMI-backed cancellation
-// should DEFER the rail-side delete to a scheduled time (a genuine future
-// undo window exists), or (zero, false) when it must delete IMMEDIATELY.
-//
-// Defer only when there is a real future window: the paid period end is known,
-// in the future, and far enough out that deleteAt = periodEnd - margin is still
-// in the future. Otherwise (window already open, or period unknown/past) the
-// caller must delete inline exactly as before.
+// NMIDeferredDeleteAt returns (deleteAt, true) when an NMI cancellation should
+// defer the rail-side delete to periodEnd - margin (still in the future), or
+// (zero, false) when it must delete immediately.
 func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bool) {
 	if sub == nil {
 		return time.Time{}, false
@@ -57,38 +42,25 @@ func NMIDeferredDeleteAt(sub *models.Subscription, now time.Time) (time.Time, bo
 	}
 	deleteAt := sub.CurrentPeriodEndsAt.Add(-NMIDeleteSafetyMargin)
 	if !deleteAt.After(now) {
-		// The 48h pre-rebill window has already opened — too close to defer safely.
+		// The pre-rebill window has opened: too close to defer.
 		return time.Time{}, false
 	}
 	return deleteAt, true
 }
 
-// SystemDeleteCoolingOff is how long an AUTOMATED (system-origin) terminal
-// cancellation waits before its irreversible rail-side delete becomes due
-// (or#842). A user cancel already has an undo window; the automated paths —
-// dunning exhaustion, unknown-resolution convergence — queued the delete at
-// `now`, so a cancellation our own malfunction produced (a stale roster, a
-// misread decline) reached the provider before anything could notice.
-//
-// The window is not a delay for its own sake: NMIDeleteHandler.CheckRelevance
-// re-reads the subscription at execution time and SUPERSEDES the delete if the
-// row is no longer a canceled-awaiting-delete one. A late renewal charge, a
-// converge pass that resurrects the row, or an operator undo inside the window
-// therefore leaves the rail schedule intact — the delete simply never happens.
-// 24h covers one full worker/reconcile cycle plus an operator's working day.
+// SystemDeleteCoolingOff is how long an automated (system-origin) terminal
+// cancellation waits before its irreversible rail-side delete is due, so a
+// cancel our own malfunction produced can be caught. NMIDeleteHandler
+// re-reads the row at execution and supersedes the delete unless it is still
+// canceled-awaiting-delete, so a late renewal, a converge resurrection or an
+// operator undo inside the window leaves the rail schedule intact.
 const SystemDeleteCoolingOff = 24 * time.Hour
 
 // SystemDeferredDeleteAt is when an automated terminal cancellation's rail-side
-// delete becomes due: now + SystemDeleteCoolingOff, shortened when a KNOWN
-// future rebill would otherwise fire first.
-//
-// The clamp is the same doctrine as NMIDeleteSafetyMargin: the delete must land
-// strictly before the rail's next auto-charge or the customer is billed after
-// being canceled. When the paid period ends in the future but the 48h pre-rebill
-// margin has already opened, there is no safe room to wait at all and the delete
-// is due immediately, exactly as before. The dominant automated case — a
-// subscription already past its period end — has no known future charge date, so
-// it gets the full window.
+// delete is due: now + SystemDeleteCoolingOff, clamped to land before a known
+// future rebill (as NMIDeleteSafetyMargin), and immediate once that margin has
+// opened. Past its period end there is no known charge date, so the full
+// window applies.
 func SystemDeferredDeleteAt(sub *models.Subscription, now time.Time) time.Time {
 	due := now.Add(SystemDeleteCoolingOff)
 	if !periodEndsInFuture(sub, now) {
@@ -104,11 +76,9 @@ func SystemDeferredDeleteAt(sub *models.Subscription, now time.Time) time.Time {
 	return margin
 }
 
-// CancelModeFor returns the cancellation capability for a subscription — each
-// rail's answer lives in its #669 descriptor (rails.Descriptor.CancelMode; NMI
-// is state-conditional: reversible only while its deferred delete is pending,
-// issue 216). A nil subscription or unknown rail yields CancelModeDestructive
-// (the safe default).
+// CancelModeFor returns the subscription's cancellation capability from its
+// rail descriptor (NMI is reversible only while its deferred delete is
+// pending). A nil subscription or unknown rail yields CancelModeDestructive.
 func CancelModeFor(sub *models.Subscription, now time.Time) CancelMode {
 	return rails.CancelModeFor(sub, now)
 }
@@ -125,10 +95,8 @@ func periodEndsInFuture(sub *models.Subscription, now time.Time) bool {
 	return sub.CurrentPeriodEndsAt.After(now)
 }
 
-// CancelScheduled reports whether a subscription is canceled but the user still
-// retains paid access until the end of the current period (status == canceled
-// && current_period_ends_at > now). This is independent of whether the cancel
-// can be undone.
+// CancelScheduled reports whether a subscription is canceled but still paid
+// through the current period, regardless of whether the cancel can be undone.
 func CancelScheduled(sub *models.Subscription, now time.Time) bool {
 	if sub == nil {
 		return false
@@ -139,12 +107,9 @@ func CancelScheduled(sub *models.Subscription, now time.Time) bool {
 	return periodEndsInFuture(sub, now)
 }
 
-// Resumable is the single shared predicate for "can this subscription be resumed
-// right now". It is true when the cancellation is reversible for this rail
-// AND the subscription is canceled AND the paid period is still in the future.
-//
-// This is the ONE place that gates resume — the HTTP handler, the River worker,
-// the public DTO, and the library facade all consult it so they cannot drift.
+// Resumable is the one resume gate (handler, worker, DTO and facade): the
+// cancel is reversible on this rail, the subscription is canceled, and its
+// paid period is still in the future.
 func Resumable(sub *models.Subscription, now time.Time) bool {
 	if sub == nil {
 		return false
@@ -163,10 +128,8 @@ func Resumable(sub *models.Subscription, now time.Time) bool {
 	return periodEndsInFuture(sub, now)
 }
 
-// CancelPortalURL returns the external consumer-portal URL a client should send
-// the user to in order to manage their subscription, when the cancel mode is
-// external_portal. Returns nil otherwise (every current rail since #696 moved
-// CCBill onto the DataLink SMS cancel). The URL is the rail descriptor's (#686).
+// CancelPortalURL returns the rail descriptor's consumer-portal URL when the
+// cancel mode is external_portal, else nil (no current rail uses it).
 func CancelPortalURL(sub *models.Subscription, now time.Time) *string {
 	if CancelModeFor(sub, now) != CancelModeExternalPortal {
 		return nil

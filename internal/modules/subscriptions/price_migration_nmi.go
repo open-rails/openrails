@@ -1,24 +1,14 @@
 package subscriptions
 
-// #815: gateway-native NMI auto-migration for #813 plan migrations.
+// A gateway-native NMI recurring subscription (NMI initiates the rebills) is
+// migrated server-side: update_subscription sets the remote plan_amount to the
+// target price's amount. NMI knows only amount and schedule, so the product
+// change stays internal.
 //
-// A gateway-native NMI recurring subscription (NMI initiates the rebills; no
-// #297 stored-credential anchor) CAN be migrated server-side: classic Direct
-// Post recurring=update_subscription mutates the remote record's plan_amount
-// (merchant-initiated, vault-backed, no user interaction). NMI knows only
-// amount + schedule — no product concept — so the rail-side flip for a plan
-// change is plan_amount -> the target price's amount; the product/entitlement
-// cutover stays internal.
-//
-// Timing is STRICTER than Stripe: NMI has no future-dated schedule object, so
-// the push IS the next-rebill flip. Pushes happen only inside the change-
-// boundary period (after the last old-price rebill, before the first
-// new-price one) — see pushNMI's early-flip guard. Provider truth flips at
-// push time (the remote record immediately reads the target amount, verified
-// by read-back), so the internal cutover accompanies the push — mirroring the
-// converge-from-provider-truth doctrine. Billing still flips only at the next
-// rebill; the rebill date never moves; nothing is charged off-cycle;
-// entitlement windows re-derive at the next renewal grant (#813 amendment).
+// NMI has no future-dated schedule, so the push is the next-rebill flip: it
+// happens only in the period before the first new-price rebill (pushNMI's
+// early-flip guard). The internal move accompanies the read-back-verified push;
+// the rebill date never moves and nothing is charged off-cycle.
 
 import (
 	"context"
@@ -31,11 +21,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// NMIPusher is the #815 gateway-native NMI push seam (production impl:
-// NewNMIPlanPusher over the #788 per-merchant client resolver; faked in
-// tests). CanPush doubles as the NMI-family rail detector — it is resolver-
-// driven, so custom-named NMI PSPs classify without code
-// changes.
+// NMIPusher pushes a migration to an NMI gateway schedule (NewNMIPlanPusher;
+// faked in tests). CanPush doubles as the NMI-family rail detector, so
+// custom-named NMI PSPs classify without code changes.
 type NMIPusher interface {
 	// CanPush reports whether sub is an addressable gateway-native NMI
 	// recurring record: the merchant declares an armable NMI account for it
@@ -53,8 +41,8 @@ type nmiPlanPusher struct {
 	resolver NMIClientSource
 }
 
-// NewNMIPlanPusher builds the production NMIPusher over the store-scoped NMI
-// client resolver (#788; satisfied by money.MerchantCollectionAdapterBuilder).
+// NewNMIPlanPusher builds the production NMIPusher over the merchant's NMI
+// client resolver (money.MerchantCollectionAdapterBuilder).
 func NewNMIPlanPusher(resolver NMIClientSource) NMIPusher {
 	return &nmiPlanPusher{resolver: resolver}
 }
@@ -86,9 +74,8 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 	if railID == "" {
 		return fmt.Errorf("nmi push: subscription missing nmi reference")
 	}
-	// or#863: through the registry, never an inline /10_000 — the converter is
-	// the only thing here that knows the currency's scale, and the only thing
-	// that can refuse an amount whose currency was never established.
+	// Through the registry, never an inline /10_000: only the converter knows
+	// the currency's scale and refuses an unestablished currency.
 	cents, err := moneyutil.NativeToRailMinorExact(currency, amountNative)
 	if err != nil {
 		return fmt.Errorf("nmi push: %w", err)
@@ -127,10 +114,9 @@ func (p *nmiPlanPusher) PushPlanAmount(ctx context.Context, sub *models.Subscrip
 		return fmt.Errorf("nmi push: update %s: %w", railID, err)
 	}
 
-	// Converge-from-provider-truth: confirm the flip took before the caller
-	// applies the internal cutover. A mismatch (or ambiguous update) leaves
-	// the row blocked; a re-run re-pushes the same amount (a set-to-value op,
-	// idempotent at NMI) and re-verifies.
+	// Confirm the flip took before the caller moves the subscription. A
+	// mismatch (or ambiguous update) leaves the move blocked; a re-run
+	// re-pushes the same amount (idempotent at NMI) and re-verifies.
 	after, found, err := client.GetSubscription(ctx, railID)
 	if err != nil {
 		return fmt.Errorf("nmi push: verify %s: %w", railID, err)

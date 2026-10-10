@@ -29,7 +29,7 @@ type renewalEffects struct {
 // grants are idempotent, so a webhook-first payment row can be completed here.
 func (s *SubscriptionLifecycleService) applyRenewalEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects renewalEffects) (*models.NotificationQueue, error) {
 	if !effects.PreserveLifecycle {
-		// The payment fact decides through the state machine (#1091).
+		// The payment fact decides through the state machine.
 		var event lifecycle.Event = lifecycle.RenewalPaid{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}
 		if effects.Reinstate && sub.Status == models.StatusCanceled {
 			event = lifecycle.Reinstate{PeriodStart: effects.PeriodStart, PeriodEnd: effects.PeriodEnd}

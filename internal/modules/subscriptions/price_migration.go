@@ -1,8 +1,7 @@
 package subscriptions
 
 // Price migrations move the subscribers of one price, or of every version of
-// a price key, to another price (#1175 decision 9; formerly reprice batches
-// and plan migrations).
+// a price key, to another price.
 //
 // Money: nothing is prorated, charged early or re-anchored. Each subscription
 // moves at its first renewal on or after effective_at, carrying the move as

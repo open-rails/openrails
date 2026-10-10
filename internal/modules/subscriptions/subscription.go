@@ -48,7 +48,7 @@ type SubscriptionService struct {
 
 var ErrActiveSubscriptionExists = errors.New("active or pending subscription already exists for this product")
 
-// now returns the current time from the service's clock, or time.Now() if no clock is set.
+// now returns the service clock's time, or time.Now() without one.
 func (s *SubscriptionService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -68,8 +68,8 @@ const (
 	RailCCBill = "ccbill"
 	RailStripe = "stripe"
 
-	// Uppercase is the canonical internal form (CUR-6) and what the
-	// DB CHECK accepts. Lowercase belongs only on a rail wire.
+	// Uppercase is the canonical internal form and what the DB CHECK accepts.
+	// Lowercase belongs only on a rail wire.
 	CurrencyUSD = "USD"
 	CurrencyEUR = "EUR"
 
@@ -95,7 +95,6 @@ func (s *SubscriptionService) GetAvailableProducts(ctx context.Context) ([]*mode
 		return nil, fmt.Errorf("failed to get active products: %w", err)
 	}
 
-	// Load prices for each product
 	for _, product := range products {
 		prices, err := s.PriceService.GetActiveByProductID(ctx, product.ID)
 		if err != nil {
@@ -184,13 +183,13 @@ func (s *SubscriptionService) GetActiveOrPendingByUserIDAndTierGroup(ctx context
 }
 
 // GetUnknownByUserIDAndProductID returns an `unknown`-status subscription for a
-// user and product (#691 checkout guard).
+// user and product (checkout guard).
 func (s *SubscriptionService) GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
 	return s.subscriptionRepo.GetUnknownByUserIDAndProductID(ctx, userID, productID)
 }
 
 // GetUnknownByUserIDAndTierGroup returns an `unknown`-status subscription for a
-// user in the specified tier group (#691 checkout guard).
+// user in the specified tier group (checkout guard).
 func (s *SubscriptionService) GetUnknownByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
 	return s.subscriptionRepo.GetUnknownByUserIDAndTierGroup(ctx, userID, tierGroup)
 }
@@ -202,7 +201,7 @@ func (s *SubscriptionService) Update(ctx context.Context, subscription *models.S
 // ReplaceForTierChange atomically swaps oldSub (pre-mutated by the caller to
 // its canceled state) for newSub in one transaction, so the one-live-
 // subscription-per-(subject, tier-group) unique index is never violated and a
-// failure leaves the old subscription active (SEC-10 — nothing to reactivate).
+// failure leaves the old subscription active.
 func (s *SubscriptionService) ReplaceForTierChange(ctx context.Context, oldSub, newSub *models.Subscription) error {
 	return s.subscriptionRepo.ReplaceForTierChange(ctx, oldSub, newSub, s.now())
 }

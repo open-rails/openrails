@@ -15,8 +15,8 @@ import (
 )
 
 // ApplyCardLifecycle applies a card event and carries it to the subscriptions
-// the card pays, in d's transaction (#1168). The notices it returns are
-// dispatched after commit.
+// the card pays, in d's transaction. The notices it returns are dispatched
+// after commit.
 func (s *SubscriptionLifecycleService) ApplyCardLifecycle(ctx context.Context, d *db.DB, ev paymentmethods.CardEvent) (paymentmethods.CardLifecycle, []*models.NotificationQueue, error) {
 	life, err := paymentmethods.ApplyCardLifecycle(ctx, d.Gen(ctx), ev)
 	if err != nil {

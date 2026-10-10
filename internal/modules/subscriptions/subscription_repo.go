@@ -112,15 +112,10 @@ func (r *SubscriptionRepo) Update(ctx context.Context, s *models.Subscription) e
 	return r.UpdateAt(ctx, s, time.Now())
 }
 
-// ReplaceForTierChange atomically persists a tier change: it writes oldSub
-// (pre-mutated by the caller to its canceled state) and inserts newSub in ONE
-// transaction. The partial unique index
-// subscriptions_customer_id_tier_group_key allows only one live
-// subscription per (tenant_subject, tier_group), so the old row's cancel and
-// the new row's insert must commit together — and the cancel must execute
-// first. On any failure the transaction rolls back and the old subscription
-// remains active locally (SEC-10: upgrade compensation never has to
-// reactivate it).
+// ReplaceForTierChange writes oldSub (pre-mutated by the caller to its
+// canceled state) and inserts newSub in one transaction, the cancel first:
+// subscriptions_customer_id_tier_group_key allows one live subscription per
+// (customer, tier_group). On failure the old subscription stays active.
 func (r *SubscriptionRepo) ReplaceForTierChange(ctx context.Context, oldSub, newSub *models.Subscription, now time.Time) error {
 	return r.db.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txRepo := NewSubscriptionRepo(r.db.NewWithPgxTx(tx))
@@ -132,11 +127,10 @@ func (r *SubscriptionRepo) ReplaceForTierChange(ctx context.Context, oldSub, new
 }
 
 func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription, now time.Time) error {
-	// All columns are written explicitly so nil values CLEAR fields
-	// (CanceledAt, EndedAt, ...) when reactivating subscriptions. Because this
-	// is a full-row write from an in-memory image, webhook-apply
-	// read-modify-writes must read via GetByPSPSubscriptionIDForUpdate inside
-	// one tx or a concurrent writer's committed changes get reverted (#675).
+	// Every column is written, so nil values clear fields (CanceledAt,
+	// EndedAt, ...). A full-row write from an in-memory image: webhook-apply
+	// read-modify-writes must read via GetByPSPSubscriptionIDForUpdate in one
+	// tx, or a concurrent writer's committed changes are reverted.
 	if now.IsZero() {
 		now = time.Now()
 	}
@@ -185,8 +179,8 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 		DunningPolicy:               s.DunningPolicy,
 	}
 	if s.LifecycleChanged() {
-		// #1091 part C: status, paid period and cancellation change only in a
-		// named lifecycle decision, against the revision it was decided on.
+		// Status, paid period and cancellation change only in a named
+		// lifecycle decision, against the revision it was decided on.
 		if s.LifecycleDecision() == "" {
 			return fmt.Errorf("%w: subscription %s (caller %s)", ErrLifecycleUndecided, s.ID, callerName(2))
 		}
@@ -239,9 +233,8 @@ func callerName(skip int) string {
 	return fmt.Sprintf("%s:%d", name, line)
 }
 
-// attachSubscriptionRelations stitches Price and PaymentMethod (the bun-era
-// selectWithDetails relations) onto subs; withProduct additionally loads
-// Price.Product (selectWithProduct).
+// attachSubscriptionRelations stitches Price and PaymentMethod onto subs;
+// withProduct also loads Price.Product.
 func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs []*models.Subscription, withProduct bool) error {
 	if len(subs) == 0 {
 		return nil
@@ -479,8 +472,8 @@ func (r *SubscriptionRepo) GetActiveSubscriptionAt(ctx context.Context, userID s
 }
 
 // GetByPSPSubscriptionIDForUpdate is the row-locked (FOR UPDATE) variant for
-// webhook-apply read-modify-writes (#675). Must run inside a transaction;
-// UpdateAt is a full-row write, so the lock must be held from read to write.
+// webhook-apply read-modify-writes. Must run inside a transaction; UpdateAt is
+// a full-row write, so the lock must be held from read to write.
 func (r *SubscriptionRepo) GetByPSPSubscriptionIDForUpdate(ctx context.Context, rail, railSubscriptionID string) (*models.Subscription, error) {
 	railSubscriptionID = strings.TrimSpace(railSubscriptionID)
 	if railSubscriptionID == "" {
@@ -728,8 +721,8 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Co
 }
 
 // GetUnknownByUserIDAndProductID finds an `unknown`-status subscription for a
-// user and product (#691 checkout guard): parked pending provider verification,
-// possibly still alive/billing at the provider.
+// user and product (checkout guard): parked pending provider verification,
+// possibly still billing at the provider.
 func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
 	tsid, err := db.ResolveCustomerID(userID)
 	if err != nil {
@@ -750,7 +743,7 @@ func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, u
 	return r.oneWithDetails(ctx, row, false)
 }
 
-// GetUnknownByUserIDAndTierGroup is the tier-group variant of the #691 checkout
+// GetUnknownByUserIDAndTierGroup is the tier-group variant of the checkout
 // guard lookup. Returns the subscription with Price and Product loaded.
 func (r *SubscriptionRepo) GetUnknownByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
 	tsid, err := db.ResolveCustomerID(userID)
@@ -780,11 +773,9 @@ func derefSubs(subs []*models.Subscription) []models.Subscription {
 	return out
 }
 
-// DueDunningBatch bounds ONE merchant's dunning pass (or#837). Each returned
-// row can charge a card and terminate a subscription, so an uncapped list was
-// an unbounded burst of provider calls in a single job. Most-overdue first (the
-// query's order), and the claim lease means the remainder is simply the next
-// pass's head — nothing is skipped, only paced.
+// DueDunningBatch bounds one merchant's dunning pass: each row can charge a
+// card and terminate a subscription. Most-overdue first, and the claim lease
+// makes the remainder the next pass's head: nothing is skipped, only paced.
 const DueDunningBatch = 500
 
 // ListDueDunningSubscriptions returns past_due subscriptions on the given
@@ -818,7 +809,7 @@ func (r *SubscriptionRepo) ListDueDunningSubscriptions(ctx context.Context, rail
 
 // ListOverdueRebills returns auto-renewing subscriptions whose period ended
 // before its owner's cutoff with neither an attempt nor a recorded miss for
-// that cycle (#1112).
+// that cycle.
 func (r *SubscriptionRepo) ListOverdueRebills(ctx context.Context, engineCutoff, nmiCutoff time.Time) ([]*models.Subscription, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {

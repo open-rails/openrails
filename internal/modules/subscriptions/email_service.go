@@ -70,7 +70,7 @@ func (s *EmailService) SetDomainServices(
 	s.users = users
 }
 
-// now returns the current time from the service's clock, or time.Now() if no clock is set.
+// now returns the service clock's time, or time.Now() without one.
 func (s *EmailService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -119,7 +119,7 @@ func (s *EmailService) storeName(ctx context.Context) string {
 	return name
 }
 
-// signupURL is the merchant's winback/signup page (#789); "" when undeclared.
+// signupURL is the merchant's winback/signup page; "" when undeclared.
 func (s *EmailService) signupURL(ctx context.Context) string {
 	return strings.TrimSpace(s.merchantProfile(ctx).SignupURL)
 }
@@ -144,8 +144,8 @@ func (s *EmailService) SendSubscriptionExpired(ctx context.Context, data Subscri
 	return s.SendEmail(ctx, data.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 }
 
-// SendPaymentMethodUpdateRequired is the or#870 bucket-2 send: charging has
-// STOPPED but the subscription and the customer's access are intact.
+// SendPaymentMethodUpdateRequired is the bucket-2 send: charging has stopped
+// but the subscription and the customer's access are intact.
 func (s *EmailService) SendPaymentMethodUpdateRequired(ctx context.Context, userID string) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping payment-method-update email")
@@ -213,10 +213,6 @@ func (s *EmailService) SendPurchaseReceipt(ctx context.Context, n *models.Notifi
 	return s.SendEmail(ctx, email, content.Subject, content.HTML, content.Plain)
 }
 
-// ============================================================================
-// Subscription Email Methods (formerly in SubscriptionEmailService)
-// ============================================================================
-
 // SendSubscriptionChanged sends the receipt of a change staff made at the
 // customer's request.
 func (s *EmailService) SendSubscriptionChanged(ctx context.Context, userID string, data billing.NotificationData) error {
@@ -280,7 +276,7 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 		return nil
 	}
 
-	// access_ended (#789) works for grant-only customers: no subscription row
+	// access_ended works for grant-only customers: no subscription row
 	// required, so it resolves the user directly instead of via getEmailData.
 	if reason == PremiumEndReasonAccessEnded {
 		return s.SendAccessEnded(ctx, userID, s.now())
@@ -299,8 +295,8 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	case PremiumEndReasonExpired:
 		return s.SendSubscriptionExpired(ctx, *emailData)
 	case PremiumEndReasonNonRecoverable:
-		// or#870 bucket 3: the mandate is gone. Distinct copy — their saved card
-		// was NOT touched, and re-subscribing is the way back.
+		// Bucket 3: the mandate is gone. Their saved card was not touched, and
+		// re-subscribing is the way back.
 		rendered := RenderSubscriptionNonRecoverableEmail(s.storeName(ctx), s.signupURL(ctx), *emailData)
 		return s.SendEmail(ctx, emailData.UserEmail, rendered.Subject, rendered.HTML, rendered.Plain)
 	case PremiumEndReasonChargeback, PremiumEndReasonRefund, PremiumEndReasonAdmin, PremiumEndReasonRail:
@@ -314,8 +310,8 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 	}
 }
 
-// SendAccessEnded (#789) sends the neutral access-ended notice. It never needs
-// a subscription row — grant-only customers get it too.
+// SendAccessEnded sends the neutral access-ended notice. It needs no
+// subscription row, so grant-only customers get it too.
 func (s *EmailService) SendAccessEnded(ctx context.Context, userID string, endedAt time.Time) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping access-ended email")
@@ -497,8 +493,8 @@ func describePaymentMethod(subscription *models.Subscription) string {
 	return strings.Join(parts, " ")
 }
 
-// railDisplayName is registry-backed (#669); unknown rails keep the legacy
-// upper-cased fallback.
+// railDisplayName is the rail registry's display name; unknown rails fall back
+// to upper case.
 func railDisplayName(rail models.Rail) string {
 	return rails.DisplayName(rail)
 }

@@ -1,10 +1,6 @@
-// Package collection is the ONE collection engine core (#828): "a user owes
-// money; collect it on a schedule; classify outcomes; verify ambiguity; go
-// terminal deliberately." Two consumers ride it — subscription rebill dunning
-// (terminal ⇒ cancel + entitlement revoke, staleness ⇒ cancel-never-charge)
-// and invoice arrears collection (terminal ⇒ uncollectible). Consumer POLICY
-// stays at the consumer; the schedule table, outcome classification and
-// failure-action mechanics live here, once.
+// Package collection is the collection engine core: schedule retries for money
+// owed, classify outcomes and go terminal deliberately. Subscription dunning and
+// invoice arrears collection consume it; their terminal policy stays with them.
 package collection
 
 import (
@@ -20,24 +16,20 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// Cadence-relative retry schedule (#359, extracted by #828).
-//
-// The schedule is a HARDCODED function of the billing cycle — no knob.
-// Each entry is a retry moment as an OFFSET from the INITIAL failure:
+// Default retry schedule, as offsets from the initial failure:
 //
 //	cycle < 4 days        -> no retries (the first failure is terminal)
-//	4 days <= cycle < 28  -> +1d, +2d                  ("weekly": 3 failures total)
-//	cycle >= 28 days      -> +2d, +5d, +9d, +13d       ("monthly": 5 failures total)
+//	4 days <= cycle < 28  -> +1d, +2d                  (3 failures total)
+//	cycle >= 28 days      -> +2d, +5d, +9d, +13d       (5 failures total)
 //	unknown (<= 0)        -> ErrUnknownCycle: nothing is scheduled or charged
 //
-// Boundary rationale: the derived staleness window (last offset + slack) must
-// fit WELL INSIDE one billing cycle, so a subscription is never still dunning
-// the old period when the next charge is due.
+// The staleness window (last offset + slack) fits inside one cycle, so a
+// subscription never still duns the old period when the next charge is due.
 const (
-	// MinRetryCycleHours is the shortest billing cycle that gets any retries at
-	// all; below it the first failure is terminal. 96h (4 days).
+	// MinRetryCycleHours is the shortest billing cycle with any retries; below
+	// it the first failure is terminal.
 	MinRetryCycleHours = 4 * 24
-	// MonthlyCycleHours is where the monthly (capped) tier starts. 672h (28 days).
+	// MonthlyCycleHours is where the monthly tier starts.
 	MonthlyCycleHours = 28 * 24
 	// maxWindowSlack is the most slack added past the last retry offset: 24h
 	// tolerates a late worker run. Short cycles get half their cycle instead
@@ -90,9 +82,8 @@ var (
 	}
 )
 
-// RetryOffsets returns the hardcoded retry schedule for a billing cycle in
-// HOURS. An empty schedule means no retries — the first failure is terminal.
-// Callers must not mutate the returned slice.
+// RetryOffsets returns the default retry schedule for a billing cycle in hours.
+// Empty means no retries. Callers must not mutate the returned slice.
 func RetryOffsets(cycleHours int) ([]time.Duration, error) {
 	return DefaultPolicy.RetryOffsets(cycleHours)
 }
@@ -104,10 +95,9 @@ func MaxFailures(cycleHours int) (int, error) {
 }
 
 // NextRetryIn returns how long after the failures-th consecutive failure
-// (1-based) the next retry should run, or 0 when that failure is terminal.
-// The gaps reproduce the offset schedule when each retry runs on time and
-// degrade gracefully when the worker is late — the next retry is always
-// relative to the failure that just happened, never in the past.
+// (1-based) the next retry runs, or 0 when that failure is terminal. It is
+// relative to the failure just made, so a late worker never schedules into the
+// past.
 func NextRetryIn(cycleHours, failures int) (time.Duration, error) {
 	return DefaultPolicy.NextRetryIn(cycleHours, failures)
 }
@@ -119,16 +109,13 @@ func NextAttemptAt(cycleHours, failures int, lastAttempt time.Time) (next time.T
 	return DefaultPolicy.NextAttemptAt(cycleHours, failures, lastAttempt)
 }
 
-// Window returns the DERIVED staleness window (#344, #359): how long past the
-// missed charge collection may still attempt one. Past it the charge is SKIPPED
-// — a card that failed months ago is never surprise-charged by a catch-up run —
-// and the row parks for provider verification. Expiry is NOT a terminal
-// outcome (#839): a clock reading is not evidence a subscription is dead.
+// Window returns the derived staleness window: how long past the missed charge
+// collection may still attempt it. Past it the charge is skipped (no surprise
+// catch-up charge) and the row parks for provider verification; expiry alone is
+// never terminal.
 //
-// window = last retry offset + min(24h, cycle/2). A 0-retry cycle (sub-4-day
-// cadence) has no offsets, so its window is the slack alone — NOT zero (#839),
-// and never a whole cycle: an hourly membership gets 30 minutes, a daily one
-// 12 hours. Window(cycle) < cycle for every known cycle.
+// window = last retry offset + min(24h, cycle/2), so a 0-retry cycle still gets
+// the slack and Window(cycle) < cycle for every known cycle.
 func Window(cycleHours int) (time.Duration, error) {
 	return DefaultPolicy.Window(cycleHours)
 }
@@ -137,9 +124,8 @@ func windowSlack(cycle time.Duration) time.Duration {
 	return min(maxWindowSlack, cycle/2)
 }
 
-// BillingCycleHoursOf returns the price's billing cycle in HOURS, or 0 when
-// the price or its cycle is unknown (one-time prices), which the schedule
-// functions refuse with ErrUnknownCycle.
+// BillingCycleHoursOf returns the price's billing cycle in hours, or 0 when
+// unknown (one-time prices), which the schedule refuses with ErrUnknownCycle.
 func BillingCycleHoursOf(price *models.Price) int {
 	if price == nil {
 		return 0
@@ -151,13 +137,9 @@ func BillingCycleHoursOf(price *models.Price) int {
 	return *cycleHours
 }
 
-// CycleHoursBetween returns a billing period's length in HOURS — the invoice
-// consumer's analogue of BillingCycleHoursOf. An invoice's REAL cycle is its
-// statement period (period_starts_at → period_ends_at), so a weekly statement is dunned
-// on the weekly offsets and an annual one on the monthly offsets, instead of
-// every invoice being dunned on a hardcoded month (or#828).
-//
-// A degenerate or unset period returns 0 = unknown (ErrUnknownCycle).
+// CycleHoursBetween returns a billing period's length in hours: an invoice's
+// cycle is its statement period. A degenerate or unset period returns 0
+// (ErrUnknownCycle).
 func CycleHoursBetween(from, to time.Time) int {
 	if from.IsZero() || to.IsZero() || !to.After(from) {
 		return 0

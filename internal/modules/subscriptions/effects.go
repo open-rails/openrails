@@ -29,14 +29,10 @@ type EffectOptions struct {
 	Notice billing.NotificationData
 }
 
-// ApplyEffects carries out a transition's effects inside the caller's
-// transaction (#1089 §3), on the row the caller holds locked. Call it after
-// Transition and before persisting the row: a provider cancel stamps the
-// row's deletion marker. Notices are queued idempotently and returned for the
-// caller to deliver after commit (DispatchNotifications).
-//
-// Transition owns retry fields; these effects project the corresponding grace
-// policy. The unverified trigger separately wakes provider resolution on commit.
+// ApplyEffects carries out a transition's effects in the caller's transaction,
+// on the row it holds locked. Call it after Transition and before persisting
+// the row: a provider cancel stamps the deletion marker. Notices are queued
+// idempotently and returned for DispatchNotifications after commit.
 func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.DB, sub *models.Subscription, effects []lifecycle.Effect, now time.Time, opts EffectOptions) ([]*models.NotificationQueue, error) {
 	for _, effect := range effects {
 		switch effect.(type) {
@@ -111,8 +107,8 @@ func (s *SubscriptionLifecycleService) ApplyEffects(ctx context.Context, d *db.D
 }
 
 // queueProviderCancel queues, in d's transaction, the cancel of the provider
-// schedule a terminal transition leaves billing (#1102). An NMI delete waits
-// out the system cooling-off window; a replay finds it already queued.
+// schedule a terminal transition leaves billing. An NMI delete waits out the
+// system cooling-off window; a replay finds it already queued.
 func (s *SubscriptionLifecycleService) queueProviderCancel(ctx context.Context, d *db.DB, sub *models.Subscription, now time.Time) error {
 	if sub.RailSubscriptionID == "" {
 		return nil

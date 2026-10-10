@@ -14,10 +14,9 @@ import (
 )
 
 // lifecycleDecisionWriters are the only functions that may name a lifecycle
-// decision (#1091 part C). The state machine's Transition is the rule; the rest
-// are explicit decisions outside it: a plan change that supersedes a
-// membership, a refund that revokes access.
-// Adding a writer means adding it here, in review.
+// decision. Transition is the rule; the rest are explicit decisions outside it
+// (a plan change superseding a membership, a refund revoking access). Adding a
+// writer means adding it here, in review.
 var lifecycleDecisionWriters = map[string]bool{
 	"internal/modules/checkout/stripe_tier_change_intent.go:finalizeUpgrade":   true,
 	"internal/intents/refund.go:revokeMembershipAccess":                        true,

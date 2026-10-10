@@ -6,21 +6,19 @@ import (
 	"time"
 )
 
-// Policy is a merchant's dunning schedule as data (#1093). Tiers are ordered
-// by cycle; the first tier whose MaxCycle exceeds a billing cycle applies, and
-// the last tier (MaxCycle zero) takes every longer cycle. Retry offsets are
-// measured from the first decline. Transient is the quick ladder for processor
-// try-again answers.
+// Policy is a merchant's dunning schedule as data. Tiers are ordered by cycle;
+// the first tier whose MaxCycle exceeds a billing cycle applies, and the last
+// (MaxCycle zero) takes every longer cycle. Offsets are measured from the first
+// decline. Transient is the quick ladder for processor try-again answers.
 type Policy struct {
 	Tiers     []Tier
 	Transient []time.Duration
 	// SuspendAccess ends access with the paid period while a declined renewal
-	// is retried. The default keeps access until a confirmed outcome (Paul,
-	// 2026-09-25); uncertainty alone never ends it.
+	// is retried. By default access lasts until a confirmed outcome.
 	SuspendAccess bool
 	// SuspendWhenHeld ends an engine member's access at the renewal allowance
-	// when collection is stopped and the renewal has no outcome. The default
-	// keeps it until the renewal is attempted (Paul, 2026-09-25).
+	// when collection is stopped and the renewal has no outcome. By default
+	// access lasts until the renewal is attempted.
 	SuspendWhenHeld bool
 }
 
@@ -30,8 +28,8 @@ type Tier struct {
 	Offsets  []time.Duration
 }
 
-// DefaultPolicy is the built-in schedule (#359): no retries below 4 days,
-// +1d/+2d below 28 days, +2d/+5d/+9d/+13d from 28 days.
+// DefaultPolicy is the built-in schedule: no retries below 4 days, +1d/+2d
+// below 28 days, +2d/+5d/+9d/+13d from 28 days.
 var DefaultPolicy = Policy{
 	Tiers: []Tier{
 		{MaxCycle: MinRetryCycleHours * time.Hour},

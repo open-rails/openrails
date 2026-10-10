@@ -14,12 +14,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// ErrPaymentMethodProviderAccountMismatch is returned when a durable
-// payment-source update is asked to use an instrument owned by another PSP.
-// Provider vault references are account-scoped; allowing this request to reach
-// a source-account client could silently bill the wrong account or produce an
-// unrepairable split. Cross-account cutover must use the explicit card
-// re-entry workflow described by ProviderAccountCutoverPlan.
+// ErrPaymentMethodProviderAccountMismatch refuses a payment-source update with
+// an instrument owned by another PSP: vault references are account-scoped, so
+// it could bill the wrong account. A cross-account move needs the card
+// re-entered.
 var ErrPaymentMethodProviderAccountMismatch = errors.New("payment method belongs to a different provider account")
 
 // A custody remap retains the old PSP vault reference for correlation only.
@@ -33,21 +31,16 @@ func ValidatePaymentMethodSourceCustody(pm *models.PaymentMethod) error {
 	return nil
 }
 
-// NMIClientForExistingSubscription resolves the NMI client that owns an already
-// recorded subscription. New-work selectors must not be used for rows pinned to
-// an archived PSP.
-// NMIClientSource arms the store-scoped NMI client for a subscription's
-// merchant + stamped PSP (#788 Layer C; satisfied by
-// money.MerchantCollectionAdapterBuilder). ok=false with nil err = the
-// merchant declares no NMI account; err = declared but not armable (fail
-// closed).
+// NMIClientSource arms the merchant's NMI client for a subscription's stamped
+// PSP (money.MerchantCollectionAdapterBuilder). ok=false with nil err = no NMI
+// account declared; err = declared but not armable (fail closed).
 type NMIClientSource interface {
 	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
 }
 
-// NMIClientForExistingSubscription resolves the NMI client that owns sub —
-// the #704 stamped PSP when present, else the merchant's pull
-// scope — from the armed psps state (#788).
+// NMIClientForExistingSubscription resolves the NMI client that owns sub: its
+// stamped PSP when present, else the merchant's pull scope. New-work selectors
+// must not be used for rows pinned to an archived PSP.
 func NMIClientForExistingSubscription(ctx context.Context, resolver NMIClientSource, sub *models.Subscription) (*nmi.NMIClient, string, bool, error) {
 	if sub == nil {
 		return nil, "", false, errors.New("subscription is nil")

@@ -45,10 +45,9 @@ type AdminSubscriptionService struct {
 	StripeService       *StripeService
 	clock               clockwork.Clock
 
-	// providerCancel queues the durable provider cancel of a
-	// merchant-initiated cancel (or#896, #1102), admin-origin.
+	// providerCancel queues the durable, admin-origin provider cancel of a
+	// merchant-initiated cancel.
 	providerCancel ProviderCancelScheduler
-	// No user directory enrichment; IdP subject is stored on subscription
 }
 
 // SetProviderCancelScheduler injects the admin-origin provider-cancel scheduler.
@@ -65,7 +64,7 @@ func (s *AdminSubscriptionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// now returns the current time from the service's clock, or time.Now() if no clock is set.
+// now returns the service clock's time, or time.Now() without one.
 func (s *AdminSubscriptionService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -76,7 +75,7 @@ func (s *AdminSubscriptionService) now() time.Time {
 // AdminSubscriptionResponse represents a subscription with enriched admin data
 type AdminSubscriptionResponse struct {
 	*models.Subscription
-	//Product  *models.Product   `json:"product,omitempty"`
+
 	Price   *models.Price `json:"price,omitempty"`
 	Dunning *billing.SubscriptionDunning
 }
@@ -137,7 +136,6 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 	}
 	response := &AdminSubscriptionResponse{Subscription: subscription}
 
-	// Enrich with price and product data if available
 	if price, err := s.PriceService.GetByID(ctx, subscription.PriceID); err == nil {
 		response.Price = price
 
@@ -169,18 +167,7 @@ func (s *AdminSubscriptionService) requireLockedSubscription(ctx context.Context
 	return sub, nil
 }
 
-// CancelSubscription cancels a subscription (admin/merchant-initiated).
-//
-// or#896: the rail side rides the SAME durable intent pipeline the
-// user-initiated cancel uses (#674 write-through provider intents). It used to
-// call the gateway synchronously with no intent and no verify leg, and an
-// unresolvable PSP only logged a warning — so the local row flipped to
-// canceled while NMI happily kept rebilling. Now the local cancellation and
-// the remote-cancel intent commit in ONE transaction: the row is never
-// terminal while the rail-side schedule survives unconfirmed (the
-// DeletionScheduledAt marker stays set until the intent's own verify-then-
-// execute leg confirms the NMI subscription is gone), and an ambiguous
-// provider outcome parks for verification instead of lying.
+// rebillInFlight reports whether an OpenRails rebill of sub is still unresolved.
 func rebillInFlight(ctx context.Context, d *db.DB, sub *models.Subscription) (bool, error) {
 	rows, err := d.Gen(ctx).ListRebillTermOwners(ctx, gen.ListRebillTermOwnersParams{MerchantID: sub.MerchantID, SubscriptionID: sub.ID})
 	if err != nil {
@@ -201,6 +188,9 @@ func providerCancellable(status models.SubscriptionStatus) bool {
 	return status.Live()
 }
 
+// CancelSubscription cancels a subscription for the merchant. The local
+// cancellation and the provider-cancel intent commit in one transaction, so the
+// row is never terminal while the rail-side schedule survives unconfirmed.
 func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subscriptionID uuid.UUID, reason string, revokeAccess, accountDeletion bool) error {
 	subscription, err := s.requireSubscription(ctx, subscriptionID)
 	if err != nil {
@@ -297,7 +287,6 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		return err
 	}
 
-	// Add notification
 	notification := &models.NotificationQueue{
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,

@@ -369,9 +369,9 @@ func RenderSubscriptionExpiredEmail(storeName, customerPortalURL string, data Su
 	}
 }
 
-// RenderAccessEndedEmail (#789) tells a customer their premium access ended.
-// Neutral copy — these are often long-lapsed users, so no "we tried to charge
-// you" language. A non-empty signupURL renders a "Sign up again" CTA.
+// RenderAccessEndedEmail tells a customer their premium access ended, in
+// neutral copy (often long-lapsed users, so no charge language). A non-empty
+// signupURL renders a "Sign up again" CTA.
 func RenderAccessEndedEmail(storeName, signupURL, username string, endedAt time.Time) EmailContent {
 	endedOn := endedAt.Format("Jan 2, 2006")
 	name := strings.TrimSpace(username)
@@ -442,11 +442,9 @@ func subscriptionProductName(storeName, productName string) string {
 	return premiumName
 }
 
-// RenderPaymentMethodUpdateRequiredEmail is the or#870 BUCKET 2 notice: the
-// rail told us this card cannot be charged (expired, bad CVC, call issuer...),
-// so we STOPPED charging it. The subscription and the customer's access are
-// still live — they just need to update the card. The one email in the ladder
-// that is a recovery opportunity rather than an apology or a goodbye.
+// RenderPaymentMethodUpdateRequiredEmail is the bucket-2 notice: the card
+// cannot be charged (expired, bad CVC, call issuer...), so charging stopped,
+// but the subscription and access are live until the customer updates it.
 func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	linkText := ""
@@ -479,12 +477,10 @@ func RenderPaymentMethodUpdateRequiredEmail(storeName, customerPortalURL string,
 	}
 }
 
-// RenderSubscriptionNonRecoverableEmail is the or#870 BUCKET 3 goodbye: the
-// issuer withdrew the recurring mandate (NMI 261/262, Stripe
-// revocation_of_authorization) or the instrument is permanently dead
-// (pick-up/lost/stolen/fraudulent). We canceled the schedule at the rail. We
-// did NOT touch their stored payment method — only they delete that — and they
-// are welcome to re-subscribe.
+// RenderSubscriptionNonRecoverableEmail is the bucket-3 goodbye: the issuer
+// withdrew the recurring mandate or the instrument is dead, so the rail
+// schedule was canceled. The stored payment method is untouched, and the
+// customer may re-subscribe.
 func RenderSubscriptionNonRecoverableEmail(storeName, checkoutURL string, data SubscriptionEmailData) EmailContent {
 	premiumName := subscriptionProductName(storeName, data.ProductName)
 	linkText := ""

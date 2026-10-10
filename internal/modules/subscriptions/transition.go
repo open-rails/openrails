@@ -9,7 +9,7 @@ import (
 )
 
 // OwnerOf maps a subscription's collection policy to the state machine's
-// owner (design §2): who charges renewals and who retries declines.
+// owner: who charges renewals and who retries declines.
 func OwnerOf(sub *models.Subscription) lifecycle.Owner {
 	switch {
 	case sub.CollectionPolicy == models.CollectionPolicyEngine:

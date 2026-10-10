@@ -17,11 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
-// Stripe side of the subscription liveness sync (#367): a read-only,
-// per-subscription provider-truth probe — GET /v1/subscriptions/{id} with the
-// latest invoice expanded. Stripe runs its own dunning and retries webhooks
-// for days, so this is lower urgency than the NMI probe, but it repairs long
-// webhook outages the same way.
+// Stripe side of the subscription liveness sync: a read-only provider-truth
+// probe (GET /v1/subscriptions/{id}, latest invoice expanded) that repairs
+// long webhook outages.
 
 // StripeLivenessRecord is the normalized remote-truth view of one Stripe
 // subscription for liveness classification. Found=false means Stripe no
@@ -35,8 +33,8 @@ type StripeLivenessRecord struct {
 	CurrentPeriodEnd   time.Time
 	// CustomerID is Stripe's cus_… id; Metadata is the subscription metadata
 	// (checkout stamps user_id / internal_price_id / checkout_attempt_id there).
-	// PriceID is the first item's Stripe price id. Fetch-sourced identity for
-	// the #684 converge path — never read from webhook payloads.
+	// PriceID is the first item's Stripe price id. Identity for converge comes
+	// from this fetch, never from webhook payloads.
 	CustomerID string
 	Metadata   map[string]string
 	PriceID    string

@@ -27,8 +27,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Sentinel errors for subscription operations. The typed ones (#983) carry
-// the status and wire code handlers answer with.
+// Sentinel errors for subscription operations. The typed ones carry the
+// status and wire code handlers answer with.
 var (
 	ErrSubscriptionNotFound  = apperr.New(http.StatusNotFound, "subscription_not_found", "subscription not found")
 	ErrSubscriptionNotActive = apperr.New(http.StatusConflict, "subscription_not_active", "subscription is not active")
@@ -52,7 +52,7 @@ type UserSubscriptionService struct {
 	PaymentService      *payments.PaymentService
 	NotificationService *NotificationService
 	EntitlementService  *entitlements.EntitlementService
-	// NMIResolver arms store-scoped NMI clients per merchant (#788).
+	// NMIResolver arms store-scoped NMI clients per merchant.
 	NMIResolver NMIClientSource
 	clock       clockwork.Clock
 
@@ -62,9 +62,9 @@ type UserSubscriptionService struct {
 }
 
 // ProviderCancelScheduler queues the durable cancel of a provider-billed
-// schedule (#1102): the NMI delete, the CCBill DataLink cancel, the Stripe
-// cancel. WithTx rebinds it onto the caller's transaction so the intent
-// commits atomically with the local cancellation that needs it.
+// schedule: the NMI delete, the CCBill DataLink cancel, the Stripe cancel.
+// WithTx rebinds it onto the caller's transaction so the intent commits
+// atomically with the local cancellation that needs it.
 type ProviderCancelScheduler interface {
 	// ScheduleProviderCancel queues sub's provider cancel (a no-op when no
 	// provider bills it). An NMI delete is due at sub.DeletionScheduledAt,
@@ -89,7 +89,7 @@ func (s *UserSubscriptionService) Clock() clockwork.Clock {
 	return s.clock
 }
 
-// now returns the current time from the service's clock, or time.Now() if no clock is set.
+// now returns the service clock's time, or time.Now() without one.
 func (s *UserSubscriptionService) now() time.Time {
 	if s.clock != nil {
 		return s.clock.Now()
@@ -291,10 +291,10 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 	switch {
 	case rails.IsNMI(subscription.Rail):
 		// The NMI delete always rides the durable nmi_delete_subscription
-		// intent, committed with the cancellation: the destructive switch,
-		// volume breaker and verify-then-execute apply exactly as for an admin
-		// cancel. With a genuine undo window (issue 216) it is due at
-		// period_end - margin, keeping the schedule for a resume; otherwise now.
+		// intent, committed with the cancellation, so the destructive switch,
+		// volume breaker and verify-then-execute apply as for an admin cancel.
+		// With an undo window it is due at period_end - margin, keeping the
+		// schedule for a resume; otherwise now.
 		if subscription.RailSubscriptionID != "" {
 			if s.providerCancel == nil {
 				return fmt.Errorf("nmi remote-delete scheduler unavailable")
@@ -315,12 +315,10 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 			}
 		}
 	case subscription.Rail == models.RailCCBill:
-		// #696: merchant-initiated CCBill cancel via DataLink SMS — same
-		// semantics as NMI: local cancel with the #691 paid runway plus a
-		// durable remote-cancel intent, atomic in the cancel tx. CCBill's
-		// cancelSubscription stops rebilling and keeps access through the paid
-		// period on its own side, so the intent is due immediately (no undo
-		// window to defer for) and the cancel is not resumable.
+		// CCBill cancel via DataLink SMS: a local cancel with paid runway plus
+		// a durable remote-cancel intent in the cancel tx. CCBill keeps access
+		// through the paid period itself, so the intent is due immediately and
+		// the cancel is not resumable.
 		if s.providerCancel == nil {
 			return fmt.Errorf("ccbill remote-cancel scheduler unavailable")
 		}
@@ -377,7 +375,6 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		return err
 	}
 
-	// Add notification
 	notification := &models.NotificationQueue{
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),

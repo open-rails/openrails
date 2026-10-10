@@ -23,7 +23,7 @@ import (
 type StripeInvoiceCollectionParams struct {
 	CustomerID      string
 	PaymentMethodID string
-	// AmountCents is rail minor units (typed Cents, #671).
+	// AmountCents is rail minor units.
 	AmountCents         moneyutil.Cents
 	Currency            string
 	Description         string
@@ -738,9 +738,9 @@ func rawString(raw json.RawMessage) string {
 	return strings.TrimSpace(s)
 }
 
-// rawInt64 decodes a Stripe integer field. Stripe amounts are minor units and
-// always integral on the wire; a non-integral value is a decode failure, not
-// something to truncate through a float64 (MONEY-3).
+// rawInt64 decodes a Stripe integer field. Stripe amounts are integral minor
+// units; a non-integral value is a decode failure, never truncated through a
+// float64.
 func rawInt64(raw json.RawMessage) int64 {
 	var n int64
 	if err := json.Unmarshal(raw, &n); err == nil {

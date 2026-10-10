@@ -23,8 +23,8 @@ import (
 var ErrStripeRefundTargetMissing = errors.New("stripe refundable transaction id is missing")
 
 // stripeRefundMetadataKey tags every refund OpenRails creates with the intent
-// ledger idempotency key, so the verifier can re-find the refund via READS
-// (GET /v1/refunds) when the create's outcome was ambiguous (#358 phase B).
+// ledger idempotency key, so the verifier can re-find the refund via reads
+// (GET /v1/refunds) when the create's outcome was ambiguous.
 const stripeRefundMetadataKey = "openrails_idempotency_key"
 
 // StripeAPICallError is a non-2xx response from the Stripe API: the request
@@ -58,7 +58,7 @@ func (s *StripeRefundService) baseURL() string {
 
 type RefundParams struct {
 	ChargeID string
-	// Amount is Stripe minor units (typed Cents, #671); 0 = full refund.
+	// Amount is Stripe minor units; 0 = full refund.
 	Amount         moneyutil.Cents
 	Reason         string
 	IdempotencyKey string

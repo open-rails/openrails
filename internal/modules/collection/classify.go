@@ -6,14 +6,9 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 )
 
-// Action is what ONE failed collection attempt does to the schedule.
-//
-// Every Action names exactly one disposition. There is deliberately no
-// "neither retry nor terminal" return: the pre-doctrine FailureAction returned
-// a bare Action{} for any code its two-way split called non-retryable — no
-// next attempt AND not terminal — so the row parked in a state nothing
-// resolved (or#828). Under the or#870 doctrine that case is bucket 2, a
-// DELIBERATE stop with a reason, a notification and a resume path, not a hole.
+// Action is what ONE failed collection attempt does to the schedule. Every
+// Action names exactly one disposition; bucket 2 is a deliberate stop awaiting
+// a new payment method, never a state nothing resolves.
 type Action struct {
 	// Decline is the classifier's answer. Its Action retries (keeps the
 	// schedule) or stops charging, for opposite reasons.
@@ -42,18 +37,13 @@ func (a Action) ScheduleExhausted() bool {
 	return a.Terminal && !a.Decline.Action.StopsCharging()
 }
 
-// FailureAction is the ONE decision for one failed attempt, shared by both
-// consumers: classify the decline with the or#870 three-bucket doctrine, then
-// apply the cycle's schedule to bucket 1.
+// FailureAction is the decision for one failed attempt: classify the decline
+// into three buckets, then apply the cycle's schedule to bucket 1.
 //
-// cycleHours is the REAL billing cycle of the thing being collected — the
-// subscription's price cadence (BillingCycleHoursOf) or the invoice's
-// statement period (CycleHoursBetween) — never a hardcoded month (or#828).
-//
-// failureCode is the code recorded VERBATIM off the rail; nil/empty is bucket
-// 1, because no evidence is not evidence.
-// An unknown cycle refuses bucket 1 with ErrUnknownCycle; buckets 2 and 3 do
-// not depend on the cycle.
+// cycleHours is the real billing cycle of what is collected, never a hardcoded
+// month. failureCode is the rail's code verbatim; nil/empty is bucket 1 (no
+// evidence is not evidence). An unknown cycle refuses bucket 1 with
+// ErrUnknownCycle; buckets 2 and 3 do not depend on the cycle.
 func FailureAction(cycleHours int, rail string, failureCode *string, priorFailures int, firstFailureAt *time.Time, now time.Time) (Action, error) {
 	code := ""
 	if failureCode != nil {
@@ -62,13 +52,11 @@ func FailureAction(cycleHours int, rail string, failureCode *string, priorFailur
 	d := decline.Classify(rail, code)
 	switch d.Action {
 	case decline.NonRecoverable:
-		// Bucket 3 — the issuer withdrew the recurring mandate, or the
-		// instrument is permanently dead. Terminal on the FIRST look: there is
-		// no schedule worth running against an instrument that cannot succeed.
+		// Bucket 3: the issuer withdrew the recurring mandate or the
+		// instrument is dead. Terminal on the first look.
 		return Action{Decline: d, Terminal: true}, nil
 	case decline.FixPaymentMethod:
-		// Bucket 2 — their card, fixable in a minute. Stop charging NOW, and
-		// terminate NOTHING.
+		// Bucket 2: the customer's fixable card. Stop charging, terminate nothing.
 		return Action{Decline: d}, nil
 	}
 

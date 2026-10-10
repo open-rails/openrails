@@ -1,9 +1,9 @@
-// Package mandates owns stored-credential agreements (#1168): one agreement on
-// one saved card, recurring for a subscription, unscheduled for collection in
-// one currency, or card_on_file for one-click reuse. A mandate holds the
-// network lineage its storing transaction established, scoped to the gateway
-// account that ran it. Charges cite a mandate; they never carry references of
-// their own. Every lookup is scoped by merchant and customer.
+// Package mandates owns stored-credential agreements: one agreement on one
+// saved card, recurring for a subscription, unscheduled for collection in one
+// currency, or card_on_file for one-click reuse. A mandate holds the network
+// lineage its storing transaction established, scoped to the gateway account
+// that ran it. Charges cite a mandate, never references of their own. Every
+// lookup is scoped by merchant and customer.
 package mandates
 
 import (

@@ -21,9 +21,8 @@ import (
 	sharedformat "github.com/open-rails/openrails/internal/shared/format"
 )
 
-// RequireStripeSecretKey resolves the ctx merchant's armed Stripe account —
-// the psps row plus scoped secrets (Layer C, #788). It never
-// reads a boot-config artifact; an unarmed rail fails closed.
+// RequireStripeSecretKey resolves the ctx merchant's armed Stripe account (the
+// psps row plus scoped secrets). An unarmed rail fails closed.
 func RequireStripeSecretKey(ctx context.Context, src railresolve.Source) (*config.ResolvedPSP, string, error) {
 	if src == nil {
 		return nil, "", fmt.Errorf("stripe configuration is not available")
@@ -327,15 +326,10 @@ func (s *StripeService) GetSubscriptionItemID(ctx context.Context, subscriptionI
 }
 
 // UpdateSubscriptionPrice swaps the subscription's line-item price and, when
-// internalPriceID is non-empty, rewrites the subscription's
-// metadata[internal_price_id] to the new local price UUID. The metadata rewrite
-// is essential: every invoice Stripe emits for this subscription (the immediate
-// proration invoice AND all future renewals) carries the subscription's metadata
-// under subscription_details.metadata, and the invoice.paid webhook resolves the
-// price from internal_price_id first. If we changed only the line-item price but
-// left stale metadata pointing at the OLD price, the upgrade proration invoice
-// and every later renewal would resolve the old price, fail the amount check,
-// and be dropped (#268).
+// internalPriceID is non-empty, rewrites metadata[internal_price_id] to it.
+// Every invoice Stripe emits (proration and renewals) carries that metadata,
+// and invoice.paid resolves the price from it first: stale metadata would fail
+// the amount check and drop those invoices.
 func (s *StripeService) UpdateSubscriptionPrice(ctx context.Context, subscriptionID, itemID, newPriceID, internalPriceID, prorationBehavior, billingAnchor string) error {
 	_, secretKey, err := RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {

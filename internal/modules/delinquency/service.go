@@ -46,12 +46,9 @@ func eventTypeFor(s State) string {
 	}
 }
 
-// PassBatch caps how many (payer, currency) pairs ONE merchant's evaluation
-// pass examines per leg. Both legs are already activity-shaped — overdue
-// receivables and already-parked payers, never the customer table — and this is
-// the second bound on top: a pass is bounded work regardless. The enter leg is
-// ordered oldest-debt-first, so a merchant beyond the cap still gets its most
-// urgent payers evaluated, and the rest on the next 15-minute pass.
+// PassBatch caps how many (payer, currency) pairs one merchant's pass examines
+// per leg. The enter leg is oldest-debt-first, so the most urgent payers go
+// first and the rest wait for the next pass.
 const PassBatch = 5000
 
 // Transition is one observed state change, already recorded and signalled.
@@ -88,12 +85,9 @@ func (s *Service) now() time.Time {
 	return s.clock.Now().UTC()
 }
 
-// Policy resolves the merchant's declared delinquency policy.
-//
-// The amount floor is DERIVED rather than asked for: a merchant that has
-// already declared an invoice monthly floor has answered "how small is too
-// small to chase", and asking the same question twice invites two answers that
-// disagree. An explicit arrears_delinquency_floor overrides it.
+// Policy resolves the merchant's declared delinquency policy. The amount floor
+// derives from the invoice monthly floor unless arrears_delinquency_floor
+// overrides it.
 func (s *Service) Policy(ctx context.Context) (Policy, error) {
 	if s == nil || s.db == nil {
 		return Policy{}, fmt.Errorf("delinquency service not initialized")
@@ -106,8 +100,6 @@ func (s *Service) Policy(ctx context.Context) (Policy, error) {
 }
 
 // PolicyFromConfig resolves a policy from a merchant configuration document.
-// Split out so the derivation is testable without a database and so callers
-// holding a config need not re-read it.
 func PolicyFromConfig(cfg models.MerchantConfiguration) (Policy, error) {
 	p := Policy{GraceDays: DefaultGraceDays, AmountFloor: DefaultAmountFloor}
 	if cfg.ArrearsGraceDays != nil {
@@ -125,17 +117,11 @@ func PolicyFromConfig(cfg models.MerchantConfiguration) (Policy, error) {
 	return p, nil
 }
 
-// Evaluate runs one merchant's delinquency pass: classify every payer with
-// due work, record the transitions, and emit the signal for each.
-//
-// The candidate set is DUE WORK, never a roster. Two indexed scans:
-//
-//	ENTER — payers with an overdue open receivable (invoices_customer_id_currency_due_at_idx);
-//	EXIT  — payers already parked non-current (customer_delinquency_customer_id_currency_idx),
-//	        which is the only way a settled debt gets noticed, since a paid
-//	        invoice simply stops appearing in the first scan.
-//
-// A payer with no debt and no parked row is never visited and never gets a row.
+// Evaluate runs one merchant's delinquency pass: classify every payer with due
+// work, record the transitions, and emit the signal for each. Candidates come
+// from two indexed scans, never a roster: payers with an overdue open
+// receivable (enter), and payers already parked non-current (exit, the only
+// way a settled debt is noticed). Anyone else never gets a row.
 func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, error) {
 	var out PassResult
 	if s == nil || s.db == nil {
@@ -154,9 +140,7 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 		return out, err
 	}
 
-	// Pinned explicitly (or#861/or#877: under the since-removed RLS an unpinned
-	// work-list read evaluated nothing and reported success). Reentrant, so the
-	// worker's outer scope stands.
+	// Pinned explicitly; reentrant, so the worker's outer scope stands.
 	var overdue []gen.ListOverdueInvoiceAggregatesRow
 	var parked []gen.BillingCustomerDelinquency
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -184,12 +168,8 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 	}
 	type candidate struct {
 		exposure Exposure
-		// policy is the payer's EFFECTIVE policy: the merchant-wide one with the
-		// bound billing policy's overrides applied (or#897). Carried per candidate
-		// because two payers of the same merchant can now legitimately have
-		// different grace — an enterprise tenant and a self-serve one are not the
-		// same customer, and pretending otherwise was the only reason this was
-		// ever merchant-wide.
+		// policy is the payer's effective policy: the merchant's with the bound
+		// billing policy's overrides applied.
 		policy Policy
 	}
 	candidates := make(map[key]candidate, len(overdue)+len(parked))
@@ -209,9 +189,8 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 		}
 	}
 	for _, r := range parked {
-		// A parked payer absent from the overdue scan owes nothing any more: zero
-		// exposure, which Classify reads as `current` under ANY policy — so the
-		// merchant-wide one is not a fallback here, it is simply irrelevant.
+		// A parked payer absent from the overdue scan owes nothing: zero
+		// exposure classifies `current` under any policy.
 		if _, ok := candidates[key{r.CustomerID, r.Currency}]; !ok {
 			candidates[key{r.CustomerID, r.Currency}] = candidate{policy: policy}
 		}
@@ -233,10 +212,9 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 	return out, errors.Join(errs...)
 }
 
-// apply records one payer's evaluation and, if the state actually changed,
-// emits the signal for it. Upsert + signal share one transaction: a transition
-// that is stored but never announced is a silent shutoff instruction lost, and
-// an announcement without the stored state would repeat forever.
+// apply records one payer's evaluation and signals a state change in the same
+// transaction: a stored but unannounced transition is a lost shutoff
+// instruction, and an announcement without stored state repeats forever.
 func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Policy, customerID uuid.UUID, currency string, exposure Exposure, now time.Time) (Transition, bool, error) {
 	state := Classify(policy, exposure, now)
 
@@ -263,9 +241,8 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 		if err != nil {
 			return err
 		}
-		// "" = there was no row before. A first sighting that is already
-		// `current` is not a transition — it is a payer who owes nothing, and
-		// announcing that would be noise.
+		// "" = no row before. A first sighting already `current` is not a
+		// transition.
 		previous := StateCurrent
 		if row.PreviousState != "" {
 			previous = ParseState(row.PreviousState)
@@ -292,9 +269,8 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 		if err != nil {
 			return fmt.Errorf("encode delinquency event: %w", err)
 		}
-		// transition_seq is the idempotency coordinate: two evaluators racing
-		// the same transition compute the same sequence, so the unique index
-		// collapses them into one instruction to the host.
+		// transition_seq makes racing evaluators of one transition collapse
+		// into one instruction to the host.
 		dedupe := fmt.Sprintf("delinquency:%s:%s:%d", customerID, currency, row.TransitionSeq)
 		if _, err := q.EnqueueHostLifecycleEvent(ctx, gen.EnqueueHostLifecycleEventParams{
 			MerchantID:  tid.UUID(),
@@ -319,13 +295,9 @@ func (s *Service) apply(ctx context.Context, tid billing.MerchantID, policy Poli
 	return transition, changed, nil
 }
 
-// notify tells the PAYER, on the two rungs a payer can act on: you are now
-// delinquent, and you are no longer delinquent. Entering grace is deliberately
-// silent — the or#870 collection ladder already told them the charge failed,
-// and a second message for the same event is noise.
-//
-// Never fatal: the state and the host signal are already durable, and a lost
-// in-app notification is not a reason to re-run a money decision.
+// notify tells the payer on entering and leaving delinquent. Entering grace
+// is silent: collection already reported the failed charge. Never fatal: the
+// state and host signal are already durable.
 func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, now time.Time) {
 	var eventType models.NotificationEventType
 	switch {
@@ -358,22 +330,11 @@ func (s *Service) notify(ctx context.Context, t Transition, exposure Exposure, n
 	}
 }
 
-// IsDelinquent is the admission gate's question, and it answers conservatively
-// on purpose.
-//
-// It reads the stored state first (one primary-key lookup, so admission stays
-// O(1) for the overwhelming majority of payers who are current), and refuses
-// only if a LIVE recompute against the invoices agrees. That ordering matters
-// in both directions:
-//
-//   - a payer who has just settled is never refused on a projection the
-//     evaluator has not caught up with — the outage risk lands on our side of
-//     the ledger, not theirs;
-//   - a payer the evaluator has not yet visited is never refused either, since
-//     enforcement follows a recorded transition rather than a read.
-//
-// Any error fails OPEN. A gate that denies because it could not read is a gate
-// that turns our malfunction into the customer's outage.
+// IsDelinquent is the admission gate's question, answered conservatively: it
+// reads the stored state (one primary-key lookup) and refuses only if a live
+// recompute against the invoices agrees, so a payer who just settled or was
+// never evaluated is never refused. Any error fails open: our malfunction must
+// not become the customer's outage.
 func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, currency string) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, nil
@@ -386,9 +347,7 @@ func (s *Service) IsDelinquent(ctx context.Context, payer identity.CustomerID, c
 		return false, err
 	}
 	delinquent := false
-	// Pinned: admission may be reached from a seam that has not already pinned
-	// a merchant connection, and an unpinned read here would answer "not
-	// delinquent" for everyone forever.
+	// Pinned: admission may come from a seam with no merchant connection yet.
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		q := s.db.Gen(ctx)
 		stored, err := q.GetCustomerDelinquency(ctx, gen.GetCustomerDelinquencyParams{

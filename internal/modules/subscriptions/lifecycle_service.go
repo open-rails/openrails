@@ -139,9 +139,6 @@ func (s *SubscriptionLifecycleService) SetConfig(cfg *config.Config) {
 	s.Config = cfg
 }
 
-// SetCreditGranter installs the transaction-aware subscription credit writer.
-// A credit-bearing lifecycle fails closed when this dependency is absent.
-
 // SetProviderCancelScheduler injects the provider-cancel scheduler.
 func (s *SubscriptionLifecycleService) SetProviderCancelScheduler(c ProviderCancelScheduler) {
 	s.providerCancel = c
@@ -160,11 +157,6 @@ func (s *SubscriptionLifecycleService) now() time.Time {
 	}
 	return time.Now()
 }
-
-// (#368 appendRenewalGraceWindows deleted by #691: auto-renew subscription
-// windows are STANDING — silence at period end cannot cut access, so no grace
-// window is pre-appended. Historical `grace` rows are still revoked on
-// renewal/cancel/terminal paths.)
 
 // DispatchNotifications delivers notification rows after their surrounding
 // transaction commits. Transaction-aware lifecycle callers use this to avoid
@@ -643,8 +635,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		// Use provided amount/currency or fall back to price defaults
 		amount := params.Amount
 		if !params.AmountProvided && amount == 0 {
-			// #651: caller supplied no charged amount; record the catalog list price
-			// but warn — this is the expected price, not a confirmed charged amount.
+			// The caller supplied no charged amount: record the catalog list
+			// price, with a warning (expected, not confirmed).
 			log.WithContext(ctx).WithFields(log.Fields{
 				"price_id":       price.ID,
 				"transaction_id": params.TransactionID,
@@ -657,8 +649,8 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			currency = price.Currency
 		}
 
-		// #651: record the provider's transaction time when supplied; now() only as
-		// last resort. Status is set explicitly (was relying on the SQL empty->'completed').
+		// The provider's transaction time when supplied; now() only as a last
+		// resort.
 		purchasedAt := now
 		if params.PurchasedAt != nil && !params.PurchasedAt.IsZero() {
 			purchasedAt = params.PurchasedAt.UTC()
@@ -669,8 +661,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			PriceID:        price.ID,
 			SubscriptionID: &subscription.ID,
 			Rail:           params.Rail,
-			// or#893: the charge belongs to the account that took it, which is
-			// the account the subscription itself names.
+			// The charge belongs to the account that took it: the subscription's.
 			PspID:         pspIDOf(subscription),
 			TransactionID: params.TransactionID,
 			Amount:        amount,
@@ -679,7 +670,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			Status:        payments.PaymentStatusSucceededValue,
 			Metadata:      withPaidPeriod(params.PaymentMetadata, periodStartsAt),
 			AttemptKind:   func() *string { k := payments.AttemptInitial; return &k }(),
-			MoneyMovement: models.MoneyMovementRail, // or#827: the signup charge settled at the rail.
+			MoneyMovement: models.MoneyMovementRail, // the signup charge settled at the rail
 			PurchasedAt:   purchasedAt,
 			CreatedAt:     now,
 			Quantity:      CloneQuantity(subscription.Quantity),
@@ -935,16 +926,15 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 		if params.TransactionID != "" && acceptedPayment == nil {
 			now := s.now().UTC()
 			if !params.AmountProvided && params.Amount <= 0 {
-				// #651: recording a renewal payment with no charged amount supplied;
-				// fall back to catalog list price but warn (expected price, not a
-				// confirmed charge).
+				// No charged amount supplied: record the catalog list price, with
+				// a warning (expected, not confirmed).
 				log.WithContext(ctx).WithFields(log.Fields{
 					"price_id":             price.ID,
 					"rail_subscription_id": params.RailSubscriptionID,
 					"transaction_id":       params.TransactionID,
 				}).Warn("no charged amount supplied for renewal payment; recording catalog list price")
 			}
-			// #651: provider transaction time when supplied; now() only as last resort.
+			// The provider's transaction time when supplied; now() only as a last resort.
 			purchasedAt := now
 			if params.PurchasedAt != nil && !params.PurchasedAt.IsZero() {
 				purchasedAt = params.PurchasedAt.UTC()
@@ -963,7 +953,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				Status:         payments.PaymentStatusSucceededValue,
 				Metadata:       withPaidPeriod(params.PaymentMetadata, renewalPeriodStart(params, subscription, now)),
 				AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
-				MoneyMovement:  models.MoneyMovementRail, // or#827: the rebill settled at the rail.
+				MoneyMovement:  models.MoneyMovementRail, // the rebill settled at the rail
 				PurchasedAt:    purchasedAt,
 				CreatedAt:      now,
 				Quantity:       CloneQuantity(subscription.Quantity),
@@ -1336,12 +1326,9 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		}
 	}
 
-	// Cancellation policy (caller-owned): an immediate revoke truncates the
-	// paid period to now; a period-end cancel keeps paid access until the term
-	// ends and only forfeits the pre-appended #368 grace window. The terminal
-	// status flip + Solana cascade + entitlement revoke are the shared local-
-	// state core (ApplyLocalCancellation), so this path can never diverge from
-	// the LIFE-plane convergence repairs.
+	// An immediate revoke truncates the paid period to now; a period-end
+	// cancel keeps paid access until the term ends and forfeits only renewal
+	// grace. ApplyLocalCancellation owns the shared local-state core.
 	now := s.now()
 	endAt := now
 	if params.RevokeAccess {
@@ -1417,9 +1404,7 @@ type CancelMembershipTxResult struct {
 }
 
 // LocalCancellation describes a side-effect-free terminal cancellation of a
-// subscription — the local-state transition shared by the user-driven
-// CancelMembership path and the LIFE-plane convergence repairs (grace_exhausted /
-// pending_stale).
+// subscription: the local-state transition every cancel path shares.
 type LocalCancellation struct {
 	EndedAt       time.Time                 // subscriptions.ended_at
 	CancelType    models.CancelType         // subscriptions.cancel_type
@@ -1429,25 +1414,13 @@ type LocalCancellation struct {
 	RevokeSources []models.AccessSourceType // entitlement sources to revoke; empty = revoke nothing
 }
 
-// ApplyLocalCancellation performs the side-effect-free LOCAL-STATE transition of
-// cancelling `sub`: the terminal status flip + ended/cancel fields + cleared
-// retry/grace schedule, the #264 Solana cranker cascade, and revocation of the
-// named entitlement sources as-of RevokeAsOf. It deliberately does NOT send
-// notifications, write the lifecycle event log, or enqueue provider intents —
-// those durable side-effects belong to the caller (CancelMembership layers them
-// on after this returns).
-//
-// It runs every write on the supplied `dbb`, so the CALLER owns atomicity:
-// CancelMembership passes its MerchantTx-bound handle (all writes commit
-// together); the convergence engine passes its merchant-scoped connection (the
-// idempotent sweep heals any partial write). This is the single chokepoint where
-// the local outcome of "cancel a subscription" is defined — the converged path
-// can no longer diverge from the user path (notably: the Solana cascade, whose
-// absence previously left a converged Solana cancel pulling forever).
-//
-// The caller loads `sub` (and may pre-adjust its period bounds — e.g. truncate
-// to now for an immediate revoke) before calling; this method owns only the
-// terminal status/cancel fields + cascade + revoke.
+// ApplyLocalCancellation is the one definition of a cancel's local state: the
+// terminal status and cancel fields, a cleared retry schedule, the Solana
+// cranker cascade, and revocation of RevokeSources as of RevokeAsOf. It sends
+// no notifications, writes no event log and queues no provider intents; those
+// belong to the caller. Every write runs on dbb, so the caller owns atomicity.
+// The caller loads sub (and may first truncate its period for an immediate
+// revoke).
 func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Context, dbb *db.DB, sub *models.Subscription, c LocalCancellation) error {
 	if dbb == nil || sub == nil {
 		return fmt.Errorf("apply local cancellation: db handle and subscription are required")
@@ -1457,10 +1430,8 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		return err
 	}
 	endedAt := c.EndedAt
-	// canceled_at is the operation instant, but never after ended_at: the
-	// subscriptions_ended_not_before_canceled_check constraint requires ended_at >= canceled_at,
-	// and an immediate revoke pins ended_at to the caller's `now` (computed a hair
-	// before this method's own s.now()).
+	// canceled_at never exceeds ended_at (a CHECK constraint), and an immediate
+	// revoke pins ended_at to the caller's slightly earlier now.
 	canceledAt := now
 	if endedAt.Before(canceledAt) {
 		canceledAt = endedAt
@@ -1489,9 +1460,9 @@ func (s *SubscriptionLifecycleService) ApplyLocalCancellation(ctx context.Contex
 		return fmt.Errorf("apply local cancellation: update subscription %s: %w", sub.ID, err)
 	}
 
-	// #264 cascade: stop the Solana cranker in the same transaction. A genuinely
-	// missing mirror remains an idempotent no-op; every other error must roll the
-	// parent cancellation back so a retry cannot leave the cranker active.
+	// Stop the Solana cranker in the same transaction. A missing mirror is a
+	// no-op; any other error rolls the cancellation back so a retry cannot
+	// leave the cranker active.
 	if sub.Rail == models.RailSolana {
 		if err := s.cancelSolanaSubscriptionForLifecycle(ctx, dbb, sub.ID); err != nil {
 			return fmt.Errorf("apply local cancellation: cancel Solana subscription %s: %w", sub.ID, err)
@@ -1532,12 +1503,11 @@ func withLockedSubscription(ctx context.Context, database *db.DB, snapshot *mode
 	return err
 }
 
-// ApplyLocalPastDue is the side-effect-free LOCAL transition of an active sub
-// into dunning (past_due), grace dated to the supplied instant (the missed
-// period end). #664: an already-exhausted grace is later parked as `unknown` by
-// grace_exhausted, never terminated — FailMembership owns terminal
-// cancellation. Grace is set only when none exists. No-op unless active; runs
-// under a row lock on the supplied `dbb`; an outer transaction may extend atomicity.
+// ApplyLocalPastDue is the side-effect-free local transition of an active sub
+// into dunning (past_due), grace dated to the missed period end. An exhausted
+// grace is later parked as `unknown`, never terminated: FailMembership owns
+// terminal cancellation. Grace is set only when none exists. No-op unless
+// active; runs under a row lock on dbb.
 func (s *SubscriptionLifecycleService) ApplyLocalPastDue(ctx context.Context, dbb *db.DB, sub *models.Subscription, graceEndsAt time.Time) error {
 	belief := sub.CurrentPeriodEndsAt
 	return withLockedSubscription(ctx, dbb, sub, func(ctx context.Context, dbb *db.DB, sub *models.Subscription) error {
@@ -1606,12 +1576,12 @@ func (s *SubscriptionLifecycleService) ResumeStalledDunning(ctx context.Context,
 	return resumed, err
 }
 
-// ApplyLocalUnknown parks a subscription as `unknown` (#632/#664): a
-// needs-provider-verification state resolved by provider-pull (#633). Entry
-// from `active` (period elapsed, no ownership evidence) or `past_due` (dunning
-// stalled past grace). Access stays intact — no revoke on a guess. Clears stale
-// grace/retry scheduling; keeps retry_attempts/last_retry_at as attempt
-// evidence. from narrows the entry statuses, checked under the row lock.
+// ApplyLocalUnknown parks a subscription as `unknown` for provider pull to
+// resolve. Entry is from `active` (period elapsed, no ownership evidence) or
+// `past_due` (dunning stalled past grace). Access stays intact: no revoke on
+// a guess. Clears grace/retry scheduling but keeps retry_attempts and
+// last_retry_at as evidence. from narrows the entry statuses, checked under
+// the row lock.
 func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, dbb *db.DB, sub *models.Subscription, from ...models.SubscriptionStatus) error {
 	if len(from) == 0 {
 		from = []models.SubscriptionStatus{models.StatusActive, models.StatusPastDue}
@@ -1642,11 +1612,10 @@ func (s *SubscriptionLifecycleService) ApplyLocalUnknown(ctx context.Context, db
 	})
 }
 
-// CollectSkippedRenewal hands OpenRails a period NMI's schedule skipped
-// (#1113): the row enters dunning with its first attempt due now, so the due
-// pass charges the cycle's rebill and a decline follows the merchant's
-// schedule. The caller has proven the skip from NMI's records. Reports
-// whether the row was handed over.
+// CollectSkippedRenewal hands OpenRails a period NMI's schedule skipped: the
+// row enters dunning with its first attempt due now, so the due pass charges
+// the rebill and a decline follows the merchant's schedule. The caller has
+// proven the skip from NMI's records. Reports whether the row was handed over.
 func (s *SubscriptionLifecycleService) CollectSkippedRenewal(ctx context.Context, dbb *db.DB, sub *models.Subscription) (bool, error) {
 	belief := sub.CurrentPeriodEndsAt
 	if belief == nil {
@@ -1685,14 +1654,9 @@ func samePeriodEnd(belief, current *time.Time) bool {
 	return current != nil && current.Equal(*belief)
 }
 
-// cancelSolanaSubscriptionCascade flips the linked billing.solana_subscriptions
-// row to canceled so the hourly Solana cranker's ListDue (which filters
-// status = active) no longer returns it — billing stops because OpenRails is the
-// only puller (#264). `d` must be the tx-bound db handle so the cascade commits
-// atomically with the lifecycle cancellation. Idempotent: setting an
-// already-canceled row to canceled is a no-op. Tolerant of a missing row (a
-// Solana sub that was never enrolled): returns nil after logging so the cancel
-// itself never fails on the cascade.
+// cancelSolanaSubscriptionCascade cancels the linked solana_subscriptions row
+// so the cranker, the only puller, stops billing. d must be the transaction's
+// handle. Idempotent; a missing row (never enrolled) is a no-op.
 func cancelSolanaSubscriptionCascade(ctx context.Context, d *db.DB, subscriptionID uuid.UUID) error {
 	solanaRepo := solanasubs.NewSolanaSubscriptionRepo(d)
 	row, err := solanaRepo.GetBySubscriptionID(ctx, subscriptionID)
@@ -1765,7 +1729,6 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 
 		// Provider expiration stops billing and renewal grace, preserving paid access.
 		if entSvc != nil {
-			// Terminal expiration: immediately remove any grace windows for this subscription too.
 			graceProducts, err := entSvc.ListLiveProductsBySource(ctx, models.AccessSourceGrace, subscription.ID.String())
 			if err != nil {
 				return fmt.Errorf("list grace access for expired subscription %s: %w", subscription.ID, err)
@@ -1810,10 +1773,10 @@ func (s *SubscriptionLifecycleService) ExpireMembership(ctx context.Context, sub
 	return nil
 }
 
-// FailMembership marks a subscription as failed due to payment issues.
 // FindingTerminalHeld is a terminal decline whose cancellation was refused.
 const FindingTerminalHeld = "life.terminal_outcome.held"
 
+// FailMembership records a failed charge on a subscription.
 func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, params *FailMembershipParams) error {
 	if params == nil || params.SubscriptionID == nil || *params.SubscriptionID == uuid.Nil {
 		return fmt.Errorf("subscription_id is required")
@@ -1827,8 +1790,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 	// Set inside the tx when a terminal cancellation must also stop the
 	// remote NMI recurring subscription; the job is enqueued after commit.
 	var scheduleDeferredDelete bool
-	// or#870 bucket 2: the decline means the customer must fix their card.
-	// Drives the payment_method_update_required notification below.
+	// Bucket 2: the customer must fix their card; drives the
+	// payment_method_update_required notification below.
 	var needsPaymentMethodUpdate bool
 	var unknownCycle uuid.UUID
 
@@ -1858,7 +1821,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			return nil
 		}
 
-		// Capture values for event logging
 		subscriptionID = subscription.ID
 		userID = subscription.CustomerID.String()
 		scheduleDeferredDelete = false // reset in case the tx is retried
@@ -1870,16 +1832,12 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			declined = params.DeclinedAt.UTC()
 		}
 
-		// #821/#839/#840/#836: ONE gate for every terminal outcome in this flow.
-		// A terminal cancel revokes entitlements AND queues the IRREVERSIBLE
-		// cancellation of the recurring SCHEDULE at the rail (or#870: never the
-		// customer's stored payment method — nothing here can delete that), so it
-		// requires (a) a named certainty leg —
-		// provider truth, a non-retryable decline, or genuinely exhausted dunning
-		// ATTEMPTS — and (b) an open operator kill switch. A date comparison, an
-		// expired dunning window, and the absence of one of our own rows are not
-		// evidence. Refused terminals PARK as `unknown`: access intact, out of the
-		// dunning queue, resolved by the provider-verification plane.
+		// One gate for every terminal outcome here. A terminal cancel revokes
+		// entitlements and queues the irreversible cancel of the rail schedule
+		// (never the stored payment method), so it needs a named certainty leg
+		// and an open operator kill switch. Refused terminals park as
+		// `unknown`: access intact, out of the dunning queue, for provider
+		// verification.
 		terminalRefusal := func(leg string) string {
 			if params.TerminalBlocked != "" {
 				return params.TerminalBlocked
@@ -1889,10 +1847,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			return ""
 		}
-		// scheduleExhaustionLeg: running the retry schedule out is certainty ONLY
-		// when the attempts were REAL — a recorded charge attempt per failure
-		// (#733 payments row). Attempts we declined to make because our own data
-		// was missing (#840) carry no leg and cannot exhaust anything.
+		// Schedule exhaustion is certainty only when every failure was a real,
+		// recorded charge attempt; attempts skipped for missing data exhaust
+		// nothing.
 		scheduleExhaustionLeg := func() string {
 			if params.TerminalCertainty != "" {
 				return params.TerminalCertainty
@@ -1902,8 +1859,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 			return ""
 		}
-		// The state machine decides the status (#1091); this flow owns the
-		// attempt count and the next attempt time.
+		// The state machine decides the status; this flow owns the attempt
+		// count and the next attempt time.
 		periodStart := time.Time{}
 		if subscription.CurrentPeriodEndsAt != nil {
 			periodStart = subscription.CurrentPeriodEndsAt.UTC()
@@ -1912,7 +1869,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		quietRetry := false // a transient retry tells the customer nothing yet
 		var event lifecycle.Event
 		// A decline opens the dunning case under the merchant's policy of the
-		// moment; the rest of the case runs under it (#1102).
+		// moment; the rest of the case runs under it.
 		if subscription.Status != models.StatusCanceled && subscription.Status != models.StatusPending {
 			if err := openCase(ctx, db, subscription); err != nil {
 				return err
@@ -1920,22 +1877,21 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		}
 		switch params.Decline {
 		case decline.FixPaymentMethod:
-			// or#870 bucket 2 — the customer's card, fixable. Charging stops,
-			// access and the stored card are untouched, and a replaced card
-			// resumes dunning. Not terminal: no certainty leg needed.
+			// Bucket 2: the customer's fixable card. Charging stops, access and
+			// the stored card are untouched, and a replaced card resumes
+			// dunning. Not terminal, so no certainty leg is needed.
 			event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.FixMethod, At: now}
 			needsPaymentMethodUpdate = true
 		case decline.NonRecoverable:
-			// or#870 bucket 3 — the mandate is gone. Cancel at the rail, unless
-			// the kill switch or a missing certainty leg holds the outcome.
+			// Bucket 3: the mandate is gone. Cancel at the rail, unless the kill
+			// switch or a missing certainty leg holds the outcome.
 			if heldTerminal = terminalRefusal(params.TerminalCertainty); heldTerminal != "" {
 				event = lifecycle.TerminalHeld{}
 			} else {
 				event = lifecycle.RenewalDeclined{PeriodStart: periodStart, Bucket: lifecycle.NonRecoverable, At: now}
 			}
 		default:
-			// Bucket 1 — keep the schedule. The dunning cadence is a function of
-			// the billing cycle (collection.RetryOffsets).
+			// Bucket 1: keep the schedule, a function of the billing cycle.
 			cycleHours := 0
 			if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 				accepted := params.Prepared
@@ -2048,22 +2004,12 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			subscription.CancelFeedback = &reason
 		}
 
-		// (#691: no grace windows are appended while dunning runs past the paid
-		// term — the auto-renew sub's STANDING window keeps access intact until a
-		// terminal outcome closes it.)
-
-		// #344 follow-up: a terminal payment-failure cancellation of an
-		// NMI-backed subscription must also stop the rail-side recurring
-		// subscription, or NMI keeps retrying it monthly forever. The
-		// DeletionScheduledAt marker AND the nmi_delete intent are both
-		// written inside this transaction (atomic — no crash window between
-		// marker and intent). #679 queue-always: the desired provider action is
-		// recorded UNCONDITIONALLY — provider_write_mode / credentials / the
-		// volume breaker gate EXECUTION at the intent executor, never queuing
-		// (limited mode parks system-origin intents until mode=full).
-		// or#842: due after a cooling-off window, not at `now` — dunning
-		// exhaustion is our own inference, and the handler's relevance re-check
-		// supersedes the delete if the row recovers inside the window.
+		// A terminal cancel of an NMI-backed subscription must also stop the
+		// rail schedule, or NMI rebills forever. The DeletionScheduledAt marker
+		// and the nmi_delete intent commit in this transaction. The intent is
+		// queued unconditionally; write mode, credentials and the breaker gate
+		// execution. It is due after a cooling-off window, and the handler's
+		// relevance check supersedes it if the row recovers.
 		deferredDeleteAt := SystemDeferredDeleteAt(subscription, now)
 		if subscription.Status == models.StatusCanceled &&
 			rails.RemoteDeleteOnTerminalCancel(subscription.Rail) &&
@@ -2106,10 +2052,8 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// Terminal cancellation with a remote NMI schedule: enqueue the
-		// deferred delete intent IN THIS TRANSACTION so the
-		// DeletionScheduledAt marker and the intent commit atomically (no
-		// crash window between them).
+		// Enqueue the deferred delete in this transaction, atomically with
+		// its DeletionScheduledAt marker.
 		if scheduleDeferredDelete {
 			if err := s.providerCancel.WithTx(tx).ScheduleNMIDelete(ctx, subscription.CustomerID.String(), subscription.ID, deferredDeleteAt); err != nil {
 				return fmt.Errorf("enqueue deferred NMI delete with cancellation: %w", err)
@@ -2123,10 +2067,9 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			"next_retry_at":   subscription.NextRetryAt,
 		}).Warn("Updated subscription during failure flow")
 
-		// A terminal billing failure stops renewal grace; previously paid access
-		// retains its independent expiry.
+		// A terminal billing failure stops renewal grace; paid access keeps
+		// its own expiry.
 		if subscription.Status == models.StatusCanceled && entSvc != nil {
-			// Terminal dunning failure: remove any grace windows too so access doesn't continue.
 			graceProducts, err := entSvc.ListLiveProductsBySource(ctx, models.AccessSourceGrace, subscription.ID.String())
 			if err != nil {
 				return fmt.Errorf("list grace access for failed subscription %s: %w", subscription.ID, err)
@@ -2146,15 +2089,11 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			}
 		}
 
-		// Immediate notification for each outcome, so a customer is
-		// never silent-treated through a whole dunning cycle and then suddenly
-		// canceled:
-		//   bucket 1, still trying  -> payment_method_failed ("we'll keep trying")
-		//   bucket 1, schedule out  -> premium_ended / expired ("we gave up")
-		//   bucket 2                -> payment_method_update_required ("fix it,
-		//                              your access is still on")
-		//   bucket 3                -> premium_ended / non_recoverable ("the
-		//                              mandate is gone; re-subscribe")
+		// Notify every outcome, so no customer is canceled without warning:
+		//   bucket 1, still trying  -> payment_method_failed
+		//   bucket 1, schedule out  -> premium_ended / expired
+		//   bucket 2                -> payment_method_update_required
+		//   bucket 3                -> premium_ended / non_recoverable
 		eventType := models.NotificationPaymentMethodFailed
 		var data billing.NotificationData
 		switch {
@@ -2172,7 +2111,7 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 
 		// A decline that says the card was reissued reads the holder once
 		// first: an updater may already hold the new card, and the member is
-		// asked only if it does not (#1168).
+		// asked only if it does not.
 		charged, err := PaymentMethodOf(ctx, db.Gen(ctx), subscription)
 		if err != nil {
 			return err
@@ -2212,11 +2151,6 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		return err
 	}
 
-	// The deferred NMI delete intent committed inside the failure-flow
-	// transaction above, atomically with the cancellation + marker. Runs at
-	// "now": the undo-window semantics of user cancellations do not apply to
-	// dunning exhaustion. Idempotent via the intent ledger's idempotency_key
-	// (#358).
 	if scheduleDeferredDelete {
 		// Enqueued inside the failure-flow transaction above; this is just
 		// the operator-visible confirmation.
@@ -2248,11 +2182,8 @@ func validateCompletedPayment(payment *models.Payment, expectedAmount int64, exp
 	return nil
 }
 
-// Parameter structs for lifecycle operations
-
-// pspIDOf is the subscription's PSP as a payment stamp. or#893: a charge — a
-// signup, a rebill, or a decline marker — belongs to the account that attempted
-// it, and the subscription row is the authority on which one that is.
+// pspIDOf is the subscription's PSP as a payment stamp: a signup, rebill or
+// decline marker belongs to the account the subscription names.
 func pspIDOf(subscription *models.Subscription) *uuid.UUID {
 	if subscription == nil || subscription.PspID == uuid.Nil {
 		return nil

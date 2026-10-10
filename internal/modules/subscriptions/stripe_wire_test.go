@@ -83,8 +83,8 @@ func TestStripeCreateCustomerWire(t *testing.T) {
 	require.Len(t, got(), 1)
 }
 
-// #671: rail minor units reach the wire as the literal integer; the invoice
-// is created first excluding pending items and the item is attached by id, so
+// Rail minor units reach the wire as the literal integer; the invoice is
+// created first excluding pending items and the item is attached by id, so
 // nothing can be swept across operations. Every step has its own key.
 func TestStripeCollectInvoiceWire(t *testing.T) {
 	params := StripeInvoiceCollectionParams{CustomerID: "cus_1", PaymentMethodID: "pm_1", AmountCents: 1999, Currency: "USD", IdempotencyKey: "idem-1"}
@@ -266,8 +266,8 @@ func TestResolveStripeRefundTarget(t *testing.T) {
 	}
 }
 
-// #268 Model B upgrade: swap the item price, stamp the new internal price for
-// future invoice.paid resolution, invoice the proration now and reset the anchor.
+// Upgrade: swap the item price, stamp the new internal price for future
+// invoice.paid resolution, invoice the proration now and reset the anchor.
 func TestStripeUpdateSubscriptionPriceWire(t *testing.T) {
 	srv, got := stripeFake(t, map[string]string{"POST /v1/subscriptions/sub_123": `{"id":"sub_123"}`})
 	err := wireService(srv.URL).UpdateSubscriptionPrice(context.Background(), "sub_123", "si_item_1", "price_new", "019e5e09-37e6-7ef7-be77-13a9891a13e0", "always_invoice", "now")

@@ -13,7 +13,7 @@ import (
 const day = 24 * time.Hour
 
 // Offsets, failure budget, per-failure gaps and derived staleness window per
-// cadence tier, including the tier boundaries (#359, #839).
+// cadence tier, including the tier boundaries.
 func TestRetrySchedule(t *testing.T) {
 	weekly := []time.Duration{day, 2 * day}
 	monthly := []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}
@@ -81,7 +81,7 @@ func TestUnknownCycleFailsClosed(t *testing.T) {
 }
 
 // Every Action names exactly one disposition: schedule, terminal, or (bucket 2
-// only) a deliberate stop awaiting a new payment method (or#828).
+// only) a deliberate stop awaiting a new payment method.
 func TestFailureAction(t *testing.T) {
 	first := time.Date(2026, time.July, 1, 12, 0, 0, 0, time.UTC)
 	monthlyCycle := CycleHoursBetween(first, first.AddDate(0, 1, 0))
