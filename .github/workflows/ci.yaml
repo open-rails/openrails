@@ -112,7 +112,10 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          cache-dependency-path: web/admin/pnpm-lock.yaml
+          cache-dependency-path: |
+            web/admin/pnpm-lock.yaml
+            web/checkout/pnpm-lock.yaml
+            sdk/billing-ui/pnpm-lock.yaml
       - run: bash scripts/check.sh console
 
   chart:
