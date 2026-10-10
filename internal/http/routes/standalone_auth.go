@@ -46,12 +46,6 @@ type ResourceTokenResolver interface {
 	RequireRecentResourceSignIn(r *http.Request) error
 }
 
-// ResourceUserResolver verifies a trusted issuer's access token on a
-// signed-in user's own routes and resolves the merchants it may act on.
-type ResourceUserResolver interface {
-	ResolveResourceUser(r *http.Request) (*credential.ResourceUser, error)
-}
-
 // ResourceCustomerResolver verifies a trusted issuer's access token granted
 // openrails:self and resolves the customer it acts as (#1140).
 type ResourceCustomerResolver interface {

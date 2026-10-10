@@ -1,15 +1,12 @@
 package routes
 
 import (
-	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
 
-	auth "github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -146,7 +143,6 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/invoices/{id}/retry-collection":                                  write,
 		"POST /v1/admin/metrics/query":                                                   read,
 		"PUT /v1/admin/dashboard":                                                        admin,
-		"GET /v1/admin/worker-health":                                                    read,
 		"GET /v1/admin/findings/{id}":                                                    read,
 		"POST /v1/admin/findings/{id}/resolve":                                           write,
 		"GET /v1/admin/configuration":                                                    admin,
@@ -293,80 +289,4 @@ func TestUserRoutes(t *testing.T) {
 	for _, key := range inventory(routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}) {
 		require.NotContains(t, key, "/solana/recurring")
 	}
-}
-
-// Platform routes accept only human sessions holding a root-group grant.
-func TestPlatformRoutes(t *testing.T) {
-	type unlock struct{ user, actor string }
-	var unlocked *unlock
-	var asked []string
-	checker := func(granted bool) rootFunc {
-		return func(_ context.Context, _ *http.Request, perm string) (bool, error) {
-			asked = append(asked, perm)
-			return granted, nil
-		}
-	}
-	root, notRoot := checker(true), checker(false)
-	unlocker := unlockFunc(func(_ context.Context, user, actor string) error {
-		unlocked = &unlock{user, actor}
-		return nil
-	})
-	mount := func(opts PlatformOptions) http.Handler {
-		mux := http.NewServeMux()
-		RegisterPlatformRoutes(router.NewMux(mux, "/v1/platform", nil), nil, opts)
-		return mux
-	}
-	h := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: root, AdminLimiter: unlocker})
-	rec := do(h, http.MethodDelete, "/v1/platform/admin-rate-limit-lockouts/"+userB, nil)
-	require.Equal(t, http.StatusNoContent, rec.Code, rec.Body.String())
-	require.Equal(t, []string{billing.RootAdminRateLimitsUnlock}, asked)
-	require.Equal(t, &unlock{userB, userA}, unlocked)
-
-	unlocked = nil
-	require.Equal(t, http.StatusBadRequest, do(h, http.MethodDelete, "/v1/platform/admin-rate-limit-lockouts/not-a-uuid", nil).Code)
-	require.Nil(t, unlocked)
-
-	for _, tc := range []struct {
-		name   string
-		opts   PlatformOptions
-		status int
-	}{
-		{"no root grant", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userB}, nil), Root: notRoot, AdminLimiter: unlocker}, 403},
-		{"revoked session", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: rootFunc(func(context.Context, *http.Request, string) (bool, error) { return false, auth.ErrRevoked }), AdminLimiter: unlocker}, 401},
-		{"unauthenticated", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated), Root: root, AdminLimiter: unlocker}, 401},
-		{"opaque subject", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: "root"}, nil), Root: root, AdminLimiter: unlocker}, 401},
-		{"root checker failure", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: rootFunc(func(context.Context, *http.Request, string) (bool, error) { return false, errors.New("db") }), AdminLimiter: unlocker}, 500},
-		{"not wired", PlatformOptions{AdminLimiter: unlocker}, 500},
-		{"no unlocker", PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userA}, nil), Root: root}, 503},
-	} {
-		require.Equal(t, tc.status, do(mount(tc.opts), http.MethodDelete, "/v1/platform/admin-rate-limit-lockouts/"+userB, nil).Code, tc.name)
-		require.Nil(t, unlocked, tc.name)
-	}
-
-	asked = nil
-	for path, perm := range map[string]string{
-		"GET /v1/platform/merchants":            billing.RootMerchantsRead,
-		"GET /v1/platform/merchants/x":          billing.RootMerchantsRead,
-		"DELETE /v1/platform/merchants/x":       billing.RootMerchantsDelete,
-		"POST /v1/platform/merchants/x/restore": billing.RootMerchantsRestore,
-		"GET /v1/platform/worker-health":        billing.RootWorkerHealthRead,
-	} {
-		asked = nil
-		method, p, _ := strings.Cut(path, " ")
-		denied := mount(PlatformOptions{Authenticator: userAuth(billingauth.UserContext{UserID: userB}, nil), Root: notRoot})
-		require.Equal(t, http.StatusForbidden, do(denied, method, p, nil).Code, path)
-		require.Equal(t, []string{perm}, asked, path)
-	}
-}
-
-type rootFunc func(context.Context, *http.Request, string) (bool, error)
-
-func (f rootFunc) HasRootPermission(ctx context.Context, r *http.Request, perm string) (bool, error) {
-	return f(ctx, r, perm)
-}
-
-type unlockFunc func(context.Context, string, string) error
-
-func (f unlockFunc) Unlock(ctx context.Context, userID, actorID string) error {
-	return f(ctx, userID, actorID)
 }

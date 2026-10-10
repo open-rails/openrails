@@ -14,7 +14,6 @@ import {
   getRebillCycle,
   getSubscription,
   getUsageMeter,
-  listApiKeys,
   listCustomerEntitlements,
   listCustomerPaymentMethods,
   listCustomerProductAccess,
@@ -33,11 +32,8 @@ import {
   listSubscriptions,
   listUsageMeterOverrides,
   listUsageMeters,
-  listTeam,
-  listTeamInvites,
   getConfig,
   listWebhooks,
-  listWorkerHealth,
   PAGE_MAX,
   type AttemptFilters,
   type CycleFilters,
@@ -101,7 +97,6 @@ const buildQueryKeys = (root: () => MerchantRoot) => ({
   usageMeters: () => [...root(), "catalog", "meters"] as const,
   usageMeter: (key: string) => [...root(), "catalog", "meters", key] as const,
   settings: () => [...root(), "settings"] as const,
-  team: () => [...root(), "team"] as const,
   alerts: () => [...root(), "alerts"] as const,
   ops: () => [...root(), "ops"] as const,
   dashboard: () => [...root(), "dashboard"] as const,
@@ -493,13 +488,6 @@ export const adminQueries = {
       },
       meta: { errorAction: "Load the findings summary" },
     }),
-  workerHealth: () =>
-    queryOptions({
-      queryKey: [...queryKeys.ops(), "worker-health"],
-      queryFn: ({ signal }) => listWorkerHealth(signal),
-      staleTime: 10_000,
-      meta: { errorAction: "Load worker health" },
-    }),
   merchantConfiguration: (errorAction?: string) =>
     queryOptions({
       queryKey: queryKeys.settings(),
@@ -518,24 +506,6 @@ export const adminQueries = {
       queryFn: ({ signal }) => listRails(signal),
       staleTime: Infinity,
       meta: { errorAction: "Load rails" },
-    }),
-  apiKeys: () =>
-    queryOptions({
-      queryKey: [...queryKeys.settings(), "api-keys"],
-      queryFn: ({ signal }) => listApiKeys(signal),
-      meta: { errorAction: "Load API keys" },
-    }),
-  team: () =>
-    queryOptions({
-      queryKey: [...queryKeys.team(), "members"],
-      queryFn: ({ signal }) => listTeam(signal),
-      meta: { errorAction: "Load team" },
-    }),
-  teamInvites: () =>
-    queryOptions({
-      queryKey: [...queryKeys.team(), "invites"],
-      queryFn: ({ signal }) => listTeamInvites(signal),
-      meta: { errorAction: "Load invites" },
     }),
   config: () =>
     queryOptions({

@@ -329,10 +329,5 @@ func (m *model) openAPI() ([]byte, error) {
 }
 
 // routePermission is what a route's caller must hold: a staff route's
-// Routes.Permissions field, another route's own permission.
-func routePermission(r routes.Route) string {
-	if needs := r.Needs(); needs != "" {
-		return needs
-	}
-	return r.Perm
-}
+// Routes.Permissions field.
+func routePermission(r routes.Route) string { return r.Needs() }

@@ -50,10 +50,9 @@ import { PSPPublicationAttempts } from "@/lib/psp-publication"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import { settingsTab, useMerchantConfig } from "@/lib/capabilities"
+import { extensionSettingsTabs, useExtensions } from "@/extensions/registry"
+import type { ConsoleSettingsTab } from "@/extensions/types"
 import { NotificationsTab } from "./notifications"
-import { ApiKeysTab } from "./api-keys"
-import { FederatedTeamTab } from "./federated-team"
-import { TeamTab } from "./team"
 
 const LINE_TAB =
   "flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
@@ -63,9 +62,14 @@ export function SettingsPage() {
   // back button steps through tabs the way it looks like it should.
   const [params, setParams] = useSearchParams()
   const config = useMerchantConfig()
-  const first = settingsTab(null, config)
-  const tab = settingsTab(params.get("tab"), config)
-  const { federated } = useAuth()
+  const { activeMerchant } = useAuth()
+  const hosted = extensionSettingsTabs(
+    useExtensions().extensions,
+    activeMerchant
+  )
+  const values = hosted.map((h) => h.value)
+  const first = settingsTab(null, config, values)
+  const tab = settingsTab(params.get("tab"), config, values)
 
   return (
     <Tabs
@@ -88,9 +92,6 @@ export function SettingsPage() {
               Merchant
             </TabsTrigger>
           )}
-          <TabsTrigger value="team" className={LINE_TAB}>
-            Team
-          </TabsTrigger>
           {config && (
             <TabsTrigger value="notifications" className={LINE_TAB}>
               Notifications
@@ -101,12 +102,14 @@ export function SettingsPage() {
               PSPs
             </TabsTrigger>
           )}
-          <TabsTrigger value="api-keys" className={LINE_TAB}>
-            API keys
-          </TabsTrigger>
           <TabsTrigger value="customer-controls" className={LINE_TAB}>
             Customer controls
           </TabsTrigger>
+          {hosted.map((h) => (
+            <TabsTrigger key={h.value} value={h.value} className={LINE_TAB}>
+              {h.title}
+            </TabsTrigger>
+          ))}
         </TabsList>
       </div>
       {config && (
@@ -114,9 +117,6 @@ export function SettingsPage() {
           <MerchantSettingsTab />
         </TabsContent>
       )}
-      <TabsContent value="team">
-        {federated ? <FederatedTeamTab /> : <TeamTab />}
-      </TabsContent>
       {config && (
         <TabsContent value="notifications">
           <NotificationsTab />
@@ -127,14 +127,36 @@ export function SettingsPage() {
           <PSPsTab />
         </TabsContent>
       )}
-      <TabsContent value="api-keys">
-        <ApiKeysTab />
-      </TabsContent>
       <TabsContent value="customer-controls">
         <CustomerControlsTab />
       </TabsContent>
+      {hosted.map((h) => (
+        <TabsContent key={h.value} value={h.value}>
+          <HostedTab tab={h} />
+        </TabsContent>
+      ))}
     </Tabs>
   )
+}
+
+// HostedTab is a host extension's Settings tab, loaded when first shown.
+function HostedTab({ tab }: { tab: ConsoleSettingsTab }) {
+  const [loaded, setLoaded] = React.useState<{
+    tab: ConsoleSettingsTab
+    Component: React.ComponentType
+  }>()
+  React.useEffect(() => {
+    let live = true
+    void tab.lazy().then(({ Component }) => {
+      if (live) setLoaded({ tab, Component })
+    })
+    return () => {
+      live = false
+    }
+  }, [tab])
+  if (loaded?.tab !== tab)
+    return <p className="text-sm text-muted-foreground">Loading…</p>
+  return <loaded.Component />
 }
 
 function MerchantSettingsTab() {

@@ -402,7 +402,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 |---|---|
 | Admission (hot path) | `Admit`, `GetAdmission`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
-| Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost`, `SetAPIHost`, `VerifyAPIHost` |
+| Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost` |
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `DeleteSpendDelegation` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, collection cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTiers`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
@@ -535,9 +535,8 @@ dunning, the intents ledger), [billing-policies.md](billing-policies.md)
 [self-hosting-mode1.md](self-hosting-mode1.md).
 
 
-Merchant team and API-key routes belong to the standalone server's control
-plane. An embedded engine mounts no placeholder management routes; the host
-owns its identity and team UI.
+OpenRails serves no team or API-key routes: the host owns its identity and
+team UI. Worker health is the host's `Client.Probes` (`openrails_job_progress`).
 
 ### Merchant checkout authority
 

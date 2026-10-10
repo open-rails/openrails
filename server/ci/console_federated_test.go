@@ -97,20 +97,19 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(owner.ID), admin)
 	flow := authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: boot.Issuer.Resource, Scopes: strings.Fields(boot.Issuer.Scope)}
 	tokens := as.Authorize(t, owner, flow)
-	w = dpopServe(t, handler, tokens, rsRequest{path: "/v1/merchants"})
+	w = dpopServe(t, userMerchants(cp), tokens, rsRequest{path: "/hosted/merchants"})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	list := merchantList(t, w)
 	require.Len(t, list, 1)
 	require.Equal(t, shop, list[0].Slug)
 	require.Equal(t, "owner", list[0].Role)
-	w = dpopServe(t, handler, tokens, rsRequest{method: http.MethodPost, path: "/v1/merchant/federated-grants", body: `{"email":"staff@example.test","role":"viewer"}`})
-	require.Equal(t, http.StatusCreated, w.Code, "a fresh sign-in may grant access: %s", w.Body.String())
+	require.Equal(t, http.StatusNotFound, dpopServe(t, handler, tokens, rsRequest{path: "/v1/merchants"}).Code, "the console's merchants come from the host")
 
 	renewed := as.Refresh(t, console, "", tokens)
 	require.Equal(t, http.StatusOK, dpopServe(t, handler, renewed, rsRequest{path: "/v1/admin/findings"}).Code, "the console's refreshed token")
 
 	stranger := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
-	w = dpopServe(t, handler, stranger, rsRequest{path: "/v1/merchants"})
+	w = dpopServe(t, userMerchants(cp), stranger, rsRequest{path: "/hosted/merchants"})
 	require.Equal(t, http.StatusOK, w.Code)
 	require.Empty(t, merchantList(t, w), "the console shows the empty state")
 

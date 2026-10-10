@@ -5,6 +5,8 @@
 import { AuthKitError, isAuthKitError } from "@openrails/auth-ui/client"
 import type { Guard } from "@openrails/auth-ui/react"
 
+import type { ConsoleMerchant } from "@/extensions/types"
+
 import type { OpenRailsErrorCode } from "./generated/error-codes"
 import type { ListPage } from "./generated/wire"
 
@@ -29,6 +31,9 @@ export interface BootstrapConfig {
   // The trusted issuer staff sign in at (AdminConsole.Issuer); null signs in
   // to auth_base_url's accounts.
   issuer: IssuerBootstrap | null
+  // The merchant the mount serves (an embedded host's); null when staff pick
+  // one.
+  merchant?: ConsoleMerchant | null
 }
 
 export interface IssuerBootstrap {
@@ -57,6 +62,11 @@ export async function loadBootstrap(url: string): Promise<BootstrapConfig> {
 export function getBootstrap(): BootstrapConfig {
   if (!bootstrapConfig) throw new Error("bootstrap config not loaded")
   return bootstrapConfig
+}
+
+// mountMerchant is the merchant the console's mount serves, if it serves one.
+export function mountMerchant(): ConsoleMerchant | undefined {
+  return bootstrapConfig?.merchant ?? undefined
 }
 
 // The merchant every request is made as (OpenRails-Merchant), kept for the

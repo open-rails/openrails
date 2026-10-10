@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -27,11 +26,7 @@ var ErrInvalidName = errors.New("merchants: invalid merchant name")
 var ErrRenamesDisabled = errors.New("merchants: merchant renames are disabled")
 
 // RenameTooSoonError reports a rename before the policy's interval elapsed.
-type RenameTooSoonError struct{ NextRenameAt time.Time }
-
-func (e *RenameTooSoonError) Error() string {
-	return fmt.Sprintf("merchants: the next rename is allowed at %s", e.NextRenameAt.UTC().Format(time.RFC3339))
-}
+type RenameTooSoonError = billing.MerchantRenameTooSoonError
 
 // Rename gives a live merchant a new name. The former name becomes an alias
 // under policy, and a name the merchant itself held before is reclaimed.

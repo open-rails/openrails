@@ -113,9 +113,9 @@ type UnreadCount struct {
 	UnreadCount int64 `json:"unread_count"`
 }
 
-// WorkerHealth is one background job kind's recent runs. LastError is the
-// job's error text, which only the platform operator sees: it can name another
-// merchant's records.
+// WorkerHealth is one background job kind's recent runs, an operator's read
+// (the server's ListWorkerHealth, openrails workers). LastError is the job's
+// error text, which can name any merchant's records.
 type WorkerHealth struct {
 	WorkerKind            string     `json:"worker_kind"`
 	RegisteredAt          time.Time  `json:"registered_at"`

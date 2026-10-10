@@ -3,12 +3,8 @@
 package ci_test
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -24,9 +20,9 @@ import (
 	"github.com/open-rails/openrails/server"
 )
 
-// SEC: adding a teammate by email never grants a merchant role to an account
-// that has not proved the address: anyone can register an address they do not
-// own. Only a live account that verified it joins directly; an unverified or
+// SEC: adding a teammate by email (the server's InviteMerchantTeamMember)
+// never grants a merchant role to an account that has not proved the
+// address: anyone can register an address they do not own. Only a live account that verified it joins directly; an unverified or
 // deleted account gets the answer an unregistered address gets (an invitation
 // where registration mints one), and no role.
 func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
@@ -56,50 +52,26 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			email := "owner-" + id + "@e2e.test"
 			owner, err := core.CreateUser(ctx, iam.NewUser{Email: email, Username: "owner_" + id, Password: authtest.Password, EmailVerified: true})
 			require.NoError(t, err)
-			_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
+			m, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
 			require.NoError(t, err)
-			handler, err := standaloneHandler(cp)
-			require.NoError(t, err)
-			ts := httptest.NewServer(handler)
-			t.Cleanup(ts.Close)
-			// Inviting needs a recent sign-in, which a minted token is not.
 			token := authtest.SignIn(t, core, authtest.User{User: owner, Email: email, Password: authtest.Password}).AccessToken
+			by := userActor(t, cp, token)
 
-			call := func(method, path string, body any) (int, map[string]any) {
-				var data io.Reader
-				if body != nil {
-					raw, err := json.Marshal(body)
-					require.NoError(t, err)
-					data = bytes.NewReader(raw)
-				}
-				req, err := http.NewRequestWithContext(ctx, method, ts.URL+"/v1/merchant/team"+path, data)
-				require.NoError(t, err)
-				req.Header.Set("Authorization", "Bearer "+token)
-				req.Header.Set("OpenRails-Merchant", slug)
-				req.Header.Set("Content-Type", "application/json")
-				res, err := http.DefaultClient.Do(req)
-				require.NoError(t, err)
-				defer res.Body.Close()
-				out := map[string]any{}
-				require.NoError(t, json.NewDecoder(res.Body).Decode(&out))
-				return res.StatusCode, out
+			invite := func(email string) (*billing.TeamInviteResult, error) {
+				return cp.InviteMerchantTeamMember(ctx, by, m.MerchantID, billing.InviteTeamMemberParams{Email: email, Role: "viewer"})
 			}
-			invite := func(email string) (int, map[string]any) {
-				return call(http.MethodPost, "/invites", map[string]string{"email": email, "role": "viewer"})
-			}
-			// shape is what the answer reveals: status, fields and error code.
-			shape := func(status int, body map[string]any) []any {
-				out := []any{status, body["member"] != nil, body["invite"] != nil, body["url"] != nil}
-				if e, ok := body["error"].(map[string]any); ok {
-					out = append(out, e["code"])
+			// shape is what the answer reveals: fields and refusal.
+			shape := func(res *billing.TeamInviteResult, err error) []any {
+				if err != nil {
+					return []any{errors.Is(err, server.ErrTeamInvitesDisabled)}
 				}
-				return out
+				return []any{res.Member != nil, res.Invite != nil, res.URL != nil}
 			}
 			onTeam := func(u iam.User) bool {
-				status, body := call(http.MethodGet, "", nil)
-				require.Equal(t, http.StatusOK, status, "%v", body)
-				for _, m := range body["data"].([]any) {
-					if m.(map[string]any)["user_id"] == u.ID {
+				team, err := cp.ListMerchantTeam(ctx, m.MerchantID)
+				require.NoError(t, err)
+				for _, member := range team {
+					if member.UserID == u.ID {
 						return true
 					}
 				}
@@ -107,6 +79,12 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			}
 
 			unknown := shape(invite("team-" + uuid.NewString()[:12] + "@e2e.test"))
+			require.Equal(t, registers, cp.TeamInvitesEnabled())
+			if registers {
+				require.Equal(t, []any{false, true, true}, unknown, "an unregistered address gets a link")
+			} else {
+				require.Equal(t, []any{true}, unknown, "closed registration mints no link")
+			}
 
 			for what, u := range map[string]iam.User{"unverified": account(false), "deleted": account(true)} {
 				if what == "deleted" {
@@ -119,10 +97,20 @@ func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 			}
 
 			verified := account(true)
-			status, body := invite(strings.ToUpper(*verified.Email))
-			require.Equal(t, http.StatusCreated, status, "%v", body)
-			require.NotNil(t, body["member"], "added at once: %v", body)
+			res, err := invite(strings.ToUpper(*verified.Email))
+			require.NoError(t, err)
+			require.NotNil(t, res.Member, "added at once: %+v", res)
 			require.True(t, onTeam(verified), "control: the account that proved the address joins")
+
+			// The team keeps an owner; the role a member holds changes.
+			member, err := cp.SetMerchantTeamRole(ctx, by, m.MerchantID, verified.ID, "support")
+			require.NoError(t, err)
+			require.Equal(t, "support", member.Role)
+			_, err = cp.SetMerchantTeamRole(ctx, by, m.MerchantID, owner.ID, "viewer")
+			require.ErrorIs(t, err, server.ErrLastOwner)
+			require.ErrorIs(t, cp.RemoveMerchantTeamMember(ctx, by, m.MerchantID, owner.ID), server.ErrLastOwner)
+			require.NoError(t, cp.RemoveMerchantTeamMember(ctx, by, m.MerchantID, verified.ID))
+			require.False(t, onTeam(verified))
 
 			if registers {
 				// The control plane's mail reaches the engine's sender, rendered,

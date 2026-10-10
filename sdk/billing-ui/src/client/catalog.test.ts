@@ -104,7 +104,7 @@ describe("catalog", () => {
   it("reads the public configuration", async () => {
     const capabilities = {
       route_groups: { admin: true, catalog_write: false, merchant_config: false },
-      features: { team_invites: false },
+      features: { api_host: false },
     }
     const { client, request } = served(
       json(200, { capabilities, currencies: currenciesFixture, payment: null }),

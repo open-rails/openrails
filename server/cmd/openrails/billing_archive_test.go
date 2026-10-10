@@ -155,14 +155,14 @@ func TestBillingArchiveBearerFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "credential")
 	for _, token := range []string{"", " \n", "first\nsecond", "two words", strings.Repeat("x", (64<<10)+1)} {
 		require.NoError(t, os.WriteFile(path, []byte(token), 0o600))
-		_, err := readBillingArchiveToken(path)
+		_, err := readTokenFile(path)
 		require.Error(t, err, "%q", token)
 	}
 	require.NoError(t, os.WriteFile(path, []byte("test-bearer\n"), 0o600))
-	token, err := readBillingArchiveToken(path)
+	token, err := readTokenFile(path)
 	require.NoError(t, err)
 	require.Equal(t, "test-bearer", token)
-	_, err = readBillingArchiveToken(path + ".missing")
+	_, err = readTokenFile(path + ".missing")
 	require.Error(t, err)
 }
 

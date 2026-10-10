@@ -4,71 +4,74 @@ package ci_test
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
 	"github.com/stretchr/testify/require"
 )
 
-// Users create merchants through OpenRails' own route (#1106): the name claim,
-// reserved names, admission and the per-IP/per-user velocity limit.
-func TestMerchantCreationRoute(t *testing.T) {
+// A user creates a merchant only through a hosted product's own route, on
+// ProvisionMerchant with the user as owner (#1173): the creation policy
+// (verified email, reserved names, the free allowance) applies, and the
+// user's merchants list it with the owner role. OpenRails serves no route
+// that creates or lists merchants.
+func TestMerchantCreationPolicy(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
 	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.MerchantCreation = &server.MerchantCreationConfig{ReservedSlugs: []string{reserved}, FreeAllowance: 1}
 		deps.HasVaultedPaymentMethod = func(context.Context, string) (bool, error) { return false, nil }
 	})
+	ctx := t.Context()
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	owner, ownerToken := newUser(t, cp)
-	other, otherToken := newUser(t, cp)
-	create := func(token string, body map[string]string) (*json.Decoder, int) {
-		w := call(t, handler, token, http.MethodPost, "/v1/merchants", "", body)
-		return json.NewDecoder(w.Body), w.Code
+	account := newAccount(t, cp)
+	owner, other := account.ID, newAccount(t, cp).ID
+	unverified, _ := newUser(t, cp)
+	create := func(user, name string) (*billing.ProvisionMerchantResult, error) {
+		return cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: name, DisplayName: "Shop One", OwnerUserID: user})
 	}
-	code := func(token string, body map[string]string) int {
-		_, status := create(token, body)
-		return status
+	displayName := func(id billing.MerchantID) *string {
+		m, err := cp.GetMerchant(ctx, id)
+		require.NoError(t, err)
+		return m.DisplayName
 	}
 
 	shop := uniqueName("shop")
-	require.Equal(t, http.StatusForbidden, code(ownerToken, map[string]string{"name": shop}), "an unverified account claims no name")
-	verifyEmail(t, cp, owner)
-	verifyEmail(t, cp, other)
+	_, err = create(unverified, shop)
+	require.ErrorIs(t, err, billing.ErrMerchantCreationEmailUnverified, "an unverified account claims no name")
 
-	body, status := create(ownerToken, map[string]string{"name": shop, "display_name": "Shop One"})
-	require.Equal(t, http.StatusCreated, status)
-	var created billing.UserMerchant
-	require.NoError(t, body.Decode(&created))
-	w := call(t, handler, ownerToken, http.MethodGet, "/v1/merchants", "", nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var mine billing.ListPage[billing.UserMerchant]
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&mine))
-	require.Equal(t, []billing.UserMerchant{{ID: created.ID, Slug: shop, DisplayName: "Shop One", Role: "owner", Permissions: []string{"merchant:*"}}}, mine.Items, "the answer is the user's new merchant")
-	w = call(t, handler, ownerToken, http.MethodGet, "/v1/merchant/team", shop, nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), `"role":"owner"`)
+	created, err := create(owner, shop)
+	require.NoError(t, err)
+	require.True(t, created.Created)
+	ownerToken := authtest.SignIn(t, cp.AuthKit(), account).AccessToken
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer "+ownerToken)
+	mine, err := cp.ListUserMerchants(ctx, r)
+	require.NoError(t, err)
+	require.Equal(t, []billing.UserMerchant{{ID: created.MerchantID, Slug: shop, DisplayName: "Shop One", Role: "owner", Permissions: []string{"merchant:*"}}}, mine)
 
-	body, status = create(ownerToken, map[string]string{"name": shop})
-	require.Equal(t, http.StatusOK, status, "re-posting an owned name is the idempotent repair, past the allowance")
-	var repaired billing.UserMerchant
-	require.NoError(t, body.Decode(&repaired))
-	require.Equal(t, created.ID, repaired.ID)
-	require.Equal(t, http.StatusPaymentRequired, code(ownerToken, map[string]string{"name": uniqueName("second")}), "past the allowance a vaulted payment method is required")
+	repaired, err := create(owner, shop)
+	require.NoError(t, err, "an owned name is the idempotent repair, past the allowance")
+	require.Equal(t, []any{created.MerchantID, false}, []any{repaired.MerchantID, repaired.Created})
+	_, err = create(owner, uniqueName("second"))
+	require.ErrorIs(t, err, billing.ErrMerchantCreationPaymentMethodRequired, "past the allowance a vaulted payment method is required")
 
-	require.Equal(t, http.StatusConflict, code(otherToken, map[string]string{"name": shop}))
-	require.Equal(t, http.StatusConflict, code(otherToken, map[string]string{"name": reserved}))
-	require.Equal(t, http.StatusBadRequest, code(otherToken, map[string]string{"name": "Not A Name!"}))
+	taken, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, DisplayName: "Hijacked", OwnerUserID: other})
+	require.NoError(t, err)
+	require.Equal(t, []any{created.MerchantID, false}, []any{taken.MerchantID, taken.Created}, "a taken name never becomes another merchant")
+	require.Equal(t, "Shop One", *displayName(created.MerchantID), "nor takes another user's display name")
+	_, err = create(other, reserved)
+	require.ErrorIs(t, err, billing.ErrMerchantSlugReserved)
+	_, err = create(other, "Not A Name!")
+	require.ErrorIs(t, err, billing.ErrInvalidMerchantSlug)
 
-	// Seven claims so far from one client IP; the twelfth is the last allowed.
-	for range 5 {
-		require.Equal(t, http.StatusBadRequest, code(otherToken, map[string]string{"name": "Not A Name!"}))
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		w := call(t, handler, ownerToken, method, "/v1/merchants", "", map[string]string{"name": uniqueName("late")})
+		require.Equal(t, http.StatusNotFound, w.Code, "%s /v1/merchants: %s", method, w.Body.String())
 	}
-	w = call(t, handler, otherToken, http.MethodPost, "/v1/merchants", "", map[string]string{"name": uniqueName("late")})
-	require.Equal(t, http.StatusTooManyRequests, w.Code, w.Body.String())
-	require.NotEmpty(t, w.Header().Get("Retry-After"))
 }

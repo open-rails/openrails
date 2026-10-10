@@ -10,11 +10,13 @@ import type { ComponentType, ReactNode } from "react"
 export type ConsoleScope = "merchant" | "user"
 
 export interface ConsoleMerchant {
+  // Empty for a merchant opened by name, before the host's directory knows it.
   id: string
   slug: string
   display_name?: string
-  // The member's role on this merchant: owner, support or viewer.
-  role: string
+  // The member's role on this merchant (owner, support or viewer), when a
+  // host's directory says it.
+  role?: string
 }
 
 export interface ConsoleUser {
@@ -67,6 +69,18 @@ export interface ConsoleMenuItem {
   useVisible?: () => boolean
 }
 
+// A tab of the console's Settings page: a host's team, API keys or the like.
+export interface ConsoleSettingsTab {
+  // The ?tab= value; unique, and not one of the console's own.
+  value: string
+  title: string
+  lazy: () => Promise<{ Component: ComponentType }>
+  // Position among the tabs; the console's own use 0–50 in tens.
+  order?: number
+  // Merchant roles that see the tab; unset is every role.
+  roles?: string[]
+}
+
 export interface ConsoleExtension {
   // Unique; also the key of this extension's AdminConsoleConfig.Extensions
   // entry.
@@ -75,9 +89,18 @@ export interface ConsoleExtension {
   routes?: ConsoleRoute[]
   // Account-menu entries, above the console's own.
   userMenu?: ConsoleMenuItem[]
+  // The signed-in user's merchants, from the host's own directory: the
+  // switcher's list. Without one the console acts for the merchant its mount
+  // serves, or one the user opens by name. At most one extension declares it.
+  merchants?: () => Promise<ConsoleMerchant[]>
   // A console path that creates a merchant. The empty state and the merchant
   // switcher offer "New merchant" when one extension declares it.
   newMerchantPath?: string
+  // Rendered in the no-merchant state below the console's own text, such as
+  // the invitations a user may accept.
+  EmptyState?: ComponentType
+  // Tabs added to the Settings page of the selected merchant.
+  settingsTabs?: ConsoleSettingsTab[]
   // Wraps the whole console, inside its session and query providers: host
   // context, dialogs a host page relies on.
   Provider?: ComponentType<{ children: ReactNode }>

@@ -13,7 +13,7 @@ flowchart LR
     B[Browser] -- session credential --> H[Your identity provider]
     H -. access token, scope openrails:self .-> B
     B -- DPoP access token, /v1/me/* --> OR[OpenRails :3053]
-    H -- API key, /v1/admin/* --> OR
+    H -- access token, /v1/admin/* --> OR
     OR --> PG[(Postgres 18+)]
     OR --> RD[(Garnet/Redis)]
     R[Stripe / NMI / CCBill / Solana] -- webhooks --> OR
@@ -142,24 +142,25 @@ missing metadata. Existing API edits and archived accounts survive restarts.
 AuthKit bootstrap is first-run only; catalog application is always explicit.
 Use metadata applications for deliberate versioned configuration changes.
 
-**Create an API key.** Backend credentials are merchant-scoped API keys
-(`openrails_st_…`) minted through the merchant surface:
+**Backend credentials.** Your backend is a client of the issuer you
+registered in step 2 (see [trusted issuers](#trusted-issuers-staff-machines-and-customers)):
+it requests a client-credentials access token for this deployment's resource
+identifier with scope `openrails:merchant`, and its permissions there, within
+the issuer's ceiling, decide what it may do. OpenRails mints no credentials
+and serves no route that does; a hosted product built on the `server` package
+mints API keys with `CreateMerchantAPIKey`.
 
-```
-POST /v1/merchant/api-keys   {"name": "backend", "role": "owner"}
-```
+The remote CLI reads such a token from `--token-file` on every call, so
+whatever refreshes it may rewrite the file in place:
 
-Roles are fixed: `viewer` (reads, `server.MerchantRead` — right for LLM agents),
-`support` (also acts on customers, `server.MerchantWrite`), `owner` (also the
-merchant's configuration, `server.MerchantAdmin`). Minting needs AuthKit's
-credentials-manage permission on the merchant (owner-only), so authenticate
-the mint with an access token from the issuer you registered in step 2
-(issuer-as-owner: its tokens administer exactly that one merchant), an
-operator session from the bootstrap user, or the admin console
-(`admin_console.enabled`). The secret is returned **exactly once** in the mint
-response and is never retrievable again. `GET /v1/merchant/api-keys` lists,
-`DELETE /v1/merchant/api-keys/{id}` revokes. Details:
-[merchant-provisioning.md](merchant-provisioning.md).
+```bash
+curl -s https://issuer.example/oauth/token -d grant_type=client_credentials \
+  -d client_id=billing-backend -d client_secret="$SECRET" \
+  -d scope=openrails:merchant -d resource=https://openrails.example.com \
+  | jq -r .access_token > /run/openrails/token
+openrails get-merchant-config --server-url https://openrails.example \
+  --token-file /run/openrails/token --merchant your-merchant
+```
 
 ### Backend integration
 
@@ -167,14 +168,22 @@ response and is never retrievable again. `GET /v1/merchant/api-keys` lists,
 embedded mode:
 
 ```go
+tokens := (&clientcredentials.Config{ // golang.org/x/oauth2/clientcredentials
+    ClientID: "billing-backend", ClientSecret: secret, TokenURL: "https://issuer.example/oauth/token",
+    Scopes: []string{"openrails:merchant"}, EndpointParams: url.Values{"resource": {"https://openrails.example.com"}},
+}).TokenSource(ctx) // caches the token until it expires
 client, err := openrails.NewRemote("https://openrails.example",
-    openrails.WithAPIKey(os.Getenv("OPENRAILS_API_KEY")), // or WithTokenProvider for minted JWTs
-    openrails.WithMerchantID(merchantID),                 // the merchant its calls act on
+    openrails.WithTokenProvider(func(context.Context) (string, error) {
+        t, err := tokens.Token()
+        if err != nil { return "", err }
+        return t.AccessToken, nil
+    }),
+    openrails.WithMerchantID(merchantID), // the merchant its calls act on
     openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
 )
 if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
 if _, err := client.GetMerchantConfiguration(ctx); err != nil { // authenticated boot probe
-    log.Fatal(err) // unreachable, bad key — fail fast
+    log.Fatal(err) // unreachable, bad credential — fail fast
 }
 
 verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
@@ -192,7 +201,8 @@ receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmission
 // or client.ReleaseAdmissions(ctx, []string{requestID}) if the work failed
 ```
 
-Options: `WithAPIKey`, `WithTokenProvider` (per-call minted bearer),
+Options: `WithTokenProvider` (per-call minted bearer), `WithAPIKey` (a
+static key, such as a hosted product's),
 `WithMerchantID` ([choosing the merchant](client-merchant-selection.md)),
 `WithTimeout`, `WithHTTPClient`. Every request carries its own currency. The
 constructor validates static configuration without I/O; `Ready` checks
@@ -219,31 +229,31 @@ up when billing is down, fail-closed protects against unmetered spend — choose
 per endpoint cost. Keep `WithTimeout` short so a slow OpenRails cannot stall
 your hot path.
 
-**Any other stack** calls the same HTTP surface with the API key:
+**Any other stack** calls the same HTTP surface with the access token:
 
 ```bash
 # Pre-authorize + hold atomically before doing expensive work
 curl -X POST https://openrails.example/v1/admin/admissions \
-  -H "Authorization: Bearer openrails_st_..." \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"items":[{"customer_id":"...","invoker":"user-123","estimated_amount":"50000",
        "expires_at":"2026-09-16T12:00:00Z","request_id":"req-789"}]}'
 
 # Settle at real cost…
 curl -X POST https://openrails.example/v1/admin/admissions/req-789/capture \
-  -H "Authorization: Bearer openrails_st_..." \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"amount":"43000","usage":{"event_type":"chat.completion"}}'
 
 # …or release the hold when the work failed
 curl -X POST https://openrails.example/v1/admin/admissions/release \
-  -H "Authorization: Bearer openrails_st_..." \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
   -d '{"request_ids":["req-789"]}'
 ```
 
 The `/v1/admin/*` surface (admissions, credits, entitlements, usage,
 settings, customers, payments, subscriptions) is gated per route by its
 permission — see [api/routes.md](api/routes.md) for every route with its permission and
-[api/endpoints.md](api/endpoints.md) for the conventions. Keys are bound to their merchant and can never act on
-another merchant's data.
+[api/endpoints.md](api/endpoints.md) for the conventions. A token acts on its issuer's merchants
+only, never on another merchant's data.
 
 ### Frontend integration
 
@@ -276,9 +286,8 @@ resource_server:
       allowed_origins: [https://admin.example.com]
 ```
 
-- `scope` selects the surface: `openrails:merchant` for the admin API and
-  `GET /v1/merchants` (the merchants the token reaches, with its role and
-  permissions there), `openrails:self` for a customer's own billing
+- `scope` selects the surface: `openrails:merchant` for the admin API,
+  `openrails:self` for a customer's own billing
   (`/v1/me/*`, DPoP-bound, `sub` a UUID: the customer's id). Another scope is
   answered `403 insufficient_scope`.
 - A token's `permissions` claim is what it grants, within the issuer's ceiling
@@ -295,13 +304,11 @@ resource_server:
 - A sensitive operation (one that moves money or grants access) needs the
   token's `auth_time` within 15 minutes; otherwise `403 step_up_required`
   (metadata `max_age: 0`) asks the client to re-authorize.
-- Staff your issuer grants nothing are invited by email:
-  `POST /v1/merchant/federated-grants {"email","role"}` (owners). The invitee
-  signs in at an issuer trusted for the merchant, lists
-  `GET /v1/merchants/invites` and accepts `POST /v1/merchants/invites/{id}/accept`
-  with a token carrying that `email` and `email_verified: true`. The role then
-  joins the token's own permissions, within the ceiling, until
-  `DELETE /v1/merchant/federated-grants/{id}`.
+- Staff your issuer grants nothing can hold a merchant role by email
+  invitation (a federated grant), which joins the token's own permissions,
+  within the ceiling. Grants are a hosted product's: it builds them on the
+  `server` package (below); a self-hosted deployment grants through its
+  issuer.
 - A token bound to a DPoP key (`cnf.jkt`) is accepted only with
   `Authorization: DPoP <token>` and a fresh proof carrying the server nonce; the
   first proof without one is answered `401 use_dpop_nonce` with a `DPoP-Nonce`
@@ -320,7 +327,7 @@ resource_server:
   `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,
   `permission_required`.
 
-These tokens, merchant API keys and the control plane's own sessions answer the
+These tokens, merchant API keys and the server's own sessions answer the
 same `openrails.Auth` contract an embedded host implements, through the same
 route gate: a token's `sub` is the subject (a user), and its invoker; a client
 acting for itself and an API key are an application subject. Customer routes
@@ -342,10 +349,11 @@ subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
 **Per-merchant API hosts.** A multi-merchant deployment can give each
-merchant a canonical hostname (the owner claims it with `PUT /v1/admin/api-host`
-and proves control of the domain with a TXT record, then
-`POST /v1/admin/api-host/verify`; operators bind directly with the
-server's `SetMerchantAPIHost`). It resolves live on the next request, no restart.
+merchant a canonical hostname: the operator declares it (`api_host` in the
+merchant manifest, or the server's `SetMerchantAPIHost`), and a hosted
+product lets a merchant claim one it proves with a DNS TXT record
+(`ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`). `GET /v1/admin/api-host`
+reads it. It resolves live on the next request, no restart.
 The public routes then resolve the merchant from the Host header, and every
 merchant-scoped route enforces Host-merchant == issuer-merchant: a token minted
 for merchant A is rejected on merchant B's host even though it verifies.
@@ -383,8 +391,9 @@ return srv.Run(ctx) // serves Addr (default :3053) and runs the workers until ct
 `server.New` composes three parts as any host of the library does: the engine
 (`openrails.New`); the server's own AuthKit client, its tables created or
 upgraded and its routes mounted at the issuer's path; and the multi-merchant
-control plane (merchant provisioning and names, teams, merchant API keys,
-federated grants, trusted issuers, fleet analytics). The engine's routes are
+control plane (merchants and their names, teams, API keys, federated grants,
+trusted issuers, fleet analytics), which is Go methods only: no OpenRails route
+registers a merchant or manages a team. The engine's routes are
 gated by the server's own `openrails.Auth`: it accepts merchant API keys, the
 server's sessions and trusted issuers' access tokens, and resolves the merchant
 each acts for.
@@ -395,10 +404,11 @@ each acts for.
 | `Auth` | The server's AuthKit: `Issuer` (required), signing keys, `Naming`, its tables' `Schema` (default `profiles`), development allowances. |
 | `Registration`, `LocalSignIn`, `PasswordlessLogin`, `PasswordlessAutoRegistration` | Who may create accounts and sign in at the server itself. Without `LocalSignIn` people sign in at a trusted issuer. |
 | `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
-| `MerchantCreation` | Lets signed-in users create merchants: reserved names, a pattern and a free allowance. |
+| `MerchantCreation` | The policy for merchants users create (`ProvisionMerchant` with an owner) and rename: reserved names, a pattern and a free allowance. |
 | `ResourceServer` | The trusted issuers whose access tokens the admin API accepts (above). |
 | `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |
 | `Addr` | Where `Run` listens; default `:3053`. |
+| `PrivateAddr` | Where `Run` also serves `PrivateHandler`, the operator's `/metrics`; empty serves none (`private_port`). |
 
 `server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's
 senders (`SMS`; `AuthEmail` for your own templates, else AuthKit's mail is
@@ -411,15 +421,25 @@ health routes, plus customer surfaces with their own `Auth`; one without a
 `Merchant` serves the merchant each request selects, which its `Auth` reads
 with `openrails.RequestMerchant`) and composes
 `RiverJobs` into its River fleet before `Start(ctx,
-openrails.WithRiverClient(fleet))`. The operator's operations are methods of
-the server: `ProvisionMerchant`, `SetMerchantAPIHost`,
-`ListMerchantsForSubject`, `ListActiveMerchantIDs`, `ListUserMerchants`,
-`ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`,
-`EnsureCustomerPermissionGroup`, `FleetAnalytics`, `FleetTimeseries`,
-`ListMerchantRetirementCandidates`, `RetireUnusedMerchant`,
-`CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod` and
-`AuthenticateUser`. `AuthKit` is the server's AuthKit client and `Client` the
-engine.
+openrails.WithRiverClient(fleet))`.
+
+The server's methods are the operator's API and a hosted product's
+foundation; the `openrails` CLI covers the operator's (`merchants`,
+`workers`, `admin-lockouts`):
+
+| Area | Methods |
+|---|---|
+| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `RenameMerchant`, `SetMerchantAPIHost`, `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
+| Users and authority | `AuthenticateUser`, `ListUserMerchants`, `ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`, `CheckRecentSignIn`, `UserActor`, `CredentialRefusal`, `EnsureCustomerPermissionGroup` |
+| Team and credentials | `ListMerchantTeam`, `ListMerchantTeamInvites`, `InviteMerchantTeamMember`, `RevokeMerchantTeamInvite`, `SetMerchantTeamRole`, `RemoveMerchantTeamMember`, `TeamInvitesEnabled`, `CreateMerchantAPIKey`, `ListMerchantAPIKeys`, `RevokeMerchantAPIKey`, `ListFederatedGrants`, `CreateFederatedGrant`, `RevokeFederatedGrant`, `ListFederatedInvites`, `AcceptFederatedGrant` |
+| Operations | `ListWorkerHealth`, `UnlockAdminLockout`, `PrivateHandler`, `FleetAnalytics`, `FleetTimeseries`, `ListMerchantRetirementCandidates`, `RetireUnusedMerchant`, `CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod` |
+
+A change to a team, its keys or its grants names its `Actor`: `UserActor(r)`,
+the user r signs in as, whom AuthKit holds to their own role; a
+`CredentialActor` holding permissions, which grants no role beyond them; or
+`OperatorActor()`. The caller authorizes each call (`ResolveAuthorizedMerchant`)
+and asks `CheckRecentSignIn` before a sensitive one. `AuthKit` is the server's
+AuthKit client and `Client` the engine.
 
 ### Upgrades and ops
 

@@ -58,7 +58,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   the route groups the mount serves and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
   `provider_credential_writes`, `api_host`, `catalog_copilot`, `metrics_ask`,
-  `dashboard_generation`, `team_invites`). Its route groups include `merchant`
+  `dashboard_generation`). Its route groups include `merchant`
   (staff work on customers) and `merchant_config` (the merchant's own
   configuration). A route the deployment cannot serve
   is not registered: it answers `404 route_not_found`.
@@ -73,8 +73,6 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a trusted issuer's access token with scope `openrails:self`, as `Authorization: DPoP <token>` with a fresh `DPoP` proof ([auth](../auth.md#trusted-issuers)) |
 | Admin, catalog edits and merchant configuration: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: an API key (`openrails_st_…`), a user session, or a trusted issuer's access token with scope `openrails:merchant` |
-| Control plane: `/v1/merchants`, the team and API-key routes | a signed-in user, or a trusted issuer's access token (standalone) |
-| Platform: `/v1/platform/*` | an operator session holding the root permission (standalone) |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
 Every staff route is gated by the host's permission for its bundle
@@ -356,9 +354,10 @@ An outbound alert webhook's URL is a write-only credential, path and query
 included: reads show `destination_host` only. `PUT …/{id}/url` rotates it and
 keeps the webhook's identity.
 
-## Standalone only
+## Not routes
 
-The team and API-key routes (`/v1/merchant/team`, `/v1/merchant/api-keys`),
-`/v1/merchants` and `/v1/platform/*` exist only with a control plane. API keys
-are minted with a fixed role (`viewer`, `support`, `owner`); the secret is
-shown once, and a caller can never mint beyond its own authority.
+No route registers a merchant, lists a user's merchants, or manages a team,
+API keys, federated grants or the merchant directory: those are the `server`
+package's Go methods and the `openrails` CLI, on which a hosted product builds
+its own routes. The operator's `/metrics` is on the standalone server's
+private listener.

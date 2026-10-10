@@ -4,18 +4,20 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/open-rails/authkit/iam"
 	helpersauth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/staffperm"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
-// Control-plane operations, for hosted products: merchant provisioning and
-// names, the merchant directory, fleet aggregates and retirement.
+// Control-plane operations, for hosted products: merchant provisioning, the
+// user's merchants and authority, fleet aggregates and retirement.
 
 // AuthenticateUser verifies a session of the server's own accounts on r.
 func (s *Server) AuthenticateUser(r *http.Request) (openrails.Identity, error) {
@@ -32,16 +34,16 @@ func (s *Server) AuthenticateUser(r *http.Request) (openrails.Identity, error) {
 
 // ProvisionMerchant returns the merchant a name resolves to, or creates one
 // claiming it, bound to a new merchant permission group owned by
-// req.OwnerUserID. A user claim answers to Config.MerchantCreation. A
-// merchant's own changes afterwards (its name, display name, API host) go
-// through its routes.
+// req.OwnerUserID (none: the operator's merchant). A user claim answers to
+// Config.MerchantCreation. It is how a merchant is created outside the
+// manifest; no OpenRails route creates one.
 func (s *Server) ProvisionMerchant(ctx context.Context, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
 	return operator.ProvisionMerchant(ctx, s.cp, req)
 }
 
 // SetMerchantAPIHost binds the host name requests resolve to this merchant
-// from, as the operator and without the DNS proof SetAPIHost asks of a
-// merchant: a host of the deployment's own. Empty clears it.
+// from, as the operator and without the DNS proof ClaimMerchantAPIHost asks
+// of a merchant: a host of the deployment's own. Empty clears it.
 func (s *Server) SetMerchantAPIHost(ctx context.Context, id billing.MerchantID, apiHost string) error {
 	return operator.SetMerchantAPIHost(ctx, s.cp, id, apiHost)
 }
@@ -52,12 +54,21 @@ func (s *Server) ListMerchantsForSubject(ctx context.Context, subject string) ([
 	return operator.ListMerchantsForSubject(ctx, s.cp, subject)
 }
 
-// ListUserMerchants returns the live merchants the user authenticated by r
-// holds a staff or owner role in. It checks the sign-in is still active and
-// reads current memberships; customer relationships are a separate listing.
+// ListUserMerchants returns the live merchants the user r authenticates as
+// may act on, with their role there: by a session of the server's accounts,
+// the merchants they hold a role in (the sign-in checked live); by a trusted
+// issuer's access token, the merchants it reaches. Customer relationships
+// are a separate listing.
 func (s *Server) ListUserMerchants(ctx context.Context, r *http.Request) ([]billing.UserMerchant, error) {
 	if r == nil {
 		return nil, openrails.ErrUnauthenticated
+	}
+	if fields := strings.Fields(r.Header.Get("Authorization")); len(fields) == 2 && credential.LooksLikeResourceToken(fields[1]) {
+		user, err := s.cp.ResolveResourceUser(r.WithContext(ctx))
+		if err != nil {
+			return nil, err
+		}
+		return user.Merchants, nil
 	}
 	core := s.cp.Core()
 	claims, err := core.VerifyRequest(r.WithContext(ctx))
@@ -109,7 +120,8 @@ func (s *Server) ResolveMerchantForGroup(ctx context.Context, ref string) (billi
 }
 
 // HasRootPermission checks live whether the user r authenticates as holds
-// permission in the root group.
+// permission in the root group (billing.RootMerchantsRead and the other
+// root: permissions), for a hosted product's operator pages.
 func (s *Server) HasRootPermission(ctx context.Context, r *http.Request, permission string) (bool, error) {
 	return s.cp.HasRootPermission(ctx, r, permission)
 }

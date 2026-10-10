@@ -3,7 +3,6 @@
 package ci_test
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,17 +15,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// GET /v1/merchants is the console's merchant list (#1106): the live merchants
-// a user holds a role in, by current name, with the user's role in each.
+// ListUserMerchants is a hosted product's merchant list (#1106): the live
+// merchants a user holds a role in, by current name, with the user's role in
+// each.
 func TestUserMerchantsListing(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())
 	ctx := t.Context()
-	handler, err := standaloneHandler(cp)
-	require.NoError(t, err)
-	member, memberToken := newUser(t, cp)
+	member, memberToken := newOwner(t, cp)
 	owner, ownerToken := newOwner(t, cp)
-	verifyEmail(t, cp, member)
 	u, err := cp.AuthKit().User(ctx, iam.UserByID(member))
 	require.NoError(t, err)
 
@@ -36,18 +33,18 @@ func TestUserMerchantsListing(t *testing.T) {
 	viewed := uniqueName("b-viewed")
 	theirs, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: viewed, OwnerUserID: owner})
 	require.NoError(t, err)
-	w := call(t, handler, ownerToken, http.MethodPost, "/v1/merchant/team/invites", viewed, map[string]string{"email": *u.Email, "role": "viewer"})
-	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
+	added, err := cp.InviteMerchantTeamMember(ctx, userActor(t, cp, ownerToken), theirs.MerchantID, billing.InviteTeamMemberParams{Email: *u.Email, Role: "viewer"})
+	require.NoError(t, err)
+	require.NotNil(t, added.Member)
 	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("c-unrelated"), OwnerUserID: owner})
 	require.NoError(t, err)
 
 	list := func(token string) []billing.UserMerchant {
-		w := call(t, handler, token, http.MethodGet, "/v1/merchants", "", nil)
-		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var body billing.ListPage[billing.UserMerchant]
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&body))
-		require.Empty(t, body.Next, "one page")
-		return body.Items
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		merchants, err := cp.ListUserMerchants(ctx, r)
+		require.NoError(t, err)
+		return merchants
 	}
 	listed := list(memberToken)
 	require.Len(t, listed, 2)
@@ -66,9 +63,6 @@ func TestUserMerchantsListing(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Retired)
 	require.Equal(t, []billing.UserMerchant{{ID: theirs.MerchantID, Slug: viewed, Role: "viewer", Permissions: viewerGrants}}, list(memberToken))
-
-	w = call(t, handler, "not-a-token", http.MethodGet, "/v1/merchants", "", nil)
-	require.Equal(t, http.StatusUnauthorized, w.Code)
 }
 
 // A hosted product aggregates its own account response through the public

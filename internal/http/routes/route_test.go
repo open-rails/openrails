@@ -33,8 +33,6 @@ var groupPaths = map[Group][]string{
 	CatalogWrite:   {"/v1/admin/catalog/", "/v1/admin/customers/"},
 	MerchantConfig: {"/v1/admin/"},
 	Customer:       {"/v1/me/"},
-	ControlPlane:   {"/v1/merchant/", "/v1/merchants"},
-	Platform:       {"/v1/platform/"},
 	Provisioning:   {"/scim/v2/"},
 	Webhooks:       {"/v1/webhooks/"},
 }
@@ -53,7 +51,7 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Coll
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 219)
+	require.Len(t, Catalog(), 192)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -70,16 +68,7 @@ func TestCatalogDeclarations(t *testing.T) {
 		for _, param := range pathParam.FindAllStringSubmatch(r.Path, -1) {
 			require.Contains(t, pathParams, param[1], "%s: name the path parameter {id}, or add what it is to pathParams", key)
 		}
-		switch {
-		case r.Staff():
-			require.Empty(t, r.Perm, "%s: a staff route checks its bundle's permission", key)
-		case r.Auth == AuthMerchant:
-			require.True(t, strings.HasPrefix(r.Perm, "merchant:"), "%s: a control-plane route checks the server's merchant: permission, not %q", key, r.Perm)
-		case r.Auth == AuthOperator:
-			require.True(t, strings.HasPrefix(r.Perm, "root:"), "%s: %q", key, r.Perm)
-		default:
-			require.Empty(t, r.Perm, "%s: tier %s checks no permission", key, r.Auth)
-		}
+		require.Equal(t, r.Staff(), r.Auth == AuthMerchant, "%s: a staff route, and only one, is behind its bundle's permission", key)
 		if r.Limit != "" {
 			require.Equal(t, AuthMerchant, r.Auth, "%s: the operation limiter keys the authorized principal", key)
 		}
@@ -164,25 +153,18 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	seen := map[string]int{}
 	at := func(base string) router.Router { return recorder{base: base, seen: seen} }
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	handler := router.Handler(func(*httprequest.Request) {})
 	providers := routesurface.AllProviderRoutes()
 	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Permissions: staffPermissions, Capabilities: &billing.Capabilities{}, External: External{
-		Live: raw, Ready: raw, Metrics: raw, CaptchaStatus: raw, CaptchaScript: raw,
-		ListMerchants: handler, CreateMerchant: handler, RenameMerchant: handler, CreateAPIKey: handler, ListAPIKeys: handler, RevokeAPIKey: handler,
-		ListTeam: handler, ListTeamInvites: handler, InviteTeamMember: handler, RevokeTeamInvite: handler, ChangeTeamRole: handler, RemoveTeamMember: handler,
-		ListFederatedGrants: handler, CreateFederatedGrant: handler, RevokeFederatedGrant: handler, ListMyFederatedGrants: handler, AcceptFederatedGrant: handler,
-		MerchantCreationEnabled: true,
+		Live: raw, Ready: raw, CaptchaStatus: raw, CaptchaScript: raw,
 	}}
 	customers := CustomerMount{Auth: authtest.Deny{}, Providers: providers}
 
 	RegisterMetaRoutes(at(""), opts)
 	RegisterUserRoutes(at("/v1"), rt, opts)
 	RegisterStaffRoutes(at("/v1"), rt, opts)
-	RegisterControlPlaneRoutes(at("/v1"), rt, opts)
 	RegisterWebhookRoutes(at("/v1/webhooks"), rt)
 	RegisterProvisioningRoutes(at("/scim/v2"), rt, Options{Provisioning: func(*http.Request) (billing.MerchantID, error) { return billing.MerchantID{}, nil }})
 	RegisterCustomerRoutes(at("/v1/me"), rt, customers)
-	RegisterPlatformRoutes(at("/v1/platform"), rt, PlatformOptions{})
 
 	var unmounted []string
 	for _, r := range Catalog() {
@@ -201,8 +183,6 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"catalog_copilot POST /v1/admin/catalog/ask",
 		"dashboard_generation POST /v1/admin/dashboard/widgets/generate",
 		"merchant_directory GET /v1/admin/api-host",
-		"merchant_directory POST /v1/admin/api-host/verify",
-		"merchant_directory PUT /v1/admin/api-host",
 		"metrics_ask POST /v1/admin/metrics/ask",
 	}, sorted(unmounted))
 

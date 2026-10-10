@@ -59,7 +59,7 @@ func newBillingCmd() *cobra.Command {
 func addBillingArchiveFlags(cmd *cobra.Command, opts *billingArchiveOptions) {
 	cmd.Flags().StringVar(&opts.merchant, "merchant", "", "Exact merchant UUID (optionally prefixed with id:); preserved on import")
 	cmd.Flags().StringVar(&opts.url, "url", "", "Remote OpenRails base URL; omit to use the local database configuration")
-	cmd.Flags().StringVar(&opts.tokenFile, "token-file", "", "File containing a remote bearer credential; required with --url")
+	cmd.Flags().StringVar(&opts.tokenFile, "token-file", "", "File holding an access token from the merchant's trusted issuer (client credentials), read on every call; required with --url")
 	cmd.Flags().DurationVar(&opts.timeout, "timeout", 0, "Optional archive operation deadline (0 uses caller cancellation)")
 }
 
@@ -188,11 +188,10 @@ func parseBillingArchiveMerchant(value string) (billing.MerchantID, error) {
 func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts billingArchiveOptions, mid billing.MerchantID) (*openrails.Client, func(), error) {
 	clientOpts := []openrails.ClientOption{openrails.WithMerchantID(mid), openrails.WithTimeout(opts.timeout)}
 	if strings.TrimSpace(opts.url) != "" {
-		token, err := readBillingArchiveToken(opts.tokenFile)
-		if err != nil {
+		if _, err := readTokenFile(opts.tokenFile); err != nil {
 			return nil, nil, err
 		}
-		client, err := openrails.NewRemote(opts.url, append(clientOpts, openrails.WithAPIKey(token))...)
+		client, err := openrails.NewRemote(opts.url, append(clientOpts, tokenFileCredential(opts.tokenFile))...)
 		return client, func() {}, err
 	}
 	database, err := openCLIDB(ctx, cfg)
@@ -220,7 +219,16 @@ func openBillingArchiveClient(ctx context.Context, cfg *config.Config, opts bill
 	return client, close, nil
 }
 
-func readBillingArchiveToken(path string) (string, error) {
+// tokenFileCredential authenticates each call with the token in path, read
+// afresh so whatever mints the merchant's client-credentials token may
+// replace it in place.
+func tokenFileCredential(path string) openrails.ClientOption {
+	return openrails.WithTokenProvider(func(context.Context) (string, error) { return readTokenFile(path) })
+}
+
+// readTokenFile reads one bearer token: an access token from the merchant's
+// trusted issuer.
+func readTokenFile(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", fmt.Errorf("open bearer credential file: %w", err)

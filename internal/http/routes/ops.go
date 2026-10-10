@@ -20,8 +20,6 @@ var opsRoutes = []Route{
 		Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetMerchantDashboard)},
 	{Method: PUT, Path: "/v1/admin/dashboard", Group: MerchantConfig, Auth: AuthMerchant, Name: "SetDashboard",
 		Request: billing.SetDashboardParams{}, Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("dashboard_invalid", "service_unavailable"), Handler: h(handlers.PutMerchantDashboard)},
-	{Method: GET, Path: "/v1/admin/worker-health", Group: Admin, Auth: AuthMerchant, Name: "ListWorkerHealth", Level: LevelRead,
-		Responses: []Reply{{200, billing.ListPage[billing.WorkerHealth]{}}}, Handler: h(handlers.GetAdminWorkerHealth)},
 	{Method: GET, Path: "/v1/admin/findings", Group: Admin, Auth: AuthMerchant, Name: "ListFindings", Level: LevelRead,
 		Query: params(queryOf(handlers.FindingsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.Finding]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.AdminListFindings)},
 	{Method: GET, Path: "/v1/admin/findings/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetFinding", Level: LevelRead,

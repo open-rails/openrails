@@ -32,11 +32,9 @@ import type {
   AdminSubscription,
   CustomerEntitlement,
   Finding,
-  MerchantAPIKey,
   MerchantConfiguration,
   MerchantSettings,
   MerchantWebhook,
-  MintedAPIKey,
   PSP,
   PSPRoutingPreview,
   RailDefinition,
@@ -47,11 +45,7 @@ import type {
   ChangeSubscriptionParams,
   SubscriptionChange,
   SubscriptionChangePreview,
-  TeamInvite,
-  TeamInviteResult,
-  TeamMember,
   WebhookFormat,
-  WorkerHealth,
 } from "./types"
 
 // --- Customers ---
@@ -611,9 +605,6 @@ export const resolveFinding = (
     { method: "POST", body: { outcome, notes } }
   )
 
-export const listWorkerHealth = (signal?: AbortSignal) =>
-  api<ListPage<WorkerHealth>>("/admin/worker-health", { signal })
-
 // --- Settings ---
 
 export const getMerchantConfiguration = (signal?: AbortSignal) =>
@@ -694,51 +685,10 @@ export const archivePSP = (id: string, allowLast = false) =>
     body: allowLast ? { allow_last: true } : {},
   })
 
-// --- API keys (#757) ---
-
-export const listApiKeys = (signal?: AbortSignal) =>
-  api<ListPage<MerchantAPIKey>>("/merchant/api-keys", { signal })
-
-export const createApiKey = (name: string, role: string) =>
-  api<MintedAPIKey>("/merchant/api-keys", {
-    method: "POST",
-    body: { name, role },
-  })
-
-export const revokeApiKey = (id: string) =>
-  api<void>(`/merchant/api-keys/${id}`, { method: "DELETE" })
-
-// --- Team management (#760) ---
-
-export const listTeam = (signal?: AbortSignal) =>
-  api<ListPage<TeamMember>>("/merchant/team", { signal })
-
-export const listTeamInvites = (signal?: AbortSignal) =>
-  api<ListPage<TeamInvite>>("/merchant/team/invites", { signal })
-
-// The public configuration: what the deployment serves (its
-// capabilities.features.team_invites says whether an invite can mint a
-// register-and-join link), the currency registry and the payment setup.
+// The public configuration: what the deployment serves, the currency
+// registry and the payment setup.
 export const getConfig = (signal?: AbortSignal) =>
   api<PublicConfig>("/config", { signal })
-
-export const inviteTeamMember = (email: string, role: string) =>
-  api<TeamInviteResult>("/merchant/team/invites", {
-    method: "POST",
-    body: { email, role },
-  })
-
-export const revokeTeamInvite = (id: string) =>
-  api<void>(`/merchant/team/invites/${id}`, { method: "DELETE" })
-
-export const changeTeamRole = (userId: string, role: string) =>
-  api<TeamMember>(`/merchant/team/${userId}`, {
-    method: "PATCH",
-    body: { role },
-  })
-
-export const removeTeamMember = (userId: string) =>
-  api<void>(`/merchant/team/${userId}`, { method: "DELETE" })
 
 // updateCustomer changes only the settings params names and answers the
 // customer.

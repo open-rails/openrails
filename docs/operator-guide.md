@@ -119,10 +119,14 @@ dependencies with their supervisor; a host fleet passed to `Start` with
 `WithRiverClient` is watched by the `openrails_job_progress` probe because its
 process state is outside OpenRails.
 
-The standalone server serves `GET /metrics` with one gauge per dependency,
-`openrails_dependency_up{dependency,class}` (class `required` or `optional`);
-alert on optional ones at 0 as degraded. Beyond that there is no runtime
-telemetry endpoint.
+The standalone server serves `GET /metrics` on its private listener
+(`private_port`; `server.Config.PrivateAddr`, or mount `PrivateHandler`
+yourself), never on the public port: one gauge per dependency,
+`openrails_dependency_up{dependency,class}` (class `required` or `optional`;
+alert on optional ones at 0 as degraded), and per job kind
+`openrails_worker_consecutive_failures{kind}` and
+`openrails_worker_last_success_timestamp_seconds{kind}`. Beyond that there is
+no runtime telemetry endpoint.
 `/v1/admin/metrics`, `/query`, and `/schema` are authenticated merchant
 business analytics, not process/runtime metrics.
 
@@ -130,6 +134,21 @@ business analytics, not process/runtime metrics.
 sweep flags `pending` older than 24h and `in_flight`/`unknown` older than 2h as
 findings), `pull-provider report` shows no open findings, and worker-health
 alerts are quiet.
+
+### Merchants and administrators
+
+The merchant directory and administrator lockouts are the operator's, with no
+HTTP route: the `openrails` CLI over the server's Go methods.
+
+```bash
+openrails merchants list [--status active|deleted|all] [--query acme] [--json]
+openrails merchants get acme                    # an id, or a live merchant's name
+openrails merchants create acme --display-name Acme [--owner-user-id <uuid>]
+openrails merchants rename acme acme-shop       # the former name forwards (auth.naming)
+openrails merchants delete <merchant-id>        # soft: off the lists, credentials resolve nothing, records kept
+openrails merchants restore <merchant-id>
+openrails admin-lockouts unlock <user-id>       # with Redis; without it a lockout lives in the serving process
+```
 
 ### When things drift
 
@@ -259,7 +278,9 @@ checkout_routing:
   mutations. Provider Refresh logs a per-pass heartbeat and per-merchant
   reconcile summary.
 - **Worker health**: `billing.worker_state` rows per job kind; the 5-minute
-  checker raises a critical merchant notification when a periodic kind stops completing.
+  checker raises a critical merchant notification when a periodic kind stops
+  completing. `openrails workers` prints each kind's last success, failure
+  streak and last error (`--json` for the full text).
 - **Notifications**: reconciliation findings raise deduplicated console
   notifications and, by severity, outbound webhooks / the alert email
   ([merchant-notifications.md](merchant-notifications.md)).

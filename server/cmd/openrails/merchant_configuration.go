@@ -85,11 +85,10 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			var client *openrails.Client
 			var err error
 			if serverURL != "" {
-				token, readErr := os.ReadFile(tokenFile)
-				if readErr != nil {
-					return readErr
+				if _, err := readTokenFile(tokenFile); err != nil {
+					return err
 				}
-				client, err = openrails.NewRemote(serverURL, openrails.WithAPIKey(strings.TrimSpace(string(token))), openrails.WithDefaultMerchant(slug))
+				client, err = openrails.NewRemote(serverURL, tokenFileCredential(tokenFile), openrails.WithDefaultMerchant(slug))
 			} else {
 				cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
 				var cleanup func()
@@ -115,7 +114,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 	}
 	cmd.Flags().StringVar(&slug, "merchant", "", "existing merchant slug (selector, not authority)")
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "remote OpenRails base URL; omit for trusted local operator execution")
-	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file containing the remote API bearer credential")
+	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file holding an access token from the merchant's trusted issuer (client credentials), read on every call")
 	if apply {
 		cmd.Flags().StringVarP(&file, "file", "f", "", "YAML or JSON application with stable application_id and expected_revision")
 	}

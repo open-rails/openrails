@@ -77,35 +77,3 @@ func (c *ControlPlane) ProvisionMerchant(ctx context.Context, name, ownerUserID 
 	}
 	return m, err == nil, err
 }
-
-// CreateOwnedMerchant creates a merchant claiming name and owned by userID,
-// under the declared creation policy. For a merchant the user already owns it
-// returns that merchant (created=false), whatever its name is now; a name
-// held by any other merchant is ErrMerchantNameTaken.
-func (c *ControlPlane) CreateOwnedMerchant(ctx context.Context, name, userID string) (*merchants.Merchant, bool, error) {
-	userID = strings.TrimSpace(userID)
-	if !c.MerchantCreationEnabled() || c.Core() == nil {
-		return nil, false, ErrNoControlPlane
-	}
-	if userID == "" {
-		return nil, false, iam.ErrInsufficientAuthority
-	}
-	name = billing.NormalizeMerchantSlug(name)
-	if err := billing.ValidateMerchantSlug(name); err != nil {
-		return nil, false, fmt.Errorf("%w: %w", merchants.ErrInvalidName, err)
-	}
-	if err := c.EnforceMerchantCreationPolicy(ctx, name, userID); err != nil {
-		return nil, false, err
-	}
-	m, created, err := c.ProvisionMerchant(ctx, name, userID)
-	if err != nil || created {
-		return m, created, err
-	}
-	if m.PermissionGroupID != "" {
-		roles, err := c.client.GroupRoles(ctx, iam.GroupByID(m.PermissionGroupID), []iam.Subject{iam.UserSubject(userID)})
-		if err != nil || roles[iam.UserSubject(userID)] == MerchantOwner {
-			return m, false, err
-		}
-	}
-	return nil, false, fmt.Errorf("%w: %q", billing.ErrMerchantNameTaken, name)
-}

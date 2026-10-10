@@ -25,11 +25,15 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 	if h.Auth == nil {
 		return server.Config{}, fmt.Errorf("auth is required: the standalone server runs its own AuthKit")
 	}
-	return server.Config{
+	cfg := server.Config{
 		Engine: *h.Config, Auth: *h.Auth, ResourceServer: h.ResourceServer, LocalSignIn: h.LocalSignIn,
 		AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
 		Addr: net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
-	}, nil
+	}
+	if h.PrivatePort != 0 {
+		cfg.PrivateAddr = net.JoinHostPort(h.Host, strconv.Itoa(h.PrivatePort))
+	}
+	return cfg, nil
 }
 
 // openServer builds the standalone server over deps, as run-server does.

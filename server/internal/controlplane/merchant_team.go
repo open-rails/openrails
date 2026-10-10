@@ -1,7 +1,6 @@
 package controlplane
 
-// Merchant team management (#760): the control-plane surface behind
-// /v1/merchant/team. Roster, invites, role changes and removal go through
+// Merchant team management (#760), behind the server's team methods. Roster, invites, role changes and removal go through
 // AuthKit group membership (ListGroupMembers, SetGroupRole, RemoveGroupMember,
 // CreateInvitation) — never raw AuthKit SQL. A member holds one of the fixed
 // merchant roles (#567).

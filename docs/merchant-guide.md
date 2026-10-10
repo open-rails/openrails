@@ -216,8 +216,8 @@ All merchant-admin operations live under `/v1/admin/*` (same public port; each
 route behind its bundle's permission: on the standalone server
 `server.MerchantRead` for reads, `server.MerchantWrite` for actions on
 customers, `server.MerchantAdmin` for catalog edits and the merchant's
-configuration). Auth is a merchant API key
-(`Bearer openrails_st_...`), a user session, or a trusted issuer's access token. Full
+configuration). Auth is a trusted issuer's access token (client credentials
+for a backend), a user session, or, on a hosted product, a merchant API key. Full
 reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
@@ -312,15 +312,9 @@ Pages: **Customers** (search → profile with grant/revoke),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
 (products/prices CRUD, archive/restore, durable catalog batch application, drift
-view), **Ops** (findings queue, the merchant inbox, worker health), **Settings** (profile,
-team, PSPs, API keys, credit limit, trust level), **Dashboard**.
-
-- **API keys** (Settings): mint scoped Bearer keys with fixed roles — `viewer`
-  (read-only; the role to mint for LLM agents), `support` (+ customer operations),
-  `owner` (full control, never the default). Secret shown exactly once; revocation is
-  immediate.
-- **Team** (Settings): AuthKit-backed roster; invite by email, change role, remove.
-  A merchant always keeps at least one human owner.
+view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
+PSPs, credit limit, trust level), **Dashboard**. A hosted product adds its own
+pages, such as the team and API keys.
 - **Dashboard**: a widget grid over the metrics API. Widget queries are written by a
   server-side LLM from natural language ("count of cancels per day, past 7 days") —
   requires `llm.api_key`; without it everything else still works and the add-widget

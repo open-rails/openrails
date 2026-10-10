@@ -73,9 +73,17 @@ describe("the merchant's configuration pages", () => {
   it("leave the settings tabs they own when not mounted", () => {
     expect(settingsTab(null, true)).toBe("merchant")
     expect(settingsTab("psps", true)).toBe("psps")
-    expect(settingsTab(null, false)).toBe("team")
+    expect(settingsTab(null, false)).toBe("customer-controls")
     for (const tab of ["merchant", "notifications", "psps"])
-      expect(settingsTab(tab, false)).toBe("team")
+      expect(settingsTab(tab, false)).toBe("customer-controls")
     expect(settingsTab("customer-controls", false)).toBe("customer-controls")
+  })
+
+  it("show a host's tabs, and no tab nobody declares", () => {
+    expect(settingsTab("team", true)).toBe("merchant")
+    expect(settingsTab("team", true, ["team", "api-keys"])).toBe("team")
+    expect(settingsTab("api-keys", false, ["team", "api-keys"])).toBe(
+      "api-keys"
+    )
   })
 })

@@ -11,6 +11,7 @@ import (
 	"github.com/riverqueue/river/rivertype"
 	log "github.com/sirupsen/logrus"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
@@ -130,4 +131,22 @@ func truncateRunes(s string, n int) string {
 		return s
 	}
 	return string(runes[:n])
+}
+
+// ListWorkerHealth is every registered worker kind's recent runs, with the
+// verbatim error text: the operator's view, never a merchant's.
+func ListWorkerHealth(ctx context.Context, database *db.DB) ([]billing.WorkerHealth, error) {
+	rows, err := database.GenDirectory().ListWorkerHealth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]billing.WorkerHealth, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, billing.WorkerHealth{
+			WorkerKind: row.WorkerKind, RegisteredAt: row.RegisteredAt, ExpectedPeriodSeconds: row.ExpectedPeriodSeconds,
+			LastSuccessAt: row.LastSuccessAt, LastErrorAt: row.LastErrorAt, LastError: row.LastError,
+			ConsecutiveFailures: row.ConsecutiveFailures, LastAlertedAt: row.LastAlertedAt, UpdatedAt: row.UpdatedAt,
+		})
+	}
+	return out, nil
 }

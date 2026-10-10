@@ -137,7 +137,7 @@ func newRootCmd() *cobra.Command {
 	migrateCmd.AddCommand(migrateUpCmd, migratePgCmd, newMigrateStatusCmd())
 	// Drop cobra's auto-generated `completion` subcommand.
 	rootCmd.CompletionOptions.DisableDefaultCmd = true
-	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newApplyCatalogCmd(), newDumpCatalogCmd(), newCatalogCmd(), newPullProviderCmd(), newPruneCmd(), newConvergeCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newSolanaSignerCmd(), newNMICmd(), newSolanaPayCmd(), newAccessCutoverCmd(), newBookCmd(), newMerchantPostureCmd())
+	rootCmd.AddCommand(serverCmd, workerCmd, migrateCmd, newPushAuthBootstrapCmd(), newPushMerchantConfigCmd(), newDumpMerchantConfigCmd(), newMerchantConfigurationCmd(false), newMerchantConfigurationCmd(true), newApplyCatalogCmd(), newDumpCatalogCmd(), newCatalogCmd(), newPullProviderCmd(), newPruneCmd(), newConvergeCmd(), newUndoRunCmd(), newIntentsCmd(), newIntentsLogCmd(), newLedgerAuditCmd(), newBillingCmd(), newSandboxCmd(), newSolanaSignerCmd(), newNMICmd(), newSolanaPayCmd(), newAccessCutoverCmd(), newBookCmd(), newMerchantPostureCmd(), newMerchantsCmd(), newWorkersCmd(), newAdminLockoutsCmd())
 	rootCmd.AddCommand(versionCmd)
 	return rootCmd
 }
@@ -188,10 +188,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
 		return closeOnError(err)
 	}
-	// Issue #222: there is no separate private/service listener. Server-to-
-	// server callers authenticate with OpenRails-issued merchant API keys on
-	// the same surface. HTTP never serves webhook and async billing APIs when
-	// the workers cannot start.
+	// HTTP never serves webhook and async billing APIs when the workers
+	// cannot start.
 	if noWorkers {
 		err = srv.Serve(ctx)
 	} else {

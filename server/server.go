@@ -45,7 +45,7 @@ type (
 	// AuthRateLimit is one AuthKit rate-limit bucket of Config.AuthRateLimits.
 	AuthRateLimit = hostconfig.AuthRateLimit
 	// MerchantCreationConfig is Config.MerchantCreation: the policy for
-	// merchant names users claim.
+	// merchants and names users claim.
 	MerchantCreationConfig = hostconfig.MerchantCreationConfig
 	// ResourceServerConfig is Config.ResourceServer: the authorization servers
 	// whose access tokens the admin API accepts.
@@ -105,8 +105,10 @@ type Config struct {
 	CloudflareProxies []string
 	// AuthRateLimits overlays AuthKit's default rate-limit buckets by name.
 	AuthRateLimits map[string]AuthRateLimit
-	// MerchantCreation lets signed-in users create merchants under this
-	// policy; nil for operator-provisioned deployments.
+	// MerchantCreation is the policy for the merchants users create and
+	// rename through a hosted product (ProvisionMerchant with an owner,
+	// RenameMerchant with an ActorUserID); nil for operator-provisioned
+	// deployments.
 	MerchantCreation *MerchantCreationConfig
 	// ResourceServer accepts RFC 9068 access tokens (at+jwt) that trusted
 	// issuers mint for this deployment, so their users reach the admin API
@@ -122,6 +124,9 @@ type Config struct {
 
 	// Addr is where Run and Serve listen; empty is ":3053".
 	Addr string
+	// PrivateAddr is where Run and Serve also serve PrivateHandler, the
+	// operator's /metrics, apart from the public surface. Empty serves none.
+	PrivateAddr string
 }
 
 // Deps is everything a standalone server reaches outside its process.
@@ -256,9 +261,9 @@ func (s *Server) Client() *openrails.Client { return s.client }
 // AuthKit is the server's own AuthKit client.
 func (s *Server) AuthKit() *authkit.Client { return s.cp.Core() }
 
-// Handler is the whole standalone surface: health, the engine's routes gated
-// by the server's Auth, the control plane's routes, AuthKit's and the admin
-// console.
+// Handler is the whole public surface: health, the engine's routes gated by
+// the server's Auth, AuthKit's and the admin console. The operator's
+// /metrics is PrivateHandler.
 func (s *Server) Handler() http.Handler { return s.surface.Handler() }
 
 // Routes is the standalone surface without the health routes, for a host's
@@ -339,9 +344,20 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 		IdleTimeout:       60 * time.Second,
 		MaxHeaderBytes:    1 << 20,
 	}
-	served := make(chan error, 1)
+	served := make(chan error, 2)
 	go func() { served <- hs.Serve(ln) }()
 	log.Infof("OpenRails serving on %s", ln.Addr())
+	var private *http.Server
+	if s.cfg.PrivateAddr != "" {
+		pln, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.cfg.PrivateAddr)
+		if err != nil {
+			_ = hs.Close()
+			return err
+		}
+		private = &http.Server{Handler: s.PrivateHandler(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 15 * time.Second, IdleTimeout: 60 * time.Second}
+		go func() { served <- private.Serve(pln) }()
+		log.Infof("OpenRails private listener (metrics) on %s", pln.Addr())
+	}
 	if workers {
 		err = s.Start(ctx)
 	}
@@ -355,6 +371,11 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	defer cancel()
 	if serr := hs.Shutdown(shutdownCtx); serr != nil {
 		log.WithError(serr).Error("server: HTTP shutdown")
+	}
+	if private != nil {
+		if serr := private.Shutdown(shutdownCtx); serr != nil {
+			log.WithError(serr).Error("server: private listener shutdown")
+		}
 	}
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil

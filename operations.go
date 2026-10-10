@@ -7,15 +7,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// ListWorkerHealth returns each background job kind's recent runs.
-func (c *Client) ListWorkerHealth(ctx context.Context, options ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error) {
-	var out billing.ListPage[billing.WorkerHealth]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/worker-health", nil, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ListFindings pages the findings queue: open findings unless req.Status
 // names another, most severe first, then oldest. req.Type is one finding type
 // or a prefix ending in ".*" ("catalog.*" lists catalog drift).

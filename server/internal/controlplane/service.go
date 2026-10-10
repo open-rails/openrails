@@ -415,12 +415,6 @@ func (c *ControlPlane) Core() *authkit.Client {
 	return c.client
 }
 
-// MerchantCreationEnabled reports whether users may create merchants: a hosted
-// creation policy is declared (or#914, WithMerchantCreation).
-func (c *ControlPlane) MerchantCreationEnabled() bool {
-	return c != nil && c.merchantCreation != nil
-}
-
 // UserAuthenticator authenticates the control plane's own user tokens in
 // process (#739), for the standalone user routes and embedding hosts. Nil
 // without a control plane.

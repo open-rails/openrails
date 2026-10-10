@@ -15,10 +15,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `allowance_source_in_use` | 409 | `invalid_request_error` | The allowance source is in use. |
 | `allowance_source_invalid` | 409 | `invalid_request_error` | The allowance source cannot back this rate card. |
 | `already_owned` | 409 | `invalid_request_error` | The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume. |
-| `api_host_claim_missing` | 409 | `invalid_request_error` | No api_host has been claimed. |
-| `api_host_reserved` | 400 | `invalid_request_error` | The api_host serves this deployment. |
-| `api_host_taken` | 409 | `invalid_request_error` | The api_host is assigned to another merchant. |
-| `api_host_unproven` | 409 | `invalid_request_error` | The api_host's DNS proof was not found. |
 | `as_of_required` | 400 | `invalid_request_error` | The import needs as_of, its RFC 3339 evidence horizon. |
 | `authentication_required` | 401 | `authentication_error` | No valid credential was presented. |
 | `authentication_unavailable` | 503 | `api_error` | The credential could not be verified right now; retry. |
@@ -50,7 +46,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `checkout_session_unavailable` | 403 | `authorization_error` | The checkout session is not available to this caller. |
 | `collection_payment_method_invalid` | 400 | `invalid_request_error` | The collection payment method cannot pay this invoice. |
 | `collection_payment_method_required` | 400 | `invalid_request_error` | Collection needs a payment method for the invoice's currency. |
-| `creation_refused` | 403 | `authorization_error` | Merchant creation was refused. |
 | `credential_custody_transition_required` | 409 | `invalid_request_error` | Credential custody differs from the published backend. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_identity_mismatch` | 401 | `authentication_error` | The credential changed identity during the request. |
@@ -58,7 +53,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `credential_revoked` | 401 | `authentication_error` | The credential or its session was revoked. |
 | `credential_source_read_only` | 405 | `invalid_request_error` | The provider credential source has no writable custody. |
 | `credential_store_read_only` | 403 | `authorization_error` | The credential store is read-only. |
-| `credentials_manage_required` | 403 | `authorization_error` | The account lacks credential-management authority on this merchant. |
 | `credit_grant_held` | 409 | `invalid_request_error` | Active holds need the grant's remaining credit. |
 | `credit_grant_not_found` | 404 | `invalid_request_error` | The credit grant does not exist. |
 | `credit_grant_unavailable` | 409 | `invalid_request_error` | The credit grant expired, ended or has no remaining credit. |
@@ -76,7 +70,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
 | `default_rate_card_required` | 409 | `invalid_request_error` | The meter needs a default rate card. |
 | `delegated_principal_invalid` | 401 | `authentication_error` | The host's delegated principal names no usable merchant or subject. |
-| `email_unverified` | 403 | `authorization_error` | The operation needs a verified email. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
@@ -90,33 +83,25 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `insufficient_funds` | 402 | `card_error` | The payment instrument lacks funds. |
 | `insufficient_scope` | 403 | `authorization_error` | The access token was not granted the scope this surface requires. |
 | `internal_error` | 500 | `api_error` | OpenRails failed; request_id identifies the failure in its logs. |
-| `invalid_api_host` | 400 | `invalid_request_error` | api_host must be a bare lowercase domain name. |
 | `invalid_cursor` | 400 | `invalid_request_error` | The cursor is not one this list issued. |
 | `invalid_customer_id` | 400 | `invalid_request_error` | The customer id is missing or malformed. |
-| `invalid_email` | 400 | `invalid_request_error` | The email is missing or malformed. |
 | `invalid_host_event_request` | 400 | `invalid_request_error` | The host event request is invalid. |
-| `invalid_name` | 400 | `invalid_request_error` | The name is missing or too long. |
 | `invalid_param` | 400 | `invalid_request_error` | The request is malformed or a parameter is invalid; param names the parameter when known. |
 | `invalid_payment_method` | 400 | `invalid_request_error` | The payment method is not eligible for this operation. |
 | `invalid_psp_reference` | 400 | `invalid_request_error` | The PSP reference is invalid. |
 | `invalid_query` | 400 | `invalid_request_error` | A query parameter is malformed or out of range; param is the parameter. |
 | `invalid_request_body` | 400 | `invalid_request_error` | The request body could not be read or is not one JSON value. |
 | `invalid_settlement_status_request` | 400 | `invalid_request_error` | A settlement status read needs a customer and a price. |
-| `invalid_user` | 400 | `invalid_request_error` | The user id is missing or malformed. |
-| `invites_disabled` | 409 | `invalid_request_error` | The email has no verified account and invitations by registration are disabled. |
 | `invoice_action_not_allowed` | 409 | `invalid_request_error` | The invoice's status does not allow this action. |
 | `invoice_not_retryable` | 409 | `invalid_request_error` | The invoice cannot be collected again. |
 | `invoice_retry_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key names a different collection attempt. |
 | `invoice_retry_in_progress` | 409 | `invalid_request_error` | A collection attempt on this invoice is unresolved. |
 | `invoice_retry_outcome_unknown` | 409 | `invalid_request_error` | The last collection attempt's outcome is unknown. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
-| `last_owner` | 400 | `invalid_request_error` | A merchant must keep at least one owner. |
-| `members_manage_required` | 403 | `authorization_error` | The account lacks team-management authority on this merchant. |
 | `merchant_binding_mismatch` | 409 | `invalid_request_error` | The selected merchant is not the one the credential, deployment or request is bound to. |
 | `merchant_configuration_application_conflict` | 409 | `invalid_request_error` | The application id already committed with different content. |
 | `merchant_configuration_revision_conflict` | 409 | `invalid_request_error` | The merchant configuration changed; read its revision before applying. |
 | `merchant_context_mismatch` | 403 | `authorization_error` | The authorized merchant is not the one the request resolved. |
-| `merchant_creation_payment_method_required` | 402 | `card_error` | Creating another merchant needs a payment method on file. |
 | `merchant_directory_unavailable` | 503 | `api_error` | The merchant directory could not be read; retry. |
 | `merchant_not_found` | 404 | `invalid_request_error` | No active merchant answers to the selector. |
 | `merchant_selector_invalid` | 400 | `invalid_request_error` | The OpenRails-Merchant header is malformed, repeated or names no merchant. |
@@ -126,8 +111,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `method_not_allowed` | 405 | `invalid_request_error` | The path exists but not for this method; Allow lists its methods. |
 | `metrics_query_invalid` | 400 | `invalid_request_error` | The metrics query is invalid; metadata.errors lists why. |
 | `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
-| `name_reserved` | 409 | `invalid_request_error` | The merchant name is reserved. |
-| `name_taken` | 409 | `invalid_request_error` | The merchant name is taken. |
 | `order_has_recurring_line` | 409 | `invalid_request_error` | An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid. |
 | `order_line_unavailable` | 422 | `invalid_request_error` | A line cannot be bought; param names it and metadata.code says why. |
 | `order_not_cancelable` | 409 | `invalid_request_error` | Only an open order, or one awaiting the customer's action, can be canceled. |
@@ -192,13 +175,10 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `refund_failed` | 502 | `api_error` | The provider refused the refund. |
 | `refund_rail_unavailable` | 409 | `invalid_request_error` | The payment's rail cannot accept a refund right now. |
 | `refund_unsupported` | 400 | `invalid_request_error` | The payment's rail has no automatic refund. |
-| `rename_too_soon` | 429 | `invalid_request_error` | The merchant was renamed too recently. |
-| `renames_disabled` | 403 | `invalid_request_error` | Merchant renames are disabled. |
 | `request_body_too_large` | 413 | `invalid_request_error` | The request body exceeds the deployment's cap. |
 | `resource_access_denied` | 403 | `authorization_error` | The credential may not access this resource. |
 | `resource_conflict` | 409 | `invalid_request_error` | The request conflicts with the resource's current state. |
 | `resource_not_found` | 404 | `invalid_request_error` | The addressed resource does not exist in this merchant. |
-| `role_escalation` | 403 | `authorization_error` | The grant exceeds the caller's own authority. |
 | `route_not_found` | 404 | `invalid_request_error` | No route matches the path. |
 | `scheduled_change_exists` | 409 | `invalid_request_error` | The subscription already has a scheduled change. |
 | `sender_proof_required` | 401 | `authentication_error` | A sender-constrained token arrived without its DPoP proof. |
@@ -233,7 +213,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `subscription_resumable` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again. |
 | `trial_unsupported_on_rail` | 400 | `invalid_request_error` | This rail cannot run a trial first phase. |
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
-| `unknown_role` | 400 | `invalid_request_error` | The role is not one this merchant defines. |
 | `unsupported_media_type` | 415 | `invalid_request_error` | The request body is not application/json. |
 | `usage_meter_invalid` | 400 | `invalid_request_error` | The meter definition is invalid. |
 | `usage_meter_not_found` | 404 | `invalid_request_error` | The usage meter does not exist. |

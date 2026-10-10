@@ -1,19 +1,19 @@
 // The console's operator. auth-ui owns the browser session (sign-in, refresh,
 // step-up); the console adds the merchants the user may act on and the one
-// its requests are made as.
+// its requests are made as. OpenRails lists no user's merchants: a host's
+// extension does (merchants), else the mount serves one merchant, else the
+// user opens one by name.
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 
+import { directoryHost, useExtensions } from "@/extensions/registry"
+import type { ConsoleExtension, ConsoleMerchant } from "@/extensions/types"
 import {
-  api,
+  mountMerchant,
   selectedMerchant,
   setSelectedMerchant,
   takeMerchantFromHash,
 } from "@/lib/api/client"
-import type {
-  MerchantMembership,
-  MerchantMembershipList,
-} from "@/lib/api/types"
 import { useIdentity, type ConsoleUser } from "@/lib/identity"
 import { queryClient } from "@/lib/query-client"
 
@@ -24,16 +24,16 @@ export interface ConsoleAuth {
   // The merchant list could not be loaded: not the same as having none.
   merchantsFailed: boolean
   me: ConsoleUser | null
-  // Staff sign in at a trusted issuer: its own permissions, plus roles
-  // granted by email invitation.
-  federated: boolean
-  merchants: MerchantMembership[]
-  activeMerchant?: MerchantMembership
+  merchants: ConsoleMerchant[]
+  activeMerchant?: ConsoleMerchant
+  // Merchants are opened by name: no host directory and no merchant the
+  // mount serves.
+  opensByName: boolean
   selectMerchant: (slug: string) => void
   logout: () => Promise<void>
 }
 
-const EMPTY_MERCHANTS: MerchantMembership[] = []
+const EMPTY_MERCHANTS: ConsoleMerchant[] = []
 
 export const clearMerchantQueries = () =>
   queryClient.removeQueries({ queryKey: ["merchant"] })
@@ -43,12 +43,22 @@ export const clearMerchantQueries = () =>
 let requestedMerchant =
   typeof window === "undefined" ? undefined : takeMerchantFromHash()
 
-// The user's merchants, sorted; a requested merchant wins when it is theirs,
-// then the selected one, else the first becomes the merchant requests are made
-// as.
-export async function loadMerchants(): Promise<MerchantMembership[]> {
-  const list = await api<MerchantMembershipList>("/merchants")
-  const merchants = [...list.data].sort((a, b) => a.slug.localeCompare(b.slug))
+// The user's merchants, sorted: the host directory's, else the merchant the
+// mount serves, else the one opened by name. A requested merchant wins when it
+// is theirs, then the selected one, else the first becomes the merchant
+// requests are made as.
+export async function loadMerchants(
+  host?: ConsoleExtension
+): Promise<ConsoleMerchant[]> {
+  const fixed = mountMerchant()
+  let list: ConsoleMerchant[]
+  if (host?.merchants) list = await host.merchants()
+  else if (fixed) list = [fixed]
+  else {
+    const opened = requestedMerchant ?? selectedMerchant()
+    list = opened ? [{ id: "", slug: opened }] : []
+  }
+  const merchants = [...list].sort((a, b) => a.slug.localeCompare(b.slug))
   if (merchants.some((merchant) => merchant.slug === requestedMerchant)) {
     setSelectedMerchant(requestedMerchant)
   }
@@ -63,9 +73,12 @@ export async function loadMerchants(): Promise<MerchantMembership[]> {
 export function useAuth(): ConsoleAuth {
   const session = useIdentity()
   const signedIn = session.status === "signed_in"
+  // A build's extensions are fixed: the directory never changes under a key.
+  const host = directoryHost(useExtensions().extensions)
+  // eslint-disable-next-line @tanstack/query/exhaustive-deps
   const membership = useQuery({
     queryKey: ["auth", "merchants", session.user?.id ?? null],
-    queryFn: loadMerchants,
+    queryFn: () => loadMerchants(host),
     enabled: signedIn,
     staleTime: Infinity,
     retry: false,
@@ -73,15 +86,17 @@ export function useAuth(): ConsoleAuth {
   const merchants = membership.data ?? EMPTY_MERCHANTS
   const active = selectedMerchant()
 
+  const opensByName = !host && !mountMerchant()
   const selectMerchant = React.useCallback(
     (slug: string) => {
       if (slug === selectedMerchant()) return
-      if (!merchants.some((merchant) => merchant.slug === slug)) return
-      setSelectedMerchant(slug)
+      const known = merchants.some((merchant) => merchant.slug === slug)
+      if (!known && !opensByName) return
+      setSelectedMerchant(slug || undefined)
       clearMerchantQueries()
       window.location.reload()
     },
-    [merchants]
+    [merchants, opensByName]
   )
 
   const { signOut } = session
@@ -97,9 +112,9 @@ export function useAuth(): ConsoleAuth {
     signedIn,
     merchantsFailed: membership.isError,
     me: session.user,
-    federated: Boolean(session.issuer),
     merchants,
     activeMerchant: merchants.find((merchant) => merchant.slug === active),
+    opensByName,
     selectMerchant,
     logout,
   }

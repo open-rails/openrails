@@ -28,7 +28,7 @@ vi.mock("@/lib/auth", () => ({ useAuth: () => auth.value }))
 beforeEach(async () => {
   browserEnvironment()
   await server()
-  auth.value = { ...auth.value, merchants: [], merchantsFailed: false }
+  auth.value = { ...auth.value, merchants: [], merchantsFailed: false, opensByName: false } as typeof auth.value
 })
 
 const page = () => Promise.resolve({ Component: () => null })
@@ -80,6 +80,24 @@ describe("a user with no merchants", () => {
     expect(html).toContain("You don&#x27;t have access to any merchants yet")
     expect(html).toContain("Ask an operator of this OpenRails deployment")
     expect(html).not.toContain("New merchant")
+  })
+
+  it("opens a merchant by name where nothing lists them", () => {
+    auth.value = { ...auth.value, opensByName: true } as typeof auth.value
+    const html = render(<NoMerchants />)
+    expect(html).toContain("Open a merchant")
+    expect(html).toContain("Merchant name")
+    expect(html).not.toContain("You don&#x27;t have access")
+  })
+
+  it("renders a host's empty state below its own", () => {
+    const invites: ConsoleExtension = {
+      id: "invites",
+      EmptyState: () => <p>Pending invitations</p>,
+    }
+    expect(renderAt("/", [invites], <NoMerchants />)).toContain(
+      "Pending invitations"
+    )
   })
 
   it("gets the host's New merchant action when an extension declares one", () => {

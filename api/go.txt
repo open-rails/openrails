@@ -133,7 +133,6 @@ pkg openrails, method (*Client) ListRateOverrides(context.Context, billing.Custo
 pkg openrails, method (*Client) ListRebillCycles(context.Context, billing.RebillCycleListParams, ...RequestOption) (*billing.ListPage[billing.RebillCycle], error)
 pkg openrails, method (*Client) ListSpendDelegations(context.Context, billing.CustomerID, ...RequestOption) (*billing.ListPage[billing.SpendDelegation], error)
 pkg openrails, method (*Client) ListSubscriptions(context.Context, billing.SubscriptionListParams, ...RequestOption) (*billing.ListPage[billing.Subscription], error)
-pkg openrails, method (*Client) ListWorkerHealth(context.Context, ...RequestOption) (*billing.ListPage[billing.WorkerHealth], error)
 pkg openrails, method (*Client) MarkInvoiceUncollectible(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) MerchantID() billing.MerchantID
 pkg openrails, method (*Client) OpenProviderOperation(context.Context, billing.OpenProviderOperationParams, ...RequestOption) (*billing.ProviderOperation, error)
@@ -161,7 +160,6 @@ pkg openrails, method (*Client) RevokeCreditGrant(context.Context, billing.Custo
 pkg openrails, method (*Client) RiverJobs() river.Contribution
 pkg openrails, method (*Client) Routes(Routes) ([]Route, error)
 pkg openrails, method (*Client) SCIMHandler() (http.Handler, error)
-pkg openrails, method (*Client) SetAPIHost(context.Context, billing.SetAPIHostParams, ...RequestOption) (*billing.MerchantAPIHost, error)
 pkg openrails, method (*Client) SetAlertWebhookURL(context.Context, billing.AlertWebhookID, billing.SetAlertWebhookURLParams, ...RequestOption) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) SetDashboard(context.Context, billing.SetDashboardParams, ...RequestOption) (*billing.Dashboard, error)
 pkg openrails, method (*Client) SetMeter(context.Context, string, billing.SetMeterParams, ...RequestOption) (*billing.Meter, error)
@@ -174,7 +172,6 @@ pkg openrails, method (*Client) UpdateCustomer(context.Context, billing.Customer
 pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billing.UpdatePSPParams, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
-pkg openrails, method (*Client) VerifyAPIHost(context.Context, ...RequestOption) (*billing.MerchantAPIHost, error)
 pkg openrails, method (*Client) VoidInvoice(context.Context, billing.InvoiceID, ...RequestOption) (*billing.Invoice, error)
 pkg openrails, method (*Client) With(...ClientOption) (*Client, error)
 pkg openrails, method (CCBillPSP) PSPConfig() PSPConfig
@@ -546,7 +543,6 @@ pkg openrails/billing, const CodeInvoiceRetryOutcomeUnknown untyped string = "in
 pkg openrails/billing, const CodeInvokerScopedPrincipal untyped string = "invoker_scoped_principal"
 pkg openrails/billing, const CodeMerchantBindingMismatch untyped string = "merchant_binding_mismatch"
 pkg openrails/billing, const CodeMerchantContextMismatch untyped string = "merchant_context_mismatch"
-pkg openrails/billing, const CodeMerchantCreationPaymentMethodRequired untyped string = "merchant_creation_payment_method_required"
 pkg openrails/billing, const CodeMerchantDirectoryUnavailable untyped string = "merchant_directory_unavailable"
 pkg openrails/billing, const CodeMerchantNotFound untyped string = "merchant_not_found"
 pkg openrails/billing, const CodeMerchantSelectorInvalid untyped string = "merchant_selector_invalid"
@@ -722,6 +718,8 @@ pkg openrails/billing, const MaxOrderLines untyped int = 100
 pkg openrails/billing, const MaxPageLimit untyped int = 500
 pkg openrails/billing, const MaxProductAccessChecks untyped int = 100
 pkg openrails/billing, const MaxUsageBatchItems untyped int = 1000
+pkg openrails/billing, const MerchantActive MerchantStatus = "active"
+pkg openrails/billing, const MerchantDeleted MerchantStatus = "deleted"
 pkg openrails/billing, const MerchantGroupPersona untyped string = "merchant"
 pkg openrails/billing, const MerchantRetirementRefusedActive MerchantRetirementRefusal = "active"
 pkg openrails/billing, const MerchantRetirementRefusedGroupMismatch MerchantRetirementRefusal = "group_mismatch"
@@ -907,6 +905,7 @@ pkg openrails/billing, method (*InvoiceID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*ListPage[T]) UnmarshalJSON([]byte) error
 pkg openrails/billing, method (*MandateID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*MerchantID) UnmarshalText([]byte) error
+pkg openrails/billing, method (*MerchantRenameTooSoonError) Error() string
 pkg openrails/billing, method (*NotificationID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*OrderID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*OrderLineID) UnmarshalText([]byte) error
@@ -1998,6 +1997,16 @@ pkg openrails/billing, type MandateListParams struct, embedded PageRequest
 pkg openrails/billing, type MandateStatus string
 pkg openrails/billing, type MarkNotificationsReadParams struct
 pkg openrails/billing, type MarkNotificationsReadParams struct, NotificationIDs []NotificationID `json:"notification_ids"`
+pkg openrails/billing, type Merchant struct
+pkg openrails/billing, type Merchant struct, CreatedAt time.Time `json:"created_at"`
+pkg openrails/billing, type Merchant struct, DeletedAt *time.Time `json:"deleted_at"`
+pkg openrails/billing, type Merchant struct, DisplayName *string `json:"display_name"`
+pkg openrails/billing, type Merchant struct, ID MerchantID `json:"id"`
+pkg openrails/billing, type Merchant struct, LastPaymentAt *time.Time `json:"last_payment_at"`
+pkg openrails/billing, type Merchant struct, RailsArmed []Rail `json:"rails_armed"`
+pkg openrails/billing, type Merchant struct, Slug string `json:"slug"`
+pkg openrails/billing, type Merchant struct, Status MerchantStatus `json:"status"`
+pkg openrails/billing, type Merchant struct, UpdatedAt time.Time `json:"updated_at"`
 pkg openrails/billing, type MerchantAPIHost struct
 pkg openrails/billing, type MerchantAPIHost struct, APIHost *string `json:"api_host"`
 pkg openrails/billing, type MerchantAPIHost struct, Claim *APIHostClaim `json:"claim"`
@@ -2011,6 +2020,10 @@ pkg openrails/billing, type MerchantConfigurationState struct, DisplayName strin
 pkg openrails/billing, type MerchantConfigurationState struct, Revision string `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct, Settings MerchantSettings `json:"settings"`
 pkg openrails/billing, type MerchantID [16]byte
+pkg openrails/billing, type MerchantListParams struct
+pkg openrails/billing, type MerchantListParams struct, Query string
+pkg openrails/billing, type MerchantListParams struct, Statuses []MerchantStatus
+pkg openrails/billing, type MerchantListParams struct, embedded PageRequest
 pkg openrails/billing, type MerchantName struct
 pkg openrails/billing, type MerchantName struct, ID MerchantID `json:"id"`
 pkg openrails/billing, type MerchantName struct, Name string `json:"name"`
@@ -2024,6 +2037,8 @@ pkg openrails/billing, type MerchantRef struct
 pkg openrails/billing, type MerchantRef struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type MerchantRef struct, ID MerchantID `json:"id"`
 pkg openrails/billing, type MerchantRef struct, Slug string `json:"slug"`
+pkg openrails/billing, type MerchantRenameTooSoonError struct
+pkg openrails/billing, type MerchantRenameTooSoonError struct, NextRenameAt time.Time
 pkg openrails/billing, type MerchantRetirement struct
 pkg openrails/billing, type MerchantRetirement struct, Refusal MerchantRetirementRefusal
 pkg openrails/billing, type MerchantRetirement struct, Retired bool
@@ -2060,6 +2075,7 @@ pkg openrails/billing, type MerchantSettings struct, Profile *MerchantProfile `j
 pkg openrails/billing, type MerchantSettings struct, ProviderRefundAccess *string `json:"provider_refund_access,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, RenewalReceiptMinIntervalHours *int `json:"renewal_receipt_min_interval_hours,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
+pkg openrails/billing, type MerchantStatus string
 pkg openrails/billing, type Meter struct
 pkg openrails/billing, type Meter struct, Aggregation catalog.Aggregation `json:"aggregation"`
 pkg openrails/billing, type Meter struct, BillingSupported bool `json:"billing_supported"`
@@ -2906,6 +2922,7 @@ pkg openrails/billing, type ReleaseProviderOperationParams struct
 pkg openrails/billing, type ReleaseProviderOperationParams struct, OperationID string `json:"-"`
 pkg openrails/billing, type ReleaseProviderOperationParams struct, ReleaseReference string `json:"release_reference"`
 pkg openrails/billing, type RenameMerchantParams struct
+pkg openrails/billing, type RenameMerchantParams struct, ActorUserID string `json:"-"`
 pkg openrails/billing, type RenameMerchantParams struct, Name string `json:"name"`
 pkg openrails/billing, type ReplaceEntitlementsParams struct
 pkg openrails/billing, type ReplaceEntitlementsParams struct, Pairs []EntitlementReplacement `json:"pairs"`
@@ -2937,8 +2954,6 @@ pkg openrails/billing, type ScheduledChange struct, Product *ProductSummary `jso
 pkg openrails/billing, type ScheduledChange struct, Quantity *int `json:"quantity"`
 pkg openrails/billing, type ScheduledChange struct, Source ScheduledChangeSource `json:"source"`
 pkg openrails/billing, type ScheduledChangeSource string
-pkg openrails/billing, type SetAPIHostParams struct
-pkg openrails/billing, type SetAPIHostParams struct, APIHost string `json:"api_host"`
 pkg openrails/billing, type SetAlertWebhookURLParams struct
 pkg openrails/billing, type SetAlertWebhookURLParams struct, URL string `json:"url"`
 pkg openrails/billing, type SetDashboardParams struct
@@ -3444,32 +3459,63 @@ pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immed
 pkg openrails/server, const MerchantAdmin untyped string = "merchant:billing:admin"
 pkg openrails/server, const MerchantRead untyped string = "merchant:billing:read"
 pkg openrails/server, const MerchantWrite untyped string = "merchant:billing:write"
+pkg openrails/server, func CredentialActor([]string) Actor
+pkg openrails/server, func CredentialRefusal(error) (Refusal, bool)
 pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)
+pkg openrails/server, func OperatorActor() Actor
+pkg openrails/server, method (*Server) AcceptFederatedGrant(context.Context, *http.Request, billing.FederatedGrantID) (*billing.UserMerchant, error)
 pkg openrails/server, method (*Server) AuthKit() *authkit.Client
 pkg openrails/server, method (*Server) AuthenticateUser(*http.Request) (openrails.Identity, error)
+pkg openrails/server, method (*Server) CheckRecentSignIn(context.Context, *http.Request) error
+pkg openrails/server, method (*Server) ClaimMerchantAPIHost(context.Context, billing.MerchantID, string) (*billing.MerchantAPIHost, error)
 pkg openrails/server, method (*Server) Client() *openrails.Client
 pkg openrails/server, method (*Server) Close(context.Context) error
 pkg openrails/server, method (*Server) CompletePendingMerchantRetirements(context.Context, int) (int, error)
+pkg openrails/server, method (*Server) CreateFederatedGrant(context.Context, Actor, billing.MerchantID, billing.CreateFederatedGrantParams) (*billing.FederatedGrant, error)
+pkg openrails/server, method (*Server) CreateMerchantAPIKey(context.Context, Actor, billing.MerchantID, billing.CreateAPIKeyParams) (*billing.CreatedAPIKey, error)
+pkg openrails/server, method (*Server) DeleteMerchant(context.Context, billing.MerchantID) (*billing.Merchant, error)
 pkg openrails/server, method (*Server) EnsureCustomerPermissionGroup(context.Context, string, string) (string, error)
 pkg openrails/server, method (*Server) FleetAnalytics(context.Context, billing.MerchantID, int) (*billing.FleetSnapshot, error)
 pkg openrails/server, method (*Server) FleetTimeseries(context.Context, billing.MerchantID, int) (*billing.FleetSeries, error)
+pkg openrails/server, method (*Server) GetMerchant(context.Context, billing.MerchantID) (*billing.Merchant, error)
 pkg openrails/server, method (*Server) Handler() http.Handler
 pkg openrails/server, method (*Server) HasRootPermission(context.Context, *http.Request, string) (bool, error)
+pkg openrails/server, method (*Server) InviteMerchantTeamMember(context.Context, Actor, billing.MerchantID, billing.InviteTeamMemberParams) (*billing.TeamInviteResult, error)
 pkg openrails/server, method (*Server) ListActiveMerchantIDs(context.Context, billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)
+pkg openrails/server, method (*Server) ListFederatedGrants(context.Context, billing.MerchantID) ([]billing.FederatedGrant, error)
+pkg openrails/server, method (*Server) ListFederatedInvites(context.Context, *http.Request) ([]billing.FederatedInvite, error)
+pkg openrails/server, method (*Server) ListMerchantAPIKeys(context.Context, billing.MerchantID) ([]billing.APIKey, error)
 pkg openrails/server, method (*Server) ListMerchantRetirementCandidates(context.Context, billing.MerchantRetirementCandidateListParams) (billing.MerchantRetirementCandidatePage, error)
+pkg openrails/server, method (*Server) ListMerchantTeam(context.Context, billing.MerchantID) ([]billing.TeamMember, error)
+pkg openrails/server, method (*Server) ListMerchantTeamInvites(context.Context, billing.MerchantID) ([]billing.TeamInvite, error)
+pkg openrails/server, method (*Server) ListMerchants(context.Context, billing.MerchantListParams) (*billing.ListPage[billing.Merchant], error)
 pkg openrails/server, method (*Server) ListMerchantsForSubject(context.Context, string) ([]billing.MerchantRef, error)
 pkg openrails/server, method (*Server) ListUserMerchants(context.Context, *http.Request) ([]billing.UserMerchant, error)
+pkg openrails/server, method (*Server) ListWorkerHealth(context.Context) ([]billing.WorkerHealth, error)
+pkg openrails/server, method (*Server) PrivateHandler() http.Handler
 pkg openrails/server, method (*Server) ProvisionMerchant(context.Context, billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error)
+pkg openrails/server, method (*Server) RemoveMerchantTeamMember(context.Context, Actor, billing.MerchantID, string) error
+pkg openrails/server, method (*Server) RenameMerchant(context.Context, billing.MerchantID, billing.RenameMerchantParams) (*billing.MerchantName, error)
 pkg openrails/server, method (*Server) ResolveAuthorizedMerchant(context.Context, *http.Request, string, string) (billing.MerchantID, string, error)
 pkg openrails/server, method (*Server) ResolveMerchantForGroup(context.Context, string) (billing.MerchantID, string, error)
+pkg openrails/server, method (*Server) RestoreMerchant(context.Context, billing.MerchantID) (*billing.Merchant, error)
 pkg openrails/server, method (*Server) RetireUnusedMerchant(context.Context, billing.MerchantID, string) (billing.MerchantRetirement, error)
+pkg openrails/server, method (*Server) RevokeFederatedGrant(context.Context, Actor, billing.MerchantID, billing.FederatedGrantID) error
+pkg openrails/server, method (*Server) RevokeMerchantAPIKey(context.Context, Actor, billing.MerchantID, string) error
+pkg openrails/server, method (*Server) RevokeMerchantTeamInvite(context.Context, Actor, billing.MerchantID, string) error
 pkg openrails/server, method (*Server) RiverJobs() river.Contribution
 pkg openrails/server, method (*Server) Routes(...openrails.CustomerRoutes) ([]openrails.Route, error)
 pkg openrails/server, method (*Server) Run(context.Context) error
 pkg openrails/server, method (*Server) Serve(context.Context) error
 pkg openrails/server, method (*Server) SetMerchantAPIHost(context.Context, billing.MerchantID, string) error
+pkg openrails/server, method (*Server) SetMerchantTeamRole(context.Context, Actor, billing.MerchantID, string, string) (*billing.TeamMember, error)
 pkg openrails/server, method (*Server) Start(context.Context, ...openrails.StartOption) error
 pkg openrails/server, method (*Server) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
+pkg openrails/server, method (*Server) TeamInvitesEnabled() bool
+pkg openrails/server, method (*Server) UnlockAdminLockout(context.Context, string) error
+pkg openrails/server, method (*Server) UserActor(*http.Request) (Actor, error)
+pkg openrails/server, method (*Server) VerifyMerchantAPIHost(context.Context, billing.MerchantID) (*billing.MerchantAPIHost, error)
+pkg openrails/server, type Actor struct
 pkg openrails/server, type AuthConfig = hostconfig.AuthConfig
 pkg openrails/server, type AuthConfig struct
 pkg openrails/server, type AuthConfig struct, ActiveKeyID string
@@ -3505,6 +3551,7 @@ pkg openrails/server, type Config struct, LocalSignIn bool
 pkg openrails/server, type Config struct, MerchantCreation *MerchantCreationConfig
 pkg openrails/server, type Config struct, PasswordlessAutoRegistration bool
 pkg openrails/server, type Config struct, PasswordlessLogin bool
+pkg openrails/server, type Config struct, PrivateAddr string
 pkg openrails/server, type Config struct, Registration iam.RegistrationMode
 pkg openrails/server, type Config struct, ResourceServer *ResourceServerConfig
 pkg openrails/server, type Config struct, TrustedProxies []string
@@ -3536,6 +3583,10 @@ pkg openrails/server, type NamingConfig struct
 pkg openrails/server, type NamingConfig struct, Enabled *bool
 pkg openrails/server, type NamingConfig struct, FormerNames config.FormerNamesConfig
 pkg openrails/server, type NamingConfig struct, RenameInterval *time.Duration
+pkg openrails/server, type Refusal struct
+pkg openrails/server, type Refusal struct, Code string
+pkg openrails/server, type Refusal struct, Headers map[string]string
+pkg openrails/server, type Refusal struct, Status int
 pkg openrails/server, type ResourceServerConfig = hostconfig.ResourceServerConfig
 pkg openrails/server, type ResourceServerConfig struct
 pkg openrails/server, type ResourceServerConfig struct, DPoPNonceKey string
@@ -3552,4 +3603,21 @@ pkg openrails/server, type TrustedIssuerConfig struct, Keys []iam.RemoteApplicat
 pkg openrails/server, type TrustedIssuerConfig struct, Merchants []string
 pkg openrails/server, type TrustedIssuerConfig struct, Name string
 pkg openrails/server, type TrustedIssuerConfig struct, Permissions []string
+pkg openrails/server, var ErrAPIHostClaimMissing error
+pkg openrails/server, var ErrAPIHostReserved error
+pkg openrails/server, var ErrAPIHostTaken error
+pkg openrails/server, var ErrAPIHostUnproven error
+pkg openrails/server, var ErrFederatedGrantExists error
+pkg openrails/server, var ErrFederatedGrantInvalidEmail error
+pkg openrails/server, var ErrFederatedGrantNotFound error
+pkg openrails/server, var ErrFederatedGrantUnverified error
+pkg openrails/server, var ErrInvalidAPIHost error
+pkg openrails/server, var ErrInvalidMerchantName error
+pkg openrails/server, var ErrLastOwner error
+pkg openrails/server, var ErrMerchantNotFound error
+pkg openrails/server, var ErrNotTeamMember error
+pkg openrails/server, var ErrRenamesDisabled error
+pkg openrails/server, var ErrRoleEscalation error
+pkg openrails/server, var ErrTeamInvitesDisabled error
+pkg openrails/server, var ErrUnknownMerchantRole error
 pkg openrails/web/admin, func FS() fs.FS

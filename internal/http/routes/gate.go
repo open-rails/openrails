@@ -307,7 +307,7 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 	if IsNilAuth(a) {
 		panic(MountError{Route: route.Key(), Reason: "an admin route needs Routes.Auth"})
 	}
-	perm := e.permissionFor(route)
+	perm := e.Permissions.For(route)
 	if strings.TrimSpace(perm) == "" {
 		panic(MountError{Route: route.Key(), Reason: "no permission (Routes.Permissions)"})
 	}
@@ -320,15 +320,6 @@ func (e *Env) staffGates(route Route) []router.Middleware {
 		out = append(out, inPerson(route, a))
 	}
 	return append(out, e.staffCheck(route, a))
-}
-
-// permissionFor is the permission a merchant-tier route checks: a
-// control-plane route's own, a staff route's bundle's.
-func (e *Env) permissionFor(route Route) string {
-	if !route.Staff() {
-		return route.Perm
-	}
-	return e.Permissions.For(route)
 }
 
 // inPerson stacks the host's Sensitive for a user acting in person. A key or
@@ -430,7 +421,7 @@ func (e *Env) staffCan(r *http.Request, routeKey string) error {
 	route, ok := routeByKey(routeKey)
 	perm := ""
 	if ok {
-		perm = e.permissionFor(route)
+		perm = e.Permissions.For(route)
 	}
 	if perm == "" {
 		return billingauth.ErrForbidden

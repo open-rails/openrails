@@ -1,17 +1,17 @@
 # Metrics for LLMs — wiring any agent to the OpenRails query API
 
-Any LLM agent or dashboard with a merchant API key can answer analytics questions against
+Any LLM agent or dashboard with a merchant credential can answer analytics questions against
 OpenRails directly: the schema endpoint IS the machine-readable documentation,
 validation errors are corrective instructions returned all at once, and results are
 token-lean tables. No SDK.
 
 ## Auth
 
-- Bearer merchant **API key** (`Authorization: Bearer <key>`) that the host's
-  `Permissions.AdminRead` admits (on the standalone server a `viewer` key);
-  mint one from the
-  console (Settings) or the API.
-- Every query is scoped to the key's merchant (an explicit merchant predicate); the API serves
+- A bearer credential (`Authorization: Bearer <token>`) that the host's
+  `Permissions.AdminRead` admits: on the standalone server a client-credentials
+  access token from the merchant's trusted issuer granting `server.MerchantRead`, or a
+  hosted product's `viewer` API key.
+- Every query is scoped to the credential's merchant (an explicit merchant predicate); the API serves
   **aggregates only**, never entity rows.
 - Prefix: standalone `/v1`, embedded typically `/billing/v1`.
 

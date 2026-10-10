@@ -17,7 +17,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/credential"
-	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
@@ -309,33 +308,4 @@ func TestStandaloneCustomers(t *testing.T) {
 
 func bearer(token string) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + token}
-}
-
-// Required on the control plane's own user routes pins a UUID subject for
-// the handler, surviving request reassignment.
-func TestUserAuthMiddleware(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		authn  billingauth.Authenticator
-		seenAs string
-		status int
-	}{
-		{"valid", userAuth(billingauth.UserContext{UserID: userA}, nil), userA, http.StatusNoContent},
-		{"rejected", userAuth(billingauth.UserContext{}, billingauth.ErrUnauthenticated), "", http.StatusUnauthorized},
-		{"opaque subject", userAuth(billingauth.UserContext{UserID: "42"}, nil), "", http.StatusUnauthorized},
-		{"auth disabled", nil, "", http.StatusInternalServerError},
-	} {
-		user := "unset"
-		rec := httptest.NewRecorder()
-		Options{Authenticator: tc.authn}.requiredMW()(func(r *httprequest.Request) {
-			r.Request = r.Request.WithContext(context.Background())
-			uc, _ := r.UserContext()
-			user = uc.UserID
-			r.Status(http.StatusNoContent)
-		})(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/merchants", nil), nil))
-		require.Equal(t, tc.status, rec.Code, tc.name)
-		if rec.Code == http.StatusNoContent {
-			require.Equal(t, tc.seenAs, user, tc.name)
-		}
-	}
 }

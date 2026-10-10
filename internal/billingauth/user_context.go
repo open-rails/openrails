@@ -12,9 +12,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// UserContext is a signed-in user of the standalone control plane's own
-// routes (/v1/merchants, /v1/platform): never a billing customer or staff
-// verdict, which the route gate binds instead.
+// UserContext is a signed-in user of the standalone server's own accounts:
+// never a billing customer or staff verdict, which the route gate binds
+// instead.
 type UserContext struct {
 	// UserID is the user's UUID.
 	UserID        string

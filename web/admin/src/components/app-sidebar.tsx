@@ -136,12 +136,12 @@ function NavEntry({
 }
 
 function MerchantSwitcher() {
-  const { activeMerchant, merchants, selectMerchant } = useAuth()
+  const { activeMerchant, merchants, opensByName, selectMerchant } = useAuth()
   const navigate = useNavigate()
   const newMerchant = newMerchantPath(useExtensions().extensions)
   const label =
     activeMerchant?.display_name || activeMerchant?.slug || "Select merchant"
-  const role = activeMerchant?.role ?? "Merchant console"
+  const role = activeMerchant?.role || "Merchant console"
   const initials = activeMerchant?.slug.slice(0, 2) ?? "µ"
 
   return (
@@ -191,9 +191,11 @@ function MerchantSwitcher() {
                       <span className="truncate text-sm">
                         {merchant.display_name || merchant.slug}
                       </span>
-                      <span className="truncate text-xs text-muted-foreground capitalize">
-                        {merchant.role}
-                      </span>
+                      {merchant.role && (
+                        <span className="truncate text-xs text-muted-foreground capitalize">
+                          {merchant.role}
+                        </span>
+                      )}
                     </span>
                     {active && (
                       <HugeiconsIcon
@@ -207,6 +209,17 @@ function MerchantSwitcher() {
             </DropdownMenuGroup>
             {/* The console creates no merchants itself: the entry exists only
                 when a host extension serves a creation page. */}
+            {opensByName && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={() => selectMerchant("")}
+                  className="gap-2 py-2"
+                >
+                  Open another merchant
+                </DropdownMenuItem>
+              </>
+            )}
             {newMerchant && (
               <>
                 <DropdownMenuSeparator />

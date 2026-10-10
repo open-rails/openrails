@@ -152,7 +152,7 @@ export type {
   ScheduledChange,
 } from "./generated/wire"
 
-// --- Ops: findings / repair alerts / worker health ---
+// --- Ops: findings and repair alerts ---
 
 export interface Recommendation {
   action: string
@@ -193,18 +193,6 @@ export interface FindingsGauges {
   orphaned_members: number
   freeloaders: number
   duplicate_coverage: number
-}
-
-export interface WorkerHealth {
-  worker_kind: string
-  registered_at: string
-  expected_period_seconds?: number
-  last_success_at?: string
-  last_error_at?: string
-  last_error?: string
-  consecutive_failures: number
-  last_alerted_at?: string
-  updated_at: string
 }
 
 // --- Settings / providers ---
@@ -274,52 +262,6 @@ export interface RailDefinition {
   setting_keys: string[]
 }
 
-// --- API keys (#757) ---
-
-export interface MerchantAPIKey {
-  id: string
-  name: string
-  role: string
-  // Non-secret leading token part ("openrails_st_<key_id>") for matching a
-  // stored credential. The secret itself is shown once, at mint time only.
-  prefix: string
-  created_at: string
-  last_used_at: string | null
-  expires_at: string | null
-  revoked_at: string | null
-}
-
-export interface MintedAPIKey extends MerchantAPIKey {
-  secret: string
-}
-
-// --- Team management (#760) ---
-
-export interface TeamMember {
-  user_id: string
-  email: string | null
-  username: string | null
-  role: string
-}
-
-export interface TeamInvite {
-  id: string
-  role: string
-  created_at: string
-  expires_at: string | null
-  redeemed_at: string | null
-  revoked_at: string | null
-}
-
-// Outcome of inviting an email: either a live account had verified the address
-// (added to the team immediately) or a single-use register+join link was minted
-// (url shown once for the owner to share).
-export interface TeamInviteResult {
-  member: TeamMember | null
-  invite: TeamInvite | null
-  url: string | null
-}
-
 // --- Auth (AuthKit authhttp) ---
 
 export interface AuthCapabilities {
@@ -377,19 +319,6 @@ export interface Me {
   username?: string
   roles?: string[]
   entitlements?: string[]
-}
-
-// A merchant the signed-in user holds a role in (GET /v1/merchants).
-export interface MerchantMembership {
-  id: string
-  slug: string
-  display_name?: string
-  role: string
-}
-
-export interface MerchantMembershipList {
-  object: "list"
-  data: MerchantMembership[]
 }
 
 // --- Alerting (#736) ---

@@ -255,7 +255,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 	})
 
 	t.Run("merchants", func(t *testing.T) {
-		w := serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-admins"} }))})
+		w := serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions"); c["roles"] = []string{"billing-admins"} }))})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		list := merchantList(t, w)
 		require.Len(t, list, 1)
@@ -263,14 +263,14 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 		require.Equal(t, "custom", list[0].Role, "owner grants capped by the ceiling are no named role")
 		require.ElementsMatch(t, []string{staffperm.Read, staffperm.Admin}, list[0].Permissions)
 
-		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") }))})
+		w = serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") }))})
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Empty(t, merchantList(t, w), "a token granting nothing lists nothing")
 
-		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(stranger.mint(t, nil))})
+		w = serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: bearer(stranger.mint(t, nil))})
 		require.Equal(t, http.StatusUnauthorized, w.Code)
 		require.Equal(t, billing.CodeAccessTokenIssuerUnknown, errorCode(t, w))
-		w = serve(handler, rsRequest{path: "/v1/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }))})
+		w = serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { c["scope"] = billing.ScopeSelf }))})
 		require.Equal(t, http.StatusForbidden, w.Code)
 		require.Equal(t, billing.CodeInsufficientScope, errorCode(t, w))
 	})
@@ -429,13 +429,13 @@ func TestResourceServerTrustsAnAuthKitAuthorizationServer(t *testing.T) {
 		require.Contains(t, w.Header().Get("WWW-Authenticate"), `scope="openrails:merchant"`)
 		require.Equal(t, http.StatusOK, dpopServe(t, handler, self, rsRequest{path: "/v1/me/entitlements"}).Code, "the user's own billing")
 
-		w = dpopServe(t, handler, renewed, rsRequest{path: "/v1/merchants"})
+		w = dpopServe(t, userMerchants(cp), renewed, rsRequest{path: "/hosted/merchants"})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		list := merchantList(t, w)
 		require.Len(t, list, 1)
 		require.Equal(t, shop, list[0].Slug)
 		require.Equal(t, "owner", list[0].Role)
-		w = dpopServe(t, handler, nobody, rsRequest{path: "/v1/merchants"})
+		w = dpopServe(t, userMerchants(cp), nobody, rsRequest{path: "/hosted/merchants"})
 		require.Equal(t, http.StatusOK, w.Code)
 		require.Empty(t, merchantList(t, w))
 	})
@@ -544,7 +544,7 @@ merchants:
 	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
 	require.Equal(t, http.StatusOK, call(app.mint(t, func(c jwt.MapClaims) { c["sub"], c["client_id"] = "sync", "sync" })).Code, "the application acting for itself")
 
-	w = serve(handler, rsRequest{path: "/v1/merchants", authorization: "Bearer " + app.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })})
+	w = serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: "Bearer " + app.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"} })})
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	list := merchantList(t, w)
 	require.Len(t, list, 1)
@@ -623,82 +623,107 @@ func TestResourceServerFederatedGrants(t *testing.T) {
 			}
 		})
 	}
-	const grants, findings = "/v1/merchant/federated-grants", "/v1/admin/findings"
+	const findings = "/v1/admin/findings"
+	mid, _, err := cp.ResolveMerchantForGroup(t.Context(), shop)
+	require.NoError(t, err)
+	ownerActor := server.CredentialActor([]string{"merchant:*"})
+	invite := func(by server.Actor, email, role string) (*billing.FederatedGrant, error) {
+		return cp.CreateFederatedGrant(t.Context(), by, mid, billing.CreateFederatedGrantParams{Email: email, Role: role})
+	}
+	as := func(token string) *http.Request {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		return r
+	}
 
-	w := send(http.MethodPost, grants, owner, body{"email": " Staff@Example.test ", "role": "viewer"})
-	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-	var grant billing.FederatedGrant
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &grant))
+	grant, err := invite(ownerActor, " Staff@Example.test ", "viewer")
+	require.NoError(t, err)
 	require.Equal(t, "staff@example.test", grant.Email)
 	require.Nil(t, grant.Subject, "pending")
 	for name, tc := range map[string]struct {
-		token   string
-		payload body
-		status  int
-		code    string
+		by          server.Actor
+		email, role string
+		want        error
 	}{
-		"duplicate":     {owner, body{"email": "staff@example.test", "role": "support"}, http.StatusConflict, billing.CodeResourceConflict},
-		"bad email":     {owner, body{"email": "Staff <staff@example.test>", "role": "viewer"}, http.StatusBadRequest, "invalid_email"},
-		"unknown role":  {owner, body{"email": "x@example.test", "role": "admin"}, http.StatusBadRequest, "unknown_role"},
-		"beyond caller": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{staffperm.MembersManage} }), body{"email": "x@example.test", "role": "owner"}, http.StatusForbidden, "role_escalation"},
-		"not an owner":  {staff(nil), body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodePermissionRequired},
-		"stale sign-in": {host.mint(t, func(c jwt.MapClaims) {
-			c["permissions"], c["auth_time"] = []string{"merchant:*"}, time.Now().Add(-time.Hour).Unix()
-		}), body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodeStepUpRequired},
-		"no sign-in time": {host.mint(t, func(c jwt.MapClaims) { c["permissions"] = []string{"merchant:*"}; delete(c, "auth_time") }),
-			body{"email": "x@example.test", "role": "viewer"}, http.StatusForbidden, billing.CodeStepUpRequired},
+		"duplicate":     {ownerActor, "staff@example.test", "support", server.ErrFederatedGrantExists},
+		"bad email":     {ownerActor, "Staff <staff@example.test>", "viewer", server.ErrFederatedGrantInvalidEmail},
+		"unknown role":  {ownerActor, "x@example.test", "admin", server.ErrUnknownMerchantRole},
+		"beyond caller": {server.CredentialActor([]string{staffperm.MembersManage}), "x@example.test", "owner", server.ErrRoleEscalation},
 	} {
-		w := send(http.MethodPost, grants, tc.token, tc.payload)
-		require.Equal(t, tc.status, w.Code, "%s: %s", name, w.Body.String())
-		require.Equal(t, tc.code, errorCode(t, w), name)
+		_, err := invite(tc.by, tc.email, tc.role)
+		require.ErrorIs(t, err, tc.want, name)
+	}
+	for _, route := range []struct{ method, path string }{
+		{http.MethodGet, "/v1/merchant/federated-grants"}, {http.MethodPost, "/v1/merchant/federated-grants"}, {http.MethodGet, "/v1/merchants/invites"},
+	} {
+		require.Equal(t, http.StatusNotFound, send(route.method, route.path, owner, body{}).Code, "%s %s is the hosted product's", route.method, route.path)
 	}
 
 	require.Equal(t, http.StatusForbidden, send(http.MethodGet, findings, staff(nil), nil).Code, "no access until accepted")
-	var pending billing.ListPage[billing.FederatedInvite]
-	w = send(http.MethodGet, "/v1/merchants/invites", staff(nil), nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pending))
-	require.Len(t, pending.Items, 1)
-	require.Equal(t, grant.ID, pending.Items[0].ID)
-	require.Equal(t, shop, pending.Items[0].Merchant.Slug)
+	pending, err := cp.ListFederatedInvites(t.Context(), as(staff(nil)))
+	require.NoError(t, err)
+	require.Len(t, pending, 1)
+	require.Equal(t, grant.ID, pending[0].ID)
+	require.Equal(t, shop, pending[0].Merchant.Slug)
 
 	unverified := staff(func(c jwt.MapClaims) { c["email_verified"] = false })
-	w = send(http.MethodGet, "/v1/merchants/invites", unverified, nil)
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &pending))
-	require.Empty(t, pending.Items, "an unverified email is offered nothing")
-	accept := "/v1/merchants/invites/" + grant.ID.String() + "/accept"
-	w = send(http.MethodPost, accept, unverified, nil)
-	require.Equal(t, http.StatusForbidden, w.Code)
-	require.Equal(t, "email_unverified", errorCode(t, w))
+	pending, err = cp.ListFederatedInvites(t.Context(), as(unverified))
+	require.NoError(t, err)
+	require.Empty(t, pending, "an unverified email is offered nothing")
+	_, err = cp.AcceptFederatedGrant(t.Context(), as(unverified), grant.ID)
+	require.ErrorIs(t, err, server.ErrFederatedGrantUnverified)
 	stranger := other.mint(t, func(c jwt.MapClaims) { c["email"], c["email_verified"] = "staff@example.test", true })
-	w = send(http.MethodPost, accept, stranger, nil)
-	require.Equal(t, http.StatusNotFound, w.Code, "an issuer not trusted for the merchant cannot accept its grants")
+	_, err = cp.AcceptFederatedGrant(t.Context(), as(stranger), grant.ID)
+	require.ErrorIs(t, err, server.ErrFederatedGrantNotFound, "an issuer not trusted for the merchant cannot accept its grants")
+	_, err = cp.ListFederatedInvites(t.Context(), as("not-a-token"))
+	refusal, ok := server.CredentialRefusal(err)
+	require.True(t, ok, "%v", err)
+	require.Equal(t, http.StatusUnauthorized, refusal.Status)
 
-	w = send(http.MethodPost, accept, staff(nil), nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	var reached billing.UserMerchant
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &reached))
+	reached, err := cp.AcceptFederatedGrant(t.Context(), as(staff(nil)), grant.ID)
+	require.NoError(t, err)
 	require.Equal(t, shop, reached.Slug)
 	require.Equal(t, "viewer", reached.Role)
-	require.Equal(t, http.StatusNotFound, send(http.MethodPost, accept, staff(nil), nil).Code, "a grant is accepted once")
+	_, err = cp.AcceptFederatedGrant(t.Context(), as(staff(nil)), grant.ID)
+	require.ErrorIs(t, err, server.ErrFederatedGrantNotFound, "a grant is accepted once")
 
 	require.Equal(t, http.StatusOK, send(http.MethodGet, findings, staff(nil), nil).Code, "the grant's role")
-	require.Equal(t, http.StatusForbidden, send(http.MethodPost, grants, staff(nil), body{"email": "y@example.test", "role": "viewer"}).Code, "a viewer manages nobody")
-	w = send(http.MethodGet, "/v1/merchants", staff(nil), nil)
-	require.Equal(t, http.StatusOK, w.Code)
-	list := merchantList(t, w)
+	list, err := cp.ListUserMerchants(t.Context(), as(staff(nil)))
+	require.NoError(t, err)
 	require.Len(t, list, 1)
 	require.Equal(t, "viewer", list[0].Role)
+	_, err = invite(server.CredentialActor(list[0].Permissions), "y@example.test", "owner")
+	require.ErrorIs(t, err, server.ErrRoleEscalation, "a viewer grants no more than it holds")
 
-	var roster billing.ListPage[billing.FederatedGrant]
-	w = send(http.MethodGet, grants, owner, nil)
-	require.Equal(t, http.StatusOK, w.Code)
-	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &roster))
-	require.Len(t, roster.Items, 1)
-	require.Equal(t, host.iss, *roster.Items[0].Issuer)
-	require.Equal(t, staffSub, *roster.Items[0].Subject)
+	roster, err := cp.ListFederatedGrants(t.Context(), mid)
+	require.NoError(t, err)
+	require.Len(t, roster, 1)
+	require.Equal(t, host.iss, *roster[0].Issuer)
+	require.Equal(t, staffSub, *roster[0].Subject)
 
-	require.Equal(t, http.StatusNoContent, send(http.MethodDelete, grants+"/"+grant.ID.String(), owner, nil).Code)
-	require.Equal(t, http.StatusNotFound, send(http.MethodDelete, grants+"/"+grant.ID.String(), owner, nil).Code)
+	require.NoError(t, cp.RevokeFederatedGrant(t.Context(), ownerActor, mid, grant.ID))
+	require.ErrorIs(t, cp.RevokeFederatedGrant(t.Context(), ownerActor, mid, grant.ID), server.ErrFederatedGrantNotFound)
 	require.Equal(t, http.StatusForbidden, send(http.MethodGet, findings, staff(nil), nil).Code, "revoked")
+}
+
+// userMerchants is how a hosted product serves a signed-in user's merchants
+// on the server's Go API: ListUserMerchants, a refused credential answered
+// by CredentialRefusal with its retry headers.
+func userMerchants(srv *server.Server) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		list, err := srv.ListUserMerchants(r.Context(), r)
+		if refusal, ok := server.CredentialRefusal(err); ok {
+			for name, value := range refusal.Headers {
+				w.Header().Set(name, value)
+			}
+			w.WriteHeader(refusal.Status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]string{"code": refusal.Code}})
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(billing.ListPage[billing.UserMerchant]{Items: list})
+	})
 }

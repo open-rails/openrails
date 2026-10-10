@@ -3,7 +3,9 @@ import { Home01Icon } from "@hugeicons/core-free-icons"
 
 import {
   buildNav,
+  directoryHost,
   extensionRoute,
+  extensionSettingsTabs,
   newMerchantPath,
   userMenuItems,
   validateExtensions,
@@ -118,6 +120,28 @@ describe("console navigation", () => {
     expect(extensionRoute([hosted], "/customers")).toBeUndefined()
   })
 
+  it("adds a host's Settings tabs by order, for the roles they name", () => {
+    const tabs: ConsoleExtension = {
+      id: "team",
+      settingsTabs: [
+        { value: "api-keys", title: "API keys", lazy: page, order: 60, roles: ["owner"] },
+        { value: "team", title: "Team", lazy: page, order: 5 },
+      ],
+    }
+    const titles = (merchant?: typeof owner) =>
+      extensionSettingsTabs([tabs], merchant).map((tab) => tab.title)
+    expect(titles(owner)).toEqual(["Team", "API keys"])
+    expect(titles(viewer)).toEqual(["Team"])
+    expect(titles({ id: "", slug: "acme" } as typeof owner)).toEqual(["Team"])
+    expect(extensionSettingsTabs([], owner)).toEqual([])
+  })
+
+  it("lists merchants from the one extension that declares a directory", () => {
+    const directory = { id: "dir", merchants: () => Promise.resolve([owner]) }
+    expect(directoryHost([hosted])).toBeUndefined()
+    expect(directoryHost([hosted, directory])?.id).toBe("dir")
+  })
+
   it("offers the host's New merchant page and account-menu entries", () => {
     expect(newMerchantPath([])).toBeUndefined()
     expect(newMerchantPath([hosted])).toBe("/merchants/new")
@@ -163,6 +187,29 @@ describe("extension validation", () => {
     refuses(
       [{ id: "x", userMenu: [{ title: "T", path: "//evil.example" }] }],
       /console path/
+    )
+  })
+
+  it("allows one merchant directory and unique Settings tabs", () => {
+    const merchants = () => Promise.resolve([])
+    refuses(
+      [
+        { id: "x", merchants },
+        { id: "y", merchants },
+      ],
+      /only one extension may declare merchants/
+    )
+    for (const value of ["psps", "customer-controls", "Team"])
+      refuses(
+        [{ id: "x", settingsTabs: [{ value, title: "T", lazy: page }] }],
+        /settings tab/
+      )
+    refuses(
+      [
+        { id: "x", settingsTabs: [{ value: "team", title: "T", lazy: page }] },
+        { id: "y", settingsTabs: [{ value: "team", title: "T", lazy: page }] },
+      ],
+      /settings tab/
     )
   })
 

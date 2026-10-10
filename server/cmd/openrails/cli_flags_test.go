@@ -122,3 +122,23 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	}
 	require.Len(t, paths, 2, "refused invocations never reach the server")
 }
+
+// The operator commands refuse a malformed argument before they open the
+// server.
+func TestOperatorCommandsRefuseMalformedArguments(t *testing.T) {
+	for name, tc := range map[string]struct {
+		cmd  *cobra.Command
+		args []string
+		want string
+	}{
+		"status":     {newMerchantsCmd(), []string{"list", "--status", "gone"}, "--status is active, deleted or all"},
+		"delete id":  {newMerchantsCmd(), []string{"delete", "acme"}, "a merchant id"},
+		"restore id": {newMerchantsCmd(), []string{"restore", "acme"}, "a merchant id"},
+		"rename":     {newMerchantsCmd(), []string{"rename", "acme"}, "accepts 2 arg(s)"},
+		"unlock":     {newAdminLockoutsCmd(), []string{"unlock", "root"}, "a user id"},
+		"workers":    {newWorkersCmd(), []string{"extra"}, "unknown command"},
+	} {
+		_, err := execute(tc.cmd, tc.args...)
+		require.ErrorContains(t, err, tc.want, name)
+	}
+}

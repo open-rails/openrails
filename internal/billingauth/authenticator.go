@@ -13,9 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 )
 
-// Authenticator verifies a standalone control-plane user session for the
-// control plane's own routes (/v1/merchants, /v1/platform). Billing routes
-// use Auth instead.
+// Authenticator verifies a session of the standalone server's own accounts,
+// which its Auth admits on the staff routes.
 type Authenticator interface {
 	Authenticate(ctx context.Context, r *http.Request) (UserContext, error)
 }

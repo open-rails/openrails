@@ -41,11 +41,9 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 	supportSession := authtest.SignIn(t, cp.AuthKit(), support).AccessToken
 
 	apiKey := func(role string) string {
-		w := call(t, handler, ownerSession, http.MethodPost, "/v1/merchant/api-keys", shop, map[string]string{"name": role + " key", "role": role})
-		require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-		out := map[string]any{}
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&out))
-		return out["secret"].(string)
+		key, err := cp.CreateMerchantAPIKey(ctx, userActor(t, cp, ownerSession), mid, billing.CreateAPIKeyParams{Name: role + " key", Role: role})
+		require.NoError(t, err)
+		return key.Secret
 	}
 	type caller struct{ token, selector string }
 	callers := map[string]caller{

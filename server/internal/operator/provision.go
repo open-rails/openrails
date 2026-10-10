@@ -27,8 +27,11 @@ func ProvisionMerchant(ctx context.Context, cp *controlplane.ControlPlane, req b
 	if err != nil {
 		return nil, fmt.Errorf("control plane provision %q: %w", slug, err)
 	}
-	if err := cp.SetMerchantDisplayName(ctx, m.ID, req.DisplayName); err != nil {
-		return nil, fmt.Errorf("control plane provision %q: display name: %w", slug, err)
+	// A user's claim names only the merchant it creates.
+	if created || req.OwnerUserID == "" {
+		if err := cp.SetMerchantDisplayName(ctx, m.ID, req.DisplayName); err != nil {
+			return nil, fmt.Errorf("control plane provision %q: display name: %w", slug, err)
+		}
 	}
 	return &billing.ProvisionMerchantResult{MerchantID: m.ID, GroupID: m.PermissionGroupID, Created: created}, nil
 }

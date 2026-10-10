@@ -53,26 +53,21 @@ func (s *Server) registerProvisioningRoutes(mux router.Registrar) {
 	httproutes.RegisterProvisioningRoutes(router.NewMuxRecorded(mux, "/scim/v2", s.runtime, s.recordRoute), s.runtime, httproutes.Options{Provisioning: auth.Authenticate})
 }
 
-// registerStandaloneMetaRoutes registers health and metrics, the standalone
-// server's process surface, and the public configuration, which is browser
-// tier.
+// registerStandaloneMetaRoutes registers health, the standalone server's
+// process surface, and the public configuration, which is browser tier.
 func (s *Server) registerStandaloneMetaRoutes(mux router.Registrar) {
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordRoute), httproutes.Options{External: httproutes.External{
 		Live: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			httprequest.NewHTTP(w, r, nil).SuccessJSON(httproutes.Health{Status: httproutes.HealthOK})
 		}),
-		Ready:   http.HandlerFunc(s.readyHandler),
-		Metrics: http.HandlerFunc(s.metricsHandler),
+		Ready: http.HandlerFunc(s.readyHandler),
 	}})
 	httproutes.RegisterMetaRoutes(router.NewMuxRecorded(mux, "", s.runtime, s.recordBrowserRoute), httproutes.Options{Capabilities: s.capabilities()})
 }
 
 // capabilities is what the standalone server serves: every bundle.
 func (s *Server) capabilities() *billing.Capabilities {
-	caps := embedhttp.CapabilitiesFor(s.runtime, staffPermissions, embedhttp.ProviderRoutesForRuntime(s.runtime, nil),
-		// Team invitations mint register-and-join links when the control
-		// plane's posture allows them.
-		map[string]bool{"team_invites": s.controlPlane != nil && s.controlPlane.InvitesEnabled()})
+	caps := embedhttp.CapabilitiesFor(s.runtime, staffPermissions, embedhttp.ProviderRoutesForRuntime(s.runtime, nil), nil)
 	caps.RouteGroups[string(httproutes.Provisioning)] = true
 	return &caps
 }

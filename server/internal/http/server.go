@@ -272,11 +272,6 @@ func New(deps Dependencies) (*Server, error) {
 	s.registerUserRoutes(mux)
 	// #555/#561: merchant/support routes live only under `/v1/admin/*`.
 	s.registerMerchantActionRoutes(mux)
-	// #721: cross-merchant platform operator directory (/v1/platform/*),
-	// standalone-only (root-group-gated; no embedded analogue).
-	s.registerPlatformRoutes(mux)
-	// #1106: a signed-in user's own merchants (/v1/merchants).
-	s.registerMerchantAccountRoutes(mux)
 
 	// Selective AuthKit route mounting (#224, authhttp.MountHandler since
 	// authkit #250). In locked-down mode this mounts ONLY the intentional

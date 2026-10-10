@@ -8,7 +8,8 @@ import (
 // ApplyMerchantConfigurationParams is an explicit, replayable metadata update.
 // Omitted fields preserve stored values. Credentials and provider lifecycle
 // changes use the PSP methods and their separate publication receipts; the
-// API host is claimed, proven and released with SetAPIHost.
+// operator binds the API host (the merchant manifest, or the server's
+// SetMerchantAPIHost), and a hosted product claims one for its merchant.
 type ApplyMerchantConfigurationParams struct {
 	ApplicationID    string            `json:"application_id"`
 	ExpectedRevision *string           `json:"expected_revision"`
@@ -87,12 +88,6 @@ type APIHostRecord struct {
 	Type  string `json:"type"`
 	Name  string `json:"name"`
 	Value string `json:"value"`
-}
-
-// SetAPIHostParams claims APIHost for the merchant; "" releases the host and
-// any claim.
-type SetAPIHostParams struct {
-	APIHost string `json:"api_host"`
 }
 
 // Capabilities is what this deployment serves: each optional route bundle

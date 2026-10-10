@@ -50,6 +50,16 @@ type Config struct {
 	// Issuer is the trusted issuer the console signs staff in at; null signs
 	// in to AuthBaseURL's own accounts.
 	Issuer *Issuer `json:"issuer"`
+	// Merchant is the merchant the mount serves; null where staff choose one
+	// (a host's console extension lists theirs, or they open one by name).
+	Merchant *Merchant `json:"merchant"`
+}
+
+// Merchant is the merchant a console mount serves.
+type Merchant struct {
+	ID          string `json:"id"`
+	Slug        string `json:"slug"`
+	DisplayName string `json:"display_name,omitempty"`
 }
 
 // Issuer is the console's OAuth 2.0 public client at a trusted issuer.

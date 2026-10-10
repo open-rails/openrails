@@ -20,7 +20,7 @@ type Surface struct {
 
 // StandaloneServer builds the standalone surface over the engine graph a and
 // its control plane cp: the engine's routes gated by the control plane's Auth,
-// the control plane's own routes, AuthKit's and the admin console.
+// AuthKit's and the admin console.
 func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*server.Server, error) {
 	return server.New(server.Dependencies{
 		Config:         a.Config,

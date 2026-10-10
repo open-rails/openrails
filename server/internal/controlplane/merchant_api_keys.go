@@ -1,7 +1,7 @@
 package controlplane
 
-// Merchant self-serve API keys (#757): the control-plane surface behind
-// /v1/merchant/api-keys, through AuthKit's Client (CreateAPIKey, ListAPIKeys,
+// Merchant API keys (#757), behind the server's CreateMerchantAPIKey and its
+// siblings, through AuthKit's Client (CreateAPIKey, ListAPIKeys,
 // RevokeAPIKey) — never raw AuthKit SQL. A key holds one of the merchant roles
 // (#567): owner, support or viewer, the read-only role for LLM agents.
 

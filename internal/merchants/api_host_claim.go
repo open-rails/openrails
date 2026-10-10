@@ -45,6 +45,47 @@ type APIHostClaim struct {
 // Record is the DNS name that must carry the claim's token as a TXT value.
 func (c APIHostClaim) Record() string { return ChallengeLabel + "." + c.APIHost }
 
+// ChangeAPIHost is the merchant's own api_host change: "" releases the host
+// and any claim, the current host changes nothing, and another host opens a
+// claim that routes nothing until VerifyAPIHost. It answers the host that
+// routes now and the open claim. The deployment's own hosts (reserved) are
+// ErrAPIHostReserved.
+func (s *Service) ChangeAPIHost(ctx context.Context, id billing.MerchantID, host string, reserved []string) (string, *APIHostClaim, error) {
+	host = NormalizeAPIHost(host)
+	if host == "" {
+		return "", nil, s.ReleaseAPIHost(ctx, id)
+	}
+	cfg, err := s.GetHostConfig(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	if cfg.APIHost == host {
+		return host, nil, nil
+	}
+	if err := ClaimableAPIHost(host, reserved); err != nil {
+		return "", nil, err
+	}
+	claim, err := s.ClaimAPIHost(ctx, id, host)
+	if err != nil {
+		return "", nil, err
+	}
+	return cfg.APIHost, claim, nil
+}
+
+// APIHostView is the merchant's routing host (empty: none) and open claim
+// as the API answers them.
+func APIHostView(host string, claim *APIHostClaim) billing.MerchantAPIHost {
+	var out billing.MerchantAPIHost
+	if host != "" {
+		out.APIHost = &host
+	}
+	if claim != nil {
+		out.Claim = &billing.APIHostClaim{APIHost: claim.APIHost, CreatedAt: claim.CreatedAt,
+			DNSRecord: billing.APIHostRecord{Type: "TXT", Name: claim.Record(), Value: claim.Token}}
+	}
+	return out
+}
+
 // ClaimAPIHost opens id's claim on host with a fresh token, replacing any
 // earlier claim. A claim routes nothing; VerifyAPIHost binds the host.
 func (s *Service) ClaimAPIHost(ctx context.Context, id billing.MerchantID, host string) (*APIHostClaim, error) {

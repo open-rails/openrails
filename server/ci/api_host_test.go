@@ -131,78 +131,68 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 		handler.ServeHTTP(w, r)
 		return w
 	}
-	type shop struct{ slug, session string }
+	type shop struct {
+		id            billing.MerchantID
+		slug, session string
+	}
 	provision := func(prefix string) shop {
 		owner := newAccount(t, cp)
 		slug := uniqueName(prefix)
-		_, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
+		m, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug, OwnerUserID: owner.ID})
 		require.NoError(t, err)
-		return shop{slug, authtest.SignIn(t, cp.AuthKit(), owner).AccessToken}
+		return shop{m.MerchantID, slug, authtest.SignIn(t, cp.AuthKit(), owner).AccessToken}
 	}
 	victim, squatter := provision("victim"), provision("squatter")
-	w := on(shared, victim.session, http.MethodPost, "/v1/merchant/api-keys", victim.slug, map[string]string{"name": "backend", "role": "owner"})
-	require.Equal(t, http.StatusCreated, w.Code, w.Body.String())
-	key := map[string]any{}
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&key))
-	victimKey := key["secret"].(string)
+	key, err := cp.CreateMerchantAPIKey(ctx, server.OperatorActor(), victim.id, billing.CreateAPIKeyParams{Name: "backend", Role: "owner"})
+	require.NoError(t, err)
+	victimKey := key.Secret
 	works := func(host string, s shop) int {
 		t.Helper()
-		return on(host, s.session, http.MethodGet, "/v1/merchant/team", s.slug, nil).Code
+		return on(host, s.session, http.MethodGet, "/v1/admin/findings", s.slug, nil).Code
 	}
-	type hostState struct {
-		APIHost *string `json:"api_host"`
-		Claim   *struct {
-			APIHost   string                             `json:"api_host"`
-			DNSRecord struct{ Type, Name, Value string } `json:"dns_record"`
-		} `json:"claim"`
+	claim := func(s shop, host string) (*billing.MerchantAPIHost, error) {
+		return cp.ClaimMerchantAPIHost(ctx, s.id, host)
 	}
-	decode := func(w *httptest.ResponseRecorder) hostState {
-		t.Helper()
-		var state hostState
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&state), w.Body.String())
-		return state
+	verify := func(s shop) (*billing.MerchantAPIHost, error) {
+		return cp.VerifyMerchantAPIHost(ctx, s.id)
 	}
-	claim := func(s shop, host string) *httptest.ResponseRecorder {
-		return on(shared, s.session, http.MethodPut, "/v1/admin/api-host", s.slug, map[string]string{"api_host": host})
-	}
-	verify := func(s shop) *httptest.ResponseRecorder {
-		return on(shared, s.session, http.MethodPost, "/v1/admin/api-host/verify", s.slug, nil)
-	}
-	refused := func(w *httptest.ResponseRecorder, status int, code string) {
-		t.Helper()
-		require.Equal(t, status, w.Code, w.Body.String())
-		require.Contains(t, w.Body.String(), code)
+	for _, route := range []struct{ method, path string }{{http.MethodPut, "/v1/admin/api-host"}, {http.MethodPost, "/v1/admin/api-host/verify"}} {
+		w := on(shared, victim.session, route.method, route.path, victim.slug, map[string]string{"api_host": "shop.victim.e2e.test"})
+		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, w.Code, "%s %s: a claim is the hosted product's: %s", route.method, route.path, w.Body.String())
 	}
 
 	const domain = "shop.victim.e2e.test"
 	record := "_openrails-challenge." + domain
 
 	// A squatter's claim routes nothing and cannot be proven.
-	w = claim(squatter, domain)
-	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
-	squatterClaim := decode(w).Claim
+	state, err := claim(squatter, domain)
+	require.NoError(t, err)
+	squatterClaim := state.Claim
 	require.NotNil(t, squatterClaim)
 	require.Equal(t, "TXT", squatterClaim.DNSRecord.Type)
 	require.Equal(t, record, squatterClaim.DNSRecord.Name)
-	refused(verify(squatter), http.StatusConflict, "api_host_unproven")
+	unproven, err := verify(squatter)
+	require.ErrorIs(t, err, server.ErrAPIHostUnproven)
+	require.Equal(t, squatterClaim.DNSRecord, unproven.Claim.DNSRecord, "the refusal names the record to publish")
 	require.Equal(t, http.StatusOK, works(domain, victim), "an unproven host pins no merchant")
 
 	// The domain's owner claims it, publishes its token and proves it.
-	w = claim(victim, domain)
-	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
-	victimToken := decode(w).Claim.DNSRecord.Value
+	state, err = claim(victim, domain)
+	require.NoError(t, err)
+	victimToken := state.Claim.DNSRecord.Value
 	require.NotEqual(t, squatterClaim.DNSRecord.Value, victimToken)
-	w = on(shared, victim.session, http.MethodGet, "/v1/admin/api-host", victim.slug, nil)
+	w := on(shared, victim.session, http.MethodGet, "/v1/admin/api-host", victim.slug, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	pending := decode(w)
+	var pending billing.MerchantAPIHost
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&pending))
 	require.Nil(t, pending.APIHost, "a claim is not the api_host")
 	require.Equal(t, domain, pending.Claim.APIHost)
 	require.Equal(t, http.StatusOK, works(domain, squatter), "a claim pins nothing")
 	dns.publish(record, victimToken)
-	refused(verify(squatter), http.StatusConflict, "api_host_unproven")
-	w = verify(victim)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	bound := decode(w)
+	_, err = verify(squatter)
+	require.ErrorIs(t, err, server.ErrAPIHostUnproven)
+	bound, err := verify(victim)
+	require.NoError(t, err)
 	require.Equal(t, domain, *bound.APIHost)
 	require.Nil(t, bound.Claim)
 	require.Equal(t, http.StatusOK, works(domain, victim))
@@ -211,35 +201,44 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 
 	// Even with its token in the record, a squatter cannot take a held host.
 	dns.publish(record, squatterClaim.DNSRecord.Value)
-	refused(verify(squatter), http.StatusConflict, "api_host_taken")
-	refused(claim(squatter, domain), http.StatusConflict, "api_host_taken")
+	_, err = verify(squatter)
+	require.ErrorIs(t, err, server.ErrAPIHostTaken)
+	_, err = claim(squatter, domain)
+	require.ErrorIs(t, err, server.ErrAPIHostTaken)
 
 	// The deployment's own hosts and bare addresses are never claimable.
 	for _, host := range []string{shared, "API.E2E.Test:443", console, "127.0.0.1"} {
-		refused(claim(squatter, host), http.StatusBadRequest, "api_host_reserved")
+		_, err = claim(squatter, host)
+		require.ErrorIs(t, err, server.ErrAPIHostReserved, host)
 	}
-	refused(claim(squatter, "203.0.113.7"), http.StatusBadRequest, "invalid_api_host")
+	_, err = claim(squatter, "203.0.113.7")
+	require.ErrorIs(t, err, server.ErrInvalidAPIHost)
+	refused := func(w *httptest.ResponseRecorder, status int, code string) {
+		t.Helper()
+		require.Equal(t, status, w.Code, w.Body.String())
+		require.Contains(t, w.Body.String(), code)
+	}
 
 	// The configuration document binds no host: only a proven claim does.
 	w = on(shared, squatter.session, http.MethodGet, "/v1/admin/configuration", squatter.slug, nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	state := map[string]any{}
-	require.NoError(t, json.NewDecoder(w.Body).Decode(&state))
+	configuration := map[string]any{}
+	require.NoError(t, json.NewDecoder(w.Body).Decode(&configuration))
 	refused(on(shared, squatter.session, http.MethodPost, "/v1/admin/configuration/applications", squatter.slug,
-		map[string]any{"application_id": uuid.NewString(), "expected_revision": state["revision"], "api_host": domain}), http.StatusBadRequest, "unknown_field")
+		map[string]any{"application_id": uuid.NewString(), "expected_revision": configuration["revision"], "api_host": domain}), http.StatusBadRequest, "unknown_field")
 
 	// Control: the squatter proves a domain it does control.
 	const own = "shop.squatter.e2e.test"
-	w = claim(squatter, own)
-	require.Equal(t, http.StatusAccepted, w.Code, w.Body.String())
-	dns.publish("_openrails-challenge."+own, decode(w).Claim.DNSRecord.Value)
-	w = verify(squatter)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	state, err = claim(squatter, own)
+	require.NoError(t, err)
+	dns.publish("_openrails-challenge."+own, state.Claim.DNSRecord.Value)
+	_, err = verify(squatter)
+	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, works(own, squatter))
 
 	// Giving a host up needs no proof, and it stops routing at once.
-	w = claim(victim, "")
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Nil(t, decode(w).APIHost)
+	state, err = claim(victim, "")
+	require.NoError(t, err)
+	require.Nil(t, state.APIHost)
 	require.Equal(t, http.StatusOK, works(domain, squatter))
 }

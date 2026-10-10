@@ -40,7 +40,7 @@ var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSess
 // openRoutes is every route no Auth gates. A route that joins it is a
 // reviewed change.
 var openRoutes = []string{
-	"GET /health/live", "GET /health/ready", "GET /metrics", "GET /v1/config",
+	"GET /health/live", "GET /health/ready", "GET /v1/config",
 	"GET /v1/captcha/client.js", "GET /v1/captcha/status",
 	"GET /v1/catalog/products", "GET /v1/solana/tokens",
 	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
@@ -62,23 +62,16 @@ var sensitiveRoutes = []string{
 	"DELETE /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
 	"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}",
 	"DELETE /v1/admin/provisioning-tokens/{id}",
-	"DELETE /v1/merchant/api-keys/{id}",
-	"DELETE /v1/merchant/federated-grants/{id}",
-	"DELETE /v1/merchant/team/invites/{id}",
-	"DELETE /v1/merchant/team/{user_id}",
 	"GET /v1/admin/billing-archive",
-	"GET /v1/merchant/api-keys",
 	"PATCH /v1/admin/catalog/prices/{id}",
 	"PATCH /v1/admin/catalog/products/{id}",
 	"PATCH /v1/admin/customers/{customer_id}",
 	"PATCH /v1/admin/psps/{id}",
-	"PATCH /v1/merchant/team/{user_id}",
 	"POST /v1/admin/admissions",
 	"POST /v1/admin/admissions/extend",
 	"POST /v1/admin/admissions/release",
 	"POST /v1/admin/admissions/{request_id}/capture",
 	"POST /v1/admin/alert-webhooks",
-	"POST /v1/admin/api-host/verify",
 	"POST /v1/admin/billing-archive",
 	"POST /v1/admin/billing-import",
 	"POST /v1/admin/catalog/applications",
@@ -113,26 +106,20 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/subscriptions/{id}/change",
 	"POST /v1/admin/subscriptions/{id}/resume",
 	"POST /v1/admin/usage-events",
-	"POST /v1/merchant/api-keys",
-	"POST /v1/merchant/federated-grants",
-	"POST /v1/merchant/team/invites",
 	"PUT /v1/admin/alert-webhooks/{id}/url",
-	"PUT /v1/admin/api-host",
 	"PUT /v1/admin/catalog/meters/{key}",
 	"PUT /v1/admin/catalog/meters/{key}/rate-card",
 	"PUT /v1/admin/catalog/products/by-key/{product_key}",
 	"PUT /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
 	"PUT /v1/admin/customers/{customer_id}/spend-delegations",
 	"PUT /v1/admin/subscriptions/{id}/payment-method",
-	"PUT /v1/merchant/name",
 }
 
 // Every catalog route declares exactly one tier of the closed set, and what
-// that tier checks: a staff route its bundle's permission, a control-plane route one
-// exact permission, a customer route none, and no customer path names a
-// customer.
+// that tier checks: a staff route its bundle's permission, a customer route
+// none, and no customer path names a customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
-	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthUser, AuthCustomer, AuthMerchant, AuthOperator, AuthProvider, AuthProvisioning}
+	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthCustomer, AuthMerchant, AuthProvider, AuthProvisioning}
 	var open, sensitive []string
 	names := map[string]string{}
 	for _, r := range Catalog() {
@@ -147,7 +134,6 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 		require.False(t, r.Sensitive && r.Auth != AuthMerchant, "%s: only a merchant route steps up", key)
 		if r.Staff() {
 			require.Equal(t, AuthMerchant, r.Auth, key)
-			require.Empty(t, r.Perm, "%s: a staff route's permission is the host's", key)
 			require.NotEmpty(t, r.Name, key)
 			require.Empty(t, names[r.Name], "%s: %s already names %s", key, r.Name, names[r.Name])
 			names[r.Name] = key
@@ -161,13 +147,7 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 			require.Empty(t, r.Level, key)
 		}
 		switch r.Auth {
-		case AuthMerchant:
-			if !r.Staff() {
-				require.NotEmpty(t, r.Perm, key)
-				require.NotContains(t, r.Perm, "*", "%s: a permission is exact, never a glob", key)
-			}
 		case AuthCustomer:
-			require.Empty(t, r.Perm, key)
 			require.Equal(t, Customer, r.Group, key)
 			require.False(t, Sensitive(r), "%s: customer self-service never steps up", key)
 			for _, param := range []string{"{customer_id}", "{subject}", "{user_id}"} {
@@ -274,7 +254,7 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 		}
 		checked, sensitive := 0, 0
 		for _, r := range Catalog() {
-			if !mounted[r.Key()] || r.Group == ControlPlane || r.Group == Platform {
+			if !mounted[r.Key()] {
 				continue
 			}
 			var want []string

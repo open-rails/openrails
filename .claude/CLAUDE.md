@@ -49,8 +49,9 @@ through `host-four`; these are placeholders, not customer or repository names.
   `/v1/admin` the admin routes (`Permissions.AdminRead` for reads, `AdminWrite` for
   writes), catalog edits (`CatalogWrite`) and the merchant's own configuration
   (`MerchantConfig`) mount only with the host's permission; `AdminWrite` and
-  `CatalogWrite` need `AdminRead`. The standalone control plane (`/v1/merchant`,
-  `/v1/merchants`) and platform (`/v1/platform`) are the server's.
+  `CatalogWrite` need `AdminRead`. No route registers a merchant or manages a
+  team, API keys or the merchant directory: those are `server` Go methods and
+  the `openrails` CLI; a hosted product builds its own routes on them.
 - OpenRails names no staff permissions: the host passes its own in
   `Routes.Permissions`; the in-process `Client` checks none.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are

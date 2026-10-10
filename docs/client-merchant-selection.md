@@ -34,7 +34,7 @@ that keeps merchant UUIDs uses `ForMerchantID`, or one client per merchant
 
 Both transports send exactly one `OpenRails-Merchant` header: a slug
 (`OpenRails-Merchant: alpha`) or a stable id (`OpenRails-Merchant: id:<uuid>`).
-Every merchant-scoped route (`/v1/merchant`, `/v1/me`) honors
+Every merchant-scoped route (`/v1/admin`, `/v1/me`) honors
 it the same way: the server resolves the selector, authorizes
 the credential for that merchant, and only then pins it, before acquiring a
 merchant database connection or running business logic.
@@ -50,8 +50,8 @@ request path never depends on the selector.
 
 ## Credentials are independent
 
-`WithAPIKey` uses one credential: a key for alpha cannot reach bravo because a
-call selects bravo. Use `WithCredentialProvider` when a bearer token must be
+`WithAPIKey` and `WithTokenProvider` use one credential: a key or token for
+alpha cannot reach bravo because a call selects bravo. Use `WithCredentialProvider` when a bearer token must be
 minted for the requested merchant. The callback receives the
 `CredentialTarget` and must be safe for concurrent calls; a failed mint returns
 an error without falling back to another token:

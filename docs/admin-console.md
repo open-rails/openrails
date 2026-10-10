@@ -5,7 +5,7 @@
 A React SPA (`web/admin`, Vite), the staff dashboard, driving the
 `/v1/admin/*` API. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
-findings, team, API keys. It holds no state and no privileges of its own; every
+findings, settings. It holds no state and no privileges of its own; every
 action is an admin-API call its permission admits the caller for. Catalog
 editing appears only where catalog edits are mounted (`Permissions.CatalogWrite`),
 its PSP, settings and notification pages, and dashboard editing, only where the
@@ -52,13 +52,16 @@ its URLs are relative to the `<base href="/admin/">` in `index.html`, which the
 server rewrites to the path, and the SPA derives its routes and `config.json`
 URL from `document.baseURI`.
 
-**Users without a merchant.** A signed-in user who belongs to no merchant sees
-an empty state instead of a dashboard. OpenRails creates no merchants itself, so
-by default it tells them to ask an operator. A host that does declares a
-creation page in its console extension (`newMerchantPath`, below); the empty
-state and the merchant switcher then offer "New merchant". Any link may open the
-console on a merchant with `#merchant=<slug>` (e.g. `/admin/#merchant=acme`);
-the console selects it if the user belongs to it and drops the fragment.
+**Which merchant.** OpenRails lists no user's merchants. The console acts for
+the merchant its mount serves (an embedded engine's, in `config.json`'s
+`merchant`); on the standalone server staff open a merchant by name, and the
+admin API decides their access. A host with a directory of its users'
+merchants declares it in its console extension (`merchants`, below): the
+switcher lists them with each role, and a user with none sees an empty state
+that points at an operator or, with a creation page (`newMerchantPath`),
+offers "New merchant". Any link may open the console on a merchant with
+`#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the console selects it and
+drops the fragment.
 
 **Where staff sign in.** Embedded, at the host's AuthKit
 (`AdminConsole.AuthBaseURL`). Standalone, at a trusted issuer when
@@ -161,6 +164,10 @@ export default [
       { title: "Plan", path: "/plan", scope: "merchant", group: "Setup", roles: ["owner"] },
     ],
     newMerchantPath: "/merchants/new",
+    merchants: () => authFetch("/api/v1/me/merchants").then((r) => r.json()),
+    settingsTabs: [
+      { value: "team", title: "Team", lazy: () => import("./team").then((m) => ({ Component: m.TeamTab })) },
+    ],
   }),
 ]
 ```
@@ -168,6 +175,12 @@ export default [
 - **Scope.** `merchant` pages act on the selected merchant: they sit in the
   console's groups and, for a user with no merchant, show the empty state.
   `user` pages belong to the signed-in user and stay reachable without one.
+- **Merchants and settings.** `merchants` is the signed-in user's merchants
+  from the host's own directory (`{id, slug, display_name?, role?}`; one
+  extension at most). `settingsTabs` add tabs to Settings, by `order` and
+  `roles`; a team, API-key or invitation page is the host's, built on the
+  server's Go methods. `EmptyState` renders in the no-merchant state, such as
+  the invitations a user may accept.
 - **Navigation.** `nav` entries join the sidebar by `group` (merchant entries
   default to the console's "Billing" group, user entries to "Account") and
   `order`; `roles`, `visible(ctx)` and the `useVisible` hook (for data the
@@ -208,7 +221,7 @@ What the engine enforces:
   console path gets the app shell and the bootstrap document (base URLs +
   feature flags; no secrets, no data).
 - All **data and actions** go through `/v1/admin/*` with a Bearer token
-  (AuthKit user session or merchant API key) and are enforced server-side by
+  (an AuthKit session or a trusted issuer's access token) and are enforced server-side by
   each route's permission plus per-query merchant scoping. The console
   has no client-side privilege of its own; a 403 renders as a
   "role lacks permission" toast.
@@ -231,7 +244,7 @@ mount's `Auth.RequirePermission` checks each route's permission (`Routes.Permiss
 
 Browse to the console path, `https://<your-host>/admin/` by default (the bare
 path redirects). The SPA bootstraps from `config.json` beneath it:
-`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer}`.
+`{auth_base_url, api_base_url, nl_widgets_enabled, ask_enabled, catalog_copilot_enabled, catalog_drafting_enabled, extensions, issuer, merchant}`.
 
 **Login** is AuthKit's own: the console's session is auth-ui's (`@openrails/auth-ui`),
 whose sign-in form offers password, the deployment's login-capable OIDC providers
@@ -242,8 +255,8 @@ across reloads of that tab; every API call carries the bearer, never a cookie.
 Every write runs through auth-ui's step-up dialog: when OpenRails answers
 `403 step_up_required` (an owner operation after a stale sign-in), the dialog
 asks the user to confirm it's them and the write is retried. Who can sign in
-and what they may do: standalone, the merchant team roster and fixed roles
-(`owner`/`support`/`viewer`, see the merchant guide); embedded, the host's
+and what they may do: standalone, the server's merchant roles
+(`owner`/`support`/`viewer`) or a trusted issuer's token; embedded, the host's
 `Routes.Auth`.
 
 **At a trusted issuer**, the console is that issuer's OAuth 2.0 client
@@ -253,8 +266,7 @@ and the DPoP-bound rotating refresh token in IndexedDB beside its
 non-extractable key. A write OpenRails refuses with `step_up_required` (a
 sign-in older than 15 minutes) re-authorizes at the issuer with `max_age=0` in
 a popup and runs again. Sign-out revokes the refresh token and ends the
-issuer session. The team page lists the merchant's email invitations; a user
-the issuer grants nothing sees the invitations its verified email received.
+issuer session.
 
 Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 `/admin/config.json` to `localhost:3053`).
@@ -268,8 +280,8 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 | Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view; cancel (typed confirmation), resume, NMI payment-method change |
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
 | Catalog | `/catalog` | Products/prices, price detail + change wizard, archive/restore, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
-| Ops | `/ops` | Findings queue (approve/ignore), the merchant inbox (ledger repairs and worker stalls arrive there as critical notifications), worker health |
-| Settings | `/settings` | Tabs: Merchant profile, Team, Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), API keys, Customer controls |
+| Ops | `/ops` | Findings queue (approve/ignore), the merchant inbox (ledger repairs and worker stalls arrive there as critical notifications) |
+| Settings | `/settings` | Tabs: Merchant profile, Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), Customer controls, and a host extension's |
 
 **Natural-language features** are fail-closed on the server's `llm:` config and
 mirrored into `config.json` so the UI shows a pointed empty-state (naming the
@@ -286,7 +298,7 @@ knob) instead of a broken button:
 `openai` at any OpenAI-compatible backend (Groq, Ollama, vLLM). Everything else
 on the dashboard works keyless.
 
-Day-to-day workflows — catalog authoring, dunning, refund doctrine, team
-management, API keys for agents — live in [the merchant guide](merchant-guide.md).
+Day-to-day workflows — catalog authoring, dunning, refund doctrine — live in
+[the merchant guide](merchant-guide.md).
 For programmatic access to the same metrics the console uses, see
 [metrics-for-llms.md](metrics-for-llms.md).

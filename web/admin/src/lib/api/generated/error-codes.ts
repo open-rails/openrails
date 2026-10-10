@@ -10,10 +10,6 @@ export type OpenRailsErrorCode =
   | "allowance_source_in_use"
   | "allowance_source_invalid"
   | "already_owned"
-  | "api_host_claim_missing"
-  | "api_host_reserved"
-  | "api_host_taken"
-  | "api_host_unproven"
   | "as_of_required"
   | "authentication_required"
   | "authentication_unavailable"
@@ -45,7 +41,6 @@ export type OpenRailsErrorCode =
   | "checkout_session_unavailable"
   | "collection_payment_method_invalid"
   | "collection_payment_method_required"
-  | "creation_refused"
   | "credential_custody_transition_required"
   | "credential_expired"
   | "credential_identity_mismatch"
@@ -53,7 +48,6 @@ export type OpenRailsErrorCode =
   | "credential_revoked"
   | "credential_source_read_only"
   | "credential_store_read_only"
-  | "credentials_manage_required"
   | "credit_grant_held"
   | "credit_grant_not_found"
   | "credit_grant_unavailable"
@@ -71,7 +65,6 @@ export type OpenRailsErrorCode =
   | "default_rate_card_not_found"
   | "default_rate_card_required"
   | "delegated_principal_invalid"
-  | "email_unverified"
   | "finding_action_failed"
   | "finding_not_actionable"
   | "hold_not_found"
@@ -85,33 +78,25 @@ export type OpenRailsErrorCode =
   | "insufficient_funds"
   | "insufficient_scope"
   | "internal_error"
-  | "invalid_api_host"
   | "invalid_cursor"
   | "invalid_customer_id"
-  | "invalid_email"
   | "invalid_host_event_request"
-  | "invalid_name"
   | "invalid_param"
   | "invalid_payment_method"
   | "invalid_psp_reference"
   | "invalid_query"
   | "invalid_request_body"
   | "invalid_settlement_status_request"
-  | "invalid_user"
-  | "invites_disabled"
   | "invoice_action_not_allowed"
   | "invoice_not_retryable"
   | "invoice_retry_idempotency_conflict"
   | "invoice_retry_in_progress"
   | "invoice_retry_outcome_unknown"
   | "invoker_scoped_principal"
-  | "last_owner"
-  | "members_manage_required"
   | "merchant_binding_mismatch"
   | "merchant_configuration_application_conflict"
   | "merchant_configuration_revision_conflict"
   | "merchant_context_mismatch"
-  | "merchant_creation_payment_method_required"
   | "merchant_directory_unavailable"
   | "merchant_not_found"
   | "merchant_selector_invalid"
@@ -121,8 +106,6 @@ export type OpenRailsErrorCode =
   | "method_not_allowed"
   | "metrics_query_invalid"
   | "model_unavailable"
-  | "name_reserved"
-  | "name_taken"
   | "order_has_recurring_line"
   | "order_line_unavailable"
   | "order_not_cancelable"
@@ -187,13 +170,10 @@ export type OpenRailsErrorCode =
   | "refund_failed"
   | "refund_rail_unavailable"
   | "refund_unsupported"
-  | "rename_too_soon"
-  | "renames_disabled"
   | "request_body_too_large"
   | "resource_access_denied"
   | "resource_conflict"
   | "resource_not_found"
-  | "role_escalation"
   | "route_not_found"
   | "scheduled_change_exists"
   | "sender_proof_required"
@@ -228,7 +208,6 @@ export type OpenRailsErrorCode =
   | "subscription_resumable"
   | "trial_unsupported_on_rail"
   | "unknown_field"
-  | "unknown_role"
   | "unsupported_media_type"
   | "usage_meter_invalid"
   | "usage_meter_not_found"
@@ -254,10 +233,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   allowance_source_in_use: { status: 409, type: "invalid_request_error", meaning: "The allowance source is in use." },
   allowance_source_invalid: { status: 409, type: "invalid_request_error", meaning: "The allowance source cannot back this rate card." },
   already_owned: { status: 409, type: "invalid_request_error", meaning: "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume." },
-  api_host_claim_missing: { status: 409, type: "invalid_request_error", meaning: "No api_host has been claimed." },
-  api_host_reserved: { status: 400, type: "invalid_request_error", meaning: "The api_host serves this deployment." },
-  api_host_taken: { status: 409, type: "invalid_request_error", meaning: "The api_host is assigned to another merchant." },
-  api_host_unproven: { status: 409, type: "invalid_request_error", meaning: "The api_host's DNS proof was not found." },
   as_of_required: { status: 400, type: "invalid_request_error", meaning: "The import needs as_of, its RFC 3339 evidence horizon." },
   authentication_required: { status: 401, type: "authentication_error", meaning: "No valid credential was presented." },
   authentication_unavailable: { status: 503, type: "api_error", meaning: "The credential could not be verified right now; retry." },
@@ -289,7 +264,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   checkout_session_unavailable: { status: 403, type: "authorization_error", meaning: "The checkout session is not available to this caller." },
   collection_payment_method_invalid: { status: 400, type: "invalid_request_error", meaning: "The collection payment method cannot pay this invoice." },
   collection_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "Collection needs a payment method for the invoice's currency." },
-  creation_refused: { status: 403, type: "authorization_error", meaning: "Merchant creation was refused." },
   credential_custody_transition_required: { status: 409, type: "invalid_request_error", meaning: "Credential custody differs from the published backend." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_identity_mismatch: { status: 401, type: "authentication_error", meaning: "The credential changed identity during the request." },
@@ -297,7 +271,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   credential_revoked: { status: 401, type: "authentication_error", meaning: "The credential or its session was revoked." },
   credential_source_read_only: { status: 405, type: "invalid_request_error", meaning: "The provider credential source has no writable custody." },
   credential_store_read_only: { status: 403, type: "authorization_error", meaning: "The credential store is read-only." },
-  credentials_manage_required: { status: 403, type: "authorization_error", meaning: "The account lacks credential-management authority on this merchant." },
   credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "Active holds need the grant's remaining credit." },
   credit_grant_not_found: { status: 404, type: "invalid_request_error", meaning: "The credit grant does not exist." },
   credit_grant_unavailable: { status: 409, type: "invalid_request_error", meaning: "The credit grant expired, ended or has no remaining credit." },
@@ -315,7 +288,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
   default_rate_card_required: { status: 409, type: "invalid_request_error", meaning: "The meter needs a default rate card." },
   delegated_principal_invalid: { status: 401, type: "authentication_error", meaning: "The host's delegated principal names no usable merchant or subject." },
-  email_unverified: { status: 403, type: "authorization_error", meaning: "The operation needs a verified email." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
@@ -329,33 +301,25 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   insufficient_funds: { status: 402, type: "card_error", meaning: "The payment instrument lacks funds." },
   insufficient_scope: { status: 403, type: "authorization_error", meaning: "The access token was not granted the scope this surface requires." },
   internal_error: { status: 500, type: "api_error", meaning: "OpenRails failed; request_id identifies the failure in its logs." },
-  invalid_api_host: { status: 400, type: "invalid_request_error", meaning: "api_host must be a bare lowercase domain name." },
   invalid_cursor: { status: 400, type: "invalid_request_error", meaning: "The cursor is not one this list issued." },
   invalid_customer_id: { status: 400, type: "invalid_request_error", meaning: "The customer id is missing or malformed." },
-  invalid_email: { status: 400, type: "invalid_request_error", meaning: "The email is missing or malformed." },
   invalid_host_event_request: { status: 400, type: "invalid_request_error", meaning: "The host event request is invalid." },
-  invalid_name: { status: 400, type: "invalid_request_error", meaning: "The name is missing or too long." },
   invalid_param: { status: 400, type: "invalid_request_error", meaning: "The request is malformed or a parameter is invalid; param names the parameter when known." },
   invalid_payment_method: { status: 400, type: "invalid_request_error", meaning: "The payment method is not eligible for this operation." },
   invalid_psp_reference: { status: 400, type: "invalid_request_error", meaning: "The PSP reference is invalid." },
   invalid_query: { status: 400, type: "invalid_request_error", meaning: "A query parameter is malformed or out of range; param is the parameter." },
   invalid_request_body: { status: 400, type: "invalid_request_error", meaning: "The request body could not be read or is not one JSON value." },
   invalid_settlement_status_request: { status: 400, type: "invalid_request_error", meaning: "A settlement status read needs a customer and a price." },
-  invalid_user: { status: 400, type: "invalid_request_error", meaning: "The user id is missing or malformed." },
-  invites_disabled: { status: 409, type: "invalid_request_error", meaning: "The email has no verified account and invitations by registration are disabled." },
   invoice_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The invoice's status does not allow this action." },
   invoice_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The invoice cannot be collected again." },
   invoice_retry_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key names a different collection attempt." },
   invoice_retry_in_progress: { status: 409, type: "invalid_request_error", meaning: "A collection attempt on this invoice is unresolved." },
   invoice_retry_outcome_unknown: { status: 409, type: "invalid_request_error", meaning: "The last collection attempt's outcome is unknown." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
-  last_owner: { status: 400, type: "invalid_request_error", meaning: "A merchant must keep at least one owner." },
-  members_manage_required: { status: 403, type: "authorization_error", meaning: "The account lacks team-management authority on this merchant." },
   merchant_binding_mismatch: { status: 409, type: "invalid_request_error", meaning: "The selected merchant is not the one the credential, deployment or request is bound to." },
   merchant_configuration_application_conflict: { status: 409, type: "invalid_request_error", meaning: "The application id already committed with different content." },
   merchant_configuration_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The merchant configuration changed; read its revision before applying." },
   merchant_context_mismatch: { status: 403, type: "authorization_error", meaning: "The authorized merchant is not the one the request resolved." },
-  merchant_creation_payment_method_required: { status: 402, type: "card_error", meaning: "Creating another merchant needs a payment method on file." },
   merchant_directory_unavailable: { status: 503, type: "api_error", meaning: "The merchant directory could not be read; retry." },
   merchant_not_found: { status: 404, type: "invalid_request_error", meaning: "No active merchant answers to the selector." },
   merchant_selector_invalid: { status: 400, type: "invalid_request_error", meaning: "The OpenRails-Merchant header is malformed, repeated or names no merchant." },
@@ -365,8 +329,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   method_not_allowed: { status: 405, type: "invalid_request_error", meaning: "The path exists but not for this method; Allow lists its methods." },
   metrics_query_invalid: { status: 400, type: "invalid_request_error", meaning: "The metrics query is invalid; metadata.errors lists why." },
   model_unavailable: { status: 502, type: "api_error", meaning: "The language model did not answer; retry, or ask a narrower question." },
-  name_reserved: { status: 409, type: "invalid_request_error", meaning: "The merchant name is reserved." },
-  name_taken: { status: 409, type: "invalid_request_error", meaning: "The merchant name is taken." },
   order_has_recurring_line: { status: 409, type: "invalid_request_error", meaning: "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid." },
   order_line_unavailable: { status: 422, type: "invalid_request_error", meaning: "A line cannot be bought; param names it and metadata.code says why." },
   order_not_cancelable: { status: 409, type: "invalid_request_error", meaning: "Only an open order, or one awaiting the customer's action, can be canceled." },
@@ -431,13 +393,10 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   refund_failed: { status: 502, type: "api_error", meaning: "The provider refused the refund." },
   refund_rail_unavailable: { status: 409, type: "invalid_request_error", meaning: "The payment's rail cannot accept a refund right now." },
   refund_unsupported: { status: 400, type: "invalid_request_error", meaning: "The payment's rail has no automatic refund." },
-  rename_too_soon: { status: 429, type: "invalid_request_error", meaning: "The merchant was renamed too recently." },
-  renames_disabled: { status: 403, type: "invalid_request_error", meaning: "Merchant renames are disabled." },
   request_body_too_large: { status: 413, type: "invalid_request_error", meaning: "The request body exceeds the deployment's cap." },
   resource_access_denied: { status: 403, type: "authorization_error", meaning: "The credential may not access this resource." },
   resource_conflict: { status: 409, type: "invalid_request_error", meaning: "The request conflicts with the resource's current state." },
   resource_not_found: { status: 404, type: "invalid_request_error", meaning: "The addressed resource does not exist in this merchant." },
-  role_escalation: { status: 403, type: "authorization_error", meaning: "The grant exceeds the caller's own authority." },
   route_not_found: { status: 404, type: "invalid_request_error", meaning: "No route matches the path." },
   scheduled_change_exists: { status: 409, type: "invalid_request_error", meaning: "The subscription already has a scheduled change." },
   sender_proof_required: { status: 401, type: "authentication_error", meaning: "A sender-constrained token arrived without its DPoP proof." },
@@ -472,7 +431,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   subscription_resumable: { status: 409, type: "invalid_request_error", meaning: "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again." },
   trial_unsupported_on_rail: { status: 400, type: "invalid_request_error", meaning: "This rail cannot run a trial first phase." },
   unknown_field: { status: 400, type: "invalid_request_error", meaning: "The JSON body names a field the route does not accept; param is the field." },
-  unknown_role: { status: 400, type: "invalid_request_error", meaning: "The role is not one this merchant defines." },
   unsupported_media_type: { status: 415, type: "invalid_request_error", meaning: "The request body is not application/json." },
   usage_meter_invalid: { status: 400, type: "invalid_request_error", meaning: "The meter definition is invalid." },
   usage_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The usage meter does not exist." },

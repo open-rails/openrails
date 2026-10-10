@@ -386,7 +386,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// operator who believed ignored security or tenant config was active had no
 	// way to find out. Every one of them now REFUSES boot with the error that
 	// names its replacement — no aliases, no dual reads.
-	retiredPrivatePort := k.Exists("private_port") || os.Getenv("PRIVATE_PORT") != ""
 	retiredStoreConfig := k.Exists("store") || hasEnvPrefix("STORE_")
 	retiredMerchantConfig := k.Exists("merchant") || os.Getenv("MERCHANT") != ""
 	retiredCORSConfig := k.Exists("cors_origins") || os.Getenv("CORS_ORIGINS") != ""
@@ -431,9 +430,6 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	}
 	if retiredControlPlaneLegacy {
 		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
-	}
-	if retiredPrivatePort {
-		return nil, fmt.Errorf("private_port was removed: OpenRails serves a single HTTP listener and there is no separate internal port; delete the private_port yaml key and PRIVATE_PORT env var")
 	}
 
 	// Unmarshal into fileConfig (overlay onto defaults). Strict (or#915,

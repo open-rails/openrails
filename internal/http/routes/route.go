@@ -49,11 +49,6 @@ const (
 	// billing import and export, the dashboard layout, behind the host's
 	// MerchantConfig.
 	MerchantConfig Group = "merchant_config"
-	// ControlPlane is the standalone server's merchant accounts, team and
-	// API keys.
-	ControlPlane Group = "control_plane"
-	// Platform is the standalone operator tier (/v1/platform).
-	Platform Group = "platform"
 	// Webhooks is inbound provider callbacks.
 	Webhooks Group = "webhooks"
 	// Provisioning is SCIM 2.0: the merchant's directory pushing its users.
@@ -71,16 +66,12 @@ const (
 	AuthCheckoutSession Tier = "checkout_session"
 	// AuthSessionID: the id in the path is the credential.
 	AuthSessionID Tier = "session_id"
-	// AuthUser: a signed-in user of the standalone control plane.
-	AuthUser Tier = "user"
 	// AuthCustomer: the mount's Auth.Required, then the customer gate.
 	AuthCustomer Tier = "customer"
 	// AuthMerchant: the mount's Auth.RequirePermission for the route's bundle
-	// permission (a control-plane route's Perm), on the request's merchant;
+	// permission, on the request's merchant;
 	// Auth.Sensitive too for a user in person on a Sensitive route.
 	AuthMerchant Tier = "merchant"
-	// AuthOperator: a human session holding Perm, a root: grant.
-	AuthOperator Tier = "operator"
 	// AuthProvider: the payment provider's own signature on the payload.
 	AuthProvider Tier = "provider_signature"
 	// AuthProvisioning: the merchant's provisioning token, or a
@@ -107,8 +98,6 @@ const (
 	FeatureMetricsAsk Feature = "metrics_ask"
 	// FeatureDashboardGeneration: llm.api_key.
 	FeatureDashboardGeneration Feature = "dashboard_generation"
-	// FeatureMerchantCreation: a hosted merchant-creation policy is declared.
-	FeatureMerchantCreation Feature = "merchant_creation"
 )
 
 // Level is an admin route's: a read mounts with AdminRead, a write with
@@ -128,8 +117,6 @@ const (
 	// session id.
 	ThrottleSessionRead Throttle = "checkout_session_read"
 	ThrottleSessionPay  Throttle = "checkout_session_pay"
-	// ThrottleMerchantCreation bounds merchant creation per address and user.
-	ThrottleMerchantCreation Throttle = "merchant_creation"
 )
 
 // Reply is one success outcome of a route: its status and body. Body is a
@@ -251,9 +238,6 @@ type Route struct {
 	// Sensitive: the route moves money or removes access; the host's
 	// Sensitive stacks on it for a user in person.
 	Sensitive bool
-	// Perm is the permission a standalone control-plane route (AuthMerchant)
-	// or operator route (a root: grant, AuthOperator) checks.
-	Perm string
 	// Limit meters the operation per human administrator, after authorization.
 	Limit middleware.AdminOperation
 	// Throttle is the route's own limiter.
@@ -310,7 +294,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, resource := range [][]Route{
 		metaRoutes, configRoutes, checkoutRoutes, ordersRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, invoicesRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
-		merchantRoutes, opsRoutes, platformRoutes, provisioningRoutes,
+		merchantRoutes, opsRoutes, provisioningRoutes,
 	} {
 		all = append(all, resource...)
 	}
@@ -347,12 +331,6 @@ func TierErrors(tier Tier) []string {
 	common := []string{billing.CodeInternalError, billing.CodeRateLimitExceeded, "captcha_required", "captcha_invalid", "database_busy"}
 	var own []string
 	switch tier {
-	case AuthUser:
-		own = []string{
-			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
-			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
-			billing.CodeAuthenticationUnavailable,
-		}
 	case AuthCustomer:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
@@ -370,8 +348,6 @@ func TierErrors(tier Tier) []string {
 			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound,
 			billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
 		}, selectorErrors...)
-	case AuthOperator:
-		own = []string{billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodePermissionRequired}
 	}
 	out := append(common, own...)
 	sort.Strings(out)

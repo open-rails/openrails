@@ -36,22 +36,3 @@ func (c *Client) GetAPIHost(ctx context.Context, options ...RequestOption) (*bil
 	}
 	return &out, nil
 }
-
-// SetAPIHost claims a host for the merchant's public routes: it routes nothing
-// until VerifyAPIHost proves the claim's DNS record. "" releases the host.
-func (c *Client) SetAPIHost(ctx context.Context, req billing.SetAPIHostParams, options ...RequestOption) (*billing.MerchantAPIHost, error) {
-	var out billing.MerchantAPIHost
-	if err := c.do(ctx, http.MethodPut, "/v1/admin/api-host", req, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// VerifyAPIHost proves the open claim through DNS and binds its host.
-func (c *Client) VerifyAPIHost(ctx context.Context, options ...RequestOption) (*billing.MerchantAPIHost, error) {
-	var out billing.MerchantAPIHost
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/api-host/verify", nil, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

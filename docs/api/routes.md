@@ -2,23 +2,22 @@
 
 # Routes
 
-Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (192), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
-**Permission** is, for an admin or merchant-config route, the `Routes.Permissions` field the host's Auth checks; other routes name their own permission.
+**Permission** is, for a staff route, the `Routes.Permissions` field the host's Auth checks.
 
 **Notes**: `when` is the configuration that mounts the route; `sensitive` a route that also needs a recent sign-in from a user in person; `catalog write` a route that refuses where the deployment does not allow catalog updates; `limit` the per-administrator operation limiter; `Idempotency-Key` a route that reads the header.
 
 ## Process
 
-Health, metrics and capability discovery. Only the standalone server serves the root paths.
+Health and capability discovery. Only the standalone server serves the root paths.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/health/live` | public | — | — | 200 `Health` |  |
 | GET | `/health/ready` | public | — | — | 200 `Health` |  |
-| GET | `/metrics` | public | — | — | 200 `text/plain` |  |
 | GET | `/v1/config` | public | — | — | 200 `PublicConfig` |  |
 
 ## Checkout (public)
@@ -176,7 +175,6 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/metrics/query` | merchant | `AdminRead` | `MetricsQuery` | 200 `MetricsResult` |  |
 | GET | `/v1/admin/metrics/schema` | merchant | `AdminRead` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/admin/dashboard` | merchant | `AdminRead` | — | 200 `Dashboard` |  |
-| GET | `/v1/admin/worker-health` | merchant | `AdminRead` | — | 200 `ListPage<WorkerHealth>` |  |
 | GET | `/v1/admin/findings` | merchant | `AdminRead` | — | 200 `ListPage<Finding>` |  |
 | GET | `/v1/admin/findings/{id}` | merchant | `AdminRead` | — | 200 `Finding` |  |
 | POST | `/v1/admin/findings/{id}/resolve` | merchant | `AdminWrite` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
@@ -220,8 +218,6 @@ The merchant's own configuration, every route behind the host's `Permissions.Mer
 | GET | `/v1/admin/configuration` | merchant | `MerchantConfig` | — | 200 `MerchantConfigurationState` |  |
 | POST | `/v1/admin/configuration/applications` | merchant | `MerchantConfig` | `ApplyMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` | sensitive |
 | GET | `/v1/admin/api-host` | merchant | `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
-| PUT | `/v1/admin/api-host` | merchant | `MerchantConfig` | `SetAPIHostParams` | 200 `MerchantAPIHost`<br>202 `MerchantAPIHost` | when `merchant_directory`; sensitive |
-| POST | `/v1/admin/api-host/verify` | merchant | `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory`; sensitive |
 | GET | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | — | 200 `ListPage<AlertWebhook>` |  |
 | POST | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | sensitive |
 | DELETE | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | — | 204 — | sensitive |
@@ -234,43 +230,6 @@ The merchant's own configuration, every route behind the host's `Permissions.Mer
 | GET | `/v1/admin/provisioning-tokens` | merchant | `MerchantConfig` | — | 200 `ListPage<ProvisioningToken>` |  |
 | POST | `/v1/admin/provisioning-tokens` | merchant | `MerchantConfig` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
 | DELETE | `/v1/admin/provisioning-tokens/{id}` | merchant | `MerchantConfig` | — | 204 — | sensitive |
-
-## Control plane (standalone)
-
-Merchant accounts, API keys and the team.
-
-| Method | Path | Tier | Permission | Request | Response | Notes |
-|---|---|---|---|---|---|---|
-| GET | `/v1/merchants` | user | — | — | 200 `ListPage<UserMerchant>` |  |
-| POST | `/v1/merchants` | user | — | `CreateMerchantParams` | 200 `UserMerchant`<br>201 `UserMerchant` | when `merchant_creation` |
-| PUT | `/v1/merchant/name` | merchant | `merchant:billing:admin` | `RenameMerchantParams` | 200 `MerchantName` | sensitive |
-| POST | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | `CreateAPIKeyParams` | 201 `CreatedAPIKey` | sensitive |
-| GET | `/v1/merchant/api-keys` | merchant | `merchant:credentials:manage` | — | 200 `ListPage<APIKey>` | sensitive |
-| DELETE | `/v1/merchant/api-keys/{id}` | merchant | `merchant:credentials:manage` | — | 204 — | sensitive |
-| GET | `/v1/merchant/federated-grants` | merchant | `merchant:members:read` | — | 200 `ListPage<FederatedGrant>` |  |
-| POST | `/v1/merchant/federated-grants` | merchant | `merchant:members:manage` | `CreateFederatedGrantParams` | 201 `FederatedGrant` | sensitive |
-| DELETE | `/v1/merchant/federated-grants/{id}` | merchant | `merchant:members:manage` | — | 204 — | sensitive |
-| GET | `/v1/merchants/invites` | user | — | — | 200 `ListPage<FederatedInvite>` |  |
-| POST | `/v1/merchants/invites/{id}/accept` | user | — | — | 200 `UserMerchant` |  |
-| GET | `/v1/merchant/team` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamMember>` |  |
-| GET | `/v1/merchant/team/invites` | merchant | `merchant:members:read` | — | 200 `ListPage<TeamInvite>` |  |
-| POST | `/v1/merchant/team/invites` | merchant | `merchant:members:manage` | `InviteTeamMemberParams` | 201 `TeamInviteResult` | sensitive |
-| DELETE | `/v1/merchant/team/invites/{id}` | merchant | `merchant:members:manage` | — | 204 — | sensitive |
-| PATCH | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | `SetTeamRoleParams` | 200 `TeamMember` | sensitive |
-| DELETE | `/v1/merchant/team/{user_id}` | merchant | `merchant:members:manage` | — | 204 — | sensitive |
-
-## Platform (standalone)
-
-The operator tier.
-
-| Method | Path | Tier | Permission | Request | Response | Notes |
-|---|---|---|---|---|---|---|
-| GET | `/v1/platform/worker-health` | operator | `root:worker-health:read` | — | 200 `ListPage<WorkerHealth>` |  |
-| GET | `/v1/platform/merchants` | operator | `root:merchants:read` | — | 200 `ListPage<PlatformMerchant>` |  |
-| GET | `/v1/platform/merchants/{id}` | operator | `root:merchants:read` | — | 200 `PlatformMerchant` |  |
-| DELETE | `/v1/platform/merchants/{id}` | operator | `root:merchants:delete` | — | 200 `PlatformMerchant` |  |
-| POST | `/v1/platform/merchants/{id}/restore` | operator | `root:merchants:restore` | — | 200 `PlatformMerchant` |  |
-| DELETE | `/v1/platform/admin-rate-limit-lockouts/{user_id}` | operator | `root:admin-rate-limits:unlock` | — | 204 — |  |
 
 ## Provider webhooks
 

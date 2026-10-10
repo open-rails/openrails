@@ -100,31 +100,30 @@ const (
 
 // Authentication and authorization codes: why a credential was refused.
 const (
-	CodeCredentialExpired                     = "credential_expired"
-	CodeCredentialRevoked                     = "credential_revoked"
-	CodeCredentialIdentityMismatch            = "credential_identity_mismatch"
-	CodeSenderProofRequired                   = "sender_proof_required"
-	CodeServiceCredentialInvalid              = "service_credential_invalid"
-	CodeServiceCredentialMerchantUnresolved   = "service_credential_merchant_unresolved"
-	CodeServiceCredentialResourceScopeDenied  = "service_credential_resource_scope_denied"
-	CodeServiceCredentialCustomerScopeDenied  = "service_credential_customer_scope_denied"
-	CodeDelegatedPrincipalInvalid             = "delegated_principal_invalid"
-	CodeAccessTokenInvalid                    = "access_token_invalid"
-	CodeAccessTokenIssuerUnknown              = "access_token_issuer_unknown"
-	CodeAccessTokenMerchantNotBound           = "access_token_merchant_not_bound"
-	CodeDPoPNonceRequired                     = "use_dpop_nonce"
-	CodeInsufficientScope                     = "insufficient_scope"
-	CodeHostPrincipalInvalid                  = "host_principal_invalid"
-	CodePermissionRequired                    = "permission_required"
-	CodeMerchantUnresolved                    = "merchant_unresolved"
-	CodeHostMerchantMismatch                  = "host_merchant_mismatch"
-	CodeMerchantContextMismatch               = "merchant_context_mismatch"
-	CodeInvokerScopedPrincipal                = "invoker_scoped_principal"
-	CodeStepUpRequired                        = "step_up_required"
-	CodeStepUpUnavailable                     = "step_up_unavailable"
-	CodeAuthenticationUnavailable             = "authentication_unavailable"
-	CodeAuthorizationUnavailable              = "authorization_unavailable"
-	CodeMerchantCreationPaymentMethodRequired = "merchant_creation_payment_method_required"
+	CodeCredentialExpired                    = "credential_expired"
+	CodeCredentialRevoked                    = "credential_revoked"
+	CodeCredentialIdentityMismatch           = "credential_identity_mismatch"
+	CodeSenderProofRequired                  = "sender_proof_required"
+	CodeServiceCredentialInvalid             = "service_credential_invalid"
+	CodeServiceCredentialMerchantUnresolved  = "service_credential_merchant_unresolved"
+	CodeServiceCredentialResourceScopeDenied = "service_credential_resource_scope_denied"
+	CodeServiceCredentialCustomerScopeDenied = "service_credential_customer_scope_denied"
+	CodeDelegatedPrincipalInvalid            = "delegated_principal_invalid"
+	CodeAccessTokenInvalid                   = "access_token_invalid"
+	CodeAccessTokenIssuerUnknown             = "access_token_issuer_unknown"
+	CodeAccessTokenMerchantNotBound          = "access_token_merchant_not_bound"
+	CodeDPoPNonceRequired                    = "use_dpop_nonce"
+	CodeInsufficientScope                    = "insufficient_scope"
+	CodeHostPrincipalInvalid                 = "host_principal_invalid"
+	CodePermissionRequired                   = "permission_required"
+	CodeMerchantUnresolved                   = "merchant_unresolved"
+	CodeHostMerchantMismatch                 = "host_merchant_mismatch"
+	CodeMerchantContextMismatch              = "merchant_context_mismatch"
+	CodeInvokerScopedPrincipal               = "invoker_scoped_principal"
+	CodeStepUpRequired                       = "step_up_required"
+	CodeStepUpUnavailable                    = "step_up_unavailable"
+	CodeAuthenticationUnavailable            = "authentication_unavailable"
+	CodeAuthorizationUnavailable             = "authorization_unavailable"
 )
 
 const (
@@ -371,11 +370,6 @@ var errorCodes = []ErrorCode{
 	{"invalid_psp_reference", 400, invalid, "The PSP reference is invalid."},
 	{"merchant_configuration_application_conflict", 409, invalid, "The application id already committed with different content."},
 	{"merchant_configuration_revision_conflict", 409, invalid, "The merchant configuration changed; read its revision before applying."},
-	{"invalid_api_host", 400, invalid, "api_host must be a bare lowercase domain name."},
-	{"api_host_reserved", 400, invalid, "The api_host serves this deployment."},
-	{"api_host_taken", 409, invalid, "The api_host is assigned to another merchant."},
-	{"api_host_claim_missing", 409, invalid, "No api_host has been claimed."},
-	{"api_host_unproven", 409, invalid, "The api_host's DNS proof was not found."},
 	{"webhook_invalid", 400, invalid, "The outbound webhook is invalid."},
 	{"webhook_account_mismatch", 400, invalid, "The webhook's account does not match its payload."},
 	{"metrics_query_invalid", 400, invalid, "The metrics query is invalid; metadata.errors lists why."},
@@ -390,24 +384,6 @@ var errorCodes = []ErrorCode{
 	{"billing_archive_not_empty", 409, invalid, "The destination's billing state must be empty."},
 	{"billing_archive_unsupported_state", 409, invalid, "The merchant has state that cannot safely be moved."},
 	{"billing_archive_integrity", 422, invalid, "The billing archive failed integrity validation."},
-
-	// Standalone control plane.
-	{"invalid_name", 400, invalid, "The name is missing or too long."},
-	{"invalid_email", 400, invalid, "The email is missing or malformed."},
-	{"invalid_user", 400, invalid, "The user id is missing or malformed."},
-	{"unknown_role", 400, invalid, "The role is not one this merchant defines."},
-	{"role_escalation", 403, authz, "The grant exceeds the caller's own authority."},
-	{"credentials_manage_required", 403, authz, "The account lacks credential-management authority on this merchant."},
-	{"members_manage_required", 403, authz, "The account lacks team-management authority on this merchant."},
-	{"last_owner", 400, invalid, "A merchant must keep at least one owner."},
-	{"invites_disabled", 409, invalid, "The email has no verified account and invitations by registration are disabled."},
-	{"name_taken", 409, invalid, "The merchant name is taken."},
-	{"name_reserved", 409, invalid, "The merchant name is reserved."},
-	{"renames_disabled", 403, invalid, "Merchant renames are disabled."},
-	{"rename_too_soon", 429, invalid, "The merchant was renamed too recently."},
-	{"email_unverified", 403, authz, "The operation needs a verified email."},
-	{"creation_refused", 403, authz, "Merchant creation was refused."},
-	{CodeMerchantCreationPaymentMethodRequired, 402, card, "Creating another merchant needs a payment method on file."},
 }
 
 var errorCodeIndex = func() map[string]ErrorCode {

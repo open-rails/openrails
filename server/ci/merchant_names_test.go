@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -62,8 +63,7 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 // operatorRename renames a merchant as the operator: no rename interval, no
 // reserved-name check.
 func operatorRename(ctx context.Context, srv *server.Server, id billing.MerchantID, name string) error {
-	_, cp := operator.Of(srv)
-	_, err := cp.RenameMerchant(ctx, id, name, "", true)
+	_, err := srv.RenameMerchant(ctx, id, billing.RenameMerchantParams{Name: name})
 	return err
 }
 
@@ -194,9 +194,10 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	}
 }
 
-// Merchants rename themselves over HTTP under the naming policy; AuthKit's
-// group-name routes are not served.
-func TestMerchantRenameRoute(t *testing.T) {
+// A merchant's own rename answers to the naming policy and the creation
+// policy's reserved names; the former name keeps selecting it. No route
+// renames a merchant.
+func TestMerchantOwnRename(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
 	cp := f.newServer(t, reserving(reserved))
@@ -210,26 +211,26 @@ func TestMerchantRenameRoute(t *testing.T) {
 	require.NoError(t, err)
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-
-	do := func(method, path, selector string, body any) *httptest.ResponseRecorder {
-		return call(t, handler, token, method, path, selector, body)
-	}
-	rename := func(selector, to string) *httptest.ResponseRecorder {
-		return do(http.MethodPut, "/v1/merchant/name", selector, map[string]string{"name": to})
+	rename := func(to string) (*billing.MerchantName, error) {
+		return cp.RenameMerchant(ctx, m.MerchantID, billing.RenameMerchantParams{Name: to, ActorUserID: owner})
 	}
 
-	require.Equal(t, http.StatusConflict, rename(shop, reserved).Code)
-	require.Equal(t, http.StatusConflict, rename(shop, taken).Code)
-	require.Equal(t, http.StatusBadRequest, rename(shop, "Not A Name").Code)
+	_, err = rename(reserved)
+	require.ErrorIs(t, err, billing.ErrMerchantSlugReserved)
+	_, err = rename(taken)
+	require.ErrorIs(t, err, billing.ErrMerchantNameTaken)
+	_, err = rename("Not A Name")
+	require.ErrorIs(t, err, server.ErrInvalidMerchantName)
 	next := uniqueName("shop")
-	w := rename(shop, next)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.JSONEq(t, `{"id":"`+m.MerchantID.String()+`","name":"`+next+`"}`, w.Body.String())
-	w = rename(shop, uniqueName("shop"))
-	require.Equal(t, http.StatusTooManyRequests, w.Code, "the former name still selects the merchant; the interval refuses: %s", w.Body.String())
-	require.NotEmpty(t, w.Header().Get("Retry-After"))
-	w = do(http.MethodGet, "/v1/merchant/team", shop, nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	name, err := rename(next)
+	require.NoError(t, err)
+	require.Equal(t, billing.MerchantName{ID: m.MerchantID, Name: next}, *name)
+	_, err = rename(uniqueName("shop"))
+	var tooSoon *billing.MerchantRenameTooSoonError
+	require.ErrorAs(t, err, &tooSoon, "the interval refuses a second rename")
+	require.True(t, tooSoon.NextRenameAt.After(time.Now()))
+	require.Equal(t, http.StatusOK, call(t, handler, token, http.MethodGet, "/v1/admin/findings", shop, nil).Code, "the former name still selects the merchant")
+	require.Equal(t, http.StatusNotFound, call(t, handler, token, http.MethodPut, "/v1/merchant/name", shop, map[string]string{"name": uniqueName("shop")}).Code)
 	mid, current, err := cp.ResolveMerchantForGroup(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, []any{m.MerchantID, next}, []any{mid, current})

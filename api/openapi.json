@@ -64,34 +64,6 @@
         ]
       }
     },
-    "/metrics": {
-      "get": {
-        "tags": [
-          "meta"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:public"
-        ]
-      }
-    },
     "/v1/config": {
       "get": {
         "tags": [
@@ -10171,108 +10143,6 @@
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
-      },
-      "put": {
-        "tags": [
-          "merchant_config"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetAPIHostParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantAPIHost"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantAPIHost"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
-        "x-openrails-sensitive": true,
-        "x-openrails-mounted-when": "merchant_directory",
-        "x-openrails-errors": [
-          "api_host_reserved",
-          "api_host_taken",
-          "invalid_api_host",
-          "merchant_unresolved",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/api-host/verify": {
-      "post": {
-        "tags": [
-          "merchant_config"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantAPIHost"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
-        "x-openrails-sensitive": true,
-        "x-openrails-mounted-when": "merchant_directory",
-        "x-openrails-errors": [
-          "api_host_claim_missing",
-          "api_host_taken",
-          "api_host_unproven",
-          "merchant_unresolved",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
       }
     },
     "/v1/admin/alert-webhooks": {
@@ -10627,858 +10497,6 @@
         ]
       }
     },
-    "/v1/merchants": {
-      "get": {
-        "tags": [
-          "control_plane"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/UserMerchant"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-errors": [
-          "authentication_required"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user"
-        ]
-      },
-      "post": {
-        "tags": [
-          "control_plane"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateMerchantParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserMerchant"
-                }
-              }
-            }
-          },
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserMerchant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-mounted-when": "merchant_creation",
-        "x-openrails-throttle": "merchant_creation",
-        "x-openrails-errors": [
-          "authentication_required",
-          "creation_refused",
-          "email_unverified",
-          "invalid_name",
-          "merchant_creation_payment_method_required",
-          "name_reserved",
-          "name_taken"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/name": {
-      "put": {
-        "tags": [
-          "control_plane"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RenameMerchantParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantName"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:billing:admin",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_name",
-          "name_reserved",
-          "name_taken",
-          "rename_too_soon",
-          "renames_disabled",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/api-keys": {
-      "post": {
-        "tags": [
-          "control_plane"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateAPIKeyParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CreatedAPIKey"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credentials:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "credential_revoked",
-          "credentials_manage_required",
-          "invalid_name",
-          "merchant_unresolved",
-          "role_escalation",
-          "unknown_role"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "get": {
-        "tags": [
-          "control_plane"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/APIKey"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credentials:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "merchant_unresolved"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/api-keys/{id}": {
-      "delete": {
-        "tags": [
-          "control_plane"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:credentials:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "credential_revoked",
-          "merchant_unresolved",
-          "resource_not_found",
-          "role_escalation"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/federated-grants": {
-      "get": {
-        "tags": [
-          "control_plane"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/FederatedGrant"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:read",
-        "x-openrails-errors": [
-          "merchant_unresolved"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      },
-      "post": {
-        "tags": [
-          "control_plane"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateFederatedGrantParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/FederatedGrant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_email",
-          "merchant_unresolved",
-          "resource_conflict",
-          "role_escalation",
-          "unknown_role"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/federated-grants/{id}": {
-      "delete": {
-        "tags": [
-          "control_plane"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "merchant_unresolved",
-          "resource_not_found",
-          "role_escalation"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchants/invites": {
-      "get": {
-        "tags": [
-          "control_plane"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/FederatedInvite"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-errors": [
-          "authentication_required"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user"
-        ]
-      }
-    },
-    "/v1/merchants/invites/{id}/accept": {
-      "post": {
-        "tags": [
-          "control_plane"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UserMerchant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "user",
-        "x-openrails-errors": [
-          "authentication_required",
-          "email_unverified",
-          "resource_conflict",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:user"
-        ]
-      }
-    },
-    "/v1/merchant/team": {
-      "get": {
-        "tags": [
-          "control_plane"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/TeamMember"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:read",
-        "x-openrails-errors": [
-          "merchant_unresolved"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/team/invites": {
-      "get": {
-        "tags": [
-          "control_plane"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/TeamInvite"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:read",
-        "x-openrails-errors": [
-          "merchant_unresolved"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      },
-      "post": {
-        "tags": [
-          "control_plane"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InviteTeamMemberParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamInviteResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "credential_revoked",
-          "invalid_email",
-          "invites_disabled",
-          "members_manage_required",
-          "merchant_unresolved",
-          "role_escalation",
-          "unknown_role"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/merchant/team/invites/{id}": {
-      "delete": {
-        "tags": [
-          "control_plane"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "credential_revoked",
-          "members_manage_required",
-          "merchant_unresolved",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/merchant/team/{user_id}": {
-      "patch": {
-        "tags": [
-          "control_plane"
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetTeamRoleParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TeamMember"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "credential_revoked",
-          "invalid_user",
-          "last_owner",
-          "members_manage_required",
-          "merchant_unresolved",
-          "resource_not_found",
-          "role_escalation",
-          "unknown_role"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "delete": {
-        "tags": [
-          "control_plane"
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "merchant:members:manage",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "credential_revoked",
-          "invalid_user",
-          "last_owner",
-          "members_manage_required",
-          "merchant_unresolved",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/admin/host-events": {
       "get": {
         "tags": [
@@ -11785,57 +10803,6 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
-        ]
-      }
-    },
-    "/v1/admin/worker-health": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/WorkerHealth"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant"
         ]
       }
     },
@@ -12281,319 +11248,6 @@
         ]
       }
     },
-    "/v1/platform/worker-health": {
-      "get": {
-        "tags": [
-          "platform"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/WorkerHealth"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "operator",
-        "x-openrails-permission": "root:worker-health:read",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:operator"
-        ]
-      }
-    },
-    "/v1/platform/merchants": {
-      "get": {
-        "tags": [
-          "platform"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "q",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/PlatformMerchant"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "operator",
-        "x-openrails-permission": "root:merchants:read",
-        "x-openrails-errors": [
-          "invalid_cursor"
-        ],
-        "x-openrails-error-sets": [
-          "tier:operator",
-          "request"
-        ]
-      }
-    },
-    "/v1/platform/merchants/{id}": {
-      "get": {
-        "tags": [
-          "platform"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformMerchant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "operator",
-        "x-openrails-permission": "root:merchants:read",
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:operator"
-        ]
-      },
-      "delete": {
-        "tags": [
-          "platform"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformMerchant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "operator",
-        "x-openrails-permission": "root:merchants:delete",
-        "x-openrails-errors": [
-          "invalid_param",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:operator"
-        ]
-      }
-    },
-    "/v1/platform/merchants/{id}/restore": {
-      "post": {
-        "tags": [
-          "platform"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlatformMerchant"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "operator",
-        "x-openrails-permission": "root:merchants:restore",
-        "x-openrails-errors": [
-          "invalid_param",
-          "name_taken",
-          "resource_conflict",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:operator"
-        ]
-      }
-    },
-    "/v1/platform/admin-rate-limit-lockouts/{user_id}": {
-      "delete": {
-        "tags": [
-          "platform"
-        ],
-        "parameters": [
-          {
-            "name": "user_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "operator",
-        "x-openrails-permission": "root:admin-rate-limits:unlock",
-        "x-openrails-errors": [
-          "authentication_required",
-          "invalid_param",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:operator"
-        ]
-      }
-    },
     "/v1/admin/provisioning-tokens": {
       "get": {
         "tags": [
@@ -12786,70 +11440,6 @@
           "type",
           "name",
           "value"
-        ]
-      },
-      "APIKey": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "prefix": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_used_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revoked_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "role",
-          "prefix",
-          "created_at",
-          "last_used_at",
-          "expires_at",
-          "revoked_at"
         ]
       },
       "AcknowledgeHostEventsParams": {
@@ -15240,17 +13830,6 @@
           "payment_method_id"
         ]
       },
-      "CreateAPIKeyParams": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          }
-        }
-      },
       "CreateAlertWebhookParams": {
         "type": "object",
         "properties": {
@@ -15359,28 +13938,6 @@
             "format": "date-time"
           },
           "description": {
-            "type": "string"
-          }
-        }
-      },
-      "CreateFederatedGrantParams": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          }
-        }
-      },
-      "CreateMerchantParams": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          },
-          "display_name": {
             "type": "string"
           }
         }
@@ -15729,74 +14286,6 @@
             "type": "string"
           }
         }
-      },
-      "CreatedAPIKey": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "prefix": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_used_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revoked_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "secret": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "role",
-          "prefix",
-          "created_at",
-          "last_used_at",
-          "expires_at",
-          "revoked_at",
-          "secret"
-        ]
       },
       "CreatedProvisioningToken": {
         "type": "object",
@@ -16876,83 +15365,6 @@
           }
         }
       },
-      "FederatedGrant": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "issuer": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "subject": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "accepted_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "email",
-          "role",
-          "issuer",
-          "subject",
-          "accepted_at",
-          "created_at"
-        ]
-      },
-      "FederatedInvite": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "merchant": {
-            "$ref": "#/components/schemas/MerchantRef"
-          },
-          "role": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "merchant",
-          "role"
-        ]
-      },
       "Finding": {
         "type": "object",
         "properties": {
@@ -17445,17 +15857,6 @@
           "overdraft_amount": {
             "type": "string",
             "description": "A number as a decimal string."
-          }
-        }
-      },
-      "InviteTeamMemberParams": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
           }
         }
       },
@@ -18228,21 +16629,6 @@
           "settings"
         ]
       },
-      "MerchantName": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "name"
-        ]
-      },
       "MerchantProfile": {
         "type": "object",
         "properties": {
@@ -18262,25 +16648,6 @@
             "type": "string"
           }
         }
-      },
-      "MerchantRef": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "slug",
-          "display_name"
-        ]
       },
       "MerchantSettings": {
         "type": "object",
@@ -21044,77 +19411,6 @@
           }
         }
       },
-      "PlatformMerchant": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "display_name": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "deleted_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rails_armed": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "last_payment_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "slug",
-          "status",
-          "display_name",
-          "created_at",
-          "updated_at",
-          "deleted_at",
-          "rails_armed",
-          "last_payment_at"
-        ]
-      },
       "PortalResponse": {
         "type": "object",
         "properties": {
@@ -23056,14 +21352,6 @@
           }
         }
       },
-      "RenameMerchantParams": {
-        "type": "object",
-        "properties": {
-          "name": {
-            "type": "string"
-          }
-        }
-      },
       "ReplaceEntitlementsParams": {
         "type": "object",
         "properties": {
@@ -23186,14 +21474,6 @@
           "created_at"
         ]
       },
-      "SetAPIHostParams": {
-        "type": "object",
-        "properties": {
-          "api_host": {
-            "type": "string"
-          }
-        }
-      },
       "SetAlertWebhookURLParams": {
         "type": "object",
         "properties": {
@@ -23293,14 +21573,6 @@
         "type": "object",
         "properties": {
           "payment_method_id": {
-            "type": "string"
-          }
-        }
-      },
-      "SetTeamRoleParams": {
-        "type": "object",
-        "properties": {
-          "role": {
             "type": "string"
           }
         }
@@ -24071,139 +22343,6 @@
           "tokens"
         ]
       },
-      "TeamInvite": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expires_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "redeemed_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revoked_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "role",
-          "created_at",
-          "expires_at",
-          "redeemed_at",
-          "revoked_at"
-        ]
-      },
-      "TeamInviteResult": {
-        "type": "object",
-        "properties": {
-          "member": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/TeamMember"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "invite": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/TeamInvite"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "url": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "member",
-          "invite",
-          "url"
-        ]
-      },
-      "TeamMember": {
-        "type": "object",
-        "properties": {
-          "user_id": {
-            "type": "string"
-          },
-          "email": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "username": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "role": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "user_id",
-          "email",
-          "username",
-          "role"
-        ]
-      },
       "Tier": {
         "type": "object",
         "properties": {
@@ -24770,36 +22909,6 @@
           "dimensions"
         ]
       },
-      "UserMerchant": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "slug": {
-            "type": "string"
-          },
-          "display_name": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string"
-          },
-          "permissions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "slug",
-          "display_name",
-          "role",
-          "permissions"
-        ]
-      },
       "WebhookReceipt": {
         "type": "object",
         "properties": {
@@ -24820,89 +22929,6 @@
         "required": [
           "status",
           "code"
-        ]
-      },
-      "WorkerHealth": {
-        "type": "object",
-        "properties": {
-          "worker_kind": {
-            "type": "string"
-          },
-          "registered_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expected_period_seconds": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_success_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_error_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_error": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "consecutive_failures": {
-            "type": "integer"
-          },
-          "last_alerted_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "worker_kind",
-          "registered_at",
-          "expected_period_seconds",
-          "last_success_at",
-          "last_error_at",
-          "last_error",
-          "consecutive_failures",
-          "last_alerted_at",
-          "updated_at"
         ]
       },
       "ErrorEnvelope": {
@@ -25043,17 +23069,6 @@
       "step_up_unavailable",
       "use_dpop_nonce"
     ],
-    "tier:operator": [
-      "authentication_required",
-      "captcha_invalid",
-      "captcha_required",
-      "credential_expired",
-      "credential_revoked",
-      "database_busy",
-      "internal_error",
-      "permission_required",
-      "rate_limit_exceeded"
-    ],
     "tier:provider_signature": [
       "captcha_invalid",
       "captcha_required",
@@ -25074,22 +23089,6 @@
       "database_busy",
       "internal_error",
       "rate_limit_exceeded"
-    ],
-    "tier:user": [
-      "access_token_invalid",
-      "access_token_issuer_unknown",
-      "authentication_required",
-      "authentication_unavailable",
-      "captcha_invalid",
-      "captcha_required",
-      "credential_expired",
-      "credential_revoked",
-      "database_busy",
-      "insufficient_scope",
-      "internal_error",
-      "rate_limit_exceeded",
-      "sender_proof_required",
-      "use_dpop_nonce"
     ]
   },
   "x-openrails-error-codes": {
@@ -25137,26 +23136,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."
-    },
-    "api_host_claim_missing": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "No api_host has been claimed."
-    },
-    "api_host_reserved": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The api_host serves this deployment."
-    },
-    "api_host_taken": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The api_host is assigned to another merchant."
-    },
-    "api_host_unproven": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The api_host's DNS proof was not found."
     },
     "as_of_required": {
       "status": 400,
@@ -25313,11 +23292,6 @@
       "type": "invalid_request_error",
       "meaning": "Collection needs a payment method for the invoice's currency."
     },
-    "creation_refused": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "Merchant creation was refused."
-    },
     "credential_custody_transition_required": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25352,11 +23326,6 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "The credential store is read-only."
-    },
-    "credentials_manage_required": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The account lacks credential-management authority on this merchant."
     },
     "credit_grant_held": {
       "status": 409,
@@ -25443,11 +23412,6 @@
       "type": "authentication_error",
       "meaning": "The host's delegated principal names no usable merchant or subject."
     },
-    "email_unverified": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The operation needs a verified email."
-    },
     "finding_action_failed": {
       "status": 502,
       "type": "api_error",
@@ -25513,11 +23477,6 @@
       "type": "api_error",
       "meaning": "OpenRails failed; request_id identifies the failure in its logs."
     },
-    "invalid_api_host": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "api_host must be a bare lowercase domain name."
-    },
     "invalid_cursor": {
       "status": 400,
       "type": "invalid_request_error",
@@ -25528,20 +23487,10 @@
       "type": "invalid_request_error",
       "meaning": "The customer id is missing or malformed."
     },
-    "invalid_email": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The email is missing or malformed."
-    },
     "invalid_host_event_request": {
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The host event request is invalid."
-    },
-    "invalid_name": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The name is missing or too long."
     },
     "invalid_param": {
       "status": 400,
@@ -25573,16 +23522,6 @@
       "type": "invalid_request_error",
       "meaning": "A settlement status read needs a customer and a price."
     },
-    "invalid_user": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The user id is missing or malformed."
-    },
-    "invites_disabled": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The email has no verified account and invitations by registration are disabled."
-    },
     "invoice_action_not_allowed": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25613,16 +23552,6 @@
       "type": "authorization_error",
       "meaning": "An invoker-scoped credential spends a customer's balance but may not manage the account."
     },
-    "last_owner": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "A merchant must keep at least one owner."
-    },
-    "members_manage_required": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The account lacks team-management authority on this merchant."
-    },
     "merchant_binding_mismatch": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25642,11 +23571,6 @@
       "status": 403,
       "type": "authorization_error",
       "meaning": "The authorized merchant is not the one the request resolved."
-    },
-    "merchant_creation_payment_method_required": {
-      "status": 402,
-      "type": "card_error",
-      "meaning": "Creating another merchant needs a payment method on file."
     },
     "merchant_directory_unavailable": {
       "status": 503,
@@ -25692,16 +23616,6 @@
       "status": 502,
       "type": "api_error",
       "meaning": "The language model did not answer; retry, or ask a narrower question."
-    },
-    "name_reserved": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The merchant name is reserved."
-    },
-    "name_taken": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The merchant name is taken."
     },
     "order_has_recurring_line": {
       "status": 409,
@@ -26023,16 +23937,6 @@
       "type": "invalid_request_error",
       "meaning": "The payment's rail has no automatic refund."
     },
-    "rename_too_soon": {
-      "status": 429,
-      "type": "invalid_request_error",
-      "meaning": "The merchant was renamed too recently."
-    },
-    "renames_disabled": {
-      "status": 403,
-      "type": "invalid_request_error",
-      "meaning": "Merchant renames are disabled."
-    },
     "request_body_too_large": {
       "status": 413,
       "type": "invalid_request_error",
@@ -26052,11 +23956,6 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The addressed resource does not exist in this merchant."
-    },
-    "role_escalation": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The grant exceeds the caller's own authority."
     },
     "route_not_found": {
       "status": 404,
@@ -26227,11 +24126,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The JSON body names a field the route does not accept; param is the field."
-    },
-    "unknown_role": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The role is not one this merchant defines."
     },
     "unsupported_media_type": {
       "status": 415,

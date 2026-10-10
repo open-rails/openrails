@@ -3,8 +3,8 @@
 package ci_test
 
 import (
-	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,11 +24,12 @@ import (
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
-// A staff member's permission checks act as their own sign-in: a session
-// revoked after its token was minted is a 401 at the next check, not an
-// outage. Merchant credentials are minted and revoked through AuthKit, by the
-// user themselves or, for a non-user credential, by the system after
-// OpenRails' no-escalation check.
+// A staff member's changes to the team and keys act as their own sign-in: a
+// session revoked after its token was minted is refused at the next change,
+// not an outage. Merchant credentials are minted and revoked through AuthKit,
+// by the user themselves or, for a credential carrying its own permissions,
+// by the system after OpenRails' no-escalation check. The keys reach the
+// admin API with their role.
 func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())
@@ -37,55 +38,70 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 	require.NoError(t, err)
 	owner := newAccount(t, cp)
 	shop := uniqueName("staff")
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
+	provisioned, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
+	mid := provisioned.MerchantID
 	session := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
+	ownerActor := userActor(t, cp, session)
 
-	w := call(t, handler, session, http.MethodGet, "/v1/merchant/team", shop, nil)
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), `"role":"owner"`)
-	mint := func(token, selector, role string) (int, map[string]any) {
-		w := call(t, handler, token, http.MethodPost, "/v1/merchant/api-keys", selector, map[string]string{"name": role + " key", "role": role})
-		out := map[string]any{}
-		require.NoError(t, json.NewDecoder(w.Body).Decode(&out))
-		return w.Code, out
-	}
-	status, ownerKey := mint(session, shop, "owner")
-	require.Equal(t, http.StatusCreated, status, "%v", ownerKey)
-	require.True(t, strings.HasPrefix(ownerKey["prefix"].(string), "openrails_st_"))
-	status, viewerKey := mint(ownerKey["secret"].(string), "", "viewer")
-	require.Equal(t, http.StatusCreated, status, "an owner key mints within its own authority: %v", viewerKey)
-	status, body := mint(viewerKey["secret"].(string), "", "viewer")
-	require.Equal(t, http.StatusForbidden, status, "a viewer key cannot manage credentials: %v", body)
+	team, err := cp.ListMerchantTeam(ctx, mid)
+	require.NoError(t, err)
+	require.Len(t, team, 1)
+	require.Equal(t, "owner", team[0].Role)
+	ownerKey, err := cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "owner key", Role: "owner"})
+	require.NoError(t, err)
+	require.True(t, strings.HasPrefix(ownerKey.Prefix, "openrails_st_"))
+	viewerKey, err := cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantRead, server.MerchantWrite, server.MerchantAdmin}), mid, billing.CreateAPIKeyParams{Name: "viewer key", Role: "viewer"})
+	require.NoError(t, err, "a credential mints within its own authority")
+	_, err = cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantRead}), mid, billing.CreateAPIKeyParams{Name: "escalated", Role: "owner"})
+	require.ErrorIs(t, err, server.ErrRoleEscalation)
+	_, err = cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "x", Role: "admin"})
+	require.ErrorIs(t, err, server.ErrUnknownMerchantRole)
+	keys, err := cp.ListMerchantAPIKeys(ctx, mid)
+	require.NoError(t, err)
+	require.Len(t, keys, 2)
 
 	findings := func(token string) int {
 		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", "", nil).Code
 	}
-	require.Equal(t, http.StatusOK, findings(viewerKey["secret"].(string)))
-	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey["secret"].(string), http.MethodGet, "/v1/admin/psps", "", nil).Code, "a viewer reads no merchant configuration")
-	require.Equal(t, http.StatusOK, call(t, handler, ownerKey["secret"].(string), http.MethodGet, "/v1/admin/psps", "", nil).Code)
+	require.Equal(t, http.StatusOK, findings(viewerKey.Secret))
+	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code, "a viewer reads no merchant configuration")
+	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code)
 	attempt := billing.CheckoutAttemptID(uuid.New()).String()
 	for _, route := range []struct{ method, path string }{
 		{http.MethodPost, "/v1/admin/checkout-attempts"},
 		{http.MethodGet, "/v1/admin/checkout-attempts/" + attempt},
 		{http.MethodPost, "/v1/admin/checkout-attempts/" + attempt + "/confirm"},
+		{http.MethodGet, "/v1/merchant/team"},
+		{http.MethodPost, "/v1/merchant/api-keys"},
+		{http.MethodGet, "/v1/merchants"},
 	} {
-		w := call(t, handler, ownerKey["secret"].(string), route.method, route.path, "", map[string]any{})
+		w := call(t, handler, ownerKey.Secret, route.method, route.path, "", map[string]any{})
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s is not mounted: %s", route.method, route.path, w.Body.String())
 	}
-	w = call(t, handler, session, http.MethodDelete, "/v1/merchant/api-keys/"+viewerKey["id"].(string), shop, nil)
-	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
-	require.Equal(t, http.StatusUnauthorized, findings(viewerKey["secret"].(string)), "a revoked key authenticates nothing")
+	require.NoError(t, cp.RevokeMerchantAPIKey(ctx, ownerActor, mid, viewerKey.ID))
+	require.Equal(t, http.StatusUnauthorized, findings(viewerKey.Secret), "a revoked key authenticates nothing")
+	require.ErrorIs(t, cp.RevokeMerchantAPIKey(ctx, ownerActor, mid, viewerKey.ID+"x"), billing.ErrNotFound)
 
-	w = call(t, handler, session, http.MethodPost, "/v1/merchant/team/invites", shop, map[string]string{"email": uniqueName("nobody") + "@e2e.test", "role": "viewer"})
-	require.Equal(t, http.StatusConflict, w.Code, "self-hosted registration is closed: %s", w.Body.String())
+	_, err = cp.InviteMerchantTeamMember(ctx, ownerActor, mid, billing.InviteTeamMemberParams{Email: uniqueName("nobody") + "@e2e.test", Role: "viewer"})
+	require.ErrorIs(t, err, server.ErrTeamInvitesDisabled, "self-hosted registration is closed")
+	require.False(t, cp.TeamInvitesEnabled())
 
 	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserIdentity(owner.ID), owner.ID)
 	require.NoError(t, err)
-	w = call(t, handler, session, http.MethodGet, "/v1/merchant/team", shop, nil)
-	require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
-	require.Contains(t, w.Body.String(), "credential_revoked")
-	require.Equal(t, http.StatusOK, findings(ownerKey["secret"].(string)), "control: the owner's API key is not the revoked session")
+	_, err = cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "late", Role: "viewer"})
+	require.ErrorIs(t, err, iam.ErrSessionRevoked)
+	require.Equal(t, http.StatusOK, findings(ownerKey.Secret), "control: the owner's API key is not the revoked session")
+}
+
+// userActor is the server account a bearer token signs in.
+func userActor(t *testing.T, srv *server.Server, token string) server.Actor {
+	t.Helper()
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Authorization", "Bearer "+token)
+	actor, err := srv.UserActor(r)
+	require.NoError(t, err)
+	return actor
 }
 
 // newAccount creates an account with a verified email and a password, which

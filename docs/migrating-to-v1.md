@@ -254,12 +254,13 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.SetAlertWebhookURL(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
 | `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |
-| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename is `PUT /v1/merchant/name` and a user's merchants `GET /v1/merchants` |
+| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.ApplyMerchantConfiguration(`; a rename and a user's merchants are the server's `RenameMerchant` and `ListUserMerchants` |
+| `client.ListWorkerHealth(`, `client.SetAPIHost(`, `client.VerifyAPIHost(` | The server's `ListWorkerHealth` (`openrails workers`, the private listener's `/metrics`), `ClaimMerchantAPIHost` and `VerifyMerchantAPIHost` |
 | `GetUnreadNotificationCount` (merchant) | Removed: count open findings with `client.QueryMetrics(` (`open_findings`) |
 | `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical findings in `client.ListFindings(` |
 | `ListActiveMerchantIDs(ctx, limit, offset)` | The server's `ListActiveMerchantIDs` takes a `billing.PageRequest` and returns a page |
 | `billing.Page`, `billing.PageOptions`, `billing.UserDirectory`, `billing.UsernameResolver` | Removed |
-| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | The inbox, findings and worker health are admin reads (`Permissions.AdminRead`) |
+| Permission `merchant:repair-alerts:read`; the merchant inbox under `merchant:metrics:read` | The inbox and findings are admin reads (`Permissions.AdminRead`); worker health is the operator's |
 | Permissions `merchant:catalog:read-own`, `merchant:catalog:update-own`; the control plane's `creator` role | Removed with creator-owned catalogs; a teammate or API key holds `viewer`, `support` or `owner` |
 
 ## 4. HTTP routes and shapes
@@ -284,8 +285,8 @@ fields (`400 unknown_field`), and every error code is in
   `GET /v1/merchant/checkout-options`.
 - The purchase-review routes (`/v1/merchant/purchase-reviews`): a purchase under
   review is a finding.
-- `api_host` in a configuration application: release a host with
-  `PUT /v1/merchant/api-host` and an empty `api_host`.
+- `api_host` in a configuration application: the operator binds a host (the
+  merchant manifest, the server's `SetMerchantAPIHost`).
 - `GET /v1/merchant/repair-alerts`: read `/v1/merchant/notifications`.
 - Delegated access tokens (`delegated-access+jwt`), remote-application tokens
   (`remote-application-access+jwt`) and service JWTs, with the
@@ -294,12 +295,25 @@ fields (`400 unknown_field`), and every error code is in
   9068 access tokens from trusted issuers instead: `openrails:self` for
   `/v1/me`, `openrails:merchant` for the merchant API, client credentials for
   machines ([auth](auth.md#trusted-issuers)).
+- The standalone control plane and platform: `/v1/merchants` (registration
+  and a user's merchants), its invites, `/v1/merchant/name`,
+  `/v1/merchant/api-keys`, `/v1/merchant/team…`,
+  `/v1/merchant/federated-grants`, the API-host claim and verify, both
+  worker-health routes and `/v1/platform/*`. Merchants are registered by the
+  manifest or the `server` package's Go methods (`ProvisionMerchant`, …),
+  which also serve teams, keys and grants for a hosted product to build its
+  own routes on; the operator's directory, worker health and lockouts are the
+  `openrails merchants`, `workers` and `admin-lockouts` commands. A
+  self-hosted remote client authenticates with a client-credentials token
+  from the merchant's trusted issuer.
+- Public `GET /metrics`: the private listener serves it (`private_port`,
+  `server.Config.PrivateAddr`).
 
 ### Renamed or reshaped
 
 | Before | After |
 |---|---|
-| `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…`; the standalone control plane keeps `/v1/merchant/name`, `/api-keys`, `/team` and `/federated-grants` |
+| `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
 | `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`), `/v1/admin/psps/{id}/archive`, `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; `/v1/admin/rails` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/admin/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
@@ -322,7 +336,6 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/import/billing` | `POST /v1/admin/billing-import` |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/admin/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
-| `GET /v1/platform/merchants` with `limit` and `offset` | A cursor page (`limit`, `cursor`) |
 
 ### Shapes
 

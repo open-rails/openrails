@@ -151,7 +151,7 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 	if authBase == "" {
 		return nil, fmt.Errorf("openrails: Routes.AdminConsole has no sign-in method: set AdminConsole.AuthBaseURL")
 	}
-	handler, err := adminconsole.Handler(path, adminconsole.Config{
+	console := adminconsole.Config{
 		AuthBaseURL:            authBase,
 		APIBaseURL:             sel.Prefix + "/v1",
 		NLWidgetsEnabled:       config.LLMConfigured(cfg.LLM),
@@ -159,7 +159,12 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		CatalogCopilotEnabled:  config.LLMCatalogCopilotConfigured(cfg.LLM),
 		CatalogDraftingEnabled: config.LLMCatalogDraftingConfigured(cfg.LLM),
 		Extensions:             sel.AdminConsole.Extensions,
-	}, a.ConsoleAssets)
+	}
+	// The console acts for the merchant the engine serves.
+	if mid := a.Runtime.ConfiguredMerchant(); !mid.IsZero() && cfg.Merchant.Slug != "" {
+		console.Merchant = &adminconsole.Merchant{ID: mid.String(), Slug: cfg.Merchant.Slug, DisplayName: cfg.Merchant.DisplayName}
+	}
+	handler, err := adminconsole.Handler(path, console, a.ConsoleAssets)
 	if err != nil {
 		return nil, fmt.Errorf("openrails: %w", err)
 	}

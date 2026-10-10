@@ -18,8 +18,8 @@ const (
 	HealthReady HealthStatus = "ready"
 )
 
-// metaRoutes is the process surface: health and metrics. They sit at the
-// root, outside /v1, and only the standalone server mounts them.
+// metaRoutes is the process surface: health. They sit at the root, outside
+// /v1, and only the standalone server mounts them.
 var metaRoutes = []Route{
 	{Method: GET, Path: "/health/live", Group: Meta, Auth: AuthPublic, NoConn: true,
 		Responses: []Reply{{200, Health{}}}, Bind: external(func(x *External) http.Handler { return x.Live })},
@@ -27,6 +27,4 @@ var metaRoutes = []Route{
 	// answered.
 	{Method: GET, Path: "/health/ready", Group: Meta, Auth: AuthPublic, NoConn: true,
 		Responses: []Reply{{200, Health{}}}, Errors: codes("service_unavailable"), Bind: external(func(x *External) http.Handler { return x.Ready })},
-	{Method: GET, Path: "/metrics", Group: Meta, Auth: AuthPublic, NoConn: true,
-		Responses: []Reply{{200, Stream{"text/plain"}}}, Bind: external(func(x *External) http.Handler { return x.Metrics })},
 }

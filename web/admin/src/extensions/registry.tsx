@@ -17,9 +17,11 @@ import type {
   ConsoleContext,
   ConsoleExtension,
   ConsoleMenuItem,
+  ConsoleMerchant,
   ConsoleNavItem,
   ConsoleRoute,
   ConsoleScope,
+  ConsoleSettingsTab,
 } from "./types"
 
 export const BILLING_GROUP = "Billing"
@@ -90,6 +92,14 @@ export const corePaths = [
   "/settings",
 ]
 
+// The Settings page's own tabs; an extension's tab may not reuse a value.
+export const coreSettingsTabs = [
+  "merchant",
+  "notifications",
+  "psps",
+  "customer-controls",
+]
+
 const idPattern = /^[a-z0-9][a-z0-9-]*$/
 
 function checkPath(where: string, path: string) {
@@ -105,7 +115,9 @@ function checkPath(where: string, path: string) {
 export function validateExtensions(extensions: ConsoleExtension[]) {
   const ids = new Set<string>()
   const paths = new Set(corePaths)
+  const tabs = new Set(coreSettingsTabs)
   let newMerchant: string | undefined
+  let directory: string | undefined
   for (const extension of extensions) {
     if (!idPattern.test(extension.id) || ids.has(extension.id)) {
       throw new Error(
@@ -137,6 +149,22 @@ export function validateExtensions(extensions: ConsoleExtension[]) {
       }
       newMerchant = extension.newMerchantPath
     }
+    if (extension.merchants !== undefined) {
+      if (directory !== undefined) {
+        throw new Error(
+          `console extension ${extension.id}: only one extension may declare merchants (${directory} does)`
+        )
+      }
+      directory = extension.id
+    }
+    for (const tab of extension.settingsTabs ?? []) {
+      if (!idPattern.test(tab.value) || tabs.has(tab.value)) {
+        throw new Error(
+          `console extension ${extension.id}: settings tab ${JSON.stringify(tab.value)} must be a unique lowercase value`
+        )
+      }
+      tabs.add(tab.value)
+    }
   }
 }
 
@@ -147,6 +175,10 @@ export interface NavGroup {
 
 type ContextFor = (extensionId?: string) => ConsoleContext
 
+// holds reports whether the merchant's known role is one of roles.
+const holds = (merchant: ConsoleMerchant, roles: string[]) =>
+  merchant.role !== undefined && roles.includes(merchant.role)
+
 function shows(
   item: ConsoleNavItem | ConsoleMenuItem,
   ctx: ConsoleContext,
@@ -155,7 +187,7 @@ function shows(
   if (scope === "merchant") {
     if (!ctx.activeMerchant) return false
     const roles = "roles" in item ? item.roles : undefined
-    if (roles && !roles.includes(ctx.activeMerchant.role)) return false
+    if (roles && !holds(ctx.activeMerchant, roles)) return false
   }
   return item.visible ? item.visible(ctx) : true
 }
@@ -212,6 +244,26 @@ export function userMenuItems(
       shows(item, contextFor(extension.id), "user")
     )
   )
+}
+
+// directoryHost is the extension that lists the user's merchants, if one
+// does.
+export function directoryHost(
+  extensions: ConsoleExtension[]
+): ConsoleExtension | undefined {
+  return extensions.find((extension) => extension.merchants)
+}
+
+// extensionSettingsTabs are the hosts' Settings tabs the selected merchant's
+// role sees, by order.
+export function extensionSettingsTabs(
+  extensions: ConsoleExtension[],
+  merchant?: ConsoleMerchant
+): ConsoleSettingsTab[] {
+  return extensions
+    .flatMap((extension) => extension.settingsTabs ?? [])
+    .filter((tab) => !tab.roles || (merchant && holds(merchant, tab.roles)))
+    .sort((a, b) => (a.order ?? 100) - (b.order ?? 100))
 }
 
 export function newMerchantPath(extensions: ConsoleExtension[]) {

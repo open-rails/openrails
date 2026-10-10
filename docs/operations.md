@@ -1233,9 +1233,10 @@ each merchant its own canonical API hostname, used for Host→merchant
 resolution on the public routes. Browser CORS is a **separate, fixed,
 engine-wide policy**, not a per-merchant setting.
 
-- **Configuring a merchant's host**: the owner claims and proves one
-  (`PUT /v1/admin/api-host`, then `POST /v1/admin/api-host/verify`), or
-  the operator binds it with the server's `SetMerchantAPIHost`. It is
+- **Configuring a merchant's host**: the operator binds it (the merchant
+  manifest's `api_host`, or the server's `SetMerchantAPIHost`); a hosted
+  product lets the owner claim and prove one (`ClaimMerchantAPIHost`, then
+  `VerifyMerchantAPIHost`). It is
   `billing.merchants.api_host` (globally unique among live merchants),
   resolved LIVE on the next
   request; no boot-time host map, so a merchant configured on one node

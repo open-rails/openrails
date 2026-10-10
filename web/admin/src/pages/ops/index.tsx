@@ -25,46 +25,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import type { Finding } from "@/lib/api/types"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import { formatSeconds } from "@/lib/duration"
 import { formatDate } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 
 export function OpsPage() {
-  return (
-    <Tabs defaultValue="findings" className="flex flex-col gap-4">
-      {/* Line tabs, not the pill group: these are sections of one page rather
-          than a segmented control switching one value. */}
-      <TabsList
-        variant="line"
-        className="w-full justify-start gap-6 rounded-none p-0"
-      >
-        <TabsTrigger
-          value="findings"
-          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
-        >
-          Findings
-        </TabsTrigger>
-        <TabsTrigger
-          value="worker-health"
-          className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
-        >
-          Worker health
-        </TabsTrigger>
-      </TabsList>
-      <TabsContent value="findings">
-        <FindingsTab />
-      </TabsContent>
-      <TabsContent value="worker-health">
-        <WorkerHealthTab />
-      </TabsContent>
-    </Tabs>
-  )
+  return <FindingsTab />
 }
 
 const severityTone: Record<string, string> = {
@@ -300,68 +270,5 @@ function ResolveFindingDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
-  )
-}
-
-function WorkerHealthTab() {
-  const { data, isPending: loading } = useQuery(adminQueries.workerHealth())
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
-  if (!data?.data.length)
-    return (
-      <p className="text-sm text-muted-foreground">No workers registered.</p>
-    )
-  return (
-    <div className="overflow-x-auto rounded-md border">
-      <Table>
-        <TableHeader>
-          <TableRow className="hover:bg-transparent">
-            <TableHead className="text-muted-foreground">Worker</TableHead>
-            <TableHead className="text-muted-foreground">
-              Last success
-            </TableHead>
-            <TableHead className="text-muted-foreground">Last error</TableHead>
-            <TableHead className="text-muted-foreground">Failures</TableHead>
-            <TableHead className="text-muted-foreground">
-              Expected period
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.data.map((w) => (
-            <TableRow key={w.worker_kind}>
-              <TableCell className="text-xs">{w.worker_kind}</TableCell>
-              <TableCell>{formatDate(w.last_success_at)}</TableCell>
-              <TableCell className="max-w-72">
-                {w.last_error_at ? (
-                  <span title={w.last_error}>
-                    {formatDate(w.last_error_at)}
-                    {w.last_error ? `: ${w.last_error.slice(0, 60)}` : ""}
-                  </span>
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-              <TableCell>
-                {w.consecutive_failures > 0 ? (
-                  <Badge
-                    variant="secondary"
-                    className="bg-failed-surface text-failed"
-                  >
-                    {w.consecutive_failures}
-                  </Badge>
-                ) : (
-                  "0"
-                )}
-              </TableCell>
-              <TableCell>
-                {w.expected_period_seconds
-                  ? formatSeconds(w.expected_period_seconds)
-                  : "—"}
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
   )
 }

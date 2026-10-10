@@ -13,7 +13,6 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/credential"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -31,11 +30,6 @@ type Options struct {
 	// request acts on (the standalone server's, the in-process host's).
 	// Otherwise a merchant route acts on the configured merchant.
 	AuthBindsMerchant bool
-
-	// Authenticator and ResourceUsers authenticate the standalone control
-	// plane's own user routes (AuthUser).
-	Authenticator billingauth.Authenticator
-	ResourceUsers ResourceUserResolver
 
 	// ProviderRoutes controls provider-specific public routes. Nil preserves the
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
@@ -63,25 +57,13 @@ type Options struct {
 	External External
 }
 
-// External are the handlers an assembly owns: built from its configuration, or
-// from packages the catalog must not import (the standalone control plane). A
+// External are the handlers an assembly owns, built from its configuration. A
 // route bound to one is mounted where the assembly supplies it.
 type External struct {
 	// Meta: the process surface.
-	Live, Ready, Metrics http.Handler
+	Live, Ready http.Handler
 	// Captcha discovery, beside the checkout routes.
 	CaptchaStatus, CaptchaScript http.Handler
-
-	// The standalone control plane's merchant accounts, API keys and team.
-	ListMerchants, CreateMerchant, RenameMerchant      router.Handler
-	CreateAPIKey, ListAPIKeys, RevokeAPIKey            router.Handler
-	ListTeam, ListTeamInvites, InviteTeamMember        router.Handler
-	RevokeTeamInvite, ChangeTeamRole, RemoveTeamMember router.Handler
-	// Federated grants (#1140): the merchant's, and the signed-in user's own.
-	ListFederatedGrants, CreateFederatedGrant, RevokeFederatedGrant router.Handler
-	ListMyFederatedGrants, AcceptFederatedGrant                     router.Handler
-	MerchantCreationEnabled                                         bool
-	MerchantCreationLimit                                           router.Middleware
 }
 
 // Env is one assembly mounting routes: its options and the gates built from
@@ -99,9 +81,6 @@ type Env struct {
 	Viewers billingauth.Auth
 	// permissions caches Auth.RequirePermission by permission for staffCan.
 	permissions *sync.Map
-	// Root and Unlocker serve the platform tier.
-	Root     RootPermissionChecker
-	Unlocker AdminRateLimitUnlocker
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
 	// scim is the SCIM server Provisioning authenticates, built once.
@@ -144,11 +123,6 @@ func external(pick func(*External) http.Handler) func(*Env) router.Handler {
 	}
 }
 
-// controlPlane binds a route to a control-plane handler the assembly owns.
-func controlPlane(pick func(*External) router.Handler) func(*Env) router.Handler {
-	return func(e *Env) router.Handler { return pick(&e.External) }
-}
-
 // gated binds a handler that asks whether its caller would pass another
 // route's permission.
 func gated(build func(httphandlers.StaffCan) func(*httprequest.Request)) func(*Env) router.Handler {
@@ -175,8 +149,6 @@ func (e *Env) enabled(f Feature) bool {
 		return rt != nil && rt.DashboardService.AskConfigured()
 	case FeatureDashboardGeneration:
 		return rt != nil && rt.DashboardService.NLConfigured()
-	case FeatureMerchantCreation:
-		return e.External.MerchantCreationEnabled
 	}
 	panic("routes: unknown feature " + string(f))
 }
@@ -219,8 +191,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		// The SCIM server authenticates its merchant and answers SCIM errors.
 	case AuthCheckoutSession:
 		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime), e.checkoutViewer(route)}, conn...)
-	case AuthUser:
-		mw = append(conn, e.requiredMW())
 	case AuthCustomer:
 		mw = append(e.customerGates(route), conn...)
 	case AuthMerchant:
@@ -234,8 +204,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 			mw = append(mw, e.AdminLimiter.AdminRateLimitMW(route.Limit))
 		}
 		mw = append(mw, conn...)
-	case AuthOperator:
-		mw = []router.Middleware{e.platformPermissionMW(route.Perm)}
 	default:
 		panic(MountError{Route: route.Key(), Reason: "declares no auth tier"})
 	}
@@ -244,10 +212,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(mw, middleware.CheckoutSessionRateLimit(e.Runtime, "checkout-session-read", middleware.CheckoutSessionReadsPerMinute))
 	case ThrottleSessionPay:
 		mw = append(mw, middleware.CheckoutSessionRateLimit(e.Runtime, "checkout-session-pay", middleware.CheckoutSessionPaysPerMinute))
-	case ThrottleMerchantCreation:
-		if e.External.MerchantCreationLimit != nil {
-			mw = append(mw, e.External.MerchantCreationLimit)
-		}
 	}
 	if checked := checkedParams(route.Query); len(checked) > 0 {
 		mw = append(mw, strictQueryMW(checked))
@@ -321,41 +285,6 @@ func strictQueryMW(names []string) router.Middleware {
 	}
 }
 
-// requiredMW authenticates a standalone control-plane user for its own
-// routes, aborts 401 on failure, and pins the resulting UserContext.
-func (opts Options) requiredMW() router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if opts.ResourceUsers != nil && credential.LooksLikeResourceToken(authorizationToken(r.Request.Header.Get("Authorization"))) {
-				user, err := opts.ResourceUsers.ResolveResourceUser(r.Request)
-				if err != nil {
-					r.AbortGate(credential.ResourceTokenRefusal(err))
-					return
-				}
-				r.Set(middleware.ResourceUserContextKey, user)
-				next(r)
-				return
-			}
-			a := opts.Authenticator
-			if a == nil {
-				r.AbortCode(billing.CodeInternalError, "authentication disabled")
-				return
-			}
-			uc, err := a.Authenticate(r.Request.Context(), r.Request)
-			if err != nil {
-				r.AbortGate(billingauth.Unauthenticated(err))
-				return
-			}
-			if verr := uc.ValidateSubject(); verr != nil {
-				r.AbortCode(billing.CodeAuthenticationRequired, verr.Error())
-				return
-			}
-			r.SetUserContext(uc)
-			next(r)
-		}
-	}
-}
-
 func under(prefix string) func(Route) bool {
 	return func(r Route) bool { return r.Path == prefix || strings.HasPrefix(r.Path, prefix+"/") }
 }
@@ -408,12 +337,6 @@ func RegisterStaffRoutesUnder(rr router.Router, rt *app.Runtime, opts Options, p
 
 // mounts reports a staff route its bundle's permission mounts.
 func (p Permissions) mounts(r Route) bool { return r.Staff() && p.For(r) != "" }
-
-// RegisterControlPlaneRoutes mounts the standalone control plane's merchant
-// accounts, API keys and team, on a router rooted at /v1.
-func RegisterControlPlaneRoutes(rr router.Router, rt *app.Runtime, opts Options) {
-	newEnv(rt, opts).mount(rr, "/v1", in(ControlPlane))
-}
 
 // RegisterWebhookRoutes mounts the canonical callback surface under /webhooks.
 // The configured provider identity resolves its merchant in the runtime

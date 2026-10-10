@@ -1,6 +1,7 @@
-// Command standalone calls an OpenRails server (self-hosted or the hosted product)
-// with a merchant API key. OPENRAILS_URL, OPENRAILS_API_KEY and
-// OPENRAILS_MERCHANT_ID are required.
+// Command standalone calls an OpenRails server with a merchant credential:
+// self-hosted, an access token from the merchant's trusted issuer (client
+// credentials); on a hosted product, its API key. OPENRAILS_URL,
+// OPENRAILS_TOKEN and OPENRAILS_MERCHANT_ID are required.
 package main
 
 import (
@@ -24,22 +25,24 @@ func main() {
 }
 
 func run(ctx context.Context, getenv func(string) string) error {
-	baseURL, key := getenv("OPENRAILS_URL"), getenv("OPENRAILS_API_KEY")
-	if baseURL == "" || key == "" {
-		return errors.New("OPENRAILS_URL and OPENRAILS_API_KEY are required")
+	baseURL, token := getenv("OPENRAILS_URL"), getenv("OPENRAILS_TOKEN")
+	if baseURL == "" || token == "" {
+		return errors.New("OPENRAILS_URL and OPENRAILS_TOKEN are required")
 	}
 	merchantID, err := billing.ParseMerchantID(getenv("OPENRAILS_MERCHANT_ID"))
 	if err != nil {
 		return err
 	}
 	client, err := openrails.NewRemote(baseURL,
-		openrails.WithAPIKey(key),
+		// A real backend mints the token per call (WithTokenProvider over its
+		// issuer's client-credentials grant).
+		openrails.WithTokenProvider(func(context.Context) (string, error) { return token, nil }),
 		openrails.WithMerchantID(merchantID),
 	)
 	if err != nil {
 		return err
 	}
-	// One authenticated read proves the server, the key and the merchant.
+	// One authenticated read proves the server, the credential and the merchant.
 	if _, err := client.GetMerchantConfiguration(ctx); err != nil {
 		return err
 	}

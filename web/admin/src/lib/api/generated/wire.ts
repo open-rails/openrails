@@ -18,17 +18,6 @@ export type APIHostRecord = {
   value: string
 }
 
-export type APIKey = {
-  id: string
-  name: string
-  role: string
-  prefix: string
-  created_at: string
-  last_used_at: string | null
-  expires_at: string | null
-  revoked_at: string | null
-}
-
 export type AcknowledgeHostEventsParams = {
   host_event_ids?: string[]
 }
@@ -519,11 +508,6 @@ export type CollectionPaymentMethod = {
   payment_method_id: string
 }
 
-export type CreateAPIKeyParams = {
-  name?: string
-  role?: string
-}
-
 export type CreateAlertWebhookParams = {
   name?: string
   url?: string
@@ -558,16 +542,6 @@ export type CreateCreditGrantParams = {
   invoker?: string
   expires_at?: string
   description?: string
-}
-
-export type CreateFederatedGrantParams = {
-  email?: string
-  role?: string
-}
-
-export type CreateMerchantParams = {
-  name?: string
-  display_name?: string
 }
 
 export type CreateOrderParams = {
@@ -666,18 +640,6 @@ export type CreateProductParams = {
 
 export type CreateProvisioningTokenParams = {
   name?: string
-}
-
-export type CreatedAPIKey = {
-  id: string
-  name: string
-  role: string
-  prefix: string
-  created_at: string
-  last_used_at: string | null
-  expires_at: string | null
-  revoked_at: string | null
-  secret: string
 }
 
 export type CreatedProvisioningToken = {
@@ -944,22 +906,6 @@ export type ExtendAdmissionParams = {
   expires_at?: string
 }
 
-export type FederatedGrant = {
-  id: string
-  email: string
-  role: string
-  issuer: string | null
-  subject: string | null
-  accepted_at: string | null
-  created_at: string
-}
-
-export type FederatedInvite = {
-  id: string
-  merchant: MerchantRef
-  role: string
-}
-
 export type Finding = {
   id: string
   finding_type: string
@@ -1047,11 +993,6 @@ export type IncrementProviderOperationParams = {
   amount?: string
   minimum_amount?: string
   overdraft_amount?: string
-}
-
-export type InviteTeamMemberParams = {
-  email?: string
-  role?: string
 }
 
 export type Invoice = {
@@ -1183,23 +1124,12 @@ export type MerchantConfigurationState = {
   settings: MerchantSettings
 }
 
-export type MerchantName = {
-  id: string
-  name: string
-}
-
 export type MerchantProfile = {
   display_name?: string
   logo_url?: string
   from_email?: string
   support_url?: string
   signup_url?: string
-}
-
-export type MerchantRef = {
-  id: string
-  slug: string
-  display_name: string
 }
 
 export type MerchantSettings = {
@@ -1787,18 +1717,6 @@ export type PerUnitPrice = {
   matrix?: Matrix
 }
 
-export type PlatformMerchant = {
-  id: string
-  slug: string
-  status: string
-  display_name: string | null
-  created_at: string
-  updated_at: string
-  deleted_at: string | null
-  rails_armed: string[]
-  last_payment_at: string | null
-}
-
 export type PortalResponse = {
   url: string
 }
@@ -2197,10 +2115,6 @@ export type ReleaseProviderOperationParams = {
   release_reference?: string
 }
 
-export type RenameMerchantParams = {
-  name?: string
-}
-
 export type ReplaceEntitlementsParams = {
   pairs?: EntitlementReplacement[]
 }
@@ -2240,10 +2154,6 @@ export type ScheduledChange = {
   product?: ProductSummary
 }
 
-export type SetAPIHostParams = {
-  api_host?: string
-}
-
 export type SetAlertWebhookURLParams = {
   url?: string
 }
@@ -2278,10 +2188,6 @@ export type SetSpendDelegationsParams = {
 
 export type SetSubscriptionPaymentMethodParams = {
   payment_method_id?: string
-}
-
-export type SetTeamRoleParams = {
-  role?: string
 }
 
 export type SolanaPayGetResponse = {
@@ -2444,28 +2350,6 @@ export type SupportedTokensResponse = {
   tokens: TokenInfo[]
 }
 
-export type TeamInvite = {
-  id: string
-  role: string
-  created_at: string
-  expires_at: string | null
-  redeemed_at: string | null
-  revoked_at: string | null
-}
-
-export type TeamInviteResult = {
-  member: TeamMember | null
-  invite: TeamInvite | null
-  url: string | null
-}
-
-export type TeamMember = {
-  user_id: string
-  email: string | null
-  username: string | null
-  role: string
-}
-
 export type Tier = {
   entitlement: string
   display_name: string
@@ -2585,27 +2469,7 @@ export type UsageRow = {
   dimensions: Record<string, number> | null
 }
 
-export type UserMerchant = {
-  id: string
-  slug: string
-  display_name: string
-  role: string
-  permissions: string[]
-}
-
 export type WebhookReceipt = {
   status: string
   code: string | null
-}
-
-export type WorkerHealth = {
-  worker_kind: string
-  registered_at: string
-  expected_period_seconds: number | null
-  last_success_at: string | null
-  last_error_at: string | null
-  last_error: string | null
-  consecutive_failures: number
-  last_alerted_at: string | null
-  updated_at: string
 }

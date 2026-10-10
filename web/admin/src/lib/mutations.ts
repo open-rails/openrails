@@ -13,10 +13,8 @@ import { askCatalog } from "@/lib/api/copilot"
 import {
   cancelPriceMigration,
   cancelSubscription,
-  changeTeamRole,
   changeSubscriptionPaymentMethod,
   changeSubscription,
-  createApiKey,
   createPrice,
   createProduct,
   createWebhook,
@@ -30,7 +28,6 @@ import {
   getPriceByKey,
   getProduct,
   grantProductAccess,
-  inviteTeamMember,
   listCustomers,
   listPayments,
   listSubscriptions,
@@ -44,13 +41,10 @@ import {
   applyCatalog,
   refreshCatalogDrift,
   refundPayment,
-  removeTeamMember,
   createPriceMigration,
   resolveFinding,
   resumeSubscription,
-  revokeApiKey,
   revokeProductAccess,
-  revokeTeamInvite,
   updateCustomer,
   updatePrice,
   updateProduct,
@@ -696,63 +690,6 @@ export const adminMutations = {
         ...keys.settings(),
         "psps",
       ]),
-    })
-  },
-  createApiKey: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.settings(), "api-keys", "create"],
-      mutationFn: ({ name, role }: { name: string; role: string }) =>
-        createApiKey(name, role),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.settings(),
-        "api-keys",
-      ]),
-    })
-  },
-  revokeApiKey: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.settings(), "api-keys", "revoke"],
-      mutationFn: (id: string) => revokeApiKey(id),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.settings(),
-        "api-keys",
-      ]),
-    })
-  },
-  inviteTeamMember: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.team(), "invite"],
-      mutationFn: ({ email, role }: { email: string; role: string }) =>
-        inviteTeamMember(email, role),
-      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
-    })
-  },
-  revokeTeamInvite: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.team(), "invites", "revoke"],
-      mutationFn: (id: string) => revokeTeamInvite(id),
-      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
-    })
-  },
-  changeTeamRole: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.team(), "role"],
-      mutationFn: ({ userId, role }: { userId: string; role: string }) =>
-        changeTeamRole(userId, role),
-      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
-    })
-  },
-  removeTeamMember: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.team(), "remove"],
-      mutationFn: (userId: string) => removeTeamMember(userId),
-      onSuccess: invalidateTreeOnSuccess(queryClient, keys.team()),
     })
   },
   setCreditLimit: () => {

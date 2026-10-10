@@ -26,6 +26,9 @@ type Config struct {
 	// Host and Port are the HTTP listener (default 0.0.0.0:3053).
 	Host string
 	Port int
+	// PrivatePort is the private listener's, on Host: the operator's
+	// /metrics. 0 serves none.
+	PrivatePort int
 	// MerchantManifestOverlays are YAML files in the merchant manifest's own
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
@@ -58,8 +61,9 @@ func FromContext(ctx context.Context) *Config {
 // the exceptions. Keys inside a section match the section's Go field names
 // without their underscores (db.sql_trace is DBConfig.SQLTrace).
 type fileConfig struct {
-	Port port   `koanf:"port"`
-	Host string `koanf:"host"`
+	Port        port   `koanf:"port"`
+	Host        string `koanf:"host"`
+	PrivatePort port   `koanf:"private_port"`
 
 	ProviderWriteMode string `koanf:"provider_write_mode"`
 	TestMode          string `koanf:"test_mode"`
@@ -225,6 +229,7 @@ func (f *fileConfig) config() (*Config, error) {
 		LocalSignIn:              f.LocalSignIn,
 		Host:                     f.Host,
 		Port:                     int(f.Port),
+		PrivatePort:              int(f.PrivatePort),
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		AdminConsole:             f.AdminConsole.mount(),
 		ConsoleIssuer:            f.AdminConsole.issuer(),
@@ -272,6 +277,9 @@ func Validate(cfg *Config) error {
 	// A number in config.yaml decodes without UnmarshalText; 0 is unset.
 	if cfg.Port < 0 || cfg.Port > 65535 {
 		return fmt.Errorf("invalid port %d: must be 1-65535", cfg.Port)
+	}
+	if cfg.PrivatePort < 0 || cfg.PrivatePort > 65535 || (cfg.PrivatePort != 0 && cfg.PrivatePort == cfg.Port) {
+		return fmt.Errorf("invalid private_port %d: must be 1-65535 and not port", cfg.PrivatePort)
 	}
 	if err := billing.Validate(cfg.Config); err != nil {
 		return err

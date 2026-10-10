@@ -25,10 +25,19 @@ export function useCatalogWrites(): boolean {
 // configTabs are the settings tabs that are the merchant's configuration.
 const configTabs = ["merchant", "notifications", "psps"]
 
+// The settings tabs shown without the merchant's configuration.
+const otherTabs = ["customer-controls"]
+
 // settingsTab is the settings tab shown for the requested one: the first tab
-// when none is requested or the configuration tabs are not mounted.
-export function settingsTab(requested: string | null, config: boolean) {
-  const first = config ? "merchant" : "team"
-  if (!requested || (!config && configTabs.includes(requested))) return first
+// when none is requested, the requested one is not shown, or the
+// configuration tabs are not mounted. hosted are the host extensions' tabs.
+export function settingsTab(
+  requested: string | null,
+  config: boolean,
+  hosted: string[] = []
+) {
+  const first = config ? "merchant" : "customer-controls"
+  const shown = [...(config ? configTabs : []), ...otherTabs, ...hosted]
+  if (!requested || !shown.includes(requested)) return first
   return requested
 }

@@ -17,13 +17,13 @@ import (
 )
 
 func TestCapabilities(t *testing.T) {
-	caps := CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r"}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"team_invites": true})
+	caps := CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r"}, routesurface.ProviderRoutes{Solana: true}, map[string]bool{"hosted_extra": true})
 	require.Equal(t, map[string]bool{"admin": true, "catalog_write": false, "merchant_config": false}, caps.RouteGroups)
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "provider_credential_writes": false,
 		"api_host": false, "catalog_copilot": false, "metrics_ask": false, "dashboard_generation": false,
-		"team_invites": true,
+		"hosted_extra": true,
 	}, caps.Features)
 
 	// Credential writes need the merchant-config bundle.

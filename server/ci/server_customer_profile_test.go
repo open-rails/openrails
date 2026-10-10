@@ -207,10 +207,10 @@ func TestServerCustomerProfileServesTheSelectedMerchant(t *testing.T) {
 	// So does the merchant's proven API host, without a selector; a selector
 	// naming another merchant there is refused.
 	const shopHost = "shop.first.e2e.test"
-	claim, err := engine.SetAPIHost(ctx, billing.SetAPIHostParams{APIHost: shopHost}, openrails.ForMerchantID(first.id))
+	claim, err := cp.ClaimMerchantAPIHost(ctx, first.id, shopHost)
 	require.NoError(t, err)
 	dns.publish(claim.Claim.DNSRecord.Name, claim.Claim.DNSRecord.Value)
-	_, err = engine.VerifyAPIHost(ctx, openrails.ForMerchantID(first.id))
+	_, err = cp.VerifyMerchantAPIHost(ctx, first.id)
 	require.NoError(t, err)
 	w = do(shopHost, aliceToken, http.MethodGet, "/billing/v1/me/product-access", "")
 	require.Equal(t, []billing.ProductAccessID{passes[first.id]}, held(w))

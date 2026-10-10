@@ -44,7 +44,8 @@ var (
 type ProvisionMerchantParams struct {
 	// Slug is the merchant name to claim.
 	Slug string
-	// DisplayName, when set, becomes the merchant's display name.
+	// DisplayName, when set, becomes the merchant's display name: an
+	// existing one's only for the operator (no OwnerUserID).
 	DisplayName string
 	// OwnerUserID becomes the new merchant group's owner, only when this call
 	// creates the merchant; an existing merchant's roles are never touched. A
@@ -60,6 +61,47 @@ type ProvisionMerchantResult struct {
 	GroupID string
 	// Created reports whether this call claimed the name.
 	Created bool
+}
+
+// MerchantRenameTooSoonError is a merchant's own rename within the naming
+// policy's rename interval: NextRenameAt is when it may rename again.
+type MerchantRenameTooSoonError struct{ NextRenameAt time.Time }
+
+func (e *MerchantRenameTooSoonError) Error() string {
+	return "merchants: the next rename is allowed at " + e.NextRenameAt.UTC().Format(time.RFC3339)
+}
+
+// MerchantStatus is a merchant's directory state.
+type MerchantStatus string
+
+const (
+	MerchantActive MerchantStatus = "active"
+	// MerchantDeleted is soft-deleted: off the default lists, its
+	// credentials resolve nothing, its records kept.
+	MerchantDeleted MerchantStatus = "deleted"
+)
+
+// Merchant is one merchant of the operator's directory.
+type Merchant struct {
+	ID          MerchantID     `json:"id"`
+	Slug        string         `json:"slug"`
+	DisplayName *string        `json:"display_name"`
+	Status      MerchantStatus `json:"status"`
+	// RailsArmed is the distinct rails of its live PSPs, as declared.
+	RailsArmed    []Rail     `json:"rails_armed"`
+	LastPaymentAt *time.Time `json:"last_payment_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
+	DeletedAt     *time.Time `json:"deleted_at"`
+}
+
+// MerchantListParams pages the operator's directory, newest first.
+type MerchantListParams struct {
+	PageRequest
+	// Statuses filters by status; empty lists active merchants.
+	Statuses []MerchantStatus
+	// Query matches part of a merchant's current name.
+	Query string
 }
 
 // MerchantRef is a merchant's directory identity.
@@ -193,8 +235,9 @@ type MerchantRetirement struct {
 	Refusal MerchantRetirementRefusal
 }
 
-// The standalone server's merchant account routes: the signed-in user's
-// merchants, the merchant's name, API keys and team.
+// A hosted product's user model, served on the server's Go API: the
+// signed-in user's merchants, the merchant's name, API keys, team and
+// federated grants. The JSON names are the ones its own routes answer with.
 
 // CreateMerchantParams creates a merchant the signed-in user owns.
 type CreateMerchantParams struct {
@@ -212,6 +255,10 @@ type MerchantName struct {
 // forwarding to it under the deployment's naming policy.
 type RenameMerchantParams struct {
 	Name string `json:"name"`
+	// ActorUserID is the user renaming their own merchant: the name then
+	// answers to the creation policy's reserved names and pattern and to the
+	// rename interval. Empty is the operator's rename.
+	ActorUserID string `json:"-"`
 }
 
 // APIKey is one of the merchant's API keys, without its secret.
