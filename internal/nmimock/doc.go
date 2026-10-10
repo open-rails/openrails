@@ -1,66 +1,42 @@
 // Package nmimock is a stateful, deterministic NMI gateway for tests and
-// disposable sandbox stacks. It serves the NMI surface OpenRails uses:
+// disposable sandbox stacks. It serves the surface OpenRails uses: v5
+// customers, payments, plans and subscriptions; Direct Post
+// /api/transact.php; and the Query API /api/query.php.
 //
-//   - Customer Vault v5 (/api/v5/customers, billing entries),
-//   - v5 payments (read, refund, void, auth probe), plans and subscriptions,
-//   - Direct Post /api/transact.php (sale, validate, refund, void,
-//     recurring add_subscription/update_subscription/rebill_subscription,
-//     customer_vault add_customer/add_billing with a card number),
-//   - Query API /api/query.php (transaction, recurring, test_mode_status).
-//
-// Serve it over loopback (New, then point provider_sandbox.nmi_gateway_url at
-// URL, whose root also takes all three APIs) or in process (NewUnstarted, then
-// use the Mock as an http.RoundTripper or http.Handler). Time comes only from
-// Options.Clock.
-//
-// Tests seed state (Tokenize, Issue, AddVault, AddPlan, AddSchedule, AddSale),
-// inspect what the gateway saw (Sales, Ledger, Attempts, Calls, Validations)
-// and inject failures (SetDecline, DeclineValidations, LoseSales,
-// DropSaleResponses, RefuseDuplicates, QueryUnavailable, FailRequests, Hold,
-// Intercept).
-// RenewSchedule and RunDue play NMI's recurring engine; SkipSchedule is it
-// passing a date without charging.
-//
-// Only tests and sandbox commands may import it; guard_test.go enforces this.
+// Serve it over loopback (New; point provider_sandbox.nmi_gateway_url at URL)
+// or in process (NewUnstarted, as an http.RoundTripper or http.Handler). Time
+// comes only from Options.Clock. Only tests and sandbox commands may import it
+// (guard_test.go).
 //
 // # Known differences from real NMI
 //
-//   - Cards: a Collect.js token made by Tokenize names its card. Any other
-//     token ending in four digits is a visa with those last four; last four
-//     DeclineLast4 declines sales with 202. Tokens stay valid after use,
-//     except when adding a billing entry. A card's AVS and CVV letters ride
-//     every answer for it; real NMI derives them per request.
-//   - Declines: responsetext is always "DECLINE" (real text varies by
-//     processor). A card declined "vault" is refused when stored. Card
-//     verification (type=validate) approves funds declines 202 and 203.
+//   - Cards: a Tokenize token names its card; any other token ending in four
+//     digits is a visa with those last four, and DeclineLast4 declines sales
+//     with 202. Tokens stay valid after use, except when adding a billing
+//     entry. A card's AVS and CVV letters ride every answer for it.
+//   - Declines: responsetext is always "DECLINE". A card declined "vault" is
+//     refused when stored; type=validate approves funds declines 202 and 203.
 //     A card stored by number must pass Luhn and carry an MMYY expiry; its
-//     brand comes from its first digits, its behaviour from Issue, and its
-//     cvv is not checked.
-//   - Duplicate checks: the gateway-wide window (Options.DuplicateWindow)
-//     matches card brand, last four and amount; dup_seconds matches the same
-//     within one vault. Real NMI also weighs other fields.
-//   - Query API: filters order_id, transaction_id, customer_vault_id,
+//     brand comes from its first digits and its cvv is not checked.
+//   - Duplicate checks: Options.DuplicateWindow matches brand, last four and
+//     amount gateway-wide; dup_seconds the same within one vault.
+//   - Query API filters: order_id, transaction_id, customer_vault_id,
 //     subscription_id (comma list), action_type, start_date, end_date,
-//     result_limit and page_number. Other filters are ignored. Transactions
-//     carry the fields OpenRails reads plus condition, cc_number and
-//     response_text. Card fields come from the Card (cc_bin defaults by
-//     brand); processor_response_code is "00" on approval, "51" behind 202
-//     and "05" behind any other decline. The recurring report returns
-//     subscription id, order, next charge date and plan id only. A refund is
-//     its own transaction.
-//   - Indexing lag: a sale is invisible to the Query API until
-//     Options.IndexLag has passed on the mock clock (or HideSales/Reveal).
-//     v5 payment reads see it at once.
-//   - v5 JSON: responses carry the fields OpenRails decodes; others are
-//     omitted. Cursors are decimal offsets. Error bodies use the
-//     {"type","error_code","message"} envelope with 400 or 404.
-//   - Recurring engine: schedules bill only when a test calls RenewSchedule or
-//     RunDue; a charge is dated the schedule's next billing time (a test may
-//     force it early, so it can postdate the clock), and a failed charge
-//     advances to the next date without retrying.
+//     result_limit, page_number; others are ignored. cc_bin defaults by brand;
+//     processor_response_code is "00" on approval, "51" behind 202 and "05"
+//     behind other declines. The recurring report carries subscription id,
+//     order, next charge date and plan id only. A refund is its own
+//     transaction.
+//   - Indexing lag: a sale is invisible to the Query API until Options.IndexLag
+//     passes on the mock clock (or HideSales/Reveal); v5 reads see it at once.
+//   - v5 JSON carries only the fields OpenRails decodes. Cursors are decimal
+//     offsets; errors use the {"type","error_code","message"} envelope with
+//     400 or 404.
+//   - Recurring engine: schedules bill only on RenewSchedule or RunDue, dated
+//     the schedule's next billing time (so a forced early charge can postdate
+//     the clock); a failed charge advances without retrying.
 //     rebill_subscription charges the schedule amount without moving it.
-//   - Webhooks are never sent; tests deliver notices themselves.
-//   - Currency is whatever the request names (USD for schedule charges);
-//     there is no settlement, batching or chargeback.
-//   - Authentication is not checked: any security_key or Authorization works.
+//   - No webhooks, settlement, batching or chargebacks. Currency is whatever
+//     the request names (USD for schedule charges). Authentication is not
+//     checked.
 package nmimock

@@ -14,19 +14,16 @@ import (
 
 type SaleParams struct {
 	CustomerVaultID string
-	// BillingID targets ONE stored card inside the vault (#682 shared-vault
-	// support). Empty = the vault's priority-1 entry — always correct under the
-	// one-vault-per-card minting policy; set it (from the payment method's
-	// rail_method_ref) when the vault may hold multiple entries.
+	// BillingID targets one stored card in the vault; empty charges the
+	// priority-1 entry. Set it when the vault may hold several.
 	BillingID string
 	// Amount is rail minor units, rendered in the explicitly supplied currency.
 	Amount           moneyutil.Cents
 	Currency         string
 	OrderDescription string
 	OrderID          string
-	// StoredCredential carries the CIT/MIT credential-on-file fields (#297),
-	// sent through classic Direct Post, the lane on which NMI documents them.
-	// nil is a customer-present purchase that stores nothing: no fields.
+	// StoredCredential carries the CIT/MIT credential-on-file fields, sent on
+	// classic Direct Post where NMI documents them. nil sends none.
 	StoredCredential *StoredCredential
 }
 
@@ -65,16 +62,15 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 	}
 	currency := strings.TrimSpace(params.Currency)
 	if currency == "" {
-		// #651: a money path must not silently default the currency.
+		// A money path never defaults the currency.
 		return nil, errors.New("currency is required")
 	}
 	orderDesc := params.OrderDescription
 	if orderDesc == "" {
 		orderDesc = "One-time purchase"
 	}
-	// NMI caps orderid at 50 chars (live-verified). The order id is the
-	// correlation handle evidence probes search by — refuse loudly rather than
-	// silently truncate it into an unfindable reference.
+	// NMI caps orderid at 50 chars (live-verified). Probes search by it, so
+	// refuse rather than truncate it into an unfindable reference.
 	if len(params.OrderID) > 50 {
 		return nil, fmt.Errorf("order id %q exceeds NMI's 50-character limit", params.OrderID)
 	}
@@ -87,9 +83,8 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 	return c.runClassicSale(ctx, params, currency, orderDesc, strings.TrimSpace(params.BillingID))
 }
 
-// runClassicSale charges a vault via classic Direct Post (type=sale +
-// customer_vault_id): billingID targets ONE specific billing entry; ""
-// charges the priority-1 entry. Stored-credential fields ride this lane (#297).
+// runClassicSale charges a vault via classic Direct Post (type=sale); an empty
+// billingID charges the priority-1 entry.
 func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, currency, orderDesc, billingID string) (*SaleResponse, error) {
 	amount, err := WireAmount(params.Amount, currency)
 	if err != nil {

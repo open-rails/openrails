@@ -9,9 +9,8 @@ import (
 	"time"
 )
 
-// Batched Query API reads for resolving unverified schedules (#1094 §12).
-// query.php takes comma-separated subscription_id lists; NMI documents no
-// list-size or rate limit, so callers stay at MaxQueryIDs per request.
+// Batched Query API schedule reads. query.php takes comma-separated
+// subscription_id lists with no documented size or rate limit.
 
 // MaxQueryIDs is the most schedule ids one query.php request carries.
 const MaxQueryIDs = 50

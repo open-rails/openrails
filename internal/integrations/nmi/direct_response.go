@@ -8,16 +8,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Exported classic Direct Post response surface for sibling rails (#795): the
-// custodian-proxied transport receives NMI's classic urlencoded body through the BT
-// proxy and must parse it with the SAME parser and decline vocabulary as the
-// direct rail — one taxonomy, two transports.
-
-// ParseSaleResponse parses a classic Direct Post sale response body. An
-// approval returns a SaleResponse; a parsed non-approval returns a
-// *CustomerVaultError carrying the verbatim response code + localization id
-// (the decline taxonomy nmidirect classifies on). An unreadable body returns
-// a TransportAmbiguousError — the mutation likely executed (#674).
+// ParseSaleResponse parses a classic Direct Post sale body; the
+// custodian-proxied transport shares it, so both use one decline taxonomy.
+// A decline (response=2) is a *CustomerVaultError with the verbatim code; any
+// other non-approval or unreadable body is a TransportAmbiguousError.
 func ParseSaleResponse(raw string) (*SaleResponse, error) {
 	output, err := parseDirectResponse(raw)
 	if err != nil {

@@ -34,10 +34,10 @@ func (c *NMIClient) PostureKey() providerposture.Key {
 	return key
 }
 
-// VerifyPosture runs the authoritative test-mode check now and records the
-// verdict for every client that loads the same credential. It is called when
-// credentials are loaded: startup, create and rotation. Under live posture
-// the account must be proven live (SEC-33).
+// VerifyPosture runs the authoritative test-mode check and records the verdict
+// for every client that loads the same credential. It runs when credentials
+// load (startup, create, rotation). Under live posture the account must be
+// proven live.
 func (c *NMIClient) VerifyPosture(ctx context.Context) providerposture.Status {
 	if !c.TestMode {
 		return providerposture.Process().Verify(ctx, c.PostureKey(), c.CheckLivePosture)
@@ -100,9 +100,9 @@ func (c *NMIClient) requireArmed(ctx context.Context, target string) error {
 		return nil
 	}
 	if !c.TestMode {
-		// SEC-33: a live credential proves it is not in test mode before its
-		// first mutation — verified when loaded, or inline (bounded, once) when
-		// this process has not seen it yet.
+		// A live credential proves it is not in test mode before its first
+		// mutation: verified on load, or inline (bounded, once) when this
+		// process has not seen it.
 		if c.LoopbackFixture {
 			return nil
 		}

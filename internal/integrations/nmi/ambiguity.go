@@ -6,14 +6,11 @@ import "errors"
 // It cannot be inferred from a transport failure or an empty provider query.
 var ErrNotDispatched = errors.New("nmi: financial request was not dispatched")
 
-// TransportAmbiguousError marks a gateway call whose MUTATION MAY HAVE
-// EXECUTED even though we got no usable answer: the request was (or may have
-// been) sent and the response was lost (timeout after send, connection reset,
-// 5xx, unreadable/undecodable body). Callers must NEVER treat it as a decline
-// or blind-retry with a fresh order id — verify at the provider first (#674).
-//
-// Clean failures (read-only guard, unconfigured client, request validation,
-// parsed 4xx envelopes, parsed declines) are deliberately NOT wrapped.
+// TransportAmbiguousError marks a gateway call whose mutation may have
+// executed though no usable answer came back (timeout after send, reset, 5xx,
+// unreadable body). Never treat it as a decline or retry with a fresh order
+// id: verify at the provider first. Clean failures (readonly, unconfigured,
+// validation, parsed 4xx envelopes or declines) are not wrapped.
 type TransportAmbiguousError struct{ Err error }
 
 func (e *TransportAmbiguousError) Error() string {

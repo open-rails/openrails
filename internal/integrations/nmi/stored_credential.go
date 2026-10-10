@@ -6,18 +6,14 @@ import (
 	"strings"
 )
 
-// StoredCredential carries NMI's credential-on-file (CIT/MIT) wire fields,
-// verified verbatim against the NMI integration portal ("Credential on File
-// Information", 2026-07-06):
+// StoredCredential carries NMI's credential-on-file (CIT/MIT) wire fields, as
+// the NMI portal's "Credential on File Information" documents them:
 //
 //	initiated_by                customer | merchant
-//	stored_credential_indicator stored | used        (SINGULAR "credential")
-//	initial_transaction_id      the gateway transactionid of the sequence's
-//	                            initial CIT — NMI's own id, which the gateway
-//	                            maps to the network transaction identifier
-//	                            internally; never a raw network NTID
-//	billing_method              recurring — sent on recurring-agreement charges
-//	                            only; unscheduled CoF sends NO billing_method
+//	stored_credential_indicator stored | used   (singular "credential")
+//	initial_transaction_id      NMI's transactionid of the sequence's initial
+//	                            CIT (NMI maps it to the network id), never a raw NTID
+//	billing_method              recurring, on recurring-agreement charges only
 //
 // The portal's canonical combinations:
 //
@@ -27,8 +23,7 @@ import (
 //	unscheduled CIT reuse:                           initiated_by=customer stored_credential_indicator=used
 //	unscheduled MIT:                                 initiated_by=merchant stored_credential_indicator=used initial_transaction_id=…
 //
-// References do NOT cross agreement types ("This transaction ID cannot be
-// used for 'unscheduled' … credential-on-file transactions").
+// References do not cross agreement types.
 type StoredCredential struct {
 	InitiatedBy          string // "customer" | "merchant"
 	Indicator            string // "stored" | "used"
@@ -78,9 +73,8 @@ func (sc *StoredCredential) Validate() error {
 }
 
 // ApplyToForm stamps the credential-on-file fields onto a classic Direct Post
-// form. It remains nil-safe as a form helper, but every money-moving caller
-// validates the value first. Exported for the custodian-proxied transport
-// (#795), which composes the same classic sale form for BT-proxy delivery.
+// form. nil-safe, but money-moving callers validate first. The
+// custodian-proxied transport composes the same form.
 func (sc *StoredCredential) ApplyToForm(values url.Values) {
 	if sc == nil {
 		return

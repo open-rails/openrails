@@ -40,9 +40,7 @@ type DeleteCustomerVaultData struct {
 
 type CreateCustomerVaultResponse struct {
 	CustomerVaultID string
-	// BillingID is the created billing entry's id (the instrument-scope handle
-	// inside the vault). Recorded verbatim (#682: safe to capture now that the
-	// rebill-driver mode has its own column and no longer keys off this).
+	// BillingID is the created billing entry's id, recorded verbatim.
 	BillingID string
 	// Card is the gateway's masked display data for the stored card.
 	Card V5BillingCardData
@@ -50,11 +48,9 @@ type CreateCustomerVaultResponse struct {
 
 func (d *CreateCustomerVaultData) v5Billing(requireToken bool) (*v5CustomerBillingRequest, error) {
 	billing := &v5CustomerBillingRequest{
-		// The live v5 create-customer REQUIRES a billing currency (verified
-		// 2026-07-01; the docs omit it). The classic API had no such field —
-		// the gateway defaulted to the account currency. USD mirrors the
-		// existing money-path default (money.DefaultCurrency) for the one
-		// account class we run NMI on.
+		// The live v5 create-customer requires a billing currency (the docs
+		// omit it). USD matches money.DefaultCurrency for the one account
+		// class OpenRails runs on NMI.
 		Currency:  "USD",
 		FirstName: d.FirstName,
 		LastName:  d.LastName,
@@ -105,11 +101,9 @@ func (c *NMIClient) CreateCustomerVault(ctx context.Context, data CreateCustomer
 }
 
 // UpdateCustomerVault updates the primary billing record (payment token
-// and/or address fields) via PATCH /v5/customers/{id}. The live gateway
-// REQUIRES billing[].id (verified 2026-07-01 — the documented
-// omit-for-priority-1 behavior 400s). Callers that already know the exact
-// billing entry pass BillingID; otherwise the priority-1 id is resolved with
-// a read first.
+// and/or address) via PATCH /v5/customers/{id}. The live gateway requires
+// billing[].id (the documented omit-for-priority-1 400s), so without
+// BillingID the priority-1 id is read first.
 func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomerVaultData) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -156,12 +150,10 @@ func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomer
 	return nil
 }
 
-// DeleteCustomerBillingEntry removes ONE stored card from a multi-entry vault
-// via DELETE /v5/customers/{vault}/billing/{billing_id} (live-verified
-// 2026-07-02; the DOCUMENTED /billing-addresses/{id} path answers
-// E_ROUTE_NOT_FOUND). NMI refuses to empty a vault ("Customer Vault must have
-// at least one billing", HTTP 400) — deleting the LAST entry means deleting
-// the whole vault customer instead (DeleteCustomerVault).
+// DeleteCustomerBillingEntry removes one stored card from a multi-entry vault
+// via DELETE /v5/customers/{vault}/billing/{billing_id} (live-verified; the
+// documented /billing-addresses/{id} answers E_ROUTE_NOT_FOUND). NMI refuses
+// to empty a vault (HTTP 400), so the last entry goes with DeleteCustomerVault.
 func (c *NMIClient) DeleteCustomerBillingEntry(ctx context.Context, vaultID, billingID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err

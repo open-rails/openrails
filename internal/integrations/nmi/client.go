@@ -36,47 +36,31 @@ type NMIClient struct {
 	providerName       string
 	SecurityKey        string
 	WebhookSecret      string
-	// DirectPostURL survives #663 for the two classic-only recurring ops
-	// (add_subscription, rebill_subscription); everything else is v5 JSON.
+	// DirectPostURL is the classic transact endpoint: sales, validates,
+	// recurring ops and server card vaulting. Other mutations are v5 JSON.
 	DirectPostURL string
-	// QueryURL survives #663 for transaction SEARCH only (v5 has no
-	// payments list/search; v4's report endpoint is partner-key-only).
+	// QueryURL is the classic Query API: v5 has no payments search and v4's
+	// report endpoint is partner-key-only.
 	QueryURL           string
 	V5BaseURL          string
 	TestMode           bool
 	endpointDeployment string
-	// ReadOnly blocks EVERY mutation — classic direct-post AND v5 non-GET —
-	// with ErrProviderReadOnly; reads stay available. Set when mode=readonly
-	// (#346) at client build.
+	// ReadOnly blocks every mutation, classic and v5 non-GET, with
+	// ErrProviderReadOnly; reads stay available.
 	ReadOnly bool
 	// LoopbackFixture marks an explicitly declared loopback fake gateway:
 	// mutations skip posture verification but only reach literal loopback IPs.
 	LoopbackFixture bool
 	proxyFixture    bool
-	// httpClient bounds every gateway call with a timeout so a slow/hung NMI
-	// endpoint fails fast instead of blocking the request forever (#363/#367).
-	// The default http.DefaultClient used by http.PostForm has NO timeout.
+	// httpClient is timeout-bounded; http.DefaultClient has no timeout.
 	httpClient *http.Client
 }
 
-// Per-request deadlines. Split on the SAME axis the read-only guard and the
-// ambiguity classifier already use — mutation vs read — because the cost of a
-// timeout differs entirely between the two:
-//
-//   - A MUTATION that times out is an UNKNOWN outcome (TransportAmbiguousError):
-//     it may have moved money, so the caller must go verify at the gateway
-//     instead of retrying. Cutting this bound short manufactures ambiguity and
-//     buys an expensive verify round-trip, so it stays generous — a card
-//     authorization crossing issuer networks legitimately takes double-digit
-//     seconds.
-//   - A READ that times out is unambiguous: nothing happened, ask again next
-//     cycle. Here the scarce resource is the worker slot, not the answer.
-//     ProviderRefreshWorker pages through whole rosters, so N stalled pages
-//     cost 10s*N rather than 25s*N.
-//
-// These bound one round-trip. The CALLER's context still wins when it is
-// shorter or already canceled — that is the point of the ctx plumbing: a
-// canceled job aborts an in-flight call instead of burning the full bound.
+// Per-request deadlines, split mutation vs read. A mutation that times out is
+// an unknown outcome the caller must verify, so its bound is generous: a card
+// authorization can take double-digit seconds. A read that times out is just
+// retried, so its bound is short to free the worker slot. A shorter or
+// canceled caller ctx still wins.
 const (
 	nmiMutationTimeout = 25 * time.Second
 	nmiReadTimeout     = 10 * time.Second
@@ -116,18 +100,16 @@ func (e *CustomerVaultError) Error() string {
 	return fmt.Sprintf("%s (%s)", e.Message, strings.Join(extras, ", "))
 }
 
-// newClient builds an unbound client. Every caller outside this package goes
-// through NewAccountClient: an NMI client never exists without the merchant,
-// PSP, account and endpoint deployment its credential belongs to (#1055).
+// newClient builds an unbound client. Callers outside this package use
+// NewAccountClient: an NMI client never exists without the merchant, PSP,
+// account and endpoint deployment its credential belongs to.
 func newClient(provider string, cfg *config.NMIProviderSettings, testMode bool) (*NMIClient, error) {
 	if cfg == nil {
 		return nil, errors.New("nmi provider configuration is required")
 	}
 
-	// No construction-time warn for a missing webhook secret: clients are built
-	// for catalog ops and credential probes where it is irrelevant (the arm PUT
-	// probe fires before the secret write lands, #845). The webhook path itself
-	// errors loudly when verification runs without a secret.
+	// No warning for a missing webhook secret: clients also serve catalog ops
+	// and credential probes. Webhook verification fails loudly without one.
 	webhookSecret := strings.TrimSpace(cfg.WebhookSecret)
 
 	securityKey := strings.TrimSpace(cfg.SecurityKey)
@@ -204,14 +186,12 @@ func (c *NMIClient) client() *http.Client {
 	return &http.Client{Timeout: nmiMutationTimeout}
 }
 
-// newRequest builds the ONE kind of outbound request this package makes: one
-// carrying the caller's context, bounded by a deadline chosen from the
-// mutation/read axis. Every NMI byte leaves through here (via sendDirectRequest,
-// sendQueryRequest or sendV5Request) — there is no other request constructor in
-// the package, and the `noctx` linter keeps it that way.
+// newRequest builds every outbound NMI request (direct, query and v5): it
+// carries the caller's ctx under the mutation or read deadline. The noctx
+// linter forbids any other constructor.
 //
-// The returned cancel MUST be called by the caller (defer) once the response
-// body is fully read; cancelling earlier aborts the body read.
+// The caller must defer cancel until the body is fully read; cancelling
+// earlier aborts the read.
 func (c *NMIClient) newRequest(ctx context.Context, method, url string, body io.Reader, mutating bool) (*http.Request, context.CancelFunc, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -289,10 +269,9 @@ func newSaleError(rawResponse string, output url.Values) error {
 }
 
 // ErrDuplicateTransaction marks NMI's duplicate-check refusal (response=3,
-// code 300, "Duplicate transaction"): the gateway matched the card and amount
-// to a recent transaction and rejected THIS request without processing it.
-// Callers holding a unique durable order for the request may treat it as not
-// executed; others keep verifying, as the error is also ambiguous.
+// code 300, "Duplicate transaction"): this request was rejected unprocessed.
+// Only a caller holding a unique durable order may treat it as not executed;
+// it is also ambiguous, so others verify.
 var ErrDuplicateTransaction = errors.New("nmi: gateway refused a duplicate transaction without processing it")
 
 func duplicateRefusal(output url.Values, responseCode int) bool {
@@ -428,9 +407,8 @@ func (c *NMIClient) sendDirectBody(ctx context.Context, requestType string, body
 	return string(answer), nil
 }
 
-// sendQueryRequest is the transaction SEARCH survivor: a POST on the wire, but
-// semantically a READ (no gateway state changes), so it takes the read bound
-// and its failures are never wrapped ambiguous.
+// sendQueryRequest posts to the Query API: a POST on the wire but a read, so
+// it takes the read bound and its failures are never ambiguous.
 func (c *NMIClient) sendQueryRequest(ctx context.Context, data url.Values) (_ string, err error) {
 	req, cancel, err := c.newRequest(ctx, http.MethodPost, c.QueryURL, strings.NewReader(data.Encode()), false)
 	if err != nil {

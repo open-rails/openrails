@@ -481,8 +481,8 @@ func TestAddCustomerBillingEntryNamesTheAddedCard(t *testing.T) {
 	}
 }
 
-// or#866: a canceled caller context aborts the in-flight call; a mutation
-// aborted mid-flight stays an unknown outcome.
+// A canceled caller context aborts the in-flight call; a mutation aborted
+// mid-flight stays an unknown outcome.
 func TestStalledGatewayHonorsCallerContext(t *testing.T) {
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -30,26 +30,22 @@ type RecurringPaymentData struct {
 	CardUserData
 	PlanID          string
 	CustomerVaultID string
-	// BillingID binds the subscription to ONE stored card in the vault (#682
-	// shared-vault support); "" uses the vault's priority-1 entry — always
-	// correct under the one-vault-per-card minting policy.
+	// BillingID binds the subscription to one stored card in the vault; ""
+	// uses the vault's priority-1 entry.
 	BillingID    string
 	Email        string
 	Currency     string
 	PaymentToken string
-	// Amount is the enrollment first charge in integer CENTS (#818); it is
-	// rendered onto the classic wire by centsToDollarString — the same integer
-	// formatter the plan amount uses, so enrollment and plan never disagree.
+	// Amount is the enrollment first charge in minor units, rendered by
+	// WireAmount like the plan amount so the two never disagree.
 	Amount     moneyutil.Cents
 	OrderID    string
 	PONumber   string
 	CustomerID string
 	StartDate  string
-	// StoredCredential carries the CIT credential-on-file fields (#297) for the
-	// enrollment charge — the portal's recurring initial CIT "MUST INCLUDE"
-	// billing_method=recurring + initiated_by=customer +
-	// stored_credential_indicator=stored (billing_method is already always sent
-	// by this lane). It is required.
+	// StoredCredential is the enrollment charge's recurring initial CIT
+	// (initiated_by=customer, stored_credential_indicator=stored; this lane
+	// always sends billing_method=recurring). Required; nil when ScheduleOnly.
 	StoredCredential *StoredCredential
 }
 
@@ -88,10 +84,9 @@ type ManualRebillParams struct {
 	SubscriptionID string
 	OrderID        string
 	PONumber       string
-	// StoredCredential carries the recurring-MIT credential-on-file fields
-	// (#297): initiated_by=merchant + stored_credential_indicator=used +
-	// initial_transaction_id=<recurring sequence anchor> + billing_method=
-	// recurring. It is required.
+	// StoredCredential is the recurring MIT: initiated_by=merchant,
+	// stored_credential_indicator=used, initial_transaction_id and
+	// billing_method=recurring. Required.
 	StoredCredential *StoredCredential
 }
 
@@ -204,10 +199,8 @@ func (c *NMIClient) AddRecurringSubscription(ctx context.Context, data Recurring
 	}, nil
 }
 
-// UpdateRecurringSubscription stays on classic Direct Post DELIBERATELY
-// (#663): PATCH /v5/subscriptions/{id} is documented but the live gateway
-// answers E_ROUTE_NOT_FOUND (verified 2026-07-01) — subscription updates have
-// no working v5 route.
+// UpdateRecurringSubscription uses classic Direct Post: the documented PATCH
+// /v5/subscriptions/{id} answers E_ROUTE_NOT_FOUND on the live gateway.
 func (c *NMIClient) UpdateRecurringSubscription(ctx context.Context, subscriptionID, planAmount string, planPayments int) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err
@@ -277,9 +270,8 @@ func (s V5Subscription) NamedPlan() bool {
 	return s.Plan != nil && strings.TrimSpace(s.Plan.PlanName) != "" && strings.TrimSpace(s.Plan.ID) != ""
 }
 
-// UpdateSubscriptionPaymentSource stays on classic Direct Post DELIBERATELY
-// (#663): the v5 subscription-update route does not exist on the live gateway
-// (see UpdateRecurringSubscription).
+// UpdateSubscriptionPaymentSource uses classic Direct Post: v5 has no live
+// subscription-update route (see UpdateRecurringSubscription).
 func (c *NMIClient) UpdateSubscriptionPaymentSource(ctx context.Context, subscriptionID, customerVaultID string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -315,8 +307,8 @@ func (c *NMIClient) UpdateSubscriptionPaymentSource(ctx context.Context, subscri
 }
 
 // ErrProviderReadOnly is returned by every NMI mutation when the provider is
-// read-only (mode=readonly, #346). A reactive operation that needed the write
-// has genuinely failed and must surface as an error.
+// read-only. A reactive operation that needed the write has failed and must
+// surface as an error.
 var ErrProviderReadOnly = errors.New("nmi: provider writes are blocked (mode=readonly)")
 
 // DeleteRecurringSubscription cancels a subscription via
@@ -336,9 +328,8 @@ func (c *NMIClient) DeleteRecurringSubscription(ctx context.Context, subscriptio
 	return nil
 }
 
-// AttemptManualRebill stays on classic Direct Post DELIBERATELY (#663):
-// recurring=rebill_subscription (charge the subscription NOW, against its own
-// schedule state) has no v5 equivalent of any kind.
+// AttemptManualRebill uses classic Direct Post: recurring=rebill_subscription
+// (charge the schedule now, against its own state) has no v5 equivalent.
 func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebillParams) (*ManualRebillResponse, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return &ManualRebillResponse{Success: false, ErrorMessage: err.Error()}, err
@@ -402,11 +393,9 @@ func (c *NMIClient) AttemptManualRebill(ctx context.Context, params ManualRebill
 	return result, nil
 }
 
-// AddRecurringPlan creates a new NMI Recurring Plan via POST /v5/plans. NMI
-// plan amounts are dollars; OpenRails stores integer cents, converted at this
-// wire boundary. dayFrequency is the billing interval in days; planPayments is
-// the total number of payments (0 = bill forever). Frequency and payments are
-// immutable once a plan is created.
+// AddRecurringPlan creates an NMI recurring plan via POST /v5/plans; the amount
+// is rendered by WireAmount. dayFrequency is the interval in days, planPayments
+// the total payments (0 = forever); both are immutable once the plan exists.
 func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents, currency string, dayFrequency, planPayments int) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -439,11 +428,9 @@ func (c *NMIClient) AddRecurringPlan(ctx context.Context, planID, planName strin
 	return nil
 }
 
-// EditRecurringPlan stays on classic Direct Post DELIBERATELY (#663): the
-// documented PATCH /v5/plans/{id} answers E_ROUTE_NOT_FOUND on the live
-// gateway (verified 2026-07-01). NMI only permits the plan name and amount to
-// change; frequency and payment count are immutable once a plan exists.
-// planAmountCents is converted from cents to a dollar string for NMI.
+// EditRecurringPlan uses classic Direct Post: the documented PATCH
+// /v5/plans/{id} answers E_ROUTE_NOT_FOUND on the live gateway. NMI lets only
+// the plan name and amount change.
 func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName string, planAmountCents moneyutil.Cents, currency string) error {
 	if err := c.checkConfiguration(); err != nil {
 		return err
@@ -457,10 +444,8 @@ func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName stri
 		return err
 	}
 
-	// current_plan_id identifies the plan being edited (live-verified
-	// 2026-07-01; sending plan_id instead answers "Invalid Recurring Plan ID"
-	// — the pre-#663 code did exactly that, so plan edits had NEVER worked
-	// against the live gateway).
+	// current_plan_id names the plan to edit (live-verified); plan_id answers
+	// "Invalid Recurring Plan ID".
 	values := url.Values{
 		"recurring":       {"edit_plan"},
 		"security_key":    {c.SecurityKey},
@@ -487,16 +472,14 @@ func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName stri
 	return nil
 }
 
-// centsToDollarString converts integer cents into a fixed two-decimal dollar
-// string as required by NMI's classic plan_amount parameter.
+// centsToDollarString renders cents as a fixed two-decimal dollar string.
 func centsToDollarString(cents moneyutil.Cents) string {
 	return string(centsJSONAmount(cents))
 }
 
-// RecurringPlanDetail is the parsed view of a single NMI recurring plan
-// returned by GetRecurringPlanDetailByID. Found=false means no plan matched
-// the id. DayFrequency is the billing interval in days; it is 0 when the plan
-// is month-based (parity with the classic recurring_plans report).
+// RecurringPlanDetail is one NMI recurring plan from GetRecurringPlanDetailByID.
+// Found=false means no plan matched the id. DayFrequency is the interval in
+// days, 0 for a month-based plan.
 type RecurringPlanDetail struct {
 	ID           string
 	Payments     *int
@@ -554,10 +537,9 @@ func (c *NMIClient) GetRecurringPlanDetailByID(ctx context.Context, planID, curr
 	return RecurringPlanDetail{Found: true, ID: plan.ID, Name: plan.PlanName, AmountCents: int64(minor), DayFrequency: dayFreq, Payments: payments}, nil
 }
 
-// SearchTransactions stays on the classic Query API (query.php) DELIBERATELY
-// (#663): v5 payments has no list/search endpoint (only GET by known id), and
-// v4's transaction report requires a partner-portal key. This is the bulk
-// reconcile pull and the order-id evidence probes' read path.
+// SearchTransactions uses the classic Query API: v5 has no payments search
+// (only GET by id) and v4's transaction report needs a partner key. It is the
+// bulk reconcile pull and the order-id probes' read path.
 func (c *NMIClient) SearchTransactions(ctx context.Context, filter QueryFilter) (string, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return "", err

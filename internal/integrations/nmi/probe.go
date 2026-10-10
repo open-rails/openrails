@@ -13,32 +13,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Test-mode account detection (#348).
+// Sandbox qualification probe (the regular gateway answers test_mode_status
+// instead). The test card 4111… is a non-issued PAN no real rail approves, so
+// one auth decides: approved = simulated, declined = live, request-level error
+// = indeterminate. On a live account the auth is declined and moves no money;
+// an approved simulated auth is voided, best effort.
 //
-// NMI sandbox/test accounts are indistinguishable by configuration: they hit
-// the SAME production gateway URL and the security key carries no marker
-// (unlike Stripe's sk_test_/sk_live_ prefixes). What IS distinguishable is
-// behavior: the canonical test card (4111...) is a non-issued PAN that no
-// production rail can ever approve, while a test-mode account simulates
-// approval for it without touching a rail
-// (docs.nmi.com/reference/testing-methods). One authorization-only probe is
-// therefore conclusive:
-//
-//	auth on the test card APPROVED -> the account is simulating (safe)
-//	auth on the test card DECLINED -> the account is LIVE
-//	transport/credential errors (response=3) -> indeterminate
-//
-// The probe is harmless on a live account — an auth on a non-issued PAN is
-// declined and no money can move (it does cost one declined-attempt gateway
-// fee, typically cents). An approved simulated auth is voided (best-effort)
-// for tidiness.
-//
-// The amount and order_id are randomized per attempt: NMI's duplicate-
-// transaction check rejects a repeat of the same card+amount+order_id within
-// its window (response=3 "Duplicate transaction"), and the rail refuses
-// dup_seconds=0, so a fixed probe would turn back-to-back boots (#362) into
-// ProbeIndeterminate. The verdict is amount-independent — no production
-// rail approves a non-issued PAN at any amount.
+// Amount and order_id are randomized per attempt: NMI's duplicate check
+// rejects a repeat card+amount+order_id in its window and refuses
+// dup_seconds=0. No real rail approves a non-issued PAN at any amount.
 
 const (
 	probeTestCard      = "4111111111111111"
@@ -46,10 +29,9 @@ const (
 	probeOrderIDPrefix = "openrails-testmode-probe-"
 )
 
-// probeAmount returns a randomized auth amount in [$1.01, $1.99] so repeated
-// probes never trip duplicate-transaction detection. crypto/rand is used (over
-// math/rand) only to satisfy gosec G404 — randomness here is for uniqueness,
-// not security; a read failure just degrades to the lower bound.
+// probeAmount is a random auth amount in [$1.01, $1.99] so repeated probes miss
+// duplicate detection. crypto/rand only satisfies gosec G404; a read failure
+// degrades to the lower bound.
 func probeAmount() moneyutil.Cents {
 	var b [1]byte
 	_, _ = rand.Read(b[:])

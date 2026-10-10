@@ -17,16 +17,11 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// v5 JSON API transport (#663). Everything except three classic survivors runs
-// through here:
-//   - transact.php keeps ONLY recurring=add_subscription (atomic first-charge +
-//     enroll + delayed start has no v5 equivalent) and recurring=rebill_subscription
-//     (no v5 equivalent at all);
-//   - query.php keeps ONLY transaction SEARCH (v5 payments has no list/search,
-//     v4's report endpoint is partner-key-only).
+// v5 JSON API transport. The classic endpoints remain where v5 lacks a route
+// or field OpenRails needs (see DirectPostURL and QueryURL).
 //
-// Auth: the classic security key IS the v5 credential ("no need to generate new
-// API keys"), sent as the ENTIRE Authorization header value — no Bearer/scheme.
+// Auth: the classic security key is the v5 credential, sent as the entire
+// Authorization header value (no scheme).
 
 const (
 	DefaultV5BaseURL = "https://secure.nmi.com/api/v5"
@@ -40,7 +35,7 @@ var ErrV5NotFound = errors.New("nmi: resource not found")
 var ErrV5Refused = errors.New("nmi v5 refused the request")
 
 // centsJSONAmount renders integer cents as an exact two-decimal JSON number
-// (1099 -> 10.99). Never float math: this is a money wire boundary (#671).
+// (1099 -> 10.99), never via float: a money wire boundary.
 func centsJSONAmount(cents moneyutil.Cents) json.RawMessage {
 	neg := ""
 	if cents < 0 {
@@ -72,10 +67,9 @@ func (c *NMIClient) sendV5Request(ctx context.Context, method, path string, body
 		reqBody = bytes.NewReader(encoded)
 	}
 
-	// Non-GET = mutation: failures past the send may have executed at the
-	// gateway and are wrapped transport-ambiguous (#674). Parsed 4xx envelopes
-	// stay clean (the gateway rejected the REQUEST); 5xx / lost responses do not.
-	// The same flag picks the deadline (mutation bound vs read bound).
+	// Non-GET is a mutation: failures past the send may have executed and are
+	// wrapped transport-ambiguous; parsed 4xx envelopes stay clean. The flag
+	// also picks the deadline.
 	mutating := method != http.MethodGet
 
 	req, cancel, err := c.newRequest(ctx, method, c.v5BaseURL()+path, reqBody, mutating)
@@ -144,8 +138,6 @@ func (c *NMIClient) v5BaseURL() string {
 	return DefaultV5BaseURL
 }
 
-// --- payments ---
-
 // v5PaymentDetails is the request-side payment_details object. Exactly one
 // variant: raw card (test-mode probe only) or Collect.js / Payment Component
 // token. Vault charges use the top-level customer_vault:{id} object instead
@@ -162,9 +154,8 @@ type v5OrderDetails struct {
 }
 
 // v5CustomerVaultRef charges a stored vault customer. The docs show
-// payment_details.customer_vault_id for vault sales, but the live gateway
-// rejects that as an extra parameter and wants a top-level
-// customer_vault:{id} object (verified 2026-07-01).
+// payment_details.customer_vault_id, but the live gateway rejects it as an
+// extra parameter and wants a top-level customer_vault:{id} object.
 type v5CustomerVaultRef struct {
 	ID string `json:"id"`
 }
@@ -213,9 +204,8 @@ func (t *v5Transaction) resultCode() int {
 	return code
 }
 
-// newV5TransactionError maps a declined/errored v5 transaction onto the same
-// CustomerVaultError shape the classic path produced, so caller error handling
-// (localization ids, hard/soft decline classification) is unchanged.
+// newV5TransactionError maps a v5 decline (response=2, 2xx code) onto the
+// classic CustomerVaultError shape; any other outcome is ambiguous.
 func newV5TransactionError(prefix string, txn *v5Transaction) error {
 	code, _ := strconv.Atoi(strings.TrimSpace(txn.ResponseCode))
 	if strings.TrimSpace(txn.Response) != "2" || code < 200 || code >= 300 {
@@ -230,8 +220,6 @@ func newV5TransactionError(prefix string, txn *v5Transaction) error {
 		RawResponse:    string(rawResponse),
 	}
 }
-
-// --- customers (Customer Vault) ---
 
 type v5CustomerBillingRequest struct {
 	// ID targets an existing billing entry on update; the live gateway
@@ -261,7 +249,7 @@ type V5CustomerBilling struct {
 	PaymentDetails V5BillingCardData `json:"payment_details"`
 }
 
-// v5BillingCardData is the response-side stored payment method (masked).
+// V5BillingCardData is the response-side stored payment method (masked).
 type V5BillingCardData struct {
 	CardNumber string `json:"card_number"`
 	CardExp    string `json:"card_exp"`
@@ -288,9 +276,9 @@ func (c *V5Customer) PrimaryBilling() *V5CustomerBilling {
 	return nil
 }
 
-// V5Cursor is a v5 pagination cursor. The docs declare next_cursor as a
-// nullable integer, but the live gateway returns a STRING (verified
-// 2026-07-01) — decode both, normalize to string ("" = no more pages).
+// V5Cursor is a v5 pagination cursor. The docs declare next_cursor a nullable
+// integer but the live gateway returns a string; both decode ("" = no more
+// pages).
 type V5Cursor string
 
 func (c *V5Cursor) UnmarshalJSON(raw []byte) error {
@@ -381,8 +369,6 @@ func (c *NMIClient) GetCustomer(ctx context.Context, id string) (V5Customer, boo
 	return customer, true, nil
 }
 
-// --- subscriptions ---
-
 // V5Subscription is the slice of the v5 subscription resource openrails reads.
 type V5Subscription struct {
 	Object          string `json:"object"`
@@ -391,10 +377,10 @@ type V5Subscription struct {
 	NextBillingDate string `json:"next_billing_date"`
 	Amount          string `json:"amount"`
 	CustomerVaultID string `json:"customer_vault_id"`
-	// DelayedCondition is NMI's de-facto lifecycle flag (live-verified
-	// 2026-07-01): "active" on every live subscription, "inactive" after a
-	// delete. The v5 GET keeps answering 200 for deleted subscriptions (a
-	// tombstone) — only never-existed ids 404. The LIST excludes deleted ones.
+	// DelayedCondition is NMI's de-facto lifecycle flag (live-verified):
+	// "active" on live subscriptions, "inactive" after a delete. The v5 GET
+	// answers 200 for deleted ones (a tombstone); only never-existed ids 404.
+	// The list excludes deleted ones.
 	DelayedCondition   string  `json:"delayed_condition"`
 	PausedSubscription any     `json:"paused_subscription"` // "0"/"1" string on the wire despite docs
 	Plan               *V5Plan `json:"plan"`
@@ -458,11 +444,10 @@ func (c *NMIClient) ListSubscriptionsPage(ctx context.Context, cursor string, pe
 	return SubscriptionPage{Subscriptions: *wire.Subscriptions, NextCursor: wire.NextCursor, HasMore: *wire.HasMore}, nil
 }
 
-// GetSubscription fetches one subscription by id. found=false when the
-// subscription is GONE at NMI — either a 404 (never existed) or a deletion
-// tombstone (200 with delayed_condition=inactive; live-verified 2026-07-01).
-// found therefore means "live recurring record", matching the classic
-// recurring report's absence-is-terminal semantics that #664/#665 depend on.
+// GetSubscription fetches one subscription by id. found=false when it is gone
+// at NMI: a 404 (never existed) or a deletion tombstone (200 with
+// delayed_condition=inactive; live-verified). found means a live recurring
+// record, so absence is terminal.
 func (c *NMIClient) GetSubscription(ctx context.Context, subscriptionID string) (V5Subscription, bool, error) {
 	var sub V5Subscription
 	if err := c.checkConfiguration(); err != nil {
@@ -543,11 +528,8 @@ func (c *NMIClient) GetPaymentActions(ctx context.Context, transactionID string)
 	return out, true, nil
 }
 
-// --- plans ---
-
 // v5PlanCreateRequest: the docs call the identifier `plan_id`, but the live
-// gateway rejects that as an extra parameter and wants `id` (verified
-// 2026-07-01).
+// gateway rejects that as an extra parameter and wants `id`.
 type v5PlanCreateRequest struct {
 	PlanID       string          `json:"id"`
 	PlanName     string          `json:"plan_name"`

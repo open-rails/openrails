@@ -8,9 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// PrepareRecurringSale verifies the native engine's supported single-card vault
-// without moving money. Unlike legacy sales, the engine never selects a default
-// billing entry. This read proves the account/instrument binding, not consent.
+// PrepareRecurringSale verifies the engine's single-card vault and billing
+// entry without moving money; the engine never charges a default entry. It
+// proves the account/instrument binding, not consent.
 func (c *NMIClient) PrepareRecurringSale(ctx context.Context, vaultID, billingID string) error {
 	if c == nil || c.accountMerchantID == uuid.Nil || c.accountPSPID == uuid.Nil || c.accountSecurityKey == "" || c.SecurityKey != c.accountSecurityKey {
 		return errors.New("native recurring sale requires its immutable account credentials")

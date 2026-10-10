@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
 
-// What NMI's transaction history can tell apart (#1114, #1120).
+// Authorization kinds NMI's transaction history can tell apart.
 const (
 	HistoryVerification    = "verification"
 	HistoryOneOffSale      = "one_off_sale"
@@ -47,12 +47,10 @@ type DeclineHistory struct {
 	Undated int
 }
 
-// DeclineHistory reads the card verifications, one-off sales and scheduled
-// rebills NMI answered in [since, until), each counted once in the month it
-// was made. It writes nothing. The Query API selects a transaction by its
-// last change, so until should be now; it is read one calendar month per
-// query, oldest first, in pages of QueryPageLimit. `openrails nmi
-// decline-report` and the history job both read through it (#1120).
+// DeclineHistory counts the card verifications, one-off sales and scheduled
+// rebills NMI answered in [since, until), once each in the month made. Read
+// only. The Query API selects by last change, so until should be now; it reads
+// one calendar month per query, oldest first, in pages of QueryPageLimit.
 func (c *NMIClient) DeclineHistory(ctx context.Context, since, until time.Time) (DeclineHistory, error) {
 	h := DeclineHistory{Since: since.UTC(), Until: until.UTC()}
 	counts := map[HistoryCount]int{}

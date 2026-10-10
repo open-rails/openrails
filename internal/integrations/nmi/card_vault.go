@@ -12,14 +12,12 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 )
 
-// Server card entry (#1129): the card reached OpenRails itself, so it is
-// vaulted with the classic Direct Post Customer Vault call. v5 POST /customers
-// is documented to take a card in payment_details but has not been probed
-// against the live gateway; the classic call is the one known to work.
+// Server card entry uses the classic Direct Post Customer Vault call: v5 POST
+// /customers documents a card in payment_details but is unproven live.
 //
-// The caller names the vault and billing entry. An outcome lost in transit is
-// then settled by reading that vault, never by sending the card again: the
-// card is wiped when either call returns and is recorded nowhere.
+// The caller names the vault and billing entry, so an outcome lost in transit
+// is settled by reading that vault, never by resending the card. The card is
+// wiped when either call returns and is recorded nowhere.
 
 // CreateCustomerVaultFromCard vaults card as a new customer vault vaultID whose
 // one billing entry is billingID. The response's BillingID and Card are empty:
@@ -119,8 +117,8 @@ func (c *NMIClient) vaultCard(ctx context.Context, action, vaultID, billingID st
 // 4 digits.
 const cardFieldsCap = 64
 
-// vaultRefusalText is the gateway's responsetext with any digit run long
-// enough to be a card number removed.
+// vaultRefusalText is the gateway's responsetext, or "refused" when it may
+// hold a card number.
 func vaultRefusalText(out url.Values) string {
 	text := strings.TrimSpace(out.Get("responsetext"))
 	if cardguard.ContainsPAN(text) {

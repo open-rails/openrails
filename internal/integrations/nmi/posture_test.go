@@ -161,10 +161,9 @@ func TestSandboxDeploymentUsesQualificationProbeOnce(t *testing.T) {
 	require.EqualValues(t, 3, g.mutations.Load())
 }
 
-// SEC-33 after a restart: posture now verifies in the background, so a live
-// credential this process has not seen yet is checked inline, once, before its
-// first mutation. A test-mode account is refused; a live one proceeds and is
-// not re-queried per mutation.
+// A live credential this process has not seen is checked inline, once, before
+// its first mutation. A test-mode account is refused; a live one proceeds and
+// is not re-queried per mutation.
 func TestLivePostureUnseenCredentialVerifiesInlineBeforeFirstMutation(t *testing.T) {
 	live := func(g *fakeGateway) *NMIClient {
 		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: config.NMIEndpointGateway}, false)
@@ -219,9 +218,9 @@ func TestProxyPostureBindsCredentialAndDestination(t *testing.T) {
 	require.ErrorIs(t, none.RequireArmedFor(context.Background(), DefaultDirectPostURL, "proxy-key"), providerposture.ErrDisarmed)
 }
 
-// SEC-33: under live posture an NMI account must prove it is live. An account
-// left in test mode approves without moving money, so every mutation is
-// refused before it is sent; the sandbox endpoint is refused outright.
+// Under live posture an NMI account must prove it is live. An account left in
+// test mode approves without moving money, so every mutation is refused before
+// it is sent; the sandbox endpoint is refused outright.
 func TestLivePostureRefusesTestModeAccount(t *testing.T) {
 	live := func(g *fakeGateway, deployment string) *NMIClient {
 		client, err := NewAccountClient(uuid.New(), uuid.New(), "nmi", &config.NMIProviderSettings{SecurityKey: "live-" + uuid.NewString(), EndpointDeployment: deployment}, false)

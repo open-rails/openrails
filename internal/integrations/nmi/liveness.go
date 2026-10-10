@@ -11,11 +11,8 @@ import (
 	"github.com/open-rails/openrails/internal/decline"
 )
 
-// Read-only liveness probes over the NMI Query API (query.php). Shared by the
-// dunning manual-rebill verifier (#358) and the unknown-cohort per-subscription
-// probe (#665, reconcile.NMISubscriptionProber): both answer "what does the
-// provider believe happened?" by READS — no direct-post mutation is reachable
-// from this file.
+// Read-only probes of what NMI believes happened (Query API and v5 GETs); no
+// mutation is reachable from this file.
 
 // QueryTimeFormat is the Query API start_date/end_date (and action <date>)
 // timestamp layout: YYYYMMDDhhmmss.
