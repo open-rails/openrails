@@ -33,9 +33,7 @@ OpenRails integrates with several payment-processors:
 
 ### How to Install (Embedded)
 
-You'll need a Go webserver, and Postgres (v18 or higher).
-
-Here we'll build a simple app where users register / login with [AuthKit](https://github.com/open-rails/authkit), buy CSS courses individually or as a bundle, and can buy a recurring monthly or annual membership.
+ We'll embed OpenRails the library into your Go webserver (you can alternatively run OpenRails as its own standalone server separately--see below). In this example, we'll have a simple site where users register / login with [AuthKit](https://github.com/open-rails/authkit) and buy CSS courses individually or as a bundle, and buy a recurring monthly or annual membership.
 
 First install:
 
@@ -93,20 +91,18 @@ products:
         billing_interval: 365 days
 ```
 
-Products and their prices are maps keyed by a stable key you choose. The entitlements are arbitrary strings; OpenRails tracks these, but it's up to your application to give them meaning.
+Products and their prices are maps keyed by a stable key you choose. The entitlements are arbitrary strings you choose; OpenRails tracks these, but it's up to your application to give them meaning. Above, we created strings for our membership and for individual products.
 
 #### Build the billing client
 
-You, the seller, and your payment processor account go in `merchant.yaml`. This
-one is an NMI gateway; declare as many PSPs as you like. The file holds your
-gateway's secret keys, so keep it out of version control:
+Next, configure your merchant. This contains secrets that allow OpenRails to talk to your PSP (payment service provider).
 
 ```yaml
 # merchant.yaml
 slug: onlydemo # your merchant's name: lowercase letters, digits and hyphens
 display_name: OnlyDemo
 psps:
-  mobius: # your name for this account; any key you like
+  paykings: # your name for this account; any key you like
     rail: nmi # the gateway kind: nmi, stripe, ccbill or solana
     account_id: "000000" # the NMI dashboard's "Gateway ID"
     settings:
@@ -139,14 +135,13 @@ import (
 )
 
 func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Client, error) {
-	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
+	// Load your PSP-configs from above
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
 		return nil, err
 	}
 
-	// What you sell. New applies each distinct catalog once, even across restarts.
-	// Later edits through the Go client remain available and are not undone by a replay.
+	// Your products + prices as a catalog. This can be safely applied on every server startup
 	products, err := catalog.ReadFile("catalog.yaml")
 	if err != nil {
 		return nil, err
@@ -154,14 +149,13 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
-		TestMode:          openrails.Sandbox,                           // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
+		TestMode:          openrails.Sandbox,                           // Supplied PSP credentials MUST be to a sandbox / testmode account, or else that PSP is disarmed
 		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
 		Merchant:          merchant,
 		Catalog:           products,
 	}
 
-	// Build the billing engine; it creates or upgrades its own tables. It has no logins
-	// of its own: your auth guards its routes when you mount them.
+	// This command will automatically apply its migrations and return a client
 	return openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db, // the same pool your app uses
 		Contacts: ak, // AuthKit answers each lookup with the user's current email and name
@@ -211,7 +205,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 })
 ```
 
-OpenRails checks four permissions of yours, and mounts a bundle of routes only
+OpenRails checks five permissions of yours, and mounts a bundle of routes only
 when you give its permission:
 
 | Bundle | Mounted | Who may call it |
@@ -219,12 +213,16 @@ when you give its permission:
 | public | always | anyone |
 | customer (`/v1/me`) | always | a signed-in customer, for their own billing |
 | webhooks | always | payment processors, verified by signature |
+| provisioning (`/scim/v2`) | standalone and hosted; embedded with `Provisioning: true` | your directory, with the merchant's provisioning token |
 | admin (`/v1/admin`) | with `AdminRead` (reads) and `AdminWrite` (writes) | staff holding that permission |
 | catalog edits (`/v1/admin/catalog`) | with `CatalogWrite` | staff holding that permission |
 | merchant config (`/v1/admin`) | with `MerchantConfig` | staff holding that permission |
+| programmatic (`/v1/app`) | with `App` | your backend's own credential, never a person |
 
 `AdminWrite` and `CatalogWrite` need `AdminRead`; catalog reads are admin
-reads. Writes that move money or remove access also ask for a recent sign-in.
+reads. Writes that move money or remove access also ask a person for a recent
+sign-in. Admin routes take whoever holds the permission, a person or your
+backend; programmatic routes take only your backend.
 
 #### Customer contact info
 
@@ -320,7 +318,7 @@ config:
 merchant := openrails.MerchantDeclaration{
 	Slug: "onlydemo",
 	PSPs: map[string]openrails.PSPConfig{
-		"mobius": openrails.NMIPSP{
+		"paykings": openrails.NMIPSP{
 			AccountID:            conf.NMI.GatewayID,
 			TokenizationKey:      conf.NMI.TokenizationKey,
 			SecurityKey:          conf.NMI.SecurityKey,
@@ -382,7 +380,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	bill, err := newBilling(ctx, db, ak)
+	bill, err := newBilling(ctx, db)
 	if err != nil {
 		return err
 	}
@@ -467,10 +465,16 @@ permissions:
   truth; your Go code can edit the catalog either way.
 - `Permissions.MerchantConfig`: the merchant's own configuration: PSPs,
   settings, billing import and export, the dashboard layout.
+- `Permissions.App`: the programmatic routes at `/billing/v1/app`, for your own
+  backend when it talks to OpenRails over HTTP (a standalone or hosted
+  OpenRails, or a service of yours not written in Go): usage, admissions,
+  provider operations, host events and orders it creates for its users. They
+  refuse a person even one holding the permission. Embedded, your Go code calls
+  the same operations on the `Client` and you can leave `App` out.
 - `AdminConsole`: the staff dashboard (below). Leaving it out, the default,
   mounts no dashboard routes at all.
 
-The Go `Client` has every admin, catalog and merchant-config route as a method, and
+The Go `Client` has every admin, catalog, merchant-config and programmatic route as a method, and
 checks no permission: code that holds the client is trusted.
 
 That is the whole server integration, and it is the program in
@@ -479,6 +483,191 @@ number: the browser hands the card to the processor's tokenization iframe, and
 OpenRails charges the stored token, rebills memberships at their interval,
 retries failed renewals, and keeps `CheckEntitlements` current. A rental's access
 ends after its 3 days; a canceled membership keeps access until its paid term ends.
+
+#### Routes
+
+The `Mount` above serves these routes. Paths are relative to the `Prefix` you mount at (`/billing` in this example, so `/v1/catalog/products` is served at `/billing/v1/catalog/products`):
+
+**Public** (always mounted; no sign-in)
+
+| Route | What it does |
+|---|---|
+| `GET /v1/catalog/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
+| `GET /v1/config` | how this deployment is set up: which route groups and features are on, the currency and rail registries, each PSP's public browser config, Solana tokens, and the captcha to solve when asked (billing-ui reads it once) |
+| `GET /v1/payment-method-setups/{id}` | the card page: what to show while a customer enters a card (the setup's secret is the credential, so the page can live on another host) |
+| `POST /v1/payment-method-setups/{id}/confirm` | enter the card |
+| `GET`, `POST /v1/solana-pay/{id}` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
+
+**Customer** (always mounted; a signed-in customer, acting only on their own billing)
+
+| Route | What it does |
+|---|---|
+| `GET /v1/me` | their balance per currency, the card that pays each currency, and unread notices |
+| `GET`, `DELETE /v1/me/cart` | their cart, priced now with the ways it can be paid; empty it |
+| `PUT /v1/me/cart/lines/{price_id}` | set a line's quantity (0 removes it) |
+| `POST /v1/me/orders` | buy lines or the cart, paying in the same call with a saved or new card, or leaving the order open to pay later (`/preview`: the total and the ways it can be paid) |
+| `GET /v1/me/orders`, `GET /v1/me/orders/{id}` | their orders; one order |
+| `POST /v1/me/orders/{id}/pay` | pay it, with a saved or new card |
+| `POST /v1/me/orders/{id}/confirm` | finish it after the processor's step (3-D Secure, a redirect, a wallet) |
+| `POST /v1/me/orders/{id}/cancel` | cancel an unpaid order |
+| `GET /v1/me/entitlements` | everything they currently have access to |
+| `GET /v1/me/subscriptions`, `GET /v1/me/subscriptions/{id}` | their subscriptions; one subscription, with any change waiting for renewal |
+| `POST /v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
+| `POST /v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
+| `POST /v1/me/subscriptions/{id}/change` | change tier, or seats on a per-seat price: upgrades charge the difference now, downgrades wait for renewal, and changing back to what they have cancels a waiting downgrade (`/preview`: what it would cost) |
+| `PUT /v1/me/subscriptions/{id}/payment-method` | pay a subscription with another saved card, or with their default again |
+| `POST /v1/me/subscriptions/{id}/pay`, `/confirm` | pay a failed renewal now, with a saved or new card; finish it |
+| `GET /v1/me/payment-methods` | their saved cards, newest first, with the agreements each carries |
+| `POST /v1/me/payment-method-setups` | start entering a card |
+| `POST /v1/me/payment-methods` | save the card a setup entered (`replaces`: put it in an old card's place everywhere) |
+| `PATCH`, `DELETE /v1/me/payment-methods/{id}` | change a card's expiry, billing details or reuse; remove it |
+| `POST /v1/me/payment-methods/{id}/verify` | confirm a card again after its brand changed |
+| `PUT /v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its invoices and every subscription without its own card |
+| `GET /v1/me/payments` | card payments and refunds |
+| `GET /v1/me/invoices`, `GET /v1/me/invoices/{id}` | invoices; one invoice |
+| `POST /v1/me/invoices/{id}/pay`, `/confirm` | pay an open invoice, with a saved or new card; finish it |
+| `GET /v1/me/balance/transactions` | balance movements: top-ups, usage spent, expiries |
+| `GET /v1/me/usage` | metered usage this period |
+| `POST /v1/me/billing-portal-sessions` | open Stripe's billing portal (when a Stripe PSP is declared) |
+| `GET /v1/me/notifications` | billing notices ("your card was declined") |
+| `POST /v1/me/notifications/read` | mark up to 100 read, or all |
+
+**Admin** (with `Permissions.AdminRead` and `AdminWrite`; your staff's work on customers)
+
+Each route needs `AdminRead` or `AdminWrite`, as its last column says. Writes
+by a person also need a recent sign-in.
+
+| Route | What it does | Needs |
+|---|---|---|
+| `GET /v1/admin/customers` | customers (`?ids=`; `?search=`: by email, username or name) | read |
+| `GET /v1/admin/customers/{customer_id}` | one customer: email, username and name (from your directory), settings, balance per currency, and the card that pays each currency | read |
+| `PATCH /v1/admin/customers/{customer_id}` | change a customer's credit limit, trust level, billing policy and invoice profile | write |
+| `GET /v1/admin/customers/{customer_id}/payment-methods` | a customer's saved cards, each with the agreements (mandates) it carries, ended ones included: evidence for disputes | read |
+| `GET /v1/admin/customers/{customer_id}/balance` | prepaid credit balance | read |
+| `GET /v1/admin/customers/{customer_id}/balance/transactions` | balance movements | read |
+| `GET /v1/admin/subscriptions`, `GET /v1/admin/subscriptions/{id}` | subscriptions; one subscription, with its `scheduled_change` (`?dunning=true`: renewals we are still retrying or waiting on a new card for, each with its `dunning`: retries made and left, the next and the final retry) | read |
+| `POST /v1/admin/subscriptions/{id}/cancel` | cancel | write |
+| `POST /v1/admin/subscriptions/{id}/resume` | undo a cancellation | write |
+| `POST /v1/admin/subscriptions/{id}/change` | change tier or seats when the customer asks support: upgrades charge the difference now, downgrades wait for renewal, changing back to the current plan cancels a waiting change; needs a `reason`, and the customer is emailed the receipt (`/preview`: what it would cost) | write |
+| `PUT /v1/admin/subscriptions/{id}/payment-method` | move a subscription to another of the customer's saved cards, or back to their default | write |
+| `POST /v1/admin/price-migrations` | move subscribers from one price, or every old version of a price, to another, at renewal or on a date (`/preview`: who it affects) | write |
+| `GET /v1/admin/price-migrations`, `GET /v1/admin/price-migrations/{id}` | those migrations | read |
+| `POST /v1/admin/price-migrations/{id}/cancel` | cancel one | write |
+| `GET /v1/admin/orders`, `GET /v1/admin/orders/{id}` | orders: what a customer bought or tried to, and where an unpaid one stopped (`?customer_id=`, `?price_id=`, `?status=`); one order | read |
+| `GET /v1/admin/payments`, `GET /v1/admin/payments/{id}` | payments and refunds (`?customer_id=`, `?subscription_id=`, `?invoice_id=`, `?order_id=`, `?status=`); one payment | read |
+| `POST /v1/admin/payments` | record money received outside OpenRails for an invoice or an order | write |
+| `POST /v1/admin/payments/{id}/refunds` | refund | write |
+| `GET /v1/admin/payment-attempts`, `GET /v1/admin/payment-attempts/{id}` | every attempt to charge, declines included | read |
+| `GET /v1/admin/renewals`, `GET /v1/admin/renewals/{id}` | renewal cycles and their charges | read |
+| `GET /v1/admin/invoices`, `GET /v1/admin/invoices/{id}` | invoices; one invoice (`?overdue=true`: unpaid past their due date, each saying whether its grace has run out and new usage is refused; they stay until paid, voided or written off) | read |
+| `POST /v1/admin/invoices/{id}/void`, `/mark-uncollectible` | void it; write it off | write |
+| `POST /v1/admin/invoices/{id}/retry-collection` | charge it again now, from the card that pays its currency | write |
+| `GET /v1/admin/entitlements` | who has which entitlement, up to 100 customers at once (`?customer_id=`, `?entitlement=`, `?prefix=`) | read |
+| `GET /v1/admin/product-access` | products customers hold, bought or granted (`?customer_id=`, `?product_id=`) | read |
+| `POST /v1/admin/product-access` | grant a product without payment | write |
+| `POST /v1/admin/product-access/{id}/revoke` | take a grant back | write |
+| `GET /v1/admin/credit-grants`, `GET /v1/admin/credit-grants/{id}` | credits granted (`?customer_id=`) | read |
+| `POST /v1/admin/credit-grants` | grant credits | write |
+| `POST /v1/admin/credit-grants/{id}/revoke` | revoke a grant | write |
+| `GET /v1/admin/provider-operations`, `GET /v1/admin/provider-operations/{operation_id}` | those reservations, each with how far its cost is confirmed (`?refused=true&state=open`: stuck ones) | read |
+| `POST /v1/admin/provider-operations/{operation_id}/close` | settle or write off a stuck one | write |
+| `GET /v1/admin/catalog/products`, `GET /v1/admin/catalog/products/{id}` | products (`?keys=`, `?entitlement=`) | read |
+| `GET /v1/admin/catalog/prices`, `/{id}`, `/{id}/history` | prices (`?product_key=`, `?key=`); a price key's versions | read |
+| `GET /v1/admin/catalog/meters`, `/{key}` | meters and their rates | read |
+| `GET /v1/admin/catalog/rate-overrides` | customers' own meter rates (`?meter_key=`, `?customer_id=`) | read |
+| `GET /v1/admin/catalog/revision` | the catalog's revision, which every catalog write advances | read |
+| `GET /v1/admin/findings`, `GET /v1/admin/findings/{id}` | problems OpenRails found that need a person, catalog drift included (`?type=`) | read |
+| `POST /v1/admin/findings/{id}/resolve` | resolve one | write |
+| `POST /v1/admin/psps/refresh` | re-read every PSP now: renewals, declines, cancellations, card changes and catalog drift | write |
+| `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | run a metrics query (usage, open findings and more); what a query may use | read |
+| `GET /v1/admin/dashboard` | the dashboard's widgets | read |
+
+Removed: the AI assistants (`catalog/ask`,
+`metrics/ask`, `dashboard/widgets/generate`), spend delegations, staff card
+removal, `PUT /v1/admin/catalog/products/by-key/{product_key}` and
+`GET /v1/admin/catalog/product-archives/{id}`.
+
+**Catalog edits** (with `Permissions.CatalogWrite`; off in this example, where `catalog.yaml` is the truth)
+
+Every route needs `CatalogWrite` and a recent sign-in.
+
+| Route | What it does |
+|---|---|
+| `POST /v1/admin/catalog/applications` | apply a whole catalog document (renaming an entitlement across products included) |
+| `POST /v1/admin/catalog/products`, `PATCH /v1/admin/catalog/products/{id}` | create, change or archive a product |
+| `POST /v1/admin/catalog/prices`, `PATCH /v1/admin/catalog/prices/{id}` | create, change or archive a price |
+| `PUT /v1/admin/catalog/meters/{key}` | create or change a meter and the rates that price its usage |
+| `PUT`, `DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | a customer's own rate for a meter |
+| `POST /v1/admin/catalog/product-archives` | archive a product, refunding its current owners or sending them to review |
+
+**Merchant config** (with `Permissions.MerchantConfig`; off in this example)
+
+Every route needs `MerchantConfig`. Writes also need a recent sign-in, except
+the PSP routing preview and saving the dashboard.
+
+| Route | What it does |
+|---|---|
+| `GET`, `POST /v1/admin/psps` | your PSPs; add one |
+| `GET`, `PATCH /v1/admin/psps/{id}` | one PSP; change its settings or credentials, or retire it |
+| `POST /v1/admin/psps/routing-preview` | which PSP an order for a price would use |
+| `GET`, `PATCH /v1/admin/configuration` | your settings, their revision and your API host; change them |
+| `GET`, `POST /v1/admin/alert-webhooks`; `PATCH`, `DELETE /v1/admin/alert-webhooks/{id}` | where operator alerts are sent |
+| `GET`, `POST /v1/admin/provisioning-tokens`; `DELETE /v1/admin/provisioning-tokens/{id}` | the tokens your directory pushes users with (each shown once) |
+| `GET /v1/admin/billing-archive` | export your billing |
+| `POST /v1/admin/billing-archive` | restore an export into an empty book |
+| `POST /v1/admin/billing-import` | import billing from another system |
+| `PUT /v1/admin/dashboard` | save the dashboard's widgets |
+
+Every route, with its permission, request and response, is in the [route table](docs/api/routes.md); each admin and merchant-config route has one method on the Go `Client`, and the conventions are in the [API guide](docs/api/endpoints.md).
+
+**Programmatic** (with `Permissions.App`; your backend, never a person)
+
+Your backend calls these with its own credential: a client-credentials token
+from your issuer (AuthKit issues them) whose application holds `App`. A person
+is refused even if they hold it. Writes take an `Idempotency-Key`, so a retry
+never double-counts. Embedded, call the same `Client` methods in process instead.
+
+| Route | What it does |
+|---|---|
+| `POST /v1/app/orders` | an unpaid order for one of your users, which they pay on your site (a pay link); it never charges (`/preview`: its total and how it can be paid) |
+| `POST /v1/app/orders/{id}/cancel` | withdraw an unpaid order you created |
+| `POST /v1/app/usage-events` | record metered usage, failed work included |
+| `POST /v1/app/admissions` | admit requests against a customer's budget, holding funds |
+| `POST /v1/app/admissions/{request_id}/capture` | settle one at its actual cost |
+| `POST /v1/app/admissions/release`, `/extend` | free holds; move their deadlines |
+| `POST /v1/app/provider-operations` | reserve funds for an upstream provider's work |
+| `POST /v1/app/provider-operations/{operation_id}/increment`, `/release` | raise a reservation; free it |
+| `POST /v1/app/provider-operations/{operation_id}/observations` | what the provider billed, or why that can't be known |
+| `GET /v1/app/host-events` | events for your backend to process, oldest first |
+| `POST /v1/app/host-events/acknowledge` | mark them processed |
+
+To read what it needs beyond these (a customer, their entitlements, an order's
+status), give your backend's application `AdminRead` too: admin reads take an
+application as readily as a person.
+
+**Webhooks and provisioning** (other systems pushing to OpenRails; no user signs in)
+
+| Route | Mounted | What it does |
+|---|---|---|
+| `POST /v1/webhooks/{rail}/{account_id}` | always | processor notifications (Stripe, NMI, CCBill), verified by signature per account |
+| `POST /scim/v2/Bulk` | standalone and hosted; embedded with `Routes.Provisioning: true` | your directory's batch of user changes, with the merchant's provisioning token (AuthKit sends one every 5 minutes) |
+| `POST`, `GET`, `PUT`, `PATCH`, `DELETE /scim/v2/Users`, `/scim/v2/Users/{id}` | same | one user at a time, for directories that don't batch (Okta, Entra ID) |
+| `GET /scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | same | what OpenRails accepts, including the batch limits |
+
+Provisioning routes live under `{Prefix}/scim/v2`. Embedded, they are off by
+default because `Deps.Contacts` asks your AuthKit directly; turn them on only to
+keep a pushed copy instead (one or the other: `Mount` refuses both).
+
+What you will set next:
+
+| To | Set |
+|---|---|
+| Send billing email (receipts, failed-payment notices) | `Config.SendGrid` (`APIKey`, `From`) or your own `Deps.Email`, plus where addresses come from: `Deps.Contacts` (embedded) or SCIM provisioning (standalone) |
+| Publish the admin and programmatic routes | `Routes.Permissions`: your permissions for admin reads, admin writes, catalog edits, merchant config and your backend (`App`) |
+| Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
+| Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
+| Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
+| Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
 
 #### Admin dashboard
 
@@ -647,85 +836,6 @@ videos but not the paid courses. `AccountBilling` lets members cancel, resume or
 change the card for a failed renewal.
 
 Several sites selling for one merchant can share one payment page instead: set `Config.Checkout.PageURL` (where the page is served) and `EmbedOrigins` (the sites allowed to frame it). The payment host serves billing-ui's `<CheckoutPage>`; each site creates its session as above and shows `<CheckoutFrame url={session.url} />`. See [billing-ui's README](sdk/billing-ui/README.md).
-
-#### Routes
-
-Mounting gives your users these routes under `/billing`:
-
-**Shopping and checkout** (always mounted; no sign-in)
-
-| Route | What it does |
-|---|---|
-| `GET /billing/v1/catalog/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
-| `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
-| `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
-| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
-| `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
-| `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
-| `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, and the payment methods a buyer can use with their browser config (always mounted) |
-
-**Your customers' own billing** (always mounted; signed in, always as the caller)
-
-| Route | What it does |
-|---|---|
-| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
-| `GET /billing/v1/me/entitlements` | everything they currently have access to |
-| `GET /billing/v1/me/subscriptions` | their subscriptions |
-| `GET /billing/v1/me/subscriptions/{id}` | one subscription |
-| `POST /billing/v1/me/subscriptions/{id}/cancel` | cancel at period end (with a reason) |
-| `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier` | upgrade or downgrade |
-| `POST /billing/v1/me/subscriptions/{id}/change-tier/preview` | what that change would cost |
-| `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
-| `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
-| `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
-| `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
-| `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
-| `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
-| `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
-| `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |
-| `PUT /billing/v1/me/collection-payment-method` | choose the card that pays one currency's invoices |
-| `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
-| `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
-| `POST /billing/v1/me/billing-portal` | open Stripe's billing portal (when a Stripe PSP is declared) |
-| `GET /billing/v1/me/payments` | payment and refund history |
-| `GET /billing/v1/me/invoices` | invoices |
-| `GET /billing/v1/me/invoices/{id}` | one invoice |
-| `POST /billing/v1/me/invoices/{id}/pay-now` | pay an open invoice with a saved card |
-| `GET /billing/v1/me/balance` | prepaid balance |
-| `GET /billing/v1/me/balance/transactions` | its balance transactions |
-| `GET /billing/v1/me/usage` | metered usage |
-| `GET /billing/v1/me/spend-limits` | spending limits |
-| `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
-| `GET /billing/v1/me/notifications/unread-count` | how many are unread |
-| `POST /billing/v1/me/notifications/read` | mark up to 100 read |
-
-**Webhooks and provisioning** (other systems pushing to OpenRails; no user signs in)
-
-| Route | Mounted | What it does |
-|---|---|---|
-| `POST /billing/v1/webhooks/{rail}/{account_id}` | always | processor notifications (Stripe, NMI, CCBill), verified per account |
-| `POST /billing/scim/v2/Bulk` | standalone and hosted; embedded with `Routes.Provisioning: true` | your directory's batch of user changes, with the merchant's provisioning token |
-| `POST`, `GET`, `PUT`, `PATCH`, `DELETE /billing/scim/v2/Users`, `/billing/scim/v2/Users/{id}` | same | one user at a time, for directories that don't batch (Okta, Entra ID) |
-| `GET /billing/scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | same | what OpenRails accepts, including the batch limits |
-
-Provisioning routes live under `{Prefix}/scim/v2`. Embedded, they are off by
-default because `Deps.Contacts` asks your AuthKit directly; turn them on only to
-keep a pushed copy instead (one or the other: `Mount` refuses both). See
-[customer contacts](docs/customer-contacts.md).
-
-`Permissions.AdminRead` and `AdminWrite` publish the admin API (`/billing/v1/admin/*`) for your staff and machines rather than your users: customers, payments and refunds, subscriptions, invoices, credits. `Permissions.CatalogWrite` adds catalog edits, and `Permissions.MerchantConfig` the merchant's own configuration: PSPs, settings, alerts. Each route is behind your permission for its bundle, and each has one method on the Go `Client`. Every route and its permission are in the [route table](docs/api/routes.md); the conventions are in the [API guide](docs/api/endpoints.md).
-
-What you will set next:
-
-| To | Set |
-|---|---|
-| Send billing email (receipts, failed-payment notices) | `Config.SMTP` (`Host`, `Port`, `Username`, `Password`, `From`: any SMTP server) or your own `Deps.Email`, plus where addresses come from: `Deps.Contacts` (embedded) or SCIM provisioning (standalone) |
-| Publish the admin routes | `Routes.Permissions`: your permissions for admin reads, admin writes, catalog edits and merchant config |
-| Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
-| Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
-| Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
-| Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
 
 ### How access and billing work
 
@@ -1142,7 +1252,7 @@ Operator side (you, the merchant):
 
 Customer side (your users):
 - The customer starts a purchase with their own credential: their browser creates a checkout session (`POST /v1/me/checkout-sessions`, billing-ui) and pays it.
-- Apps with purchase rules of their own can create the session with the merchant's credential instead: `Client.CreateCheckoutSession`, in process or remote with a merchant API key your `AdminWrite` admits, then hand it to the buyer's browser. Paying with a saved card always needs the customer's own proof.
+- Apps with purchase rules of their own can create the session with the merchant's credential instead: `Client.CreateCheckoutSession`, in process or remote with a merchant API key the route's guard admits, then hand it to the buyer's browser. Paying with a saved card always needs the customer's own proof.
 - Your frontend calls `/v1/me/*` self-service routes with a short-lived token.
 - Processor webhooks land on OpenRails; it updates entitlements in your database and your app reads them.
 
@@ -1218,7 +1328,7 @@ More in [products and prices through the Client](docs/catalog-client.md).
 Archetypes — the site you're building, and what OpenRails does for it:
 
 - **Building an OnlyFans, Fansly, or Pornhub Premium** — recurring memberships on
-  processors that will actually board adult content (NMI ISOs like MobiusPay/PaymentCloud,
+  processors that will actually board adult content (NMI ISOs like PayKings/PaymentCloud,
   CCBill). You get duplicate-subscription prevention, dunning that chases failed rebills,
   and entitlements that survive lost webhooks — the subscription-lifecycle plumbing every
   paysite rebuilds badly.
@@ -1500,7 +1610,6 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout sessions, payment methods, tokens, and error handling.
 - [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
-- [Customer contacts](docs/customer-contacts.md) — where customers' emails and names come from: your AuthKit in process, or your directory's SCIM 2.0 pushes.
 - [Products and prices through the Client](docs/catalog-client.md) and [choosing the merchant a call acts on](docs/client-merchant-selection.md).
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 
@@ -1514,7 +1623,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 **Payment rails** — per-rail setup: credentials, the manifest entry, webhooks, sandbox testing:
 
 - [Rail matrix](docs/rails/certification-matrix.md) — what each rail does, and what evidence backs a verification claim
-- [NMI](docs/rails/nmi.md) (MobiusPay, PaymentCloud, PayKings, and other NMI-backed ISOs)
+- [NMI](docs/rails/nmi.md) (PayKings, PaymentCloud, and other NMI-backed ISOs)
 - [Stripe](docs/rails/stripe.md)
 - [CCBill](docs/rails/ccbill.md)
 - [Solana](docs/rails/solana.md) (USDC, self-custody, on-chain recurring subscriptions)
