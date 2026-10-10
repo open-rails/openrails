@@ -474,7 +474,7 @@ func TestCCBillChargesTakeTheLocalRecordCurrency(t *testing.T) {
 	sub := LocalSubscription{ID: subID, CustomerID: customerID, PriceID: &priceID, PriceCurrency: "GBP", Status: "active", Rail: "ccbill",
 		RailSubscriptionID: "0125217202000000017", StartedAt: now.Add(-24 * time.Hour)}
 	original := LocalPayment{ID: uuid.New(), CustomerID: customerID, Rail: "ccbill", TransactionID: "original", AmountCents: 799, Currency: "EUR",
-		Status: "completed", SubscriptionID: &subID}
+		Status: "succeeded", SubscriptionID: &subID}
 	snap := &RemoteSnapshot{Provider: ProviderCCBill, Capabilities: Capabilities{Transactions: true, Refunds: true}, Transactions: []RemoteTransaction{
 		{TransactionID: "rebill", SubscriptionID: sub.RailSubscriptionID, Type: TransactionTypeSale, Success: true, Amount: "7.99", OccurredAt: now},
 		{TransactionID: "refund", Type: TransactionTypeRefund, Success: true, Amount: "7.99", OccurredAt: now, Raw: []byte(`{"charge":"original"}`)},

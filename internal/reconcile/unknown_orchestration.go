@@ -371,7 +371,7 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			Amount:         amount,
 			ListAmount:     amount,
 			Currency:       currency,
-			Status:         "completed",
+			Status:         "succeeded",
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,

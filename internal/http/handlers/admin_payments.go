@@ -362,7 +362,7 @@ func issuePreparedAdminRefund(ctx context.Context, r *httprequest.Request, prepa
 	if err := paymentService.AttachRelations(ctx, refund); err != nil {
 		return nil, 0, err
 	}
-	if payments.PaymentStatusCompleted(refund.Status) {
+	if payments.PaymentStatusSucceeded(refund.Status) {
 		return refund, http.StatusCreated, nil
 	}
 	switch intent.Status {

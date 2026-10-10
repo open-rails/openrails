@@ -597,7 +597,7 @@ JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.ps
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
   AND p.subscription_id=sqlc.arg(subscription_id)::uuid
   AND p.psp_id=sqlc.arg(psp_id)::uuid
-  AND p.status='completed' AND p.deleted_at IS NULL;
+  AND p.status='succeeded' AND p.deleted_at IS NULL;
 
 -- name: HasUnattributedPaymentAfterRebillBoundary :one
 -- Existing provider-observed payments have no immutable accepted interval.
@@ -608,7 +608,7 @@ SELECT EXISTS (
  WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid
    AND p.subscription_id=sqlc.arg(subscription_id)::uuid
    AND p.psp_id=sqlc.arg(psp_id)::uuid
-   AND p.status='completed' AND p.deleted_at IS NULL
+   AND p.status='succeeded' AND p.deleted_at IS NULL
    AND p.purchased_at>=sqlc.arg(period_start)::timestamptz
    AND NOT EXISTS (
      SELECT 1 FROM billing.provider_intents i

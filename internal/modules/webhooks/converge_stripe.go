@@ -406,7 +406,7 @@ func (s *StripeConvergeService) recordPaidProration(ctx context.Context, txdb *d
 	payment := &models.Payment{
 		ID: uuidutil.NewV7(), CustomerID: sub.CustomerID, PriceID: priceID, SubscriptionID: &subID, Rail: models.RailStripe, PspID: &pspID,
 		TransactionID: rec.LatestInvoiceTransactionID, Amount: amount, ListAmount: amount, Currency: strings.ToUpper(rec.LatestInvoiceCurrency),
-		Status: payments.PaymentStatusCompletedValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: billedAt, CreatedAt: now,
+		Status: payments.PaymentStatusSucceededValue, MoneyMovement: models.MoneyMovementRail, PurchasedAt: billedAt, CreatedAt: now,
 		// A proration pays a part-period at the new price: its own period key,
 		// never a renewal's.
 		Metadata: map[string]any{"stripe_invoice_id": rec.LatestInvoiceID, "billing_reason": "subscription_update", subscriptions.PaidPeriodKey: billedAt.UTC().Format(time.RFC3339)},

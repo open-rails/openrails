@@ -361,7 +361,7 @@ func evaluateArchivedPurchase(ctx context.Context, r *httprequest.Request, op pr
 			id := billing.PaymentID(refund.ID)
 			item.RefundID = &id
 			item.Outcome = billing.ArchivedPurchaseRefunded
-			if !payments.PaymentStatusCompleted(refund.Status) {
+			if !payments.PaymentStatusSucceeded(refund.Status) {
 				item.Outcome = billing.ArchivedPurchaseRefundPending
 			}
 			return item, nil

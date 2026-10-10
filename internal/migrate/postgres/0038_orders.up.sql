@@ -183,6 +183,35 @@ CREATE UNIQUE INDEX checkout_attempts_order_id_live_key ON billing.checkout_atte
 CREATE INDEX checkout_attempts_order_id_idx ON billing.checkout_attempts USING btree (merchant_id, order_id) WHERE order_id IS NOT NULL;
 ALTER TABLE billing.orders ADD CONSTRAINT orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED;
 
+-- Payment statuses speak the wire's words. A charge never fails (a decline is
+-- a payment attempt); only a refund the PSP refused is failed. The rows move
+-- before the settlement trigger learns the new word, so history publishes
+-- nothing again.
+ALTER TABLE billing.payments DROP CONSTRAINT payments_status_check;
+UPDATE billing.payments SET status = 'succeeded' WHERE status = 'completed';
+ALTER TABLE billing.payments ADD CONSTRAINT payments_status_check CHECK (status IN ('pending', 'succeeded', 'failed', 'refunded'));
+ALTER TABLE billing.payments ADD CONSTRAINT payments_failed_refund_check CHECK (status <> 'failed' OR refunded_payment_id IS NOT NULL);
+COMMENT ON COLUMN billing.payments.status IS 'pending (a refund awaiting its PSP), succeeded, refunded (an NMI same-id refund marks its sale), or failed (only a refund the PSP refused; a declined charge is a payment attempt).';
+CREATE OR REPLACE FUNCTION billing.enqueue_payment_settlement_event() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    IF billing.billing_restore_active(NEW.merchant_id) THEN RETURN NEW; END IF;
+    IF NEW.status = 'succeeded'
+       AND NEW.amount > 0
+       AND NEW.refunded_payment_id IS NULL
+       AND NEW.money_movement = 'rail'
+       AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM NEW.status)
+    THEN
+        INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, payment_id, amount, currency, occurred_at, dedupe_key)
+        VALUES (NEW.merchant_id, 'payment.settled', 'payment', NEW.id, NEW.id, NEW.amount, NEW.currency,
+                COALESCE(NEW.purchased_at, NEW.created_at, now()), 'payment:' || NEW.id::text)
+        ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
 -- Payments reference what they paid: an order, a subscription's period, or
 -- (a one-price sale before orders) a price.
 ALTER TABLE billing.payments ADD COLUMN order_id uuid;
@@ -194,7 +223,7 @@ COMMENT ON COLUMN billing.payments.order_id IS 'The order this charge (or its re
 CREATE INDEX payments_order_id_idx ON billing.payments USING btree (merchant_id, order_id) WHERE order_id IS NOT NULL;
 -- At most one successful charge per order.
 CREATE UNIQUE INDEX payments_order_id_charge_key ON billing.payments USING btree (merchant_id, order_id)
-    WHERE order_id IS NOT NULL AND refunded_payment_id IS NULL AND status IN ('completed', 'refunded') AND deleted_at IS NULL;
+    WHERE order_id IS NOT NULL AND refunded_payment_id IS NULL AND status IN ('succeeded', 'refunded') AND deleted_at IS NULL;
 
 -- Order events reach the host through the outbox.
 ALTER TABLE billing.host_outbox DROP CONSTRAINT host_outbox_payload_check;

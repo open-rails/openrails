@@ -145,9 +145,9 @@ func TestPaymentMethodHealth(t *testing.T) {
 		active  bool
 	}{
 		{valid, "", "", true},
-		{valid, "completed", billing.ChargeSucceeded, true},
+		{valid, "succeeded", billing.ChargeSucceeded, true},
 		{valid, "failed", billing.ChargeFailed, false},
-		{models.Card{ExpMonth: 1, ExpYear: 2020}, "completed", billing.ChargeSucceeded, false},
+		{models.Card{ExpMonth: 1, ExpYear: 2020}, "succeeded", billing.ChargeSucceeded, false},
 	} {
 		var charge *models.PaymentMethodCharge
 		if tc.charge != "" {

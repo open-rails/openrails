@@ -78,7 +78,7 @@ func (s *Service) Fund(ctx context.Context, p Params) (uuid.UUID, error) {
 		if err != nil {
 			return fmt.Errorf("load credit funding payment: %w", err)
 		}
-		if payment.CustomerID != p.CustomerID.UUID() || payment.Currency != p.Currency || payment.Status != "completed" || payment.RefundedPaymentID != nil {
+		if payment.CustomerID != p.CustomerID.UUID() || payment.Currency != p.Currency || payment.Status != "succeeded" || payment.RefundedPaymentID != nil {
 			return fmt.Errorf("credit funding does not match completed payment")
 		}
 		if p.OrderLineID != uuid.Nil {

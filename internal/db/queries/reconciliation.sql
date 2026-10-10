@@ -399,7 +399,7 @@ INSERT INTO billing.payments (
     sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
-    'completed', sqlc.narg(subscription_id), sqlc.narg(metadata),
+    'succeeded', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid,
     -- or#827: the row mirrors a charge the rail actually settled.
@@ -419,7 +419,7 @@ INSERT INTO billing.payments (
     sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
-    'completed', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
+    'succeeded', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     -- or#827: a refund is real (negative) money movement at the rail; the
@@ -526,7 +526,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-        AND p.deleted_at IS NULL AND p.status = 'completed'
+        AND p.deleted_at IS NULL AND p.status = 'succeeded'
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.current_period_ends_at, s.id
@@ -560,7 +560,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-        AND p.status = 'completed' AND p.deleted_at IS NULL
+        AND p.status = 'succeeded' AND p.deleted_at IS NULL
   )
 -- or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
 ORDER BY s.created_at, s.id
@@ -572,7 +572,7 @@ FROM billing.subscriptions s
 JOIN LATERAL (
     SELECT p.id, p.transaction_id, p.purchased_at FROM billing.payments p
     WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-      AND p.status = 'completed' AND p.deleted_at IS NULL
+      AND p.status = 'succeeded' AND p.deleted_at IS NULL
     ORDER BY p.purchased_at DESC, p.id DESC
     LIMIT 1
 ) p ON true
@@ -885,7 +885,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.payments p
     WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
       AND p.subscription_id = sqlc.arg(subscription_id)::uuid
-      AND p.deleted_at IS NULL AND p.status = 'completed'
+      AND p.deleted_at IS NULL AND p.status = 'succeeded'
       AND (sqlc.narg(since)::timestamptz IS NULL OR p.purchased_at >= sqlc.narg(since)::timestamptz)
 )::bool AS paid;
 
@@ -923,12 +923,12 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.id = ANY(sqlc.arg(ids)::
 
 -- Recorded charges (payments) and declines (attempts) a bulk pass decides from.
 -- name: ListRecordedSubscriptionCharges :many
-SELECT subscription_id, transaction_id::text AS transaction_id, 'completed'::text AS status,
+SELECT subscription_id, transaction_id::text AS transaction_id, 'succeeded'::text AS status,
        purchased_at::timestamptz AS occurred_at, amount::bigint AS amount, currency::text AS currency,
        ''::text AS response_code
 FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY(sqlc.arg(subscription_ids)::uuid[])
-  AND purchased_at >= sqlc.arg(since)::timestamptz AND status = 'completed' AND deleted_at IS NULL
+  AND purchased_at >= sqlc.arg(since)::timestamptz AND status = 'succeeded' AND deleted_at IS NULL
 UNION ALL
 SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::timestamptz, amount::bigint,
        COALESCE(currency, '')::text, COALESCE(response_code, '')::text

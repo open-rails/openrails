@@ -31,7 +31,7 @@ func NewPaymentRepo(d *db.DB) *PaymentRepo { return &PaymentRepo{db: d} }
 // trigger considers. An empty status is 'completed' (the column default), so it
 // counts here exactly as it does in SQL.
 func IsSettlementCandidate(p *models.Payment) bool {
-	return p != nil && PaymentStatusCompleted(p.Status) && p.Amount > 0 && p.RefundedPaymentID == nil
+	return p != nil && PaymentStatusSucceeded(p.Status) && p.Amount > 0 && p.RefundedPaymentID == nil
 }
 
 // resolveMoneyMovement enforces or#827's positive marker at the one place every

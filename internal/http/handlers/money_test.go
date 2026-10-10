@@ -113,7 +113,7 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 	charge := func(status string) *models.Payment {
 		return &models.Payment{ID: uuid.New(), Rail: models.RailNMI, Amount: 1000, Currency: "USD", Status: status, CreatedAt: time.Unix(100, 0)}
 	}
-	for status, want := range map[string]billing.PaymentStatus{"completed": billing.PaymentSucceeded, "pending": billing.PaymentPending, "failed": billing.PaymentFailed} {
+	for status, want := range map[string]billing.PaymentStatus{"succeeded": billing.PaymentSucceeded, "pending": billing.PaymentPending, "failed": billing.PaymentFailed} {
 		got := PaymentToAPI(charge(status), nil)
 		require.Equal(t, billing.PaymentCharge, got.Kind)
 		require.Equal(t, want, got.Status, status)
@@ -121,13 +121,13 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 	}
 
 	original := uuid.New()
-	for status, want := range map[string]billing.PaymentStatus{"completed": billing.PaymentSucceeded, "pending": billing.PaymentPending, "failed": billing.PaymentFailed} {
+	for status, want := range map[string]billing.PaymentStatus{"succeeded": billing.PaymentSucceeded, "pending": billing.PaymentPending, "failed": billing.PaymentFailed} {
 		got := PaymentToAPI(&models.Payment{ID: uuid.New(), RefundedPaymentID: &original, Amount: -500, Currency: "USD", Status: status}, nil)
 		require.Equal(t, billing.PaymentRefund, got.Kind)
 		require.Equal(t, want, got.Status)
 	}
 	chargeback := "chargeback"
-	require.Equal(t, billing.PaymentChargeback, PaymentToAPI(&models.Payment{ID: uuid.New(), Amount: -500, Status: "completed", ReversalKind: &chargeback}, nil).Kind)
+	require.Equal(t, billing.PaymentChargeback, PaymentToAPI(&models.Payment{ID: uuid.New(), Amount: -500, Status: "succeeded", ReversalKind: &chargeback}, nil).Kind)
 
 	refund := func(amount int64, status string) *models.Payment {
 		return &models.Payment{ID: uuid.New(), RefundedPaymentID: &original, Amount: amount, Currency: "USD", Status: status}
@@ -139,12 +139,12 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 		status  billing.PaymentStatus
 	}{
 		{"none", []*models.Payment{}, 0, billing.PaymentSucceeded},
-		{"only completed refunds count", []*models.Payment{refund(-300, "completed"), refund(-400, "pending"), refund(-500, "failed")}, 300, billing.PaymentPartiallyRefunded},
-		{"multiple full", []*models.Payment{refund(-300, "completed"), refund(-700, "completed")}, 1000, billing.PaymentRefunded},
-		{"legacy positive amount", []*models.Payment{refund(300, "completed")}, 300, billing.PaymentPartiallyRefunded},
+		{"only completed refunds count", []*models.Payment{refund(-300, "succeeded"), refund(-400, "pending"), refund(-500, "failed")}, 300, billing.PaymentPartiallyRefunded},
+		{"multiple full", []*models.Payment{refund(-300, "succeeded"), refund(-700, "succeeded")}, 1000, billing.PaymentRefunded},
+		{"legacy positive amount", []*models.Payment{refund(300, "succeeded")}, 300, billing.PaymentPartiallyRefunded},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			p := charge("completed")
+			p := charge("succeeded")
 			detail := PaymentToAPI(p, tc.refunds)
 			require.Equal(t, []any{tc.total, tc.status}, []any{detail.AmountRefunded, detail.Status})
 			require.Len(t, detail.Refunds, len(tc.refunds))
@@ -152,11 +152,11 @@ func TestPaymentStatusAndRefundTotals(t *testing.T) {
 			require.Equal(t, []any{detail.AmountRefunded, detail.Status}, []any{history.AmountRefunded, history.Status}, "history and detail agree")
 		})
 	}
-	failed := PaymentToAPI(charge("failed"), []*models.Payment{refund(-1000, "completed")})
+	failed := PaymentToAPI(charge("failed"), []*models.Payment{refund(-1000, "succeeded")})
 	require.Equal(t, billing.PaymentFailed, failed.Status, "a failed charge never reads as refunded")
 	require.NotNil(t, failed.Failure)
 
-	manual := PaymentToAPI(&models.Payment{ID: uuid.New(), Channel: models.ChannelManual, Amount: 1000, Status: "completed"}, nil)
+	manual := PaymentToAPI(&models.Payment{ID: uuid.New(), Channel: models.ChannelManual, Amount: 1000, Status: "succeeded"}, nil)
 	require.Equal(t, billing.ChannelManual, manual.Channel)
 	require.Nil(t, manual.Rail, "an off-rail payment names no rail")
 }

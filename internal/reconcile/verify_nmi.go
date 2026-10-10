@@ -482,7 +482,7 @@ func recordedCharges(ctx context.Context, database *db.DB, mid billing.MerchantI
 			continue
 		}
 		sub := *row.SubscriptionID
-		t := RemoteTransaction{TransactionID: row.TransactionID, SubscriptionID: rail[sub], Type: TransactionTypeSale, Success: row.Status == "completed",
+		t := RemoteTransaction{TransactionID: row.TransactionID, SubscriptionID: rail[sub], Type: TransactionTypeSale, Success: row.Status == "succeeded",
 			AmountCents: row.Amount / 10_000, Currency: row.Currency, OccurredAt: row.OccurredAt.UTC()}
 		if !t.Success {
 			t.Type, t.DeclineCode = TransactionTypeDecline, row.ResponseCode

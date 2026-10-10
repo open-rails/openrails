@@ -34,7 +34,7 @@ func stripePaymentAliases(snapshot *RemoteSnapshot, payments map[string]*LocalPa
 		charge := payments[transaction.TransactionID]
 		if conflicts[intent] || (charge != nil && charge.ID != payment.ID) ||
 			payment.AmountCents != transaction.AmountCents || !strings.EqualFold(payment.Currency, transaction.Currency) ||
-			(payment.Status != "completed" && payment.Status != "refunded") {
+			(payment.Status != "succeeded" && payment.Status != "refunded") {
 			conflicts[transaction.TransactionID], conflicts[intent] = true, true
 			continue
 		}

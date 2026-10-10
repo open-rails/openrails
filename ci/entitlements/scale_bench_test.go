@@ -208,7 +208,7 @@ func TestAccessCutoverScaleBenchmark(t *testing.T) {
 	exec(`WITH c AS (SELECT id, row_number() OVER (ORDER BY id) AS n FROM `+s+`.customers WHERE merchant_id = $1
 	), pp AS (SELECT p.id AS product_id, pr.id AS price_id, row_number() OVER (ORDER BY p.key) AS n FROM `+s+`.products p JOIN `+s+`.prices pr ON pr.product_id = p.id WHERE p.merchant_id = $1
 	) INSERT INTO `+s+`.payments(merchant_id,id,customer_id,price_id,channel,transaction_id,amount,list_amount,currency,status,purchased_at)
-	SELECT $1, uuidv7(), c.id, pp.price_id, 'manual', 'bench-' || c.n, 1000000, 1000000, 'USD', 'completed', $2
+	SELECT $1, uuidv7(), c.id, pp.price_id, 'manual', 'bench-' || c.n, 1000000, 1000000, 'USD', 'succeeded', $2
 	FROM c JOIN pp ON pp.n = CASE WHEN c.n = 50001 THEN (SELECT max(n) FROM pp) ELSE 1 + c.n % 5000 END`, merchant, at)
 	exec(`INSERT INTO `+s+`.grants(merchant_id,id,customer_id,product_id,payment_id,kind,source_type,source_id,event,spec_snapshot,starts_at)
 		SELECT pay.merchant_id, uuidv7(), pay.customer_id, pr.product_id, pay.id, 'entitlement', 'purchase', pay.id::text, 'grant', '{"entitlements":["seed"]}', pay.purchased_at

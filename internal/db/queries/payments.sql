@@ -111,7 +111,7 @@ WHERE original.merchant_id = sqlc.arg(merchant_id)::uuid
     AND original.id = ANY(sqlc.arg(payment_ids)::uuid[])
     AND original.amount > 0 AND original.refunded_payment_id IS NULL
     AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
-    AND refund.status = 'completed'
+    AND refund.status = 'succeeded'
 GROUP BY original.id;
 
 -- name: LinkRefundedPayment :execrows
@@ -141,7 +141,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 
 -- name: CompleteRefundReservation :execrows
 UPDATE billing.payments
-SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
+SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0
@@ -167,7 +167,7 @@ LIMIT 1;
 -- the settlement trigger fires on.
 -- name: CompleteProviderAttempt :execrows
 UPDATE billing.payments
-SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
+SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND amount > 0
   AND status = 'pending'
@@ -179,10 +179,10 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
 -- but its status must still reach a terminal state — leaving it 'pending'
 -- forever reads as a stuck payment. It keeps money_movement = 'none' (or#827):
 -- the money moved on the separate real charge row, and this anchor reaching
--- 'completed' must not publish a second settlement to the host.
+-- 'succeeded' must not publish a second settlement to the host.
 -- name: CompleteProviderAttemptInPlace :execrows
 UPDATE billing.payments
-SET metadata = $2, status = 'completed', money_movement = 'none'
+SET metadata = $2, status = 'succeeded', money_movement = 'none'
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND amount > 0
   AND status = 'pending'
@@ -194,7 +194,7 @@ SELECT EXISTS (
     FROM billing.payments purch
     WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid
       AND purch.subscription_id = sqlc.arg(subscription_id)::uuid
-      AND purch.status = 'completed'
+      AND purch.status = 'succeeded'
       AND purch.purchased_at >= sqlc.arg(period_end)::timestamptz
       AND purch.deleted_at IS NULL
 )::bool;
@@ -203,7 +203,7 @@ SELECT EXISTS (
 SELECT * FROM billing.payments purch
 WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.subscription_id = $1
   AND purch.amount > 0
-  AND COALESCE(purch.status::text, 'completed') = 'completed'
+  AND COALESCE(purch.status::text, 'succeeded') = 'succeeded'
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC
 LIMIT 1;
@@ -327,7 +327,7 @@ FOR UPDATE;
 -- name: GetLatestPaidPaymentIDForSubscription :one
 SELECT id FROM billing.payments
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(subscription_id)::uuid
-  AND status = 'completed' AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0
+  AND status = 'succeeded' AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0
 ORDER BY purchased_at DESC, id DESC
 LIMIT 1;
 

@@ -200,7 +200,7 @@ FROM billing.payments p
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL
-  AND p.status = 'completed'
+  AND p.status = 'succeeded'
   AND p.amount > 0
   AND p.subscription_id IS NULL
   AND NOT EXISTS (
@@ -342,7 +342,7 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND p.deleted_at IS NULL
   AND p.rail = 'solana'
-  AND p.status = 'completed'
+  AND p.status = 'succeeded'
   AND p.amount > 0
   AND p.subscription_id IS NULL
   AND p.metadata->>'expiration_rfc3339' IS NOT NULL

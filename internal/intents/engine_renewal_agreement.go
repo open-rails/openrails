@@ -147,7 +147,7 @@ func orderAgreement(ctx context.Context, d *db.DB, sub *models.Subscription, op 
 	if payment, err = q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: op.MerchantID, ID: p.PaymentID}); err != nil {
 		return agreement, payment, fmt.Errorf("%w: paid agreement payment is missing", ErrRebillNotRetryable)
 	}
-	if payment.OrderID == nil || *payment.OrderID != order.ID || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptInitial || payment.Amount != order.Total || payment.Status != payments.PaymentStatusCompletedValue {
+	if payment.OrderID == nil || *payment.OrderID != order.ID || payment.AttemptKind == nil || *payment.AttemptKind != payments.AttemptInitial || payment.Amount != order.Total || payment.Status != payments.PaymentStatusSucceededValue {
 		return agreement, payment, fmt.Errorf("%w: order payment contradicts its order", ErrRebillNotRetryable)
 	}
 	var access *int

@@ -8,11 +8,11 @@ SELECT count(*)::bigint AS total,
             WHERE p.merchant_id = m.id AND NOT p.archived)))::bigint AS armed,
        (count(*) FILTER (WHERE EXISTS (
            SELECT 1 FROM billing.payments pay
-            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
+            WHERE pay.merchant_id = m.id AND pay.status = 'succeeded'
               AND pay.reversal_kind IS NULL AND pay.deleted_at IS NULL)))::bigint AS first_revenue,
        (count(*) FILTER (WHERE EXISTS (
            SELECT 1 FROM billing.payments pay
-            WHERE pay.merchant_id = m.id AND pay.status = 'completed'
+            WHERE pay.merchant_id = m.id AND pay.status = 'succeeded'
               AND pay.reversal_kind IS NULL AND pay.deleted_at IS NULL
               AND pay.purchased_at >= sqlc.arg(since)::timestamptz)))::bigint AS active_revenue
 FROM billing.merchants m
@@ -24,7 +24,7 @@ WHERE m.deleted_at IS NULL AND m.status = 'active'
 -- name: FleetRevenueByCurrency :many
 SELECT p.currency::text AS currency, count(*)::bigint AS payments, COALESCE(sum(p.amount), 0)::bigint AS settled_amount
 FROM billing.payments p
-WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
+WHERE p.status = 'succeeded' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
   AND p.purchased_at >= sqlc.arg(since)::timestamptz
   AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR p.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)
 GROUP BY p.currency
@@ -43,7 +43,7 @@ WITH charges AS (
 ), disputes AS (
     SELECT p.rail AS r, count(*) AS n
       FROM billing.payments p
-     WHERE p.purchased_at >= sqlc.arg(since)::timestamptz AND p.reversal_kind = 'chargeback' AND p.status = 'completed'
+     WHERE p.purchased_at >= sqlc.arg(since)::timestamptz AND p.reversal_kind = 'chargeback' AND p.status = 'succeeded'
        AND p.deleted_at IS NULL
        AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR p.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)
      GROUP BY p.rail
@@ -81,7 +81,7 @@ GROUP BY 1;
 -- name: FleetWeeklyActiveMerchants :many
 SELECT date_trunc('week', p.purchased_at)::timestamptz AS week_start, count(DISTINCT p.merchant_id)::bigint AS merchants
 FROM billing.payments p
-WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
+WHERE p.status = 'succeeded' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
   AND p.purchased_at >= date_trunc('week', sqlc.arg(since)::timestamptz)
   AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR p.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)
 GROUP BY 1;
@@ -100,7 +100,7 @@ GROUP BY 1;
 SELECT date_trunc('week', p.purchased_at)::timestamptz AS week_start, p.currency::text AS currency,
        count(*)::bigint AS payments, COALESCE(sum(p.amount), 0)::bigint AS settled_amount
 FROM billing.payments p
-WHERE p.status = 'completed' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
+WHERE p.status = 'succeeded' AND p.reversal_kind IS NULL AND p.deleted_at IS NULL
   AND p.purchased_at >= date_trunc('week', sqlc.arg(since)::timestamptz)
   AND (sqlc.narg(exclude_merchant_id)::uuid IS NULL OR p.merchant_id <> sqlc.narg(exclude_merchant_id)::uuid)
 GROUP BY 1, 2

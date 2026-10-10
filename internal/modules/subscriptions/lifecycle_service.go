@@ -671,7 +671,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			Amount:        amount,
 			ListAmount:    price.Amount,
 			Currency:      currency,
-			Status:        payments.PaymentStatusCompletedValue,
+			Status:        payments.PaymentStatusSucceededValue,
 			Metadata:      withPaidPeriod(params.PaymentMetadata, periodStartsAt),
 			AttemptKind:   func() *string { k := payments.AttemptInitial; return &k }(),
 			MoneyMovement: models.MoneyMovementRail, // or#827: the signup charge settled at the rail.
@@ -766,7 +766,7 @@ func (s *SubscriptionLifecycleService) RecordConfirmedChargeWithoutRenewal(ctx c
 		payment := &models.Payment{
 			ID: uuidutil.NewV7(), CustomerID: subscription.CustomerID, PriceID: priceID, SubscriptionID: &subscription.ID,
 			Rail: params.Rail, PspID: pspIDOf(subscription), TransactionID: params.TransactionID,
-			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusCompletedValue,
+			Amount: amount, ListAmount: amount, Currency: currency, Status: payments.PaymentStatusSucceededValue,
 			Metadata:      metadata,
 			AttemptKind:   func() *string { k := payments.AttemptRenewal; return &k }(),
 			MoneyMovement: models.MoneyMovementRail, PurchasedAt: now, CreatedAt: now,
@@ -952,7 +952,7 @@ func (s *SubscriptionLifecycleService) RenewMembership(ctx context.Context, para
 				Amount:         amount,
 				ListAmount:     amount,
 				Currency:       currency,
-				Status:         payments.PaymentStatusCompletedValue,
+				Status:         payments.PaymentStatusSucceededValue,
 				Metadata:       withPaidPeriod(params.PaymentMetadata, renewalPeriodStart(params, subscription, now)),
 				AttemptKind:    func() *string { k := payments.AttemptRenewal; return &k }(),
 				MoneyMovement:  models.MoneyMovementRail, // or#827: the rebill settled at the rail.
@@ -2203,8 +2203,8 @@ func validateCompletedPayment(payment *models.Payment, expectedAmount int64, exp
 		return errors.New("payment is required")
 	}
 	status := strings.TrimSpace(payment.Status)
-	if status != "" && !strings.EqualFold(status, "completed") {
-		return fmt.Errorf("payment transaction is not completed")
+	if status != "" && !strings.EqualFold(status, "succeeded") {
+		return fmt.Errorf("payment transaction has not succeeded")
 	}
 	if expectedAmount > 0 && payment.Amount != expectedAmount {
 		return fmt.Errorf("payment transaction amount mismatch")

@@ -14,7 +14,7 @@ import (
 
 const completeProviderAttempt = `-- name: CompleteProviderAttempt :execrows
 UPDATE billing.payments
-SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
+SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
 WHERE payments.merchant_id = $4::uuid AND id = $1
   AND amount > 0
   AND status = 'pending'
@@ -46,7 +46,7 @@ func (q *Queries) CompleteProviderAttempt(ctx context.Context, arg CompleteProvi
 
 const completeProviderAttemptInPlace = `-- name: CompleteProviderAttemptInPlace :execrows
 UPDATE billing.payments
-SET metadata = $2, status = 'completed', money_movement = 'none'
+SET metadata = $2, status = 'succeeded', money_movement = 'none'
 WHERE payments.merchant_id = $3::uuid AND id = $1
   AND amount > 0
   AND status = 'pending'
@@ -65,7 +65,7 @@ type CompleteProviderAttemptInPlaceParams struct {
 // but its status must still reach a terminal state — leaving it 'pending'
 // forever reads as a stuck payment. It keeps money_movement = 'none' (or#827):
 // the money moved on the separate real charge row, and this anchor reaching
-// 'completed' must not publish a second settlement to the host.
+// 'succeeded' must not publish a second settlement to the host.
 func (q *Queries) CompleteProviderAttemptInPlace(ctx context.Context, arg CompleteProviderAttemptInPlaceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeProviderAttemptInPlace, arg.ID, arg.Metadata, arg.MerchantID)
 	if err != nil {
@@ -76,7 +76,7 @@ func (q *Queries) CompleteProviderAttemptInPlace(ctx context.Context, arg Comple
 
 const completeRefundReservation = `-- name: CompleteRefundReservation :execrows
 UPDATE billing.payments
-SET transaction_id = $2, status = 'completed', metadata = $3, money_movement = 'rail'
+SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
 WHERE payments.merchant_id = $4::uuid AND id = $1
   AND refunded_payment_id IS NOT NULL
   AND amount < 0
@@ -329,7 +329,7 @@ const getLatestChargeBySubscriptionID = `-- name: GetLatestChargeBySubscriptionI
 SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id FROM billing.payments purch
 WHERE purch.merchant_id = $2::uuid AND purch.subscription_id = $1
   AND purch.amount > 0
-  AND COALESCE(purch.status::text, 'completed') = 'completed'
+  AND COALESCE(purch.status::text, 'succeeded') = 'succeeded'
   AND purch.deleted_at IS NULL
 ORDER BY purch.purchased_at DESC
 LIMIT 1
@@ -384,7 +384,7 @@ func (q *Queries) GetLatestChargeBySubscriptionID(ctx context.Context, arg GetLa
 const getLatestPaidPaymentIDForSubscription = `-- name: GetLatestPaidPaymentIDForSubscription :one
 SELECT id FROM billing.payments
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
-  AND status = 'completed' AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0
+  AND status = 'succeeded' AND deleted_at IS NULL AND reversal_kind IS NULL AND amount > 0
 ORDER BY purchased_at DESC, id DESC
 LIMIT 1
 `
@@ -636,7 +636,7 @@ WHERE original.merchant_id = $1::uuid
     AND original.id = ANY($2::uuid[])
     AND original.amount > 0 AND original.refunded_payment_id IS NULL
     AND original.deleted_at IS NULL AND refund.deleted_at IS NULL
-    AND refund.status = 'completed'
+    AND refund.status = 'succeeded'
 GROUP BY original.id
 `
 
@@ -852,7 +852,7 @@ SELECT EXISTS (
     FROM billing.payments purch
     WHERE purch.merchant_id = $1::uuid
       AND purch.subscription_id = $2::uuid
-      AND purch.status = 'completed'
+      AND purch.status = 'succeeded'
       AND purch.purchased_at >= $3::timestamptz
       AND purch.deleted_at IS NULL
 )::bool

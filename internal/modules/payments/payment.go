@@ -28,7 +28,7 @@ type PaymentService struct {
 
 const (
 	PaymentStatusPendingValue   = "pending"
-	PaymentStatusCompletedValue = "completed"
+	PaymentStatusSucceededValue = "succeeded"
 	PaymentStatusFailedValue    = "failed"
 	PaymentStatusRefundedValue  = "refunded"
 )
@@ -54,7 +54,7 @@ func (s *PaymentService) Clock() clockwork.Clock {
 }
 
 func (s *PaymentService) Create(ctx context.Context, payment *models.Payment) error {
-	if payment != nil && payment.RefundedPaymentID != nil && payment.ReversalKind != nil && *payment.ReversalKind == ReversalDisputeReversal && payment.Amount > 0 && PaymentStatusCompleted(payment.Status) {
+	if payment != nil && payment.RefundedPaymentID != nil && payment.ReversalKind != nil && *payment.ReversalKind == ReversalDisputeReversal && payment.Amount > 0 && PaymentStatusSucceeded(payment.Status) {
 		return s.repo.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 			d := s.repo.db.NewWithPgxTx(tx)
 			scoped := NewPaymentService(d, s.clock)
@@ -172,7 +172,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 	}
 	existing, err := s.GetByPSPTransactionID(ctx, orig.Rail, refundTransactionID)
 	if err == nil {
-		if existing.RefundedPaymentID == nil || *existing.RefundedPaymentID != orig.ID || existing.Amount != -amount || existing.ReversalKind == nil || *existing.ReversalKind != reversalKind || !PaymentStatusCompleted(existing.Status) {
+		if existing.RefundedPaymentID == nil || *existing.RefundedPaymentID != orig.ID || existing.Amount != -amount || existing.ReversalKind == nil || *existing.ReversalKind != reversalKind || !PaymentStatusSucceeded(existing.Status) {
 			return nil, errors.New("refund transaction id is already bound to different payment facts")
 		}
 		return existing, nil
@@ -219,7 +219,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		Amount:        -amount,
 		ListAmount:    orig.ListAmount,
 		Currency:      orig.Currency,
-		Status:        PaymentStatusCompletedValue,
+		Status:        PaymentStatusSucceededValue,
 		ReversalKind:  &reversalKind,
 		// The reversal settled at the rail; the feed excludes it on
 		// amount/refunded_payment_id, not on this marker (or#827).
@@ -355,7 +355,7 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 	// their positive recoveries, so every recovery finds its exact effect.
 	for i := len(rows) - 1; i >= 0; i-- {
 		row := rows[i]
-		if PaymentStatusCompleted(row.Status) && row.Amount < 0 {
+		if PaymentStatusSucceeded(row.Status) && row.Amount < 0 {
 			if err := credits.ApplyReversal(ctx, paymentID, row.ID, nil); err != nil {
 				return err
 			}
@@ -363,7 +363,7 @@ func (s *PaymentService) syncPurchasedCreditRefund(ctx context.Context, paymentI
 	}
 	for i := len(rows) - 1; i >= 0; i-- {
 		row := rows[i]
-		if !PaymentStatusCompleted(row.Status) || row.Amount <= 0 {
+		if !PaymentStatusSucceeded(row.Status) || row.Amount <= 0 {
 			continue
 		}
 		var reversed *uuid.UUID
@@ -446,8 +446,8 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	if amount <= 0 {
 		return errors.New("refund amount must be > 0")
 	}
-	if !PaymentStatusCompleted(orig.Status) {
-		return errors.New("only completed charge payments can be refunded")
+	if !PaymentStatusSucceeded(orig.Status) {
+		return errors.New("only succeeded charge payments can be refunded")
 	}
 	if orig.Amount <= 0 || orig.RefundedPaymentID != nil {
 		return errors.New("only successful charge payments can be refunded")
@@ -476,9 +476,9 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	return nil
 }
 
-func PaymentStatusCompleted(status string) bool {
+func PaymentStatusSucceeded(status string) bool {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "", PaymentStatusCompletedValue:
+	case "", PaymentStatusSucceededValue:
 		return true
 	default:
 		return false
@@ -543,7 +543,7 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 			return err
 		}
 		if current.Status != PaymentStatusPendingValue && current.Status != PaymentStatusFailedValue {
-			return errors.New("a completed refund cannot be released")
+			return errors.New("a succeeded refund cannot be released")
 		}
 		if err := scoped.repo.MarkFailed(ctx, id); err != nil {
 			return err
@@ -563,7 +563,7 @@ func (s *PaymentService) MarkFailed(ctx context.Context, id uuid.UUID) error {
 	})
 }
 
-// RefundTotals reports the completed refunds against each listed charge.
+// RefundTotals reports the succeeded refunds against each listed charge.
 func (s *PaymentService) RefundTotals(ctx context.Context, paymentIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
 	return s.repo.RefundTotals(ctx, paymentIDs)
 }

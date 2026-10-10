@@ -85,7 +85,7 @@ func ValidateValues(p Profile, values []*string) error {
 			var benefit models.CreditGrantSnapshot
 			currency := value(p, values, "currency")
 			status := value(p, values, "status")
-			if json.Unmarshal([]byte(*raw), &benefit) != nil || benefit.Validate() != nil || currency == nil || benefit.Currency != *currency || status != nil && *status == "completed" && benefit.StartsAt.IsZero() {
+			if json.Unmarshal([]byte(*raw), &benefit) != nil || benefit.Validate() != nil || currency == nil || benefit.Currency != *currency || status != nil && *status == "succeeded" && benefit.StartsAt.IsZero() {
 				return fmt.Errorf("invalid purchased credit payment snapshot")
 			}
 		}

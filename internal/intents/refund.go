@@ -121,7 +121,7 @@ func (r refundReservations) checkRelevance(ctx context.Context, intent gen.Billi
 	switch strings.ToLower(strings.TrimSpace(reservation.Status)) {
 	case payments.PaymentStatusPendingValue:
 		return StillRelevant(), nil
-	case payments.PaymentStatusCompletedValue, "":
+	case payments.PaymentStatusSucceededValue, "":
 		return SupersededBy("refund reservation already completed"), nil
 	default:
 		return SupersededBy(fmt.Sprintf("refund reservation released (status=%s)", reservation.Status)), nil
@@ -148,7 +148,7 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 		if err != nil {
 			return err
 		}
-		if payments.PaymentStatusCompleted(reservation.Status) {
+		if payments.PaymentStatusSucceeded(reservation.Status) {
 			return nil
 		}
 		if p.RevokeAccess {

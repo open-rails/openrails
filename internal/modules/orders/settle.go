@@ -235,7 +235,7 @@ func (s *Service) recordPayment(ctx context.Context, d *db.DB, order *Order, cha
 	payment := &models.Payment{
 		ID: charge.PaymentID, CustomerID: order.CustomerID, OrderID: &order.ID,
 		Channel: models.ChannelRail, Rail: models.Rail(charge.Rail), PspID: &psp, TransactionID: charge.TransactionID,
-		Amount: charge.Amount, ListAmount: order.Total, Currency: order.Currency, Status: payments.PaymentStatusCompletedValue,
+		Amount: charge.Amount, ListAmount: order.Total, Currency: order.Currency, Status: payments.PaymentStatusSucceededValue,
 		PurchasedAt: charge.PurchasedAt, CreatedAt: s.now(), AttemptKind: &kind, Metadata: charge.Metadata,
 		MoneyMovement: models.MoneyMovementRail,
 	}

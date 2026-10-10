@@ -98,6 +98,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "payments" && len(r.Values) == len(p.Columns)-2 {
 			r.Values = append(r.Values, nil, nil) // Before purchased credits and private legacy duration evidence.
 		}
+		if p.Name == "payments" {
+			renamePaymentStatus(p, r.Values)
+		}
 		if p.Name == "prices" && len(r.Values) == len(p.Columns) {
 			for i, c := range p.Columns {
 				if c.Name != "billing_interval_hours" || r.Values[i] == nil {
@@ -276,4 +279,14 @@ func namedProfile(name string) Profile {
 		}
 	}
 	panic("archive profile " + name + " is missing")
+}
+
+// renamePaymentStatus moves a legacy payment's completed to succeeded, as
+// migration 35 moved the database.
+func renamePaymentStatus(p Profile, values []*string) {
+	for i, c := range p.Columns {
+		if c.Name == "status" && i < len(values) && values[i] != nil && *values[i] == "completed" {
+			values[i] = new("succeeded")
+		}
+	}
 }

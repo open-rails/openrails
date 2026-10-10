@@ -187,7 +187,7 @@ FROM billing.payments pay
 JOIN billing.prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
 WHERE pay.merchant_id = $1::uuid AND pr.product_id = $2::uuid
   AND pay.purchased_at >= $3::timestamptz
-  AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'completed'
+  AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'succeeded'
   AND pay.deleted_at IS NULL AND pay.subscription_id IS NULL
   AND (pay.money_movement = 'rail' OR pay.channel <> 'rail')
 ORDER BY pay.purchased_at, pay.id

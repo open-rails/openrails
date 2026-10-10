@@ -526,7 +526,7 @@ func TestDiffSolanaDiscoveries(t *testing.T) {
 			sale(sigFromByte(4), 999, env(clean, nil)),
 			pullTxn,
 		}}
-		recorded := []LocalPayment{{ID: uuid.New(), Rail: "solana", TransactionID: sigFromByte(4), AmountCents: 999, Status: "completed"}}
+		recorded := []LocalPayment{{ID: uuid.New(), Rail: "solana", TransactionID: sigFromByte(4), AmountCents: 999, Status: "succeeded"}}
 		findings := diffProvider(ProviderSolana, snap, &LocalState{}, recorded, now, diffOptions{})
 		require.Len(t, findings, 4, "an already-recorded payment produces nothing")
 		by := map[string]Finding{}

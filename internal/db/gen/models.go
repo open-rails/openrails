@@ -1025,7 +1025,8 @@ type BillingPayment struct {
 	Amount        int64
 	ListAmount    int64
 	Currency      string
-	Status        string
+	// pending (a refund awaiting its PSP), succeeded, refunded (an NMI same-id refund marks its sale), or failed (only a refund the PSP refused; a declined charge is a payment attempt).
+	Status string
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID

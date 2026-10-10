@@ -57,7 +57,7 @@ func (w *world) checkMoneyInvariants() {
 
 	local := map[string]bool{}
 	rows, err := w.pool.Query(ctx, `SELECT transaction_id, rail FROM `+schema+`.payments
-		WHERE channel = 'rail' AND status = 'completed' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL`)
+		WHERE channel = 'rail' AND status = 'succeeded' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL`)
 	if err != nil {
 		t.Errorf("invariants: read payments: %v", err)
 		return
@@ -107,7 +107,7 @@ func (w *world) checkMoneyInvariants() {
 
 	var twice []string
 	rows, err = w.pool.Query(ctx, `SELECT subscription_id::text || '@' || (metadata->>'period_start') FROM `+schema+`.payments p
-		WHERE status = 'completed' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL
+		WHERE status = 'succeeded' AND money_movement = 'rail' AND amount > 0 AND deleted_at IS NULL AND refunded_payment_id IS NULL
 		  AND subscription_id IS NOT NULL AND metadata ? 'period_start'
 		  AND NOT EXISTS (SELECT 1 FROM `+schema+`.payments r WHERE r.refunded_payment_id = p.id AND r.deleted_at IS NULL)
 		GROUP BY subscription_id, metadata->>'period_start' HAVING count(*) > 1`)

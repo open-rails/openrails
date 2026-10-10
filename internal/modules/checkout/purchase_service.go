@@ -501,7 +501,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		Amount:              amount,
 		ListAmount:          price.Amount,
 		Currency:            currency,
-		Status:              payments.PaymentStatusCompletedValue,
+		Status:              payments.PaymentStatusSucceededValue,
 		PurchasedAt:         purchasedAt,
 		CreatedAt:           now,
 		DiscountCode:        req.DiscountCode,
@@ -549,7 +549,7 @@ func (s *CheckoutPurchaseService) applyPurchase(ctx context.Context, req *paymen
 		if existingPayment.SubscriptionID != nil && *existingPayment.SubscriptionID != *req.SubscriptionID {
 			return nil, paymentTransactionTaken("payment transaction belongs to a different subscription")
 		}
-		if !payments.PaymentStatusCompleted(existingPayment.Status) {
+		if !payments.PaymentStatusSucceeded(existingPayment.Status) {
 			return nil, paymentTransactionTaken("payment transaction is not completed")
 		}
 		if amount > 0 && existingPayment.Amount != amount {

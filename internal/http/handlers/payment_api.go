@@ -13,7 +13,7 @@ func PaymentToAPI(p *models.Payment, refunds []*models.Payment) billing.Payment 
 	var amountRefunded int64
 	out := make([]billing.Payment, 0, len(refunds))
 	for _, r := range refunds {
-		if r.Status == "completed" {
+		if r.Status == "succeeded" {
 			amountRefunded += abs(r.Amount)
 		}
 		out = append(out, paymentView(r, 0))
@@ -118,7 +118,7 @@ func paymentKind(p *models.Payment) billing.PaymentKind {
 
 func paymentStatus(status string) billing.PaymentStatus {
 	switch status {
-	case "completed":
+	case "succeeded":
 		return billing.PaymentSucceeded
 	case "refunded":
 		return billing.PaymentRefunded

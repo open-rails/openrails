@@ -21,7 +21,7 @@ func (t InitialMembershipTerms) ValidateSubscriptionIdentity(sub *models.Subscri
 // ValidateInitialMembershipPayment checks original paid facts, not a current
 // catalog projection. Later membership changes cannot change this payment.
 func ValidateInitialMembershipPayment(t InitialMembershipTerms, p *models.Payment, rail models.Rail, transaction string) error {
-	if p == nil || p.ID != t.PaymentID || p.CustomerID != t.CustomerID || p.PriceID != t.PriceID || p.PspID == nil || *p.PspID != t.PSPID || p.SubscriptionID == nil || *p.SubscriptionID != t.SubscriptionID || p.Rail != rail || p.TransactionID != transaction || p.Amount != t.Amount || p.ListAmount != t.RecurringAmount || p.Currency != t.Currency || !payments.PaymentStatusCompleted(p.Status) || p.MoneyMovement != models.MoneyMovementRail {
+	if p == nil || p.ID != t.PaymentID || p.CustomerID != t.CustomerID || p.PriceID != t.PriceID || p.PspID == nil || *p.PspID != t.PSPID || p.SubscriptionID == nil || *p.SubscriptionID != t.SubscriptionID || p.Rail != rail || p.TransactionID != transaction || p.Amount != t.Amount || p.ListAmount != t.RecurringAmount || p.Currency != t.Currency || !payments.PaymentStatusSucceeded(p.Status) || p.MoneyMovement != models.MoneyMovementRail {
 		return errors.New("existing initial payment contradicts accepted enrollment")
 	}
 	return nil

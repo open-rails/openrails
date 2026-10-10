@@ -143,7 +143,7 @@ func (w *world) chargeAgain(customerID string, after time.Duration, newPrice boo
 			metadata, purchased_at, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement)
 		SELECT $3::uuid, `+priceExpr+`, channel, rail, transaction_id || '-again', amount, list_amount, currency, status, subscription_id,
 			`+metadataExpr+`, purchased_at + $2::interval, created_at, merchant_id, customer_id, psp_id, attempt_kind, money_movement
-		FROM billing.payments pay WHERE customer_id = $1::uuid AND status = 'completed' ORDER BY purchased_at DESC LIMIT 1`), customerID, fmt.Sprintf("%d seconds", int(after.Seconds())), id)
+		FROM billing.payments pay WHERE customer_id = $1::uuid AND status = 'succeeded' ORDER BY purchased_at DESC LIMIT 1`), customerID, fmt.Sprintf("%d seconds", int(after.Seconds())), id)
 	require.NoError(w.t, err)
 	return id.String()
 }

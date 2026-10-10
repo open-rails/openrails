@@ -39,7 +39,7 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.source_type = 'purchas
 -- sharing a child is one charge per bundle, not a double charge for the
 -- child). A refunded purchase no longer charges the customer, so grants whose
 -- payment is refunded (status flip OR a linked refund row — the admin refund
--- path records a negative row and leaves the original 'completed') drop out:
+-- path records a negative row and leaves the original 'succeeded') drop out:
 -- the #692 approve→refund fix self-confirms on the next sweep instead of
 -- reopening; the access-side residue is derive.grant.excess's domain.
 -- Purchases ride as a jsonb array (payment linkage nullable) ordered
@@ -104,7 +104,7 @@ WITH charges AS (
     JOIN billing.products prod ON price.product_id = prod.id
     WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.deleted_at IS NULL
       AND purch.subscription_id IS NOT NULL
-      AND purch.status = 'completed'
+      AND purch.status = 'succeeded'
       AND purch.money_movement = 'rail'
       AND purch.amount > 0
       AND purch.refunded_payment_id IS NULL

@@ -518,7 +518,7 @@ func paymentMethodHealth(card models.Card, charge *models.PaymentMethodCharge, n
 	}
 	if charge != nil {
 		at, outcome := charge.LastChargedAt, billing.ChargeSucceeded
-		if charge.Status != "completed" {
+		if charge.Status != "succeeded" {
 			outcome = billing.ChargeFailed
 			h.Active = false
 		}

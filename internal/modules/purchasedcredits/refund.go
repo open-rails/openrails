@@ -96,7 +96,7 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		if err != nil {
 			return err
 		}
-		if reversal.CustomerID != g.CustomerID || reversal.Currency != currency || reversal.RefundedPaymentID == nil || *reversal.RefundedPaymentID != paymentID || reversal.Status != "completed" || reversal.Amount == 0 {
+		if reversal.CustomerID != g.CustomerID || reversal.Currency != currency || reversal.RefundedPaymentID == nil || *reversal.RefundedPaymentID != paymentID || reversal.Status != "succeeded" || reversal.Amount == 0 {
 			return fmt.Errorf("credit reversal contradicts completed payment")
 		}
 		committed, err := q.GetPurchasedCreditReversalState(ctx, gen.GetPurchasedCreditReversalStateParams{MerchantID: mid.UUID(), GrantID: g.ID, ReversalID: reversalID.String()})

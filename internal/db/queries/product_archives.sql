@@ -29,7 +29,7 @@ FROM billing.payments pay
 JOIN billing.prices pr ON pr.merchant_id = pay.merchant_id AND pr.id = pay.price_id
 WHERE pay.merchant_id = sqlc.arg(merchant_id)::uuid AND pr.product_id = sqlc.arg(product_id)::uuid
   AND pay.purchased_at >= sqlc.arg(purchase_window_starts_at)::timestamptz
-  AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'completed'
+  AND pay.refunded_payment_id IS NULL AND pay.amount > 0 AND pay.status = 'succeeded'
   AND pay.deleted_at IS NULL AND pay.subscription_id IS NULL
   AND (pay.money_movement = 'rail' OR pay.channel <> 'rail')
 ORDER BY pay.purchased_at, pay.id;

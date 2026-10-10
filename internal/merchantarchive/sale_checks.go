@@ -82,7 +82,7 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || !bought || observed.Rail == nil || *observed.Rail != op.Rail || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
 		return errors.New("sale result points to another payment or commercial decision")
 	}
-	if !payments.PaymentStatusCompleted(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
+	if !payments.PaymentStatusSucceeded(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
 		return errors.New("sale result is not its exact completed payment")
 	}
 	if p.OrderID != uuid.Nil {

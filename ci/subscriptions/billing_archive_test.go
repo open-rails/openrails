@@ -255,7 +255,7 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	require.EqualValues(t, 1, record.RowsAffected())
 	require.NotEqual(t, "provider_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
 
-	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET status = 'completed' WHERE transaction_id LIKE '%_sub_declined:%'`))
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET status = 'succeeded' WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
 	require.Equal(t, "provider_intents", refusedTable(), "a completed payment under a refused enrollment")
 	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.payments WHERE transaction_id LIKE '%_sub_declined:%'`))

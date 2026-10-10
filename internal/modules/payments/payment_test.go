@@ -25,7 +25,7 @@ func TestMoneyMovementIsDeclared(t *testing.T) {
 		want    models.MoneyMovement
 		errText string
 	}{
-		{"undeclared completed charge", models.Payment{Amount: 7_000_000, Status: "completed"}, "", "must be declared"},
+		{"undeclared completed charge", models.Payment{Amount: 7_000_000, Status: "succeeded"}, "", "must be declared"},
 		{"empty status is completed", models.Payment{Amount: 7_000_000}, "", "must be declared"},
 		{"declared rail", models.Payment{Amount: 7_000_000, MoneyMovement: models.MoneyMovementRail}, models.MoneyMovementRail, ""},
 		{"declared none", models.Payment{Amount: 7_000_000, MoneyMovement: models.MoneyMovementNone}, models.MoneyMovementNone, ""},
@@ -49,18 +49,18 @@ func TestMoneyMovementIsDeclared(t *testing.T) {
 // CUR-6: every minted payment row carries the canonical upper-case currency, or none is minted.
 func TestPaymentInsertParamsCanonicalize(t *testing.T) {
 	t.Parallel()
-	params, err := paymentInsertParams(&models.Payment{ID: uuid.New(), Amount: 1_000_000, Currency: " usd ", Status: "completed", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
+	params, err := paymentInsertParams(&models.Payment{ID: uuid.New(), Amount: 1_000_000, Currency: " usd ", Status: "succeeded", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
 	require.NoError(t, err)
 	require.Equal(t, "USD", params.Currency)
 	require.Equal(t, string(models.MoneyMovementRail), params.MoneyMovement)
 	require.Equal(t, "rail", params.Channel)
 	require.Equal(t, "nmi", *params.Rail)
 
-	manual, err := paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Status: "completed", Channel: models.ChannelManual, MoneyMovement: models.MoneyMovementNone})
+	manual, err := paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Status: "succeeded", Channel: models.ChannelManual, MoneyMovement: models.MoneyMovementNone})
 	require.NoError(t, err)
 	require.Equal(t, "manual", manual.Channel)
 	require.Nil(t, manual.Rail, "a manual payment has no rail")
-	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Status: "completed", Channel: models.ChannelManual, Rail: "nmi", MoneyMovement: models.MoneyMovementNone})
+	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Status: "succeeded", Channel: models.ChannelManual, Rail: "nmi", MoneyMovement: models.MoneyMovementNone})
 	require.ErrorContains(t, err, "names no rail")
 	_, err = paymentInsertParams(&models.Payment{Amount: 1_000_000, Currency: "USD", Rail: "nmi", MoneyMovement: models.MoneyMovementRail})
 	require.ErrorContains(t, err, "status required", "no status is invented")
@@ -77,7 +77,7 @@ func TestValidateRefundRefusals(t *testing.T) {
 	svc := &PaymentService{}
 	refunded := uuid.New()
 	mk := func(mut func(*models.Payment)) *models.Payment {
-		p := &models.Payment{ID: uuid.New(), Amount: 1000, Status: "completed", MoneyMovement: models.MoneyMovementRail}
+		p := &models.Payment{ID: uuid.New(), Amount: 1000, Status: "succeeded", MoneyMovement: models.MoneyMovementRail}
 		mut(p)
 		return p
 	}
@@ -89,17 +89,17 @@ func TestValidateRefundRefusals(t *testing.T) {
 	}{
 		{"nil", nil, 500, "required"},
 		{"zero amount", mk(func(*models.Payment) {}), 0, "> 0"},
-		{"failed", mk(func(p *models.Payment) { p.Status = "failed" }), 500, "completed"},
-		{"pending", mk(func(p *models.Payment) { p.Status = "pending" }), 500, "completed"},
-		{"refunded", mk(func(p *models.Payment) { p.Status = "refunded" }), 500, "completed"},
+		{"failed", mk(func(p *models.Payment) { p.Status = "failed" }), 500, "succeeded"},
+		{"pending", mk(func(p *models.Payment) { p.Status = "pending" }), 500, "succeeded"},
+		{"refunded", mk(func(p *models.Payment) { p.Status = "refunded" }), 500, "succeeded"},
 		{"reversal row", mk(func(p *models.Payment) { p.Amount, p.RefundedPaymentID = -1000, &refunded }), 500, "successful charge"},
 		{"bookkeeping row", mk(func(p *models.Payment) { p.MoneyMovement = models.MoneyMovementNone }), 500, "no money movement"},
 	} {
 		require.ErrorContains(t, svc.ValidateRefund(context.Background(), tc.p, tc.amount), tc.errText, tc.name)
 	}
 
-	for status, want := range map[string]bool{"": true, "completed": true, " Completed ": true, "pending": false, "failed": false} {
-		require.Equal(t, want, PaymentStatusCompleted(status), status)
+	for status, want := range map[string]bool{"": true, "succeeded": true, " Succeeded ": true, "pending": false, "failed": false} {
+		require.Equal(t, want, PaymentStatusSucceeded(status), status)
 	}
 }
 
@@ -111,7 +111,7 @@ func TestEffectiveRefundTotal(t *testing.T) {
 		want int64
 	}{
 		{nil, 0},
-		{[]refundTotalRow{{Amount: -500, Status: "completed"}}, 500},
+		{[]refundTotalRow{{Amount: -500, Status: "succeeded"}}, 500},
 		{[]refundTotalRow{{Amount: -500, Status: "pending"}}, 500},
 		{[]refundTotalRow{{Amount: -500, Status: " FAILED "}}, 0},
 		{[]refundTotalRow{{Amount: -500}, {Amount: -200}}, 700},

@@ -1432,7 +1432,7 @@ SELECT EXISTS (
  WHERE p.merchant_id=$1::uuid
    AND p.subscription_id=$2::uuid
    AND p.psp_id=$3::uuid
-   AND p.status='completed' AND p.deleted_at IS NULL
+   AND p.status='succeeded' AND p.deleted_at IS NULL
    AND p.purchased_at>=$4::timestamptz
    AND NOT EXISTS (
      SELECT 1 FROM billing.provider_intents i
@@ -1479,7 +1479,7 @@ JOIN billing.provider_intents i ON i.merchant_id=p.merchant_id AND i.psp_id=p.ps
 WHERE p.merchant_id=$1::uuid
   AND p.subscription_id=$2::uuid
   AND p.psp_id=$3::uuid
-  AND p.status='completed' AND p.deleted_at IS NULL
+  AND p.status='succeeded' AND p.deleted_at IS NULL
 `
 
 type ListCompletedManualRebillPaymentCoverageParams struct {

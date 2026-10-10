@@ -18,7 +18,7 @@ func TestStripePullDoesNotBackfillNativeRenewalFromCustomer(t *testing.T) {
 	require.Len(t, findings, 1)
 	require.Equal(t, FindingStatusRequiresReview, findings[0].Status)
 	require.Nil(t, findings[0].Apply, "native receipts belong to their accepted operation")
-	known := LocalPayment{ID: uuid.New(), CustomerID: customer, SubscriptionID: &sub, TransactionID: "ch_1", AmountCents: 999, Currency: "USD", Status: "completed"}
+	known := LocalPayment{ID: uuid.New(), CustomerID: customer, SubscriptionID: &sub, TransactionID: "ch_1", AmountCents: 999, Currency: "USD", Status: "succeeded"}
 	require.Empty(t, diffProvider(ProviderStripe, snapshot, local, []LocalPayment{known}, time.Now(), diffOptions{}))
 }
 
@@ -28,7 +28,7 @@ func TestStripePullDoesNotBackfillNativeRenewalFromCustomer(t *testing.T) {
 func TestStripePullRecognizesCheckoutPaymentIntent(t *testing.T) {
 	for _, name := range []string{"match", "wrong_amount", "wrong_currency", "two_allocations", "two_charges", "not_settled"} {
 		t.Run(name, func(t *testing.T) {
-			payment := LocalPayment{ID: uuid.New(), TransactionID: "pi_1", AmountCents: 999, Currency: "USD", Status: "completed"}
+			payment := LocalPayment{ID: uuid.New(), TransactionID: "pi_1", AmountCents: 999, Currency: "USD", Status: "succeeded"}
 			payments := []LocalPayment{payment}
 			transaction := RemoteTransaction{TransactionID: "ch_1", Type: TransactionTypeSale, Success: true, AmountCents: 999, Currency: "USD", Raw: rawJSON(map[string]string{"payment_intent": "pi_1"})}
 			snapshot := &RemoteSnapshot{Provider: ProviderStripe, Capabilities: Capabilities{Transactions: true}, Transactions: []RemoteTransaction{transaction}}
@@ -63,7 +63,7 @@ func TestStripePullRecognizesCheckoutPaymentIntent(t *testing.T) {
 }
 
 func TestStripeRefundLinksCheckoutPaymentOutsideChargeWindow(t *testing.T) {
-	payment := LocalPayment{ID: uuid.New(), TransactionID: "pi_1", AmountCents: 999, Currency: "USD", Status: "completed"}
+	payment := LocalPayment{ID: uuid.New(), TransactionID: "pi_1", AmountCents: 999, Currency: "USD", Status: "succeeded"}
 	snapshot := &RemoteSnapshot{Provider: ProviderStripe, Capabilities: Capabilities{Transactions: true, Refunds: true}, Transactions: []RemoteTransaction{{TransactionID: "re_1", Type: TransactionTypeRefund, Success: true, AmountCents: 999, Currency: "USD", Raw: rawJSON(map[string]string{"charge": "ch_1", "payment_intent": "pi_1"})}}}
 	findings := diffProvider(ProviderStripe, snapshot, &LocalState{}, []LocalPayment{payment}, time.Now(), diffOptions{})
 	require.Len(t, findings, 1)

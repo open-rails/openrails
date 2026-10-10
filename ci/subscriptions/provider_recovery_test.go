@@ -172,7 +172,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 		expectedCharges = 2
 		require.Eventually(t, func() bool {
 			var count int
-			err := target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`), subUUID(member.sub)).Scan(&count)
+			err := target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='succeeded'`), subUUID(member.sub)).Scan(&count)
 			return err == nil && count == 2
 		}, 30*time.Second, 30*time.Millisecond, "exact canonical readback settles the existing payment without a local submission fence")
 		var fenced int
@@ -191,7 +191,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	target.nmi.ClearIntercepts()
 	require.Eventually(t, func() bool {
 		var count int
-		err := target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='completed'`), subUUID(member.sub)).Scan(&count)
+		err := target.pool.QueryRow(t.Context(), target.q(`SELECT count(*) FROM billing.payments WHERE subscription_id=$1 AND status='succeeded'`), subUUID(member.sub)).Scan(&count)
 		return err == nil && count == 2
 	}, 100*time.Second, 50*time.Millisecond, "configured full mode automatically resumes after verified catch-up")
 	require.Len(t, target.nmi.Attempts(), 2)

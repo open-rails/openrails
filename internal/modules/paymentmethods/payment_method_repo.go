@@ -529,7 +529,7 @@ func (r *PaymentMethodRepo) LatestChargeByMethodIDs(ctx context.Context, ids []u
 		}
 		status := "failed"
 		if row.Category == "approved" {
-			status = "completed"
+			status = "succeeded"
 		}
 		out[*row.PaymentMethodID] = models.PaymentMethodCharge{LastChargedAt: row.AttemptedAt, Status: status}
 	}
