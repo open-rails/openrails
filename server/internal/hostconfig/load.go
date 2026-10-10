@@ -209,6 +209,9 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 	envCallbackWithValue := func(key string, value string) (string, interface{}) {
 		upperKey := strings.ToUpper(key)
+		if serviceLink(upperKey, strings.TrimSpace(value)) {
+			return "", nil
+		}
 		if upperKey == "MERCHANT" || upperKey == "AUTH_ISSUERS" || upperKey == "CORS_ORIGINS" || strings.HasPrefix(upperKey, "RAILS_") || strings.HasPrefix(upperKey, "STORE_") {
 			return "", nil
 		}
@@ -482,7 +485,8 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 func hasEnvPrefix(prefix string) bool {
 	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, prefix) {
+		name, value, _ := strings.Cut(entry, "=")
+		if strings.HasPrefix(name, prefix) && !serviceLink(name, value) {
 			return true
 		}
 	}

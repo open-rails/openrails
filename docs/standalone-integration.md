@@ -52,7 +52,10 @@ trusted proxies, captcha, admin console) plus an environment overlay: an env var
 maps onto the config tree by prefix, e.g. `DB_URL` → `db.url`,
 `PROVIDER_WRITE_MODE` → `provider_write_mode`, `SECRET_BACKEND` →
 `secret_backend`. For the two operating dials there are also CLI flags.
-Precedence: **flag beats env beats yaml.**
+Precedence: **flag beats env beats yaml.** An env var inside a section that
+names no key refuses boot, except the variables Kubernetes adds for each
+Service in the namespace (`REDIS_SERVICE_HOST`, `DB_PORT=tcp://…`), which are
+ignored.
 
 Security defaults apply in sandbox and live deployments. Narrow local auth
 exceptions must be explicit; provider posture does not relax storage, issuer,
