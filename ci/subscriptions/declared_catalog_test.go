@@ -181,3 +181,41 @@ products:
 	require.Equal(t, "price_legacy_"+key, price.PSPs["stripe"].IDs["price_id"])
 	require.Equal(t, revision+1, w.catalogRevision())
 }
+
+// Replicas boot together: another one holds a PSP row (recording its
+// credential fingerprint, say) while this New applies a catalog selling on that
+// PSP. New waits its turn instead of failing.
+func TestDeclaredCatalogWaitsForABusyPSP(t *testing.T) {
+	w := prepareWorld(t, 12)
+	w.start()
+	w.stop()
+	key := "busy-" + uuid.NewString()[:8]
+	params, err := catalog.ParseApplicationYAML([]byte(fmt.Sprintf(`schema_version: 1
+products:
+  %[1]s:
+    display_name: Busy
+    entitlements: ["%[1]s"]
+    prices:
+      %[1]s-monthly:
+        currency: usd
+        unit_amount: 9990000
+        billing_interval_hours: 720
+        access_duration_hours: 720
+        psps: [nmi]
+`, key)))
+	require.NoError(t, err)
+
+	holder, err := w.pool.Begin(t.Context())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = holder.Rollback(context.Background()) })
+	var held int
+	require.NoError(t, holder.QueryRow(t.Context(), w.sql(`SELECT count(*) FROM (SELECT 1 FROM billing.psps WHERE key = 'nmi' FOR UPDATE) held`)).Scan(&held))
+	require.Equal(t, 1, held)
+	time.AfterFunc(time.Second, func() { _ = holder.Rollback(context.Background()) })
+
+	client, err := w.bootDeclared(t.Context(), params)
+	require.NoError(t, err, "a PSP another replica holds delays New, never fails it")
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	_, err = priceByKey(t.Context(), client, key, key+"-monthly")
+	require.NoError(t, err)
+}
