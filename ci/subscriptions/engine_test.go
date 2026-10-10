@@ -47,14 +47,14 @@ func (e *engineCase) providerLedger() []ledgerEntry {
 
 func (e *engineCase) providerAttempts() int {
 	if e.rail == "stripe" {
-		return e.w.stripe.attempts("")
+		return e.w.stripe.Attempts("")
 	}
 	return len(e.w.nmi.Attempts())
 }
 
 func (e *engineCase) setDecline(last4, stripeCode, nmiCode string) {
 	if e.rail == "stripe" {
-		e.w.stripe.setDecline(last4, stripeCode)
+		e.w.stripe.SetDecline(last4, stripeCode)
 	} else {
 		e.w.nmi.SetDecline(last4, nmiCode)
 	}
@@ -182,7 +182,7 @@ func TestEngineHappyRenewals(t *testing.T) {
 			require.Len(t, paid, period, "local payments match provider charges")
 			e.requireLedgerAgreement(paid)
 		}
-		require.Empty(t, w.stripe.unexpected())
+		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }
@@ -415,7 +415,7 @@ func (e *engineCase) replaceCard(c card) {
 func (e *engineCase) lastChargedCard() string {
 	if e.rail == "stripe" {
 		ledger := e.w.stripe.ledger("")
-		return e.w.stripe.cardOf(ledger[len(ledger)-1].Method)
+		return e.w.stripe.CardOf(ledger[len(ledger)-1].Method)
 	}
 	return e.w.nmi.LastSale().Card.Last4
 }
@@ -710,7 +710,7 @@ func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	w.refreshProviders()
 	w.wake()
 	w.until(func() bool { return w.attemptStatus(attempt) == "failed" }, "the abandoned challenge fails the enrollment")
-	require.Len(t, w.stripe.mutations("/v1/payment_intents/"), 1, "the challenged payment itself is closed, once")
+	require.Len(t, w.stripe.Mutations("/v1/payment_intents/"), 1, "the challenged payment itself is closed, once")
 	fresh := c.saveCard("stripe", visa)
 	c.subscribeAgain(embedded, "stripe", price.ID.String(), "content:members", fresh)
 	require.True(t, c.entitled("content:members"))

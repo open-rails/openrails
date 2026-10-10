@@ -56,10 +56,9 @@ func nmiEvent(kind string, body obj) obj {
 // refundNotice is the provider telling OpenRails about its latest refund.
 func (w *world) refundNotice(rail string) obj {
 	if rail == "stripe" {
-		w.stripe.mu.Lock()
-		defer w.stripe.mu.Unlock()
-		for _, re := range w.stripe.refunds {
-			ch := w.stripe.charges[fmt.Sprint(re["charge"])]
+		if refunds := w.stripe.Refunds(); len(refunds) > 0 {
+			re := refunds[len(refunds)-1]
+			ch := w.stripe.Charge(fmt.Sprint(re["charge"]))
 			return stripeEvent("charge.refunded", obj{"object": "charge", "id": ch["id"], "payment_intent": ch["payment_intent"], "amount": ch["amount"], "amount_refunded": ch["amount_refunded"], "refunded": ch["refunded"], "currency": ch["currency"], "customer": ch["customer"],
 				"refunds": obj{"object": "list", "data": []obj{re}}})
 		}

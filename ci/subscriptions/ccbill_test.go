@@ -369,7 +369,7 @@ func TestCCBillNewSaleIsRefused(t *testing.T) {
 
 // engineCharges counts every charge OpenRails submitted on any rail.
 func (w *world) engineCharges() int {
-	return len(w.stripe.mutations("/v1/payment_intents")) + len(w.nmi.Attempts())
+	return len(w.stripe.Mutations("/v1/payment_intents")) + len(w.nmi.Attempts())
 }
 
 // CCBill names its buyer by username: the one the host's directory holds for

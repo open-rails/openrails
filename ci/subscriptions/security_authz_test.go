@@ -100,7 +100,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 
 func lastFour(w *world, rail string, entry ledgerEntry) string {
 	if rail == "stripe" {
-		return w.stripe.cardOf(entry.Method)
+		return w.stripe.CardOf(entry.Method)
 	}
 	return entry.Method
 }

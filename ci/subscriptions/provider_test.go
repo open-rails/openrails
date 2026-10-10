@@ -58,11 +58,11 @@ func importLegacy(t *testing.T, w *world, rail string, tp topology, configure ..
 	case "stripe":
 		l.railCust = "cus_legacy" + uuid.NewString()[:8]
 		method := "pm_legacy" + uuid.NewString()[:8]
-		l.railSub = w.stripe.legacySubscription(l.railCust, method, links["stripe"]["price_id"], 999, start, end)
+		l.railSub = w.stripe.AddSubscription(l.railCust, method, links["stripe"]["price_id"], 999, start, end)
 		book.PaymentMethods = []billing.DeclaredPaymentMethod{{Customer: customerID, Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method, Card: declaredCard(visa)}}
 		book.Subscriptions = []billing.DeclaredSubscription{{SourceID: "legacy-" + l.railSub, Customer: customerID, Price: priceID, Rail: "stripe", RailSubscriptionID: l.railSub, StartedAt: start, PaidThrough: &end,
 			PaymentMethod: &billing.PaymentMethodRef{Rail: "stripe", RailCustomerRef: l.railCust, RailMethodRef: method}}}
-		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.latestCharge(l.railSub), Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
+		book.Transactions = []billing.DeclaredTransaction{{RailSubscriptionID: l.railSub, TransactionID: w.stripe.LatestCharge(l.railSub), Success: true, Amount: 9_990_000, Currency: "USD", OccurredAt: start}}
 	case "nmi":
 		vault := w.nmi.AddVault(visa)
 		l.railCust = vault
@@ -129,7 +129,7 @@ func (l *legacy) periodEnd() time.Time {
 // engineWrites counts provider mutations OpenRails could use to charge.
 func (l *legacy) engineCharges() int {
 	if l.rail == "stripe" {
-		return len(l.w.stripe.mutations("/v1/payment_intents"))
+		return len(l.w.stripe.Mutations("/v1/payment_intents"))
 	}
 	return len(l.w.nmi.Attempts())
 }
@@ -158,13 +158,13 @@ func TestProviderOwnedRenewals(t *testing.T) {
 		if rail == "stripe" {
 			// Stripe first rolls the period with a draft invoice; that is a
 			// renewal in progress, never a decline.
-			require.Equal(t, http.StatusOK, w.deliver(rail, stripeEvent("customer.subscription.updated", w.stripe.providerDraft(l.railSub))))
+			require.Equal(t, http.StatusOK, w.deliver(rail, stripeEvent("customer.subscription.updated", w.stripe.DraftRenewal(l.railSub))))
 			sub := w.subscription(tp, l.sub)
 			require.Equal(t, billing.SubscriptionActive, sub.Status, "a draft invoice is not a failed renewal")
 			for _, p := range w.payments(tp, l.c.id) {
 				require.NotEqual(t, "failed", p.Status, "no failed payment for a draft invoice")
 			}
-			first = stripeEvent("invoice.paid", w.stripe.providerCollectDraft(l.railSub))
+			first = stripeEvent("invoice.paid", w.stripe.CollectDraft(l.railSub))
 		} else {
 			first = l.providerRenewal(true)
 		}
@@ -194,7 +194,7 @@ func TestProviderOwnedRenewals(t *testing.T) {
 // sends about it.
 func (l *legacy) providerRenewal(paid bool) obj {
 	if l.rail == "stripe" {
-		inv := l.w.stripe.providerRenew(l.railSub, paid)
+		inv := l.w.stripe.RenewSubscription(l.railSub, paid)
 		kind := "invoice.paid"
 		if !paid {
 			kind = "invoice.payment_failed"
@@ -213,7 +213,7 @@ func (l *legacy) providerRenewal(paid bool) obj {
 // staleNotice is an old lifecycle notice arriving after newer ones.
 func (l *legacy) staleNotice() obj {
 	if l.rail == "stripe" {
-		stale := l.w.stripe.subscriptionObject(l.railSub)
+		stale := l.w.stripe.Subscription(l.railSub)
 		event := stripeEvent("customer.subscription.updated", stale)
 		event["created"] = time.Now().Add(-40 * day).Unix()
 		return event
@@ -252,7 +252,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.wake()
 			require.NotNil(t, w.subscription(tp, l.sub).CanceledAt)
 			if rail == "stripe" {
-				require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"], "Stripe stops renewing")
+				require.Equal(t, true, w.stripe.Subscription(l.railSub)["cancel_at_period_end"], "Stripe stops renewing")
 			} else {
 				require.False(t, w.nmi.ScheduleLive(l.railSub), "the NMI schedule is deleted")
 			}
@@ -296,7 +296,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 			w.advance(time.Hour)
 			w.wake()
 			if rail == "stripe" {
-				require.Equal(t, "canceled", w.stripe.subscriptionObject(l.railSub)["status"], "a delinquent Stripe schedule ends now, so its open invoice stops retrying")
+				require.Equal(t, "canceled", w.stripe.Subscription(l.railSub)["status"], "a delinquent Stripe schedule ends now, so its open invoice stops retrying")
 			} else {
 				// Documented: the destructive-action switch ships off and holds
 				// every NMI schedule delete until an operator arms it.
@@ -313,7 +313,7 @@ func TestProviderOwnedLifecycle(t *testing.T) {
 // providerCancelNotice ends the schedule at the provider and returns its notice.
 func (l *legacy) providerCancelNotice() obj {
 	if l.rail == "stripe" {
-		return stripeEvent("customer.subscription.deleted", l.w.stripe.providerCancel(l.railSub))
+		return stripeEvent("customer.subscription.deleted", l.w.stripe.CancelSubscription(l.railSub))
 	}
 	l.w.nmi.DeleteSchedule(l.railSub)
 	return nmiEvent("recurring.subscription.delete", obj{"subscription_id": l.railSub})

@@ -38,7 +38,7 @@ func (w *world) railLedger(rail string) []ledgerEntry {
 
 func (w *world) railDecline(rail, stripeCode, nmiCode string) {
 	if rail == "stripe" {
-		w.stripe.setDecline(visa.Last4, stripeCode)
+		w.stripe.SetDecline(visa.Last4, stripeCode)
 	} else {
 		w.nmi.SetDecline(visa.Last4, nmiCode)
 	}
@@ -133,7 +133,7 @@ func TestEngineTierUpgrade(t *testing.T) {
 			c.must(http.MethodPost, "/subscriptions/"+successor.String()+"/cancel", "", map[string]any{"reason": "done"})
 			w.settle()
 		}
-		require.Empty(t, w.stripe.unexpected())
+		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }
@@ -208,7 +208,7 @@ func TestEngineTierDowngrade(t *testing.T) {
 			c.must(http.MethodPost, "/subscriptions/"+sub.String()+"/cancel", "", map[string]any{"reason": "done"})
 			w.settle()
 		}
-		require.Empty(t, w.stripe.unexpected())
+		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }
@@ -275,7 +275,7 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 	w.advance(360 * time.Hour)
 	charges := len(w.stripe.ledger(""))
 
-	w.stripe.setDecline(visa.Last4, "auth")
+	w.stripe.SetDecline(visa.Last4, "auth")
 	key := "challenged-" + uuid.NewString()
 	req := billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID)}
 	pending, err := c.change(sub, billing.ChangeSubscriptionParams{PriceID: req.PriceID, IdempotencyKey: key})
@@ -289,7 +289,7 @@ func TestEngineTierUpgradeAuthentication(t *testing.T) {
 
 	auth := unwrap(c.must(http.MethodGet, "/payment-operations/"+op+"/authentication", "", nil))
 	require.NotEmpty(t, auth["client_secret"])
-	require.True(t, w.stripe.authenticate(auth["payment_intent_id"].(string)))
+	require.True(t, w.stripe.Authenticate(auth["payment_intent_id"].(string)))
 	c.must(http.MethodPost, "/payment-operations/"+op+"/authentication/confirm", "", nil)
 	w.settle()
 

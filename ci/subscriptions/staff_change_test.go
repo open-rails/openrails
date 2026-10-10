@@ -16,20 +16,13 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// intentField reads one field of a PaymentIntent the fake holds.
-func (f *stripeFake) intentField(id, key string) any {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.intents[id][key]
-}
-
 // requireMerchantInitiated: the last charge cited the card's agreement as a
 // merchant-initiated charge and stored nothing anew.
 func (w *world) requireMerchantInitiated(rail string, charged ledgerEntry) {
 	w.t.Helper()
 	if rail == "stripe" {
-		require.Equal(w.t, "true", w.stripe.intentField(charged.ID, "metadata").(map[string]string)["openrails_merchant_initiated"])
-		require.Empty(w.t, w.stripe.intentField(charged.ID, "setup_future_usage"), "an off-session charge saves nothing")
+		require.Equal(w.t, "true", w.stripe.PaymentIntent(charged.ID)["metadata"].(map[string]string)["openrails_merchant_initiated"])
+		require.Empty(w.t, w.stripe.PaymentIntent(charged.ID)["setup_future_usage"], "an off-session charge saves nothing")
 		return
 	}
 	sale := w.nmi.LastSale()
@@ -144,7 +137,7 @@ func TestStaffSubscriptionChange(t *testing.T) {
 		requireCode(t, err, http.StatusConflict, billing.CodeStoredCredentialRequired)
 		require.Len(t, w.railLedger(rail), charges+1)
 		require.Equal(t, basic.ID, w.subscription(embedded, successor).ScheduledChange.PriceID, "the refused change leaves the schedule")
-		require.Empty(t, w.stripe.unexpected())
+		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }
@@ -189,7 +182,7 @@ func TestSubscriptionChangeBack(t *testing.T) {
 		require.Equal(t, int64(2000), ledger[len(ledger)-1].Amount, fmt.Sprintf("%s: the renewal bills the current price", rail))
 		require.Equal(t, pro.ID, w.subscription(embedded, sub).PriceID)
 		require.True(t, c.entitled(pro.ent))
-		require.Empty(t, w.stripe.unexpected())
+		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }

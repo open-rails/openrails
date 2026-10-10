@@ -42,7 +42,7 @@ func TestReplicasManyDueAtOnce(t *testing.T) {
 	sub, err := f.replicas[2].client[remote].GetSubscription(t.Context(), cases[0].sub)
 	require.NoError(t, err)
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
-	require.Empty(t, f.base.stripe.unexpected())
+	require.Empty(t, f.base.stripe.Unexpected())
 	require.Empty(t, f.base.nmi.Unexpected())
 }
 
@@ -270,17 +270,11 @@ func receiptRead(f *fleet, e *engineCase) func(*http.Request) bool {
 			if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/payment_intents/") {
 				return false
 			}
-			pi := fk.intents[strings.TrimPrefix(r.URL.Path, "/v1/payment_intents/")]
+			pi := fk.PaymentIntent(strings.TrimPrefix(r.URL.Path, "/v1/payment_intents/"))
 			if pi == nil || pi["customer"] != ref || pi["status"] != "succeeded" {
 				return false
 			}
-			paid := 0
-			for _, id := range fk.order {
-				if fk.intents[id]["customer"] == ref && fk.intents[id]["status"] == "succeeded" {
-					paid++
-				}
-			}
-			return paid >= 2
+			return len(fk.Ledger(ref)) >= 2
 		}
 	}
 	fk := f.base.nmi
@@ -385,18 +379,8 @@ func TestReplicasNoticeDuringFinalize(t *testing.T) {
 func (f *fleet) renewalNotice(e *engineCase) obj {
 	ref := f.providerCustomers(e)[0]
 	if e.rail == "stripe" {
-		fk := f.base.stripe
-		fk.mu.Lock()
-		defer fk.mu.Unlock()
-		for i := len(fk.order) - 1; i >= 0; i-- {
-			pi := fk.intents[fk.order[i]]
-			if pi["customer"] == ref && pi["status"] == "succeeded" {
-				copied := obj{}
-				for k, v := range pi {
-					copied[k] = v
-				}
-				return stripeEvent("payment_intent.succeeded", copied)
-			}
+		if paid := f.base.stripe.Ledger(ref); len(paid) > 0 {
+			return stripeEvent("payment_intent.succeeded", f.base.stripe.PaymentIntent(paid[len(paid)-1].PaymentIntent))
 		}
 		f.t.Fatal("no Stripe renewal to notify")
 	}

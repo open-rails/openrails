@@ -1,6 +1,4 @@
-//go:build e2e && integration
-
-package subscriptions_test
+package stripemock
 
 import (
 	"context"
@@ -17,7 +15,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func stripeDedupRequest(t *testing.T, f *stripeFake, ctx context.Context, key string, form url.Values) (int, []byte, error) {
+func stripeDedupRequest(t *testing.T, f *Mock, ctx context.Context, key string, form url.Values) (int, []byte, error) {
 	t.Helper()
 	r, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/payment_intents", strings.NewReader(form.Encode()))
 	require.NoError(t, err)
@@ -39,12 +37,12 @@ func stripeDedupForm(method string) url.Values {
 // A result survives a lost response; concurrent requests do not execute twice;
 // parameters are part of the key binding; and a key is not a permanent fence.
 func TestStripeSimulatorIdempotencyBoundary(t *testing.T) {
-	f := newStripeFake()
+	f := NewUnstarted(Options{})
 	clock := clockwork.NewFakeClockAt(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
-	f.setClock(clock.Now)
+	f.SetClock(clock.Now)
 	form := stripeDedupForm("pm_fixture")
-	gate := f.hold(newGate(func(r *http.Request) bool { return r.URL.Path == "/v1/payment_intents" }, false))
-	t.Cleanup(func() { f.unhold() })
+	held := f.Hold(func(r *http.Request) bool { return r.URL.Path == "/v1/payment_intents" }, HoldRequest)
+	t.Cleanup(f.ClearIntercepts)
 	type result struct {
 		status int
 		body   []byte
@@ -56,7 +54,7 @@ func TestStripeSimulatorIdempotencyBoundary(t *testing.T) {
 		winner <- result{status, body, err}
 	}()
 	select {
-	case <-gate.arrived:
+	case <-held.Arrived():
 	case <-time.After(5 * time.Second):
 		t.Fatal("first request did not reach the provider")
 	}
@@ -64,12 +62,12 @@ func TestStripeSimulatorIdempotencyBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusConflict, status)
 	require.Contains(t, string(body), "idempotency_key_in_use")
-	require.Empty(t, f.ledger(""))
-	close(gate.release)
+	require.Empty(t, f.Ledger(""))
+	held.Release()
 	first := <-winner
 	require.NoError(t, first.err)
 	require.Equal(t, http.StatusOK, first.status)
-	f.unhold()
+	f.ClearIntercepts()
 
 	var wg sync.WaitGroup
 	for range 8 {
@@ -81,13 +79,13 @@ func TestStripeSimulatorIdempotencyBoundary(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	require.Len(t, f.ledger(""), 1)
+	require.Len(t, f.Ledger(""), 1)
 	changed := stripeDedupForm("pm_fixture")
 	changed.Set("amount", "1000")
 	status, _, err = stripeDedupRequest(t, f, t.Context(), "one-obligation", changed)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, status)
-	require.Len(t, f.ledger(""), 1)
+	require.Len(t, f.Ledger(""), 1)
 
 	clock.Advance(24*time.Hour - time.Nanosecond)
 	status, body, err = stripeDedupRequest(t, f, t.Context(), "one-obligation", form)
@@ -99,13 +97,13 @@ func TestStripeSimulatorIdempotencyBoundary(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
 	require.NotEqual(t, first.body, body)
-	require.Len(t, f.ledger(""), 2, "the provider may prune a key after 24 hours")
+	require.Len(t, f.Ledger(""), 2, "the provider may prune a key after 24 hours")
 }
 
 func TestStripeSimulatorCachesDeclinesAndKeepsReadback(t *testing.T) {
-	f := newStripeFake()
+	f := NewUnstarted(Options{})
 	clock := clockwork.NewFakeClockAt(time.Now())
-	f.setClock(clock.Now)
+	f.SetClock(clock.Now)
 	f.declines["pm_declined"] = "insufficient_funds"
 	form := stripeDedupForm("pm_declined")
 	status, first, err := stripeDedupRequest(t, f, t.Context(), "attempt-0", form)
@@ -116,13 +114,13 @@ func TestStripeSimulatorCachesDeclinesAndKeepsReadback(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, http.StatusPaymentRequired, status, "replay retains the original HTTP status")
 	require.Equal(t, first, replay)
-	require.Empty(t, f.ledger(""))
+	require.Empty(t, f.Ledger(""))
 	status, _, err = stripeDedupRequest(t, f, t.Context(), "attempt-1", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
-	require.Len(t, f.ledger(""), 1)
+	require.Len(t, f.Ledger(""), 1)
 
-	f.delayIntentVisibility(time.Hour)
+	f.DelayIntentVisibility(time.Hour)
 	status, paid, err := stripeDedupRequest(t, f, t.Context(), "delayed", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status)
@@ -146,16 +144,16 @@ func TestStripeSimulatorCachesDeclinesAndKeepsReadback(t *testing.T) {
 }
 
 func TestStripeSimulatorDoesNotCacheValidationFailure(t *testing.T) {
-	f := newStripeFake()
+	f := NewUnstarted(Options{})
 	form := stripeDedupForm("pm_fixture")
 	form.Set("amount", "not-an-integer")
 	status, _, err := stripeDedupRequest(t, f, t.Context(), "validate-then-retry", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusBadRequest, status)
-	require.Empty(t, f.ledger(""))
+	require.Empty(t, f.Ledger(""))
 	form.Set("amount", "999")
 	status, _, err = stripeDedupRequest(t, f, t.Context(), "validate-then-retry", form)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusOK, status, "a corrected request may reuse a key that never executed")
-	require.Len(t, f.ledger(""), 1)
+	require.Len(t, f.Ledger(""), 1)
 }

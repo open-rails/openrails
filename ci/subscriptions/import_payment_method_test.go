@@ -85,10 +85,10 @@ func TestImportPaymentMethodIdempotent(t *testing.T) {
 				if method == "" {
 					method = "pm_unrecorded" + suffix
 				}
-				railSub := w.stripe.legacySubscription(ref.RailCustomerRef, method, link, 999, start, end)
+				railSub := w.stripe.AddSubscription(ref.RailCustomerRef, method, link, 999, start, end)
 				subs.Subscriptions = append(subs.Subscriptions, billing.DeclaredSubscription{SourceID: "legacy-" + railSub, Customer: customerID, Price: price.ID, Rail: "stripe",
 					RailSubscriptionID: railSub, StartedAt: start, PaidThrough: &end, PaymentMethod: &ref})
-				subs.Transactions = append(subs.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: w.stripe.latestCharge(railSub), Success: true,
+				subs.Transactions = append(subs.Transactions, billing.DeclaredTransaction{RailSubscriptionID: railSub, TransactionID: w.stripe.LatestCharge(railSub), Success: true,
 					Amount: 9_990_000, Currency: "USD", OccurredAt: start})
 				want[railSub] = bareID
 				if ref.RailMethodRef != "" {

@@ -131,7 +131,7 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 			require.NoError(t, f.base.pool.QueryRow(t.Context(), f.q(`SELECT claims FROM billing.idempotency_keys
 				WHERE operation = 'checkout_attempt_create' AND idempotency_key LIKE $1`), victim.id+":%").Scan(&claims))
 			require.EqualValues(t, 2, claims, "the dead replica's claim was reclaimed once")
-			require.Empty(t, f.base.stripe.unexpected())
+			require.Empty(t, f.base.stripe.Unexpected())
 			require.Empty(t, f.base.nmi.Unexpected())
 		})
 	}
@@ -240,7 +240,7 @@ func TestReplicasCheckoutLeaseLapse(t *testing.T) {
 
 func (f *fleet) submissionCount(rail string) int {
 	if rail == "stripe" {
-		return f.base.stripe.attempts("")
+		return f.base.stripe.Attempts("")
 	}
 	return len(f.base.nmi.Attempts())
 }

@@ -23,30 +23,8 @@ import (
 // them. Access follows payment evidence, and revoking access stops provider
 // billing.
 
-func (f *stripeFake) subscriptionWritesDown(down bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.subsDown = down
-}
-
-// setStatus moves a Stripe subscription to status; retrying says whether
-// Stripe still has a payment attempt scheduled on its open invoice.
-func (f *stripeFake) setStatus(subID, status string, retrying bool) obj {
-	f.mu.Lock()
-	s := f.subs[subID]
-	s["status"] = status
-	if inv, ok := s["latest_invoice"].(obj); ok && inv["status"] == "open" {
-		inv["next_payment_attempt"] = nil
-		if retrying {
-			inv["next_payment_attempt"] = time.Now().Add(72 * time.Hour).Unix()
-		}
-	}
-	f.mu.Unlock()
-	return f.subscriptionObject(subID)
-}
-
 func (l *legacy) stripeSubWrites() []providerCall {
-	return l.w.stripe.mutations("/v1/subscriptions/" + l.railSub)
+	return l.w.stripe.Mutations("/v1/subscriptions/" + l.railSub)
 }
 
 // A dispute or a refunded charge revokes a Stripe member's access, and the
@@ -66,7 +44,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		}
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
-		remote := w.stripe.subscriptionObject(l.railSub)
+		remote := w.stripe.Subscription(l.railSub)
 		require.Equal(t, true, remote["cancel_at_period_end"], "Stripe does not renew a disputed membership")
 		require.Equal(t, "active", remote["status"])
 		require.Len(t, l.stripeSubWrites(), 1, "one remote cancel for a redelivered dispute")
@@ -74,7 +52,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		// A won dispute restores the paid period; Stripe still stops at its end.
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.closed", "dp_stop", "won", p)))
 		require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status)
-		require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
+		require.Equal(t, true, w.stripe.Subscription(l.railSub)["cancel_at_period_end"])
 		require.Zero(t, l.engineCharges())
 	})
 	t.Run("dispute_while_delinquent", func(t *testing.T) {
@@ -90,7 +68,7 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_late", "needs_response", p)))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
-		require.Equal(t, "canceled", w.stripe.subscriptionObject(l.railSub)["status"], "a delinquent subscription ends now, so its open invoice stops retrying")
+		require.Equal(t, "canceled", w.stripe.Subscription(l.railSub)["status"], "a delinquent subscription ends now, so its open invoice stops retrying")
 	})
 	t.Run("dashboard_refund", func(t *testing.T) {
 		t.Parallel()
@@ -98,11 +76,11 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		l := importLegacy(t, w, "stripe", embedded)
 		w.converge()
 		w.refreshProviders()
-		w.stripe.dashboardRefund(w.stripe.latestCharge(l.railSub), 999)
+		w.stripe.dashboardRefund(w.stripe.LatestCharge(l.railSub), 999)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", w.refundNotice("stripe")))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
-		require.Equal(t, true, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
+		require.Equal(t, true, w.stripe.Subscription(l.railSub)["cancel_at_period_end"])
 		require.Len(t, l.stripeSubWrites(), 1)
 	})
 	t.Run("stripe_unavailable", func(t *testing.T) {
@@ -112,14 +90,14 @@ func TestStripeRevokeStopsStripeBilling(t *testing.T) {
 		w.converge()
 		w.refreshProviders()
 		p := completed(w.payments(embedded, l.c.id))[0]
-		w.stripe.subscriptionWritesDown(true)
+		w.stripe.SubscriptionWritesUnavailable(true)
 		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeDisputeEvent("charge.dispute.created", "dp_down", "needs_response", p)))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status, "the revoke never waits on Stripe")
 		require.False(t, l.c.entitled(l.ent))
-		require.Equal(t, false, w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"])
+		require.Equal(t, false, w.stripe.Subscription(l.railSub)["cancel_at_period_end"])
 
-		w.stripe.subscriptionWritesDown(false)
-		w.until(func() bool { return w.stripe.subscriptionObject(l.railSub)["cancel_at_period_end"] == true }, "the queued cancel reaches Stripe")
+		w.stripe.SubscriptionWritesUnavailable(false)
+		w.until(func() bool { return w.stripe.Subscription(l.railSub)["cancel_at_period_end"] == true }, "the queued cancel reaches Stripe")
 		require.Len(t, l.stripeSubWrites(), 1)
 	})
 }
@@ -149,7 +127,7 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 				require.Equal(t, billing.SubscriptionPastDue, w.subscription(embedded, l.sub).Status)
 				require.True(t, l.c.entitled(l.ent), "access while Stripe retries")
 			}
-			require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, tc.status, false))))
+			require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.SetSubscriptionStatus(l.railSub, tc.status, false))))
 			require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 			require.False(t, l.c.entitled(l.ent), "no access without payment")
 			require.Zero(t, l.engineCharges())
@@ -163,11 +141,11 @@ func TestStripeOwnedAccessFollowsStripe(t *testing.T) {
 		w.advanceHealthyTo(l.periodEnd().Add(time.Hour))
 		require.Equal(t, http.StatusOK, w.deliver("stripe", l.providerRenewal(false)))
 		w.advanceHealthyTo(w.clock.Now().Add(20 * day))
-		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, "past_due", true))))
+		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.SetSubscriptionStatus(l.railSub, "past_due", true))))
 		require.NotEqual(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.True(t, l.c.entitled(l.ent), "Stripe is still retrying")
 
-		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.setStatus(l.railSub, "past_due", false))))
+		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.SetSubscriptionStatus(l.railSub, "past_due", false))))
 		require.Equal(t, billing.SubscriptionCanceled, w.subscription(embedded, l.sub).Status)
 		require.False(t, l.c.entitled(l.ent))
 	})

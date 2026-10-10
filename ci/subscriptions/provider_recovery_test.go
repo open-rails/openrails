@@ -309,7 +309,7 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 
 func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 	a, b, _ := copiedStripeBook(t)
-	a.w.stripe.setClock(a.w.clock.Now)
+	a.w.stripe.SetClock(a.w.clock.Now)
 	end := a.periodEnd()
 	a.toPeriodEnd()
 	a.w.pull()
@@ -318,11 +318,9 @@ func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 	payment := a.providerLedger()[1].ID
 	provider := a.w.stripe
 	a.w.stop()
-	provider.mu.Lock()
-	provider.chargesDown = true
-	provider.intents[payment]["status"] = "processing"
-	provider.mu.Unlock()
-	t.Cleanup(func() { provider.mu.Lock(); provider.intents[payment]["status"] = "succeeded"; provider.mu.Unlock() })
+	provider.ChargeListUnavailable(true)
+	provider.SetPaymentIntentStatus(payment, "processing")
+	t.Cleanup(func() { provider.SetPaymentIntentStatus(payment, "succeeded") })
 	b.w.stop()
 	// The general clone helper observes just before due; this scenario
 	// deliberately restores beyond that observation's freshness window.
@@ -337,11 +335,9 @@ func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 	b.w.stop()
 	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 	b.w.start()
-	provider.mu.Lock()
-	provider.chargesDown = false
-	provider.visibleAt[payment] = provider.now().Add(48 * time.Hour)
-	provider.intents[payment]["status"] = "succeeded"
-	provider.mu.Unlock()
+	provider.ChargeListUnavailable(false)
+	provider.HidePaymentIntent(payment, 48*time.Hour)
+	provider.SetPaymentIntentStatus(payment, "succeeded")
 	b.w.until(func() bool { return b.periodEnd().After(end) }, "direct read of retained candidate recovers while customer listing omits it")
 	require.Equal(t, 2, b.providerAttempts())
 	var submitted int
@@ -351,7 +347,7 @@ func TestReadonlyStripeRecoveryRetainsObservedCandidate(t *testing.T) {
 
 func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
 	a, b, _ := copiedStripeBook(t)
-	a.w.stripe.setClock(a.w.clock.Now)
+	a.w.stripe.SetClock(a.w.clock.Now)
 	end := a.periodEnd()
 	a.toPeriodEnd()
 	a.w.pull()
@@ -369,9 +365,7 @@ func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
 	require.NoError(t, err)
 	a.w.settle()
 	a.w.stop()
-	a.w.stripe.mu.Lock()
-	a.w.stripe.chargesDown = true
-	a.w.stripe.mu.Unlock()
+	a.w.stripe.ChargeListUnavailable(true)
 	b.w.stop()
 	b.w.advance(end.Add(time.Hour).Sub(b.w.clock.Now()))
 	read := a.w.stripe.hold(newGate(func(r *http.Request) bool { return r.Method == http.MethodGet && r.URL.Path == "/v1/payment_intents" }, false))
@@ -401,9 +395,7 @@ func TestReadonlyStripeReversalRecordsMoneyBeforeCancellation(t *testing.T) {
 	var status string
 	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT status FROM billing.provider_intents WHERE intent_type='subscription_collection' AND subscription_id=$1`), b.sub.UUID()).Scan(&status))
 	require.Equal(t, "unknown_needs_verify", status, "original operation retains the pending lifecycle work")
-	a.w.stripe.mu.Lock()
-	a.w.stripe.chargesDown = false
-	a.w.stripe.mu.Unlock()
+	a.w.stripe.ChargeListUnavailable(false)
 	b.w.pull()
 	b.w.stop()
 	b.w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeFull }
@@ -419,11 +411,8 @@ func TestReadonlyWebhookRecordsRefundBeforeHeldCancellation(t *testing.T) {
 	e := enroll(t, w, "stripe", embedded)
 	original := completed(w.payments(embedded, e.c.id))[0]
 	charge := e.providerLedger()[0].Charge
-	w.stripe.mu.Lock()
-	status, raw := w.stripe.createRefund(url.Values{"charge": {charge}})
-	w.stripe.mu.Unlock()
-	require.Equal(t, http.StatusOK, status)
-	refund := raw.(obj)
+	refund, err := w.stripe.Refund(charge, 0)
+	require.NoError(t, err)
 	w.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = config.ProviderWriteModeReadOnly }
 	w.restart()
 	notice := obj{"id": "evt_readonly_refund", "type": "refund.created", "created": time.Now().Unix(), "data": obj{"object": refund}}

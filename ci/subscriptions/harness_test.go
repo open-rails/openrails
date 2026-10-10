@@ -409,7 +409,7 @@ func (w *world) start() {
 	}
 	for _, rail := range []string{"stripe", "nmi"} {
 		if _, declared := psps[rail]; declared {
-			require.False(t, w.psp[rail].IsZero(), "%+v stripe odd=%v nmi odd=%v", config, w.stripe.unexpected(), w.nmi.Unexpected())
+			require.False(t, w.psp[rail].IsZero(), "%+v stripe odd=%v nmi odd=%v", config, w.stripe.Unexpected(), w.nmi.Unexpected())
 		}
 	}
 }
@@ -995,7 +995,7 @@ func completed(payments []billing.Payment) []billing.Payment {
 // without reaching the provider.
 func (w *world) loseSubmissions(rail string, n int) {
 	if rail == "stripe" {
-		w.stripe.loseSubmissions(n)
+		w.stripe.LoseSubmissions(n)
 	} else {
 		w.nmi.LoseSales(n)
 	}
@@ -1004,9 +1004,7 @@ func (w *world) loseSubmissions(rail string, n int) {
 // lostSubmissions is how many charge requests were lost in transit.
 func (w *world) lostSubmissions(rail string) int {
 	if rail == "stripe" {
-		w.stripe.mu.Lock()
-		defer w.stripe.mu.Unlock()
-		return w.stripe.lost
+		return w.stripe.Lost()
 	}
 	return w.nmi.Lost()
 }
@@ -1014,7 +1012,7 @@ func (w *world) lostSubmissions(rail string) int {
 // readUnavailable makes the rail's authoritative payment read fail.
 func (w *world) readUnavailable(rail string, down bool) {
 	if rail == "stripe" {
-		w.stripe.listUnavailable(down)
+		w.stripe.PaymentIntentListUnavailable(down)
 	} else {
 		w.nmi.QueryUnavailable(down)
 	}

@@ -121,7 +121,7 @@ func copyStripeBook(t *testing.T, armBoth bool) (*engineCase, *engineCase, *cloc
 	b.settleCollectionScans()
 	require.Len(t, one.providerLedger(), 1, "observation of the restored book sends no renewal")
 	providerClock := clockwork.NewFakeClockAt(time.Now())
-	a.stripe.setClock(providerClock.Now)
+	a.stripe.SetClock(providerClock.Now)
 	two, customer := *one, *one.c
 	two.w, customer.w = b, b
 	two.c = &customer
@@ -141,20 +141,20 @@ func TestMovedBookRenewsOnlyWhereArmed(t *testing.T) {
 	a.w.waive("recorded", "the retired source never records the destination's renewal")
 	paidThrough := a.periodEnd()
 	provider := a.w.stripe
-	before := len(provider.submitted("/v1/payment_intents"))
+	before := len(provider.Submitted("/v1/payment_intents"))
 	a.toPeriodEnd()
 	b.toPeriodEnd()
 	a.w.runRenewals()
 	b.w.runRenewals()
 	a.w.settle()
 	b.w.settle()
-	require.Len(t, provider.submitted("/v1/payment_intents"), before, "neither copy renews before one is armed")
+	require.Len(t, provider.Submitted("/v1/payment_intents"), before, "neither copy renews before one is armed")
 	armMerchant(t, b.w, a.w.client[embedded].MerchantID())
 	b.w.runRenewals()
 	b.w.until(func() bool { return b.periodEnd().After(paidThrough) }, "the armed copy renews")
 	a.w.runRenewals()
 	a.w.settle()
-	require.Len(t, provider.submitted("/v1/payment_intents"), before+1, "only the armed copy renews")
+	require.Len(t, provider.Submitted("/v1/payment_intents"), before+1, "only the armed copy renews")
 	require.Equal(t, paidThrough, a.periodEnd(), "the exported source stays readonly")
 	require.Len(t, a.providerLedger(), 2, "one initial payment and one renewal")
 }
@@ -166,7 +166,7 @@ func TestCopiedStripeBooksRenewConcurrently(t *testing.T) {
 	a, b, _ := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	provider := a.w.stripe
-	before := len(provider.submitted("/v1/payment_intents"))
+	before := len(provider.Submitted("/v1/payment_intents"))
 	g := provider.hold(newGate(stripeIntentCreate, false))
 	var release sync.Once
 	unblock := func() { release.Do(func() { close(g.release) }) }
@@ -181,7 +181,7 @@ func TestCopiedStripeBooksRenewConcurrently(t *testing.T) {
 		t.Fatal("first renewal did not reach the provider")
 	}
 	jobs.Go(b.w.runRenewals)
-	require.Eventually(t, func() bool { return len(provider.submitted("/v1/payment_intents")) >= before+2 }, 15*time.Second, 10*time.Millisecond,
+	require.Eventually(t, func() bool { return len(provider.Submitted("/v1/payment_intents")) >= before+2 }, 15*time.Second, 10*time.Millisecond,
 		"both independent copies must submit while the first operation is in flight")
 	unblock()
 	jobs.Wait()
@@ -207,7 +207,7 @@ func TestCopiedStripeBookReadsAgedObligationBeforeFirstSubmission(t *testing.T) 
 	a.toPeriodEnd()
 	a.w.runRenewals()
 	require.True(t, a.periodEnd().After(paidThrough))
-	before := len(a.w.stripe.submitted("/v1/payment_intents"))
+	before := len(a.w.stripe.Submitted("/v1/payment_intents"))
 	providerClock.Advance(25 * time.Hour)
 	var operations int
 	require.NoError(t, b.w.pool.QueryRow(t.Context(), b.w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type='subscription_collection'`)).Scan(&operations))
@@ -215,7 +215,7 @@ func TestCopiedStripeBookReadsAgedObligationBeforeFirstSubmission(t *testing.T) 
 	b.toPeriodEnd()
 	b.w.runRenewals()
 	b.w.until(func() bool { return b.periodEnd().After(paidThrough) }, "the stale copy adopts the persistent provider record")
-	require.Equal(t, before, len(a.w.stripe.submitted("/v1/payment_intents")), "readback succeeds without any new POST after key expiry")
+	require.Equal(t, before, len(a.w.stripe.Submitted("/v1/payment_intents")), "readback succeeds without any new POST after key expiry")
 	require.Len(t, a.providerLedger(), 2)
 	require.Equal(t, a.periodEnd(), b.periodEnd())
 	require.Len(t, completed(b.w.payments(embedded, b.c.id)), 2)
@@ -228,7 +228,7 @@ func TestCopiedStripeBookRefusesConflictingRenewalTerms(t *testing.T) {
 	a.toPeriodEnd()
 	a.w.runRenewals()
 	require.True(t, a.periodEnd().After(paidThrough))
-	before := len(a.w.stripe.submitted("/v1/payment_intents"))
+	before := len(a.w.stripe.Submitted("/v1/payment_intents"))
 	// A restored database can independently author a different next price.
 	// Use the normal immutable-price/versioning and price-migration APIs.
 	client := b.w.client[embedded]
@@ -249,7 +249,7 @@ func TestCopiedStripeBookRefusesConflictingRenewalTerms(t *testing.T) {
 	b.toPeriodEnd()
 	b.w.runRenewals()
 	require.Equal(t, paidThrough, b.periodEnd(), "conflicting terms are not applied locally")
-	require.Equal(t, before, len(a.w.stripe.submitted("/v1/payment_intents")), "reconcile the conflict; never try a different charge key")
+	require.Equal(t, before, len(a.w.stripe.Submitted("/v1/payment_intents")), "reconcile the conflict; never try a different charge key")
 	require.Len(t, a.providerLedger(), 2)
 	require.Len(t, completed(b.w.payments(embedded, b.c.id)), 1)
 	b.w.waive("recorded", "the divergent copy refuses the other database's paid renewal; the test asserts its unchanged period/payment count and no provider submission")
@@ -269,7 +269,7 @@ func TestCopiedStripeBookRefusesStaleAttemptAfterSuccessfulRetry(t *testing.T) {
 	require.NotNil(t, nextRetry(sub))
 	require.Equal(t, paidThrough, a.periodEnd())
 	require.Len(t, a.providerLedger(), 1)
-	firstAttempt := a.w.stripe.submitted("/v1/payment_intents")
+	firstAttempt := a.w.stripe.Submitted("/v1/payment_intents")
 	require.Len(t, firstAttempt, 2, "initial payment and declined renewal")
 	a.setDecline(visa.Last4, "", "")
 	advance := nextRetry(sub).Sub(a.w.clock.Now()) + time.Second
@@ -278,13 +278,13 @@ func TestCopiedStripeBookRefusesStaleAttemptAfterSuccessfulRetry(t *testing.T) {
 	a.w.runRenewals()
 	require.True(t, a.periodEnd().After(paidThrough))
 	require.Len(t, a.providerLedger(), 2)
-	attempts := a.w.stripe.submitted("/v1/payment_intents")
+	attempts := a.w.stripe.Submitted("/v1/payment_intents")
 	require.Len(t, attempts, 3, "the next eligible attempt is a distinct provider request")
 	require.NotEqual(t, attempts[1].IdempotencyKey, attempts[2].IdempotencyKey)
 	b.toPeriodEnd()
 	b.w.runRenewals()
 	require.Equal(t, paidThrough, b.periodEnd(), "the older attempt needs reconciliation with the later paid attempt")
-	require.Len(t, a.w.stripe.submitted("/v1/payment_intents"), len(attempts))
+	require.Len(t, a.w.stripe.Submitted("/v1/payment_intents"), len(attempts))
 	require.Len(t, a.providerLedger(), 2)
 	b.w.waive("recorded", "the stale attempt is held for reconciliation after the other database's later attempt paid; provider and local period counts are asserted")
 }
@@ -297,7 +297,7 @@ func TestCopiedStripeBookRecoversAgedLostReplyWithoutResend(t *testing.T) {
 	a, b, providerClock := copiedStripeBook(t)
 	paidThrough := a.periodEnd()
 	provider := a.w.stripe
-	provider.delayIntentVisibility(48 * time.Hour)
+	provider.DelayIntentVisibility(48 * time.Hour)
 	g := provider.hold(newGate(stripeIntentCreate, true))
 	g.served = true
 	var release sync.Once
@@ -315,7 +315,7 @@ func TestCopiedStripeBookRecoversAgedLostReplyWithoutResend(t *testing.T) {
 	a.w.stop()
 	unblock()
 	provider.unhold()
-	before := len(provider.submitted("/v1/payment_intents"))
+	before := len(provider.Submitted("/v1/payment_intents"))
 	providerClock.Advance(25 * time.Hour)
 	a.w.advance(25 * time.Hour)
 	a.w.start()
@@ -326,14 +326,14 @@ func TestCopiedStripeBookRecoversAgedLostReplyWithoutResend(t *testing.T) {
 		a.w.wake()
 	}
 	require.Equal(t, paidThrough, a.periodEnd())
-	require.Equal(t, before, len(provider.submitted("/v1/payment_intents")), "an aged uncertain submission cannot be re-sent on an empty read")
+	require.Equal(t, before, len(provider.Submitted("/v1/payment_intents")), "an aged uncertain submission cannot be re-sent on an empty read")
 	require.Len(t, a.providerLedger(), 2)
 	providerClock.Advance(24 * time.Hour)
 	a.w.until(func() bool { return a.periodEnd().After(paidThrough) }, "the original provider record becomes visible")
 	b.toPeriodEnd()
 	b.w.runRenewals()
 	b.w.until(func() bool { return b.periodEnd().After(paidThrough) }, "the stale copy also reads the persistent obligation")
-	require.Equal(t, before, len(provider.submitted("/v1/payment_intents")))
+	require.Equal(t, before, len(provider.Submitted("/v1/payment_intents")))
 	require.Len(t, a.providerLedger(), 2)
 	require.Equal(t, a.periodEnd(), b.periodEnd())
 }

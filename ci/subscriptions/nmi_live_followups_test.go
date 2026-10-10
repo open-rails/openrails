@@ -3,7 +3,6 @@
 package subscriptions_test
 
 import (
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -82,11 +81,8 @@ func TestLegacyImportRaisesNoFindings(t *testing.T) {
 
 // dashboardRefund refunds amount (minor units) of a charge outside OpenRails.
 func (f *stripeFake) dashboardRefund(chargeID string, amount int64) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	status, _ := f.createRefund(map[string][]string{"charge": {chargeID}, "amount": {fmt.Sprint(amount)}})
-	if status != http.StatusOK {
-		panic(fmt.Sprintf("stripe fake dashboard refund: %d", status))
+	if _, err := f.Refund(chargeID, amount); err != nil {
+		panic(err)
 	}
 }
 

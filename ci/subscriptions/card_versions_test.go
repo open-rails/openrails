@@ -24,20 +24,6 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// editCard changes a payment method's card at Stripe.
-func (f *stripeFake) editCard(pm string, edit func(card obj)) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	edit(f.methods[pm]["card"].(obj))
-}
-
-// detach detaches a payment method from its customer at Stripe.
-func (f *stripeFake) detach(pm string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.methods[pm]["customer"] = nil
-}
-
 // A card changed through Stripe's API (an expiry edit in Stripe's portal) is
 // a version of the same method, read from Stripe. A card Stripe detached is
 // removed and its agreements end.
@@ -46,15 +32,15 @@ func TestStripePaymentMethodUpdatedAndDetached(t *testing.T) {
 	w := newWorld(t)
 	e := enroll(t, w, "stripe", embedded)
 	pm := w.methodRow(e.method, "rail_method_ref")
-	customer := w.stripe.customerOf(pm)
+	customer := w.stripe.CustomerOf(pm)
 
-	w.stripe.editCard(pm, func(card obj) { card["exp_month"] = 7 })
+	w.stripe.EditCard(pm, func(card obj) { card["exp_month"] = 7 })
 	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("payment_method.updated", obj{"object": "payment_method", "id": pm, "customer": customer})))
 	require.Equal(t, []string{"customer_save/saved", "provider_read/updated"}, w.methodVersions(e.method))
 	require.Equal(t, "7", w.methodRow(e.method, "card_exp_month::text"))
 	require.Equal(t, "active", w.methodRow(e.method, "status"))
 
-	w.stripe.detach(pm)
+	w.stripe.Detach(pm)
 	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("payment_method.detached", obj{"object": "payment_method", "id": pm, "customer": nil})))
 	require.Equal(t, "removed", w.methodRow(e.method, "status"))
 	for _, state := range w.mandateStates(e.method) {
@@ -90,10 +76,8 @@ func TestPatchPaymentMethod(t *testing.T) {
 			if rail == "nmi" {
 				require.Equal(t, "0931", w.nmi.Vault(w.vaultOf(method)).Card.Exp, "the vault takes the expiry")
 			} else {
-				w.stripe.mu.Lock()
-				exp := w.stripe.methods[w.methodRow(method, "rail_method_ref")]["card"].(obj)["exp_month"]
-				w.stripe.mu.Unlock()
-				require.Equal(t, 9, exp, "Stripe takes the expiry")
+				exp := w.stripe.PaymentMethod(w.methodRow(method, "rail_method_ref"))["card"].(obj)["exp_month"]
+				require.EqualValues(t, 9, exp, "Stripe takes the expiry")
 			}
 
 			out = c.must(http.MethodPatch, path, "", map[string]any{"reusable": false})

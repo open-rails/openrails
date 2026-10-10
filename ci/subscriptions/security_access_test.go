@@ -300,9 +300,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/return",
 		})
 		require.ErrorIs(t, err, billing.ErrInvalid, "a live key is disarmed in a sandbox deployment: nothing sells")
-		recorder.mu.Lock()
-		defer recorder.mu.Unlock()
-		for _, call := range recorder.writes {
+		for _, call := range recorder.Mutations("") {
 			require.NotEqual(t, http.MethodPost, call.Method, "no provider mutation with a live key: %s", call.Path)
 		}
 	})

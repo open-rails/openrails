@@ -221,7 +221,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	// saved card and a card setup, an open invoice, a notification and a
 	// checkout session.
 	a, sub := w.engineMember("stripe", embedded, from)
-	w.stripe.setDecline(visa.Last4, "auth")
+	w.stripe.SetDecline(visa.Last4, "auth")
 	pending, err := a.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: "idor-" + uuid.NewString()})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status)

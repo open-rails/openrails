@@ -159,7 +159,7 @@ products:
 	require.NoError(t, err)
 	revision := w.catalogRevision()
 
-	w.stripe.priceReadsUnavailable(true)
+	w.stripe.PriceReadsUnavailable(true)
 	client, err := w.bootDeclared(t.Context(), params)
 	require.NoError(t, err, "a provider outage never fails New")
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
@@ -170,7 +170,7 @@ products:
 	require.ErrorIs(t, err, billing.ErrNotFound)
 	require.Equal(t, revision, w.catalogRevision())
 
-	w.stripe.priceReadsUnavailable(false)
+	w.stripe.PriceReadsUnavailable(false)
 	require.Eventually(t, func() bool { return client.Ready(t.Context()) == nil }, 30*time.Second, 50*time.Millisecond)
 	price, err := priceByKey(t.Context(), client, key, key+"-monthly")
 	require.NoError(t, err)

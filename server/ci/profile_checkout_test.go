@@ -21,6 +21,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/open-rails/openrails/server"
 )
 
@@ -70,7 +71,7 @@ func (a ownerAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
 func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	t.Parallel()
 	f := newFixture(t)
-	stripe := newStripeFake()
+	stripe := stripemock.NewUnstarted(stripemock.Options{})
 	ctx := t.Context()
 	key := make([]byte, 32)
 	_, err := rand.Read(key)
@@ -184,7 +185,7 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	status, setup := call(oliviaToken, http.MethodPost, surface(acme)+"/payment-method-setups", "", map[string]any{"psp_id": pspOf(t, engine, platform.id), "consent": true})
 	require.Equal(t, http.StatusOK, status, "%v", setup)
 	setup = unwrap(setup)
-	stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), visa)
+	stripe.CompleteSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), visa)
 	status, confirmed := call(oliviaToken, http.MethodPost, surface(acme)+"/payment-method-setups/"+setup["id"].(string)+"/confirm", "", map[string]any{})
 	require.Equal(t, http.StatusOK, status, "%v", confirmed)
 	card := unwrap(confirmed)["payment_method_id"].(string)
@@ -260,11 +261,11 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	saved := doc["saved_methods"].([]any)
 	require.Len(t, saved, 1, "%v", doc)
 	require.Equal(t, card, saved[0].(map[string]any)["id"])
-	charges := stripe.charged()
+	charges := len(stripe.Ledger(""))
 	status, out = call(oliviaToken, http.MethodPost, surface(acme)+"/checkout-sessions/"+session+"/pay", "", pay)
 	require.Equal(t, http.StatusOK, status, "%v", out)
 	require.Equal(t, "succeeded", out["status"], "%v", out)
-	require.Equal(t, charges+1, stripe.charged())
+	require.Equal(t, charges+1, len(stripe.Ledger("")))
 	subs, err := engine.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: acmeCustomer, Status: billing.SubscriptionActive}, openrails.ForMerchantID(platform.id))
 	require.NoError(t, err)
 	require.Len(t, subs.Items, 1)
@@ -272,7 +273,7 @@ func TestServerProfilePaysCheckoutAsItsCustomer(t *testing.T) {
 	none, err := engine.ListSubscriptions(ctx, billing.SubscriptionListParams{CustomerID: acmeCustomer}, openrails.ForMerchantID(other.id))
 	require.NoError(t, err)
 	require.Empty(t, none.Items, "the other merchant's session stays unpaid")
-	require.Empty(t, stripe.unexpected(), "Stripe calls the trimmed fake does not model")
+	require.Empty(t, stripe.Unexpected(), "Stripe calls the mock does not model")
 }
 
 // pspOf is the merchant's one PSP.

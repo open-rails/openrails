@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"fmt"
-	"net/http"
 	"strings"
 	"time"
 
@@ -29,25 +28,7 @@ func legacyPlan(id string) (nmimock.Plan, bool) {
 
 // hold parks matching requests on g, as the Stripe fake does.
 func (f *nmiFake) hold(g *gate) *gate {
-	f.Intercept(g.match, func(r *http.Request, serve func() *http.Response) (*http.Response, error) {
-		var res *http.Response
-		if g.served {
-			res = serve()
-		}
-		g.once.Do(func() { close(g.arrived) })
-		select {
-		case <-g.release:
-		case <-r.Context().Done():
-			if g.commit && res == nil {
-				serve()
-			}
-			return nil, r.Context().Err()
-		}
-		if res == nil {
-			res = serve()
-		}
-		return res, nil
-	})
+	f.Intercept(g.match, g.park)
 	return g
 }
 

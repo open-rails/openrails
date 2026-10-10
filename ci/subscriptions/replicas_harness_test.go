@@ -668,7 +668,7 @@ func (f *fleet) submissions(e *engineCase) int {
 	n := 0
 	for _, ref := range f.providerCustomers(e) {
 		if e.rail == "stripe" {
-			n += f.base.stripe.attempts(ref)
+			n += f.base.stripe.Attempts(ref)
 		} else {
 			n += f.base.nmi.attemptsFor(ref)
 		}

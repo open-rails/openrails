@@ -273,13 +273,6 @@ func TestNMIAccountUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	require.Equal(t, []string{"merchant", "used", recurring}, credentialFields(w.nmi.LastSale()))
 }
 
-// reissue is Stripe's card updater changing a payment method's card.
-func (f *stripeFake) reissue(pm, brand, last4 string, month int, fingerprint string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.methods[pm]["card"] = obj{"brand": brand, "last4": last4, "exp_month": month, "exp_year": 2036, "fingerprint": fingerprint}
-}
-
 // Stripe's card updater reissues a member's card. The same payment method
 // takes the new card. Under another brand OpenRails charges it off-session no
 // more: the renewal and invoice collection wait for the customer, who is
@@ -297,8 +290,8 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	require.NotEmpty(t, recurring)
 	reissued := func(brand, last4, fingerprint string) {
 		t.Helper()
-		w.stripe.reissue(pm, brand, last4, 3, fingerprint)
-		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("payment_method.automatically_updated", obj{"object": "payment_method", "id": pm, "customer": w.stripe.customerOf(pm)})))
+		w.stripe.ReissueCard(pm, brand, last4, 3, fingerprint)
+		require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("payment_method.automatically_updated", obj{"object": "payment_method", "id": pm, "customer": w.stripe.CustomerOf(pm)})))
 		w.settle()
 	}
 
@@ -321,7 +314,7 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	w.collectInvoices()
 	require.Equal(t, sent, e.providerAttempts())
 	require.Equal(t, agreementRequired, *w.invoice(invoice).LastCollectionFailureCode, "invoice collection waits for the customer")
-	require.Empty(t, w.stripe.unexpected())
+	require.Empty(t, w.stripe.Unexpected())
 	status, body := e.c.call(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": e.method})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 
@@ -333,12 +326,12 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	// The customer verifies the same card: a SetupIntent confirmed with them
 	// present is the new agreement, and the renewal is collected.
 	e.c.must(http.MethodPost, "/payment-methods/"+e.method+"/verify", uuid.NewString(), nil)
-	setups := w.stripe.mutations("/v1/setup_intents")
+	setups := w.stripe.Mutations("/v1/setup_intents")
 	require.Equal(t, "true", setups[len(setups)-1].Form.Get("confirm"))
 	require.Equal(t, pm, setups[len(setups)-1].Form.Get("payment_method"))
 	recurring, _ = w.agreements(e.method)
 	require.True(t, strings.HasPrefix(recurring, "seti_"), "the agreement cites the customer's setup, got %q", recurring)
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
-	require.Empty(t, w.stripe.unexpected())
+	require.Empty(t, w.stripe.Unexpected())
 }

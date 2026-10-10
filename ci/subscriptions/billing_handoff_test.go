@@ -148,9 +148,7 @@ func TestOfflineBillingHandoff(t *testing.T) {
 				require.Len(t, member.providerLedger(), 2, "one next-period charge at the destination")
 				require.True(t, member.periodEnd().After(end))
 				require.Empty(t, target.nmi.Schedules(), "engine billing did not create a provider schedule")
-				target.stripe.mu.Lock()
-				stripeSchedules := len(target.stripe.subs)
-				target.stripe.mu.Unlock()
+				stripeSchedules := target.stripe.Subscriptions()
 				require.Zero(t, stripeSchedules)
 
 				_, err = target.client[targetTopology].CancelSubscription(t.Context(), member.sub, billing.CancelSubscriptionParams{Reason: "migrated customer cancels"})

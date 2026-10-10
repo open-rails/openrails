@@ -32,12 +32,12 @@ func TestStripePortalUpgradeNeedsPayment(t *testing.T) {
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
-	w.stripe.legacyPrice(stripePrice, 1999)
+	w.stripe.SetLegacyPrice(stripePrice, 1999)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 
-	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChange(l.railSub, stripePrice, 1999, 500))))
+	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.PortalPriceChange(l.railSub, stripePrice, 1999, 500))))
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, l.price.ID, sub.PriceID, "an open invoice pays for nothing")
 	require.Equal(t, billing.SubscriptionActive, sub.Status)
@@ -70,14 +70,14 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	require.NoError(t, err)
 	hours := monthHours
 	stripePrice := "price_legacy_" + uuid.NewString()[:8]
-	w.stripe.legacyPrice(stripePrice, 1999)
+	w.stripe.SetLegacyPrice(stripePrice, 1999)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 19_990_000, Currency: "USD", BillingIntervalHours: &hours, AccessDurationHours: &hours,
 		PSPLinks: map[string]map[string]string{"stripe": {"price_id": stripePrice}}})
 	require.NoError(t, err)
 	paidBefore := len(completed(w.payments(embedded, l.c.id)))
 	end := l.periodEnd()
 
-	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.portalPriceChangePaid(l.railSub, stripePrice, 1999, 500))))
+	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.PortalPriceChangePaid(l.railSub, stripePrice, 1999, 500))))
 	w.settle()
 	sub := w.subscription(embedded, l.sub)
 	require.Equal(t, price.ID, sub.PriceID, "a paid proration moves the tier")
@@ -85,7 +85,7 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	require.True(t, l.c.entitled(premium))
 	paid := completed(w.payments(embedded, l.c.id))
 	require.Len(t, paid, paidBefore+1, "the proration charge is a payment")
-	charge := w.stripe.latestCharge(l.railSub)
+	charge := w.stripe.LatestCharge(l.railSub)
 	var proration *billing.Payment
 	for i := range paid {
 		if paid[i].TransactionID == charge {
@@ -95,7 +95,7 @@ func TestStripePortalUpgradePaidProrationIsRecorded(t *testing.T) {
 	require.NotNil(t, proration, "the proration charge %s is recorded", charge)
 	require.EqualValues(t, 5_000_000, proration.Amount)
 
-	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.subscriptionObject(l.railSub))))
+	require.Equal(t, http.StatusOK, w.deliver("stripe", stripeEvent("customer.subscription.updated", w.stripe.Subscription(l.railSub))))
 	w.settle()
 	require.Len(t, completed(w.payments(embedded, l.c.id)), paidBefore+1, "a replayed event records it once")
 }
@@ -117,7 +117,7 @@ func TestStripeEventMidConvergeIsNotLost(t *testing.T) {
 	}, true)
 	g.served = true
 	w.stripe.hold(g)
-	require.Equal(t, http.StatusOK, w.deliverNow("stripe", stripeEvent("customer.subscription.updated", w.stripe.subscriptionObject(l.railSub))))
+	require.Equal(t, http.StatusOK, w.deliverNow("stripe", stripeEvent("customer.subscription.updated", w.stripe.Subscription(l.railSub))))
 	select {
 	case <-g.arrived:
 	case <-time.After(30 * time.Second):

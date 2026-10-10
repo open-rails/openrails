@@ -191,7 +191,7 @@ func TestSeats(t *testing.T) {
 		requireCode(t, err, http.StatusNotFound, "subscription_not_found")
 		_, err = c.change(successor, billing.ChangeSubscriptionParams{Quantity: seats(11), IdempotencyKey: "bounds-" + uuid.NewString()})
 		requireCode(t, err, http.StatusBadRequest, billing.CodeInvalidParam)
-		require.Empty(t, w.stripe.unexpected())
+		require.Empty(t, w.stripe.Unexpected())
 		require.Empty(t, w.nmi.Unexpected())
 	})
 }
