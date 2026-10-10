@@ -82,14 +82,6 @@ type BillingBookIdentity struct {
 	ArmedAt          time.Time
 }
 
-// Card-testing failure counts per merchant, subject and five-minute bucket. Retention: buckets are deleted once older than the longest card-abuse window.
-type BillingCardAttemptFailure struct {
-	MerchantID uuid.UUID
-	Subject    string
-	BucketAt   time.Time
-	Failures   int64
-}
-
 // Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL. Retention: permanent, never pruned.
 type BillingCatalogApplication struct {
 	MerchantID      uuid.UUID

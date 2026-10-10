@@ -88,8 +88,8 @@ instance and no sticky session. Without Redis, run one instance.
   webhook deduplication, provider intents, and the locks that admit a charge.
 - **Redis**, named by `Config.Redis` (an address or a `redis://` or `rediss://`
   URL, with an ACL user and TLS as needed) or `Deps.Redis`. Rate-limit windows,
-  admin lockouts and captcha challenges are counted there, once for the whole
-  fleet. Without Redis they live in each process's memory, which is right for
+  admin lockouts, captcha challenges and card-testing declines are counted
+  there, once for the whole fleet. Without Redis they live in each process's memory, which is right for
   one instance only: several would each allow the full limit, and a lockout or
   challenge set on one would not hold on another. They are never in
   PostgreSQL. A declared Redis that stops answering costs sharing, not service:
@@ -977,7 +977,7 @@ Row retention:
 | `notifications` (customers') | 90 days once read, 180 days if never read |
 | `webhook_events` | 90 days after completion |
 | `host_outbox` | 30 days after delivery; an undelivered event is never deleted |
-| `idempotency_keys`, `card_attempt_failures`, `solana_pay_references` | at expiry, past the longest card-abuse window, and after the 7-day watch window |
+| `idempotency_keys`, `solana_pay_references` | at expiry, and after the 7-day watch window |
 | `failed_usage_windows` | once the window has ended, on the merchant's next failed usage |
 
 What is kept on purpose:

@@ -41,6 +41,22 @@ func TestMemory(t *testing.T) {
 	require.Zero(t, s.Fallbacks())
 }
 
+// Marks are members of a set until their time passes; marking a member again
+// restarts it, so a set counts distinct members over a sliding window.
+func TestMarks(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC)
+	s := New(nil)
+	s.Mark(ctx, now, Mark{Set: "fails", Member: "f1", TTL: 15 * time.Minute}, Mark{Set: "seen", Member: "ip:a", TTL: time.Hour})
+	now = now.Add(10 * time.Minute)
+	s.Mark(ctx, now, Mark{Set: "fails", Member: "f2", TTL: 15 * time.Minute}, Mark{Set: "seen", Member: "ip:a", TTL: time.Hour})
+	require.Equal(t, []int64{2, 1, 0}, s.Marked(ctx, now, "fails", "seen", "other"))
+	now = now.Add(6 * time.Minute)
+	require.Equal(t, []int64{1, 1}, s.Marked(ctx, now, "fails", "seen"), "the first failure slid out")
+	now = now.Add(55 * time.Minute)
+	require.Equal(t, []int64{0, 0}, s.Marked(ctx, now, "fails", "seen"), "seen an hour after it was last marked")
+}
+
 // Memory is bounded: expired entries go first, then the entry closest to
 // expiry, and neither costs a pass over every key.
 func TestMemoryIsBounded(t *testing.T) {
@@ -92,6 +108,8 @@ func TestUnreachableRedisFallsBackToMemory(t *testing.T) {
 	require.Positive(t, s.Held(ctx, "lock"))
 	require.Error(t, s.Release(ctx, "lock"), "Redis was not told")
 	require.Zero(t, s.Held(ctx, "lock"), "memory was")
-	require.EqualValues(t, 5, s.Fallbacks(), "each operation memory took")
+	s.Mark(ctx, time.Now(), Mark{Set: "fails", Member: "f1", TTL: time.Minute})
+	require.Equal(t, []int64{1}, s.Marked(ctx, time.Now(), "fails"))
+	require.EqualValues(t, 7, s.Fallbacks(), "each operation memory took")
 	require.Error(t, s.Probe(ctx))
 }

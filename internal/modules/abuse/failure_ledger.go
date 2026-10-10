@@ -10,34 +10,31 @@ import (
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
 
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/abusestate"
 )
 
-// FailureLedger is the durable card-testing counter: every replica shares the
-// same PostgreSQL rows, so blocks hold across a fleet without Redis.
+// FailureLedger counts refused cards in the abuse state: in Redis, shared by
+// every instance, else in this process's memory, for one instance.
 //
 // Per subject (customer, client address): BlockAfter failures in FailWindow or
 // DailyBlockAfter in DailyWindow block card attempts. In attack mode any subject
 // with a failure inside FailWindow is blocked. The windows slide, so blocks and
 // attack mode end once failures age out.
 type FailureLedger struct {
-	db    *db.DB
+	state *abusestate.Store
 	clock clockwork.Clock
 	cfg   CardAbuseConfig
 }
 
-const failureBucket = 5 * time.Minute
-
-// MerchantSubject is the merchant-wide row that detects attack mode.
+// MerchantSubject is the merchant-wide subject that detects attack mode.
 const MerchantSubject = "merchant"
 
-// NewFailureLedger requires the runtime's database and clock.
-func NewFailureLedger(database *db.DB, clock clockwork.Clock, cfg CardAbuseConfig) *FailureLedger {
-	if database == nil || clock == nil {
+// NewFailureLedger counts in state on the runtime's clock.
+func NewFailureLedger(state *abusestate.Store, clock clockwork.Clock, cfg CardAbuseConfig) *FailureLedger {
+	if state == nil || clock == nil {
 		return nil
 	}
-	return &FailureLedger{db: database, clock: clock, cfg: cfg}
+	return &FailureLedger{state: state, clock: clock, cfg: cfg}
 }
 
 const (
@@ -80,79 +77,75 @@ func cleanSubjects(subjects []string) []string {
 
 // Record counts one failed card attempt for each subject. Callers name
 // MerchantSubject exactly once per attempt.
-func (l *FailureLedger) Record(ctx context.Context, merchantID uuid.UUID, subjects ...string) error {
+func (l *FailureLedger) Record(ctx context.Context, merchantID uuid.UUID, subjects ...string) {
 	subjects = cleanSubjects(subjects)
-	if l == nil || l.db == nil || merchantID == uuid.Nil || len(subjects) == 0 {
-		return nil
+	if l == nil || merchantID == uuid.Nil || len(subjects) == 0 {
+		return
 	}
-	now := l.clock.Now().UTC()
-	q := l.db.Gen(ctx)
-	if err := q.RecordCardAttemptFailure(ctx, gen.RecordCardAttemptFailureParams{
-		MerchantID: merchantID, BucketAt: now.Truncate(failureBucket), Subjects: subjects,
-	}); err != nil {
-		return err
+	failure := uuid.NewString()
+	marks := make([]abusestate.Mark, 0, 2*len(subjects))
+	for _, subject := range subjects {
+		if subject == MerchantSubject {
+			marks = append(marks, abusestate.Mark{Set: attackKey(merchantID, "failures"), Member: failure, TTL: l.cfg.GlobalWindow})
+			continue
+		}
+		marks = append(marks,
+			abusestate.Mark{Set: subjectKey(merchantID, subject, "burst"), Member: failure, TTL: l.cfg.FailWindow},
+			abusestate.Mark{Set: subjectKey(merchantID, subject, "day"), Member: failure, TTL: l.cfg.DailyWindow})
+		switch {
+		case strings.HasPrefix(subject, customerPrefix):
+			marks = append(marks, abusestate.Mark{Set: attackKey(merchantID, "customers"), Member: subject, TTL: l.cfg.GlobalWindow})
+		case strings.HasPrefix(subject, addressPrefix):
+			marks = append(marks, abusestate.Mark{Set: attackKey(merchantID, "addresses"), Member: subject, TTL: l.cfg.GlobalWindow})
+		}
 	}
-	_, err := q.PruneCardAttemptFailures(ctx, gen.PruneCardAttemptFailuresParams{MerchantID: merchantID, Before: now.Add(-l.horizon())})
-	return err
-}
-
-func (l *FailureLedger) horizon() time.Duration {
-	return max(l.cfg.DailyWindow, l.cfg.GlobalWindow, l.cfg.FailWindow) + failureBucket
+	l.state.Mark(ctx, l.clock.Now(), marks...)
 }
 
 // Blocked reports whether any subject may not attempt another card now, and
 // for how long it should wait.
-func (l *FailureLedger) Blocked(ctx context.Context, merchantID uuid.UUID, subjects ...string) (time.Duration, bool, error) {
-	if l == nil || l.db == nil || merchantID == uuid.Nil {
-		return 0, false, nil
+func (l *FailureLedger) Blocked(ctx context.Context, merchantID uuid.UUID, subjects ...string) (time.Duration, bool) {
+	subjects = cleanSubjects(subjects)
+	if l == nil || merchantID == uuid.Nil || len(subjects) == 0 {
+		return 0, false
 	}
-	subjects = cleanSubjects(append(subjects, MerchantSubject))
-	now := l.clock.Now().UTC()
-	rows, err := l.db.Gen(ctx).CardAttemptFailureCounts(ctx, gen.CardAttemptFailureCountsParams{
-		BurstSince: now.Add(-l.cfg.FailWindow),
-		MerchantID: merchantID,
-		Subjects:   subjects,
-		DailySince: now.Add(-max(l.cfg.DailyWindow, l.cfg.GlobalWindow)),
-	})
-	if err != nil {
-		return 0, false, err
+	sets := make([]string, 0, 2*len(subjects))
+	for _, subject := range subjects {
+		sets = append(sets, subjectKey(merchantID, subject, "burst"), subjectKey(merchantID, subject, "day"))
 	}
-	attack := false
-	for _, row := range rows {
-		if row.Subject == MerchantSubject && row.Daily >= l.cfg.GlobalAttackAfter {
-			if attack, err = l.AttackMode(ctx, merchantID); err != nil {
-				return 0, false, err
-			}
-		}
-	}
+	counts := l.state.Marked(ctx, l.clock.Now(), sets...)
 	var wait time.Duration
-	for _, row := range rows {
-		if row.Subject == MerchantSubject {
-			continue
-		}
-		if row.Daily >= l.cfg.DailyBlockAfter {
+	attack, checked := false, false
+	for i := 0; i < len(counts); i += 2 {
+		burst, day := counts[i], counts[i+1]
+		if day >= l.cfg.DailyBlockAfter {
 			wait = max(wait, l.cfg.DailyWindow)
 		}
-		if row.Burst >= l.cfg.BlockAfter || (attack && row.Burst > 0) {
+		if burst > 0 && burst < l.cfg.BlockAfter && !checked {
+			attack, checked = l.AttackMode(ctx, merchantID), true
+		}
+		if burst >= l.cfg.BlockAfter || (attack && burst > 0) {
 			wait = max(wait, l.cfg.FailWindow)
 		}
 	}
-	return wait, wait > 0, nil
+	return wait, wait > 0
 }
 
 // AttackMode reports whether the merchant is under a card-testing attack:
 // GlobalAttackAfter failures in GlobalWindow from at least
 // GlobalAttackSubjects customers and as many client addresses.
-func (l *FailureLedger) AttackMode(ctx context.Context, merchantID uuid.UUID) (bool, error) {
-	if l == nil || l.db == nil || merchantID == uuid.Nil {
-		return false, nil
+func (l *FailureLedger) AttackMode(ctx context.Context, merchantID uuid.UUID) bool {
+	if l == nil || merchantID == uuid.Nil {
+		return false
 	}
-	b, err := l.db.Gen(ctx).CardAttackBreadth(ctx, gen.CardAttackBreadthParams{
-		MerchantID: merchantID, Since: l.clock.Now().UTC().Add(-l.cfg.GlobalWindow),
-		MerchantSubject: MerchantSubject, CustomerPrefix: customerPrefix, AddressPrefix: addressPrefix,
-	})
-	if err != nil {
-		return false, err
-	}
-	return b.Failures >= l.cfg.GlobalAttackAfter && b.Customers >= l.cfg.GlobalAttackSubjects && b.Addresses >= l.cfg.GlobalAttackSubjects, nil
+	n := l.state.Marked(ctx, l.clock.Now(), attackKey(merchantID, "failures"), attackKey(merchantID, "customers"), attackKey(merchantID, "addresses"))
+	return n[0] >= l.cfg.GlobalAttackAfter && n[1] >= l.cfg.GlobalAttackSubjects && n[2] >= l.cfg.GlobalAttackSubjects
+}
+
+func subjectKey(merchantID uuid.UUID, subject, window string) string {
+	return "card_declines:{" + merchantID.String() + "}:" + subject + ":" + window
+}
+
+func attackKey(merchantID uuid.UUID, what string) string {
+	return "card_attack:{" + merchantID.String() + "}:" + what
 }

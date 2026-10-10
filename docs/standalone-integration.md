@@ -45,9 +45,9 @@ there is no separate private/service listener.
   `db.port`, `db.database` and `db.username` (`db.sslmode` defaults to
   `require`). There is no default: without one the server refuses to start.
 - **A Redis-compatible service** (we recommend Garnet) — optional for one
-  instance, required for several. It holds rate limits, admin lockouts and
-  captcha challenges, shared by every instance; without it they live in the
-  process's memory. Name it with `redis.addr` (`REDIS_ADDR`)
+  instance, required for several. It holds rate limits, admin lockouts, captcha
+  challenges and card-testing declines, shared by every instance; without it
+  they live in the process's memory. Name it with `redis.addr` (`REDIS_ADDR`)
   or a `redis://` / `rediss://` URL (`REDIS_URL`), with `redis.username`
   (`REDIS_USERNAME`, an ACL user), `redis.password`, `redis.tls` and
   `redis.ca_cert` (`REDIS_CA_CERT`, the PEM CA) as it needs. While a declared

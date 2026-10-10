@@ -176,8 +176,8 @@ its URL, with `sslmode=verify-full` across a network.
 ## Redis
 
 Redis or [Garnet](https://github.com/microsoft/garnet) has no default, and one
-replica runs without it. OpenRails' rate limits, admin lockouts and captcha
-challenges and AuthKit's rate limits and spent DPoP proofs are kept in Redis,
+replica runs without it. OpenRails' rate limits, admin lockouts, captcha
+challenges and card-testing declines and AuthKit's rate limits and spent DPoP proofs are kept in Redis,
 shared by every replica, or without it in each pod's memory, so more than one
 replica needs Redis. None of it is in Postgres. Nothing in Redis needs a backup.
 
@@ -238,8 +238,8 @@ Prometheus Operator.
 
 `replicaCount` is 1. More replicas share the database and need:
 
-- Redis (`config.redis`) for OpenRails' rate limits, admin lockouts and captcha
-  challenges and AuthKit's rate limits and spent DPoP proofs, which each pod
+- Redis (`config.redis`) for OpenRails' rate limits, admin lockouts, captcha
+  challenges and card-testing declines and AuthKit's rate limits and spent DPoP proofs, which each pod
   otherwise keeps on its own;
 - AuthKit's keys from `secrets.authKeys`: an ephemeral signing key is per pod,
   so a token one pod signs fails on the others. Everything else in `secrets`

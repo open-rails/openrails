@@ -253,8 +253,8 @@ type Runtime struct {
 	// CaptchaStore is the process's one captcha challenge store, shared by the
 	// card-abuse guard and every HTTP surface so a solve clears it everywhere.
 	CaptchaStore *captcha.ChallengeStore
-	// CardFailureLedger is the PostgreSQL card-testing ledger (SEC-30),
-	// enforced on every replica.
+	// CardFailureLedger is the card-testing ledger (SEC-30), counted in
+	// AbuseState.
 	CardFailureLedger *abuse.FailureLedger
 
 	riverCompositionMu     sync.Mutex

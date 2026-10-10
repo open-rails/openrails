@@ -5,10 +5,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/open-rails/openrails/billing"
-
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -17,9 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/abuse"
 )
 
-// Every card save, checkout and confirmation consults the durable failure
-// ledger before the provider sees the card, and every refused card is counted,
-// on whichever replica served it.
+// Every card save, checkout and confirmation consults the failure ledger
+// before the provider sees the card, and every refused card is counted.
 
 func cardAttemptLedger(r *httprequest.Request) (*abuse.FailureLedger, uuid.UUID, bool) {
 	if r == nil || r.State == nil || r.State.CardFailureLedger == nil {
@@ -39,12 +35,7 @@ func refuseBlockedCardAttempt(r *httprequest.Request, customerID string) bool {
 	if !ok {
 		return false
 	}
-	wait, blocked, err := ledger.Blocked(r.Request.Context(), merchantID, abuse.CustomerSubject(customerID), abuse.AddressSubject(r.ClientIP()))
-	if err != nil {
-		log.WithError(err).WithField("request_id", r.RequestID()).Error("card attempt ledger unavailable")
-		r.ErrorCode(billing.CodeServiceUnavailable, "card attempts are temporarily unavailable")
-		return true
-	}
+	wait, blocked := ledger.Blocked(r.Request.Context(), merchantID, abuse.CustomerSubject(customerID), abuse.AddressSubject(r.ClientIP()))
 	if !blocked {
 		return false
 	}
@@ -59,9 +50,8 @@ func writeCardAttemptsBlocked(r *httprequest.Request, wait time.Duration) {
 }
 
 // recordCardFailure counts one card the provider refused: against subjects in
-// the durable ledger, then against this request's captcha subjects, with the
-// ledger's attack verdict. Best-effort: a failed write never changes the
-// response.
+// the ledger, then against this request's captcha subjects, with the ledger's
+// attack verdict.
 func recordCardFailure(r *httprequest.Request, subjects ...string) {
 	if r == nil || r.State == nil {
 		return
@@ -69,14 +59,9 @@ func recordCardFailure(r *httprequest.Request, subjects ...string) {
 	ctx := r.Request.Context()
 	attack := false
 	if ledger, merchantID, ok := cardAttemptLedger(r); ok {
-		if err := ledger.Record(ctx, merchantID, subjects...); err != nil {
-			log.WithError(err).WithField("request_id", r.RequestID()).Error("record card attempt failure")
-		}
+		ledger.Record(ctx, merchantID, subjects...)
 		if r.State.CardAbuseGuard != nil {
-			var err error
-			if attack, err = ledger.AttackMode(ctx, merchantID); err != nil {
-				log.WithError(err).WithField("request_id", r.RequestID()).Error("card attack mode lookup")
-			}
+			attack = ledger.AttackMode(ctx, merchantID)
 		}
 	}
 	id, _ := merchant.FromContext(ctx)

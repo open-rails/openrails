@@ -2,8 +2,8 @@
 
 OpenRails rate-limits on a fixed 1-minute window, per *bucket* (endpoint category) and per
 *subject* (dimension). Every request is counted against each applicable subject and blocked when
-**any** trips — headers reflect the strictest. Counters, admin lockouts and captcha challenges
-live in Redis when configured, shared by every instance, and otherwise in each process's memory,
+**any** trips — headers reflect the strictest. Counters, admin lockouts, captcha challenges and
+card-testing declines live in Redis when configured, shared by every instance, and otherwise in each process's memory,
 for one instance only: several instances need Redis. While a configured Redis does not answer,
 each process keeps them in its own memory and readiness reports Redis degraded. Never in
 PostgreSQL. One net/http middleware
@@ -107,9 +107,9 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 
 ## Card-testing ledger
 
-Cards the provider refused are counted in PostgreSQL
-(`billing.card_attempt_failures`), so blocks hold on every replica without
-Redis or captcha. A request refused before any provider call (a
+Cards the provider refused are counted like every other limit: in Redis, shared
+by every instance, or without it in the process's memory, one instance only;
+never in PostgreSQL. A request refused before any provider call (a
 missing field, an unconfigured PSP) is not a decline. Card saves and checkout
 payments check it before any provider call and answer `429` `card_attempts_blocked`
 with `Retry-After`:

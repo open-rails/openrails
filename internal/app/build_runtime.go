@@ -311,8 +311,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		cardAbuseGuard = abuse.NewCardAbuseGuard(abuseState, captchaStore, abuse.DefaultCardAbuseConfig())
 	}
 
-	// SEC-30: the durable card-testing ledger works on every replica, Redis or not.
-	cardFailureLedger := abuse.NewFailureLedger(database, clock, abuse.DefaultCardAbuseConfig())
+	// SEC-30: the card-testing ledger, in the abuse state.
+	cardFailureLedger := abuse.NewFailureLedger(abuseState, clock, abuse.DefaultCardAbuseConfig())
 	serviceInstances.CheckoutAttemptService.SetCardFailureLedger(cardFailureLedger)
 
 	// #725/#788: collection adapters arm PER MERCHANT from the armed rail

@@ -8,7 +8,6 @@ var ownedTables = []string{
 	"admission_denials_hourly",
 	"admission_operations",
 	"book_identity",
-	"card_attempt_failures",
 	"catalog_applications",
 	"catalog_field_owners",
 	"catalog_meters",

@@ -67,7 +67,7 @@ func DefaultCardAbuseConfig() CardAbuseConfig {
 	}
 }
 
-// CardAbuseGuard is the captcha accelerator over the durable FailureLedger: it
+// CardAbuseGuard is the captcha accelerator over the FailureLedger: it
 // captchas abusive subjects and, while the ledger reports an attack, everyone
 // on that merchant's card routes. It is built only when a captcha is
 // configured; otherwise the ledger's blocks are the whole policy.

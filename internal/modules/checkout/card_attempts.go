@@ -7,8 +7,6 @@ import (
 	"strings"
 	"time"
 
-	log "github.com/sirupsen/logrus"
-
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/abuse"
@@ -38,11 +36,7 @@ func (s *CheckoutAttemptService) guardCardAttempt(ctx context.Context, user *Use
 	if !ok || id.IsZero() {
 		return nil
 	}
-	wait, blocked, err := s.cardFailures.Blocked(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP))
-	if err != nil {
-		return fmt.Errorf("card attempt ledger: %w", err)
-	}
-	if blocked {
+	if wait, blocked := s.cardFailures.Blocked(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP)); blocked {
 		return &CardAttemptsBlockedError{RetryAfter: wait}
 	}
 	return nil
@@ -58,9 +52,7 @@ func (s *CheckoutAttemptService) noteCardAttempt(ctx context.Context, user *User
 	if !ok || id.IsZero() {
 		return
 	}
-	if rerr := s.cardFailures.Record(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP), abuse.MerchantSubject); rerr != nil {
-		log.WithError(rerr).Error("record card attempt failure")
-	}
+	s.cardFailures.Record(ctx, id.UUID(), abuse.CustomerSubject(user.ID), abuse.AddressSubject(user.ClientIP), abuse.MerchantSubject)
 }
 
 // CardAttemptFailed reports whether a checkout outcome is a refused card.

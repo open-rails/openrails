@@ -9,23 +9,25 @@ import (
 // table is a bounded map of expiring entries. A heap orders them by expiry,
 // so each call drops only the entries that have expired since the last one,
 // and a full table drops the entry closest to expiry: never a pass over every
-// key.
+// key. An entry may belong to a set, whose live members are counted.
 type table struct {
 	mu      sync.Mutex
 	limit   int
 	entries map[string]*entry
 	expiry  expiryHeap
+	sets    map[string]int
 }
 
 type entry struct {
 	key     string
+	set     string
 	value   int64
 	expires time.Time
 	index   int
 }
 
 func newTable(limit int) *table {
-	return &table{limit: limit, entries: map[string]*entry{}}
+	return &table{limit: limit, entries: map[string]*entry{}, sets: map[string]int{}}
 }
 
 // add adds n to key's value, starting at n until expires when key is absent.
@@ -37,7 +39,7 @@ func (t *table) add(key string, n int64, expires, now time.Time) int64 {
 		e.value += n
 		return e.value
 	}
-	t.insert(key, n, expires)
+	t.insert(key, "", n, expires)
 	return n
 }
 
@@ -51,7 +53,29 @@ func (t *table) set(key string, expires, now time.Time) {
 		heap.Fix(&t.expiry, e.index)
 		return
 	}
-	t.insert(key, 1, expires)
+	t.insert(key, "", 1, expires)
+}
+
+// mark holds member in set until expires.
+func (t *table) mark(set, member string, expires, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	key := set + "\x00" + member
+	if e, ok := t.entries[key]; ok {
+		e.expires = expires
+		heap.Fix(&t.expiry, e.index)
+		return
+	}
+	t.insert(key, set, 1, expires)
+}
+
+// members is how many live members set holds.
+func (t *table) members(set string, now time.Time) int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	return t.sets[set]
 }
 
 // left is how long key has before it expires; zero when absent.
@@ -70,8 +94,7 @@ func (t *table) remove(keys []string) {
 	defer t.mu.Unlock()
 	for _, key := range keys {
 		if e, ok := t.entries[key]; ok {
-			heap.Remove(&t.expiry, e.index)
-			delete(t.entries, key)
+			t.drop(heap.Remove(&t.expiry, e.index).(*entry))
 		}
 	}
 }
@@ -82,19 +105,33 @@ func (t *table) len() int {
 	return len(t.entries)
 }
 
-func (t *table) insert(key string, value int64, expires time.Time) {
+func (t *table) insert(key, set string, value int64, expires time.Time) {
 	for len(t.entries) >= t.limit {
-		delete(t.entries, heap.Pop(&t.expiry).(*entry).key)
+		t.drop(heap.Pop(&t.expiry).(*entry))
 	}
-	e := &entry{key: key, value: value, expires: expires}
+	e := &entry{key: key, set: set, value: value, expires: expires}
 	heap.Push(&t.expiry, e)
 	t.entries[key] = e
+	if set != "" {
+		t.sets[set]++
+	}
+}
+
+// drop forgets e, already off the heap.
+func (t *table) drop(e *entry) {
+	delete(t.entries, e.key)
+	if e.set == "" {
+		return
+	}
+	if t.sets[e.set]--; t.sets[e.set] == 0 {
+		delete(t.sets, e.set)
+	}
 }
 
 // sweep drops the entries expired by now.
 func (t *table) sweep(now time.Time) {
 	for len(t.expiry) > 0 && !t.expiry[0].expires.After(now) {
-		delete(t.entries, heap.Pop(&t.expiry).(*entry).key)
+		t.drop(heap.Pop(&t.expiry).(*entry))
 	}
 }
 

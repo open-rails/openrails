@@ -522,7 +522,7 @@ func isCheckoutPath(path string) bool {
 
 // cardAttackMode reports whether the request's merchant is under a card-testing
 // attack. A merchant not yet known here (a delegated token names it later)
-// leaves the request to its subjects' challenges and the durable failure ledger.
+// leaves the request to its subjects' challenges and the failure ledger.
 func cardAttackMode(r *http.Request, store *captcha.ChallengeStore) bool {
 	id, ok := merchant.FromContext(r.Context())
 	if !ok || id.IsZero() {

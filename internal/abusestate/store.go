@@ -1,5 +1,5 @@
-// Package abusestate keeps abuse state: rate-limit windows, admin lockouts
-// and captcha challenges. It lives in Redis when one is configured, which
+// Package abusestate keeps abuse state: rate-limit windows, admin lockouts,
+// captcha challenges and card-testing declines. It lives in Redis when one is configured, which
 // every instance shares, and otherwise in this process's memory, which serves
 // one instance only. A configured Redis that stops answering is left for
 // memory until it answers again. Never PostgreSQL.
@@ -30,7 +30,7 @@ type Store struct {
 	rdb *redis.Client
 	now func() time.Time
 
-	counts, holds *table
+	counts, holds, marks *table
 
 	mu       sync.Mutex
 	observed bool
@@ -44,7 +44,7 @@ type Store struct {
 func New(rdb *redis.Client) *Store {
 	return &Store{
 		rdb: rdb, now: time.Now,
-		counts: newTable(tableLimit), holds: newTable(tableLimit),
+		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit),
 	}
 }
 
@@ -112,6 +112,57 @@ func (s *Store) Held(ctx context.Context, key string) time.Duration {
 // configured Redis that did not.
 func (s *Store) Release(ctx context.Context, keys ...string) error {
 	return s.release(ctx, s.holds, keys)
+}
+
+// A Mark puts Member in Set until TTL passes; marking it again restarts it.
+type Mark struct {
+	Set, Member string
+	TTL         time.Duration
+}
+
+// Mark records marks at now, the caller's clock.
+func (s *Store) Mark(ctx context.Context, now time.Time, marks ...Mark) {
+	if s.redis() {
+		pipe := s.rdb.Pipeline()
+		for _, m := range marks {
+			pipe.ZAdd(ctx, m.Set, redis.Z{Score: float64(now.Add(m.TTL).UnixMilli()), Member: m.Member})
+			pipe.ZRemRangeByScore(ctx, m.Set, "-inf", strconv.FormatInt(now.UnixMilli(), 10))
+			pipe.PExpire(ctx, m.Set, m.TTL)
+		}
+		_, err := pipe.Exec(ctx)
+		if err == nil {
+			return
+		}
+		s.fail(ctx, err)
+	}
+	for _, m := range marks {
+		s.marks.mark(m.Set, m.Member, now.Add(m.TTL), now)
+	}
+}
+
+// Marked is how many members each set holds at now, the caller's clock: in
+// Redis, and in memory what was marked while Redis was down.
+func (s *Store) Marked(ctx context.Context, now time.Time, sets ...string) []int64 {
+	out := make([]int64, len(sets))
+	for i, set := range sets {
+		out[i] = int64(s.marks.members(set, now))
+	}
+	if s.redis() {
+		pipe := s.rdb.Pipeline()
+		live := "(" + strconv.FormatInt(now.UnixMilli(), 10)
+		counts := make([]*redis.IntCmd, len(sets))
+		for i, set := range sets {
+			counts[i] = pipe.ZCount(ctx, set, live, "+inf")
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			s.fail(ctx, err)
+			return out
+		}
+		for i, c := range counts {
+			out[i] += c.Val()
+		}
+	}
+	return out
 }
 
 func (s *Store) release(ctx context.Context, t *table, keys []string) error {
