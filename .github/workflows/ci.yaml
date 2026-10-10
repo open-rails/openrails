@@ -207,6 +207,8 @@ jobs:
     env:
       OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable
       OPENRAILS_E2E_REDIS_ADDR: 127.0.0.1:6379
+      OPENRAILS_E2E_VAULT_ADDR: http://127.0.0.1:8200
+      OPENRAILS_E2E_VAULT_TOKEN: e2e-root
       OPENRAILS_E2E_WORKERS: ${{ strategy.job-total }}
       OPENRAILS_E2E_WORKER: ${{ strategy.job-index }}
       OPENRAILS_E2E_JOBS: "6"
@@ -231,6 +233,13 @@ jobs:
           url="$(scripts/e2e-redis-tls.sh "$RUNNER_TEMP/redis-tls" 6380 "$image")"
           echo "OPENRAILS_E2E_REDIS_TLS_URL=$url" >>"$GITHUB_ENV"
           echo "OPENRAILS_E2E_REDIS_TLS_CA=$RUNNER_TEMP/redis-tls/ca.pem" >>"$GITHUB_ENV"
+      # A dev server: in memory, unsealed, OPENRAILS_E2E_VAULT_TOKEN its root
+      # token. Each test mounts its own KV v2 engine (internal/vaulttest).
+      - name: Start Vault
+        run: |
+          image="$(scripts/ci-pull-image.sh hashicorp/vault:2.1.1)"
+          docker run -d --pull never --name e2e-vault -p 8200:8200 \
+            -e VAULT_DEV_ROOT_TOKEN_ID="$OPENRAILS_E2E_VAULT_TOKEN" "$image"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:
@@ -241,6 +250,8 @@ jobs:
           family: e2e
       - name: Wait for PostgreSQL
         run: timeout 60 bash -c 'until docker exec e2e-postgres pg_isready -h 127.0.0.1 -U postgres -d openrails_test; do sleep 1; done'
+      - name: Wait for Vault
+        run: timeout 60 bash -c 'until curl -fsS "$OPENRAILS_E2E_VAULT_ADDR/v1/sys/health" >/dev/null; do sleep 1; done'
       - name: Run focused e2e contracts
         run: bash scripts/e2e.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

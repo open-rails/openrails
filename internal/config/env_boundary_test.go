@@ -37,6 +37,7 @@ func TestNoLibraryEnvReads(t *testing.T) {
 		"tests/":                      "test binaries own their env (OPENRAILS_TEST_*, RAILS_* fixtures)",
 		"scripts/":                    "operational tooling run as its own process, not importable library code",
 		"internal/dbtest/":            "test-support package: container/DSN discovery for test binaries",
+		"internal/vaulttest/":         "test-support package: the e2e suites' dev Vault for test binaries",
 	}
 
 	root, err := filepath.Abs(filepath.Join("..", ".."))
