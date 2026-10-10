@@ -1,7 +1,9 @@
 package embedhttp
 
 import (
+	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -142,4 +144,23 @@ func TestValidateRouteTable(t *testing.T) {
 		console, entry("GET", "/admin"), entry("POST", "/admin/custom/subscriptions/{id}/cancel"),
 		entry("GET", "/a/{id}/x"), entry("POST", "/a/{name}/y"),
 	}}))
+}
+
+// Every Need names a field of the routes' Permissions and of the host's
+// config.Permissions, and every field of either is a Need: a new programmatic
+// permission (AppNeeds) is added in each, or this names what is missing.
+func TestEveryNeedIsAField(t *testing.T) {
+	needs := map[string]bool{}
+	for _, n := range httproutes.AllNeeds() {
+		needs[string(n)] = true
+		require.NotNil(t, (&httproutes.Permissions{}).Field(n), "routes.Permissions.Field(%s)", n)
+		f, ok := reflect.TypeOf(config.Permissions{}).FieldByName(string(n))
+		require.True(t, ok, "config.Permissions has no field %s", n)
+		require.Equal(t, reflect.TypeOf((*fmt.Stringer)(nil)).Elem(), f.Type, "config.Permissions.%s", n)
+	}
+	for _, typ := range []reflect.Type{reflect.TypeOf(httproutes.Permissions{}), reflect.TypeOf(config.Permissions{})} {
+		for i := range typ.NumField() {
+			require.True(t, needs[typ.Field(i).Name], "%s.%s is no Need", typ, typ.Field(i).Name)
+		}
+	}
 }

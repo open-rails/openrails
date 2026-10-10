@@ -25,3 +25,10 @@ const (
 	// All is the merchant owner's grant.
 	All = "merchant:*"
 )
+
+// Declared is every permission the merchant persona declares: one per
+// Routes.Permissions field.
+var Declared = []string{
+	BillingRead, BillingManage, CatalogManage, ConfigManage, MetricsRead,
+	EntitlementsRead, UsageManage, CostsManage, EventsRead,
+}

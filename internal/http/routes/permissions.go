@@ -6,54 +6,11 @@ import "fmt"
 // for them: the staff groups' (the admin group's reads and updates, the
 // catalog, the merchant's configuration, its business metrics) and the
 // programmatic routes' (entitlement checks, usage, provider costs, host
-// events). An empty one leaves its routes unmounted.
+// events). An empty one leaves its routes unmounted. Each field is named by
+// a Need.
 type Permissions struct {
 	AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics string
 	Entitlements, Usage, Costs, Events                       string
-}
-
-// Validate refuses AdminUpdate without AdminRead.
-func (p Permissions) Validate() error {
-	if p.AdminUpdate != "" && p.AdminRead == "" {
-		return fmt.Errorf("openrails: Permissions.AdminUpdate needs AdminRead")
-	}
-	return nil
-}
-
-// Staff is p's staff groups' permissions alone.
-func (p Permissions) Staff() Permissions {
-	return Permissions{AdminRead: p.AdminRead, AdminUpdate: p.AdminUpdate, Catalog: p.Catalog, MerchantConfig: p.MerchantConfig, Metrics: p.Metrics}
-}
-
-// App is p's programmatic routes' permissions alone.
-func (p Permissions) App() Permissions {
-	return Permissions{Entitlements: p.Entitlements, Usage: p.Usage, Costs: p.Costs, Events: p.Events}
-}
-
-// For is the permission a route checks: "" when it needs none, or its
-// permission is not given and it is not mounted.
-func (p Permissions) For(r Route) string {
-	switch r.Needs() {
-	case NeedAdminRead:
-		return p.AdminRead
-	case NeedAdminUpdate:
-		return p.AdminUpdate
-	case NeedCatalog:
-		return p.Catalog
-	case NeedMerchantConfig:
-		return p.MerchantConfig
-	case NeedMetrics:
-		return p.Metrics
-	case NeedEntitlements:
-		return p.Entitlements
-	case NeedUsage:
-		return p.Usage
-	case NeedCosts:
-		return p.Costs
-	case NeedEvents:
-		return p.Events
-	}
-	return ""
 }
 
 // Need names the Routes.Permissions field a route's caller holds.
@@ -72,8 +29,74 @@ const (
 	NeedEvents       Need = "Events"
 )
 
-// appNeeds are the permissions a programmatic route may declare.
-var appNeeds = []Need{NeedEntitlements, NeedUsage, NeedCosts, NeedEvents}
+// StaffNeeds are the staff groups' permissions.
+var StaffNeeds = []Need{NeedAdminRead, NeedAdminUpdate, NeedCatalog, NeedMerchantConfig, NeedMetrics}
+
+// AppNeeds are the permissions a programmatic route may declare. A new one is
+// a Need here, a field of Permissions (and of the public config.Permissions)
+// named by it, and its case in Field; TestEveryNeedIsAField names what is
+// missing.
+var AppNeeds = []Need{NeedEntitlements, NeedUsage, NeedCosts, NeedEvents}
+
+// AllNeeds is every Permissions field.
+func AllNeeds() []Need { return append(append([]Need(nil), StaffNeeds...), AppNeeds...) }
+
+// Field is p's field n names; nil for an unknown Need.
+func (p *Permissions) Field(n Need) *string {
+	switch n {
+	case NeedAdminRead:
+		return &p.AdminRead
+	case NeedAdminUpdate:
+		return &p.AdminUpdate
+	case NeedCatalog:
+		return &p.Catalog
+	case NeedMerchantConfig:
+		return &p.MerchantConfig
+	case NeedMetrics:
+		return &p.Metrics
+	case NeedEntitlements:
+		return &p.Entitlements
+	case NeedUsage:
+		return &p.Usage
+	case NeedCosts:
+		return &p.Costs
+	case NeedEvents:
+		return &p.Events
+	}
+	return nil
+}
+
+// Validate refuses AdminUpdate without AdminRead.
+func (p Permissions) Validate() error {
+	if p.AdminUpdate != "" && p.AdminRead == "" {
+		return fmt.Errorf("openrails: Permissions.AdminUpdate needs AdminRead")
+	}
+	return nil
+}
+
+// only is p's needs alone.
+func (p Permissions) only(needs []Need) Permissions {
+	var out Permissions
+	for _, n := range needs {
+		*out.Field(n) = *p.Field(n)
+	}
+	return out
+}
+
+// Staff is p's staff groups' permissions alone.
+func (p Permissions) Staff() Permissions { return p.only(StaffNeeds) }
+
+// App is p's programmatic routes' permissions alone.
+func (p Permissions) App() Permissions { return p.only(AppNeeds) }
+
+// For is the permission a route checks: "" when it needs none, or its
+// permission is not given and it is not mounted.
+func (p Permissions) For(r Route) string {
+	if f := p.Field(r.Needs()); f != nil {
+		return *f
+	}
+	return ""
+}
 
 // Needs names the Routes.Permissions field a route checks: a staff route's
 // group's (and level's), a programmatic route's own, none for SCIM.

@@ -21,6 +21,8 @@ import (
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	httproutes "github.com/open-rails/openrails/internal/http/routes"
+	"github.com/open-rails/openrails/internal/staffperm"
 )
 
 func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
@@ -259,4 +261,14 @@ func TestRouteBudgetOutlivesServerWriteTimeout(t *testing.T) {
 	cancel()
 	req.SuccessJSON(map[string]any{"ok": true})
 	require.Equal(t, http.StatusOK, rec.Code, "a writer without a connection deadline still serves")
+}
+
+// The server names its own merchant permission for every Routes.Permissions
+// field, each one the merchant persona declares.
+func TestMerchantPermissionsCoverEveryNeed(t *testing.T) {
+	for _, n := range httproutes.AllNeeds() {
+		perm := *merchantPermissions.Field(n)
+		require.Contains(t, staffperm.Declared, perm, "Routes.Permissions.%s", n)
+	}
+	require.Len(t, staffperm.Declared, len(httproutes.AllNeeds()))
 }

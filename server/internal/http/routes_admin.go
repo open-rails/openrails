@@ -31,8 +31,9 @@ func permissionsFor(groups config.RouteGroups) httproutes.Permissions {
 		p.Metrics = merchantPermissions.Metrics
 	}
 	if groups.Programmatic {
-		app := merchantPermissions.App()
-		p.Entitlements, p.Usage, p.Costs, p.Events = app.Entitlements, app.Usage, app.Costs, app.Events
+		for _, n := range httproutes.AppNeeds {
+			*p.Field(n) = *merchantPermissions.Field(n)
+		}
 	}
 	return p
 }

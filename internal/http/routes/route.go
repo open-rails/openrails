@@ -364,8 +364,8 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if r.Group == App && (r.Sensitive || r.IdempotencyKey != r.AppWrite() || !strings.HasPrefix(r.Path, "/v1/app/")) {
 			panic("routes: " + r.Key() + ": a programmatic route is under /v1/app, never asks for a sign-in, and each write takes an Idempotency-Key")
 		}
-		if (r.Auth == AuthApplication) != (r.Permission != "") || r.Permission != "" && !slices.Contains(appNeeds, r.Permission) {
-			panic("routes: " + r.Key() + ": a programmatic route, and only one, names its permission: Entitlements, Usage, Costs or Events")
+		if (r.Auth == AuthApplication) != (r.Permission != "") || r.Permission != "" && !slices.Contains(AppNeeds, r.Permission) {
+			panic(fmt.Sprintf("routes: %s: a programmatic route, and only one, names its permission, one of %v (a new one is added to AppNeeds)", r.Key(), AppNeeds))
 		}
 		byKey[r.Key()] = r
 	}

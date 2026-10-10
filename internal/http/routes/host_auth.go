@@ -87,9 +87,15 @@ func HostOptions() Options {
 		Scope: func(_ context.Context, mid billing.MerchantID) (billingauth.Scope, error) {
 			return billingauth.HostScope(mid), nil
 		},
-		Permissions: Permissions{
-			AdminRead: "host", AdminUpdate: "host", Catalog: "host", MerchantConfig: "host", Metrics: "host",
-			Entitlements: "host", Usage: "host", Costs: "host", Events: "host",
-		},
+		Permissions: hostPermissions(),
 	}
+}
+
+// hostPermissions gives every Permissions field the host's own.
+func hostPermissions() Permissions {
+	var p Permissions
+	for _, n := range AllNeeds() {
+		*p.Field(n) = "host"
+	}
+	return p
 }

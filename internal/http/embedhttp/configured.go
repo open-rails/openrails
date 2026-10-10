@@ -35,18 +35,8 @@ func ValidateRoutes(sel config.Routes) error {
 // permission without Routes.Scope or a Scope without one, and any group
 // without Routes.Auth: nothing is ever mounted open.
 func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
-	b, p := sel.RouteGroups, sel.Permissions
-	perms := httproutes.Permissions{
-		AdminRead:      permissionText(p.AdminRead),
-		AdminUpdate:    permissionText(p.AdminUpdate),
-		Catalog:        permissionText(p.Catalog),
-		MerchantConfig: permissionText(p.MerchantConfig),
-		Metrics:        permissionText(p.Metrics),
-		Entitlements:   permissionText(p.Entitlements),
-		Usage:          permissionText(p.Usage),
-		Costs:          permissionText(p.Costs),
-		Events:         permissionText(p.Events),
-	}
+	b := sel.RouteGroups
+	perms := configuredPermissions(sel.Permissions)
 	for _, c := range []struct {
 		on         bool
 		group      string
@@ -64,15 +54,12 @@ func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 			return perms, fmt.Errorf("openrails: Permissions.%s is given, but RouteGroups.%s is off", c.name, c.group)
 		}
 	}
-	for _, c := range []struct{ perm, name string }{
-		{perms.AdminUpdate, "AdminUpdate"}, {perms.Entitlements, "Entitlements"}, {perms.Usage, "Usage"}, {perms.Costs, "Costs"}, {perms.Events, "Events"},
-	} {
-		group, on := "Admin", b.Admin
-		if c.name != "AdminUpdate" {
-			group, on = "Programmatic", b.Programmatic
-		}
-		if !on && c.perm != "" {
-			return perms, fmt.Errorf("openrails: Permissions.%s is given, but RouteGroups.%s is off", c.name, group)
+	if !b.Admin && perms.AdminUpdate != "" {
+		return perms, fmt.Errorf("openrails: Permissions.AdminUpdate is given, but RouteGroups.Admin is off")
+	}
+	for _, n := range httproutes.AppNeeds {
+		if !b.Programmatic && *perms.Field(n) != "" {
+			return perms, fmt.Errorf("openrails: Permissions.%s is given, but RouteGroups.Programmatic is off", n)
 		}
 	}
 	if err := perms.Validate(); err != nil {
@@ -89,13 +76,28 @@ func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 		return perms, fmt.Errorf("openrails: Routes.Scope is given, but no permission is")
 	}
 	if catalog, ok := sel.Auth.(auth.PermissionCatalog); ok {
-		for _, perm := range []string{perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics, perms.Entitlements, perms.Usage, perms.Costs, perms.Events} {
-			if perm != "" && !catalog.KnownPermission(perm) {
+		for _, n := range httproutes.AllNeeds() {
+			if perm := *perms.Field(n); perm != "" && !catalog.KnownPermission(perm) {
 				return perms, fmt.Errorf("openrails: Routes.Auth does not know the permission %q (Routes.Permissions)", perm)
 			}
 		}
 	}
 	return perms, nil
+}
+
+// configuredPermissions is the host's Permissions as the routes check them,
+// each field read by its Need's name.
+func configuredPermissions(given config.Permissions) httproutes.Permissions {
+	var perms httproutes.Permissions
+	v := reflect.ValueOf(given)
+	for _, n := range httproutes.AllNeeds() {
+		if f := v.FieldByName(string(n)); f.IsValid() {
+			if perm, ok := f.Interface().(fmt.Stringer); ok {
+				*perms.Field(n) = permissionText(perm)
+			}
+		}
+	}
+	return perms
 }
 
 // permissionText is a permission's text, "" for a nil one.

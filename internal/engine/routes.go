@@ -96,8 +96,10 @@ func logMount(sel config.Routes, perms httproutes.Permissions, routes int) {
 	if perms != (httproutes.Permissions{}) {
 		fields["scope_authority"], fields["scope_id"] = sel.Scope.Authority, sel.Scope.ID
 	}
-	if app := perms.App(); app != (httproutes.Permissions{}) {
-		fields["entitlements"], fields["usage"], fields["costs"], fields["events"] = app.Entitlements, app.Usage, app.Costs, app.Events
+	for _, n := range httproutes.AppNeeds {
+		if perm := *perms.Field(n); perm != "" {
+			fields[strings.ToLower(string(n))] = perm
+		}
 	}
 	if perms.Staff() != (httproutes.Permissions{}) {
 		fields["customer_read"], fields["customer_update"], fields["catalog"], fields["merchant_config"], fields["metrics"] = perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics

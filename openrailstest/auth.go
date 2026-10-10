@@ -4,6 +4,7 @@ package openrailstest
 import (
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -63,8 +64,10 @@ func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 // permissions are each permission routes gives, once each.
 func permissions(p openrails.Permissions) []string {
 	var out []string
-	for _, perm := range []fmt.Stringer{p.AdminRead, p.AdminUpdate, p.Catalog, p.MerchantConfig, p.Metrics, p.Entitlements, p.Usage, p.Costs, p.Events} {
-		if perm == nil {
+	v := reflect.ValueOf(p)
+	for i := range v.NumField() {
+		perm, _ := v.Field(i).Interface().(fmt.Stringer)
+		if perm == nil || reflect.ValueOf(perm).Kind() == reflect.Pointer && reflect.ValueOf(perm).IsNil() {
 			continue
 		}
 		if s := perm.String(); s != "" && !slices.Contains(out, s) {
