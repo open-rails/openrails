@@ -8,10 +8,9 @@ import (
 	"testing"
 )
 
-// Path-doctrine guard (#724, custodial-merchant-secrets ADR):
-// merchant-secret isolation rests on ALL secret paths being derived from the
-// single PSPSecretName builder and the single vaultSecretStore
-// namespace builder. Ad-hoc construction anywhere else would silently escape the
+// Path-doctrine guard (#724): merchant isolation rests on ALL credential names
+// and Vault paths being derived from PSPSecretName, the document-name builder
+// and the single Vault namespace builder (merchantdocs.VaultSource.MerchantPath). Ad-hoc construction anywhere else would silently escape the
 // per-merchant namespace, so this test greps the production sources and fails on
 // any non-allowlisted occurrence of the durable path fragments.
 func TestNoAdHocSecretPathConstruction(t *testing.T) {
@@ -39,7 +38,9 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 			// pattern that survived the psps rename and silently disarmed the
 			// Solana plaintext-write guard was exactly this shape).
 			fragment: `"psps/`,
-			allowed:  map[string]string{},
+			allowed: map[string]string{
+				"internal/merchantdocs/docs.go": "the document-name builder (PSPDoc) of a merchant's configuration",
+			},
 		},
 		{
 			// The RETIRED prefix. Only the loud rename checks may name it.
@@ -53,14 +54,14 @@ func TestNoAdHocSecretPathConstruction(t *testing.T) {
 			// The Vault merchant namespace (path.Join construction form).
 			fragment: `"openrails", "merchants"`,
 			allowed: map[string]string{
-				"internal/merchants/secrets_vault.go": "the single vault namespace builder (pathFor/List)",
+				"internal/merchantdocs/vault.go": "the single vault namespace builder (MerchantPath)",
 			},
 		},
 		{
 			// The Vault merchant namespace (literal string form).
 			fragment: `openrails/merchants/`,
 			allowed: map[string]string{
-				"internal/merchants/secrets_vault.go": "namespace shape documentation next to the builder",
+				"internal/merchantdocs/vault.go": "namespace shape documentation next to the builder",
 			},
 		},
 	}

@@ -1,27 +1,19 @@
-# Self-hosting with host-owned credential snapshots
+# Self-hosting with the configuration in a file
 
-Set `secret_backend: snapshot` when the host supplies provider credentials at
-startup. Values stay in process memory. Separate workers load their own snapshot;
-PostgreSQL does not share those values between processes. Updating credentials
-requires a new snapshot and provider/account validation.
-
-Merchant metadata remains database-owned. Startup initializes missing identities
-and metadata, preserves later API edits and archived accounts, and never prunes
-undeclared providers. Use explicit metadata applications for deliberate updates:
-[merchant configuration applications](merchant-configuration-applications.md).
-
-Credential custody, authorization and external HTTP publication are independent.
-The standalone server publishes the configuration routes with the admin API;
-embedded hosts give `Permissions.MerchantConfig`. Each route is gated by its permission, and
-authorized local Client metadata operations need no HTTP. Credential
-writes require a writable managed backend.
+Without a Vault KV mount, a merchant's configuration is its file: the
+standalone server's merchant manifest, or `Config.Merchant` for an embedded
+host. It is read at startup and held in memory, credentials included; Postgres
+keeps only the merchant and PSP identities history points at. Changing the
+configuration is changing the file and restarting. The configuration routes
+read it (never credentials); the edit routes are not mounted. To edit over HTTP
+instead, put the configuration in Vault ([vault.md](vault.md)).
 
 ## The three files
 
 | File | Owns | Loaded by |
 |---|---|---|
-| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `secret_backend`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
-| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, settings, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchant` |
+| `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `vault`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
+| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, display name, settings, alert webhooks, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchant` |
 | catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `Config.Catalog`, applied by `openrails.New` (embedded hosts) |
 
 Manifest anatomy and field semantics:
@@ -45,8 +37,8 @@ merchants:
         secrets: { datalink_username: ..., datalink_password: ..., salt: ... }
 ```
 
-OpenRails needs **no live Vault connection** at runtime (Vault Transit for
-Solana signing is the one optional exception — KV is never consulted).
+OpenRails needs **no live Vault connection** in this mode (Vault Transit for
+Solana signing is the one optional exception).
 
 ## Precedence
 
@@ -58,53 +50,35 @@ the manifest does not declare, refuses boot rather than being dropped.
 
 The conventional file is optional: absent, the server boots control-plane-only
 (bind merchants later). An explicit `--merchant-manifest` path must exist —
-boot refuses otherwise. Managed backends accept metadata initialization; provider
-credential declarations require the separate Client publication operation.
+boot refuses otherwise.
 
-Separate worker processes load the same manifest and overlays as API processes;
-in-memory provider credentials are not shared through PostgreSQL. Both commands
-accept `--merchant-manifest`. Each process must receive the same configured
-manifest and secret files before it can use those providers.
+Separate worker processes load the same manifest and overlays as API
+processes; nothing in the configuration is shared through PostgreSQL. Both
+commands accept `--merchant-manifest`.
 
 1. The manifest and its overlays parse strictly. Unknown fields and retired
    key names refuse boot, never a silent drop.
-2. Missing merchant/provider identities and metadata initialize in PostgreSQL.
-   Existing names, profile, routing, policy and archive decisions are preserved.
-3. Secrets are seeded **into memory** and
-   served through the same store interface every consumer reads — checkout,
-   webhook verification, provider pulls, rebill charging. Nothing is written
-   to `billing.merchant_secrets` or Vault KV.
+2. Missing merchant identities are created in PostgreSQL, and each PSP's and
+   custodian's identity is recorded.
+3. Each document validates as the configuration API validates it; one that
+   does not refuses boot.
 4. A declared secret that resolves to an empty value (no YAML value, no
-   mounted file, no env var) is a boot **error**. A PSP declared without a
-   given secret seeds nothing for it — requests needing it fail closed at use
-   time. Under `test_mode`, NMI accounts are probed before arming: production
-   credentials refuse to arm.
+   mounted file, no env var) is a boot **error**. Under `test_mode`, NMI
+   accounts are probed before arming: production credentials refuse to arm.
 
 ## Capabilities
 
-- Snapshot credentials are read-only through both Client transports. Metadata
-  edits and provider archive decisions retain their ordinary authorization checks.
-- External configuration routes require explicit publication; exposing a route
-  does not make the credential backend writable.
-- Catalog edits over HTTP and catalog documents share the catalog whatever the
-  credential backend: a document skips a product, price or meter whose field
-  an edit set differently, and reports it (see [catalog ownership](catalog-ownership.md)).
-- `openrails dump-merchant-config` exports redacted metadata with snapshot or
-  managed credentials. Plaintext credential export is not supported.
-- Managed DB secrets require encryption in sandbox and live deployments.
-  Host-owned snapshot values are not copied into a managed store.
+- Configuration edits over HTTP or through a Client are refused: the edit
+  routes are not mounted.
+- Catalog edits over HTTP and catalog documents share the catalog: a document
+  skips a product, price or meter whose field an edit set differently, and
+  reports it (see [catalog ownership](catalog-ownership.md)).
+- `openrails dump-merchant-config` reads a Vault-held configuration; with the
+  manifest, the manifest is the dump.
 
 ## Rotation walkthrough
 
-1. Rotate the value in your (operator) Vault / secret source.
+1. Rotate the value in your (operator) secret source.
 2. Re-render the mounted file (or env var).
-3. Restart with the new snapshot. Validate its provider/account/environment
-   identity before use. Existing metadata and archive decisions are preserved.
-
-## Managed credentials
-
-Choose `secret_backend: vault` or encrypted `db` for managed credentials. Publish
-validated candidates through `Client.CreatePSP` and `Client.UpdatePSP`. Actual backend
-permissions determine write capability. External HTTP publication remains a
-separate choice. Custody changes require an explicit transition preserving active
-credentials and existing provider obligations.
+3. Restart. The PSP's credential is checked against its declared account
+   before use.

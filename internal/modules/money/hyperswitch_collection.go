@@ -63,13 +63,6 @@ func (s *MoneyService) SetHyperSwitchDeployment(apiBaseURL string) error {
 	return nil
 }
 
-func collectionHyperSwitchBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
-	return charge.FreezeHyperSwitchBinding(ctx, q, method, psp, deployment)
-}
-func hyperSwitchBinding(row gen.BillingCustodian, deployment string) (charge.HyperSwitchBinding, error) {
-	return charge.HyperSwitchBindingFromAccount(row, deployment)
-}
-
 func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
 	if req.HyperSwitch == nil || *req.HyperSwitch != a.binding {
 		return nil, fmt.Errorf("%w: accepted HyperSwitch custody profile changed", charge.ErrInstrumentChanged)
@@ -89,22 +82,22 @@ func (b *MerchantCollectionAdapterBuilder) hyperSwitchAdapter(ctx context.Contex
 	if b.Config == nil || b.Config.HyperSwitch == nil || scope.CustodianID == nil || config.IsProviderReadOnly(b.Config) {
 		return nil, fmt.Errorf("HyperSwitch invoice collection is not armed")
 	}
-	custodian, err := b.DB.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *scope.CustodianID})
+	custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *scope.CustodianID)
 	if err != nil {
 		return nil, err
 	}
-	if custodian.MerchantID != mid.UUID() || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != scope.Environment || scope.Environment != config.ExpectedProviderEnvironment(b.testMode()) {
+	if !ok || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != scope.Environment || scope.Environment != config.ExpectedProviderEnvironment(b.testMode()) {
 		return nil, fmt.Errorf("HyperSwitch invoice custody does not match the accepted account")
 	}
 	posture, err := b.nmiProxyPosture(ctx, svc, mid, scope)
 	if err != nil {
 		return nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(ctx, b.Config, svc.Secrets(), mid, custodian)
+	client, err := railresolve.HyperSwitchClient(b.Config, mid, custodian)
 	if err != nil {
 		return nil, err
 	}
-	binding, err := hyperSwitchBinding(custodian, b.Config.HyperSwitch.APIBaseURL)
+	binding, err := charge.HyperSwitchBindingFromAccount(custodian, b.Config.HyperSwitch.APIBaseURL)
 	if err != nil {
 		return nil, err
 	}

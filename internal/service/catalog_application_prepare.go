@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	railreg "github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -28,7 +28,7 @@ type catalogReferenceVerifier func(context.Context, string, string, string, stri
 
 type catalogReferenceCheck struct {
 	key, provider, productKey string
-	account                   gen.BillingPsp
+	account                   merchants.PSPScope
 	request                   billing.CreatePriceParams
 	link                      map[string]string
 }
@@ -36,7 +36,7 @@ type catalogApplicationPreparation struct {
 	replay   *billing.CatalogApplicationReceipt
 	revision int64
 	links    map[[2]string]map[string]map[string]string
-	accounts map[uuid.UUID]gen.BillingPsp
+	accounts map[uuid.UUID]merchants.PSPScope
 	checks   []catalogReferenceCheck
 }
 
@@ -77,7 +77,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		if err != nil {
 			return nil, err
 		}
-		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[[2]string]map[string]map[string]string{}, accounts: map[uuid.UUID]gen.BillingPsp{}}
+		out := &catalogApplicationPreparation{replay: replay, revision: revision, links: map[[2]string]map[string]map[string]string{}, accounts: map[uuid.UUID]merchants.PSPScope{}}
 		if replay != nil {
 			return out, nil
 		}
@@ -85,8 +85,7 @@ func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogw
 		if err != nil {
 			return nil, err
 		}
-		q := scoped.catalogDatabase().Gen(ctx)
-		accounts, err := q.ListPSPsForMerchant(ctx, mid.UUID())
+		accounts, err := merchants.Of(scoped.catalogDatabase()).PSPScopes(ctx, mid)
 		if err != nil {
 			return nil, err
 		}
@@ -308,8 +307,8 @@ func catalogLinkContains(stored, declared map[string]string) bool {
 	}
 	return true
 }
-func selectCatalogApplicationPSP(accounts []gen.BillingPsp, key string, link map[string]string, environment string) (gen.BillingPsp, bool, error) {
-	var selected gen.BillingPsp
+func selectCatalogApplicationPSP(accounts []merchants.PSPScope, key string, link map[string]string, environment string) (merchants.PSPScope, bool, error) {
+	var selected merchants.PSPScope
 	found := false
 	for _, row := range accounts {
 		rowKey := row.Key
@@ -335,8 +334,8 @@ func selectCatalogApplicationPSP(accounts []gen.BillingPsp, key string, link map
 	}
 	return selected, found, nil
 }
-func sameCatalogApplicationPSP(a, b gen.BillingPsp) bool {
-	return a.ID == b.ID && a.MerchantID == b.MerchantID && a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && a.Archived == b.Archived && a.Key == b.Key && reflect.DeepEqual(a.CustodianID, b.CustodianID) && a.Revision == b.Revision && bytes.Equal(a.Settings, b.Settings)
+func sameCatalogApplicationPSP(a, b merchants.PSPScope) bool {
+	return a.ID == b.ID && a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && a.Archived == b.Archived && a.Key == b.Key && reflect.DeepEqual(a.CustodianID, b.CustodianID) && a.Revision == b.Revision && reflect.DeepEqual(a.Settings, b.Settings)
 }
 func (s *Service) revalidateCatalogApplicationProviders(ctx context.Context, prepared *catalogApplicationPreparation) error {
 	mid, err := merchant.Require(ctx)
@@ -349,11 +348,14 @@ func (s *Service) revalidateCatalogApplicationProviders(ctx context.Context, pre
 	}
 	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
 	for _, id := range ids {
-		current, err := s.catalogDatabase().Gen(ctx).LockCatalogApplicationPSP(ctx, gen.LockCatalogApplicationPSPParams{MerchantID: mid.UUID(), ID: id})
+		if _, err := s.catalogDatabase().Gen(ctx).LockCatalogApplicationPSP(ctx, gen.LockCatalogApplicationPSPParams{MerchantID: mid.UUID(), ID: id}); err != nil {
+			return err
+		}
+		current, found, err := merchants.Of(s.catalogDatabase()).PSPScopeByID(ctx, mid, id)
 		if err != nil {
 			return err
 		}
-		if !sameCatalogApplicationPSP(current, prepared.accounts[id]) {
+		if !found || !sameCatalogApplicationPSP(current, prepared.accounts[id]) {
 			return ErrCatalogConflict
 		}
 	}
@@ -367,7 +369,7 @@ func sameCatalogLinks(a, b map[string]map[string]string) bool {
 // requireSellablePrice refuses an active price that declares PSPs yet no rail
 // can sell new: none of its declared rails supports its kind, and no armed
 // rail sells it on local terms (#1078). Checkout would otherwise be empty.
-func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []gen.BillingPsp, environment string) error {
+func requireSellablePrice(key string, request billing.CreatePriceParams, declared []string, accounts []merchants.PSPScope, environment string) error {
 	recurring := request.BillingIntervalHours != nil
 	trial := request.TrialUnitAmount != nil || request.TrialDurationHours != nil
 	for _, rail := range declared {

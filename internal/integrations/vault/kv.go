@@ -1,35 +1,19 @@
-// Package vault provides the live HashiCorp Vault adapters for OpenRails'
-// per-merchant secret store (issue #251). It implements two interfaces declared
-// elsewhere, so the rest of the codebase never imports hashicorp/vault/api:
-//
-//   - merchants.VaultKV  — KV-v2 backend for the per-merchant secret store
-//     (merchants.NewVaultSecretStore wraps it; addressing is unchanged).
-//   - solana.TransitClient — Vault Transit sign-as-a-service for the
-//     non-extractable per-merchant Solana key.
-//
-// Merchant isolation is enforced by the (merchant, name) addressing in the
-// merchants layer; this package authenticates ONCE as the OpenRails process
-// (AppRole / K8s) — see auth.go — and is the trusted broker.
+// Package vault provides the live HashiCorp Vault adapters, so the rest of the
+// codebase never imports hashicorp/vault/api: KV v2 documents for merchant
+// configuration (internal/merchantdocs) and Transit sign-as-a-service for the
+// non-extractable Solana key (solana.TransitClient). It authenticates ONCE as
+// the OpenRails process (AppRole / K8s; see auth.go) and is the trusted broker.
 package vault
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"strconv"
 	"strings"
 
 	vaultapi "github.com/hashicorp/vault/api"
 )
 
-// KVv2Adapter implements merchants.VaultKV over a KV-v2 mount.
-//
-// The merchant store passes FULL logical paths that already include the mount
-// (e.g. "secret/openrails/merchants/<id>/<name>"). KV-v2's HTTP API addresses data
-// at "<mount>/data/<rest>" and metadata at "<mount>/metadata/<rest>", so this
-// adapter strips the mount prefix and re-inserts the right segment per operation.
-// Stored values live under the KV-v2 "data" envelope.
+// KVv2Adapter reads and writes JSON documents on a KV v2 mount, addressed by
+// paths under the mount.
 type KVv2Adapter struct {
 	client *vaultapi.Client
 	mount  string
@@ -67,183 +51,6 @@ func (a *KVv2Adapter) notifyErr(err error) {
 	if err != nil && a.onPermissionDenied != nil {
 		a.onPermissionDenied(err)
 	}
-}
-
-// rest strips the leading "<mount>/" the merchant store prepended.
-func (a *KVv2Adapter) rest(full string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(full, a.mount), "/")
-}
-
-func (a *KVv2Adapter) dataPath(full string) string {
-	return a.mount + "/data/" + a.rest(full)
-}
-
-func (a *KVv2Adapter) metadataPath(full string) string {
-	return a.mount + "/metadata/" + a.rest(full)
-}
-
-// ReadSecret returns the stored key/value map at path, or (nil, nil) when the
-// secret does not exist (the tenancy layer maps a missing "value" to
-// ErrSecretNotFound). A transport/permission error propagates so callers can fail
-// closed and distinguish "Vault unreachable" (retry) from "absent" (terminal).
-func (a *KVv2Adapter) ReadSecret(ctx context.Context, path string) (map[string]string, int, error) {
-	return a.ReadSecretVersion(ctx, path, 0)
-}
-
-// ReadSecretVersion reads an exact KV-v2 version. Zero explicitly selects latest.
-func (a *KVv2Adapter) ReadSecretVersion(ctx context.Context, path string, version int) (map[string]string, int, error) {
-	if version < 0 {
-		return nil, 0, fmt.Errorf("vault kv: invalid version")
-	}
-	query := map[string][]string{}
-	if version > 0 {
-		query["version"] = []string{strconv.Itoa(version)}
-	}
-	if err := a.sup.AuthState(); err != nil {
-		return nil, 0, fmt.Errorf("vault kv read: %w", err)
-	}
-	sec, err := a.client.Logical().ReadWithDataWithContext(ctx, a.dataPath(path), query)
-	if err != nil {
-		a.notifyErr(err)
-		return nil, 0, fmt.Errorf("vault kv read: %w", credentialBackendError(err))
-	}
-	if sec == nil || sec.Data == nil {
-		return nil, 0, nil // not found
-	}
-	inner, ok := sec.Data["data"].(map[string]any)
-	if !ok || inner == nil {
-		return nil, 0, nil
-	}
-	out := make(map[string]string, len(inner))
-	for k, v := range inner {
-		if s, ok := v.(string); ok {
-			out[k] = s
-		}
-	}
-	return out, kvResponseVersion(sec.Data["metadata"]), nil
-}
-
-// kvResponseVersion extracts KV-v2's current version from a data-read metadata
-// block or a write response. 0 when absent (older mounts / malformed).
-func kvResponseVersion(raw any) int {
-	meta, ok := raw.(map[string]any)
-	if ok {
-		raw = meta["version"]
-	}
-	if n, ok := raw.(json.Number); ok {
-		if v, err := n.Int64(); err == nil {
-			return int(v)
-		}
-	}
-	return 0
-}
-
-func (a *KVv2Adapter) WriteSecret(ctx context.Context, path string, data map[string]string) (int, error) {
-	return a.writeSecret(ctx, path, data, nil)
-}
-
-// WriteSecretCAS writes only if expectedVersion is the current version; zero
-// creates a new path. This is a backend compare-and-set, not a SQL transaction.
-func (a *KVv2Adapter) WriteSecretCAS(ctx context.Context, path string, data map[string]string, expectedVersion int) (int, error) {
-	if expectedVersion < 0 {
-		return 0, fmt.Errorf("vault kv: invalid CAS version")
-	}
-	return a.writeSecret(ctx, path, data, &expectedVersion)
-}
-
-func (a *KVv2Adapter) writeSecret(ctx context.Context, path string, data map[string]string, expectedVersion *int) (int, error) {
-	payload := make(map[string]any, len(data))
-	for k, v := range data {
-		payload[k] = v
-	}
-	body := map[string]any{"data": payload}
-	if expectedVersion != nil {
-		body["options"] = map[string]any{"cas": *expectedVersion}
-	}
-	if err := a.sup.AuthState(); err != nil {
-		return 0, fmt.Errorf("vault kv write: %w", err)
-	}
-	sec, err := a.client.Logical().WriteWithContext(ctx, a.dataPath(path), body)
-	if err != nil {
-		a.notifyErr(err)
-		return 0, fmt.Errorf("vault kv write: %w", credentialBackendError(err))
-	}
-	if sec != nil {
-		return kvResponseVersion(sec.Data), nil
-	}
-	return 0, nil
-}
-
-// DeleteSecret purges ALL versions via the metadata endpoint (idempotent).
-func (a *KVv2Adapter) DeleteSecret(ctx context.Context, path string) error {
-	if err := a.sup.AuthState(); err != nil {
-		return fmt.Errorf("vault kv delete: %w", err)
-	}
-	if _, err := a.client.Logical().DeleteWithContext(ctx, a.metadataPath(path)); err != nil {
-		a.notifyErr(err)
-		return fmt.Errorf("vault kv delete: %w", err)
-	}
-	return nil
-}
-
-// ListSecrets enumerates LEAF secret names under path (never values), relative
-// to path, recursively descending KV-v2 directory entries ("name/"). KV-v2 LIST
-// returns one level only, but the merchant store's List contract (matching the
-// DB store, #724 backend parity) is full relative names such as
-// "psps/<rail>/<env>/<acct>/<key>" — without recursion the
-// status surfaces would see only "psps/" and report every
-// credential unconfigured.
-func (a *KVv2Adapter) ListSecrets(ctx context.Context, path string) ([]string, error) {
-	if err := a.sup.AuthState(); err != nil {
-		return nil, fmt.Errorf("vault kv list: %w", err)
-	}
-	return a.listSecrets(ctx, strings.TrimSuffix(path, "/"), "", 0)
-}
-
-// maxListDepth bounds the recursive descent (canonical secret names are ≤5
-// segments; this is a loop guard, not a contract).
-const maxListDepth = 16
-
-func (a *KVv2Adapter) listSecrets(ctx context.Context, root, rel string, depth int) ([]string, error) {
-	if depth > maxListDepth {
-		return nil, fmt.Errorf("vault kv list: exceeded max depth %d under %q", maxListDepth, root)
-	}
-	full := root
-	if rel != "" {
-		full = root + "/" + rel
-	}
-	sec, err := a.client.Logical().ListWithContext(ctx, a.metadataPath(full))
-	if err != nil {
-		a.notifyErr(err)
-		return nil, fmt.Errorf("vault kv list: %w", err)
-	}
-	if sec == nil || sec.Data == nil {
-		return nil, nil
-	}
-	raw, _ := sec.Data["keys"].([]any)
-	var names []string
-	for _, k := range raw {
-		s, ok := k.(string)
-		if !ok || s == "" {
-			continue
-		}
-		child := strings.TrimSuffix(s, "/")
-		if rel != "" {
-			child = rel + "/" + child
-		}
-		// A KV-v2 path can be both a leaf and a directory; LIST returns both
-		// "name" and "name/" entries, so each case is handled independently.
-		if strings.HasSuffix(s, "/") {
-			sub, err := a.listSecrets(ctx, root, child, depth+1)
-			if err != nil {
-				return nil, err
-			}
-			names = append(names, sub...)
-			continue
-		}
-		names = append(names, child)
-	}
-	return names, nil
 }
 
 // BackendIdentity identifies the configured Vault address and namespace without

@@ -207,13 +207,13 @@ type BudgetWindow struct {
 	Currency      string `json:"currency,omitempty"`
 }
 
-// MerchantProfile is public/communication metadata stored per merchant.
+// MerchantProfile is the merchant's public and communication metadata; its
+// name is the merchant's display_name.
 type MerchantProfile struct {
-	DisplayName string `json:"display_name,omitempty"`
-	LogoURL     string `json:"logo_url,omitempty"`
-	FromEmail   string `json:"from_email,omitempty"`
-	SupportURL  string `json:"support_url,omitempty"`
-	SignupURL   string `json:"signup_url,omitempty"`
+	LogoURL    string `json:"logo_url,omitempty"`
+	FromEmail  string `json:"from_email,omitempty"`
+	SupportURL string `json:"support_url,omitempty"`
+	SignupURL  string `json:"signup_url,omitempty"`
 }
 
 // MerchantSettings is the merchant-owned admission/policy document installed by

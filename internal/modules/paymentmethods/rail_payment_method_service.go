@@ -418,14 +418,26 @@ func (s *RailPaymentMethodService) CardEntryForPSP(ctx context.Context, pspID uu
 	if err != nil {
 		return "", err
 	}
-	if s == nil || s.DB == nil || pspID == uuid.Nil {
+	if s == nil || pspID == uuid.Nil {
 		return config.CardEntryBrowser, nil
 	}
-	row, err := s.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: pspID})
+	scope, ok, err := s.pspScope(ctx, mid, pspID)
 	if err != nil {
 		return "", err
 	}
-	return cardEntry(merchants.PSPScopeFromRow(row)), nil
+	if !ok {
+		return "", pgx.ErrNoRows
+	}
+	return cardEntry(scope), nil
+}
+
+// pspScope resolves one PSP of the merchant's configuration by id.
+func (s *RailPaymentMethodService) pspScope(ctx context.Context, mid billing.MerchantID, pspID uuid.UUID) (merchants.PSPScope, bool, error) {
+	resolver, ok := s.ProviderSecrets.(merchants.PSPIdentityScopeResolver)
+	if !ok {
+		return merchants.PSPScope{}, false, errors.New("PSP lookup unavailable")
+	}
+	return resolver.PSPScopeByID(ctx, mid, pspID)
 }
 
 // ResolveClientForPSP arms the NMI client of one declared PSP.
@@ -480,22 +492,21 @@ func (s *RailPaymentMethodService) resolveNMIClient(ctx context.Context, provide
 	}
 
 	if len(pspID) > 0 && pspID[0] != nil && *pspID[0] != uuid.Nil {
-		if s == nil || s.DB == nil {
+		if s == nil {
 			return nil, nil, errors.New("PSP lookup unavailable")
 		}
-		row, err := s.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: queryMerchant.UUID(), ID: *pspID[0]})
+		scope, ok, err := s.pspScope(ctx, queryMerchant, *pspID[0])
 		if err != nil {
 			return nil, nil, err
 		}
-		owner, err := merchant.Require(ctx)
-		if err != nil || row.MerchantID != owner.UUID() {
+		if !ok {
 			return nil, nil, errors.New("stamped provider account is unavailable for this merchant")
 		}
-		if !rails.SameRail(models.Rail(row.Rail), models.Rail(provider)) {
-			return nil, nil, fmt.Errorf("PSP %s belongs to rail %s, not %s", row.ID, row.Rail, provider)
+		if !rails.SameRail(models.Rail(scope.Rail), models.Rail(provider)) {
+			return nil, nil, fmt.Errorf("PSP %s belongs to rail %s, not %s", scope.ID, scope.Rail, provider)
 		}
-		client, err := s.resolveNMIClientForScope(ctx, merchants.PSPScopeFromRow(row))
-		return client, &row.ID, err
+		client, err := s.resolveNMIClientForScope(ctx, scope)
+		return client, &scope.ID, err
 	}
 
 	var scopeResolver merchants.PSPScopeResolver
@@ -542,27 +553,23 @@ var (
 // resolveNMIClientForPSP arms the client of the live PSP a new card is saved
 // with.
 func (s *RailPaymentMethodService) resolveNMIClientForPSP(ctx context.Context, pspID uuid.UUID) (*nmi.NMIClient, *merchants.PSPScope, error) {
-	if s == nil || s.DB == nil {
+	if s == nil {
 		return nil, nil, errors.New("PSP lookup unavailable")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	row, err := s.DB.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: pspID})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, ErrPSPUnavailable
-	}
+	scope, ok, err := s.pspScope(ctx, mid, pspID)
 	if err != nil {
 		return nil, nil, err
 	}
-	if row.Archived || row.Environment != config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config)) {
+	if !ok || scope.Archived || scope.Environment != config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config)) {
 		return nil, nil, ErrPSPUnavailable
 	}
-	if !rails.SupportsPaymentMethodCRUD(models.Rail(row.Rail)) {
-		return nil, nil, RailPaymentMethodsUnsupported(row.Rail)
+	if !rails.SupportsPaymentMethodCRUD(models.Rail(scope.Rail)) {
+		return nil, nil, RailPaymentMethodsUnsupported(scope.Rail)
 	}
-	scope := merchants.PSPScopeFromRow(row)
 	client, err := s.resolveNMIClientForScope(ctx, scope)
 	if err != nil {
 		return nil, nil, err

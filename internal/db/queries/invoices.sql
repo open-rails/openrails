@@ -209,11 +209,12 @@ WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.id = settled.id;
 
 -- name: ListInvoiceThresholdCandidates :many
 --
--- or#897: the trigger amount is the BOUND billing policy's
--- collection_threshold_amount when the payer has one, else the merchant-wide
--- threshold, else the payer's own credit line. Resolved in SQL through the same
--- most-specific-wins rungs the admission path uses (money_settings.tier supplies
--- the tier rung), so a per-payer trigger costs no extra round trip.
+-- or#897: the trigger amount is the payer's billing policy's
+-- collection_threshold_amount when it has one, else the merchant-wide
+-- threshold, else the payer's own credit line. policies is the merchant's
+-- settings, {policies: {name: body}, tiers: {tier: name}, default: name}; the
+-- payer's policy is its own assignment while the settings still declare it,
+-- else its tier's (money_settings.tier), else the default.
 SELECT s.customer_id, s.currency, MIN(ii.invoice_at)::timestamptz AS period_starts_at, MIN(s.created_at)::timestamptz AS period_anchor
 FROM billing.money_settings s
 JOIN billing.invoice_items ii
@@ -223,17 +224,13 @@ JOIN billing.invoice_items ii
  AND ii.invoice_id IS NULL
  AND ii.status = 'pending'
  AND ii.invoice_at < sqlc.arg(cutoff)::timestamptz
-LEFT JOIN LATERAL (
-    SELECT (p.policy ->> 'collection_threshold_amount')::bigint AS threshold
-    FROM billing.billing_policy_bindings b
-    JOIN billing.billing_policies p
-      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-    WHERE b.merchant_id = s.merchant_id
-      AND (b.customer_id = s.customer_id OR b.customer_id IS NULL)
-      AND (b.tier = s.tier OR b.tier IS NULL)
-    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
-    LIMIT 1
-) pol ON true
+JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
+CROSS JOIN LATERAL (
+    SELECT (sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        sqlc.arg(policies)::jsonb -> 'tiers' ->> s.tier,
+        sqlc.arg(policies)::jsonb ->> 'default') ->> 'collection_threshold_amount')::bigint AS threshold
+) pol
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.credit_limit_amount > 0

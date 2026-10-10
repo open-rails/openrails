@@ -17,14 +17,10 @@
 unbounded-many ListPSPsForMerchant              # psps: operator-declared, units per merchant
 unbounded-many ListCustodiansForMerchant        # custodians: operator-declared, units per merchant
 unbounded-many ListPlatformMerchantRailsArmed   # psps: DISTINCT over the same small set
-unbounded-many ListMerchantWebhooks             # merchant_webhooks: operator-configured
 unbounded-many ListFederatedGrants              # federated_grants: staff the merchant's owners invited
 unbounded-many ListProvisioningTokens           # provisioning_tokens: tokens the merchant's staff minted, one per directory
-unbounded-many ListBillingPolicies              # billing_policies: operator-declared named policies (or#897)
-unbounded-many ListDeclarativeBillingPolicyBindings # billing_policy_bindings: default+tier rungs only; per-customer rows excluded by the query
 unbounded-many ListCatalogMeters                # catalog_meters: operator-declared, units per merchant
 unbounded-many ListDefaultCatalogRateCards      # catalog_rate_cards: declared default cards only; payer overrides excluded by the query
-unbounded-many ListMerchantSecretNames          # merchant_secrets: operator-declared credentials
 unbounded-many ListActiveProducts               # products: operator-declared catalog
 unbounded-many ListAllProducts                  # products: operator-declared catalog
 unbounded-many ListAllActivePricesWithProduct   # prices+products: operator-declared catalog
@@ -112,6 +108,7 @@ unbounded-many ReconcileListSolanaSubscriptionRefs         # or#837 converge sca
 unbounded-many ListStuckProviderIntents                        # or#837 scan of all live intents
 unbounded-many ListInvoicePayers                           # or#837 aggregate over all ledger transfers and catalog usage
 unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices
+unbounded-many ListInvoiceThresholdCandidates             # or#837 scan of every arrears payer with pending items
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.
 unbounded-many ListMigratableSubscriptionsByPriceIDs     # or#837 fan-out per price: a price migration's cohort

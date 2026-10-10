@@ -33,9 +33,6 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if slug == "" {
 			return fmt.Errorf("merchant key is required")
 		}
-		if strings.TrimSpace(t.DisplayName) == "" {
-			return fmt.Errorf("merchant %q display_name is required", slug)
-		}
 		if host := merchants.NormalizeAPIHost(t.APIHost); host != "" {
 			if err := merchants.ValidateAPIHost(host); err != nil {
 				return fmt.Errorf("merchant %q api_host: %w", slug, err)

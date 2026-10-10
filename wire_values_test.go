@@ -205,7 +205,7 @@ func TestProviderOperationPathIsOneSegment(t *testing.T) {
 }
 
 func TestMerchantConfigurationDocument(t *testing.T) {
-	valid := "expected_revision: revision\ndisplay_name: Shop\nsettings:\n  profile:\n    support_url: https://help.example.test\n"
+	valid := "expected_revision: 3\ndisplay_name: Shop\nsettings:\n  profile:\n    support_url: https://help.example.test\n"
 	params, err := billing.ParseMerchantConfigurationYAML([]byte(valid))
 	require.NoError(t, err)
 	require.Equal(t, "https://help.example.test", params.Settings.Profile.SupportURL)
@@ -213,12 +213,11 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 		valid + "display_name: Duplicate\n",
 		valid + "unexpected: true\n",
 		valid + "other: &anchor value\n",
-		valid + "---\nexpected_revision: extra\n",
-		valid + "application_id: retired\n",
-		"display_name: missing-revision\n",
+		valid + "---\ndisplay_name: extra\n",
+		"expected_revision: -1\n",
 		strings.Repeat(" ", billing.MaxMerchantConfigurationBytes+1),
-		`{"expected_revision":"a","expected_revision":"b"}`,
-		`{"expected_revision":"r","settings":{"profile":{"unknown":1}}}`,
+		`{"display_name":"a","display_name":"b"}`,
+		`{"expected_revision":1,"settings":{"profile":{"unknown":1}}}`,
 	} {
 		_, err := billing.ParseMerchantConfigurationYAML([]byte(document))
 		require.Error(t, err, document)
@@ -227,8 +226,8 @@ func TestMerchantConfigurationDocument(t *testing.T) {
 
 // Explicit empty lists mean "clear"; absent lists mean "unchanged".
 func TestMerchantConfigurationEmptyListsSurviveTransport(t *testing.T) {
-	revision, amount := "before", int64(9007199254740993)
-	params := billing.UpdateMerchantConfigurationParams{IdempotencyKey: "clear", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+	revision, amount := int64(2), int64(9007199254740993)
+	params := billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 		InvoiceCollectionThreshold: &amount,
 		BillingPolicies:            []billing.BillingPolicy{}, BillingPolicyBindings: []billing.BillingPolicyBinding{}, DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{},
 	}}

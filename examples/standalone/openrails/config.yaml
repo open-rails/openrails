@@ -6,7 +6,9 @@
 
 provider_write_mode: full # full | limited | readonly: how much it may do at the PSPs
 test_mode: sandbox        # sandbox | live: sandbox refuses live credentials at boot
-secret_backend: snapshot  # PSP credentials come from merchant.yaml, held in memory
+# The merchant's configuration, its PSPs and their keys, is merchant.yaml: read
+# at boot and read-only. To change it in the console instead, name a Vault KV
+# mount (vault.kv_mount) and keep only the merchant's name in merchant.yaml.
 
 host: 0.0.0.0
 port: 3053

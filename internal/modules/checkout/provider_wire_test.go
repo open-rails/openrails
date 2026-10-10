@@ -86,10 +86,9 @@ func (c ccbillScope) PSPScopeByID(_ context.Context, _ billing.MerchantID, id uu
 }
 
 func ccbillService(t *testing.T, accountID string) *CheckoutService {
-	store := merchants.NewMemorySecretStore()
+	store := merchants.SecretMap{}
 	if name, err := merchants.PSPSecretName("ccbill", "live", accountID, "salt"); err == nil {
-		_, err = store.Put(merchantCtx(), testMerchant, name, "merchant-salt")
-		require.NoError(t, err)
+		store[name] = "merchant-salt"
 	}
 	svc := &CheckoutService{Config: &config.Config{ProviderWriteMode: config.ProviderWriteModeFull}}
 	svc.SetMerchantSecretStore(store)
@@ -127,7 +126,7 @@ func TestCCBillUpgradeWire(t *testing.T) {
 	require.ErrorContains(t, err, "CCBill account_id uses a dash")
 
 	missing := &CheckoutService{}
-	missing.SetMerchantSecretStore(merchants.NewMemorySecretStore())
+	missing.SetMerchantSecretStore(merchants.SecretMap{})
 	missing.SetPSPSecretResolver(pspCatalog{})
 	_, err = missing.resolveCCBillClient(merchantCtx())
 	require.ErrorContains(t, err, "missing scoped merchant CCBill PSP")
@@ -142,7 +141,7 @@ func TestNMIClientResolutionFailsClosed(t *testing.T) {
 	require.ErrorContains(t, err, "not configured")
 
 	unarmed := &CheckoutService{}
-	unarmed.SetMerchantSecretStore(merchants.NewMemorySecretStore())
+	unarmed.SetMerchantSecretStore(merchants.SecretMap{})
 	unarmed.SetPSPSecretResolver(pspCatalog{})
 	_, err = unarmed.resolveNMIClient(merchantCtx(), "nmi")
 	require.ErrorContains(t, err, "has no armed PSP")

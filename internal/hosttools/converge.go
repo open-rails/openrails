@@ -9,6 +9,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 )
@@ -20,6 +21,8 @@ type ConvergeMerchantOptions struct {
 	MerchantID billing.MerchantID
 	// Clock is the runtime's clock; nil reads wall time.
 	Clock clockwork.Clock
+	// MerchantConfig is a running app's merchant configuration; nil opens it.
+	MerchantConfig db.MerchantConfig
 }
 
 // ConvergeMerchantResult summarizes one merchant-wide convergence pass.
@@ -49,6 +52,11 @@ func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (Conver
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
 		return res, err
 	}
+	closeConfig, err := bindMerchantConfig(ctx, opts.Config, database, merchantID, opts.MerchantConfig)
+	if err != nil {
+		return res, err
+	}
+	defer closeConfig()
 	engine := converge.NewConvergeEngine(database, opts.Clock)
 
 	mctx := merchant.WithID(ctx, merchantID)

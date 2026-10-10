@@ -59,7 +59,7 @@ func (s *Service) ListDirectory(ctx context.Context, params billing.MerchantList
 	cut := pagination.Cut(rows, limit, func(row gen.ListPlatformMerchantsRow) any { return pagination.TimeID{At: row.CreatedAt, ID: row.ID} })
 	out := &billing.ListPage[billing.Merchant]{Items: make([]billing.Merchant, 0, len(cut.Items)), Next: cut.Next}
 	for _, row := range cut.Items {
-		m := directoryMerchant(row.ID, row.Slug, row.Status, row.DisplayName)
+		m := s.directoryMerchant(ctx, row.ID, row.Slug, row.Status)
 		m.CreatedAt, m.UpdatedAt, m.DeletedAt = row.CreatedAt, row.UpdatedAt, row.DeletedAt
 		if err := s.withActivity(ctx, &m); err != nil {
 			return nil, err
@@ -76,7 +76,7 @@ func (s *Service) DirectoryEntry(ctx context.Context, id billing.MerchantID) (*b
 	if err != nil {
 		return nil, directoryError(id, err)
 	}
-	m := directoryMerchant(row.ID, row.Slug, row.Status, row.DisplayName)
+	m := s.directoryMerchant(ctx, row.ID, row.Slug, row.Status)
 	m.CreatedAt, m.UpdatedAt, m.DeletedAt = row.CreatedAt, row.UpdatedAt, row.DeletedAt
 	if err := s.withActivity(ctx, &m); err != nil {
 		return nil, err
@@ -90,7 +90,7 @@ func (s *Service) SoftDelete(ctx context.Context, id billing.MerchantID) (*billi
 	if err != nil {
 		return nil, directoryError(id, err)
 	}
-	m := directoryMerchant(row.ID, row.Slug, row.Status, row.DisplayName)
+	m := s.directoryMerchant(ctx, row.ID, row.Slug, row.Status)
 	m.CreatedAt, m.UpdatedAt, m.DeletedAt = row.CreatedAt, row.UpdatedAt, row.DeletedAt
 	return &m, nil
 }
@@ -103,13 +103,19 @@ func (s *Service) Restore(ctx context.Context, id billing.MerchantID) (*billing.
 	if err != nil {
 		return nil, directoryError(id, err)
 	}
-	m := directoryMerchant(row.ID, row.Slug, row.Status, row.DisplayName)
+	m := s.directoryMerchant(ctx, row.ID, row.Slug, row.Status)
 	m.CreatedAt, m.UpdatedAt, m.DeletedAt = row.CreatedAt, row.UpdatedAt, row.DeletedAt
 	return &m, nil
 }
 
-func directoryMerchant(id uuid.UUID, slug, status string, displayName *string) billing.Merchant {
-	return billing.Merchant{ID: billing.MerchantID(id), Slug: slug, Status: billing.MerchantStatus(status), DisplayName: displayName, RailsArmed: []billing.Rail{}}
+// directoryMerchant is a directory row with the display name its
+// configuration sets.
+func (s *Service) directoryMerchant(ctx context.Context, id uuid.UUID, slug, status string) billing.Merchant {
+	m := billing.Merchant{ID: billing.MerchantID(id), Slug: slug, Status: billing.MerchantStatus(status), RailsArmed: []billing.Rail{}}
+	if name := s.DisplayName(ctx, m.ID); name != "" {
+		m.DisplayName = &name
+	}
+	return m
 }
 
 // withActivity adds the rails of the merchant's live PSPs and its latest

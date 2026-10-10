@@ -66,37 +66,22 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 }
 
 // ProviderRoutesForRuntime derives provider-specific route gating from the
-// bound merchant's DB-armed rail accounts and probed capabilities. Explicit
-// selections override rail discovery, but cannot enable host-owned credential
-// writes or writes unsupported by the secret backend.
+// bound merchant's armed PSPs. Explicit selections override rail discovery.
 func ProviderRoutesForRuntime(rt *app.Runtime, override *routesurface.ProviderRoutes) routesurface.ProviderRoutes {
 	r := routesurface.AllProviderRoutes()
 	if override != nil {
-		r = *override
-	} else if rt != nil {
+		return *override
+	}
+	if rt != nil {
 		if mid := rt.ConfiguredMerchant(); !mid.IsZero() && rt.Merchants != nil {
 			r = armedProviderRoutes(context.Background(), rt, mid)
 			r.SolanaSigning = r.Solana
-			r.SecretWrite = true
-			if caps := rt.RouteCapabilities; caps != nil {
-				r.SolanaSigning = r.Solana && caps.SolanaCanSign
-			}
-		}
-	}
-	if rt != nil {
-		if config.SecretStoreBackend(rt.Config) == config.SecretBackendSnapshot {
-			r.SecretWrite = false
-		}
-		if caps := rt.RouteCapabilities; caps != nil {
-			r.SecretWrite = r.SecretWrite && caps.SecretWrite
-			r.SolanaSigning = r.SolanaSigning && caps.SolanaCanSign
 		}
 	}
 	return r
 }
 
-// armedProviderRoutes derives the route surface from mid's DB-armed rail
-// accounts (#775) — the mount-time analogue of the per-request DB fallback
+// armedProviderRoutes derives the route surface from mid's armed PSPs (#775) — the mount-time analogue of the per-request DB fallback
 // checkoutRailConfigured / effectiveSolanaRailConfig use. This runs ONCE at
 // handler-assembly time (not per request), so one query per rail is not a hot
 // path concern.

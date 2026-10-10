@@ -154,8 +154,8 @@ func writePSPError(r *httprequest.Request, err error) {
 	case errors.As(err, &lastActive):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "psp_last_active", err.Error()).
 			WithMetadata(map[string]any{"psp_id": lastActive.PSP.String()}))
-	case errors.Is(err, merchants.ErrSecretBackendUnavailable):
-		r.ErrorCode(billing.CodeServiceUnavailable, "secret backend unavailable")
+	case errors.Is(err, merchants.ErrConfigUnavailable):
+		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration unavailable")
 	default:
 		writeRefusal(r, err, "PSP operation failed")
 	}

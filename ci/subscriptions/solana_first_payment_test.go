@@ -39,10 +39,13 @@ type solanaShop struct {
 	key      string
 }
 
-func openSolanaShop(t *testing.T) *solanaShop {
+func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
 	t.Helper()
 	w := prepareWorld(t, 12)
 	fake, merchant := withSolana(t, w)
+	for _, f := range before {
+		f(w)
+	}
 	w.start()
 	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, solanaPlanAmount, monthHours)
 	require.NoError(t, err)

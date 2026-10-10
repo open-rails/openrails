@@ -366,24 +366,27 @@ merchant := openrails.MerchantDeclaration{
 
 #### Manage merchant config at runtime (Vault)
 
-Instead of declaring your PSPs in a file, let your staff manage them: declare
-only the merchant's slug, connect OpenRails to HashiCorp Vault, and mount the
-merchant-config routes (`Permissions.MerchantConfig`). Staff
-then add and rotate PSP credentials over HTTP or in the admin dashboard, and
-OpenRails writes the credentials to Vault, never to Postgres:
+Name a KV mount and Vault holds merchant config; name only a Transit mount and
+it only signs. Instead of declaring your configuration in a file, let your
+staff manage it: declare only the merchant's slug (anything more is refused
+beside Vault), connect OpenRails to HashiCorp Vault, and mount the
+merchant-config routes (`Permissions.MerchantConfig`). Staff then add PSPs,
+rotate credentials and change settings over HTTP or in the admin dashboard,
+starting from empty, and OpenRails writes them to Vault, never to Postgres.
+Automation can write the documents straight into Vault instead
+([vault.md](docs/vault.md) has the paths and shapes):
 
 ```go
 cfg := openrails.Config{
 	Database:          openrails.DatabaseConfig{Schema: "billing"},
 	TestMode:          openrails.Sandbox,
 	ProviderWriteMode: openrails.ProviderWritesFull,
-	Merchant:          openrails.MerchantDeclaration{Slug: "onlydemo"}, // no PSPs here: staff manage them
-	SecretBackend:     openrails.SecretBackendVault,
+	Merchant:          openrails.MerchantDeclaration{Slug: "onlydemo"}, // the slug only: Vault holds the rest
 	Vault: &openrails.VaultConfig{
 		Address:    "https://vault.internal:8200",
 		AuthMethod: "kubernetes", // or "approle", "token"
 		K8sRole:    "onlydemo-billing",
-		KVMount:    "onlydemo/kv", // the KV-v2 mount credentials are written under
+		KVMount:    "onlydemo/kv", // the KV v2 mount merchant configuration lives in
 	},
 }
 ```
@@ -1684,7 +1687,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 
 - [Operator guide](docs/operator-guide.md) — infrastructure requirements (Postgres, Redis/Garnet, Vault), what runs by itself, and the drift toolbox.
 - [Operations manual](docs/operations.md) — the deep reference: operating modes and safety levers, dunning, reconciliation, the provider intent ledger, data retention, cutovers.
-- [Merchant provisioning](docs/merchant-provisioning.md) — manifests, credentials, secrets, and API keys; [merchant names](docs/merchant-name-authority.md); [settings](docs/api/merchant-settings.md) and [configuration applications](docs/merchant-configuration-applications.md).
+- [Merchant provisioning](docs/merchant-provisioning.md) — manifests, credentials, secrets, and API keys; [merchant names](docs/merchant-name-authority.md); [settings](docs/api/merchant-settings.md) and [configuration](docs/merchant-configuration.md).
 - [Self-hosting with host-owned credentials](docs/self-hosting-mode1.md), [runtime configuration](docs/runtime-configuration.md) and [Vault](docs/vault.md).
 - [Backup and recovery](docs/backup-and-recovery.md), [moving a merchant](docs/merchant-portability.md) and [provider uncertainty](docs/provider-uncertainty.md).
 - [Rate limiting](docs/rate-limiting.md) — the built-in limits on checkout, card and subscription writes, and captcha escalation.

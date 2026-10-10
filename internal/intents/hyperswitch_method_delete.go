@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -80,15 +81,11 @@ func (h *HyperSwitchMethodDeleteHandler) Verify(ctx context.Context, in gen.Bill
 	}
 	return Retryable("qualified native deletion permits exact retry through write gates")
 }
-func deletionBinding(row gen.BillingCustodian, cfg *config.Config) (charge.HyperSwitchBinding, error) {
+func deletionBinding(row merchants.CustodianScope, cfg *config.Config) (charge.HyperSwitchBinding, error) {
 	if cfg == nil || cfg.HyperSwitch == nil || row.Kind != models.CustodianHyperSwitch || row.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(cfg)) {
 		return charge.HyperSwitchBinding{}, hyperswitch.ErrBinding
 	}
-	var settings map[string]any
-	if err := json.Unmarshal(row.Settings, &settings); err != nil {
-		return charge.HyperSwitchBinding{}, err
-	}
-	parsed, err := custodians.ParseSettings(row.Kind, settings)
+	parsed, err := custodians.ParseSettings(row.Kind, row.Settings)
 	if err != nil {
 		return charge.HyperSwitchBinding{}, err
 	}
@@ -126,15 +123,19 @@ func (h *HyperSwitchMethodDeleteHandler) Execute(ctx context.Context, in gen.Bil
 		}
 		return Succeeded(deletionEvidence(p))
 	}
-	row, err := h.DB.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: current.MerchantID, ID: *current.CustodianID})
-	if err != nil || row.MerchantID != current.MerchantID || row.Environment != p.Environment {
+	configuration := merchants.Of(h.DB)
+	if configuration == nil {
+		return Parked("merchant configuration is unavailable")
+	}
+	row, ok, err := configuration.CustodianScopeByID(ctx, billing.MerchantID(current.MerchantID), *current.CustodianID)
+	if err != nil || !ok || row.Environment != p.Environment {
 		return Parked("accepted custodian account is unavailable")
 	}
 	binding, err := deletionBinding(row, h.Rails.Config)
 	if err != nil || binding != p.Binding {
 		return Parked("accepted custodian binding changed")
 	}
-	client, err := railresolve.HyperSwitchClient(ctx, h.Rails.Config, h.Rails.MerchantSecrets, billing.MerchantID(current.MerchantID), row)
+	client, err := railresolve.HyperSwitchClient(h.Rails.Config, billing.MerchantID(current.MerchantID), row)
 	if err != nil {
 		return Parked("accepted custodian credentials are unavailable")
 	}

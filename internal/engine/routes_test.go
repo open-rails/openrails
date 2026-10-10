@@ -96,7 +96,7 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 
 	full := config.Routes{Auth: fake, RouteGroups: authtest.Groups(), Scope: authtest.Scope, Permissions: authtest.Permissions()}
 	rt := httpRuntime()
-	rt.App.Config.SecretBackend = config.SecretBackendSnapshot
+	rt.App.Config.Vault = &config.VaultConfig{KVMount: "kv"}
 	mux := mountAt(t, rt, full, "/api/pay")
 	for _, tc := range []struct {
 		method, path string

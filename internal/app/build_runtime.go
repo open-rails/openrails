@@ -1,6 +1,7 @@
 package app
 
 import (
+	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
 	"net"
 	"net/http"
@@ -84,6 +85,7 @@ type runtimeOverrides struct {
 	EmailSender     config.EmailSender
 	UserInfo        userinfo.Lookup
 	Migrations      fs.FS
+	Vault           *vaultapi.Client
 }
 
 // effectiveSolanaNetwork derives the Solana network purely from the test_mode
@@ -194,8 +196,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 
 	// #788 Layer C: ONE rail resolution seam for the whole runtime. The
-	// merchants service late-binds (EnsureMerchantsService / manifest
-	// provisioning / the standalone server arm it after build), so every
+	// merchants service is wired after the services it arms, so every
 	// resolver closes over the runtime pointer assigned below.
 	var runtimeRef *Runtime
 	merchantsFn := func() *merchants.Service {
@@ -378,16 +379,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		RailCustomerService:    serviceInstances.RailCustomerService,
 	}
 
-	// MODE 1 (#723): the in-memory credential plane exists from boot; manifest
-	// provisioning seeds it and every store consumer reads it. No persistent
-	// merchant-secret store is ever constructed in this mode.
-	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
-		runtime.ManifestSecrets, err = merchants.NewManifestSecretStoreWithIdentity(cfg.CredentialSnapshotID)
-		if err != nil {
-			return nil, fmt.Errorf("initialize snapshot credential store: %w", err)
-		}
-	}
-
 	// Arm the late-bound resolvers built above (#788): they close over
 	// runtimeRef, so every post-boot Merchants bind is visible immediately.
 	runtimeRef = runtime
@@ -420,6 +411,13 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	}
 	if serviceInstances.SolanaPayPoller != nil {
 		serviceInstances.SolanaPayPoller.SetMerchantRPC(solanaRPCResolver)
+	}
+	var borrowedVault *vaultapi.Client
+	if overrides != nil {
+		borrowedVault = overrides.Vault
+	}
+	if err := runtime.wireMerchantConfig(ctx, borrowedVault); err != nil {
+		return nil, fmt.Errorf("initialize merchant configuration: %w", err)
 	}
 
 	// Jobs queue in RiverSchema from the start; Client.Start binds the fleet

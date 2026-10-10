@@ -57,12 +57,14 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   configuration (see [below](#public-configuration)). Its `capabilities` list
   the route groups the mount serves and its features (`stripe_billing_portal`,
   `solana_one_time_payments`, `solana_subscription_management`,
-  `provider_credential_writes`, `api_host`, `catalog_copilot`, `metrics_ask`,
+  `merchant_config_edits`, `api_host`, `catalog_copilot`, `metrics_ask`,
   `dashboard_generation`). Its route groups are `admin`
   (customer support), `catalog`, `merchant_config` (the merchant's own
   configuration), `metrics` (business metrics) and `app` (the host backend's
-  programmatic routes). What a signed-in staff member holds of them is
-  `GET /v1/admin/access`. A route the deployment cannot serve
+  programmatic routes); `merchant_config_edits` says that configuration can
+  change here (Vault holds it) rather than being read from a file. What a
+  signed-in staff member holds of them is `GET /v1/admin/access`. A route the
+  deployment cannot serve
   is not registered: it answers `404 route_not_found`.
 - **Health.** `/health/live` and `/health/ready` on the standalone server; a
   failing dependency is logged, never answered.
@@ -316,9 +318,8 @@ scheduled expiry). `psps` maps each PSP key to the price's state on
 it; the public routes show the status only.
 
 Reads and writes are the catalog route group, `RouteGroups.Catalog` with
-`Permissions.Catalog`: without it they are not mounted, and its changes are
-refused while `Config.Catalog` is the catalog's truth
-(standalone: unless `secret_backend` is `vault` or `db`). The in-process Client
+`Permissions.Catalog`: without it they are not mounted. A document skips what
+an edit set ([catalog ownership](../catalog-ownership.md)). The in-process Client
 is not gated. JSON/YAML batches are deduplicated permanently by content hash,
 even after intervening edits.
 
@@ -335,11 +336,10 @@ drift findings, each with the `psp_id` that was compared, and
 A PSP is one merchant account on a rail (`mobius` and `paykings` are two PSPs on
 `nmi`). `key` is the merchant's name for it, unique among its live PSPs; price
 `psp_links` name PSPs by it. Creating one checks its credentials with the
-provider before anything is stored; `PATCH` changes settings or rotates
-credentials against the `expected_revision` it read, or archives it with
-`{archived: true}` alone. Credential writes need a writable secret backend
-(`credential_source_read_only`, `credential_store_read_only` otherwise);
-settings changes and archive do not.
+provider before anything is stored; `PATCH` changes settings, rotates
+credentials or archives against the `expected_revision` it read (`409
+revision_mismatch` when the PSP moved since). These edits are mounted only
+where Vault holds the configuration; with a file, PSPs are read-only.
 
 Archive is not deletion: the row, its id, credentials and history remain, and
 existing subscriptions, operations and inbound webhooks keep resolving to it

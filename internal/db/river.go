@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/pgidentity"
 	"github.com/riverqueue/river"
@@ -20,9 +21,44 @@ type RiverJobInserter interface {
 	InsertTx(context.Context, pgx.Tx, river.JobArgs, *river.InsertOpts) (*rivertype.JobInsertResult, error)
 }
 
-type riverBinding struct {
+// runtimeBinding is what the runtime composer binds after the handle exists,
+// shared by every handle derived from it: the River producer and the
+// merchant configuration.
+type runtimeBinding struct {
 	mu       sync.RWMutex
 	inserter RiverJobInserter
+	config   MerchantConfig
+}
+
+// MerchantConfig is the merchants' configuration, which lives in a file or
+// Vault, never in Postgres. The runtime binds the merchants service, which
+// code holding only a database handle reads it through.
+type MerchantConfig interface {
+	MerchantSettings(ctx context.Context, id billing.MerchantID) (displayName string, settings billing.MerchantSettings, err error)
+}
+
+// SetMerchantConfig binds the merchant configuration every handle derived
+// from d reads through.
+func (d *DB) SetMerchantConfig(config MerchantConfig) {
+	if d == nil {
+		return
+	}
+	if d.river == nil {
+		d.river = &runtimeBinding{}
+	}
+	d.river.mu.Lock()
+	defer d.river.mu.Unlock()
+	d.river.config = config
+}
+
+// MerchantConfig is the bound merchant configuration; nil when none is bound.
+func (d *DB) MerchantConfig() MerchantConfig {
+	if d == nil || d.river == nil {
+		return nil
+	}
+	d.river.mu.RLock()
+	defer d.river.mu.RUnlock()
+	return d.river.config
 }
 
 // ErrRiverTablesMissing reports a River schema that was never migrated.
@@ -65,7 +101,7 @@ func (d *DB) SetRiverJobInserter(inserter RiverJobInserter) {
 		return
 	}
 	if d.river == nil {
-		d.river = &riverBinding{}
+		d.river = &runtimeBinding{}
 	}
 	d.river.mu.Lock()
 	defer d.river.mu.Unlock()

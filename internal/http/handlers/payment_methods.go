@@ -163,7 +163,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 			errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
 			r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("psp_id"))
 			return
-		case errors.Is(err, merchants.ErrSecretBackendUnavailable):
+		case errors.Is(err, merchants.ErrConfigUnavailable):
 			r.ErrorCode(billing.CodeServiceUnavailable, "payment rail credentials are temporarily unavailable")
 			return
 		case errors.Is(err, paymentmethods.ErrPaymentDuplicateRefused):
@@ -276,7 +276,7 @@ func ReplacePaymentMethodCard(r *httprequest.Request) {
 		case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported), errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
 			r.ErrorCode(codePaymentMethodUpdateUnsupported, err.Error())
 			return
-		case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
+		case errors.Is(err, merchants.ErrConfigUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
 			log.WithError(err).WithFields(fields).Warn("Payment method update unavailable because provider credentials could not be loaded")
 			r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
 			return
@@ -375,7 +375,7 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 		// ceiling; this surface returns a stable refusal and never deletes locally.
 		log.WithError(err).WithFields(fields).Warn("Payment method delete refused by destructive-operation rate ceiling")
 		r.ErrorCode(billing.CodeRateLimitExceeded, "Destructive operation rate limit reached; try again later or contact support")
-	case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
+	case errors.Is(err, merchants.ErrConfigUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
 		log.WithError(err).WithFields(fields).Warn("Payment method delete unavailable because provider credentials could not be loaded")
 		r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
 	default:

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -146,16 +145,17 @@ func purgeMerchantRows(ctx context.Context, q *gen.Queries, table string, id uui
 
 // PurgeInventory is the manifest of what a merchant purge is ABOUT TO DESTROY.
 //
-// IT IS NOT A BACKUP AND IT RESTORES NOTHING. It holds counts, secret NAMES and
-// an explicit list of everything it does not capture — no customer, subscription,
-// payment, entitlement or catalog row is copied anywhere, and no secret VALUE
-// ever leaves its store. Its whole job is to put the blast radius in front of
-// the operator before they type the confirmation.
+// IT IS NOT A BACKUP AND IT RESTORES NOTHING. It holds counts, the names of
+// the merchant's configuration documents and an explicit list of everything it
+// does not capture — no customer, subscription, payment, entitlement or catalog
+// row is copied anywhere, and no credential ever leaves its store. Its whole job
+// is to put the blast radius in front of the operator before they type the
+// confirmation.
 //
 // The only restore path for a purged merchant is Postgres point-in-time recovery
-// plus the ENCRYPTION_MASTER_KEY plus Vault — see docs/backup-and-recovery.md. A
-// real per-merchant archive is or#859 phase 2 (`openrails merchant snapshot`);
-// until that exists, a purge is one-way.
+// plus its configuration (its file, or a Vault backup) — see
+// docs/backup-and-recovery.md. Until a per-merchant archive exists, a purge is
+// one-way.
 type PurgeInventory struct {
 	// ID is the billing.maintenance_runs row id.
 	ID string
@@ -166,7 +166,8 @@ type PurgeInventory struct {
 	RowCounts map[string]int
 	// TotalRows is the number Delete requires the operator to type back.
 	TotalRows int
-	// SecretNames are the merchant's secret names. Values are never read.
+	// SecretNames are the merchant's Vault configuration documents. Values
+	// are never read.
 	SecretNames []string
 	// NotCaptured spells out, in operator-facing prose, everything this
 	// inventory does not and cannot bring back.
@@ -182,9 +183,8 @@ func notCaptured(counts map[string]int, secrets int) []string {
 	out := []string{
 		"ROW DATA. This inventory holds counts, not rows. Not one customer, subscription, " +
 			"payment, entitlement, price or product row is copied anywhere by taking it.",
-		fmt.Sprintf("SECRET VALUES. %d secret NAMES are listed; no value is ever read or written out. "+
-			"A purge deletes the merchant's secrets from Vault and from the DB-encrypted store, "+
-			"and nothing here can recreate them.", secrets),
+		fmt.Sprintf("CONFIGURATION. %d Vault configuration documents are listed by name; no credential is ever read or written out. "+
+			"A purge deletes them from Vault, and nothing here can recreate them; a file holding the configuration stays the operator's.", secrets),
 		"CATALOG IDENTITY. Default and creator catalog IDs and owner-subject bindings are retained with the tombstoned merchant; product/price purge does not reassign or erase this ownership metadata.",
 		"THE APPEND-ONLY SPINE. ledger_transfers, ledger_accounts, grants and " +
 			"subscription_status_transitions are not purged (the app role holds no DELETE on them) " +
@@ -209,7 +209,7 @@ func notCaptured(counts map[string]int, secrets int) []string {
 			"NMI / Stripe / CCBill / Solana are untouched by a purge and unreachable afterwards: "+
 			"the local rows naming them are gone, so nothing remains to reconcile against.",
 		"THE RESTORE PATH. There is exactly one — Postgres point-in-time recovery, with the "+
-			"ENCRYPTION_MASTER_KEY and Vault restored alongside it (docs/backup-and-recovery.md). "+
+			"merchant's Vault documents restored alongside it (docs/backup-and-recovery.md). "+
 			"If you do not have PITR configured and tested, a purge is final.")
 	return out
 }
@@ -235,15 +235,12 @@ func (s *Service) TakePurgeInventory(ctx context.Context, id billing.MerchantID)
 		return PurgeInventory{}, err
 	}
 
-	// Enumerate per-merchant secret NAMES (never values).
+	// Enumerate the merchant's configuration documents (never values).
 	var secretNames []string
-	if s.secrets != nil {
-		names, err := s.secrets.List(ctx, id)
-		if err != nil {
-			return PurgeInventory{}, fmt.Errorf("merchants: purge inventory enumerate secrets: %w", err)
-		}
-		secretNames = append(secretNames, names...)
-		sort.Strings(secretNames)
+	if plan, err := s.captureSecretCleanup(ctx, id); err != nil {
+		return PurgeInventory{}, fmt.Errorf("merchants: purge inventory enumerate configuration: %w", err)
+	} else if plan != nil {
+		secretNames = plan.Names
 	}
 
 	inv := PurgeInventory{
@@ -263,7 +260,7 @@ func (s *Service) TakePurgeInventory(ctx context.Context, id billing.MerchantID)
 		"total_rows":    inv.TotalRows,
 		"secret_names":  inv.SecretNames,
 		"not_captured":  inv.NotCaptured,
-		"restore_path": "Postgres point-in-time recovery + ENCRYPTION_MASTER_KEY + Vault " +
+		"restore_path": "Postgres point-in-time recovery + the merchant's configuration from its file or Vault " +
 			"(docs/backup-and-recovery.md). This inventory restores nothing.",
 	})
 	if err != nil {
@@ -465,7 +462,7 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 	if actor == "" {
 		actor = "unknown"
 	}
-	cleanupPlan, err := captureSecretCleanup(ctx, s.secrets, id)
+	cleanupPlan, err := s.captureSecretCleanup(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -528,12 +525,6 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 			}
 		}
 
-		// Purge DB-backed secret store rows; the Vault-backed store is purged
-		// separately below.
-		if err := txq.DeleteAllMerchantSecrets(ctx, id.UUID()); err != nil {
-			return fmt.Errorf("merchants: purge merchant secrets: %w", err)
-		}
-
 		// Tombstone the directory row.
 		if _, err := txq.SoftDeletePlatformMerchant(ctx, id.UUID()); err != nil {
 			return fmt.Errorf("merchants: tombstone merchant: %w", err)
@@ -566,9 +557,9 @@ func (s *Service) Delete(ctx context.Context, id billing.MerchantID, opts Delete
 		return err
 	}
 
-	// The DB transaction bypasses store.Delete; evict local copies only after
-	// it commits, including caches nested around manifest-managed stores.
-	clearMerchantSecretCache(s.secrets, id)
+	if s.config != nil {
+		s.config.Forget(id)
+	}
 	if cleanupPlan != nil {
 		return s.RetrySecretCleanup(ctx, id, runID)
 	}

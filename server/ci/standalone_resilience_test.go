@@ -59,7 +59,7 @@ merchants:
 	}
 	activeFor := func(account string) int {
 		var n int
-		require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND NOT archived AND account_id = $1", account).Scan(&n))
+		require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND superseded_at IS NULL AND account_id = $1", account).Scan(&n))
 		return n
 	}
 	old := solanago.PublicKeyFromBytes(fake.PublicKey(transitKey)).String()

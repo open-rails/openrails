@@ -132,7 +132,7 @@ func writePaymentMethodChangeError(r *httprequest.Request, err error) {
 		r.ErrorCode(billing.CodePaymentProviderRejected, "The payment provider refused the change; the card is unchanged.")
 	case errors.As(err, &refused):
 		writePaymentMethodError(r, refused)
-	case errors.Is(err, merchants.ErrSecretBackendUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
+	case errors.Is(err, merchants.ErrConfigUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
 		r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
 	default:
 		if ambiguous := createPaymentMethodProviderError(err); ambiguous != nil {

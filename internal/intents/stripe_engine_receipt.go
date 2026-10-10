@@ -3,6 +3,7 @@ package intents
 import (
 	"context"
 	"errors"
+
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/internal/db/gen"

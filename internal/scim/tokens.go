@@ -98,6 +98,9 @@ func (t Tokens) Delete(ctx context.Context, mid billing.MerchantID, id billing.P
 	return nil
 }
 
+// ErrTokenTooShort refuses a declared token shorter than MinDeclaredToken.
+var ErrTokenTooShort = fmt.Errorf("secrets.scim_token must be at least %d characters", MinDeclaredToken)
+
 // Declare makes token the merchant's declared token, replacing the one
 // declared before; an empty token removes it.
 func Declare(ctx context.Context, q *gen.Queries, mid billing.MerchantID, token string) error {
@@ -105,7 +108,7 @@ func Declare(ctx context.Context, q *gen.Queries, mid billing.MerchantID, token 
 	var keep []byte
 	if token != "" {
 		if len(token) < MinDeclaredToken {
-			return fmt.Errorf("secrets.scim_token must be at least %d characters", MinDeclaredToken)
+			return ErrTokenTooShort
 		}
 		keep = tokenHash(token)
 	}

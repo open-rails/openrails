@@ -99,7 +99,7 @@ func (s *Service) EditPaymentMethod(ctx context.Context, customerID, methodID uu
 			if !*edit.Reusable {
 				return mandates.RevokeReuse(ctx, q, mid.UUID(), methodID, now)
 			}
-			psp, err := reusePSP(ctx, q, locked)
+			psp, err := reusePSP(ctx, charge.CustodyOf(d), locked)
 			if err != nil {
 				return err
 			}
@@ -334,14 +334,14 @@ func (s *Service) stripeAccount(ctx context.Context, method gen.BillingPaymentMe
 
 // reusePSP is the account a card's reuse consent belongs to: the PSP holding
 // it, or the one PSP routing reaches a custodian's card through.
-func reusePSP(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod) (uuid.UUID, error) {
+func reusePSP(ctx context.Context, custody charge.Custody, method gen.BillingPaymentMethod) (uuid.UUID, error) {
 	if method.PspID != nil {
 		return *method.PspID, nil
 	}
-	if method.CustodianID == nil {
+	if method.CustodianID == nil || custody == nil {
 		return uuid.Nil, ErrPaymentMethodEditUnsupported
 	}
-	psps, err := q.ListCustodianRoutePSPs(ctx, gen.ListCustodianRoutePSPsParams{MerchantID: method.MerchantID, Rail: method.Rail, CustodianID: *method.CustodianID})
+	psps, err := custody.CustodianRoutePSPs(ctx, billing.MerchantID(method.MerchantID), method.Rail, *method.CustodianID)
 	if err != nil {
 		return uuid.Nil, err
 	}

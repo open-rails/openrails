@@ -2,14 +2,13 @@ package merchants
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
+	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // StripeWebhookCredentialState is private operator state, never a public DTO.
@@ -18,95 +17,103 @@ type StripeWebhookCredentialState struct {
 	Writable                                             bool
 }
 
-// StripeWebhookPublication binds provider-created credentials to one account and
-// its loaded revision. Each reconcile pass owns one instance.
+// StripeWebhookPublication writes a provider-created webhook signing secret
+// into one Stripe PSP's document, at the revision it loaded. Each reconcile
+// pass owns one instance.
 type StripeWebhookPublication struct {
 	service  *Service
 	merchant billing.MerchantID
 	account  string
-	row      gen.BillingPsp
+	scope    PSPScope
 	loaded   bool
 }
 
 func (s *Service) StripeWebhookPublication(id billing.MerchantID, account string) *StripeWebhookPublication {
 	return &StripeWebhookPublication{service: s, merchant: id, account: account}
 }
+
 func (p *StripeWebhookPublication) Load(ctx context.Context) (StripeWebhookCredentialState, error) {
-	s := p.service
-	err := s.pool.MerchantTx(ctx, p.merchant, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		p.row, err = gen.New(tx).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: p.merchant.UUID(), Rail: "stripe", Environment: &s.providerEnvironment, AccountID: p.account})
-		return err
-	})
+	scope, ok, err := p.service.PSPScopeByAccountID(ctx, p.merchant, "stripe", p.account)
 	if err != nil {
 		return StripeWebhookCredentialState{}, err
 	}
-	if p.row.Archived {
+	if !ok || scope.Archived {
 		return StripeWebhookCredentialState{}, ErrPSPNotFound
 	}
-	creds, ok, err := s.LoadStripeCredentialsForAccount(ctx, p.merchant, p.account)
-	if err != nil {
-		return StripeWebhookCredentialState{}, err
-	}
-	if !ok {
-		return StripeWebhookCredentialState{}, ErrPSPNotFound
-	}
-	p.loaded = true
-	return StripeWebhookCredentialState{SecretKey: creds.SecretKey, CurrentSecret: creds.WebhookSigningSecret, PreviousSecret: creds.WebhookSigningPrevious, EndpointID: credentialState(p.row).WebhookEndpointID, Writable: CanStageCredentials(s.secrets)}, nil
-}
-func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret string) error {
-	if !p.loaded || strings.TrimSpace(endpoint) == "" || strings.TrimSpace(secret) == "" {
-		return fmt.Errorf("managed webhook publication requires qualified endpoint and signing secret")
-	}
-	name, err := PSPSecretName("stripe", p.service.providerEnvironment, p.account, "webhook_signing_secret")
-	if err != nil {
-		return err
-	}
-	if err = validateSecretValueLocal(name, secret); err != nil {
-		return err
-	}
-	names, keys := map[string]string{name: secret}, map[string]string{name: "webhook_signing_secret"}
-	if _, published := credentialState(p.row).Refs["webhook_signing_secret"]; !published {
-		ref, err := PSPSecretRef(p.row, "webhook_signing_secret")
-		if err != nil {
-			return err
-		}
-		previous, err := ReadSecretRef(ctx, p.service.secrets, p.merchant, ref)
-		if err == nil {
-			previousName, err := PSPSecretName("stripe", p.service.providerEnvironment, p.account, "webhook_signing_secret_previous")
-			if err != nil {
-				return err
-			}
-			names[previousName] = previous.Value
-			keys[previousName] = "webhook_signing_secret_previous"
-		} else if !errors.Is(err, ErrSecretNotFound) {
-			return err
-		}
-	}
-	return p.publish(ctx, endpoint, names, keys, false)
+	p.scope, p.loaded = scope, true
+	creds := p.service.stripeCredentials(scope)
+	return StripeWebhookCredentialState{
+		SecretKey: creds.SecretKey, CurrentSecret: creds.WebhookSigningSecret, PreviousSecret: creds.WebhookSigningPrevious,
+		EndpointID: scope.WebhookEndpointID, Writable: p.service.config.Writable() && scope.Revision > 0,
+	}, nil
 }
 
-// RetireOverlap is called only after qualified provider endpoint retirement.
-// Historical secret material remains; the published verifier reference is retired.
+// Publish writes the signing secret of the endpoint the provider created; the
+// outgoing secret keeps verifying for MaxWebhookSecretOverlap.
+func (p *StripeWebhookPublication) Publish(ctx context.Context, endpoint, secret string) error {
+	endpoint, secret = strings.TrimSpace(endpoint), strings.TrimSpace(secret)
+	if !p.loaded || endpoint == "" || secret == "" {
+		return fmt.Errorf("managed webhook publication requires qualified endpoint and signing secret")
+	}
+	if err := validateCredentialValue("stripe", "webhook_signing_secret", secret); err != nil {
+		return fmt.Errorf("managed webhook signing secret: %w", err)
+	}
+	return p.write(ctx, endpoint, func(next map[string]string, settings map[string]any) {
+		if current := strings.TrimSpace(next["webhook_signing_secret"]); current != "" && current != secret {
+			next["webhook_signing_secret_previous"] = current
+			settings[WebhookOverlapExpiresKey] = p.service.now().Add(MaxWebhookSecretOverlap).Format(time.RFC3339)
+		}
+		next["webhook_signing_secret"] = secret
+	})
+}
+
+// RetireOverlap is called only after qualified provider endpoint retirement:
+// the outgoing secret stops verifying.
 func (p *StripeWebhookPublication) RetireOverlap(ctx context.Context) error {
-	endpoint := credentialState(p.row).WebhookEndpointID
-	if !p.loaded || endpoint == "" {
+	if !p.loaded || p.scope.WebhookEndpointID == "" {
 		return fmt.Errorf("managed webhook retirement requires published endpoint identity")
 	}
-	return p.publish(ctx, endpoint, nil, nil, true)
+	return p.write(ctx, p.scope.WebhookEndpointID, func(next map[string]string, settings map[string]any) {
+		delete(next, "webhook_signing_secret_previous")
+		delete(settings, WebhookOverlapExpiresKey)
+	})
 }
-func (p *StripeWebhookPublication) publish(ctx context.Context, endpoint string, names, keys map[string]string, retire bool) error {
-	if !CanStageCredentials(p.service.secrets) {
-		return credentialWriteRefusal(p.service.secrets)
+
+func (p *StripeWebhookPublication) write(ctx context.Context, endpoint string, change func(map[string]string, map[string]any)) error {
+	s := p.service
+	if !s.config.Writable() {
+		return ErrConfigReadOnly
 	}
-	operation := uuid.NewSHA1(p.merchant.UUID(), []byte("stripe-webhook/"+p.service.providerEnvironment+"/"+p.account+"/"+endpoint))
-	if retire {
-		operation = uuid.NewSHA1(operation, []byte(fmt.Sprintf("retire/%d", p.row.Revision)))
+	set, err := s.config.Get(ctx, p.merchant)
+	if err != nil {
+		return err
 	}
-	validatedAt := p.row.CredentialsValidatedAt
-	row, err := p.service.publishProviderCredentials(ctx, p.merchant, "stripe", p.service.providerEnvironment, p.account, pspPublication{OperationID: operation, ExpectedRevision: p.row.Revision}, names, keys, validatedAt != nil, validatedAt, webhookPublication{WebhookEndpointID: endpoint, RetireWebhookOverlap: retire, OverlapFor: MaxWebhookSecretOverlap})
-	if err == nil {
-		p.row = row
+	held, ok := set.PSPs[strings.ToLower(p.scope.Key)]
+	if !ok || held.Revision != p.scope.Revision {
+		return ErrRevisionMismatch
+	}
+	next := clonePSP(held.Value)
+	if next.Secrets == nil {
+		next.Secrets = map[string]string{}
+	}
+	if next.Settings == nil {
+		next.Settings = map[string]any{}
+	}
+	change(next.Secrets, next.Settings)
+	if len(next.Settings) == 0 {
+		next.Settings = nil
+	}
+	if _, err := s.config.PutPSP(ctx, p.merchant, p.scope.Key, next, held.Revision); err != nil {
+		return err
+	}
+	if err := s.database.RunInMerchantConn(merchant.WithID(ctx, p.merchant), func(ctx context.Context) error {
+		return s.database.Gen(ctx).SetPSPWebhookEndpoint(ctx, gen.SetPSPWebhookEndpointParams{MerchantID: p.merchant.UUID(), ID: p.scope.ID, EndpointID: &endpoint})
+	}); err != nil {
+		return err
+	}
+	scope, ok, err := s.PSPScopeByID(ctx, p.merchant, p.scope.ID)
+	if err == nil && ok {
+		p.scope = scope
 	}
 	return err
 }

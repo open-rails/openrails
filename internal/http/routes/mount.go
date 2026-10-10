@@ -145,6 +145,8 @@ func (e *Env) enabled(f Feature) bool {
 		return e.providers.StripePortal
 	case FeatureMerchantDirectory:
 		return rt != nil && rt.Merchants != nil
+	case FeatureMerchantConfigEdits:
+		return rt.MerchantConfigEditable()
 	case FeatureCatalogCopilot:
 		return rt != nil && rt.CopilotService.Configured()
 	case FeatureMetricsAsk:

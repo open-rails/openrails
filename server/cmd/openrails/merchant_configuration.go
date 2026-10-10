@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 
+	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
+
 	"net/http"
 
 	"github.com/open-rails/openrails"
@@ -26,14 +28,14 @@ import (
 
 // Both modes use the public Client. Remote mode never loads local infrastructure.
 func newMerchantConfigurationCmd(apply bool) *cobra.Command {
-	var serverURL, tokenFile, slug, file, idempotencyKey string
+	var serverURL, tokenFile, slug, file string
 	name := "get-merchant-config"
 	if apply {
 		name = "apply-merchant-config"
 	}
 	cmd := &cobra.Command{
 		Use:   name,
-		Short: "Read or explicitly apply merchant metadata through the Client",
+		Short: "Read or update merchant configuration through the Client",
 		Args:  cobra.NoArgs,
 		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(slug) == "" {
@@ -65,10 +67,7 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 			var params billing.UpdateMerchantConfigurationParams
 			if apply {
 				if file == "" {
-					return fmt.Errorf("--file is required for a document with expected_revision")
-				}
-				if strings.TrimSpace(idempotencyKey) == "" {
-					return fmt.Errorf("--idempotency-key is required")
+					return fmt.Errorf("--file is required: the configuration to merge, with the expected_revision it was read at")
 				}
 				input, err := os.Open(file)
 				if err != nil {
@@ -84,7 +83,6 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 					return err
 				}
 				params = *parsed
-				params.IdempotencyKey = idempotencyKey
 			}
 			var client *openrails.Client
 			var err error
@@ -120,14 +118,14 @@ func newMerchantConfigurationCmd(apply bool) *cobra.Command {
 	cmd.Flags().StringVar(&serverURL, "server-url", "", "remote OpenRails base URL; omit for trusted local operator execution")
 	cmd.Flags().StringVar(&tokenFile, "token-file", "", "file holding an access token from the merchant's trusted issuer (client credentials), read on every call")
 	if apply {
-		cmd.Flags().StringVarP(&file, "file", "f", "", "YAML or JSON document with expected_revision")
-		cmd.Flags().StringVar(&idempotencyKey, "idempotency-key", "", "stable key that replays this change's first result")
+		cmd.Flags().StringVarP(&file, "file", "f", "", "YAML or JSON configuration to merge, with an optional expected_revision")
 	}
 	return cmd
 }
 
-// Local metadata administration needs database access, not credential custody,
-// payment-provider clients, workers, or standalone authentication infrastructure.
+// Local administration needs the database and the merchant's configuration
+// (Vault, or the manifest at its conventional path), not payment-provider
+// clients, workers, or standalone authentication infrastructure.
 func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, slug string) (*openrails.Client, func(), error) {
 	database, err := openCLIDB(ctx, cfg)
 	if err != nil {
@@ -142,7 +140,12 @@ func localMerchantConfigurationClient(ctx context.Context, cfg *config.Config, s
 	if err != nil {
 		return nil, cleanup, err
 	}
-	rt := &app.Runtime{DB: database, Config: cfg, MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
+	merchantsSvc, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, nil, "", hostconfig.FromContext(ctx).MerchantManifestOverlays)
+	if err != nil {
+		return nil, cleanup, err
+	}
+	cleanup = func() { closeConfig(); database.Close() }
+	rt := &app.Runtime{DB: database, Config: cfg, Merchants: merchantsSvc, MerchantConfig: merchantsSvc.Config(), MoneyService: money.NewMoneyService(database), EntitlementService: entitlements.NewEntitlementService(database)}
 	table := &router.Table{}
 	httproutes.RegisterStaffRoutesUnder(router.NewMux(table, "/v1", rt), rt, httproutes.HostOptions(), "/v1/admin/configuration")
 	transport, capability := inprocess.NewTransport(table.Handler(), func() billing.MerchantID { return selected.ID })

@@ -288,7 +288,7 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if err := mandates.Recheck(ctx, q, in.MerchantID, p.Instrument.Mandate); err != nil {
 			return errors.Join(charge.ErrInstrumentChanged, err)
 		}
-		binding, err := engineCollectionBinding(ctx, q, method, p.Instrument.PSPID, p.HyperSwitch.APIBaseURL)
+		binding, err := engineCollectionBinding(ctx, q, charge.CustodyOf(h.DB), method, p.Instrument.PSPID, p.HyperSwitch.APIBaseURL)
 		if err != nil {
 			return err
 		}

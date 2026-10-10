@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
 	solanatransit "github.com/open-rails/openrails/internal/integrations/solana"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
 func TestExampleManifestsParse(t *testing.T) {
@@ -31,7 +32,7 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.Equal(t, 7, *m.Settings.ArrearsGraceDays)
 	require.Equal(t, []billing.BudgetWindow{{Key: "burst", WindowSeconds: 900, Limit: 5_000_000}, {Key: "sustained", WindowSeconds: 18_000, Limit: 20_000_000}}, m.Settings.DelegatedInvokerWastedSpendLimits)
 	require.Len(t, *m.Settings.CheckoutRouting, 3)
-	require.Equal(t, "Local Stack Billing", m.Settings.Profile.DisplayName)
+	require.Equal(t, "Local Stack Billing", m.DisplayName)
 
 	byName, railOf := m.PSPs, map[string]string{}
 	for name, account := range m.PSPs {
@@ -74,7 +75,6 @@ func TestMerchantManifestValidation(t *testing.T) {
 		"catalogs":                     {"version: 1\ncatalogs: []\n", "catalogs"},
 		"no merchants":                 {"version: 1\n", "at least one merchant"},
 		"wrong version":                {"version: 2\nmerchants:\n  x:\n    display_name: X\n", "version must be 1"},
-		"missing display name":         {"version: 1\nmerchants:\n  host-three: {}\n", `merchant "host-three" display_name is required`},
 		"merchant name removed":        {"version: 1\nmerchants:\n  host-three:\n    name: Host Three\n", `unknown field "name"`},
 		"support email removed":        {base("    settings:\n      profile:\n        support_email: s@example.com\n"), "support_email"},
 		"settings outside settings":    {base("    profile:\n      display_name: X\n"), `unknown field "profile"`},
@@ -149,19 +149,16 @@ func TestManifestFilePathIsStrict(t *testing.T) {
 }
 
 func TestPushMerchantConfigIsCreateOnly(t *testing.T) {
-	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
-		cfg := &config.Config{SecretBackend: backend}
-		for _, seed := range []bool{false, true} {
-			for _, insert := range []bool{false, true} {
-				opts, err := ResolvePushMerchantConfigOptions(cfg, seed, insert, false, false)
-				require.NoError(t, err)
-				require.Equal(t, seed || insert, opts.Insert)
-				require.False(t, opts.Overwrite || opts.Prune)
-			}
-			for _, flags := range [][2]bool{{true, false}, {false, true}, {true, true}} {
-				_, err := ResolvePushMerchantConfigOptions(cfg, seed, true, flags[0], flags[1])
-				require.ErrorContains(t, err, "expected revision")
-			}
+	cfg := &config.Config{}
+	for _, seed := range []bool{false, true} {
+		for _, insert := range []bool{false, true} {
+			opts, err := ResolvePushMerchantConfigOptions(cfg, seed, insert, false, false)
+			require.NoError(t, err)
+			require.Equal(t, seed || insert, opts.Insert)
+		}
+		for _, flags := range [][2]bool{{true, false}, {false, true}, {true, true}} {
+			_, err := ResolvePushMerchantConfigOptions(cfg, seed, true, flags[0], flags[1])
+			require.ErrorContains(t, err, "at its revision")
 		}
 	}
 }
@@ -173,56 +170,43 @@ func (f fakeTransit) PublicKey(context.Context, string) ([]byte, error)  { retur
 
 // A Solana account_id is always derived from the signer; a declared one is
 // ignored, and a Transit signer cannot also carry a local private key.
-func TestSolanaSignerEvidence(t *testing.T) {
+func TestSolanaSignerAccount(t *testing.T) {
 	pub, _, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)
 	transitAccount := solanago.PublicKeyFromBytes(pub).String()
 	local, err := solanago.NewRandomPrivateKey()
 	require.NoError(t, err)
-	withKey, err := newManifestSecretValues("solana", map[string]string{"private_key": local.String()})
-	require.NoError(t, err)
-	empty, err := newManifestSecretValues("solana", nil)
-	require.NoError(t, err)
+	withKey := map[string]string{"private_key": local.String()}
 	transit := &PSPSignerConfig{Mode: "vault_transit", Key: "openrails-solana-local"}
 	ctx := context.Background()
 
 	for name, tc := range map[string]struct {
-		declared    string
 		account     PSPConfig
-		secrets     manifestSecretValues
 		wantAccount string
-		wantSigner  map[string]string
 	}{
-		"implicit local keypair":        {"", PSPConfig{}, withKey, local.PublicKey().String(), map[string]string{"mode": "local_keypair"}},
-		"declared id ignored (local)":   {transitAccount, PSPConfig{Signer: &PSPSignerConfig{Mode: "local_keypair"}}, withKey, local.PublicKey().String(), map[string]string{"mode": "local_keypair"}},
-		"transit":                       {"", PSPConfig{Signer: transit}, empty, transitAccount, map[string]string{"mode": "vault_transit", "key": "openrails-solana-local"}},
-		"declared id ignored (transit)": {"not-the-key", PSPConfig{Signer: transit}, empty, transitAccount, nil},
-		"receive only":                  {"", PSPConfig{}, empty, "", nil},
+		"implicit local keypair":        {PSPConfig{Secrets: withKey}, local.PublicKey().String()},
+		"declared id ignored (local)":   {PSPConfig{AccountID: transitAccount, Signer: &PSPSignerConfig{Mode: "local_keypair"}, Secrets: withKey}, local.PublicKey().String()},
+		"transit":                       {PSPConfig{Signer: transit}, transitAccount},
+		"declared id ignored (transit)": {PSPConfig{AccountID: "not-the-key", Signer: transit}, transitAccount},
 	} {
-		signer, account, err := manifestProviderSignerEvidence(ctx, "solana", tc.declared, tc.account, tc.secrets, fakeTransit{pub: pub})
+		account, err := merchantbootstrap.SolanaAccountID(ctx, tc.account, fakeTransit{pub: pub})
 		require.NoError(t, err, name)
 		require.Equal(t, tc.wantAccount, account, name)
-		if tc.wantSigner != nil {
-			require.Equal(t, tc.wantSigner, signer, name)
-		}
 	}
 	for want, tc := range map[string]struct {
-		rail    string
-		signer  *PSPSignerConfig
-		secrets manifestSecretValues
+		account PSPConfig
 		transit bool
 	}{
-		"cannot also set secrets.private_key":    {"solana", transit, withKey, true},
-		"requires a Vault connection":            {"solana", transit, empty, false},
-		"local_keypair requires secrets.private": {"solana", &PSPSignerConfig{Mode: "local_keypair"}, empty, true},
-		"must be local_keypair or vault_transit": {"solana", &PSPSignerConfig{Mode: "hsm"}, empty, true},
-		"only supported for solana":              {"stripe", transit, empty, true},
+		"cannot also set secrets.private_key":    {PSPConfig{Signer: transit, Secrets: withKey}, true},
+		"requires a Vault connection":            {PSPConfig{Signer: transit}, false},
+		"local_keypair requires secrets.private": {PSPConfig{Signer: &PSPSignerConfig{Mode: "local_keypair"}}, true},
+		"must be local_keypair or vault_transit": {PSPConfig{Signer: &PSPSignerConfig{Mode: "hsm"}}, true},
 	} {
 		var client solanatransit.TransitClient
 		if tc.transit {
 			client = fakeTransit{pub: pub}
 		}
-		_, _, err := manifestProviderSignerEvidence(ctx, tc.rail, "", PSPConfig{Signer: tc.signer}, tc.secrets, client)
+		_, err := merchantbootstrap.SolanaAccountID(ctx, tc.account, client)
 		require.ErrorContains(t, err, want)
 	}
 }

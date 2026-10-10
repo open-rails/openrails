@@ -66,7 +66,7 @@ func newPushMerchantConfigCmd() *cobra.Command {
 		"create missing merchant/config objects declared by the manifest",
 		"re-assert manifest secret/config values over existing state",
 		"delete merchant secrets that are absent from the manifest")
-	cmd.Flags().BoolVar(&opts.seed, "seed", false, "create missing merchant metadata; managed provider credentials require Client publication")
+	cmd.Flags().BoolVar(&opts.seed, "seed", false, "create the manifest's missing merchants")
 	return cmd
 }
 
@@ -162,7 +162,7 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 		return err
 	}
 
-	srv, _, cp, err := openServer(ctx, openrails.Deps{})
+	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
 	if err != nil {
 		return err
 	}
@@ -171,14 +171,19 @@ func runPushMerchantConfig(cmd *cobra.Command, opts pushMerchantConfigOptions) e
 			log.WithError(closeErr).Error("push-merchant-config cleanup failed")
 		}
 	}()
-
+	if err := graph.Runtime.EnsureMerchantsService(ctx); err != nil {
+		return err
+	}
+	reconcileOpts.Merchants = graph.Runtime.Merchants
+	if graph.Runtime.Vault != nil {
+		reconcileOpts.SolanaTransit = graph.Runtime.Vault.SolanaTransit
+	}
 	return applyPushMerchantConfigManifest(ctx, cfg, cp, manifest, out, reconcileOpts)
 }
 
 type dumpMerchantConfigOptions struct {
-	slug           string
-	out            string
-	includeSecrets bool
+	slug string
+	out  string
 }
 
 func newDumpMerchantConfigCmd() *cobra.Command {
@@ -213,9 +218,7 @@ func runDumpMerchantConfig(cmd *cobra.Command, opts dumpMerchantConfigOptions) e
 		}
 	}()
 
-	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, cp, opts.slug, bootstrap.DumpMerchantConfigOptions{
-		IncludeSecrets: opts.includeSecrets,
-	})
+	manifest, err := bootstrap.DumpMerchantConfig(ctx, cfg, cp, opts.slug)
 	if err != nil {
 		return err
 	}
@@ -291,22 +294,21 @@ func applyAuthKitAuthorityManifest(ctx context.Context, cp *controlplane.Control
 	return json.NewEncoder(out).Encode(res)
 }
 
-// applyPushMerchantConfigManifest provisions OpenRails merchants declared by the
-// merchant config manifest: permission-group + optional host-app issuer-as-owner,
-// merchant row, provider secrets, and profile (#527). It intentionally does not
-// touch catalog/provider state.
-func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.MerchantManifestReconcileOptions) error {
+// applyPushMerchantConfigManifest provisions the merchants a manifest
+// declares: permission group, optional host-app issuer-as-owner and merchant
+// row (#527). With Vault holding configuration the manifest names merchants
+// only. It does not touch catalog or provider state.
+func applyPushMerchantConfigManifest(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *bootstrap.BillingConfig, out io.Writer, reconcileOpts bootstrap.ReconcileOptions) error {
 	if manifest == nil || len(manifest.Merchants) == 0 {
 		return nil
 	}
-	if !reconcileOpts.HasMutations() {
-		fmt.Fprintf(out, "merchants: %d declared (plan-only: insert=%t overwrite=%t prune=%t; no mutations)\n", len(manifest.Merchants), reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
+	if !reconcileOpts.Insert {
+		fmt.Fprintf(out, "merchants: %d declared (plan-only; --seed provisions them)\n", len(manifest.Merchants))
 		return nil
 	}
-
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest, reconcileOpts); err != nil {
 		return fmt.Errorf("merchant bootstrap: %w", err)
 	}
-	fmt.Fprintf(out, "merchants: %d reconciled (insert=%t overwrite=%t prune=%t)\n", len(manifest.Merchants), reconcileOpts.Insert, reconcileOpts.Overwrite, reconcileOpts.Prune)
+	fmt.Fprintf(out, "merchants: %d provisioned\n", len(manifest.Merchants))
 	return nil
 }

@@ -5,7 +5,6 @@ package subscriptions_test
 import (
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -18,11 +17,12 @@ import (
 // deployment operator's declaration remains the approved path.
 func TestSecurityProviderAccountClaimsNeedProof(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	r := w.rival()
 	for _, account := range []string{"999999-0001", "999999-0000"} {
-		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{OperationID: uuid.New(), Key: "squat", Rail: billing.RailCCBill, AccountID: account})
+		_, err := r.client.CreatePSP(t.Context(), billing.CreatePSPParams{Key: "squat", Rail: billing.RailCCBill, AccountID: account})
 		require.Error(t, err, "an unproven claim of %s is refused", account)
+		require.NotEqual(t, "merchant_config_read_only", codeOf(err), "the claim itself is refused")
 	}
 	list, err := r.client.ListPSPs(t.Context(), billing.PSPListParams{Rail: billing.RailCCBill})
 	require.NoError(t, err)

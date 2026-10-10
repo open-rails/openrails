@@ -12,7 +12,7 @@ import (
 )
 
 const getCustodian = `-- name: GetCustodian :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
 WHERE custodians.merchant_id = $2::uuid AND id = $1
 `
 
@@ -31,9 +31,6 @@ func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (Bil
 		&i.Kind,
 		&i.Environment,
 		&i.AccountID,
-		&i.Settings,
-		&i.CredentialVersions,
-		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -41,7 +38,7 @@ func (q *Queries) GetCustodian(ctx context.Context, arg GetCustodianParams) (Bil
 }
 
 const getCustodianByIdentity = `-- name: GetCustodianByIdentity :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid
   AND kind = lower($2::text)
   AND environment = COALESCE($3::text, 'live')
@@ -71,9 +68,6 @@ func (q *Queries) GetCustodianByIdentity(ctx context.Context, arg GetCustodianBy
 		&i.Kind,
 		&i.Environment,
 		&i.AccountID,
-		&i.Settings,
-		&i.CredentialVersions,
-		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -81,7 +75,7 @@ func (q *Queries) GetCustodianByIdentity(ctx context.Context, arg GetCustodianBy
 }
 
 const getCustodianByKey = `-- name: GetCustodianByKey :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid
   AND lower(key) = lower($2::text)
 LIMIT 1
@@ -102,9 +96,6 @@ func (q *Queries) GetCustodianByKey(ctx context.Context, arg GetCustodianByKeyPa
 		&i.Kind,
 		&i.Environment,
 		&i.AccountID,
-		&i.Settings,
-		&i.CredentialVersions,
-		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -112,7 +103,7 @@ func (q *Queries) GetCustodianByKey(ctx context.Context, arg GetCustodianByKeyPa
 }
 
 const listCustodiansForMerchant = `-- name: ListCustodiansForMerchant :many
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid
 ORDER BY kind, key, id
 `
@@ -133,9 +124,6 @@ func (q *Queries) ListCustodiansForMerchant(ctx context.Context, merchantID uuid
 			&i.Kind,
 			&i.Environment,
 			&i.AccountID,
-			&i.Settings,
-			&i.CredentialVersions,
-			&i.Archived,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -147,6 +135,50 @@ func (q *Queries) ListCustodiansForMerchant(ctx context.Context, merchantID uuid
 		return nil, err
 	}
 	return items, nil
+}
+
+const registerCustodian = `-- name: RegisterCustodian :one
+
+INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id)
+VALUES ($1::uuid, $2::text, lower($3::text), $4::text, $5::text)
+ON CONFLICT (kind, environment, account_id) DO UPDATE SET key = billing.custodians.key
+WHERE billing.custodians.merchant_id = EXCLUDED.merchant_id
+RETURNING id, merchant_id, key, kind, environment, account_id, created_at, updated_at
+`
+
+type RegisterCustodianParams struct {
+	MerchantID  uuid.UUID
+	Key         string
+	Kind        string
+	Environment string
+	AccountID   string
+}
+
+// billing.custodians: merchant-scoped custodian identities (or#880). A row is
+// one merchant-owned account with a third-party card custodian; its
+// configuration is the custodian document.
+// Records a custodian document's identity. An identity another merchant owns
+// answers no row.
+func (q *Queries) RegisterCustodian(ctx context.Context, arg RegisterCustodianParams) (BillingCustodian, error) {
+	row := q.db.QueryRow(ctx, registerCustodian,
+		arg.MerchantID,
+		arg.Key,
+		arg.Kind,
+		arg.Environment,
+		arg.AccountID,
+	)
+	var i BillingCustodian
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.Key,
+		&i.Kind,
+		&i.Environment,
+		&i.AccountID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const resolveCustodianOwnerByIdentity = `-- name: ResolveCustodianOwnerByIdentity :one
@@ -185,81 +217,6 @@ func (q *Queries) ResolveCustodianOwnerByIdentity(ctx context.Context, arg Resol
 		&i.Kind,
 		&i.Environment,
 		&i.AccountID,
-	)
-	return i, err
-}
-
-const upsertCustodian = `-- name: UpsertCustodian :one
-
-INSERT INTO billing.custodians (
-    merchant_id, key, kind, environment, account_id, settings, archived, credential_versions
-) VALUES (
-    $1::uuid,
-    $2::text,
-    lower($3::text),
-    COALESCE($4::text, 'live'),
-    $5::text,
-    COALESCE($6, '{}'::jsonb),
-    COALESCE($7::boolean, false),
-    COALESCE($8, '{}'::jsonb)
-)
-ON CONFLICT (kind, environment, account_id) DO UPDATE SET
-    key = EXCLUDED.key,
-    settings = EXCLUDED.settings,
-    archived = EXCLUDED.archived,
-    -- or#812: a floor NEVER goes backwards. An upsert that carries no floors
-    -- (the manifest plane, which seeds rather than rotates) leaves the stored
-    -- ones alone rather than clearing a rotation another writer recorded.
-    credential_versions = billing.custodians.credential_versions || COALESCE((
-        SELECT jsonb_object_agg(incoming.key, greatest(
-            incoming.value::bigint,
-            (billing.custodians.credential_versions ->> incoming.key)::bigint
-        ))
-        FROM jsonb_each_text(EXCLUDED.credential_versions) AS incoming
-    ), '{}'::jsonb),
-    updated_at = now()
-WHERE billing.custodians.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at
-`
-
-type UpsertCustodianParams struct {
-	MerchantID         uuid.UUID
-	Key                string
-	Kind               string
-	Environment        *string
-	AccountID          string
-	Settings           []byte
-	Archived           *bool
-	CredentialVersions []byte
-}
-
-// billing.custodians: merchant-scoped custodian registry (or#880). A row is
-// one merchant-owned account with a third-party card custodian. Referenced by
-// psps.custodian_id — one custodian can back many PSPs.
-func (q *Queries) UpsertCustodian(ctx context.Context, arg UpsertCustodianParams) (BillingCustodian, error) {
-	row := q.db.QueryRow(ctx, upsertCustodian,
-		arg.MerchantID,
-		arg.Key,
-		arg.Kind,
-		arg.Environment,
-		arg.AccountID,
-		arg.Settings,
-		arg.Archived,
-		arg.CredentialVersions,
-	)
-	var i BillingCustodian
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Kind,
-		&i.Environment,
-		&i.AccountID,
-		&i.Settings,
-		&i.CredentialVersions,
-		&i.Archived,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }

@@ -37,11 +37,11 @@ func receiptWorld(t *testing.T, hosted bool) (*world, *smtptest.Server, *openrai
 		w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps["stripe"].Settings, "publishable_key") }
 	}
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
+	w.displayName = "Host Shop"
 	w.start()
 	if hosted {
 		w.stripe.SendWebhooksTo(w.server.URL+mountPrefix+"/v1/webhooks/stripe/"+stripeAcct, whsecStripe)
 	}
-	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{Profile: &billing.MerchantProfile{DisplayName: "Host Shop"}}))
 	return w, srv, directory
 }
 

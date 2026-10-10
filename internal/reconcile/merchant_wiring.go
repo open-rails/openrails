@@ -207,7 +207,7 @@ func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.M
 		name, _ := merchants.PSPSecretName(scope.Rail, scope.Environment, scope.AccountID, key)
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"merchant_id": mid.String(), "rail": scope.Rail, "secret": name,
-		}).Warn("provider pull: rail not armed — merchant secret backend failed (retried next pass)")
+		}).Warn("provider pull: rail not armed — merchant configuration unavailable (retried next pass)")
 		return "", false
 	}
 	if !found {

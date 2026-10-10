@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -73,8 +74,8 @@ func (s *CheckoutService) CreateStripeMethodSetup(ctx context.Context, psp uuid.
 	if !db.IsNotFound(err) {
 		return PaymentMethodSetup{}, err
 	}
-	account, err := d.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: mid.UUID(), ID: psp})
-	if err != nil || account.Archived || account.Rail != "stripe" || account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
+	account, live, err := merchants.Of(d).PSPScopeByID(ctx, mid, psp)
+	if err != nil || !live || account.Archived || account.Rail != "stripe" || account.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 		return PaymentMethodSetup{}, ErrCheckoutAttemptValidation
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, mid.UUID(), &psp)

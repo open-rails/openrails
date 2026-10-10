@@ -245,7 +245,7 @@ func (q *Queries) ListMethodDeletesForArchive(ctx context.Context, arg ListMetho
 }
 
 const lockCustodianDeletionAccount = `-- name: LockCustodianDeletionAccount :one
-SELECT id, merchant_id, key, kind, environment, account_id, settings, credential_versions, archived, created_at, updated_at FROM billing.custodians
+SELECT id, merchant_id, key, kind, environment, account_id, created_at, updated_at FROM billing.custodians
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR SHARE
 `
@@ -265,9 +265,6 @@ func (q *Queries) LockCustodianDeletionAccount(ctx context.Context, arg LockCust
 		&i.Kind,
 		&i.Environment,
 		&i.AccountID,
-		&i.Settings,
-		&i.CredentialVersions,
-		&i.Archived,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

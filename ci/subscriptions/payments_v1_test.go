@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"fmt"
+	"maps"
 	"net/http"
 	"strings"
 	"testing"
@@ -12,10 +13,13 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/vaulttest"
 )
 
 // Money received outside OpenRails pays an open order: a manual payment
@@ -137,28 +141,31 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 // reaches its custodian, none when no PSP or two do.
 func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := prepareWorld(t, 12)
+	w.vault = vaulttest.New(t)
+	w.custodians = map[string]openrails.CustodianConfig{"vault": {Kind: "basis_theory", AccountID: "bt-e2e",
+		Settings: map[string]any{"public_api_key": "key_public_e2e"}, Secrets: map[string]string{"api_key": "key_private_e2e"}}}
+	w.start()
 	ctx := t.Context()
 	c := w.newCustomer()
 	held := strings.TrimPrefix(c.saveCard("nmi", visa), "pm_")
 	q := gen.New(db.RewriteDBTX(w.pool, w.schema))
+	custody := charge.CustodyOf(engine.Graph(w.rt).Runtime.DB)
 	psp := w.psp["nmi"].UUID()
 	var merchant uuid.UUID
-	var env string
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT merchant_id, environment FROM billing.psps WHERE id = $1`), psp).Scan(&merchant, &env))
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT merchant_id FROM billing.psps WHERE id = $1`), psp).Scan(&merchant))
 
 	method := func(id uuid.UUID) gen.BillingPaymentMethod {
 		m, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchant, ID: id})
 		require.NoError(t, err)
 		return m
 	}
-	route, err := charge.RoutePSP(ctx, q, method(uuid.MustParse(held)))
+	route, err := charge.RoutePSP(ctx, custody, method(uuid.MustParse(held)))
 	require.NoError(t, err)
 	require.Equal(t, psp, route, "a PSP-held card charges through its PSP")
 
 	var custodian uuid.UUID
-	require.NoError(t, w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id, archived, settings)
-		VALUES ($1, 'vault', 'basis_theory', $2, 'bt-e2e', false, '{}') RETURNING id`), merchant, env).Scan(&custodian))
+	require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT id FROM billing.custodians WHERE merchant_id = $1 AND key = 'vault'`), merchant).Scan(&custodian))
 	insert := func(pspID *uuid.UUID) (uuid.UUID, error) {
 		var id uuid.UUID
 		err := w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.payment_methods (merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_method_ref, charge_via, status)
@@ -172,17 +179,16 @@ func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	vaulted, err := insert(nil)
 	require.NoError(t, err)
 
-	_, err = charge.RoutePSP(ctx, q, method(vaulted))
+	_, err = charge.RoutePSP(ctx, custody, method(vaulted))
 	require.ErrorIs(t, err, charge.ErrNoRoute, "no PSP reaches the custodian")
-	_, err = w.pool.Exec(ctx, w.q(`UPDATE billing.psps SET custodian_id = $2 WHERE id = $1`), psp, custodian)
-	require.NoError(t, err)
-	route, err = charge.RoutePSP(ctx, q, method(vaulted))
+	w.editDoc("psps/nmi", func(doc map[string]any) { doc["custodian"] = "vault" })
+	route, err = charge.RoutePSP(ctx, custody, method(vaulted))
 	require.NoError(t, err)
 	require.Equal(t, psp, route)
 
-	_, err = w.pool.Exec(ctx, w.q(`INSERT INTO billing.psps (merchant_id, rail, environment, account_id, key, custodian_id) VALUES ($1, 'nmi', $2, $3, 'nmi-two', $4)`),
-		merchant, env, "e2e-"+uuid.NewString(), custodian)
-	require.NoError(t, err)
-	_, err = charge.RoutePSP(ctx, q, method(vaulted))
+	second := map[string]any{"rail": "nmi", "environment": "test", "account_id": "e2e-" + uuid.NewString(), "custodian": "vault",
+		"secrets": map[string]string{"security_key": "e2e-second-key"}}
+	w.editDoc("psps/nmi-two", func(doc map[string]any) { maps.Copy(doc, second) })
+	_, err = charge.RoutePSP(ctx, custody, method(vaulted))
 	require.ErrorIs(t, err, charge.ErrNoRoute, "two PSPs reach it: no single answer")
 }

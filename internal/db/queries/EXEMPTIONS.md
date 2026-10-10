@@ -109,8 +109,8 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 ## AUDIT_ALLOWLIST.txt
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
-`custodians`, `merchant_webhooks`, `catalog_meters`, default `catalog_rate_cards`,
-`merchant_secrets`, and the staff a merchant invited (`federated_grants`). Row
+`custodians`, `catalog_meters`, default `catalog_rate_cards`, and the staff a
+merchant invited (`federated_grants`). Row
 counts follow the merchant's own configuration, not customer activity, so
 listing them whole does not scale with records on file.
 
@@ -169,7 +169,8 @@ observes; the set is bounded by the merchant's catalog and PSPs.
 
 - *Deployment-wide or merchant-wide scans with no LIMIT* — the Solana converge
   scans, the reconciliation findings scans, `ListStuckProviderIntents`,
-  `ListInvoicePayers` and `ListChargeableOpenInvoices`.
+  `ListInvoicePayers`, `ListChargeableOpenInvoices` and
+  `ListInvoiceThresholdCandidates`.
 - *Unbounded fan-out* — `…ByPriceIDs`, `…ByPaymentMethodIDs`,
   `ListPaymentMethodsByRails` and `ListRecordedSubscriptionCharges`. The
   caller's list is bounded but each element's row set is not.

@@ -31,10 +31,11 @@ LIMIT sqlc.arg(merchant_limit)::int;
 -- has more overdue payers than the cap, the ones who have owed longest are the
 -- ones evaluated — truncation with a defensible order beats an unbounded pass.
 --
--- or#897: each row also carries the BOUND policy's delinquency overrides, so a
--- pass over N payers stays one query. money_settings.tier supplies the tier
--- rung, so the same most-specific-wins resolution the admission path runs is
--- available here without an N+1 per candidate.
+-- or#897: each row also carries its payer's billing policy's delinquency
+-- overrides, so a pass over N payers stays one query. policies is the
+-- merchant's settings, {policies: {name: body}, tiers: {tier: name}, default:
+-- name}; the payer's policy is its own assignment while the settings still
+-- declare it, else its tier's (money_settings.tier), else the default.
 SELECT i.customer_id,
        i.currency,
        MIN(i.due_at)::timestamptz AS overdue_started_at,
@@ -47,20 +48,19 @@ SELECT i.customer_id,
        COALESCE(pol.grace_days, -1)::int AS grace_days,
        COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
 FROM billing.invoices i
-LEFT JOIN LATERAL (
-    SELECT (p.policy ->> 'delinquency_grace_days')::int AS grace_days,
-           (p.policy ->> 'delinquency_amount_floor')::bigint AS amount_floor
-    FROM billing.billing_policy_bindings b
-    JOIN billing.billing_policies p
-      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-    LEFT JOIN billing.money_settings ms
-      ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
-    WHERE b.merchant_id = i.merchant_id
-      AND (b.customer_id = i.customer_id OR b.customer_id IS NULL)
-      AND (b.tier = ms.tier OR b.tier IS NULL)
-    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
-    LIMIT 1
-) pol ON true
+JOIN billing.customers c ON c.merchant_id = i.merchant_id AND c.id = i.customer_id
+LEFT JOIN billing.money_settings ms
+  ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
+CROSS JOIN LATERAL (
+    SELECT sqlc.arg(policies)::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN sqlc.arg(policies)::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        sqlc.arg(policies)::jsonb -> 'tiers' ->> ms.tier,
+        sqlc.arg(policies)::jsonb ->> 'default') AS body
+) bound
+CROSS JOIN LATERAL (
+    SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
+           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
+) pol
 WHERE i.merchant_id = sqlc.arg(merchant_id)
   AND i.status = 'open'
   AND i.amount_due > 0

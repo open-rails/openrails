@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"sort"
 	"testing"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -79,18 +78,7 @@ func newKV(t *testing.T, h http.HandlerFunc) *KVv2Adapter {
 	return NewKVv2Adapter(client, " /secret/ ")
 }
 
-func TestKVv2PathMapping(t *testing.T) {
-	a := NewKVv2Adapter(nil, "secret")
-	const rest = "openrails/merchants/m1/psps/solana/live/AKnL4NNf/private_key"
-	if a.rest("secret/"+rest) != rest || a.dataPath("secret/"+rest) != "secret/data/"+rest || a.metadataPath("secret/"+rest) != "secret/metadata/"+rest {
-		t.Fatalf("mapping: %q %q %q", a.rest("secret/"+rest), a.dataPath("secret/"+rest), a.metadataPath("secret/"+rest))
-	}
-	if a.BackendIdentity() != "" {
-		t.Fatal("nil client has no identity")
-	}
-}
-
-func TestKVv2ReadWriteDelete(t *testing.T) {
+func TestKVv2Documents(t *testing.T) {
 	var got []string
 	var body map[string]any
 	a := newKV(t, func(w http.ResponseWriter, r *http.Request) {
@@ -102,49 +90,58 @@ func TestKVv2ReadWriteDelete(t *testing.T) {
 		case r.URL.Path == "/v1/secret/data/m1/missing":
 			w.WriteHeader(404)
 			_, _ = w.Write([]byte(`{"errors":[]}`))
+		case r.URL.Path == "/v1/secret/data/m1/stale":
+			w.WriteHeader(400)
+			_, _ = w.Write([]byte(`{"errors":["check-and-set parameter did not match the current version"]}`))
+		case r.Method == http.MethodGet && r.URL.Query().Get("list") == "true":
+			_, _ = w.Write([]byte(`{"data":{"keys":["merchant","psps/"]}}`))
 		case r.Method == http.MethodGet:
-			_, _ = w.Write([]byte(`{"data":{"data":{"value":"s3cret","n":7},"metadata":{"version":3}}}`))
-		case r.Method == http.MethodPut:
+			_, _ = w.Write([]byte(`{"data":{"data":{"rail":"nmi"},"metadata":{"version":3,"created_time":"2026-10-09T10:00:00Z"}}}`))
+		case r.Method == http.MethodPut || r.Method == http.MethodPost:
 			body = nil
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			_, _ = w.Write([]byte(`{"data":{"version":4}}`))
+			_, _ = w.Write([]byte(`{"data":{"version":4,"created_time":"2026-10-09T10:01:00Z"}}`))
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(204)
 		}
 	})
 	ctx := context.Background()
 
-	data, version, err := a.ReadSecretVersion(ctx, "secret/m1/key", 3)
-	if err != nil || version != 3 || len(data) != 1 || data["value"] != "s3cret" {
-		t.Fatalf("read = %v %d %v (non-string values must be dropped)", data, version, err)
+	doc, err := a.ReadDocument(ctx, "m1/key")
+	if err != nil || !doc.Found || doc.Version != 3 || string(doc.Data) != `{"rail":"nmi"}` || doc.Updated.IsZero() {
+		t.Fatalf("read = %+v %v", doc, err)
 	}
-	if data, version, err := a.ReadSecret(ctx, "secret/m1/missing"); data != nil || version != 0 || err != nil {
-		t.Fatalf("absent must be (nil,0,nil), got %v %d %v", data, version, err)
+	if doc, err := a.ReadDocument(ctx, "m1/missing"); doc.Found || doc.Version != 0 || err != nil {
+		t.Fatalf("absent must be not found, got %+v %v", doc, err)
 	}
-	if _, _, err := a.ReadSecretVersion(ctx, "secret/m1/key", -1); err == nil {
-		t.Fatal("negative version must be refused")
+	written, err := a.WriteDocument(ctx, "m1/key", json.RawMessage(`{"rail":"nmi"}`), 3)
+	if err != nil || written.Version != 4 {
+		t.Fatalf("cas write = %+v %v", written, err)
 	}
-
-	if v, err := a.WriteSecretCAS(ctx, "secret/m1/key", map[string]string{"value": "x"}, 3); err != nil || v != 4 {
-		t.Fatalf("cas write = %d %v", v, err)
-	}
-	if opts, _ := body["options"].(map[string]any); opts["cas"] != float64(3) || body["data"].(map[string]any)["value"] != "x" {
+	if opts, _ := body["options"].(map[string]any); opts["cas"] != float64(3) || body["data"].(map[string]any)["rail"] != "nmi" {
 		t.Fatalf("cas body = %v", body)
 	}
-	if _, err := a.WriteSecret(ctx, "secret/m1/key", map[string]string{"value": "y"}); err != nil || body["options"] != nil {
-		t.Fatalf("plain write must not send options: %v %v", body, err)
+	if _, err := a.WriteDocument(ctx, "m1/stale", json.RawMessage(`{}`), 1); !errors.Is(err, ErrCASMismatch) {
+		t.Fatalf("a stale check-and-set must be ErrCASMismatch, got %v", err)
 	}
-	if _, err := a.WriteSecretCAS(ctx, "secret/m1/key", nil, -1); err == nil {
+	if _, err := a.WriteDocument(ctx, "m1/key", json.RawMessage(`[]`), 0); err == nil {
+		t.Fatal("a document must be an object")
+	}
+	if _, err := a.WriteDocument(ctx, "m1/key", json.RawMessage(`{}`), -1); err == nil {
 		t.Fatal("negative CAS version must be refused")
 	}
-	if err := a.DeleteSecret(ctx, "secret/m1/key"); err != nil {
+	if names, err := a.ListDocuments(ctx, "m1"); err != nil || fmt.Sprint(names) != "[merchant psps/]" {
+		t.Fatalf("list = %v %v", names, err)
+	}
+	if err := a.DeleteDocument(ctx, "m1/key"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"GET /v1/secret/data/m1/key?version=3",
+		"GET /v1/secret/data/m1/key?",
 		"GET /v1/secret/data/m1/missing?",
 		"PUT /v1/secret/data/m1/key?",
-		"PUT /v1/secret/data/m1/key?",
+		"PUT /v1/secret/data/m1/stale?",
+		"GET /v1/secret/metadata/m1?list=true",
 		"DELETE /v1/secret/metadata/m1/key?", // purges all versions
 	}
 	if fmt.Sprint(got) != fmt.Sprint(want) {
@@ -152,34 +149,7 @@ func TestKVv2ReadWriteDelete(t *testing.T) {
 	}
 }
 
-// KV-v2 LIST is one level; the store contract is full relative leaf names, and a
-// path may be both a leaf and a directory.
-func TestKVv2ListRecursesToLeaves(t *testing.T) {
-	tree := map[string]string{
-		"/v1/secret/metadata/m1":               `["psps/","webhook_secret"]`,
-		"/v1/secret/metadata/m1/psps":          `["nmi","nmi/"]`,
-		"/v1/secret/metadata/m1/psps/nmi":      `["live/"]`,
-		"/v1/secret/metadata/m1/psps/nmi/live": `["api_key"]`,
-	}
-	a := newKV(t, func(w http.ResponseWriter, r *http.Request) {
-		keys, ok := tree[r.URL.Path]
-		if r.URL.Query().Get("list") != "true" || !ok {
-			w.WriteHeader(404)
-			return
-		}
-		_, _ = fmt.Fprintf(w, `{"data":{"keys":%s}}`, keys)
-	})
-	names, err := a.ListSecrets(context.Background(), "secret/m1/")
-	if err != nil {
-		t.Fatal(err)
-	}
-	sort.Strings(names)
-	if fmt.Sprint(names) != "[psps/nmi psps/nmi/live/api_key webhook_secret]" {
-		t.Fatalf("names = %v", names)
-	}
-}
-
-// Credential errors are typed so callers fail closed and a wired supervisor
+// Backend errors are typed so callers fail closed and a wired supervisor
 // hears every failure (#751 task 5).
 func TestKVv2ErrorsAreTypedAndReported(t *testing.T) {
 	for _, tc := range []struct {
@@ -199,14 +169,14 @@ func TestKVv2ErrorsAreTypedAndReported(t *testing.T) {
 		var reported []error
 		a.onPermissionDenied = func(err error) { reported = append(reported, err) }
 		ctx := context.Background()
-		if _, _, err := a.ReadSecret(ctx, "secret/k"); !errors.Is(err, tc.want) {
+		if _, err := a.ReadDocument(ctx, "k"); !errors.Is(err, tc.want) {
 			t.Errorf("%d read: got %v want %v", tc.status, err, tc.want)
 		}
-		if _, err := a.WriteSecret(ctx, "secret/k", map[string]string{"v": "1"}); !errors.Is(err, tc.want) {
+		if _, err := a.WriteDocument(ctx, "k", json.RawMessage(`{"v":"1"}`), 0); !errors.Is(err, tc.want) {
 			t.Errorf("%d write: got %v want %v", tc.status, err, tc.want)
 		}
-		_ = a.DeleteSecret(ctx, "secret/k")
-		_, _ = a.ListSecrets(ctx, "secret")
+		_ = a.DeleteDocument(ctx, "k")
+		_, _ = a.ListDocuments(ctx, "")
 		if len(reported) != 4 || IsPermissionDenied(reported[0]) != (tc.status == 403) {
 			t.Errorf("%d: reported %v", tc.status, reported)
 		}

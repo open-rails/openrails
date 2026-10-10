@@ -155,15 +155,12 @@ SELECT coalesce((EXISTS (SELECT 1 FROM billing.customers WHERE merchant_id = $1:
 	OR EXISTS (SELECT 1 FROM billing.ledger_accounts WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.psps WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.custodians WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM billing.merchant_secrets WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.webhook_events WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.provider_intents WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.host_outbox WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM billing.merchant_webhooks WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.products WHERE merchant_id = $1::uuid)
 	OR EXISTS (SELECT 1 FROM billing.catalog_meters WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = $1::uuid)
-	OR EXISTS (SELECT 1 FROM billing.billing_policies WHERE merchant_id = $1::uuid)), false)::boolean AS used
+	OR EXISTS (SELECT 1 FROM billing.catalog_rate_cards WHERE merchant_id = $1::uuid)), false)::boolean AS used
 `
 
 // Retirement blockers: obligations, money history

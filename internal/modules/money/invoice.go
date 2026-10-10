@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/statement"
 	"github.com/open-rails/openrails/internal/retention"
@@ -730,10 +731,15 @@ func (s *MoneyService) FinalizeThresholdInvoices(ctx context.Context, cutoff tim
 	if len(opts) > 0 {
 		opt = opts[0]
 	}
+	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+	if err != nil {
+		return 0, err
+	}
 	rows, err := s.db.Gen(ctx).ListInvoiceThresholdCandidates(ctx, gen.ListInvoiceThresholdCandidatesParams{
 		MerchantID:   tid.UUID(),
 		Cutoff:       cutoff,
 		MinThreshold: opt.CollectionThresholdAmount,
+		Policies:     settings.PoliciesParam(),
 	})
 	if err != nil {
 		return 0, err

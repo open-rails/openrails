@@ -1,8 +1,10 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"maps"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -38,8 +40,21 @@ type MerchantDeclaration struct {
 	// configuration API reads and applies, validated the same way. Omitted
 	// fields keep their stored values; a declared list replaces the stored one.
 	Settings billing.MerchantSettings `yaml:"settings,omitempty"`
+	// AlertWebhooks are where the merchant's operational alerts are posted.
+	AlertWebhooks []AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
 	// Secrets are the merchant's own credentials.
 	Secrets MerchantSecrets `yaml:"secrets,omitempty"`
+}
+
+// AlertWebhookConfig is one destination for the merchant's operational
+// alerts. Its URL is a credential.
+type AlertWebhookConfig struct {
+	Name string `yaml:"name,omitempty"`
+	URL  string `yaml:"url"`
+	// Format is generic (the default), discord or slack.
+	Format string `yaml:"format,omitempty"`
+	// Enabled defaults to true.
+	Enabled *bool `yaml:"enabled,omitempty"`
 }
 
 // MerchantSecrets are a merchant's own credentials, kept out of version
@@ -145,7 +160,7 @@ type CustodianConfig struct {
 	// registry (internal/custodians): public_api_key, network_tokens.
 	Settings map[string]any `yaml:"settings,omitempty"`
 	// Secrets are the kind's credential slots (Basis Theory: api_key, the
-	// private application key). Stored under
+	// private application key), named in-process
 	// custodians/<kind>/<environment>/<account_id>/<key>.
 	Secrets map[string]string `yaml:"secrets,omitempty"`
 }
@@ -193,4 +208,45 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	}
 	m.Slug = billing.NormalizeMerchantSlug(f.Slug)
 	return m, nil
+}
+
+// ConfigurationFields names what m sets beyond its merchant's identity (slug,
+// api_host): what Vault holds when it is the source.
+func ConfigurationFields(m MerchantDeclaration) []string {
+	var out []string
+	if strings.TrimSpace(m.DisplayName) != "" {
+		out = append(out, "display_name")
+	}
+	if len(m.PSPs) > 0 {
+		out = append(out, "psps")
+	}
+	if len(m.Custodians) > 0 {
+		out = append(out, "custodians")
+	}
+	if !reflect.ValueOf(m.Settings).IsZero() {
+		out = append(out, "settings")
+	}
+	if len(m.AlertWebhooks) > 0 {
+		out = append(out, "alert_webhooks")
+	}
+	if strings.TrimSpace(m.Secrets.SCIMToken) != "" {
+		out = append(out, "secrets")
+	}
+	return out
+}
+
+// ErrDeclarationBesideVault refuses a file declaring merchant configuration
+// while Vault holds it.
+var ErrDeclarationBesideVault = errors.New("Vault holds merchant configuration (vault.kv_mount); a merchant declaration names only its slug and api_host")
+
+// RefuseDeclarationBesideVault refuses m when Vault is the source and m
+// declares configuration, naming its fields.
+func RefuseDeclarationBesideVault(cfg *Config, slug string, m MerchantDeclaration) error {
+	if MerchantConfigKVMount(cfg) == "" {
+		return nil
+	}
+	if fields := ConfigurationFields(m); len(fields) > 0 {
+		return fmt.Errorf("merchant %q declares %s: %w", slug, strings.Join(fields, ", "), ErrDeclarationBesideVault)
+	}
+	return nil
 }

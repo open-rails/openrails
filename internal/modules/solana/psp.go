@@ -2,18 +2,15 @@ package solana
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/jackc/pgx/v5"
-
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 )
 
 type activeSolanaPSP struct {
@@ -34,28 +31,19 @@ func resolveActiveSolanaPSP(ctx context.Context, database *db.DB, cfg *config.Co
 		environment = config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
 	}
 
-	var row gen.BillingPsp
-	if err := database.RunInMerchantConn(merchant.WithID(ctx, tid), func(ctx context.Context) error {
-		var qerr error
-		row, qerr = database.Gen(ctx).GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{
-			MerchantID:  tid.UUID(),
-			Rail:        string(models.RailSolana),
-			Environment: &environment,
-		})
-		return qerr
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return activeSolanaPSP{}, false, nil
-		}
+	scope, ok, err := merchants.Of(database).ActivePSPScope(ctx, tid, string(models.RailSolana), environment)
+	if errors.Is(err, merchants.ErrNoActivePSP) || (err == nil && !ok) {
+		return activeSolanaPSP{}, false, nil
+	}
+	if err != nil {
 		return activeSolanaPSP{}, false, fmt.Errorf("solana: load active PSP: %w", err)
 	}
-
-	accountID := strings.TrimSpace(row.AccountID)
+	accountID := strings.TrimSpace(scope.AccountID)
 	if accountID == "" {
 		return activeSolanaPSP{}, false, fmt.Errorf("solana: active PSP has empty account_id")
 	}
-	recipient := strings.TrimSpace(solanaPSPSettings(row.Settings)["recipient_wallet"])
-	if recipient == "" {
+	recipient := strings.TrimSpace(fmt.Sprint(scope.Settings["recipient_wallet"]))
+	if scope.Settings["recipient_wallet"] == nil || recipient == "" {
 		recipient = accountID
 	}
 	return activeSolanaPSP{AccountID: accountID, RecipientWallet: recipient}, true, nil
@@ -69,18 +57,4 @@ func ResolveRecipientWallet(ctx context.Context, database *db.DB, cfg *config.Co
 		return account.RecipientWallet, nil
 	}
 	return "", fmt.Errorf("merchant wallet not configured")
-}
-
-func solanaPSPSettings(raw []byte) map[string]string {
-	var settings map[string]any
-	if len(raw) == 0 || json.Unmarshal(raw, &settings) != nil || len(settings) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(settings))
-	for key, value := range settings {
-		if s := strings.TrimSpace(fmt.Sprint(value)); s != "" {
-			out[key] = s
-		}
-	}
-	return out
 }

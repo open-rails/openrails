@@ -43,7 +43,7 @@ type EmailService struct {
 }
 
 // NewEmailService renders billing email for sender; a nil sender sends none.
-// Sender info is merchant-scoped and loaded from merchant_configurations.
+// Sender info is merchant-scoped: the merchant document's profile.
 func NewEmailService(sender config.EmailSender, profileStore *merchantconfig.Store, clocks ...clockwork.Clock) *EmailService {
 	return &EmailService{mail: sender, profileStore: profileStore, clock: timeutil.FirstClock(clocks...)}
 }

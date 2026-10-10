@@ -226,10 +226,10 @@ AND (
 );
 
 -- name: GetCheckoutCaptureAccountsForShare :one
--- Recheck current authority after vendor metadata readback, inside only the
--- short local attachment transaction. Archive/reconfiguration serializes here.
+-- Recheck the PSP and custodian identities after vendor metadata readback,
+-- inside only the short local attachment transaction.
 SELECT sqlc.embed(p),sqlc.embed(c) FROM billing.psps p
-JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
+JOIN billing.custodians c ON c.merchant_id=p.merchant_id AND c.id=sqlc.arg(custodian_id)::uuid
 WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.id=sqlc.arg(psp_id)::uuid
 FOR SHARE OF p,c;
 

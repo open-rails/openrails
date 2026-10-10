@@ -4,8 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
-	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -18,10 +19,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 var (
@@ -29,8 +31,8 @@ var (
 	ErrPSPNotFound = apperr.New(http.StatusNotFound, "psp_not_found", "merchants: PSP not found")
 	// ErrPSPExists: the account is already a PSP, of this merchant or another.
 	ErrPSPExists = apperr.New(http.StatusConflict, "psp_exists", "merchants: the account is already a PSP")
-	// ErrPSPKeyTaken: another live PSP holds the key.
-	ErrPSPKeyTaken = apperr.New(http.StatusConflict, "psp_key_taken", "merchants: another live PSP holds this key")
+	// ErrPSPKeyTaken: another PSP holds the key.
+	ErrPSPKeyTaken = apperr.New(http.StatusConflict, "psp_key_taken", "merchants: another PSP holds this key")
 	// ErrPSPCredentialsRejected: the provider refused the credentials for this
 	// deployment's posture.
 	ErrPSPCredentialsRejected = apperr.New(http.StatusBadRequest, "psp_credentials_rejected", "the provider rejected the credentials")
@@ -38,6 +40,11 @@ var (
 	// credentials do not prove control of it (SEC-33). The operator declares
 	// such accounts instead.
 	ErrPSPClaimUnproven = apperr.New(http.StatusForbidden, "psp_claim_requires_proof", "provider account claims require credentials that prove control of the account, or operator declaration")
+	// ErrRevisionMismatch refuses an edit naming a revision the document has
+	// moved past.
+	ErrRevisionMismatch = apperr.New(http.StatusConflict, billing.CodeRevisionMismatch, "the configuration changed since the revision the request names; read it again")
+	// ErrConfigReadOnly refuses an edit of configuration read from a file.
+	ErrConfigReadOnly = apperr.New(http.StatusConflict, "merchant_config_read_only", "the merchant's configuration is read from a file; change the file")
 )
 
 // providerCredentialError types a provider-side credential rejection; any
@@ -58,19 +65,6 @@ type LastActivePSPError struct {
 func (e *LastActivePSPError) Error() string {
 	return fmt.Sprintf("merchants: PSP %s is the only active PSP on its rail; pass allow_last to archive it and refuse new checkout on the rail", e.PSP)
 }
-
-// pspPublication is one write of a PSP's settings and credentials.
-type pspPublication struct {
-	OperationID      uuid.UUID
-	ExpectedRevision int64
-	// Key names a PSP being created; an existing PSP keeps its key.
-	Key                  string
-	Settings             map[string]any
-	Credentials          map[string]string
-	RetireWebhookOverlap bool
-}
-
-var pspKeyShape = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,62}$`)
 
 // pspSettingKeys are the settings a PSP on rail takes through the API.
 func pspSettingKeys(rail string) []string {
@@ -109,20 +103,19 @@ func RailDefinitions() []billing.RailDefinition {
 // ListPSPs returns one page of the merchant's PSPs in the deployment's
 // environment, newest first. Credential values are never returned.
 func (s *Service) ListPSPs(ctx context.Context, id billing.MerchantID, params billing.PSPListParams) (billing.ListPage[billing.PSP], error) {
-	if s == nil || s.pool == nil {
-		return billing.ListPage[billing.PSP]{}, errors.New("merchants: pgx pool is required")
+	j, err := s.load(ctx, id)
+	if err != nil {
+		return billing.ListPage[billing.PSP]{}, err
 	}
+	var selected []PSPScope
 	if params.IDs != nil {
-		var rows []gen.BillingPsp
-		err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-			var err error
-			rows, err = gen.New(tx).ListPSPsByIDs(ctx, gen.ListPSPsByIDsParams{MerchantID: id.UUID(), Ids: uuidutil.Of(params.IDs)})
-			return err
-		})
-		if err != nil {
-			return billing.ListPage[billing.PSP]{}, err
+		for _, want := range params.IDs {
+			if p, ok := j.byID(want.UUID()); ok && !slices.ContainsFunc(selected, func(q PSPScope) bool { return q.ID == p.ID }) {
+				selected = append(selected, p)
+			}
 		}
-		return s.pspPage(ctx, id, billing.ListPage[gen.BillingPsp]{Items: rows})
+		slices.SortFunc(selected, newestFirst)
+		return s.pspPage(ctx, id, billing.ListPage[PSPScope]{Items: selected})
 	}
 	limit, err := pagination.Limit(params.PageRequest)
 	if err != nil {
@@ -132,90 +125,84 @@ func (s *Service) ListPSPs(ctx context.Context, id billing.MerchantID, params bi
 	if err != nil {
 		return billing.ListPage[billing.PSP]{}, err
 	}
-	var rail *string
+	rail := ""
 	if params.Rail != "" {
-		normalized := normalizeProviderSecretType(string(params.Rail))
-		if !supportedRail(normalized) {
+		rail = normalizeProviderSecretType(string(params.Rail))
+		if !supportedRail(rail) {
 			return billing.ListPage[billing.PSP]{}, apperr.Invalidf("unknown rail %q", params.Rail).WithParam("rail")
 		}
-		rail = &normalized
 	}
-	var rows []gen.BillingPsp
-	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		rows, err = gen.New(tx).ListPSPs(ctx, gen.ListPSPsParams{
-			MerchantID: id.UUID(), Environment: s.providerEnvironment, Rail: rail, Archived: params.Archived,
-			AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
-		})
-		return err
-	})
-	if err != nil {
-		return billing.ListPage[billing.PSP]{}, err
+	for _, p := range slices.Backward(j.psps) {
+		if p.Environment != s.providerEnvironment || (rail != "" && p.Rail != rail) || (params.Archived != nil && p.Archived != *params.Archived) {
+			continue
+		}
+		if afterAt != nil && afterID != nil && !(p.CreatedAt.Before(*afterAt) || p.CreatedAt.Equal(*afterAt) && strings.Compare(p.ID.String(), afterID.String()) < 0) {
+			continue
+		}
+		selected = append(selected, p)
 	}
-	return s.pspPage(ctx, id, pagination.Cut(rows, limit, func(row gen.BillingPsp) any {
-		return pagination.TimeID{At: row.CreatedAt, ID: row.ID}
+	slices.SortFunc(selected, newestFirst)
+	if fetch := int(pagination.Fetch(limit)); len(selected) > fetch {
+		selected = selected[:fetch]
+	}
+	return s.pspPage(ctx, id, pagination.Cut(selected, limit, func(p PSPScope) any {
+		return pagination.TimeID{At: p.CreatedAt, ID: p.ID}
 	}))
 }
 
-// pspPage answers a page of PSP rows with their open obligations.
-func (s *Service) pspPage(ctx context.Context, id billing.MerchantID, page billing.ListPage[gen.BillingPsp]) (billing.ListPage[billing.PSP], error) {
-	out := billing.ListPage[billing.PSP]{Items: make([]billing.PSP, 0, len(page.Items)), Next: page.Next}
+func newestFirst(a, b PSPScope) int {
+	if c := b.CreatedAt.Compare(a.CreatedAt); c != 0 {
+		return c
+	}
+	return strings.Compare(b.ID.String(), a.ID.String())
+}
+
+// pspPage answers a page of PSPs with their open obligations.
+func (s *Service) pspPage(ctx context.Context, id billing.MerchantID, page billing.ListPage[PSPScope]) (billing.ListPage[billing.PSP], error) {
 	ids := make([]uuid.UUID, 0, len(page.Items))
-	for _, row := range page.Items {
-		ids = append(ids, row.ID)
+	for _, p := range page.Items {
+		ids = append(ids, p.ID)
 	}
 	obligations, err := s.pspOpenObligations(ctx, id, ids)
 	if err != nil {
 		return billing.ListPage[billing.PSP]{}, err
 	}
-	for _, row := range page.Items {
-		psp, err := s.pspFromRow(ctx, id, row, obligations[row.ID])
-		if err != nil {
-			return billing.ListPage[billing.PSP]{}, err
-		}
-		out.Items = append(out.Items, psp)
+	out := billing.ListPage[billing.PSP]{Items: make([]billing.PSP, 0, len(page.Items)), Next: page.Next}
+	for _, p := range page.Items {
+		out.Items = append(out.Items, pspView(p, obligations[p.ID]))
 	}
 	return out, nil
 }
 
 // GetPSP reads one PSP.
 func (s *Service) GetPSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID) (billing.PSP, error) {
-	row, err := s.pspRow(ctx, id, pspID)
+	if pspID.IsZero() {
+		return billing.PSP{}, ErrPSPNotFound
+	}
+	scope, ok, err := s.PSPScopeByID(ctx, id, pspID.UUID())
 	if err != nil {
 		return billing.PSP{}, err
 	}
-	return s.pspWithObligations(ctx, id, row)
+	if !ok {
+		return billing.PSP{}, ErrPSPNotFound
+	}
+	return s.pspWithObligations(ctx, id, scope)
 }
 
-func (s *Service) pspRow(ctx context.Context, id billing.MerchantID, pspID billing.PSPID) (gen.BillingPsp, error) {
-	if s == nil || s.pool == nil {
-		return gen.BillingPsp{}, errors.New("merchants: pgx pool is required")
-	}
-	if pspID.IsZero() {
-		return gen.BillingPsp{}, ErrPSPNotFound
-	}
-	var row gen.BillingPsp
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).GetPSP(ctx, gen.GetPSPParams{MerchantID: id.UUID(), ID: pspID.UUID()})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return gen.BillingPsp{}, ErrPSPNotFound
-	}
-	return row, err
-}
-
-// CreatePSP arms a new PSP: credentials are checked with the provider first,
-// then stored. A merchant's first claim of an account must prove control of
-// it through a successful credential check.
+// CreatePSP arms a new PSP in the merchant's configuration. Its credentials
+// are checked with the provider first, and a merchant's first claim of an
+// account must prove control of it. A create repeated after it took effect
+// returns the PSP it made.
 func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req billing.CreatePSPParams) (billing.PSP, error) {
+	if !s.config.Writable() {
+		return billing.PSP{}, ErrConfigReadOnly
+	}
 	rail := normalizeProviderSecretType(string(req.Rail))
 	if !supportedRail(rail) {
 		return billing.PSP{}, apperr.Invalidf("unknown rail %q", req.Rail).WithParam("rail")
 	}
 	key := strings.ToLower(strings.TrimSpace(req.Key))
-	if !pspKeyShape.MatchString(key) {
+	if !merchantdocs.KeyShape.MatchString(key) {
 		return billing.PSP{}, apperr.Invalidf("key must be 1-63 lowercase letters, digits, - or _").WithParam("key")
 	}
 	accountID := strings.TrimSpace(req.AccountID)
@@ -225,140 +212,321 @@ func (s *Service) CreatePSP(ctx context.Context, id billing.MerchantID, req bill
 	if err := config.ValidateRailAccountID(models.Rail(rail), accountID); err != nil {
 		return billing.PSP{}, apperr.Invalidf("%v", err).WithParam("account_id")
 	}
-	return s.writePSP(ctx, id, rail, accountID, nil, pspPublication{
-		OperationID: req.OperationID, Key: key, Settings: req.Settings, Credentials: req.Credentials,
-	})
-}
-
-// UpdatePSP changes a PSP's settings or rotates its credentials. New
-// credentials are checked with the provider before anything is stored; the
-// old ones keep serving until the new ones are published.
-func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID, req billing.UpdatePSPParams) (billing.PSP, error) {
-	switch {
-	case req.Archived && (len(req.Settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap):
-		return billing.PSP{}, apperr.Invalidf("archived is a request of its own").WithParam("archived")
-	case req.Archived:
-		return s.archivePSP(ctx, id, pspID, req.AllowLast)
-	case req.AllowLast:
-		return billing.PSP{}, apperr.Invalidf("allow_last goes with archived").WithParam("allow_last")
-	}
-	row, err := s.pspRow(ctx, id, pspID)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	return s.writePSP(ctx, id, row.Rail, row.AccountID, &row, pspPublication{
-		OperationID: req.OperationID, ExpectedRevision: req.ExpectedRevision, Settings: req.Settings,
-		Credentials: req.Credentials, RetireWebhookOverlap: req.RetireWebhookOverlap,
-	})
-}
-
-// writePSP validates and publishes one PSP write. existing is nil for a
-// create.
-func (s *Service) writePSP(ctx context.Context, id billing.MerchantID, rail, accountID string, existing *gen.BillingPsp, req pspPublication) (billing.PSP, error) {
-	if s == nil || s.pool == nil || s.secrets == nil {
-		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
-	}
-	if req.OperationID == uuid.Nil {
-		return billing.PSP{}, apperr.Invalidf("operation_id is required").WithParam("operation_id")
-	}
-	if req.ExpectedRevision < 0 {
-		return billing.PSP{}, apperr.Invalidf("expected_revision must not be negative").WithParam("expected_revision")
-	}
 	if err := validatePSPSettings(rail, req.Settings, req.Credentials); err != nil {
 		return billing.PSP{}, err
 	}
-	environment := s.providerEnvironment // derived from test_mode (#681/#882)
-	if receipt, completed, err := s.replayProviderCredentialPublication(ctx, id, rail, environment, accountID, req); err != nil {
-		return billing.PSP{}, err
-	} else if completed {
-		return s.pspWithObligations(ctx, id, receipt)
-	}
-	if len(req.Credentials) > 0 && !CanStageCredentials(s.secrets) {
-		return billing.PSP{}, apperr.New(http.StatusMethodNotAllowed, "credential_source_read_only", "provider credential source has no writable durable custody")
-	}
-	if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		if _, err := q.LockLiveMerchantForSecretWrite(ctx, id.UUID()); err != nil {
-			return err
-		}
-		if err := AssertPSPUnowned(ctx, q, id.UUID(), rail, environment, accountID); err != nil {
-			return err
-		}
-		row, err := q.GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: accountID})
-		switch {
-		case errors.Is(err, pgx.ErrNoRows):
-			if existing != nil {
-				return ErrPSPNotFound
-			}
-			if _, err := q.GetActivePSPByKey(ctx, gen.GetActivePSPByKeyParams{MerchantID: id.UUID(), Key: req.Key, Environment: environment}); err == nil {
-				return ErrPSPKeyTaken
-			} else if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			return nil
-		case err != nil:
-			return err
-		case existing == nil:
-			return ErrPSPExists
-		}
-		if custody := credentialState(row).Custody; custody != "" && custody != SecretCustodyIdentity(s.secrets) {
-			return ErrCredentialCustodyTransitionRequired
-		}
-		return nil
-	}); err != nil {
-		return billing.PSP{}, err
-	}
-	if err := s.refuseLiveNMIUnderTestMode(ctx, id, rail, environment, accountID, req.Credentials); err != nil {
-		return billing.PSP{}, err
-	}
-
-	// secretNames maps the scoped secret NAME to its value; secretKeys maps the
-	// same name back to the normalized credential KEY, which is what the
-	// version floor on the PSP row is recorded under.
-	secretNames := make(map[string]string, len(req.Credentials))
-	secretKeys := make(map[string]string, len(req.Credentials))
-	probeCredentials := make(map[string]string, len(req.Credentials))
-	for key, value := range req.Credentials {
-		normalizedKey, err := NormalizePSPSecretKey(rail, key)
-		if err != nil {
-			return billing.PSP{}, err
-		}
-		name, err := PSPSecretName(rail, environment, accountID, key)
-		if err != nil {
-			return billing.PSP{}, err
-		}
-		if rail == "stripe" && normalizedKey == "secret_key" {
-			if err := validateSecretValueLocal(name, value); err != nil {
-				return billing.PSP{}, err
-			}
-		} else if err := s.ValidateCredential(ctx, id, name, value, nil); err != nil {
-			return billing.PSP{}, err
-		}
-		secretNames[name] = value
-		secretKeys[name] = normalizedKey
-		probeCredentials[normalizedKey] = value
-	}
-	// ROTATION ORDER (or#812). The live probe runs FIRST and on the credentials
-	// SUPPLIED IN THIS REQUEST, so a bad new credential fails here — before any
-	// secret is written and before any version floor moves. The old credential
-	// stays exactly as it was and keeps serving on every node.
-	probed, err := s.probePaymentProviderCredentials(ctx, id, rail, environment, accountID, probeCredentials)
+	credentials, err := s.normalizeCredentials(ctx, rail, req.Credentials)
 	if err != nil {
 		return billing.PSP{}, err
 	}
-	if existing == nil && !probed && claimNeedsProof(rail) {
+	if _, supplied := credentials["webhook_signing_secret_previous"]; supplied {
+		return billing.PSP{}, apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied").WithParam("credentials")
+	}
+	doc := merchantdocs.PSP{Rail: rail, Environment: s.providerEnvironment, AccountID: accountID, Settings: mergeSettings(nil, req.Settings), Secrets: credentials}
+	set, err := s.config.Get(ctx, id)
+	if err != nil {
+		return billing.PSP{}, err
+	}
+	if existing, ok := set.PSPs[key]; ok {
+		if !samePSP(existing.Value, doc) {
+			return billing.PSP{}, ErrPSPKeyTaken
+		}
+		return s.pspByKey(ctx, id, key)
+	}
+	// An identity this merchant declared under the same key (imported
+	// history) is armed by its document; any other owner refuses.
+	if owner, found, err := s.ResolvePSPByIdentity(ctx, rail, s.providerEnvironment, accountID); err != nil {
+		return billing.PSP{}, err
+	} else if found {
+		row, ok, err := s.pspRowByID(ctx, id, owner.ID)
+		if err != nil {
+			return billing.PSP{}, err
+		}
+		if owner.MerchantID != id || !ok || !strings.EqualFold(row.Key, key) {
+			return billing.PSP{}, fmt.Errorf("PSP %s:%s: %w", rail, accountID, ErrPSPExists)
+		}
+	}
+	if err := s.refuseLiveNMIUnderTestMode(ctx, id, doc); err != nil {
+		return billing.PSP{}, err
+	}
+	probed, err := s.probePaymentProviderCredentials(ctx, id, doc)
+	if err != nil {
+		return billing.PSP{}, err
+	}
+	if !probed && claimNeedsProof(rail) {
 		return billing.PSP{}, ErrPSPClaimUnproven
 	}
-	var validatedAt *time.Time
-	if probed {
-		now := time.Now().UTC()
-		validatedAt = &now
+	set, err = s.config.PutPSP(ctx, id, key, doc, 0)
+	if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
+		return billing.PSP{}, ErrPSPKeyTaken
 	}
-	row, err := s.publishProviderCredentials(ctx, id, rail, environment, accountID, req, secretNames, secretKeys, probed, validatedAt, webhookPublication{RetireWebhookOverlap: req.RetireWebhookOverlap})
 	if err != nil {
 		return billing.PSP{}, err
 	}
-	return s.pspWithObligations(ctx, id, row)
+	if why, rejected := set.Rejected[merchantdocs.PSPDoc(key)]; rejected {
+		return billing.PSP{}, apperr.Invalidf("the PSP was written but is not served: %s", why)
+	}
+	return s.afterWrite(ctx, id, key, probed, false)
+}
+
+// samePSP reports whether a create repeats the document already held.
+func samePSP(a, b merchantdocs.PSP) bool {
+	return a.Rail == b.Rail && a.Environment == b.Environment && a.AccountID == b.AccountID && !a.Archived &&
+		maps.Equal(a.Secrets, b.Secrets) && fmt.Sprint(a.Settings) == fmt.Sprint(b.Settings)
+}
+
+// UpdatePSP changes a PSP's settings, rotates its credentials (checked with
+// the provider before anything is written) or archives it. With an expected
+// revision a PSP changed since is refused; without one the change merges onto
+// the latest revision.
+func (s *Service) UpdatePSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID, req billing.UpdatePSPParams) (billing.PSP, error) {
+	if !s.config.Writable() {
+		return billing.PSP{}, ErrConfigReadOnly
+	}
+	if req.ExpectedRevision != nil && *req.ExpectedRevision < 0 {
+		return billing.PSP{}, apperr.Invalidf("expected_revision must not be negative").WithParam("expected_revision")
+	}
+	if req.Archived && (len(req.Settings) > 0 || len(req.Credentials) > 0 || req.RetireWebhookOverlap) {
+		return billing.PSP{}, apperr.Invalidf("archived goes alone in its request").WithParam("archived")
+	}
+	for attempt := 0; ; attempt++ {
+		j, err := s.load(ctx, id)
+		if err != nil {
+			return billing.PSP{}, err
+		}
+		scope, ok := j.byID(pspID.UUID())
+		if !ok {
+			return billing.PSP{}, ErrPSPNotFound
+		}
+		held, ok := j.set.PSPs[strings.ToLower(scope.Key)]
+		if !ok || scope.Revision == 0 || held.Revision != scope.Revision {
+			// No document names this identity: it is superseded or was
+			// removed, and drains.
+			return billing.PSP{}, ErrPSPNotFound
+		}
+		if req.ExpectedRevision != nil && *req.ExpectedRevision != held.Revision {
+			return billing.PSP{}, RevisionMismatch("the PSP", *req.ExpectedRevision, held.Revision)
+		}
+		next := clonePSP(held.Value)
+		probed, rotated := false, false
+		if req.Archived {
+			if next.Archived {
+				return s.pspWithObligations(ctx, id, scope)
+			}
+			if len(j.live(scope.Rail, scope.Environment)) <= 1 && !req.AllowLast {
+				return billing.PSP{}, &LastActivePSPError{PSP: billing.PSPID(scope.ID)}
+			}
+			next.Archived = true
+		} else {
+			if next.Archived {
+				return billing.PSP{}, apperr.Invalidf("an archived PSP is never restored")
+			}
+			if err := validatePSPSettings(scope.Rail, req.Settings, req.Credentials); err != nil {
+				return billing.PSP{}, err
+			}
+			credentials, err := s.normalizeCredentials(ctx, scope.Rail, req.Credentials)
+			if err != nil {
+				return billing.PSP{}, err
+			}
+			if rotated, err = s.applyCredentials(&next, credentials, req.RetireWebhookOverlap); err != nil {
+				return billing.PSP{}, err
+			}
+			next.Settings = mergeSettings(next.Settings, req.Settings)
+			if len(credentials) > 0 {
+				if err := s.refuseLiveNMIUnderTestMode(ctx, id, next); err != nil {
+					return billing.PSP{}, err
+				}
+				if probed, err = s.probePaymentProviderCredentials(ctx, id, next); err != nil {
+					return billing.PSP{}, err
+				}
+			}
+		}
+		_, err = s.config.PutPSP(ctx, id, scope.Key, next, held.Revision)
+		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
+			if req.ExpectedRevision != nil || attempt >= 2 {
+				return billing.PSP{}, ErrRevisionMismatch
+			}
+			continue
+		}
+		if err != nil {
+			return billing.PSP{}, err
+		}
+		return s.afterWrite(ctx, id, scope.Key, probed, rotated)
+	}
+}
+
+// applyCredentials writes rotated credentials into p. A changed webhook
+// signing secret keeps the outgoing one verifying for a bounded overlap
+// (SEC-29) unless retire ends it at once.
+func (s *Service) applyCredentials(p *merchantdocs.PSP, credentials map[string]string, retire bool) (bool, error) {
+	if _, supplied := credentials["webhook_signing_secret_previous"]; supplied {
+		return false, apperr.Invalidf("webhook_signing_secret_previous is retained by rotation and cannot be supplied").WithParam("credentials")
+	}
+	if p.Secrets == nil {
+		p.Secrets = map[string]string{}
+	}
+	if p.Settings == nil {
+		p.Settings = map[string]any{}
+	}
+	rotated := false
+	if next, ok := credentials["webhook_signing_secret"]; ok && hasWebhookOverlap(p.Rail) {
+		current := strings.TrimSpace(p.Secrets["webhook_signing_secret"])
+		if current != "" && current != next {
+			rotated = true
+			if !retire {
+				p.Secrets["webhook_signing_secret_previous"] = current
+				p.Settings[WebhookOverlapExpiresKey] = s.now().Add(s.overlapWindow()).Format(time.RFC3339)
+			}
+		}
+	}
+	if retire {
+		delete(p.Secrets, "webhook_signing_secret_previous")
+		delete(p.Settings, WebhookOverlapExpiresKey)
+	}
+	maps.Copy(p.Secrets, credentials)
+	return rotated, nil
+}
+
+// afterWrite records what a write proved and answers the PSP as written.
+func (s *Service) afterWrite(ctx context.Context, id billing.MerchantID, key string, probed, rotatedWebhook bool) (billing.PSP, error) {
+	scope, err := s.pspScopeByKeyAny(ctx, id, key)
+	if err != nil {
+		return billing.PSP{}, err
+	}
+	if probed || rotatedWebhook {
+		if err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+			q := s.database.Gen(ctx)
+			if probed {
+				now := s.now()
+				if err := q.SetPSPCredentialsValidated(ctx, gen.SetPSPCredentialsValidatedParams{MerchantID: id.UUID(), ID: scope.ID, ValidatedAt: &now}); err != nil {
+					return err
+				}
+				scope.ValidatedAt = &now
+			}
+			if rotatedWebhook {
+				// A supplied signing key carries no proof the managed provider
+				// endpoint uses it; only a managed rollover binds one.
+				scope.WebhookEndpointID = ""
+				return q.SetPSPWebhookEndpoint(ctx, gen.SetPSPWebhookEndpointParams{MerchantID: id.UUID(), ID: scope.ID})
+			}
+			return nil
+		}); err != nil {
+			return billing.PSP{}, err
+		}
+	}
+	return s.pspWithObligations(ctx, id, scope)
+}
+
+// pspRowByID reads one PSP identity row.
+func (s *Service) pspRowByID(ctx context.Context, id billing.MerchantID, pspID uuid.UUID) (gen.BillingPsp, bool, error) {
+	var row gen.BillingPsp
+	err := s.database.RunInMerchantConn(merchant.WithID(ctx, id), func(ctx context.Context) error {
+		var err error
+		row, err = s.database.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: id.UUID(), ID: pspID})
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return gen.BillingPsp{}, false, nil
+	}
+	return row, err == nil, err
+}
+
+func (s *Service) pspByKey(ctx context.Context, id billing.MerchantID, key string) (billing.PSP, error) {
+	scope, err := s.pspScopeByKeyAny(ctx, id, key)
+	if err != nil {
+		return billing.PSP{}, err
+	}
+	return s.pspWithObligations(ctx, id, scope)
+}
+
+// pspScopeByKeyAny is the PSP its document's key currently names, archived or
+// not.
+func (s *Service) pspScopeByKeyAny(ctx context.Context, id billing.MerchantID, key string) (PSPScope, error) {
+	j, err := s.load(ctx, id)
+	if err != nil {
+		return PSPScope{}, err
+	}
+	held, ok := j.set.PSPs[key]
+	if !ok {
+		return PSPScope{}, ErrPSPNotFound
+	}
+	for _, p := range j.psps {
+		if strings.EqualFold(p.Key, key) && p.Revision == held.Revision && p.Revision != 0 {
+			return p, nil
+		}
+	}
+	return PSPScope{}, ErrPSPNotFound
+}
+
+// RevisionMismatch refuses an edit naming a revision obj moved past;
+// metadata.revision is the current one.
+func RevisionMismatch(obj string, expected, current int64) error {
+	return apperr.New(http.StatusConflict, billing.CodeRevisionMismatch, fmt.Sprintf("%s is at revision %d, not %d: it changed since it was read", obj, current, expected)).
+		WithMetadata(map[string]any{"revision": current})
+}
+
+// SetPSPAccount points the PSP document under key at another account: the
+// Solana signer identity an operator approved. A file is not written; its
+// declaration derives the account itself.
+func (s *Service) SetPSPAccount(ctx context.Context, id billing.MerchantID, key, account string) error {
+	if !s.config.Writable() {
+		return nil
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	for attempt := 0; ; attempt++ {
+		set, err := s.config.Reload(ctx, id)
+		if err != nil {
+			return err
+		}
+		doc, ok := set.PSPs[key]
+		if !ok {
+			return ErrPSPNotFound
+		}
+		if doc.Value.AccountID == account {
+			return nil
+		}
+		next := clonePSP(doc.Value)
+		next.AccountID = account
+		_, err = s.config.PutPSP(ctx, id, key, next, doc.Revision)
+		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
+			if attempt >= 2 {
+				return ErrRevisionMismatch
+			}
+			continue
+		}
+		return err
+	}
+}
+
+func clonePSP(p merchantdocs.PSP) merchantdocs.PSP {
+	p.Settings = maps.Clone(p.Settings)
+	p.Secrets = maps.Clone(p.Secrets)
+	if p.Signer != nil {
+		signer := *p.Signer
+		p.Signer = &signer
+	}
+	return p
+}
+
+// normalizeCredentials canonicalizes supplied credential keys against the
+// rail's registry, refusing operator-only slots and malformed values.
+func (s *Service) normalizeCredentials(ctx context.Context, rail string, in map[string]string) (map[string]string, error) {
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		normalized, err := NormalizePSPSecretKey(rail, key)
+		if err != nil {
+			return nil, err
+		}
+		if k, ok := rails.CredentialKeyFor(models.Rail(rail), normalized); !ok || !k.MerchantWritable {
+			return nil, apperr.Invalidf("credential %q is set by the operator, not over the API", normalized).WithParam("credentials")
+		}
+		value = strings.TrimSpace(value)
+		if err := validateCredentialValue(rail, normalized, value); err != nil {
+			return nil, apperr.Invalidf("credential %q: %v", normalized, err).WithParam("credentials")
+		}
+		out[normalized] = value
+	}
+	return out, nil
 }
 
 // claimNeedsProof lists rails whose inbound events route by account id.
@@ -371,11 +539,7 @@ func claimNeedsProof(rail string) bool {
 func validatePSPSettings(rail string, settings map[string]any, credentials map[string]string) error {
 	allowed := pspSettingKeys(rail)
 	for key, raw := range settings {
-		known := false
-		for _, candidate := range allowed {
-			known = known || candidate == key
-		}
-		if !known {
+		if !slices.Contains(allowed, key) {
 			return apperr.Invalidf("%s takes no setting %q", rail, key).WithParam("settings")
 		}
 		if raw == nil {
@@ -401,9 +565,7 @@ func validatePSPSettings(rail string, settings map[string]any, credentials map[s
 // empty value removes the key.
 func mergeSettings(stored map[string]any, write map[string]any) map[string]any {
 	out := make(map[string]any, len(stored)+len(write))
-	for key, value := range stored {
-		out[key] = value
-	}
+	maps.Copy(out, stored)
 	for key, value := range write {
 		if text, ok := value.(string); value == nil || (ok && strings.TrimSpace(text) == "") {
 			delete(out, key)
@@ -411,76 +573,18 @@ func mergeSettings(stored map[string]any, write map[string]any) map[string]any {
 		}
 		out[key] = value
 	}
+	if len(out) == 0 {
+		return nil
+	}
 	return out
 }
 
-// mapPSPWriteError reads a unique violation of the live-key index as the
-// key's refusal.
-func mapPSPWriteError(err error) error {
-	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "psps_live_key_key" {
-		return ErrPSPKeyTaken
-	}
-	return err
-}
-
-// archivePSP archives one PSP (#655/#656). It never contacts the provider — a
-// terminated or dark account must still be archivable — and never touches the
-// stored credentials, so existing obligations and inbound webhooks keep
-// draining. Archiving an archived PSP returns it unchanged. The only active
-// PSP on its rail is refused unless allowLast.
-func (s *Service) archivePSP(ctx context.Context, id billing.MerchantID, pspID billing.PSPID, allowLast bool) (billing.PSP, error) {
-	if s == nil || s.pool == nil {
-		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
-	}
-	target, err := s.pspRow(ctx, id, pspID)
+func (s *Service) pspWithObligations(ctx context.Context, id billing.MerchantID, scope PSPScope) (billing.PSP, error) {
+	obligations, err := s.pspOpenObligations(ctx, id, []uuid.UUID{scope.ID})
 	if err != nil {
 		return billing.PSP{}, err
 	}
-	var out gen.BillingPsp
-	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		// One lock order over the rail's rows, so two concurrent archives
-		// cannot each see the other as the remaining active PSP.
-		rows, err := q.LockPSPsForRailEnvironment(ctx, gen.LockPSPsForRailEnvironmentParams{MerchantID: id.UUID(), Rail: target.Rail, Environment: target.Environment})
-		if err != nil {
-			return err
-		}
-		var current *gen.BillingPsp
-		otherActive := 0
-		for i := range rows {
-			switch {
-			case rows[i].ID == target.ID:
-				current = &rows[i]
-			case !rows[i].Archived:
-				otherActive++
-			}
-		}
-		if current == nil {
-			return ErrPSPNotFound
-		}
-		if current.Archived {
-			out = *current
-			return nil
-		}
-		if otherActive == 0 && !allowLast {
-			return &LastActivePSPError{PSP: billing.PSPID(current.ID)}
-		}
-		out, err = q.ArchivePSP(ctx, gen.ArchivePSPParams{ID: current.ID, MerchantID: id.UUID()})
-		return err
-	})
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	return s.pspWithObligations(ctx, id, out)
-}
-
-func (s *Service) pspWithObligations(ctx context.Context, id billing.MerchantID, row gen.BillingPsp) (billing.PSP, error) {
-	obligations, err := s.pspOpenObligations(ctx, id, []uuid.UUID{row.ID})
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	return s.pspFromRow(ctx, id, row, obligations[row.ID])
+	return pspView(scope, obligations[scope.ID]), nil
 }
 
 func (s *Service) pspOpenObligations(ctx context.Context, id billing.MerchantID, pspIDs []uuid.UUID) (map[uuid.UUID]int64, error) {
@@ -498,55 +602,45 @@ func (s *Service) pspOpenObligations(ctx context.Context, id billing.MerchantID,
 	return out, err
 }
 
-func (s *Service) pspFromRow(ctx context.Context, id billing.MerchantID, row gen.BillingPsp, openObligations int64) (billing.PSP, error) {
-	statuses, err := s.pspCredentialStatuses(ctx, id, row)
-	if err != nil {
-		return billing.PSP{}, err
-	}
-	return pspView(row, statuses, openObligations), nil
-}
-
-// pspView is the API view of a PSP row: credential slots by state, never by
+// pspView is the API view of a PSP: credential slots by state, never by
 // value.
-func pspView(row gen.BillingPsp, statuses []MerchantSecretStatus, openObligations int64) billing.PSP {
-	state := credentialState(row)
+func pspView(scope PSPScope, openObligations int64) billing.PSP {
 	configured := map[string]struct{}{}
-	for _, status := range statuses {
-		if status.Configured {
-			configured[status.Key] = struct{}{}
+	for _, key := range pspCredentialKeys(scope.Rail) {
+		if scope.HasSecret(key) {
+			configured[key] = struct{}{}
 		}
 	}
-	validatedAt := state.ValidatedAt
-	if !pspValidationCredentialsConfigured(row.Rail, configured) {
+	validatedAt := scope.ValidatedAt
+	if !pspValidationCredentialsConfigured(scope.Rail, configured) {
 		validatedAt = nil
 	}
 	credentials := make(map[string]billing.PSPCredential)
-	for _, key := range pspCredentialKeys(row.Rail) {
+	for _, key := range pspCredentialKeys(scope.Rail) {
 		_, ok := configured[key]
-		credential := billing.PSPCredential{RotationVersion: state.Versions[NormalizeCredentialVersionKey(key)], Configured: ok}
+		credential := billing.PSPCredential{Configured: ok}
 		if ok {
-			credential.ValidatedAt = credentialValidatedAt(row.Rail, key, validatedAt)
+			credential.ValidatedAt = credentialValidatedAt(scope.Rail, key, validatedAt)
 		}
 		credentials[key] = credential
 	}
-	settings := rowSettings(row)
+	settings := maps.Clone(scope.Settings)
 	if settings == nil {
 		settings = map[string]any{}
 	}
 	return billing.PSP{
-		ID:              billing.PSPID(row.ID),
-		Key:             row.Key,
-		Rail:            billing.Rail(row.Rail),
-		Environment:     row.Environment,
-		AccountID:       row.AccountID,
-		Archived:        row.Archived,
-		ArchivedAt:      row.ArchivedAt,
+		ID:              billing.PSPID(scope.ID),
+		Key:             scope.Key,
+		Rail:            billing.Rail(scope.Rail),
+		Environment:     scope.Environment,
+		AccountID:       scope.AccountID,
+		Archived:        scope.Archived,
 		OpenObligations: openObligations,
 		Settings:        settings,
 		Credentials:     credentials,
-		Revision:        row.Revision,
-		CreatedAt:       row.CreatedAt,
-		UpdatedAt:       row.UpdatedAt,
+		Revision:        scope.Revision,
+		CreatedAt:       scope.CreatedAt,
+		UpdatedAt:       scope.UpdatedAt,
 	}
 }
 
@@ -605,62 +699,23 @@ func credentialValidatedAt(rail, key string, validatedAt *time.Time) *time.Time 
 	return nil
 }
 
-// mergeCredentialVersions carries forward the version floors of credentials
-// this request did not touch and raises the floors it did. A floor NEVER goes
-// backwards: a lower observed version means an out-of-order write, and the
-// higher floor is the safe one (it only ever forces a re-read).
-func mergeCredentialVersions(existing, rotated map[string]int) map[string]int {
-	if len(existing) == 0 && len(rotated) == 0 {
-		return nil
-	}
-	out := make(map[string]int, len(existing)+len(rotated))
-	for k, v := range existing {
-		if k = NormalizeCredentialVersionKey(k); k != "" && v > 0 {
-			out[k] = v
-		}
-	}
-	for k, v := range rotated {
-		if k = NormalizeCredentialVersionKey(k); k != "" && v > out[k] {
-			out[k] = v
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
 // refuseLiveNMIUnderTestMode requires a fresh simulated result before arming
-// sandbox NMI credentials. Live or indeterminate responses refuse the arm.
-func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, credentials map[string]string) error {
-	if rail != string(models.RailNMI) {
+// sandbox NMI credentials; a live deployment refuses an account left in test
+// mode (SEC-33). Live or indeterminate responses refuse the arm.
+func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.MerchantID, p merchantdocs.PSP) error {
+	if p.Rail != string(models.RailNMI) {
+		return nil
+	}
+	securityKey := strings.TrimSpace(p.Secrets["security_key"])
+	if securityKey == "" {
 		return nil
 	}
 	sandbox := s.providerEnvironment == "test"
-	name, err := PSPSecretName(rail, environment, accountID, "security_key")
+	deployment, err := config.NMIEndpointDeployment(p.Settings)
 	if err != nil {
 		return err
 	}
-	securityKey := strings.TrimSpace(credentials["security_key"])
-	if securityKey == "" && s.secrets != nil {
-		// The write may only be touching other fields (settings, a second
-		// credential) — resolve the EFFECTIVE key already on file so a live
-		// account can't slip through by omitting security_key from this
-		// particular request.
-		if sec, gerr := s.readPublishedProviderCredential(ctx, id, rail, environment, accountID, "security_key", name); gerr == nil {
-			securityKey = strings.TrimSpace(sec.Value)
-		} else if !errors.Is(gerr, ErrSecretNotFound) {
-			return fmt.Errorf("read effective NMI credential for sandbox qualification: %w", gerr)
-		}
-	}
-	if securityKey == "" {
-		return nil // unconfigured; nothing to verify
-	}
-	deployment, pspID, err := s.storedNMIDeployment(ctx, id, rail, environment, accountID)
-	if err != nil {
-		return err
-	}
-	client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, sandbox)
+	client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, sandbox)
 	if err != nil {
 		return fmt.Errorf("construct NMI posture qualification client: %w", err)
 	}
@@ -672,61 +727,18 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.Mer
 	}
 	check := nmi.CheckTestModeArm
 	if !sandbox {
-		// SEC-33: a live deployment refuses an NMI account left in test mode.
 		check = nmi.CheckLiveArm
 	}
 	if err := check(ctx, client); err != nil {
-		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", rail, accountID, err))
+		return providerCredentialError(fmt.Errorf("merchants: rail %q account %q: %w", p.Rail, p.AccountID, err))
 	}
 	return nil
 }
 
-// storedNMIDeployment reads the declared endpoint deployment and PSP id; an
-// undeclared PSP uses the default deployment and its derived natural-key id.
-func (s *Service) storedNMIDeployment(ctx context.Context, id billing.MerchantID, rail, environment, accountID string) (string, uuid.UUID, error) {
-	pspID, _, _, _ := PSPNaturalKey(rail, environment, accountID)
-	if s.pool == nil {
-		return "", pspID, nil
-	}
-	row, err := gen.New(s.pool).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: accountID})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return "", uuid.Nil, err
-	}
-	var settings map[string]any
-	if err == nil {
-		pspID = row.ID
-		settings = rowSettings(row)
-	}
-	deployment, err := config.NMIEndpointDeployment(settings)
-	return deployment, pspID, err
-}
-
-// pspCredentialStatuses reads only the registry-bounded slots of the PSP.
-// Published references select exact custody; fallback names are used only
-// for unpublished slots.
-func (s *Service) pspCredentialStatuses(ctx context.Context, id billing.MerchantID, row gen.BillingPsp) ([]MerchantSecretStatus, error) {
-	var statuses []MerchantSecretStatus
-	for _, key := range pspCredentialKeys(row.Rail) {
-		ref, err := PSPSecretRef(row, key)
-		if err != nil {
-			return nil, err
-		}
-		if ref.Retired {
-			continue
-		}
-		value, err := ReadSecretRef(ctx, s.secrets, id, ref)
-		if err != nil && !errors.Is(err, ErrSecretNotFound) {
-			return nil, err
-		}
-		statuses = append(statuses, MerchantSecretStatus{Name: ref.Name, Key: key, Rail: row.Rail, Configured: err == nil, Version: value.Version})
-	}
-	return statuses, nil
-}
-
-// DeclarePSP records a PSP identity without credentials, for imported billing
-// facts attributed to it. It never arms the PSP for checkout; an account
-// already declared keeps its id, key, archive state, custody and credentials.
-// The environment is the deployment's.
+// DeclarePSP records a PSP identity without a document, for imported billing
+// facts attributed to it. It never arms the PSP; an account already declared
+// keeps its id, key and discovered state. The environment is the
+// deployment's.
 func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declaration billing.PSPDeclaration) (billing.PSP, error) {
 	if s == nil || s.pool == nil {
 		return billing.PSP{}, errors.New("merchants: PSP storage unavailable")
@@ -737,7 +749,7 @@ func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declara
 	switch {
 	case id.IsZero():
 		return billing.PSP{}, apperr.Invalidf("a merchant is required")
-	case !pspKeyShape.MatchString(key):
+	case !merchantdocs.KeyShape.MatchString(key):
 		return billing.PSP{}, apperr.Invalidf("key must be 1-63 lowercase letters, digits, - or _").WithParam("key")
 	case !supportedRail(rail):
 		return billing.PSP{}, apperr.Invalidf("unknown rail %q", declaration.Rail).WithParam("rail")
@@ -762,7 +774,18 @@ func (s *Service) DeclarePSP(ctx context.Context, id billing.MerchantID, declara
 		return billing.PSP{}, ErrPSPExists
 	}
 	if err != nil {
-		return billing.PSP{}, mapPSPWriteError(err)
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "psps_key_key" {
+			return billing.PSP{}, ErrPSPKeyTaken
+		}
+		return billing.PSP{}, err
 	}
-	return s.pspWithObligations(ctx, id, row)
+	scope, ok, err := s.PSPScopeByID(ctx, id, row.ID)
+	if err != nil {
+		return billing.PSP{}, err
+	}
+	if !ok {
+		return billing.PSP{}, ErrPSPNotFound
+	}
+	return s.pspWithObligations(ctx, id, scope)
 }

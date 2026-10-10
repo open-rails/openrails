@@ -13,7 +13,7 @@ import (
 // merchant secret plane. Both standalone and embedded composition roots call
 // this after merchant secrets are available.
 func (r *Runtime) ArmSolanaRecurringServices(
-	secretStore merchants.MerchantSecretStore,
+	secretStore merchants.MerchantSecretReader,
 	solanaTransit solanaint.TransitClient,
 ) {
 	if r == nil || r.DB == nil || r.Config == nil || r.SolanaRPCResolver == nil {

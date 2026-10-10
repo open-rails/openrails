@@ -1,12 +1,12 @@
 package config
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"net/url"
+	"path"
 	"regexp"
 	"slices"
 	"sort"
@@ -64,6 +64,8 @@ type Config struct {
 	Database DatabaseConfig
 	// Merchant declares the one merchant an embedded engine serves; zero
 	// leaves the engine unbound (callers select a merchant per operation).
+	// Without a Vault KV mount it is the merchant's configuration, read-only;
+	// with one it seeds Vault once, when Vault holds nothing for the merchant.
 	Merchant MerchantDeclaration
 	// Catalog optionally applies one merchant-scoped batch at startup, using
 	// the same permanent content-hash replay as Client.ApplyCatalog. Later
@@ -98,29 +100,14 @@ type Config struct {
 	RateLimitsDisabled bool
 	// Captcha challenges a client that keeps hitting a rate limit.
 	Captcha *CaptchaConfig
-	// Encryption holds the master key for credentials stored in the database.
-	Encryption *EncryptionConfig
-	// Vault connects to HashiCorp Vault when Deps.Vault is nil.
+	// Vault connects to HashiCorp Vault when Deps.Vault is nil, and names its
+	// mounts: a KV mount makes Vault hold merchant configuration.
 	Vault *VaultConfig
 
 	// LLM is the model behind the console's natural-language widgets and
 	// questions. Without an API key those features are off.
 	LLM *LLMConfig
 
-	// SecretBackend selects credential custody: SecretBackendSnapshot (the
-	// default: supplied by the host, never persisted), SecretBackendVault or
-	// SecretBackendDB (always encrypted). Vault never falls back to the
-	// database.
-	SecretBackend string
-	// CredentialSnapshotID is a stable host-owned UUID identifying snapshot
-	// custody. Required to move custody from managed to snapshot.
-	CredentialSnapshotID string
-	// CredentialReadOnly refuses managed credential writes even when the
-	// backend would permit them.
-	CredentialReadOnly bool
-	// AlertSecretBackend selects vault or db custody for outbound webhook
-	// credentials, independently of SecretBackend.
-	AlertSecretBackend string
 	// CatalogReconciliationInterval schedules the alert-only catalog
 	// reconciliation: a Go duration ("30m"). Empty is 1h; "0" disables it.
 	CatalogReconciliationInterval string
@@ -300,35 +287,18 @@ func ProviderBillingQuiescence(cfg *Config) (time.Duration, error) {
 	return d, nil
 }
 
-const (
-	SecretBackendSnapshot = "snapshot"
-	SecretBackendDB       = "db"
-	SecretBackendVault    = "vault"
-)
-
-// SecretStoreBackend returns the declared credential custody. Empty chooses an
-// immutable host snapshot; unknown inputs remain invalid rather than selecting DB.
-func SecretStoreBackend(cfg *Config) string {
-	if cfg == nil || strings.TrimSpace(cfg.SecretBackend) == "" {
-		return SecretBackendSnapshot
+// MerchantConfigKVMount is the KV v2 mount that holds merchant
+// configuration; "" when none is named and a file holds it.
+func MerchantConfigKVMount(cfg *Config) string {
+	if cfg == nil || cfg.Vault == nil {
+		return ""
 	}
-	return strings.ToLower(strings.TrimSpace(cfg.SecretBackend))
+	return strings.Trim(strings.TrimSpace(cfg.Vault.KVMount), "/")
 }
 
-// EncryptionConfig configures encryption at rest. The master key wraps each
-// merchant's data key, which encrypts the credentials OpenRails stores in the
-// database. SecretBackendDB requires it; host-owned snapshot credentials stay
-// in memory and need none.
-type EncryptionConfig struct {
-	// MasterKey is the base64 of a 32-byte AES-256 key. Empty disables
-	// encryption at rest.
-	MasterKey string
-}
-
-// VaultConfig connects to HashiCorp Vault for merchant secrets and Solana
-// Transit signing: a non-nil Config.Vault (or Deps.Vault) is the connection.
-// The connection selects neither: SecretBackend selects secret storage, and
-// each Solana PSP selects its signer.
+// VaultConfig connects to HashiCorp Vault: a non-nil Config.Vault (or
+// Deps.Vault) is the connection. Name a KV mount and Vault holds merchant
+// configuration; name only a Transit mount and it only signs.
 type VaultConfig struct {
 	Namespace   string
 	ScopePrefix string
@@ -342,8 +312,8 @@ type VaultConfig struct {
 	RoleID   string
 	SecretID string
 	K8sRole  string
-	// KVMount is the KV-v2 mount merchant secrets live under; empty is
-	// "secret".
+	// KVMount is the KV v2 mount merchant configuration lives in, under
+	// ScopePrefix (empty: "openrails"). Empty: a file holds it.
 	KVMount string
 	// TransitMount is the Transit mount Solana signing keys live under; empty
 	// is "transit".
@@ -1164,18 +1134,17 @@ func Validate(cfg *Config) error {
 		return fmt.Errorf("database config validation failed: %w", err)
 	}
 
-	if err := validateEncryption(cfg.Encryption); err != nil {
-		return fmt.Errorf("encryption config validation failed: %w", err)
-	}
-
 	if err := validateHyperSwitch(cfg); err != nil {
 		return err
 	}
 	if err := validateProviderSandbox(cfg); err != nil {
 		return err
 	}
-	if err := validateSecretBackend(cfg); err != nil {
-		return fmt.Errorf("secret_backend config validation failed: %w", err)
+	if err := validateVault(cfg.Vault); err != nil {
+		return err
+	}
+	if err := RefuseDeclarationBesideVault(cfg, cfg.Merchant.Slug, cfg.Merchant); err != nil {
+		return err
 	}
 	if err := validateSecurityPolicy(cfg); err != nil {
 		return err
@@ -1218,28 +1187,15 @@ func validateSourceCIDRs(cidrs []string) error {
 	return nil
 }
 
-// validateSecretBackend checks declared custody. A live Vault connection may be
-// supplied by an embedded host; backend construction verifies its actual access.
-func validateSecretBackend(cfg *Config) error {
-	if cfg.CredentialSnapshotID != "" {
-		id, err := uuid.Parse(cfg.CredentialSnapshotID)
-		if err != nil || id == uuid.Nil || id.String() != cfg.CredentialSnapshotID {
-			return fmt.Errorf("credential_snapshot_id must be a canonical nonzero UUID")
-		}
+// validateVault refuses a malformed merchant configuration path.
+func validateVault(vc *VaultConfig) error {
+	if vc == nil {
+		return nil
 	}
-	switch strings.ToLower(strings.TrimSpace(cfg.SecretBackend)) {
-	case "", SecretBackendSnapshot, SecretBackendDB, SecretBackendVault:
-	default:
-		return fmt.Errorf("secret_backend must be snapshot, db or vault")
-	}
-	switch cfg.AlertSecretBackend {
-	case "", SecretBackendDB, SecretBackendVault:
-	default:
-		return fmt.Errorf("alert_secret_backend must be db or vault when configured")
-	}
-	if SecretStoreBackend(cfg) == SecretBackendDB || cfg.AlertSecretBackend == SecretBackendDB {
-		if cfg.Encryption == nil || strings.TrimSpace(cfg.Encryption.MasterKey) == "" {
-			return fmt.Errorf("DB credential storage requires encryption.master_key")
+	for name, raw := range map[string]string{"vault.kv_mount": vc.KVMount, "vault.scope_prefix": vc.ScopePrefix, "vault.transit_mount": vc.TransitMount} {
+		p := strings.Trim(strings.TrimSpace(raw), "/")
+		if p != "" && (path.Clean(p) != p || strings.Contains(p, "..")) {
+			return fmt.Errorf("%s %q must be a plain Vault path", name, raw)
 		}
 	}
 	return nil
@@ -1262,24 +1218,6 @@ func validateCaptcha(cfg *CaptchaConfig) error {
 	secretKey := strings.TrimSpace(cfg.SecretKey) != ""
 	if siteKey != secretKey {
 		return fmt.Errorf("captcha requires BOTH site_key and secret_key (set both to enable, neither to disable)")
-	}
-	return nil
-}
-
-// validateEncryption fails fast on a malformed at-rest encryption master key.
-// An empty key is legitimate for host-owned provider credentials or Vault.
-// The managed DB store enforces and reports its actual encryption posture;
-// syntax validation cannot infer that any secret will be persisted.
-func validateEncryption(cfg *EncryptionConfig) error {
-	if cfg == nil || strings.TrimSpace(cfg.MasterKey) == "" {
-		return nil
-	}
-	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(cfg.MasterKey))
-	if err != nil {
-		return fmt.Errorf("encryption.master_key must be valid base64: %w", err)
-	}
-	if len(raw) != 32 {
-		return fmt.Errorf("encryption.master_key must decode to 32 bytes (AES-256); got %d", len(raw))
 	}
 	return nil
 }

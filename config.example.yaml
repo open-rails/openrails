@@ -1,19 +1,11 @@
 # OpenRails runtime infrastructure config.
 #
-# Provider credential custody and catalog write policy are independent.
-# Keep config.yaml for process
-# infrastructure: listeners, databases, Vault, rate limits, captcha, and similar
-# deployment concerns.
+# Keep config.yaml for process infrastructure: listeners, databases, Vault,
+# rate limits, captcha, and similar deployment concerns. Merchant configuration
+# (PSPs, custodians, settings) lives in the merchant manifest or in Vault.
 
 provider_write_mode: full # full | limited | readonly; REQUIRED: boot refuses it unset
 test_mode: sandbox        # sandbox | live; allowed in every environment (#762) — rail-credential validation, not env, keeps it honest. REQUIRED: the credential posture is never inherited by omission
-
-secret_backend: snapshot # immutable host values; alternatively vault or encrypted db
-credential_read_only: false # may restrict a managed backend; cannot grant storage privileges
-# Trusted local operator catalog application remains available when false.
-# DB credentials require encryption.master_key in every credential posture.
-# alert_secret_backend: db # optional managed outbound webhooks beside a snapshot
-# credential_snapshot_id: <canonical UUID> # stable host identity for an explicit custody transition
 
 host: 0.0.0.0
 port: 3053
@@ -98,12 +90,13 @@ auth:
 # (admin_console.issuer). Turn it on when you have no identity provider.
 # local_sign_in: true
 
-encryption:
-  master_key: ""    # base64 32-byte AES-256 key; host provider credentials alone do not need it
-                    # Required for DB-backed alert webhook URLs and HyperSwitch SDK captures.
-
-# Declaring vault connects to it (VAULT_* env settings declare it too).
+# Declaring vault connects to it (VAULT_* env settings declare it too). Name a
+# KV mount and Vault holds merchant configuration; name only a Transit mount
+# and it only signs.
 # vault:
+#   kv_mount: ""      # KV v2 mount holding merchant configuration
+#   scope_prefix: ""  # path under the mount; default openrails
+#   transit_mount: "" # Transit mount for Solana signers; default transit
 #   address: ""       # defaults to the Vault client default / VAULT_ADDR
 #   auth_method: ""   # token | approle | kubernetes
 #   token: ""

@@ -34,8 +34,7 @@ func TestValidateMerchantDeclaration(t *testing.T) {
 		{"ccbill credentials without salt", sandbox, ccbill(map[string]string{"datalink_username": "u", "datalink_password": "p"}), false},
 		{"ccbill blank salt", sandbox, ccbill(map[string]string{"salt": " "}), false},
 		{"ccbill identity only", sandbox, ccbill(nil), true},
-		{"managed backend refuses startup PSPs", &config.Config{TestMode: config.CredentialPostureSandbox, SecretBackend: config.SecretBackendDB}, stripeKey("pk_test_abc"), false},
-		{"managed backend without PSPs", &config.Config{SecretBackend: config.SecretBackendDB}, config.MerchantDeclaration{}, true},
+		{"vault-held configuration seeds from the declaration", &config.Config{TestMode: config.CredentialPostureSandbox, Vault: &config.VaultConfig{KVMount: "kv"}}, stripeKey("pk_test_abc"), true},
 	} {
 		err := ValidateMerchantDeclaration(tc.cfg, tc.mt)
 		if tc.ok {

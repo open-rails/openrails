@@ -2,12 +2,13 @@ package merchantbootstrap
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 const (
@@ -30,9 +31,6 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		if slug == "" {
 			return fmt.Errorf("merchant key is required")
 		}
-		if strings.TrimSpace(t.DisplayName) == "" {
-			return fmt.Errorf("merchant %q display_name is required", slug)
-		}
 		if host := merchants.NormalizeAPIHost(t.APIHost); host != "" {
 			if err := merchants.ValidateAPIHost(host); err != nil {
 				return fmt.Errorf("merchant %q api_host: %w", slug, err)
@@ -40,7 +38,7 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		}
 		// The configuration API's own validator: a manifest cannot declare
 		// settings the API would refuse.
-		if err := service.ValidateMerchantSettings(t.Settings); err != nil {
+		if _, err := merchantconfig.Normalize(t.DisplayName, t.Settings); err != nil {
 			return fmt.Errorf("merchant %q settings: %w", slug, err)
 		}
 		for key, account := range t.PSPs {
@@ -100,4 +98,13 @@ func SolanaSignerConfigured(cfg config.PSPConfig) bool {
 		}
 	}
 	return false
+}
+
+func sortedMerchantKeys(in map[string]config.MerchantDeclaration) []string {
+	keys := make([]string, 0, len(in))
+	for key := range in {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }

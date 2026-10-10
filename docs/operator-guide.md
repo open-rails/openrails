@@ -10,7 +10,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns one schema (default `billing`) and its River's (default `billing_river`). | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
 | **Redis-compatible service** (Garnet recommended) | optional for one instance, required for several | Rate limits, admin lockouts and captcha challenges shared by every instance, and admission-denial counters flushed to Postgres every 5 minutes. The atomic spending-admission gate and failed-usage grace and cutoff windows are in PostgreSQL. | Without Redis, rate limits, admin lockouts and captcha challenges live in the process's memory: right for one instance, while several would each allow the full limit. They are never in PostgreSQL. Denial statistics are best-effort. No money path needs Redis. A declared Redis that stops answering costs sharing, not service: each instance keeps them in its own memory, logs an error, counts `openrails_abuse_state_fallbacks_total`, readiness reports Redis degraded without failing, and boot never waits for it. |
-| **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `billing.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
+| **HashiCorp Vault** | optional | Name a KV mount (`vault.kv_mount`) and Vault holds every merchant's configuration, credentials included; name only a Transit mount and it signs for Solana. See [vault.md](vault.md). | Without a KV mount the merchant manifest is the configuration, read-only. With one, startup needs Vault; afterwards an outage is ridden out from each replica's cache. |
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
 (file-watched, hot-rotating) or the inline `AUTHKIT_ACTIVE_KEY_ID` /
@@ -209,23 +209,14 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
 
 ### Secrets & credential rotation
 
-- **Backends**: `secret_backend: db` (envelope-encrypted in Postgres under
-  `ENCRYPTION_MASTER_KEY`) or `secret_backend: vault` (KV-v2). Managed DB storage requires encryption even in sandbox. Snapshot custody keeps
-  host-owned values in memory. Declared, never auto-detected, never inferred from
-  a Vault connection, never silently falls back. Vault setup + minimal
-  policies: [vault.md](vault.md); per-merchant secret ops, canonical names,
-  and the DB→Vault migration runbook:
-  [vault.md](vault.md).
-- **Naming**: addressed as `(merchant_id, name)` in code; Vault path
-  `secret/openrails/merchants/<merchant-uuid>/<name>`. Published references select exact validated versions. Direct backend edits do
-  not publish a new active credential. Managed publication does not require restarting the runtime.
-- **Rotation within the same PSP** uses `Client.UpdatePSP`
-  (`PATCH /v1/admin/psps/{id}`) with a stable operation ID and the
-  expected revision. A candidate is
-  staged and account/environment validated before its exact version is published.
-  Retry the same operation to recover a lost response. A failed publication leaves
-  the previous published credentials active; an unpublished candidate is not read
-  merely because it is newer in Vault.
+- **Where they live**: a PSP's credentials are part of the merchant's
+  configuration: the merchant manifest, or with `vault.kv_mount` the PSP's
+  Vault document (paths, shapes and minimal policies: [vault.md](vault.md)).
+  Postgres holds no credential.
+- **Rotation within the same PSP**: with Vault, `Client.UpdatePSP`
+  (`PATCH /v1/admin/psps/{id}`) with the expected revision; the new credential
+  is checked with the provider before it is written, and every replica reloads
+  at once. With a manifest, change the file and restart.
 - **Pointing credentials at a different account** trips the account guard:
   every provider intent is stamped with the PSP row it was
   enqueued against, and the executor parks intents whose account no longer
@@ -242,7 +233,7 @@ names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is
 - **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
   serve the price.
 - **Policy**: the `checkout_routing` merchant setting, declared under `settings:`
-  in the merchant's YAML or applied through a configuration application. Ordered
+  in the merchant's YAML or set through `PATCH /v1/admin/configuration`. Ordered
   rules, first match wins; each rule's `prefer` list is both the ranking and the
   whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
   `price`, `mode`, `country` — all optional, all AND-ed; a rule with no conditions is the

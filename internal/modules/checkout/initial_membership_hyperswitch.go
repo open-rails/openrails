@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -20,19 +21,22 @@ func (h *InitialMembershipIntentHandler) hyperSwitchCharger(ctx context.Context,
 	if h.Checkout.Config == nil || h.Checkout.Config.HyperSwitch == nil || config.IsProviderReadOnly(h.Checkout.Config) || gateway.ReadOnly || p.HyperSwitch == nil {
 		return nil, errors.New("initial membership custody is not armed")
 	}
-	custodian, err := h.database().Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: in.MerchantID, ID: *p.Instrument.CustodianID})
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
+	}
+	custodian, held, err := merchants.Of(h.database()).CustodianScopeByID(ctx, mid, *p.Instrument.CustodianID)
+	if err != nil {
+		return nil, err
+	}
+	if !held {
+		return nil, charge.ErrInstrumentChanged
 	}
 	binding, err := charge.HyperSwitchBindingFromAccount(custodian, h.Checkout.Config.HyperSwitch.APIBaseURL)
 	if err != nil || binding != *p.HyperSwitch {
 		return nil, charge.ErrInstrumentChanged
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	client, err := railresolve.HyperSwitchClient(ctx, h.Checkout.Config, h.Checkout.MerchantSecrets, mid, custodian)
+	client, err := railresolve.HyperSwitchClient(h.Checkout.Config, mid, custodian)
 	if err != nil {
 		return nil, err
 	}

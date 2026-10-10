@@ -11,6 +11,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -231,6 +232,7 @@ func TestCriticalFindingEmailsThroughTheOneSender(t *testing.T) {
 	mail := &mailbox{}
 	w := prepareWorld(t, 12)
 	w.deps = func(d *openrails.Deps) { d.Email = mail }
+	w.vault = vaulttest.New(t)
 	w.start()
 	w.armDestructive()
 	alertTo, from := "ops@merchant.test", "billing@merchant.test"

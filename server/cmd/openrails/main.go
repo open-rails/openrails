@@ -178,9 +178,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	if err := applyStartupBootstrap(ctx, cp); err != nil {
 		return closeOnError(fmt.Errorf("startup bootstrap: %w", err))
 	}
-	// Reload snapshot credentials and seed absent merchant metadata. Existing
-	// metadata is preserved unless an explicit application changes it. The
-	// conventional file is optional; an explicit manifest path must exist.
+	// Provision the manifest's merchants; without Vault the manifest is their
+	// configuration. The conventional file is optional; an explicit manifest
+	// path must exist.
 	listener := hostconfig.FromContext(cmd.Context())
 	if err := serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, cp, manifestPath, listener.MerchantManifestOverlays, bootNMIProbeV5BaseURL); err != nil {
 		return closeOnError(err)

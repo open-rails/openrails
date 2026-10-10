@@ -108,6 +108,9 @@ const (
 	FeatureStripePortal Feature = "stripe_portal"
 	// FeatureMerchantDirectory: the deployment has a merchant directory.
 	FeatureMerchantDirectory Feature = "merchant_directory"
+	// FeatureMerchantConfigEdits: Vault holds merchant configuration, so it
+	// can change; a file is read-only.
+	FeatureMerchantConfigEdits Feature = "merchant_config_edits"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
 	FeatureCatalogCopilot Feature = "catalog_copilot"
 	// FeatureMetricsAsk: llm.api_key and llm.ask_enabled.

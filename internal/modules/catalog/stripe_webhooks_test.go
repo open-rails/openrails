@@ -189,34 +189,10 @@ func TestPublicStripeWebhookURL(t *testing.T) {
 	}
 }
 
-// Fixture store backed by the real Vault adapter; not a durability test.
-type vaultFixture struct {
-	values   map[string]map[string]string
-	versions map[string]int
-}
-
-func newVaultStore() merchants.MerchantSecretStore {
-	return merchants.NewVaultSecretStore("secret", &vaultFixture{values: map[string]map[string]string{}, versions: map[string]int{}})
-}
-func (v *vaultFixture) ReadSecret(_ context.Context, p string) (map[string]string, int, error) {
-	return v.values[p], v.versions[p], nil
-}
-func (v *vaultFixture) WriteSecret(_ context.Context, p string, data map[string]string) (int, error) {
-	v.values[p] = data
-	v.versions[p]++
-	return v.versions[p], nil
-}
-func (v *vaultFixture) DeleteSecret(_ context.Context, p string) error {
-	delete(v.values, p)
-	return nil
-}
-func (v *vaultFixture) ListSecrets(context.Context, string) ([]string, error) { return nil, nil }
-
 // publication models the account-bound publisher contract; PostgreSQL
 // workflow tests qualify the real atomic publication.
 type publication struct {
-	store    merchants.MerchantSecretStore
-	id       billing.MerchantID
+	store    merchants.SecretMap
 	endpoint string
 }
 
@@ -224,29 +200,25 @@ func (p *publication) name(key string) string {
 	n, _ := merchants.PSPSecretName("stripe", "live", "acct_123", key)
 	return n
 }
-func (p *publication) value(ctx context.Context, key string) string {
-	v, _ := p.store.Get(ctx, p.id, p.name(key))
-	return v.Value
-}
+func (p *publication) value(_ context.Context, key string) string { return p.store[p.name(key)] }
 func (p *publication) Load(ctx context.Context) (merchants.StripeWebhookCredentialState, error) {
 	return merchants.StripeWebhookCredentialState{SecretKey: p.value(ctx, "secret_key"), CurrentSecret: p.value(ctx, "webhook_signing_secret"),
 		PreviousSecret: p.value(ctx, "webhook_signing_secret_previous"), EndpointID: p.endpoint, Writable: true}, nil
 }
 func (p *publication) Publish(ctx context.Context, endpoint, value string) error {
 	if previous := p.value(ctx, "webhook_signing_secret"); previous != "" {
-		if _, err := p.store.Put(ctx, p.id, p.name("webhook_signing_secret_previous"), previous); err != nil {
-			return err
-		}
+		p.store[p.name("webhook_signing_secret_previous")] = previous
 	}
-	_, err := p.store.Put(ctx, p.id, p.name("webhook_signing_secret"), value)
+	p.store[p.name("webhook_signing_secret")] = value
 	p.endpoint = endpoint
-	return err
+	return nil
 }
-func (p *publication) RetireOverlap(ctx context.Context) error {
-	return p.store.Delete(ctx, p.id, p.name("webhook_signing_secret_previous"))
+func (p *publication) RetireOverlap(context.Context) error {
+	delete(p.store, p.name("webhook_signing_secret_previous"))
+	return nil
 }
 
-func managedParams(stripeURL string, store merchants.MerchantSecretStore, id billing.MerchantID) ManagedStripeWebhookParams {
+func managedParams(stripeURL string, store merchants.MerchantSecretReader, id billing.MerchantID) ManagedStripeWebhookParams {
 	return ManagedStripeWebhookParams{
 		Config:      &config.Config{PublicBillingBaseURL: "https://billing.example.com", ProviderWriteMode: config.ProviderWriteModeFull},
 		SecretStore: store, MerchantID: id, ProviderEnvironment: "live", PspID: "acct_123",
@@ -254,21 +226,20 @@ func managedParams(stripeURL string, store merchants.MerchantSecretStore, id bil
 	}
 }
 
-func putSecret(t *testing.T, store merchants.MerchantSecretStore, id billing.MerchantID, env, key, value string) {
+func putSecret(t *testing.T, store merchants.SecretMap, env, key, value string) {
 	name, err := merchants.PSPSecretName("stripe", env, "acct_123", key)
 	require.NoError(t, err)
-	_, err = store.Put(t.Context(), id, name, value)
-	require.NoError(t, err)
+	store[name] = value
 }
 
 func TestManagedStripeWebhookCustody(t *testing.T) {
 	ctx, id := t.Context(), billing.MerchantID(uuid.New())
 
 	t.Run("publication stores the minted secret", func(t *testing.T) {
-		fake, store := newFakeStripe(t), newVaultStore()
-		putSecret(t, store, id, "live", "secret_key", "sk_test_123")
+		fake, store := newFakeStripe(t), merchants.SecretMap{}
+		putSecret(t, store, "live", "secret_key", "sk_test_123")
 		p := managedParams(fake.url, store, id)
-		p.Publication = &publication{store: store, id: id}
+		p.Publication = &publication{store: store}
 		res, err := ReconcileManagedStripeWebhook(ctx, p)
 		require.NoError(t, err)
 		require.Equal(t, WebhookCreated, res.Result.Action)
@@ -279,19 +250,19 @@ func TestManagedStripeWebhookCustody(t *testing.T) {
 	// A minted secret with nowhere durable to go is refused before any Stripe
 	// mutation: no custody, an ephemeral snapshot, or a secret recorded under
 	// another environment of the same account.
-	for name, setup := range map[string]func(store merchants.MerchantSecretStore) ManagedStripeWebhookParams{
-		"no custody": func(merchants.MerchantSecretStore) ManagedStripeWebhookParams {
+	for name, setup := range map[string]func(store merchants.SecretMap) ManagedStripeWebhookParams{
+		"no custody": func(merchants.SecretMap) ManagedStripeWebhookParams {
 			p := managedParams("", nil, billing.MerchantID{})
 			p.SecretKey = "sk_test_123"
 			return p
 		},
-		"snapshot store": func(store merchants.MerchantSecretStore) ManagedStripeWebhookParams {
-			putSecret(t, store, id, "live", "secret_key", "sk_test_123")
+		"read-only configuration": func(store merchants.SecretMap) ManagedStripeWebhookParams {
+			putSecret(t, store, "live", "secret_key", "sk_test_123")
 			return managedParams("", store, id)
 		},
-		"other environment's secret": func(store merchants.MerchantSecretStore) ManagedStripeWebhookParams {
-			putSecret(t, store, id, "live", "secret_key", "sk_test_123")
-			putSecret(t, store, id, "test", "webhook_signing_secret", "whsec_still_valid")
+		"other environment's secret": func(store merchants.SecretMap) ManagedStripeWebhookParams {
+			putSecret(t, store, "live", "secret_key", "sk_test_123")
+			putSecret(t, store, "test", "webhook_signing_secret", "whsec_still_valid")
 			return managedParams("", store, id)
 		},
 	} {
@@ -299,7 +270,7 @@ func TestManagedStripeWebhookCustody(t *testing.T) {
 			fake := newFakeStripe(t)
 			fake.seed("we_ok", stripeapi.APIVersion, 1, nil)
 			fake.endpoints["we_ok"].URL = "https://billing.example.com/v1/webhooks/stripe/acct_123"
-			p := setup(merchants.NewMemorySecretStore())
+			p := setup(merchants.SecretMap{})
 			p.StripeBaseURL = fake.url
 			_, err := ReconcileManagedStripeWebhook(ctx, p)
 			require.ErrorContains(t, err, "credential backend cannot retain generated webhook secret")
@@ -307,20 +278,20 @@ func TestManagedStripeWebhookCustody(t *testing.T) {
 		})
 	}
 
-	t.Run("read-only store with declared secret keeps existing endpoint", func(t *testing.T) {
-		fake, store := newFakeStripe(t), merchants.NewMemorySecretStore()
-		putSecret(t, store, id, "live", "secret_key", "sk_test_123")
-		putSecret(t, store, id, "live", "webhook_signing_secret", "whsec_from_manifest")
+	t.Run("read-only configuration with declared secret keeps existing endpoint", func(t *testing.T) {
+		fake, store := newFakeStripe(t), merchants.SecretMap{}
+		putSecret(t, store, "live", "secret_key", "sk_test_123")
+		putSecret(t, store, "live", "webhook_signing_secret", "whsec_from_manifest")
 		fake.seed("we_ok", stripeapi.APIVersion, 1, nil)
 		fake.endpoints["we_ok"].URL = "https://billing.example.com/v1/webhooks/stripe/acct_123"
-		res, err := ReconcileManagedStripeWebhook(ctx, managedParams(fake.url, merchants.NewReadOnlySecretStore(store), id))
+		res, err := ReconcileManagedStripeWebhook(ctx, managedParams(fake.url, store, id))
 		require.NoError(t, err)
 		require.Equal(t, WebhookUnchanged, res.Result.Action)
 		require.Zero(t, fake.creates+fake.deletes)
 	})
 
 	t.Run("unroutable callback url skips", func(t *testing.T) {
-		p := managedParams(newFakeStripe(t).url, newVaultStore(), id)
+		p := managedParams(newFakeStripe(t).url, merchants.SecretMap{}, id)
 		p.Config.PublicBillingBaseURL = "http://localhost:3053"
 		res, err := ReconcileManagedStripeWebhook(ctx, p)
 		require.NoError(t, err)
@@ -332,13 +303,13 @@ func TestManagedStripeWebhookCustody(t *testing.T) {
 // through the overlap and retires nothing until the kill switch allows it.
 func TestManagedStripeWebhookVersionBumpIsGapless(t *testing.T) {
 	ctx, id := t.Context(), billing.MerchantID(uuid.New())
-	fake, store := newFakeStripe(t), newVaultStore()
+	fake, store := newFakeStripe(t), merchants.SecretMap{}
 	now := time.Date(2026, 7, 28, 12, 0, 0, 0, time.UTC)
-	putSecret(t, store, id, "live", "secret_key", "sk_test_123")
-	putSecret(t, store, id, "live", "webhook_signing_secret", "whsec_on_the_old_endpoint")
+	putSecret(t, store, "live", "secret_key", "sk_test_123")
+	putSecret(t, store, "live", "webhook_signing_secret", "whsec_on_the_old_endpoint")
 	fake.seed("we_old", oldVersion, 1, nil)
 	fake.endpoints["we_old"].URL = "https://billing.example.com/v1/webhooks/stripe/acct_123"
-	pub := &publication{store: store, id: id}
+	pub := &publication{store: store}
 	p := managedParams(fake.url, store, id)
 	p.Publication, p.Now = pub, now
 

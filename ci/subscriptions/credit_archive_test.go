@@ -75,7 +75,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
 	quoted := pgx.Identifier{schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+quoted+" CASCADE") })
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+quoted+`.merchants (id,slug,status,permission_group_id,display_name) VALUES ($1,$2,'active',$3,'Restored')`, merchantID.UUID(), w.slug, uuid.New())
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+quoted+`.merchants (id,slug,status,permission_group_id) VALUES ($1,$2,'active',$3)`, merchantID.UUID(), w.slug, uuid.New())
 	require.NoError(t, err)
 	destination, err := db.NewWithPGXPool(w.pool, schema)
 	require.NoError(t, err)

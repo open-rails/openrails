@@ -36,25 +36,17 @@ func TestValidateCustodianEntry(t *testing.T) {
 	storePlane := valid()
 	storePlane.SecretKeys = nil
 	require.NoError(t, ValidateCustodianEntry(storePlane), "the store plane checks secrets at arm time")
-	rotated := valid()
-	rotated.CredentialVersions = map[string]int{custodians.SecretAPIKey: 3}
-	require.NoError(t, ValidateCustodianEntry(rotated))
 
 	for name, edit := range map[string]func(*CustodianEntry){
-		"no key":               func(e *CustodianEntry) { e.Key = " " },
-		"custody-less kind":    func(e *CustodianEntry) { e.Kind = models.CustodianPSP },
-		"no account id":        func(e *CustodianEntry) { e.AccountID = "" },
-		"no public key":        func(e *CustodianEntry) { delete(e.Settings, custodians.SettingPublicAPIKey) },
-		"unknown setting":      func(e *CustodianEntry) { e.Settings["invented"] = 1 },
-		"tenant endpoint":      func(e *CustodianEntry) { e.Settings["api_base_url"] = "https://tenant.example.test" },
-		"wrong value type":     func(e *CustodianEntry) { e.Settings[custodians.SettingNetworkTokens] = "yes please" },
-		"unknown secret":       func(e *CustodianEntry) { e.SecretKeys = []string{"security_key"} },
-		"missing api key":      func(e *CustodianEntry) { e.SecretKeys = []string{} },
-		"version unknown slot": func(e *CustodianEntry) { e.CredentialVersions = map[string]int{"security_key": 1} },
-		"version negative":     func(e *CustodianEntry) { e.CredentialVersions = map[string]int{custodians.SecretAPIKey: -1} },
-		"version not canonical": func(e *CustodianEntry) {
-			e.CredentialVersions = map[string]int{"API_KEY": 1}
-		},
+		"no key":            func(e *CustodianEntry) { e.Key = " " },
+		"custody-less kind": func(e *CustodianEntry) { e.Kind = models.CustodianPSP },
+		"no account id":     func(e *CustodianEntry) { e.AccountID = "" },
+		"no public key":     func(e *CustodianEntry) { delete(e.Settings, custodians.SettingPublicAPIKey) },
+		"unknown setting":   func(e *CustodianEntry) { e.Settings["invented"] = 1 },
+		"tenant endpoint":   func(e *CustodianEntry) { e.Settings["api_base_url"] = "https://tenant.example.test" },
+		"wrong value type":  func(e *CustodianEntry) { e.Settings[custodians.SettingNetworkTokens] = "yes please" },
+		"unknown secret":    func(e *CustodianEntry) { e.SecretKeys = []string{"security_key"} },
+		"missing api key":   func(e *CustodianEntry) { e.SecretKeys = []string{} },
 	} {
 		e := valid()
 		edit(&e)

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 
 	"github.com/goccy/go-yaml"
 	"github.com/jackc/pgx/v5"
@@ -25,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/signeridentity"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
@@ -204,33 +204,44 @@ func (j StaticJWKConfig) authkitJWK() iam.JWK {
 	}
 }
 
-// ProvisionMerchant is the single OpenRails merchant-provisioning boundary
-// (#527). Standalone calls it with a control plane, which creates/ensures the
-// AuthKit permission-group and optional issuer-as-owner before recording
-// permission_group_id. Embedded calls it with only Database, which registers an
-// ownerless merchant row and applies the same profile/PSP
-// configuration path without touching AuthKit or startup bootstrap markers.
+// ReconcileOptions are how a manifest provisions its merchants.
+type ReconcileOptions struct {
+	// Insert registers a merchant the manifest names that does not exist.
+	Insert bool
+	// Merchants is the merchants service over the configuration the manifest
+	// fills (a file) or reads (Vault); nil opens one for this call.
+	Merchants *merchants.Service
+	// SolanaTransit reads a vault_transit Solana signer's public key.
+	SolanaTransit solana.TransitClient
+	// WrapTransit wraps SolanaTransit per merchant (signer-change detection).
+	WrapTransit func(slug string, transit solana.TransitClient) solana.TransitClient
+	// DeferPSP skips a PSP whose account cannot be derived now.
+	DeferPSP func(rail string, err error) bool
+}
+
+// ProvisionMerchantParams provisions one manifest merchant (#527).
 type ProvisionMerchantParams struct {
 	// MerchantID is an already resolved, explicit host binding. The outer name
 	// boundary must verify the supplied name before passing this immutable scope.
 	MerchantID    billing.MerchantID
-	Directory     *merchants.Service
 	Config        *config.Config
 	ControlPlane  *controlplane.ControlPlane
 	Database      *db.DB
-	SecretStore   merchants.MerchantSecretStore
+	Merchants     *merchants.Service
 	SolanaTransit solana.TransitClient
+	DeferPSP      func(rail string, err error) bool
 	Slug          string
 	Merchant      MerchantConfig
-	Options       MerchantManifestReconcileOptions
+	Insert        bool
 }
 
-// ReconcileMerchantManifestData provisions merchants and issuer ownership
-// declared by a merchant config manifest. It is the single
-// merchant-provisioning entry point for push-merchant-config and embedded
-// startup paths. Issuer registration is declarative and does not fetch the
-// JWKS, so it succeeds even when the issuer's app is not yet running.
-func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts MerchantManifestReconcileOptions) error {
+// ReconcileMerchantManifestData provisions the merchants a manifest declares:
+// it registers missing ones (with Insert) and, with the manifest as the
+// configuration, puts each declaration in place. With Vault as the source a
+// manifest names merchants only (slug, api_host, remote_application) and is
+// refused when it declares more. Issuer registration is declarative and does
+// not fetch the JWKS.
+func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {
 	if cp == nil || cp.Core() == nil || cp.Pool() == nil {
 		return fmt.Errorf("merchant bootstrap manifest configured but control plane is not enabled")
 	}
@@ -239,6 +250,11 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 	}
 	if manifest.Version != BootstrapManifestVersion {
 		return fmt.Errorf("merchant bootstrap: manifest version must be %d", BootstrapManifestVersion)
+	}
+	for _, slug := range sortedMerchantKeys(manifest.Merchants) {
+		if err := config.RefuseDeclarationBesideVault(cfg, slug, manifest.Merchants[slug].MerchantDeclaration); err != nil {
+			return fmt.Errorf("merchant bootstrap: %w", err)
+		}
 	}
 	release, err := lockMerchantManifestBootstrap(ctx, cp)
 	if err != nil {
@@ -250,195 +266,92 @@ func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *
 		log.Info("merchant bootstrap manifest has no merchants")
 		return nil
 	}
-
-	secretStore, solanaTransit, err := manifestReconcileSecretStore(ctx, cfg, cp, opts)
-	if err != nil {
-		return err
-	}
 	database, err := db.NewWithPGXPool(cp.Pool().Raw(), cp.Pool().Schema())
 	if err != nil {
 		return fmt.Errorf("wrap control-plane db: %w", err)
 	}
-
-	directory, err := merchants.NewDirectoryService(database.DataPool())
-	if err != nil {
-		return err
+	directory, transit := opts.Merchants, opts.SolanaTransit
+	if directory == nil {
+		opened, err := merchantbootstrap.OpenMerchants(ctx, cfg, database)
+		if err != nil {
+			return fmt.Errorf("merchant bootstrap: %w", err)
+		}
+		defer opened.Close()
+		directory, transit = opened.Service, opened.SolanaTransit
+		if _, ok := directory.Config().Source().(*merchantdocs.FileSource); ok {
+			log.Info("merchant bootstrap: without Vault the manifest is read by the server that boots with it; only merchant identities persist here")
+		}
 	}
 	for _, slug := range sortedMerchantKeys(manifest.Merchants) {
-		mt := manifest.Merchants[slug]
-		transit := solanaTransit
+		signer := transit
 		switch {
-		case transit == nil:
+		case signer == nil:
 		case opts.WrapTransit != nil:
-			transit = opts.WrapTransit(slug, transit)
+			signer = opts.WrapTransit(slug, signer)
 		default:
 			// One-off tools fail closed on a changed Transit key too.
-			transit = &signeridentity.Transit{TransitClient: transit, DB: database, Directory: directory, Slug: slug,
+			signer = &signeridentity.Transit{TransitClient: signer, DB: database, Directory: directory, Slug: slug,
 				Environment: config.ExpectedProviderEnvironment(config.IsTestMode(cfg))}
 		}
 		tn, err := ProvisionMerchant(ctx, ProvisionMerchantParams{
-			Config:        cfg,
-			ControlPlane:  cp,
-			Database:      database,
-			SecretStore:   secretStore,
-			SolanaTransit: transit,
-			Slug:          slug,
-			Merchant:      mt,
-			Options:       opts,
+			Config: cfg, ControlPlane: cp, Database: database, Merchants: directory,
+			SolanaTransit: signer, DeferPSP: opts.DeferPSP, Slug: slug, Merchant: manifest.Merchants[slug], Insert: opts.Insert,
 		})
 		if err != nil {
 			return err
 		}
-		log.WithFields(log.Fields{
-			"merchant":    tn.Slug,
-			"merchant_id": tn.ID.String(),
-		}).Info("merchant bootstrap: merchant ensured")
+		log.WithFields(log.Fields{"merchant": tn.Slug, "merchant_id": tn.ID.String()}).Info("merchant bootstrap: merchant ensured")
 	}
-
-	// #480/#481: issuer/JWKS trust is AuthKit's remote_application registry (#74),
-	// not an OpenRails-owned table — the manifest no longer reconciles issuers.
 	return nil
 }
 
-// manifestReconcileSecretStore picks where manifest secrets land (#723):
-// injected store (mode-1 boot plane) > mode-2 persistent backend > mode-1
-// ephemeral memory (CLI runs: DB projections converge, secrets validate but
-// are NOT persisted — the running server holds its own from its boot manifest).
-func manifestReconcileSecretStore(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, opts MerchantManifestReconcileOptions) (merchants.MerchantSecretStore, solana.TransitClient, error) {
-	if opts.SecretStore != nil && opts.SolanaTransit != nil {
-		return opts.SecretStore, opts.SolanaTransit, nil
-	}
-	if opts.SecretStore != nil {
-		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
-		if err == nil {
-			err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
-		}
-		return opts.SecretStore, transitStore.SolanaTransit, nil
-	}
-	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
-		log.Info("merchant bootstrap: snapshot credentials validate in memory and are not persisted")
-		transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
-		if err == nil {
-			err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("merchant bootstrap: %w", err)
-		}
-		return merchants.NewMemorySecretStore(), transitStore.SolanaTransit, nil
-	}
-	secretBackend, err := merchantsecrets.Build(ctx, cfg, cp.Pool())
-	if err == nil {
-		err = secretBackend.Await(ctx, merchantsecrets.AwaitTimeout)
-	}
-	if err != nil {
-		return nil, nil, fmt.Errorf("merchant bootstrap: build secret store: %w", err)
-	}
-	return secretBackend.Secrets, secretBackend.SolanaTransit, nil
-}
-
+// ProvisionMerchant registers a manifest merchant when missing, then puts its
+// declaration in place (merchantbootstrap.ProvisionMerchant).
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merchants.Merchant, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
 	if err := merchantbootstrap.ValidateMerchantDeclaration(req.Config, mt.MerchantDeclaration); err != nil {
 		return nil, err
 	}
-	database := req.Database
-	if database == nil {
-		if req.ControlPlane == nil || req.ControlPlane.Pool() == nil {
-			return nil, fmt.Errorf("merchant provisioning requires database or control plane")
-		}
-		var err error
-		database, err = db.NewWithPGXPool(req.ControlPlane.Pool().Raw(), req.ControlPlane.Pool().Schema())
-		if err != nil {
-			return nil, fmt.Errorf("wrap control-plane db: %w", err)
-		}
+	if req.Database == nil || req.Merchants == nil {
+		return nil, fmt.Errorf("merchant provisioning requires the database and the merchant configuration")
 	}
-
-	directory := req.Directory
-	if directory == nil {
-		var err error
-		directory, err = merchants.NewDirectoryService(database.DataPool())
-		if err != nil {
-			return nil, err
-		}
-	}
-	var tn *merchants.Merchant
-	var err error
-	if !req.MerchantID.IsZero() {
-		tn, err = directory.Get(ctx, req.MerchantID)
-		if err == nil {
-			tn.Slug = slug
-		}
-	} else {
-		tn, err = directory.GetBySlug(ctx, slug)
-	}
-	found := err == nil
-	if errors.Is(err, merchants.ErrMerchantNotFound) && req.MerchantID.IsZero() {
-		err = nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
-	}
-	if !found {
-		if !req.Options.Insert {
+	id := req.MerchantID
+	if id.IsZero() {
+		tn, err := req.Merchants.GetBySlug(ctx, slug)
+		switch {
+		case err == nil:
+			id = tn.ID
+		case !errors.Is(err, merchants.ErrMerchantNotFound):
+			return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
+		case !req.Insert:
 			return nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
-		}
-		tn, err = provisionMerchantIdentity(ctx, req.Config, database, req.ControlPlane, slug, mt)
-		if err != nil {
-			return nil, err
-		}
-	} else if req.ControlPlane != nil && mt.RemoteApplication != nil && req.Options.Overwrite {
-		if err := configureMerchantRemoteApplication(ctx, req.ControlPlane, iam.GroupByID(tn.PermissionGroupID), mt.RemoteApplication); err != nil {
-			return nil, fmt.Errorf("merchant bootstrap: update merchant group/remote_application for %q: %w", slug, err)
+		default:
+			if tn, err = provisionMerchantIdentity(ctx, req.Database, req.ControlPlane, slug, mt); err != nil {
+				return nil, err
+			}
+			id = tn.ID
 		}
 	}
-
-	// Keep an existing merchant's display name in sync with the manifest (the
-	// create path already set it). A UUID-scoped update ensures an
-	// empty manifest display name leaves the stored one untouched.
-	if found && req.Options.Overwrite && strings.TrimSpace(mt.DisplayName) != "" {
-		directory, err := merchants.NewDirectoryService(database.DataPool())
-		if err != nil {
-			return nil, err
-		}
-		if err := directory.SetDisplayName(ctx, tn.ID, mt.DisplayName); err != nil {
-			return nil, fmt.Errorf("merchant bootstrap: sync display name for %q: %w", slug, err)
-		}
-	}
-
-	// Startup ensures identity and missing accounts. Existing metadata belongs
-	// to ordinary Client operations; restarting a declaration cannot reassert it.
-	if found && !req.Options.Overwrite {
-		mt.DisplayName = ""
-		mt.APIHost = ""
-		mt.Settings = billing.MerchantSettings{}
-	}
-	if err := reconcileManifestMerchantConfiguration(ctx, req.Config, database, tn.ID, slug, mt.MerchantDeclaration, req.SecretStore, req.SolanaTransit, req.Options); err != nil {
-		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
+	tn, err := merchantbootstrap.ProvisionMerchant(ctx, merchantbootstrap.ProvisionMerchantParams{
+		MerchantID: id, Config: req.Config, Database: req.Database, Merchants: req.Merchants,
+		Slug: slug, Merchant: mt.MerchantDeclaration, SolanaTransit: req.SolanaTransit, DeferPSP: req.DeferPSP,
+	})
+	if err != nil {
+		return nil, err
 	}
 	return tn, nil
 }
 
-func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database *db.DB, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (*merchants.Merchant, error) {
+func provisionMerchantIdentity(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, slug string, mt MerchantConfig) (*merchants.Merchant, error) {
 	if cp == nil {
 		// Embedded: OpenRails runs no AuthKit, so it records no permission-group;
 		// permission_group_id stays NULL and the host owns authority.
-		id, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug, DisplayName: mt.DisplayName})
+		id, err := db.RegisterUnboundMerchant(ctx, database.Qx(ctx), db.RegisterUnboundMerchantOptions{Slug: slug})
 		if err != nil {
 			return nil, err
 		}
-		tn, found, err := lookupManifestMerchant(ctx, database, cp, slug)
-		if err != nil {
-			return nil, err
-		}
-		if !found {
-			return nil, fmt.Errorf("merchant bootstrap: registered merchant %q but could not read it back", slug)
-		}
-		tn.ID = id
-		return tn, nil
+		return &merchants.Merchant{ID: id, Slug: slug}, nil
 	}
 
 	// #567: the merchant IS a top-level permission-group (child of root). When
@@ -456,21 +369,6 @@ func provisionMerchantIdentity(ctx context.Context, cfg *config.Config, database
 		return nil, fmt.Errorf("merchant bootstrap: provision %q: %w", slug, err)
 	}
 	return tn, nil
-}
-
-func lookupManifestMerchant(ctx context.Context, database *db.DB, cp *controlplane.ControlPlane, slug string) (*merchants.Merchant, bool, error) {
-	dir, err := merchants.NewDirectoryService(database.DataPool())
-	if err != nil {
-		return nil, false, err
-	}
-	row, err := dir.GetBySlug(ctx, slug)
-	if errors.Is(err, merchants.ErrMerchantNotFound) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	return row, true, nil
 }
 
 func sortedMerchantKeys(in map[string]MerchantConfig) []string {
@@ -571,47 +469,3 @@ var rejectMisplacedMerchantConfigKeys = merchantbootstrap.RejectMisplacedMerchan
 type PSPConfig = config.PSPConfig
 type CustodianConfig = config.CustodianConfig
 type PSPSignerConfig = config.PSPSignerConfig
-type MerchantManifestReconcileOptions = merchantbootstrap.MerchantManifestReconcileOptions
-type ManifestProviderIdentityResolver = merchantbootstrap.ManifestProviderIdentityResolver
-type manifestProviderIdentity = merchantbootstrap.ManifestProviderIdentity
-type pspEntry = merchantbootstrap.PspEntry
-
-var pspEntries = merchantbootstrap.PspEntries
-
-type custodianEntry = merchantbootstrap.CustodianEntry
-
-var custodianEntries = merchantbootstrap.CustodianEntries
-
-type resolvedManifestCustodian = merchantbootstrap.ResolvedManifestCustodian
-
-var resolveManifestCustodian = merchantbootstrap.ResolveManifestCustodian
-var seedManifestCustodianSecrets = merchantbootstrap.SeedManifestCustodianSecrets
-var reconcileManifestCustodians = merchantbootstrap.ReconcileManifestCustodians
-var nonNilSettings = merchantbootstrap.NonNilSettings
-var resolveManifestCustodianReference = merchantbootstrap.ResolveManifestCustodianReference
-var reconcileManifestMerchantConfiguration = merchantbootstrap.ReconcileManifestMerchantConfiguration
-var pruneManifestSecrets = merchantbootstrap.PruneManifestSecrets
-
-type resolvedManifestRailAccount = merchantbootstrap.ResolvedManifestRailAccount
-
-var resolveManifestRailAccount = merchantbootstrap.ResolveManifestRailAccount
-
-func SeedMerchantManifestSecretPlane(ctx context.Context, cfg *config.Config, id billing.MerchantID, mt MerchantConfig, store merchants.MerchantSecretStore, transit solana.TransitClient) error {
-	return merchantbootstrap.SeedMerchantManifestSecretPlane(ctx, cfg, id, mt.MerchantDeclaration, store, transit)
-}
-
-var reconcileManifestPSP = merchantbootstrap.ReconcileManifestPSP
-var manifestProviderSignerEvidence = merchantbootstrap.ManifestProviderSignerEvidence
-var solanaLocalKeypairPublicKey = merchantbootstrap.SolanaLocalKeypairPublicKey
-var solanaTransitPublicKey = merchantbootstrap.SolanaTransitPublicKey
-var manifestProviderEnvironment = merchantbootstrap.ManifestProviderEnvironment
-var manifestSolanaNetwork = merchantbootstrap.ManifestSolanaNetwork
-var normalizeManifestRail = merchantbootstrap.NormalizeManifestRail
-
-type manifestSecretValues = merchantbootstrap.ManifestSecretValues
-
-var newManifestSecretValues = merchantbootstrap.NewManifestSecretValues
-
-type defaultManifestProviderIdentityResolver = merchantbootstrap.DefaultManifestProviderIdentityResolver
-
-var stringPtrIfNotEmpty = merchantbootstrap.StringPtrIfNotEmpty

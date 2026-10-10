@@ -43,8 +43,8 @@ func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlert
 	return &out, nil
 }
 
-// UpdateAlertWebhook changes an alert webhook's URL, name, format or enabled
-// state; omitted fields keep their values.
+// UpdateAlertWebhook changes an alert webhook; omitted fields keep their
+// values.
 func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error) {
 	if id.IsZero() {
 		return nil, invalidErr("alert webhook id is required")

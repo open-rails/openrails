@@ -39,7 +39,7 @@ LIMIT sqlc.arg(row_limit)::int;
 -- The hosted portal's "which merchants am I a customer of" directory, read
 -- before any merchant is chosen.
 -- name: ListMerchantsForCustomerSubject :many
-SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
+SELECT m.id, m.slug
 FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'

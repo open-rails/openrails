@@ -1,7 +1,7 @@
 {
   "go_api": {
     ".": [
-      "const (\n\tSandbox = config.CredentialPostureSandbox\n\n\tLive = config.CredentialPostureLive\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSecretBackendSnapshot = config.SecretBackendSnapshot\n\n\tSecretBackendVault = config.SecretBackendVault\n\n\tSecretBackendDB = config.SecretBackendDB\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n)",
+      "const (\n\tSandbox = config.CredentialPostureSandbox\n\n\tLive = config.CredentialPostureLive\n\n\tProviderWritesFull = config.ProviderWriteModeFull\n\n\tProviderWritesLimited = config.ProviderWriteModeLimited\n\n\tProviderWritesReadOnly = config.ProviderWriteModeReadOnly\n\n\tSubjectUser = billingauth.SubjectUser\n\n\tSubjectApplication = billingauth.SubjectApplication\n\n\tCredentialSession = billingauth.CredentialSession\n\n\tCredentialDeviceKey = billingauth.CredentialDeviceKey\n\n\tCredentialAPIKey = billingauth.CredentialAPIKey\n\n\tCredentialSignedToken = billingauth.CredentialSignedToken\n\n\tCredentialAccessToken = billingauth.CredentialAccessToken\n)",
       "const QueueBilling = riverjobs.QueueBilling",
       "func (InvoiceSweepArgs) InsertOpts() river.InsertOpts",
       "func (InvoiceSweepArgs) Kind() string",
@@ -123,7 +123,7 @@
       "func (c *Client) Start(ctx context.Context, opts ...StartOption) error",
       "func (c *Client) UpdateAlertWebhook(ctx context.Context, id billing.AlertWebhookID, req billing.UpdateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
       "func (c *Client) UpdateCustomer(ctx context.Context, id billing.CustomerID, params billing.UpdateCustomerParams, requestOptions ...RequestOption) (*billing.Customer, error)",
-      "func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error)",
+      "func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationState, error)",
       "func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing.UpdatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error)",
       "func (c *Client) UpdatePrice(ctx context.Context, id billing.PriceID, params billing.UpdatePriceParams, requestOptions ...RequestOption) (*billing.Price, error)",
       "func (c *Client) UpdateProduct(ctx context.Context, id billing.ProductID, params billing.UpdateProductParams, requestOptions ...RequestOption) (*billing.Product, error)",
@@ -150,6 +150,7 @@
       "func WithRiverClient(fleet *river.Client[pgx.Tx]) StartOption",
       "func WithTimeout(d time.Duration) ClientOption",
       "func WithTokenProvider(fn func(context.Context) (string, error)) ClientOption",
+      "type AlertWebhookConfig = config.AlertWebhookConfig",
       "type Authenticator = billingauth.Authenticator",
       "type CCBillPSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tSalt             string `psp:\"secrets.salt,required\"`\n\tDatalinkUsername string `psp:\"secrets.datalink_username\"`\n\tDatalinkPassword string `psp:\"secrets.datalink_password\"`\n}",
       "type CaptchaConfig = config.CaptchaConfig",
@@ -168,7 +169,6 @@
       "type Email = config.Email",
       "type EmailAddress = config.EmailAddress",
       "type EmailSender = config.EmailSender",
-      "type EncryptionConfig = config.EncryptionConfig",
       "type HyperSwitchConfig = config.HyperSwitchConfig",
       "type Identity = billingauth.Identity",
       "type InvoiceSweepArgs struct {\n\tMerchantID *billing.MerchantID `json:\"merchant_id,omitempty\"`\n\n\tCollect bool `json:\"collect,omitempty\"`\n\n\tUseMonthlyFloor bool `json:\"use_monthly_floor,omitempty\"`\n\n\tFinalizePreviousMonth bool `json:\"finalize_previous_month,omitempty\"`\n}",
@@ -614,7 +614,7 @@
       "type CreateFederatedGrantParams struct {\n\tEmail string `json:\"email\"`\n\tRole  string `json:\"role\"`\n}",
       "type CreateMerchantParams struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}",
       "type CreateOrderParams struct {\n\tLines         []OrderLineParams `json:\"lines\"`\n\tExpectedTotal *int64            `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPayment     `json:\"payment,omitempty\"`\n}",
-      "type CreatePSPParams struct {\n\tOperationID uuid.UUID         `json:\"operation_id\"`\n\tKey         string            `json:\"key\"`\n\tRail        Rail              `json:\"rail\"`\n\tAccountID   string            `json:\"account_id\"`\n\tSettings    map[string]any    `json:\"settings\"`\n\tCredentials map[string]string `json:\"credentials\"`\n}",
+      "type CreatePSPParams struct {\n\tKey         string            `json:\"key\"`\n\tRail        Rail              `json:\"rail\"`\n\tAccountID   string            `json:\"account_id\"`\n\tSettings    map[string]any    `json:\"settings\"`\n\tCredentials map[string]string `json:\"credentials\"`\n}",
       "type CreatePaymentMethodParams struct {\n\tPSPID          PSPID           `json:\"psp_id\"`\n\tPaymentToken   string          `json:\"payment_token,omitempty\"`\n\tCard           *Card           `json:\"card,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n}",
       "type CreatePaymentParams struct {\n\tInvoiceID     *InvoiceID `json:\"invoice_id,omitempty\"`\n\tOrderID       *OrderID   `json:\"order_id,omitempty\"`\n\tAmount        int64      `json:\"amount,string\"`\n\tTransactionID string     `json:\"transaction_id\"`\n\tPaidAt        *time.Time `json:\"paid_at,omitempty\"`\n}",
       "type CreatePriceMigrationParams struct {\n\tFromPriceID PriceID `json:\"from_price_id,omitzero\"`\n\n\tProductKey string `json:\"product_key,omitempty\"`\n\tPriceKey   string `json:\"price_key,omitempty\"`\n\n\tToPriceID PriceID `json:\"to_price_id,omitzero\"`\n\n\tEffectiveAt time.Time `json:\"effective_at,omitzero\"`\n\n\tAcknowledgeShortNotice bool              `json:\"acknowledge_short_notice,omitempty\"`\n\tFallbackPolicy         MigrationFallback `json:\"fallback_policy,omitempty\"`\n\n\tArchiveSource *bool `json:\"archive_source,omitempty\"`\n}",
@@ -716,12 +716,11 @@
       "type MarkNotificationsReadParams struct {\n\tNotificationIDs []NotificationID `json:\"notification_ids,omitempty\"`\n\tAll             bool             `json:\"all,omitempty\"`\n}",
       "type Merchant struct {\n\tID          MerchantID     `json:\"id\"`\n\tSlug        string         `json:\"slug\"`\n\tDisplayName *string        `json:\"display_name\"`\n\tStatus      MerchantStatus `json:\"status\"`\n\n\tRailsArmed    []Rail     `json:\"rails_armed\"`\n\tLastPaymentAt *time.Time `json:\"last_payment_at\"`\n\tCreatedAt     time.Time  `json:\"created_at\"`\n\tUpdatedAt     time.Time  `json:\"updated_at\"`\n\tDeletedAt     *time.Time `json:\"deleted_at\"`\n}",
       "type MerchantAPIHost struct {\n\tAPIHost *string       `json:\"api_host\"`\n\tClaim   *APIHostClaim `json:\"claim\"`\n}",
-      "type MerchantConfigurationReceipt struct {\n\tRevision string `json:\"revision\"`\n\tReplayed bool   `json:\"replayed\"`\n}",
-      "type MerchantConfigurationState struct {\n\tRevision    string           `json:\"revision\"`\n\tDisplayName string           `json:\"display_name\"`\n\tAPIHost     string           `json:\"api_host\"`\n\tSettings    MerchantSettings `json:\"settings\"`\n}",
+      "type MerchantConfigurationState struct {\n\tRevision    int64            `json:\"revision\"`\n\tDisplayName string           `json:\"display_name\"`\n\tAPIHost     string           `json:\"api_host\"`\n\tSettings    MerchantSettings `json:\"settings\"`\n}",
       "type MerchantID uuid.UUID",
       "type MerchantListParams struct {\n\tPageRequest\n\n\tStatuses []MerchantStatus\n\n\tQuery string\n}",
       "type MerchantName struct {\n\tID   MerchantID `json:\"id\"`\n\tName string     `json:\"name\"`\n}",
-      "type MerchantProfile struct {\n\tDisplayName string `json:\"display_name,omitempty\"`\n\tLogoURL     string `json:\"logo_url,omitempty\"`\n\tFromEmail   string `json:\"from_email,omitempty\"`\n\tSupportURL  string `json:\"support_url,omitempty\"`\n\tSignupURL   string `json:\"signup_url,omitempty\"`\n}",
+      "type MerchantProfile struct {\n\tLogoURL    string `json:\"logo_url,omitempty\"`\n\tFromEmail  string `json:\"from_email,omitempty\"`\n\tSupportURL string `json:\"support_url,omitempty\"`\n\tSignupURL  string `json:\"signup_url,omitempty\"`\n}",
       "type MerchantRef struct {\n\tID          MerchantID `json:\"id\"`\n\tSlug        string     `json:\"slug\"`\n\tDisplayName string     `json:\"display_name\"`\n}",
       "type MerchantRenameTooSoonError struct{ NextRenameAt time.Time }",
       "type MerchantRetirement struct {\n\tRetired bool\n\tRefusal MerchantRetirementRefusal\n}",
@@ -772,8 +771,8 @@
       "type OrderPreview struct {\n\tCurrency       string               `json:\"currency\"`\n\tTotal          int64                `json:\"total,string\"`\n\tLines          []OrderPreviewLine   `json:\"lines\"`\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n}",
       "type OrderPreviewLine struct {\n\tPriceID              PriceID           `json:\"price_id\"`\n\tProductID            ProductID         `json:\"product_id\"`\n\tDescription          string            `json:\"description\"`\n\tQuantity             *int              `json:\"quantity\"`\n\tUnitAmount           int64             `json:\"unit_amount,string\"`\n\tAmount               int64             `json:\"amount,string\"`\n\tOwnership            catalog.Ownership `json:\"ownership\"`\n\tBillingIntervalHours *int              `json:\"billing_interval_hours\"`\n\tAccessDurationHours  *int              `json:\"access_duration_hours\"`\n\tRefusal              *OrderLineRefusal `json:\"refusal\"`\n}",
       "type OrderStatus string",
-      "type PSP struct {\n\tID PSPID `json:\"id\"`\n\n\tKey         string `json:\"key\"`\n\tRail        Rail   `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\n\tAccountID string `json:\"account_id\"`\n\n\tArchived   bool       `json:\"archived\"`\n\tArchivedAt *time.Time `json:\"archived_at\"`\n\n\tOpenObligations int64 `json:\"open_obligations\"`\n\n\tSettings    map[string]any           `json:\"settings\"`\n\tCredentials map[string]PSPCredential `json:\"credentials\"`\n\n\tRevision  int64     `json:\"revision\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
-      "type PSPCredential struct {\n\tConfigured bool `json:\"configured\"`\n\n\tValidatedAt *time.Time `json:\"validated_at\"`\n\n\tRotationVersion int `json:\"rotation_version\"`\n}",
+      "type PSP struct {\n\tID PSPID `json:\"id\"`\n\n\tKey         string `json:\"key\"`\n\tRail        Rail   `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\n\tAccountID string `json:\"account_id\"`\n\n\tArchived bool `json:\"archived\"`\n\n\tOpenObligations int64 `json:\"open_obligations\"`\n\n\tSettings    map[string]any           `json:\"settings\"`\n\tCredentials map[string]PSPCredential `json:\"credentials\"`\n\n\tRevision  int64     `json:\"revision\"`\n\tCreatedAt time.Time `json:\"created_at\"`\n\tUpdatedAt time.Time `json:\"updated_at\"`\n}",
+      "type PSPCredential struct {\n\tConfigured bool `json:\"configured\"`\n\n\tValidatedAt *time.Time `json:\"validated_at\"`\n}",
       "type PSPDeclaration struct {\n\tKey       string\n\tRail      Rail\n\tAccountID string\n}",
       "type PSPID uuid.UUID",
       "type PSPLinkState struct {\n\tStatus     PSPLinkStatus     `json:\"status\"`\n\tIDs        map[string]string `json:\"ids\"`\n\tLookupKey  string            `json:\"lookup_key\"`\n\tSyncStatus SyncStatus        `json:\"sync_status\"`\n\tDrift      []DriftField      `json:\"drift\"`\n\tMessage    string            `json:\"message\"`\n}",
@@ -909,8 +908,8 @@
       "type UnreadCount struct {\n\tUnreadCount int64 `json:\"unread_count\"`\n}",
       "type UpdateAlertWebhookParams struct {\n\tName    catalog.Field[string]             `json:\"name,omitzero\"`\n\tURL     catalog.Field[string]             `json:\"url,omitzero\"`\n\tFormat  catalog.Field[AlertWebhookFormat] `json:\"format,omitzero\"`\n\tEnabled catalog.Field[bool]               `json:\"enabled,omitzero\"`\n}",
       "type UpdateCustomerParams struct {\n\tCreditLimits   []CreditLimit                 `json:\"credit_limits,omitempty\"`\n\tTrustLevels    []TrustLevel                  `json:\"trust_levels,omitempty\"`\n\tBillingPolicy  catalog.Field[string]         `json:\"billing_policy,omitzero\"`\n\tInvoiceProfile catalog.Field[InvoiceProfile] `json:\"invoice_profile,omitzero\"`\n}",
-      "type UpdateMerchantConfigurationParams struct {\n\tIdempotencyKey   string            `json:\"-\"`\n\tExpectedRevision *string           `json:\"expected_revision\"`\n\tSettings         *MerchantSettings `json:\"settings,omitempty\"`\n\tDisplayName      *string           `json:\"display_name,omitempty\"`\n}",
-      "type UpdatePSPParams struct {\n\tOperationID      uuid.UUID         `json:\"operation_id\"`\n\tExpectedRevision int64             `json:\"expected_revision\"`\n\tSettings         map[string]any    `json:\"settings\"`\n\tCredentials      map[string]string `json:\"credentials\"`\n\n\tRetireWebhookOverlap bool `json:\"retire_webhook_overlap\"`\n\n\tArchived  bool `json:\"archived\"`\n\tAllowLast bool `json:\"allow_last\"`\n}",
+      "type UpdateMerchantConfigurationParams struct {\n\tExpectedRevision *int64            `json:\"expected_revision\"`\n\tSettings         *MerchantSettings `json:\"settings,omitempty\"`\n\tDisplayName      *string           `json:\"display_name,omitempty\"`\n}",
+      "type UpdatePSPParams struct {\n\tExpectedRevision *int64            `json:\"expected_revision\"`\n\tSettings         map[string]any    `json:\"settings\"`\n\tCredentials      map[string]string `json:\"credentials\"`\n\n\tRetireWebhookOverlap bool `json:\"retire_webhook_overlap\"`\n\n\tArchived  bool `json:\"archived\"`\n\tAllowLast bool `json:\"allow_last\"`\n}",
       "type UpdatePaymentMethodParams struct {\n\tExpMonth       *int            `json:\"exp_month,omitempty\"`\n\tExpYear        *int            `json:\"exp_year,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n\tReusable       *bool           `json:\"reusable,omitempty\"`\n}",
       "type UpdatePriceParams struct {\n\tArchived catalog.Field[bool]                         `json:\"archived,omitzero\"`\n\tPSPLinks map[string]catalog.Field[map[string]string] `json:\"psp_links,omitempty\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
       "type UpdateProductParams struct {\n\tDisplayName  catalog.Field[string]                  `json:\"display_name,omitzero\"`\n\tDescription  catalog.Field[string]                  `json:\"description,omitzero\"`\n\tEntitlements catalog.Field[[]string]                `json:\"entitlements,omitzero\"`\n\tCreditGrant  catalog.Field[catalog.CreditGrantSpec] `json:\"credit_grant,omitzero\"`\n\tTierGroup    catalog.Field[string]                  `json:\"tier_group,omitzero\"`\n\tTierRank     catalog.Field[int]                     `json:\"tier_rank,omitzero\"`\n\n\tOwnership catalog.Field[catalog.Ownership] `json:\"ownership,omitzero\"`\n\tArchived  catalog.Field[bool]              `json:\"archived,omitzero\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
@@ -1047,9 +1046,10 @@
       "type Card struct{}"
     ],
     "internal/config": [
+      "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
-      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
+      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
       "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
@@ -1059,13 +1059,12 @@
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
-      "type EncryptionConfig struct {\n\tMasterKey string\n}",
       "type FormerNamesConfig struct {\n\tMode     FormerNamesMode\n\tDuration *time.Duration\n}",
       "type FormerNamesMode string",
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
       "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tAskEnabled bool\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string\n}",
-      "type MerchantDeclaration struct {\n\tSlug        string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tAPIHost string `yaml:\"api_host,omitempty\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
+      "type MerchantDeclaration struct {\n\tSlug        string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tAPIHost string `yaml:\"api_host,omitempty\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
@@ -1353,7 +1352,6 @@
     ],
     "internal/db/models": [
       "type BillingPolicy struct {\n\tKind BillingPolicyKind `json:\"kind\"`\n\n\tOutstandingCapAmount int64 `json:\"outstanding_cap_amount,omitempty\"`\n\n\tSpendWindows []BudgetWindowPolicy `json:\"spend_windows,omitempty\"`\n\n\tBadSpendWindows []BudgetWindowPolicy `json:\"bad_spend_windows,omitempty\"`\n\n\tAccrualRateCapPerHour int64 `json:\"accrual_rate_cap_per_hour,omitempty\"`\n\n\tAccrualRateWindowSeconds int64 `json:\"accrual_rate_window_seconds,omitempty\"`\n\n\tCollectionThresholdAmount *int64 `json:\"collection_threshold_amount,omitempty\"`\n\n\tCollectionCycleBoundary string `json:\"collection_cycle_boundary,omitempty\"`\n\n\tDelinquencyGraceDays   *int   `json:\"delinquency_grace_days,omitempty\"`\n\tDelinquencyAmountFloor *int64 `json:\"delinquency_amount_floor,omitempty\"`\n\n\tPolicyCurrency string `json:\"policy_currency,omitempty\"`\n}",
-      "type BillingPolicyBinding struct {\n\tID         uuid.UUID  `json:\"id\"`\n\tMerchantID uuid.UUID  `json:\"merchant_id\"`\n\tCustomerID *uuid.UUID `json:\"customer_id,omitempty\"`\n\tTier       string     `json:\"tier,omitempty\"`\n\tPolicyName string     `json:\"policy\"`\n\tCreatedAt  time.Time  `json:\"created_at\"`\n\tUpdatedAt  time.Time  `json:\"updated_at\"`\n}",
       "type BudgetWindowPolicy struct {\n\tKey           string `json:\"key\"`\n\tWindowSeconds int64  `json:\"window_seconds\"`\n\tLimit         int64  `json:\"limit\"`\n\tCurrency      string `json:\"currency,omitempty\"`\n}",
       "type Card struct {\n\tBrand string `json:\"brand\"`\n\tLast4 string `json:\"last4\"`\n\n\tExpMonth int `json:\"exp_month\"`\n\tExpYear  int `json:\"exp_year\"`\n}",
       "type CatalogDriftEvent struct {\n\tID uuid.UUID `json:\"id\"`\n\n\tPSPID uuid.UUID `json:\"psp_id\"`\n\n\tProvider CatalogDriftProvider `json:\"provider\"`\n\tKind     CatalogDriftKind     `json:\"kind\"`\n\n\tOpenRailsResourceType CatalogDriftResourceType `json:\"openrails_resource_type\"`\n\n\tOpenRailsResourceID string `json:\"openrails_resource_id,omitempty\"`\n\n\tExternalResourceID string `json:\"external_resource_id,omitempty\"`\n\n\tField string `json:\"field,omitempty\"`\n\n\tOpenRailsValue string `json:\"openrails_value,omitempty\"`\n\tExternalValue  string `json:\"external_value,omitempty\"`\n\n\tDetectedAt time.Time  `json:\"detected_at\"`\n\tResolvedAt *time.Time `json:\"resolved_at,omitempty\"`\n}",
@@ -1500,10 +1498,16 @@
       "type CatalogSnapshot struct {\n\tKind            string                                  `json:\"kind\"`\n\tSchemaVersion   int                                     `json:\"schema_version\"`\n\tMerchantID      string                                  `json:\"merchant_id\"`\n\tCatalogRevision int64                                   `json:\"catalog_revision,string\"`\n\tDependencies    CatalogDependencies                     `json:\"dependencies\"`\n\tTables          map[string][]map[string]json.RawMessage `json:\"tables\"`\n\tSHA256          string                                  `json:\"sha256,omitempty\"`\n}",
       "type Result struct {\n\tMerchantID string `json:\"merchant_id\"`\n\tDigest     string `json:\"digest\"`\n\tRows       int64  `json:\"rows\"`\n\tReplayed   bool   `json:\"replayed\"`\n}"
     ],
+    "internal/merchantdocs": [
+      "type AlertWebhook struct {\n\tID        billing.AlertWebhookID     `json:\"id\"`\n\tName      string                     `json:\"name,omitempty\"`\n\tURL       string                     `json:\"url\"`\n\tFormat    billing.AlertWebhookFormat `json:\"format\"`\n\tEnabled   bool                       `json:\"enabled\"`\n\tCreatedAt time.Time                  `json:\"created_at\"`\n\tUpdatedAt time.Time                  `json:\"updated_at\"`\n}",
+      "type Custodian struct {\n\tKind        string            `json:\"kind\"`\n\tEnvironment string            `json:\"environment\"`\n\tAccountID   string            `json:\"account_id\"`\n\tArchived    bool              `json:\"archived,omitempty\"`\n\tSettings    map[string]any    `json:\"settings,omitempty\"`\n\tSecrets     map[string]string `json:\"secrets,omitempty\"`\n}",
+      "type Merchant struct {\n\tDisplayName   string                   `json:\"display_name,omitempty\"`\n\tSettings      billing.MerchantSettings `json:\"settings\"`\n\tAlertWebhooks []AlertWebhook           `json:\"alert_webhooks,omitempty\"`\n\tSecrets       MerchantSecrets          `json:\"secrets,omitzero\"`\n}",
+      "type MerchantSecrets struct {\n\tSCIMToken string `json:\"scim_token,omitempty\"`\n}",
+      "type PSP struct {\n\tRail        string `json:\"rail\"`\n\tEnvironment string `json:\"environment\"`\n\tAccountID   string `json:\"account_id\"`\n\tArchived    bool   `json:\"archived,omitempty\"`\n\n\tCustodian string            `json:\"custodian,omitempty\"`\n\tSigner    *Signer           `json:\"signer,omitempty\"`\n\tSettings  map[string]any    `json:\"settings,omitempty\"`\n\tSecrets   map[string]string `json:\"secrets,omitempty\"`\n}",
+      "type Signer struct {\n\tMode string `json:\"mode,omitempty\"`\n\tKey  string `json:\"key,omitempty\"`\n}"
+    ],
     "internal/merchants": [
-      "type MerchantSecretStatus struct {\n\tName string `json:\"name\"`\n\n\tRail string `json:\"rail\"`\n\n\tCustodian        string `json:\"custodian,omitempty\"`\n\tKey              string `json:\"key\"`\n\tDisplayLabel     string `json:\"display_label\"`\n\tMerchantWritable bool   `json:\"merchant_writable\"`\n\tConfigured       bool   `json:\"configured\"`\n\tVersion          int    `json:\"version,omitempty\"`\n}",
-      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}",
-      "type SecretRef struct {\n\tRetired    bool   `json:\"-\"`\n\tName       string `json:\"name\"`\n\tMinVersion int    `json:\"version\"`\n\tCustody    string `json:\"custody,omitempty\"`\n}"
+      "type SecretCleanupPlan struct {\n\tBackend string   `json:\"backend\"`\n\tRoot    string   `json:\"root\"`\n\tNames   []string `json:\"names\"`\n}"
     ],
     "internal/modules/admission/spendgate": [
       "type Policy struct {\n\tScopes []ScopedWindows `json:\"scopes\"`\n}",
@@ -1636,9 +1640,6 @@
       "type FrozenInstrument struct {\n\tPSPID           uuid.UUID  `json:\"psp_id\"`\n\tCustodian       string     `json:\"custodian\"`\n\tCustodianID     *uuid.UUID `json:\"custodian_id,omitempty\"`\n\tRailCustomerRef string     `json:\"rail_customer_ref\"`\n\tRailMethodRef   string     `json:\"rail_method_ref\"`\n\n\tMandate *Mandate `json:\"mandate,omitempty\"`\n}",
       "type HyperSwitchBinding struct {\n\tAccountID  string `json:\"account_id\"`\n\tProfileID  string `json:\"profile_id\"`\n\tAPIBaseURL string `json:\"api_base_url\"`\n}",
       "type Mandate struct {\n\tID   uuid.UUID `json:\"id\"`\n\tKind Agreement `json:\"kind\"`\n\n\tInitialTransactionID string `json:\"initial_transaction_id\"`\n\tNetworkTransactionID string `json:\"network_transaction_id,omitempty\"`\n\tTransactionLinkID    string `json:\"transaction_link_id,omitempty\"`\n}"
-    ],
-    "internal/modules/solana/recurring": [
-      "type solanaSignerConfig struct {\n\tMode string `json:\"mode\"`\n\tKey  string `json:\"key\"`\n}"
     ],
     "internal/modules/subscriptions": [
       "func (p *NMIUpgradePayload) UnmarshalJSON(data []byte) error {\n\ttype plain NMIUpgradePayload\n\tvar decoded plain\n\tif err := json.Unmarshal(data, \u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tif _, _, err := grants.DecodeAcceptedEntitlements(decoded.Entitlements, decoded.LegacyEntitlements); err != nil {\n\t\treturn err\n\t}\n\tvar fields map[string]json.RawMessage\n\tif err := json.Unmarshal(data, \u0026fields); err != nil {\n\t\treturn err\n\t}\n\tif _, present := fields[\"access_duration_hours\"]; !present {\n\t\tdecoded.AccessEndsAt = \u0026decoded.PeriodEnd\n\t}\n\t*p = NMIUpgradePayload(decoded)\n\treturn nil\n}",
@@ -1953,8 +1954,7 @@
       "bytes": "bytes",
       "configdocument": "github.com/open-rails/openrails/internal/configdocument",
       "fmt": "fmt",
-      "json": "encoding/json",
-      "strings": "strings"
+      "json": "encoding/json"
     },
     "billing/merchant_slugs.go": {
       "fmt": "fmt",
@@ -2008,8 +2008,7 @@
       "uuid": "github.com/google/uuid"
     },
     "billing/psps.go": {
-      "time": "time",
-      "uuid": "github.com/google/uuid"
+      "time": "time"
     },
     "billing/refunds.go": {
       "time": "time",
@@ -2170,7 +2169,6 @@
       "slog": "log/slog"
     },
     "internal/config/config.go": {
-      "base64": "encoding/base64",
       "catalog": "github.com/open-rails/openrails/catalog",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
@@ -2179,6 +2177,7 @@
       "log": "github.com/sirupsen/logrus",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "net": "net",
+      "path": "path",
       "regexp": "regexp",
       "slices": "slices",
       "sort": "sort",
@@ -2210,11 +2209,13 @@
     },
     "internal/config/merchant_declaration.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "errors": "errors",
       "fmt": "fmt",
       "go-yaml": "github.com/goccy/go-yaml",
       "maps": "maps",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
+      "reflect": "reflect",
       "slices": "slices",
       "strconv": "strconv",
       "strings": "strings"
@@ -2283,6 +2284,7 @@
     },
     "internal/custodymigration/custodymigration.go": {
       "billing": "github.com/open-rails/openrails/billing",
+      "boot": "github.com/open-rails/openrails/internal/merchantbootstrap",
       "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
@@ -2291,6 +2293,7 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "nmiproxy": "github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
@@ -2298,10 +2301,6 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/db/models/billing_policy.go": {
-      "time": "time",
-      "uuid": "github.com/google/uuid"
     },
     "internal/db/models/catalog_drift_event.go": {
       "strings": "strings",
@@ -2413,7 +2412,6 @@
       "context": "context",
       "converge": "github.com/open-rails/openrails/internal/reconcile/converge",
       "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
       "filepath": "path/filepath",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
@@ -2422,10 +2420,8 @@
       "intents": "github.com/open-rails/openrails/internal/intents",
       "io": "io",
       "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "merchantsecrets": "github.com/open-rails/openrails/internal/merchantsecrets",
       "os": "os",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
@@ -2831,6 +2827,7 @@
       "hyperswitch": "github.com/open-rails/openrails/internal/integrations/hyperswitch",
       "json": "encoding/json",
       "mandates": "github.com/open-rails/openrails/internal/modules/mandates",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
@@ -3089,6 +3086,15 @@
       "sha256": "crypto/sha256",
       "uuid": "github.com/google/uuid"
     },
+    "internal/merchantdocs/docs.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "errors": "errors",
+      "maps": "maps",
+      "regexp": "regexp",
+      "slices": "slices",
+      "strings": "strings",
+      "time": "time"
+    },
     "internal/merchants/secret_cleanup.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
@@ -3096,24 +3102,10 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "json": "encoding/json",
+      "merchantdocs": "github.com/open-rails/openrails/internal/merchantdocs",
       "sort": "sort",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/merchants/secrets.go": {
-      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "custodians": "github.com/open-rails/openrails/internal/custodians",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "path": "path",
-      "rails": "github.com/open-rails/openrails/internal/modules/payments/rails",
-      "strings": "strings",
-      "url": "net/url",
-      "uuid": "github.com/google/uuid"
     },
     "internal/modules/admission/spendgate/gate.go": {
       "bytes": "bytes",
@@ -3211,7 +3203,6 @@
       "json": "encoding/json",
       "math": "math",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
       "normalize": "github.com/open-rails/openrails/internal/shared/normalize",
@@ -3391,6 +3382,7 @@
       "intents": "github.com/open-rails/openrails/internal/intents",
       "mandates": "github.com/open-rails/openrails/internal/modules/mandates",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "paymentmethods": "github.com/open-rails/openrails/internal/modules/paymentmethods",
       "strings": "strings",
@@ -3713,12 +3705,14 @@
       "uuid": "github.com/google/uuid"
     },
     "internal/modules/payments/charge/hyperswitch.go": {
+      "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
+      "db": "github.com/open-rails/openrails/internal/db",
       "errors": "errors",
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
+      "merchants": "github.com/open-rails/openrails/internal/merchants",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "strings": "strings",
       "url": "net/url",
@@ -3770,23 +3764,6 @@
       "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
       "time": "time",
       "url": "net/url"
-    },
-    "internal/modules/solana/recurring/wiring.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "json": "encoding/json",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "merchants": "github.com/open-rails/openrails/internal/merchants",
-      "solanago": "github.com/gagliardetto/solana-go",
-      "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
-      "strings": "strings",
-      "time": "time",
-      "v5": "github.com/jackc/pgx/v5",
-      "vault": "github.com/open-rails/openrails/internal/integrations/vault"
     },
     "internal/modules/subscriptions/admin_service.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
@@ -4622,8 +4599,7 @@
     "merchant_configuration.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "context": "context",
-      "http": "net/http",
-      "strings": "strings"
+      "http": "net/http"
     },
     "metrics.go": {
       "billing": "github.com/open-rails/openrails/billing",

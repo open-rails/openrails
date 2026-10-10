@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -214,7 +215,7 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 			if s.Config.HyperSwitch == nil {
 				return errors.New("engine HyperSwitch custody is not configured")
 			}
-			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, terms.PSPID, s.Config.HyperSwitch.APIBaseURL)
+			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), charge.CustodyOf(d), method, terms.PSPID, s.Config.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}
@@ -223,11 +224,14 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 		if err := charge.ValidateEngineInstrument(method.Rail, charge.FreezeInstrument(method, terms.PSPID), binding); err != nil {
 			return err
 		}
-		psp, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: terms.PSPID})
+		if _, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: terms.PSPID}); err != nil {
+			return err
+		}
+		psp, live, err := merchants.Of(d).PSPScopeByID(ctx, mid, terms.PSPID)
 		if err != nil {
 			return err
 		}
-		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
+		if !live || psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 			return &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "the subscription's payment provider account is no longer available"}
 		}
 		instrument, err := enrollmentInstrument(ctx, d.Gen(ctx), method, terms.PSPID)

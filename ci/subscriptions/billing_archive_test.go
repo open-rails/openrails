@@ -100,7 +100,7 @@ func TestBillingArchivePreservesApplicationMetadata(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+destinationName+" CASCADE")
 	})
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+destinationName+`.merchants (id, slug, status, permission_group_id, display_name) VALUES ($1, 'archive-destination', 'active', $2, 'Destination authority')`, merchantID.UUID(), uuid.New())
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+destinationName+`.merchants (id, slug, status, permission_group_id) VALUES ($1, 'archive-destination', 'active', $2)`, merchantID.UUID(), uuid.New())
 	require.NoError(t, err)
 	destination, err := db.NewWithPGXPool(w.pool, destinationSchema)
 	require.NoError(t, err)

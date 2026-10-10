@@ -108,6 +108,10 @@ const (
 // once per cycle and the answer is back before the renewal it protects.
 const DefaultAccountUpdaterLookaheadDays = 14
 
+// MaxAccountUpdaterLookaheadDays bounds the window, so the cross-merchant
+// due-work query can select candidates without reading each configuration.
+const MaxAccountUpdaterLookaheadDays = 120
+
 var registry = map[string]Descriptor{
 	models.CustodianHyperSwitch: {
 		Kind:        models.CustodianHyperSwitch,

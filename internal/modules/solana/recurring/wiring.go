@@ -2,25 +2,21 @@ package recurring
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/vault"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// secretStoreGetter adapts the per-merchant merchants.MerchantSecretStore to the
+// secretStoreGetter adapts the per-merchant merchants.MerchantSecretReader to the
 // solana.MerchantSecretGetter the keypair signer needs.
 type secretStoreGetter struct {
 	store       merchants.MerchantSecretReader
@@ -32,7 +28,7 @@ type secretStoreGetter struct {
 func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID billing.MerchantID, name string) (string, error) {
 	if name == "private_key" && g.database != nil {
 		var (
-			account gen.BillingPsp
+			account merchants.PSPScope
 			ok      bool
 			err     error
 		)
@@ -47,9 +43,7 @@ func (g secretStoreGetter) GetSecret(ctx context.Context, merchantID billing.Mer
 		if !ok {
 			return "", fmt.Errorf("solana: no active PSP for signing key")
 		}
-		// or#812: read at or above the rotation version floor the PSP row
-		// records, so a key rotated on another node is never served stale here.
-		ref, err := merchants.PSPSecretRef(account, "private_key")
+		ref, err := account.SecretRef("private_key")
 		if err != nil {
 			return "", err
 		}
@@ -171,77 +165,62 @@ func (s pspSigner) resolveForPublicKey(ctx context.Context, merchantID billing.M
 // signerApproved refuses a PSP whose Transit signer reports an unapproved
 // identity (#1101): nothing is signed for, or paid to, it until an operator
 // approves the change.
-func signerApproved(account gen.BillingPsp) error {
-	if account.PendingSignerPublicKey != nil && *account.PendingSignerPublicKey != "" {
-		return fmt.Errorf("solana: PSP %s signer now reports %s: %w", account.AccountID, *account.PendingSignerPublicKey, vault.ErrSignerUnapproved)
+func signerApproved(account merchants.PSPScope) error {
+	if account.SignerChange != "" {
+		return fmt.Errorf("solana: PSP %s signer now reports %s: %w", account.AccountID, account.SignerChange, vault.ErrSignerUnapproved)
 	}
 	return nil
 }
 
 type solanaSignerConfig struct {
-	Mode string `json:"mode"`
-	Key  string `json:"key"`
+	Mode string
+	Key  string
 }
 
-func signerConfigFromRow(row gen.BillingPsp) solanaSignerConfig {
-	var signer solanaSignerConfig
-	if len(row.Signer) > 0 {
-		_ = json.Unmarshal(row.Signer, &signer)
+// signerConfigFromRow is the PSP's declared signer; none is a local keypair.
+func signerConfigFromRow(account merchants.PSPScope) solanaSignerConfig {
+	signer := solanaSignerConfig{Mode: "local_keypair"}
+	if account.Signer != nil && account.Signer.Mode != "" {
+		signer.Mode = strings.ToLower(strings.TrimSpace(account.Signer.Mode))
+		signer.Key = strings.TrimSpace(account.Signer.Key)
 	}
-	signer.Mode = strings.ToLower(strings.TrimSpace(signer.Mode))
-	signer.Key = strings.TrimSpace(signer.Key)
 	return signer
 }
 
-func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment string) (gen.BillingPsp, bool, error) {
-	if database == nil || merchantID.IsZero() {
-		return gen.BillingPsp{}, false, nil
+func primarySolanaPSP(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment string) (merchants.PSPScope, bool, error) {
+	configuration := merchants.Of(database)
+	if configuration == nil || merchantID.IsZero() {
+		return merchants.PSPScope{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.BillingPsp{}, false, fmt.Errorf("solana: PSP environment is required")
+		return merchants.PSPScope{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
-	var row gen.BillingPsp
-	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
-		var err error
-		row, err = database.Gen(ctx).GetActivePSPForNewWork(ctx, gen.GetActivePSPForNewWorkParams{
-			MerchantID:  merchantID.UUID(),
-			Rail:        "solana",
-			Environment: &environment,
-		})
-		return err
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.BillingPsp{}, false, nil
-		}
-		return gen.BillingPsp{}, false, fmt.Errorf("solana: lookup active PSP: %w", err)
+	scope, ok, err := configuration.ActivePSPScope(ctx, merchantID, "solana", environment)
+	if errors.Is(err, merchants.ErrNoActivePSP) {
+		return merchants.PSPScope{}, false, nil
 	}
-	return row, true, nil
+	if err != nil {
+		return merchants.PSPScope{}, false, fmt.Errorf("solana: lookup active PSP: %w", err)
+	}
+	return scope, ok, nil
 }
 
-func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment, accountID string) (gen.BillingPsp, bool, error) {
-	if database == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
-		return gen.BillingPsp{}, false, nil
+func solanaPSPByIdentity(ctx context.Context, database *db.DB, merchantID billing.MerchantID, environment, accountID string) (merchants.PSPScope, bool, error) {
+	configuration := merchants.Of(database)
+	if configuration == nil || merchantID.IsZero() || strings.TrimSpace(accountID) == "" {
+		return merchants.PSPScope{}, false, nil
 	}
 	environment = strings.TrimSpace(environment)
 	if environment == "" {
-		return gen.BillingPsp{}, false, fmt.Errorf("solana: PSP environment is required")
+		return merchants.PSPScope{}, false, fmt.Errorf("solana: PSP environment is required")
 	}
-	var row gen.BillingPsp
-	if err := database.RunInMerchantConn(merchant.WithID(ctx, merchantID), func(ctx context.Context) error {
-		var err error
-		row, err = database.Gen(ctx).GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{
-			MerchantID:  merchantID.UUID(),
-			Rail:        "solana",
-			Environment: &environment,
-			AccountID:   strings.TrimSpace(accountID),
-		})
-		return err
-	}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return gen.BillingPsp{}, false, nil
-		}
-		return gen.BillingPsp{}, false, fmt.Errorf("solana: lookup PSP %s: %w", accountID, err)
+	scope, ok, err := configuration.PSPScopeByAccountID(ctx, merchantID, "solana", strings.TrimSpace(accountID))
+	if err != nil {
+		return merchants.PSPScope{}, false, fmt.Errorf("solana: lookup PSP %s: %w", accountID, err)
 	}
-	return row, true, nil
+	if !ok || scope.Environment != environment {
+		return merchants.PSPScope{}, false, nil
+	}
+	return scope, true, nil
 }

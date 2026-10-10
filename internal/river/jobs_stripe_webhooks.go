@@ -120,16 +120,11 @@ func (w StripeWebhookReconcileWorker) Work(ctx context.Context, job *river.Job[S
 				continue
 			}
 			if err := w.DB.RunInMerchantScope(ctx, merchantID, "stripe webhook reconcile", func(mctx context.Context) error {
-				psps, err := w.DB.Gen(mctx).ListLivePSPsForRail(mctx, gen.ListLivePSPsForRailParams{
-					MerchantID: merchantID.UUID(), Rail: string(models.RailStripe),
-				})
+				psps, err := w.Merchants.ActivePSPScopesForRail(mctx, merchantID, string(models.RailStripe), config.ExpectedProviderEnvironment(config.IsTestMode(w.Config)))
 				if err != nil {
 					return fmt.Errorf("list stripe psps: %w", err)
 				}
 				for _, psp := range psps {
-					if psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(w.Config)) {
-						continue
-					}
 					verdict := gate.CheckMerchant(mctx, merchantID.UUID())
 					fields := log.Fields{"merchant": row.Slug, "stripe_account_id": psp.AccountID}
 					res, err := catalog.ReconcileManagedStripeWebhook(mctx, catalog.ManagedStripeWebhookParams{

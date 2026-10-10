@@ -30,7 +30,7 @@ func (q *Queries) BindUnboundMerchantGroup(ctx context.Context, arg BindUnboundM
 }
 
 const getMerchantDirectoryByID = `-- name: GetMerchantDirectoryByID :one
-SELECT id,slug,status,permission_group_id,display_name,api_host
+SELECT id,slug,status,permission_group_id,api_host
 FROM billing.merchants WHERE id=$1::uuid AND deleted_at IS NULL
 `
 
@@ -39,7 +39,6 @@ type GetMerchantDirectoryByIDRow struct {
 	Slug              string
 	Status            string
 	PermissionGroupID *string
-	DisplayName       *string
 	ApiHost           *string
 }
 
@@ -51,34 +50,25 @@ func (q *Queries) GetMerchantDirectoryByID(ctx context.Context, id uuid.UUID) (G
 		&i.Slug,
 		&i.Status,
 		&i.PermissionGroupID,
-		&i.DisplayName,
 		&i.ApiHost,
 	)
 	return i, err
 }
 
 const registerUnboundMerchant = `-- name: RegisterUnboundMerchant :one
-INSERT INTO billing.merchants (slug, status, display_name)
-VALUES ($1, 'active', $2)
-ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET
-    display_name = COALESCE(EXCLUDED.display_name, billing.merchants.display_name),
-    updated_at = now()
+INSERT INTO billing.merchants (slug, status)
+VALUES ($1, 'active')
+ON CONFLICT (slug) WHERE deleted_at IS NULL DO UPDATE SET updated_at = billing.merchants.updated_at
 WHERE billing.merchants.permission_group_id IS NULL
 RETURNING id
 `
 
-type RegisterUnboundMerchantParams struct {
-	Slug        string
-	DisplayName *string
-}
-
 // Register a merchant (billing bucket) from config, idempotently (#480). The
-// merchant carries ONLY billing/rail state; NO auth. A re-register without a
-// display_name keeps any existing one (COALESCE), so config that omits it never
-// clears a name set elsewhere. A live group-bound merchant holding the name
-// returns no row: it is never adopted as a host-owned merchant.
-func (q *Queries) RegisterUnboundMerchant(ctx context.Context, arg RegisterUnboundMerchantParams) (uuid.UUID, error) {
-	row := q.db.QueryRow(ctx, registerUnboundMerchant, arg.Slug, arg.DisplayName)
+// merchant carries ONLY billing/rail state; NO auth. A live group-bound
+// merchant holding the name returns no row: it is never adopted as a
+// host-owned merchant.
+func (q *Queries) RegisterUnboundMerchant(ctx context.Context, slug string) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, registerUnboundMerchant, slug)
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err

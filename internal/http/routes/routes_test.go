@@ -145,21 +145,28 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 	}
 }
 
-// Provider metadata and lifecycle archives stay mounted (and gated) even when
-// the secret backend is read-only.
-func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
-	for _, backend := range []string{config.SecretBackendSnapshot, config.SecretBackendDB, config.SecretBackendVault} {
-		for _, writable := range []bool{false, true} {
-			rt := &app.Runtime{Config: &config.Config{SecretBackend: backend}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
-			table := &router.Table{}
-			RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: "staff:admin"}})
-			keys := routeKeys(table)
-			for _, key := range []string{
-				"GET /admin/configuration", "PATCH /admin/configuration",
-				"GET /admin/psps", "POST /admin/psps", "PATCH /admin/psps/{id}",
-				"POST /admin/alert-webhooks", "PATCH /admin/alert-webhooks/{id}",
-			} {
-				require.Contains(t, keys, key, "%s/%v", backend, writable)
+// Merchant configuration reads mount whatever holds it; its edits mount only
+// where Vault does: a file is read-only.
+func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
+	reads := []string{"GET /admin/configuration", "GET /admin/psps", "GET /admin/psps/{id}", "GET /admin/alert-webhooks"}
+	edits := []string{"PATCH /admin/configuration", "POST /admin/psps", "PATCH /admin/psps/{id}", "POST /admin/alert-webhooks", "PATCH /admin/alert-webhooks/{id}", "DELETE /admin/alert-webhooks/{id}"}
+	for _, editable := range []bool{false, true} {
+		cfg := &config.Config{}
+		if editable {
+			cfg.Vault = &config.VaultConfig{KVMount: "kv"}
+		}
+		rt := &app.Runtime{Config: cfg}
+		table := &router.Table{}
+		RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: "staff:admin"}})
+		keys := routeKeys(table)
+		for _, key := range reads {
+			require.Contains(t, keys, key, "editable=%v", editable)
+		}
+		for _, key := range edits {
+			if editable {
+				require.Contains(t, keys, key)
+			} else {
+				require.NotContains(t, keys, key)
 			}
 		}
 	}

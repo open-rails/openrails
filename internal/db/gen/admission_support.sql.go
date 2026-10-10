@@ -7,63 +7,51 @@ package gen
 
 import (
 	"context"
-	"time"
 
 	"github.com/google/uuid"
 )
 
-const deleteCustomerBillingPolicyBinding = `-- name: DeleteCustomerBillingPolicyBinding :exec
-DELETE FROM billing.billing_policy_bindings
-WHERE merchant_id = $1 AND customer_id = $2
+const findAssignedBillingPolicyOutside = `-- name: FindAssignedBillingPolicyOutside :one
+SELECT billing_policy::text FROM billing.customers
+WHERE merchant_id = $1 AND billing_policy IS NOT NULL
+  AND NOT (billing_policy = ANY(COALESCE($2::text[], '{}')))
+LIMIT 1
 `
 
-type DeleteCustomerBillingPolicyBindingParams struct {
+type FindAssignedBillingPolicyOutsideParams struct {
 	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
+	Names      []string
 }
 
-func (q *Queries) DeleteCustomerBillingPolicyBinding(ctx context.Context, arg DeleteCustomerBillingPolicyBindingParams) error {
-	_, err := q.db.Exec(ctx, deleteCustomerBillingPolicyBinding, arg.MerchantID, arg.CustomerID)
-	return err
+// A billing policy some customer is assigned that names lacks: a settings
+// change may not remove it.
+func (q *Queries) FindAssignedBillingPolicyOutside(ctx context.Context, arg FindAssignedBillingPolicyOutsideParams) (string, error) {
+	row := q.db.QueryRow(ctx, findAssignedBillingPolicyOutside, arg.MerchantID, arg.Names)
+	var billing_policy string
+	err := row.Scan(&billing_policy)
+	return billing_policy, err
 }
 
-const listBillingPolicies = `-- name: ListBillingPolicies :many
-SELECT id, merchant_id, name, policy, created_at, updated_at FROM billing.billing_policies
-WHERE merchant_id = $1
-ORDER BY name
+const getCustomerBillingPolicy = `-- name: GetCustomerBillingPolicy :one
+SELECT billing_policy FROM billing.customers
+WHERE merchant_id = $1 AND id = $2
 `
 
-// Every named policy the merchant has declared, for the config-sync document.
-func (q *Queries) ListBillingPolicies(ctx context.Context, merchantID uuid.UUID) ([]BillingBillingPolicy, error) {
-	rows, err := q.db.Query(ctx, listBillingPolicies, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingBillingPolicy
-	for rows.Next() {
-		var i BillingBillingPolicy
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Name,
-			&i.Policy,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+type GetCustomerBillingPolicyParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) GetCustomerBillingPolicy(ctx context.Context, arg GetCustomerBillingPolicyParams) (*string, error) {
+	row := q.db.QueryRow(ctx, getCustomerBillingPolicy, arg.MerchantID, arg.CustomerID)
+	var billing_policy *string
+	err := row.Scan(&billing_policy)
+	return billing_policy, err
 }
 
 const listCustomerBillingPolicyAssignments = `-- name: ListCustomerBillingPolicyAssignments :many
-SELECT customer_id, policy_name FROM billing.billing_policy_bindings
-WHERE merchant_id = $1 AND customer_id = ANY($2::uuid[])
+SELECT id AS customer_id, billing_policy::text AS policy_name FROM billing.customers
+WHERE merchant_id = $1 AND id = ANY($2::uuid[]) AND billing_policy IS NOT NULL
 LIMIT $3::int
 `
 
@@ -74,11 +62,10 @@ type ListCustomerBillingPolicyAssignmentsParams struct {
 }
 
 type ListCustomerBillingPolicyAssignmentsRow struct {
-	CustomerID *uuid.UUID
+	CustomerID uuid.UUID
 	PolicyName string
 }
 
-// One binding per customer at most (the customer rung's unique index).
 func (q *Queries) ListCustomerBillingPolicyAssignments(ctx context.Context, arg ListCustomerBillingPolicyAssignmentsParams) ([]ListCustomerBillingPolicyAssignmentsRow, error) {
 	rows, err := q.db.Query(ctx, listCustomerBillingPolicyAssignments, arg.MerchantID, arg.CustomerIds, arg.RowLimit)
 	if err != nil {
@@ -99,223 +86,30 @@ func (q *Queries) ListCustomerBillingPolicyAssignments(ctx context.Context, arg 
 	return items, nil
 }
 
-const listDeclarativeBillingPolicyBindings = `-- name: ListDeclarativeBillingPolicyBindings :many
-SELECT id, merchant_id, customer_id, tier, policy_name, created_at, updated_at FROM billing.billing_policy_bindings
-WHERE merchant_id = $1 AND customer_id IS NULL
-ORDER BY (tier IS NOT NULL) DESC, tier
+const setCustomerBillingPolicy = `-- name: SetCustomerBillingPolicy :execrows
+
+UPDATE billing.customers SET billing_policy = $1::text
+WHERE merchant_id = $2 AND id = $3
 `
 
-// The DECLARATIVE rungs (merchant default + per-tier) for the config-sync
-// document. Per-customer bindings are deliberately excluded: they are runtime
-// segmentation state whose row count follows customers, not configuration, so
-// enumerating them would scale with records on file — and dumping them would
-// put customer identifiers into a source-available manifest.
-func (q *Queries) ListDeclarativeBillingPolicyBindings(ctx context.Context, merchantID uuid.UUID) ([]BillingBillingPolicyBinding, error) {
-	rows, err := q.db.Query(ctx, listDeclarativeBillingPolicyBindings, merchantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingBillingPolicyBinding
-	for rows.Next() {
-		var i BillingBillingPolicyBinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.Tier,
-			&i.PolicyName,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const lockBillingPolicyName = `-- name: LockBillingPolicyName :one
-SELECT name FROM billing.billing_policies
-WHERE merchant_id = $1 AND name = $2
-FOR KEY SHARE
-`
-
-type LockBillingPolicyNameParams struct {
+type SetCustomerBillingPolicyParams struct {
+	Policy     *string
 	MerchantID uuid.UUID
-	Name       string
+	CustomerID uuid.UUID
 }
 
-func (q *Queries) LockBillingPolicyName(ctx context.Context, arg LockBillingPolicyNameParams) (string, error) {
-	row := q.db.QueryRow(ctx, lockBillingPolicyName, arg.MerchantID, arg.Name)
-	var name string
-	err := row.Scan(&name)
-	return name, err
-}
-
-const resolveBillingPolicy = `-- name: ResolveBillingPolicy :one
-SELECT b.policy_name, p.policy
-FROM billing.billing_policy_bindings b
-JOIN billing.billing_policies p
-  ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-WHERE b.merchant_id = $1
-  AND (b.customer_id = $2 OR b.customer_id IS NULL)
-  AND (b.tier = $3 OR b.tier IS NULL)
-ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
-LIMIT 1
-`
-
-type ResolveBillingPolicyParams struct {
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	Tier       *string
-}
-
-type ResolveBillingPolicyRow struct {
-	PolicyName string
-	Policy     []byte
-}
-
-// The effective policy for a (merchant, payer, tier): most specific rung wins —
-// the payer's own binding, else the tier's, else the merchant default. The FK
-// guarantees the joined policy exists, so a resolved binding always yields a body.
-func (q *Queries) ResolveBillingPolicy(ctx context.Context, arg ResolveBillingPolicyParams) (ResolveBillingPolicyRow, error) {
-	row := q.db.QueryRow(ctx, resolveBillingPolicy, arg.MerchantID, arg.CustomerID, arg.Tier)
-	var i ResolveBillingPolicyRow
-	err := row.Scan(&i.PolicyName, &i.Policy)
-	return i, err
-}
-
-const upsertBillingPolicy = `-- name: UpsertBillingPolicy :exec
-
-INSERT INTO billing.billing_policies (
-    id, merchant_id, name, policy, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6)
-ON CONFLICT (merchant_id, name) DO UPDATE SET
-    policy = EXCLUDED.policy,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertBillingPolicyParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Name       string
-	Policy     []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// Admission-plane support tables: the or#897 billing-policy registry and its
-// bindings, plus hierarchical budget-scope policies (#473). The Postgres
+// Admission-plane support: customers' own billing policies (the named policies,
+// tier map and default are the merchant's settings), plus hierarchical
+// budget-scope policies (#473). The Postgres
 // rolling-budget engine (budget_inflight_holds / budget_window_state /
 // budget_reservations + FOR UPDATE) was removed in the #513 hard cut — budget
 // accounting now lives in the Redis spendgate.
-// Declare (or redeclare) one named policy. The body is validated by the shared
-// normalizer before it gets here, so a stored policy is always an enforceable one.
-func (q *Queries) UpsertBillingPolicy(ctx context.Context, arg UpsertBillingPolicyParams) error {
-	_, err := q.db.Exec(ctx, upsertBillingPolicy,
-		arg.ID,
-		arg.MerchantID,
-		arg.Name,
-		arg.Policy,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertBillingPolicyBindingCustomer = `-- name: UpsertBillingPolicyBindingCustomer :exec
-INSERT INTO billing.billing_policy_bindings (
-    id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
-) VALUES ($1, $2, $3, NULL, $4, $5, $6)
-ON CONFLICT (merchant_id, customer_id) WHERE (customer_id IS NOT NULL) DO UPDATE SET
-    policy_name = EXCLUDED.policy_name,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertBillingPolicyBindingCustomerParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	PolicyName string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// The per-customer rung: the merchant's runtime lever for one payer. Beats the
-// tier and default rungs.
-func (q *Queries) UpsertBillingPolicyBindingCustomer(ctx context.Context, arg UpsertBillingPolicyBindingCustomerParams) error {
-	_, err := q.db.Exec(ctx, upsertBillingPolicyBindingCustomer,
-		arg.ID,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.PolicyName,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertBillingPolicyBindingDefault = `-- name: UpsertBillingPolicyBindingDefault :exec
-INSERT INTO billing.billing_policy_bindings (
-    id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
-) VALUES ($1, $2, NULL, NULL, $3, $4, $5)
-ON CONFLICT (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL)) DO UPDATE SET
-    policy_name = EXCLUDED.policy_name,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertBillingPolicyBindingDefaultParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	PolicyName string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// The merchant-wide default rung: applies to every payer with no more specific
-// binding. ON CONFLICT targets the partial unique index for that rung.
-func (q *Queries) UpsertBillingPolicyBindingDefault(ctx context.Context, arg UpsertBillingPolicyBindingDefaultParams) error {
-	_, err := q.db.Exec(ctx, upsertBillingPolicyBindingDefault,
-		arg.ID,
-		arg.MerchantID,
-		arg.PolicyName,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
-}
-
-const upsertBillingPolicyBindingTier = `-- name: UpsertBillingPolicyBindingTier :exec
-INSERT INTO billing.billing_policy_bindings (
-    id, merchant_id, customer_id, tier, policy_name, created_at, updated_at
-) VALUES ($1, $2, NULL, $3, $4, $5, $6)
-ON CONFLICT (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL)) DO UPDATE SET
-    policy_name = EXCLUDED.policy_name,
-    updated_at = EXCLUDED.updated_at
-`
-
-type UpsertBillingPolicyBindingTierParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Tier       *string
-	PolicyName string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
-// The per-tier rung: applies to every payer at one trust tier.
-func (q *Queries) UpsertBillingPolicyBindingTier(ctx context.Context, arg UpsertBillingPolicyBindingTierParams) error {
-	_, err := q.db.Exec(ctx, upsertBillingPolicyBindingTier,
-		arg.ID,
-		arg.MerchantID,
-		arg.Tier,
-		arg.PolicyName,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-	)
-	return err
+// The customer's own billing policy, by its name in the merchant's settings:
+// staff's lever for one payer, beating the tier and the default. NULL clears it.
+func (q *Queries) SetCustomerBillingPolicy(ctx context.Context, arg SetCustomerBillingPolicyParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setCustomerBillingPolicy, arg.Policy, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

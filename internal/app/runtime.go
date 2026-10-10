@@ -13,8 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
-
-	vaultapi "github.com/hashicorp/vault/api"
+	"github.com/open-rails/openrails/internal/merchantdocs"
+	"github.com/open-rails/openrails/internal/vaultconn"
 
 	"github.com/jackc/pgx/v5"
 	riverhelpers "github.com/open-rails/helpers/river"
@@ -27,12 +27,10 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -117,11 +115,6 @@ type Runtime struct {
 	// resolver.
 	DNSResolver *net.Resolver
 
-	// RouteCapabilities is the advisory, boot-probed view of what OpenRails can
-	// actually do (#661), used to gate the provider route surface. Nil means
-	// unprobed → the surface stays permissive (no capability gating).
-	RouteCapabilities *routesurface.RuntimeCapabilities
-
 	Clock clockwork.Clock
 	// Contacts is who customers are: the host's directory when HostUserInfo
 	// is set (embedded Deps.UserInfo), else the kept copy SCIM and verified
@@ -178,16 +171,17 @@ type Runtime struct {
 	// ingest verify seam (#786). Nil-safe: recording never fails a webhook.
 	WebhookHealth *webhookhealth.Recorder
 
-	MoneyCharger          money.Charger
-	RailCustomerService   *payments.RailCustomerService
-	Merchants             *merchants.Service
-	VaultClient           *vaultapi.Client
-	MerchantSecretBackend *merchantsecrets.Store
-	// ManifestSecrets is the MODE-1 in-memory credential plane (#723), set iff
-	// merchant_config_source=manifest. Boot provisioning seeds it (Seeder()); runtime
-	// consumers read it through Merchants like any other store. The DB/Vault
-	// store is never constructed in this mode.
-	ManifestSecrets *merchants.ManifestSecretStore
+	MoneyCharger        money.Charger
+	RailCustomerService *payments.RailCustomerService
+	Merchants           *merchants.Service
+	// Vault is the runtime's Vault connection: the merchant configuration
+	// mount when one is named, and Transit signing.
+	Vault *vaultconn.Connection
+	// MerchantConfig is every merchant's configuration, from a file or
+	// Vault, cached in memory.
+	MerchantConfig *merchantdocs.Cache
+	configReady    sync.Once
+	configErr      error
 	// CollectionResolver is the ONE #725/#788 store-armed per-merchant
 	// credential resolver (invoice collection adapters + NMI clients for rebills,
 	// cancels, refunds and admin actions).
@@ -305,6 +299,12 @@ func (r *Runtime) ReserveAPIHosts(urls ...string) {
 	}
 }
 
+// MerchantConfigEditable reports whether merchant configuration can change at
+// runtime: Vault holds it. A file is read-only.
+func (r *Runtime) MerchantConfigEditable() bool {
+	return r != nil && r.Config != nil && config.MerchantConfigKVMount(r.Config) != ""
+}
+
 // ConfiguredMerchant returns the current single-merchant binding. Zero means
 // the caller must explicitly select a merchant through its authority.
 func (r *Runtime) ConfiguredMerchant() billing.MerchantID {
@@ -342,8 +342,11 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 	r.background.stop()
 	var errs []error
-	if r.MerchantSecretBackend != nil {
-		defer r.MerchantSecretBackend.Close()
+	if r.Vault != nil {
+		defer r.Vault.Close()
+	}
+	if r.MerchantConfig != nil {
+		defer r.MerchantConfig.Close()
 	}
 
 	// #895: stop the out-of-River progress detector first — it outlives the

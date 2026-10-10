@@ -118,7 +118,7 @@ func TestProviderDashboardRefundAccessPolicy(t *testing.T) {
 		t.Run(r.name, func(t *testing.T) {
 			t.Parallel()
 			tp := []topology{embedded, remote}[i%2]
-			w := newWorld(t)
+			w := newVaultWorld(t)
 			if r.armed {
 				w.armDestructive()
 			}

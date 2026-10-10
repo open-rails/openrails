@@ -186,20 +186,11 @@ func (q *Queries) ListAccountUpdaterOpenBatchMerchants(ctx context.Context, merc
 
 const listAccountUpdaterWorkMerchants = `-- name: ListAccountUpdaterWorkMerchants :many
 
-SELECT c.merchant_id
+SELECT DISTINCT c.merchant_id
 FROM billing.custodians c
-CROSS JOIN LATERAL (
-    -- The custodian's own declared lookahead, else the caller's default.
-    SELECT make_interval(days => COALESCE(
-        CASE WHEN c.settings ->> 'account_updater_lookahead_days' ~ '^[0-9]+$'
-             THEN (c.settings ->> 'account_updater_lookahead_days')::int END,
-        $1::int)) AS lookahead
-) w
-WHERE c.kind = lower($2::text)
-  AND c.environment = $3::text
-  AND NOT c.archived
-  AND COALESCE(c.settings ->> 'account_updater', 'false') IN ('true', 't', '1')
-  AND ($4::uuid IS NULL OR c.merchant_id > $4::uuid)
+WHERE c.kind = lower($1::text)
+  AND c.environment = $2::text
+  AND ($3::uuid IS NULL OR c.merchant_id > $3::uuid)
   -- One open batch per custodian: a waiting merchant has results to ingest, not new work.
   AND NOT EXISTS (
         SELECT 1 FROM billing.account_updater_batches b
@@ -211,7 +202,7 @@ WHERE c.kind = lower($2::text)
            AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
            AND pm.rail_method_ref IS NOT NULL
            AND (pm.account_updater_checked_at IS NULL
-                OR pm.account_updater_checked_at < $5::timestamptz - w.lookahead)
+                OR pm.account_updater_checked_at < $4::timestamptz - make_interval(days => $5::int))
            AND EXISTS (
                  SELECT 1 FROM billing.subscriptions s
                   WHERE s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
@@ -219,34 +210,38 @@ WHERE c.kind = lower($2::text)
                     AND s.deleted_at IS NULL
                     AND s.status IN ('active', 'past_due')
                     AND s.current_period_ends_at IS NOT NULL
-                    AND s.current_period_ends_at <= $5::timestamptz + w.lookahead))
+                    AND s.current_period_ends_at <= $4::timestamptz + make_interval(days => $6::int)))
 ORDER BY c.merchant_id
-LIMIT $6::int
+LIMIT $7::int
 `
 
 type ListAccountUpdaterWorkMerchantsParams struct {
-	DefaultLookaheadDays int32
-	Custodian            string
-	Environment          string
-	After                *uuid.UUID
-	Now                  time.Time
-	MerchantLimit        int32
+	Custodian        string
+	Environment      string
+	After            *uuid.UUID
+	Now              time.Time
+	MinLookaheadDays int32
+	MaxLookaheadDays int32
+	MerchantLimit    int32
 }
 
 // Batch account updater: due-work discovery, the durable batch (job ref) and
 // the per-instrument watermark. The two cross-merchant readers return ids only;
 // instrument reads, provider calls and writes run per merchant.
-// CROSS-MERCHANT: merchants whose armed custodian holds an instrument backing a
-// subscription that renews inside the custodian's lookahead and was not
-// refreshed since. Starts at the custodian registry, so a merchant without the
-// add-on costs one index probe. Capped and cursored.
+// CROSS-MERCHANT: merchants with a custodian holding an instrument that backs
+// a subscription renewing within the longest lookahead and not refreshed
+// the shortest lookahead: the merchants that may have due work. Whether the custodian is armed for the
+// updater, and its own lookahead, are in the merchant's configuration, which
+// the caller reads per merchant. Starts at the custodian registry, so a
+// merchant without a custodian costs one index probe. Capped and cursored.
 func (q *Queries) ListAccountUpdaterWorkMerchants(ctx context.Context, arg ListAccountUpdaterWorkMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listAccountUpdaterWorkMerchants,
-		arg.DefaultLookaheadDays,
 		arg.Custodian,
 		arg.Environment,
 		arg.After,
 		arg.Now,
+		arg.MinLookaheadDays,
+		arg.MaxLookaheadDays,
 		arg.MerchantLimit,
 	)
 	if err != nil {

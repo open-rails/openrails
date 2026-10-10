@@ -139,6 +139,10 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 	if err != nil {
 		return out, err
 	}
+	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
+	if err != nil {
+		return out, err
+	}
 
 	// Pinned explicitly; reentrant, so the worker's outer scope stands.
 	var overdue []gen.ListOverdueInvoiceAggregatesRow
@@ -147,7 +151,7 @@ func (s *Service) Evaluate(ctx context.Context, now time.Time) (PassResult, erro
 		q := s.db.Gen(ctx)
 		var qErr error
 		if overdue, qErr = q.ListOverdueInvoiceAggregates(ctx, gen.ListOverdueInvoiceAggregatesParams{
-			MerchantID: tid.UUID(), Now: now, RowLimit: PassBatch,
+			MerchantID: tid.UUID(), Now: now, RowLimit: PassBatch, Policies: settings.PoliciesParam(),
 		}); qErr != nil {
 			return fmt.Errorf("list overdue aggregates: %w", qErr)
 		}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -26,11 +25,7 @@ func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnbo
 	if err := billing.ValidateMerchantSlug(slug); err != nil {
 		return billing.MerchantID{}, err
 	}
-	var displayName *string
-	if dn := strings.TrimSpace(opts.DisplayName); dn != "" {
-		displayName = &dn
-	}
-	id, err := gen.New(qx).RegisterUnboundMerchant(ctx, gen.RegisterUnboundMerchantParams{Slug: slug, DisplayName: displayName})
+	id, err := gen.New(qx).RegisterUnboundMerchant(ctx, slug)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return billing.MerchantID{}, fmt.Errorf("register merchant slug %q: the name belongs to a group-bound merchant", slug)
 	}
@@ -40,15 +35,11 @@ func RegisterUnboundMerchant(ctx context.Context, qx gen.DBTX, opts RegisterUnbo
 	return billing.MerchantID(id), nil
 }
 
-// RegisterUnboundMerchantOptions is the billing-only descriptor for RegisterUnboundMerchant.
-// It carries NO auth/issuer/JWKS — auth is the host's (embedded) or AuthKit's
-// (standalone). PSP identity is owned by psps, not
-// merchants.
+// RegisterUnboundMerchantOptions is the billing-only descriptor for
+// RegisterUnboundMerchant. It carries NO auth/issuer/JWKS — auth is the host's
+// (embedded) or AuthKit's (standalone) — and no configuration.
 type RegisterUnboundMerchantOptions struct {
 	Slug string
-	// DisplayName is the human-readable merchant name (end-user display / invoices).
-	// Optional; empty leaves any existing name untouched on re-register.
-	DisplayName string
 }
 
 // RequireMerchantID verifies an explicit internal UUID without interpreting any

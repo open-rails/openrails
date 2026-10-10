@@ -39,13 +39,9 @@ export type OpenRailsErrorCode =
   | "checkout_session_expired"
   | "checkout_session_not_found"
   | "checkout_session_unavailable"
-  | "credential_custody_transition_required"
   | "credential_expired"
   | "credential_identity_mismatch"
-  | "credential_operation_conflict"
   | "credential_revoked"
-  | "credential_source_read_only"
-  | "credential_store_read_only"
   | "credit_grant_held"
   | "credit_grant_not_found"
   | "credit_grant_unavailable"
@@ -95,7 +91,7 @@ export type OpenRailsErrorCode =
   | "invoice_retry_outcome_unknown"
   | "invoker_scoped_principal"
   | "merchant_binding_mismatch"
-  | "merchant_configuration_revision_conflict"
+  | "merchant_config_read_only"
   | "merchant_context_mismatch"
   | "merchant_directory_unavailable"
   | "merchant_not_found"
@@ -262,13 +258,9 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   checkout_session_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout session expired." },
   checkout_session_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout session does not exist." },
   checkout_session_unavailable: { status: 403, type: "authorization_error", meaning: "The checkout session is not available to this caller." },
-  credential_custody_transition_required: { status: 409, type: "invalid_request_error", meaning: "Credential custody differs from the published backend." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_identity_mismatch: { status: 401, type: "authentication_error", meaning: "The credential changed identity during the request." },
-  credential_operation_conflict: { status: 409, type: "invalid_request_error", meaning: "The credential operation conflicts with the published revision." },
   credential_revoked: { status: 401, type: "authentication_error", meaning: "The credential or its session was revoked." },
-  credential_source_read_only: { status: 405, type: "invalid_request_error", meaning: "The provider credential source has no writable custody." },
-  credential_store_read_only: { status: 403, type: "authorization_error", meaning: "The credential store is read-only." },
   credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "Active holds need the grant's remaining credit." },
   credit_grant_not_found: { status: 404, type: "invalid_request_error", meaning: "The credit grant does not exist." },
   credit_grant_unavailable: { status: 409, type: "invalid_request_error", meaning: "The credit grant expired, ended or has no remaining credit." },
@@ -318,7 +310,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invoice_retry_outcome_unknown: { status: 409, type: "invalid_request_error", meaning: "The last collection attempt's outcome is unknown." },
   invoker_scoped_principal: { status: 403, type: "authorization_error", meaning: "An invoker-scoped credential spends a customer's balance but may not manage the account." },
   merchant_binding_mismatch: { status: 409, type: "invalid_request_error", meaning: "The selected merchant is not the one the credential, deployment or request is bound to." },
-  merchant_configuration_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The merchant configuration changed; read its revision before applying." },
+  merchant_config_read_only: { status: 409, type: "invalid_request_error", meaning: "The merchant's configuration is read from a file; change the file." },
   merchant_context_mismatch: { status: 403, type: "authorization_error", meaning: "The authorized merchant is not the one the request resolved." },
   merchant_directory_unavailable: { status: 503, type: "api_error", meaning: "The merchant directory could not be read; retry." },
   merchant_not_found: { status: 404, type: "invalid_request_error", meaning: "No active merchant answers to the selector." },

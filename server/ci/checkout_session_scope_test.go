@@ -36,7 +36,7 @@ func (p *refuseCheckoutProvider) RoundTrip(*http.Request) (*http.Response, error
 func TestCheckoutSessionResolvesStoredMerchant(t *testing.T) {
 	f := newFixture(t)
 	provider := &refuseCheckoutProvider{}
-	cp := f.newServer(t, func(_ *server.Config, deps *server.Deps) { deps.Engine.StripeTransport = provider })
+	cp := f.newVaultServer(t, func(_ *server.Config, deps *server.Deps) { deps.Engine.StripeTransport = provider })
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 	rt := engine.Graph(cp.Client()).Runtime

@@ -7,40 +7,43 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
 const providerCredentialProbeTimeout = 15 * time.Second
 
-func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, supplied map[string]string) (bool, error) {
-	switch rail {
+// probePaymentProviderCredentials checks the PSP's account credentials with
+// its provider, read-only. It reports whether a check ran: a rail with no
+// check, or a PSP without the credentials one reads, is not probed.
+func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billing.MerchantID, p merchantdocs.PSP) (bool, error) {
+	secret := func(key string) string { return strings.TrimSpace(p.Secrets[key]) }
+	switch p.Rail {
 	case "stripe":
-		secretKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "secret_key")
-		if err != nil || !ok {
-			return false, err
+		secretKey := secret("secret_key")
+		if secretKey == "" {
+			return false, nil
 		}
 		probeCtx, cancel := context.WithTimeout(ctx, providerCredentialProbeTimeout)
 		defer cancel()
-		if err := stripeAccountCheck(probeCtx, secretKey, environment, accountID, s.StripeClients); err != nil {
+		if err := stripeAccountCheck(probeCtx, secretKey, p.Environment, p.AccountID, s.StripeClients); err != nil {
 			return false, err
 		}
 		return true, nil
 	case "nmi":
-		securityKey, ok, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "security_key")
-		if err != nil || !ok {
-			return false, err
+		securityKey := secret("security_key")
+		if securityKey == "" {
+			return false, nil
 		}
-		deployment, pspID, err := s.storedNMIDeployment(ctx, id, rail, environment, accountID)
+		deployment, err := config.NMIEndpointDeployment(p.Settings)
 		if err != nil {
 			return false, err
 		}
-		client, err := nmi.NewAccountClient(id.UUID(), pspID, accountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, environment == "test")
+		client, err := nmi.NewAccountClient(id.UUID(), PspID(p.Rail, p.Environment, p.AccountID), p.AccountID, &config.NMIProviderSettings{SecurityKey: securityKey, EndpointDeployment: deployment}, p.Environment == "test")
 		if err != nil {
 			return false, fmt.Errorf("merchants: build nmi credential probe: %w", err)
 		}
@@ -56,23 +59,15 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 			return false, providerCredentialError(fmt.Errorf("merchants: validate nmi credentials: %w", err))
 		}
 		return true, nil
-
 	case "ccbill":
-		username, hasUsername, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "datalink_username")
-		if err != nil {
-			return false, err
-		}
-		password, hasPassword, err := s.effectiveProviderCredential(ctx, id, rail, environment, accountID, supplied, "datalink_password")
-		if err != nil {
-			return false, err
-		}
-		if !hasUsername && !hasPassword {
+		username, password := secret("datalink_username"), secret("datalink_password")
+		if username == "" && password == "" {
 			return false, nil
 		}
-		if !hasUsername || !hasPassword {
+		if username == "" || password == "" {
 			return false, apperr.Invalidf("merchants: ccbill datalink_username and datalink_password are required together")
 		}
-		clientAccNum, clientSubAcc, err := config.SplitCCBillAccountID(accountID)
+		clientAccNum, clientSubAcc, err := config.SplitCCBillAccountID(p.AccountID)
 		if err != nil {
 			return false, apperr.Invalidf("merchants: validate ccbill account id: %v", err)
 		}
@@ -81,7 +76,7 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 			ClientSubAcc:     clientSubAcc,
 			DataLinkUsername: username,
 			DataLinkPassword: password,
-			TestMode:         environment == "test",
+			TestMode:         p.Environment == "test",
 		})
 		if s.ccbillCredentialProbeBaseURL != "" {
 			client.BaseURL = s.ccbillCredentialProbeBaseURL
@@ -96,43 +91,22 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 	return false, nil
 }
 
-func (s *Service) effectiveProviderCredential(ctx context.Context, id billing.MerchantID, rail, environment, accountID string, supplied map[string]string, key string) (string, bool, error) {
-	if value := strings.TrimSpace(supplied[key]); value != "" {
-		return value, true, nil
+// validateCredentialValue applies a rail's format rules to one credential.
+func validateCredentialValue(rail, key, value string) error {
+	if value == "" {
+		return errors.New("empty")
 	}
-	name, err := PSPSecretName(rail, environment, accountID, key)
-	if err != nil {
-		return "", false, err
-	}
-	secret, err := s.readPublishedProviderCredential(ctx, id, rail, environment, accountID, key, name)
-	if errors.Is(err, ErrSecretNotFound) {
-		return "", false, nil
-	}
-	if err != nil {
-		return "", false, fmt.Errorf("merchants: load provider credential %q: %w", key, err)
-	}
-	value := strings.TrimSpace(secret.Value)
-	return value, value != "", nil
-}
-
-func (s *Service) readPublishedProviderCredential(ctx context.Context, id billing.MerchantID, rail, environment, account, key, name string) (Secret, error) {
-	ref := SecretRef{Name: name}
-	if s.pool != nil {
-		var row gen.BillingPsp
-		err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-			var err error
-			row, err = gen.New(tx).GetPSPByRailIdentity(ctx, gen.GetPSPByRailIdentityParams{MerchantID: id.UUID(), Rail: rail, Environment: &environment, AccountID: account})
-			return err
-		})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return Secret{}, err
-		}
-		if err == nil {
-			ref, err = PSPSecretRef(row, key)
-			if err != nil {
-				return Secret{}, err
+	if rail == "stripe" {
+		switch key {
+		case "secret_key":
+			if !strings.HasPrefix(value, "sk_") && !strings.HasPrefix(value, "rk_") {
+				return errors.New("invalid_format")
+			}
+		case "webhook_signing_secret", "webhook_signing_secret_thin", "webhook_signing_secret_previous":
+			if !strings.HasPrefix(value, "whsec_") {
+				return errors.New("invalid_format")
 			}
 		}
 	}
-	return ReadSecretRef(ctx, s.secrets, id, ref)
+	return nil
 }

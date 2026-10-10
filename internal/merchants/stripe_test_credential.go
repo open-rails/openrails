@@ -65,24 +65,24 @@ func stripeAccountCheck(ctx context.Context, key, environment, accountID string,
 	read := func(path string, target any) error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.stripe.com"+path, nil)
 		if err != nil {
-			return fmt.Errorf("%w: build Stripe identity probe", ErrSecretBackendUnavailable)
+			return fmt.Errorf("%w: build Stripe identity probe", ErrConfigUnavailable)
 		}
 		req.Header.Set("Authorization", "Bearer "+key)
 		resp, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("%w: Stripe identity verification unavailable", ErrSecretBackendUnavailable)
+			return fmt.Errorf("%w: Stripe identity verification unavailable", ErrConfigUnavailable)
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
 			return fmt.Errorf("%w: Stripe identity verification denied", ErrPSPCredentialsRejected)
 		}
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return fmt.Errorf("%w: Stripe identity verification failed (%d)", ErrSecretBackendUnavailable, resp.StatusCode)
+			return fmt.Errorf("%w: Stripe identity verification failed (%d)", ErrConfigUnavailable, resp.StatusCode)
 		}
 		const maxBody = 1 << 20
 		body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 		if err != nil || len(body) > maxBody || json.Unmarshal(body, target) != nil {
-			return fmt.Errorf("%w: invalid Stripe identity verification response", ErrSecretBackendUnavailable)
+			return fmt.Errorf("%w: invalid Stripe identity verification response", ErrConfigUnavailable)
 		}
 		return nil
 	}

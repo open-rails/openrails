@@ -31,6 +31,7 @@ func Converge(ctx context.Context, a *app.App, merchantID billing.MerchantID) (C
 	}
 	return ConvergeMerchant(ctx, ConvergeMerchantOptions{
 		Config: a.Config, PGXPool: a.Runtime.DB.Pool(), MerchantID: merchantID, Clock: a.Runtime.Clock,
+		MerchantConfig: a.Runtime.DB.MerchantConfig(),
 	})
 }
 

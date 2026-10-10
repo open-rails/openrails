@@ -12,6 +12,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -31,6 +32,8 @@ type UndoRunOptions struct {
 	ExpectRows int64
 	Format     string
 	Out        io.Writer
+	// MerchantConfig is a running app's merchant configuration; nil opens it.
+	MerchantConfig db.MerchantConfig
 }
 
 // UndoRun reverses one destructive run of any reversible kind or, by default,
@@ -62,6 +65,11 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if err := database.RequireMerchantID(ctx, merchantID); err != nil {
 		return err
 	}
+	closeConfig, err := bindMerchantConfig(ctx, opts.Config, database, merchantID, opts.MerchantConfig)
+	if err != nil {
+		return err
+	}
+	defer closeConfig()
 	ctx = merchant.WithID(ctx, merchantID)
 	jsonOut := strings.EqualFold(strings.TrimSpace(opts.Format), "json")
 

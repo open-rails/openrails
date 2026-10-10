@@ -17,7 +17,7 @@ import (
 const DefaultSignerCacheTTL = 60 * time.Second
 
 // keypairSigner loads the PSP private_key from a MerchantSecretGetter and
-// signs in-process, with any secret backend. The plaintext key lives in memory
+// signs in-process, from a file or Vault. The plaintext key lives in memory
 // (cached up to ttl); Vault Transit keeps it out of the process entirely.
 type keypairSigner struct {
 	secrets MerchantSecretGetter

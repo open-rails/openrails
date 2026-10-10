@@ -6,10 +6,12 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
@@ -82,23 +84,27 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if method.CustomerID != sub.CustomerID || !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || !paymentmethods.Chargeable(method) {
 		return unusable(errors.New("engine recurring method is not qualified for this obligation"))
 	}
-	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: sub.MerchantID, ID: sub.PspID})
+	configuration := merchants.Of(s.db)
+	if configuration == nil {
+		return readFailure(errors.New("merchant configuration is unavailable"))
+	}
+	account, ok, err := configuration.PSPScopeByID(ctx, billing.MerchantID(sub.MerchantID), sub.PspID)
 	if err != nil {
 		return readFailure(err)
 	}
-	if account.Archived {
+	if !ok || account.Archived {
 		return unusable(errors.New("archived account cannot admit a new engine renewal"))
 	}
 	if method.CustodianID != nil {
-		custodian, err := q.GetCustodian(ctx, gen.GetCustodianParams{MerchantID: sub.MerchantID, ID: *method.CustodianID})
+		custodian, ok, err := configuration.CustodianScopeByID(ctx, billing.MerchantID(sub.MerchantID), *method.CustodianID)
 		if err != nil {
 			return readFailure(err)
 		}
-		if custodian.Archived {
+		if !ok || custodian.Archived {
 			return unusable(errors.New("archived custodian cannot admit a new engine renewal"))
 		}
 	}
-	binding, err = engineCollectionBinding(ctx, q, method, sub.PspID, s.hyperSwitchDeployment)
+	binding, err = engineCollectionBinding(ctx, q, configuration, method, sub.PspID, s.hyperSwitchDeployment)
 	if err != nil {
 		return unsupported(err)
 	}

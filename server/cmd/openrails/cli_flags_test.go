@@ -77,28 +77,27 @@ func TestMutationFlagSurface(t *testing.T) {
 func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 	t.Setenv("ENV", "retired") // any local config load would reject this
 	tokenPath := writeTemp(t, "token", "test-credential\n")
-	document := writeTemp(t, "application.json", `{"expected_revision":"before","display_name":"New name"}`)
+	document := writeTemp(t, "configuration.json", `{"expected_revision":4,"display_name":"New name"}`)
 	var paths []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		require.Equal(t, "Bearer test-credential", r.Header.Get("Authorization"))
 		paths = append(paths, r.Method+" "+r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPatch {
-			require.Equal(t, "stable-op", r.Header.Get("Idempotency-Key"))
-			_, _ = w.Write([]byte(`{"revision":"after","replayed":false}`))
+			_, _ = w.Write([]byte(`{"revision":5,"display_name":"New name","settings":{}}`))
 			return
 		}
-		_, _ = w.Write([]byte(`{"revision":"before","display_name":"Old name","settings":{}}`))
+		_, _ = w.Write([]byte(`{"revision":4,"display_name":"Old name","settings":{}}`))
 	}))
 	defer server.Close()
 	remote := []string{"--merchant", "shop", "--server-url", server.URL, "--token-file", tokenPath}
 
 	out, err := execute(newRootCmd(), append([]string{"get-merchant-config"}, remote...)...)
 	require.NoError(t, err)
-	require.Contains(t, out, `"before"`)
-	out, err = execute(newRootCmd(), append([]string{"apply-merchant-config", "--file", document, "--idempotency-key", "stable-op"}, remote...)...)
+	require.Contains(t, out, `"Old name"`)
+	out, err = execute(newRootCmd(), append([]string{"apply-merchant-config", "--file", document}, remote...)...)
 	require.NoError(t, err)
-	require.Contains(t, out, `"after"`)
+	require.Contains(t, out, `"New name"`)
 	require.Len(t, paths, 2)
 	require.Contains(t, paths[0], "GET ")
 	require.Contains(t, paths[0], "/configuration")
@@ -115,7 +114,6 @@ func TestMerchantConfigurationRemoteCLI(t *testing.T) {
 		"token without remote":   {[]string{"get-merchant-config", "--merchant", "shop", "--token-file", tokenPath}, "requires --server-url"},
 		"missing merchant":       {[]string{"get-merchant-config", "--server-url", server.URL, "--token-file", tokenPath}, "--merchant is required"},
 		"apply without document": {append([]string{"apply-merchant-config"}, remote...), "--file is required"},
-		"apply without a key":    {append([]string{"apply-merchant-config", "--file", document}, remote...), "--idempotency-key is required"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := execute(newRootCmd(), tc.args...)

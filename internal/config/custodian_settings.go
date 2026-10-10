@@ -81,10 +81,6 @@ type CustodianEntry struct {
 	// SecretKeys are the secret slots the declaration supplies values for.
 	// Validation only — the values themselves never enter this struct.
 	SecretKeys []string
-	// CredentialVersions carries or#812 rotation watermarks for the slots this
-	// write rotated. Empty on the manifest plane, which seeds rather than
-	// rotates — an empty map never clears a floor another writer recorded.
-	CredentialVersions map[string]int
 }
 
 // ValidateCustodianEntry is THE custodian validator, shared by the manifest
@@ -104,14 +100,6 @@ func ValidateCustodianEntry(e CustodianEntry) error {
 	}
 	if _, err := custodians.ParseSettings(d.Kind, e.Settings); err != nil {
 		return fmt.Errorf("custodian %q: %w", key, err)
-	}
-	for name, version := range e.CredentialVersions {
-		if name != strings.ToLower(strings.TrimSpace(name)) {
-			return fmt.Errorf("custodian %q: credential version key %q must be canonical", key, name)
-		}
-		if _, ok := d.Secret(name); !ok || version < 0 {
-			return fmt.Errorf("custodian %q: invalid credential version for %q", key, name)
-		}
 	}
 	declared := map[string]bool{}
 	for _, name := range e.SecretKeys {

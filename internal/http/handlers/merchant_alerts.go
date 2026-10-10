@@ -47,10 +47,8 @@ func handleAlertWriteError(r *httprequest.Request, err error) {
 	switch {
 	case errors.As(err, &verr):
 		alertValidationError(r, verr)
-	case db.IsNotFound(err), errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, alerting.ErrWebhookNotFound), db.IsNotFound(err), errors.Is(err, pgx.ErrNoRows):
 		r.ErrorCode(billing.CodeResourceNotFound, "")
-	case errors.Is(err, alerting.ErrWebhookRotationConflict):
-		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	default:
 		writeRefusal(r, err, "alerting request failed")
 	}

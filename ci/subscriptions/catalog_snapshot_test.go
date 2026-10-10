@@ -95,7 +95,7 @@ products:
 	dst := pgx.Identifier{schema}.Sanitize()
 	src := pgx.Identifier{w.schema}.Sanitize()
 	t.Cleanup(func() { _, _ = w.pool.Exec(context.Background(), "DROP SCHEMA "+dst+" CASCADE") })
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.merchants(id,slug,status,permission_group_id,display_name) VALUES($1,'catalog-snapshot-target','active',$2,'Target')`, mid.UUID(), uuid.New())
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.merchants(id,slug,status,permission_group_id) VALUES($1,'catalog-snapshot-target','active',$2)`, mid.UUID(), uuid.New())
 	require.NoError(t, err)
 	destination, err := db.NewWithPGXPool(w.pool, schema)
 	require.NoError(t, err)
@@ -129,7 +129,7 @@ products:
 	refusal(err, "dependency_mismatch")
 	empty()
 	// Provision existing identities separately, first deliberately with a wrong PSP account.
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.psps(merchant_id,id,key,rail,environment,account_id,settings) SELECT merchant_id,id,key,rail,environment,'wrong-account','{}' FROM `+src+`.psps WHERE id=$1`, w.psp["nmi"].UUID())
+	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.psps(merchant_id,id,key,rail,environment,account_id) SELECT merchant_id,id,key,rail,environment,'wrong-account' FROM `+src+`.psps WHERE id=$1`, w.psp["nmi"].UUID())
 	require.NoError(t, err)
 	_, err = restore(artifact.Bytes())
 	refusal(err, "dependency_mismatch")

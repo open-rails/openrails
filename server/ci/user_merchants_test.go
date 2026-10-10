@@ -19,7 +19,7 @@ import (
 // user holds a role in, by current name, with the user's role in each.
 func TestUserMerchantsListing(t *testing.T) {
 	f := newFixture(t)
-	cp := f.newServer(t, reserving())
+	cp := f.newVaultServer(t, reserving())
 	ctx := t.Context()
 	member, memberToken := newOwner(t, cp)
 	owner, ownerToken := newOwner(t, cp)
@@ -68,7 +68,7 @@ func TestUserMerchantsListing(t *testing.T) {
 // Client, without taking a caller-selected user ID or joining AuthKit groups.
 func TestHostUserMerchantListingUsesLiveSessionAndMembership(t *testing.T) {
 	f := newFixture(t)
-	cp := f.newServer(t, reserving())
+	cp := f.newVaultServer(t, reserving())
 	ctx := t.Context()
 	member, token := newOwner(t, cp)
 	owner, _ := newOwner(t, cp)

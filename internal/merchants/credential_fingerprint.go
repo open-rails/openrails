@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -16,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
@@ -38,22 +36,17 @@ func AccountCredentialKey(rail string) string {
 	return ""
 }
 
-// CredentialFingerprinter keys the fingerprint by a secret derived from the
-// encryption master key, so the stored value proves nothing about the
-// credential to anyone without that key.
+// CredentialFingerprinter keys the fingerprint by a secret held in Vault, so
+// the stored value proves nothing about the credential to anyone without it.
 type CredentialFingerprinter struct{ key []byte }
 
-// NewCredentialFingerprinter derives the key from a base64 master key; an
-// empty master key answers nil: no stored fingerprints.
-func NewCredentialFingerprinter(masterKeyB64 string) (*CredentialFingerprinter, error) {
-	if strings.TrimSpace(masterKeyB64) == "" {
-		return nil, nil
+// NewCredentialFingerprinter derives the fingerprint key from a 32-byte key
+// held in Vault (merchantdocs.VaultSource.FingerprintKey).
+func NewCredentialFingerprinter(key []byte) (*CredentialFingerprinter, error) {
+	if len(key) != 32 {
+		return nil, errors.New("the credential fingerprint key must be 32 bytes")
 	}
-	master, err := base64.StdEncoding.DecodeString(strings.TrimSpace(masterKeyB64))
-	if err != nil || len(master) != 32 {
-		return nil, errors.New("encryption master key must be 32 bytes, base64")
-	}
-	mac := hmac.New(sha256.New, master)
+	mac := hmac.New(sha256.New, key)
 	mac.Write([]byte("openrails/psp-credential-fingerprint/v1"))
 	return &CredentialFingerprinter{key: mac.Sum(nil)}, nil
 }
@@ -65,8 +58,8 @@ func (f *CredentialFingerprinter) Fingerprint(rail, environment, credential stri
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// WithCredentialFingerprinter records the fingerprint of every published
-// account credential. nil leaves the check to declared (snapshot) PSPs.
+// WithCredentialFingerprinter records the fingerprint of every PSP's account
+// credential. nil compares a merchant's declared credentials in memory.
 func (s *Service) WithCredentialFingerprinter(f *CredentialFingerprinter) *Service {
 	if s != nil {
 		s.fingerprints = f
@@ -75,7 +68,7 @@ func (s *Service) WithCredentialFingerprinter(f *CredentialFingerprinter) *Servi
 }
 
 // recordCredentialFingerprint stores the PSP's fingerprint, or marks it a
-// duplicate when another live PSP on the rail holds the same one.
+// duplicate when another PSP on the rail holds the same one.
 func recordCredentialFingerprint(ctx context.Context, tx pgx.Tx, merchantID, pspID uuid.UUID, fingerprint string, now time.Time) (bool, error) {
 	q := gen.New(tx)
 	savepoint, err := tx.Begin(ctx)
@@ -141,53 +134,4 @@ func ReconcileDeclaredDuplicates(ctx context.Context, q *gen.Queries, merchantID
 		}
 	}
 	return nil
-}
-
-// FingerprintPSPs records the fingerprint of every live PSP of the merchant
-// that has none yet or is a duplicate, as its published credentials stand. A
-// PSP whose credential another live PSP holds is disarmed.
-func (s *Service) FingerprintPSPs(ctx context.Context, id billing.MerchantID) error {
-	if s == nil || s.fingerprints == nil || s.pool == nil {
-		return nil
-	}
-	rows, err := s.pspRows(ctx, id)
-	if err != nil {
-		return err
-	}
-	for _, row := range rows {
-		accountKey := AccountCredentialKey(row.Rail)
-		// A duplicate is checked again: the PSP it duplicated may be archived.
-		if row.Archived || row.Environment != s.providerEnvironment || accountKey == "" || (row.CredentialFingerprint != nil && row.CredentialDuplicateAt == nil) {
-			continue
-		}
-		ref, err := pspScopeFromRow(row).publishedRef(accountKey)
-		if err != nil || ref.Retired {
-			continue
-		}
-		secret, err := ReadSecretRef(ctx, s.secrets, id, ref)
-		if errors.Is(err, ErrSecretNotFound) || (err == nil && secret.Value == "") {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		fingerprint := s.fingerprints.Fingerprint(row.Rail, row.Environment, secret.Value)
-		if err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-			_, err := recordCredentialFingerprint(ctx, tx, id.UUID(), row.ID, fingerprint, s.now())
-			return err
-		}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Service) pspRows(ctx context.Context, id billing.MerchantID) ([]gen.BillingPsp, error) {
-	var rows []gen.BillingPsp
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		rows, err = gen.New(tx).ListPSPsForMerchant(ctx, id.UUID())
-		return err
-	})
-	return rows, err
 }

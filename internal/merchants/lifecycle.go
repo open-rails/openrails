@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 
 	"github.com/open-rails/openrails/billing"
 )
@@ -82,10 +83,11 @@ type Service struct {
 	StripeClients *stripeapi.Factory
 	pool          *db.Pool
 	database      *db.DB
-	secrets       MerchantSecretStore
+	// config is the merchants' configuration: their documents in a file or
+	// Vault.
+	config *merchantdocs.Cache
 	// providerEnvironment is the deployment posture (#681): test under
-	// test_mode, live otherwise. Scoped credential lookups resolve
-	// psps rows in THIS environment only.
+	// test_mode, live otherwise. PSPs resolve in THIS environment only.
 	providerEnvironment string
 	// nmiProbeV5BaseURL is a test-only seam: overrides the base URL the #348
 	// test_mode arm-time probe (refuseLiveNMIUnderTestMode) hits, so tests can
@@ -105,8 +107,8 @@ type Service struct {
 	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
 	clock                clockwork.Clock
 	webhookSecretOverlap time.Duration
-	// fingerprints keys the stored fingerprint of each published account
-	// credential; nil stores none.
+	// fingerprints keys the stored fingerprint of each PSP's account
+	// credential; nil compares declared credentials in memory instead.
 	fingerprints *CredentialFingerprinter
 }
 
@@ -119,13 +121,15 @@ func (s *Service) WithDestructivePolicy(p DestructivePolicy) *Service {
 	return s
 }
 
-// NewService builds the lifecycle service. pool is required (it owns the merchant
-// directory). secrets may be nil (credential management disabled).
-// providerEnvironment is the deployment's PSP environment —
-// derive it via config.ExpectedProviderEnvironment(config.IsTestMode(cfg)).
-func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment string) (*Service, error) {
+// NewService builds the lifecycle service over the merchants' configuration.
+// providerEnvironment is the deployment's PSP environment: derive it via
+// config.ExpectedProviderEnvironment(config.IsTestMode(cfg)).
+func NewService(pool *db.Pool, configuration *merchantdocs.Cache, providerEnvironment string) (*Service, error) {
 	if pool == nil {
 		return nil, errors.New("merchants: pgx pool is required")
+	}
+	if configuration == nil {
+		return nil, errors.New("merchants: merchant configuration is required")
 	}
 	env := normalizeProviderSecretEnvironment(providerEnvironment)
 	if env == "" {
@@ -135,7 +139,7 @@ func NewService(pool *db.Pool, secrets MerchantSecretStore, providerEnvironment 
 	if err != nil {
 		return nil, err
 	}
-	service.secrets = secrets
+	service.config = configuration
 	service.providerEnvironment = env
 	return service, nil
 }
@@ -155,18 +159,24 @@ func NewDirectoryService(pool *db.Pool) (*Service, error) {
 	return &Service{pool: pool, database: database, destructive: deniedPolicy{}}, nil
 }
 
-// NewSecretManagementService builds a secret-management-only Service. It is for
-// runtimes/tests that only need credential list/write/delete/validate behavior;
-// lifecycle methods such as Provision still require NewService with a DB pool.
-func NewSecretManagementService(secrets MerchantSecretStore) (*Service, error) {
-	if secrets == nil {
-		return nil, errors.New("merchants: secret store is required")
+// Config is the merchants' configuration; nil on a directory-only Service.
+func (s *Service) Config() *merchantdocs.Cache {
+	if s == nil {
+		return nil
 	}
-	return &Service{secrets: secrets}, nil
+	return s.config
 }
 
-// Secrets exposes the per-merchant secret store (may be nil).
-func (s *Service) Secrets() MerchantSecretStore { return s.secrets }
+// WithConfig lets a directory-only Service read display names.
+func (s *Service) WithConfig(configuration *merchantdocs.Cache) *Service {
+	if s != nil {
+		s.config = configuration
+	}
+	return s
+}
+
+// Environment is the deployment's PSP environment.
+func (s *Service) Environment() string { return s.providerEnvironment }
 
 // Provision claims req.Slug for a new merchant bound to req.PermissionGroupID.
 // bind runs first, in the same transaction, and creates that group, so a claim
@@ -238,23 +248,6 @@ type DirectoryRef struct {
 	Slug        string
 	DisplayName string
 	GroupID     string
-}
-
-// SetDisplayName sets the human-readable name for an active merchant. An empty
-// name is a no-op so repair calls cannot clear an existing value by omission.
-func (s *Service) SetDisplayName(ctx context.Context, id billing.MerchantID, displayName string) error {
-	displayName = strings.TrimSpace(displayName)
-	if displayName == "" {
-		return nil
-	}
-	n, err := gen.New(s.pool).SetMerchantDisplayName(ctx, gen.SetMerchantDisplayNameParams{ID: id.UUID(), DisplayName: displayName})
-	if err != nil {
-		return fmt.Errorf("merchants: set display name: %w", err)
-	}
-	if n == 0 {
-		return ErrMerchantNotFound
-	}
-	return nil
 }
 
 func normalizeSlug(s string) string {

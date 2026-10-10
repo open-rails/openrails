@@ -155,6 +155,7 @@ func Join(a *app.App, cp *controlplane.ControlPlane, auth hostconfig.AuthConfig,
 		return fmt.Errorf("control plane: register AuthKit jobs: %w", err)
 	}
 	a.Runtime.ReserveAPIHosts(auth.Issuer, auth.RequestOrigin, frontendBaseURL)
+	cp.BindMerchants(a.Runtime.Merchants)
 	a.Standalone = true
 	return nil
 }

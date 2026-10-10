@@ -67,18 +67,13 @@ func (r *Runtime) verifyProviderPosture(ctx context.Context, declared []billing.
 		}
 		seen[mid] = true
 		var ids []uuid.UUID
-		if err := r.DB.RunInMerchantScope(ctx, mid, "provider posture", func(mctx context.Context) error {
-			rows, err := r.DB.Gen(mctx).ListPSPsForMerchant(mctx, mid.UUID())
-			if err != nil {
-				return err
+		scopes, err := r.Merchants.LivePSPScopes(merchant.WithID(ctx, mid), mid, environment)
+		for _, scope := range scopes {
+			if !live || scope.Rail == string(models.RailNMI) {
+				ids = append(ids, scope.ID)
 			}
-			for _, row := range rows {
-				if !row.Archived && row.Environment == environment && (!live || row.Rail == string(models.RailNMI)) {
-					ids = append(ids, row.ID)
-				}
-			}
-			return nil
-		}); err != nil {
+		}
+		if err != nil {
 			if ctx.Err() == nil {
 				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
 			}
@@ -128,7 +123,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		client, err := armer.NMIClient(ctx, mid, scope)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: NMI credentials unavailable; PSP disarmed")
-			return !errors.Is(err, merchants.ErrSecretBackendUnavailable)
+			return !errors.Is(err, merchants.ErrConfigUnavailable)
 		}
 		if client.LoopbackFixture && client.TestMode {
 			return true
@@ -141,7 +136,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		secret, err := pspSecret(ctx, svc, mid, scope, "secret_key")
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(fields).Error("provider posture: Stripe credentials unavailable; PSP disarmed")
-			return !errors.Is(err, merchants.ErrSecretBackendUnavailable)
+			return !errors.Is(err, merchants.ErrConfigUnavailable)
 		}
 		status, check = r.StripeClients.VerifyPosture(ctx, secret, scope.AccountID), r.StripeClients.PostureCheckFor(secret, scope.AccountID)
 	case string(models.RailSolana):
@@ -229,23 +224,22 @@ func (r *Runtime) CheckBookIdentity(ctx context.Context) {
 	}
 }
 
-// StartCredentialFingerprints records, in the background, the credential
-// fingerprint of each loaded merchant's PSPs that have none yet, so a gateway
-// account declared twice before fingerprints existed is caught too.
-func (r *Runtime) StartCredentialFingerprints(declared ...billing.MerchantID) {
-	if r == nil || r.Merchants == nil {
+// PreloadMerchantConfig loads each declared merchant's configuration in the
+// background; the load reconciles its PSP identities and credential
+// fingerprints before the first request needs them.
+func (r *Runtime) PreloadMerchantConfig(declared ...billing.MerchantID) {
+	if r == nil || r.MerchantConfig == nil {
 		return
 	}
-	svc := r.Merchants
-	r.Go("credential fingerprints", func(ctx context.Context) {
+	r.Go("merchant config preload", func(ctx context.Context) {
 		seen := map[billing.MerchantID]bool{}
 		for _, mid := range append([]billing.MerchantID{r.ConfiguredMerchant()}, declared...) {
 			if mid.IsZero() || seen[mid] {
 				continue
 			}
 			seen[mid] = true
-			if err := svc.FingerprintPSPs(merchant.WithID(ctx, mid), mid); err != nil && ctx.Err() == nil {
-				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("credential fingerprints: cannot record; duplicate gateway accounts are checked at the next publication")
+			if _, err := r.MerchantConfig.Get(merchant.WithID(ctx, mid), mid); err != nil && ctx.Err() == nil {
+				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("merchant config: cannot load; the first request retries")
 			}
 		}
 	})

@@ -19,7 +19,7 @@ VALUES ($1, $2, $3)
 ON CONFLICT (merchant_id, id) DO UPDATE SET
   issuer = COALESCE(EXCLUDED.issuer, billing.customers.issuer),
   last_seen_at = now()
-RETURNING id, merchant_id, issuer, created_at, last_seen_at, access_version
+RETURNING id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy
 `
 
 type EnsureCustomerParams struct {
@@ -42,6 +42,7 @@ func (q *Queries) EnsureCustomer(ctx context.Context, arg EnsureCustomerParams) 
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.AccessVersion,
+		&i.BillingPolicy,
 	)
 	return i, err
 }
@@ -65,7 +66,7 @@ func (q *Queries) EnsureCustomerRow(ctx context.Context, arg EnsureCustomerRowPa
 }
 
 const getCustomer = `-- name: GetCustomer :one
-SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version FROM billing.customers
+SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy FROM billing.customers
 WHERE merchant_id = $1 AND id = $2
 `
 
@@ -84,12 +85,13 @@ func (q *Queries) GetCustomer(ctx context.Context, arg GetCustomerParams) (Billi
 		&i.CreatedAt,
 		&i.LastSeenAt,
 		&i.AccessVersion,
+		&i.BillingPolicy,
 	)
 	return i, err
 }
 
 const listCustomers = `-- name: ListCustomers :many
-SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version FROM billing.customers c
+SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy FROM billing.customers c
 WHERE c.merchant_id = $1
   AND ($2::timestamptz IS NULL
    OR (c.created_at, c.id) < ($2::timestamptz, $3::uuid))
@@ -126,6 +128,7 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 			&i.CreatedAt,
 			&i.LastSeenAt,
 			&i.AccessVersion,
+			&i.BillingPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -138,7 +141,7 @@ func (q *Queries) ListCustomers(ctx context.Context, arg ListCustomersParams) ([
 }
 
 const listCustomersByIDs = `-- name: ListCustomersByIDs :many
-SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version FROM billing.customers
+SELECT id, merchant_id, issuer, created_at, last_seen_at, access_version, billing_policy FROM billing.customers
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -164,6 +167,7 @@ func (q *Queries) ListCustomersByIDs(ctx context.Context, arg ListCustomersByIDs
 			&i.CreatedAt,
 			&i.LastSeenAt,
 			&i.AccessVersion,
+			&i.BillingPolicy,
 		); err != nil {
 			return nil, err
 		}
@@ -176,7 +180,7 @@ func (q *Queries) ListCustomersByIDs(ctx context.Context, arg ListCustomersByIDs
 }
 
 const listMerchantsForCustomerSubject = `-- name: ListMerchantsForCustomerSubject :many
-SELECT m.id, m.slug, COALESCE(m.display_name, '')::text AS display_name
+SELECT m.id, m.slug
 FROM billing.merchants m
 WHERE m.deleted_at IS NULL
   AND m.status = 'active'
@@ -185,9 +189,8 @@ ORDER BY m.slug
 `
 
 type ListMerchantsForCustomerSubjectRow struct {
-	ID          uuid.UUID
-	Slug        string
-	DisplayName string
+	ID   uuid.UUID
+	Slug string
 }
 
 // The hosted portal's "which merchants am I a customer of" directory, read
@@ -201,7 +204,7 @@ func (q *Queries) ListMerchantsForCustomerSubject(ctx context.Context, subject u
 	var items []ListMerchantsForCustomerSubjectRow
 	for rows.Next() {
 		var i ListMerchantsForCustomerSubjectRow
-		if err := rows.Scan(&i.ID, &i.Slug, &i.DisplayName); err != nil {
+		if err := rows.Scan(&i.ID, &i.Slug); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

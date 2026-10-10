@@ -38,6 +38,7 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/sqlschema"
+	"github.com/open-rails/openrails/internal/vaulttest"
 )
 
 const (
@@ -241,6 +242,19 @@ type world struct {
 	declare func(map[string]openrails.PSPConfig)
 	// custodians are the merchant's declared card custodians.
 	custodians map[string]openrails.CustodianConfig
+	// alertWebhooks are the merchant's declared alert webhooks.
+	alertWebhooks []openrails.AlertWebhookConfig
+	// settings are the merchant's declared settings; displayName its name
+	// (default: the slug).
+	settings    billing.MerchantSettings
+	displayName string
+	// vault, when set, holds the merchant's configuration: the declaration
+	// seeds it on the first start. vaultAddr, when set, is where the runtime
+	// reaches it (a proxy in front).
+	vault     *vaulttest.Vault
+	vaultAddr string
+	// vaultWritten: the merchant's documents are in Vault.
+	vaultWritten bool
 	// mount adjusts the mounted HTTP surface before start.
 	mount func(*openrails.Routes)
 	// deps adjusts the host hooks before start.
@@ -280,6 +294,62 @@ func newWorld(t *testing.T, configure ...func(*config.Config)) *world {
 	w := prepareWorld(t, 12, configure...)
 	w.start()
 	return w
+}
+
+// writeVaultDocs writes a merchant's configuration into Vault as an operator
+// does: one JSON document per object at the paths and in the shapes
+// docs/vault.md gives, then reloads it.
+func writeVaultDocs(t testing.TB, v *vaulttest.Vault, client *openrails.Client, declared openrails.MerchantDeclaration) {
+	t.Helper()
+	rt := engine.Graph(client).Runtime
+	id := rt.ConfiguredMerchant()
+	root := "openrails/merchants/" + id.UUID().String() + "/"
+	merchant := map[string]any{"display_name": declared.DisplayName, "settings": declared.Settings}
+	var hooks []map[string]any
+	for _, hook := range declared.AlertWebhooks {
+		hooks = append(hooks, map[string]any{"id": uuid.NewString(), "name": hook.Name, "url": hook.URL, "format": "generic", "enabled": true})
+	}
+	if hooks != nil {
+		merchant["alert_webhooks"] = hooks
+	}
+	v.Put(t, root+"merchant", merchant)
+	for key, psp := range declared.PSPs {
+		v.Put(t, root+"psps/"+key, map[string]any{"rail": psp.Rail, "environment": "test", "account_id": psp.AccountID,
+			"custodian": psp.Custodian, "settings": psp.Settings, "secrets": psp.Secrets})
+	}
+	for key, custodian := range declared.Custodians {
+		v.Put(t, root+"custodians/"+key, map[string]any{"kind": custodian.Kind, "environment": "test", "account_id": custodian.AccountID,
+			"settings": custodian.Settings, "secrets": custodian.Secrets})
+	}
+	loaded, err := rt.MerchantConfig.Reload(t.Context(), id)
+	require.NoError(t, err)
+	require.Empty(t, loaded.Rejected, "the documents serve")
+}
+
+// newVaultWorld is newWorld with Vault holding the merchant's configuration,
+// so the configuration API edits it.
+func newVaultWorld(t *testing.T, configure ...func(*config.Config)) *world {
+	t.Helper()
+	w := prepareWorld(t, 12, configure...)
+	w.vault = vaulttest.New(t)
+	w.start()
+	return w
+}
+
+// editDoc changes one of the merchant's Vault documents outside OpenRails
+// (path under the merchant: merchant, psps/<key>, custodians/<key>), then
+// reloads the merchant as the recheck would.
+func (w *world) editDoc(path string, edit func(doc map[string]any)) {
+	t := w.t
+	t.Helper()
+	rt := engine.Graph(w.rt).Runtime
+	full := "openrails/merchants/" + rt.ConfiguredMerchant().UUID().String() + "/" + path
+	doc := map[string]any{}
+	w.vault.Get(t, full, &doc)
+	edit(doc)
+	w.vault.Put(t, full, doc)
+	_, err := rt.MerchantConfig.Reload(t.Context(), rt.ConfiguredMerchant())
+	require.NoError(t, err)
 }
 
 // prepareWorld creates the merchant's schema and shared test doubles without
@@ -364,7 +434,21 @@ func (w *world) start() {
 	if w.mount != nil {
 		w.mount(&routes)
 	}
-	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps, Custodians: w.custodians}
+	name := w.displayName
+	if name == "" {
+		name = w.slug
+	}
+	declared := openrails.MerchantDeclaration{Slug: w.slug, DisplayName: name, PSPs: psps, Custodians: w.custodians, AlertWebhooks: w.alertWebhooks, Settings: w.settings}
+	cfg.Merchant = declared
+	if w.vault != nil {
+		// Vault holds the configuration: the engine is told only the slug, and
+		// the documents are written as an operator writes them.
+		cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug}
+		cfg.Vault = w.vault.Config()
+		if w.vaultAddr != "" {
+			cfg.Vault.Address = w.vaultAddr
+		}
+	}
 	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, StripeTransport: stripe, NMITransport: nmi, Clock: w.clock}
 	if w.deps != nil {
 		w.deps(&deps)
@@ -372,6 +456,10 @@ func (w *world) start() {
 	rt, err := openrails.New(t.Context(), *cfg, deps)
 	require.NoError(t, err)
 	w.rt = rt
+	if w.vault != nil && !w.vaultWritten {
+		writeVaultDocs(t, w.vault, rt, declared)
+		w.vaultWritten = true
+	}
 	if w.booted != nil {
 		w.booted(rt)
 	}
@@ -435,7 +523,7 @@ func (w *world) applySettings(ctx context.Context, settings billing.MerchantSett
 	if err != nil {
 		return err
 	}
-	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{IdempotencyKey: uuid.NewString(), ExpectedRevision: &current.Revision, Settings: &settings})
+	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{ExpectedRevision: &current.Revision, Settings: &settings})
 	return err
 }
 

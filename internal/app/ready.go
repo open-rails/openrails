@@ -72,8 +72,8 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	if r.AbuseState.UsesRedis() {
 		add("redis", true, r.AbuseState.RedisErr())
 	}
-	if r.MerchantSecretBackend != nil && r.MerchantSecretBackend.VaultAuth != nil {
-		add("vault", true, r.MerchantSecretBackend.State())
+	if r.UsesVault() {
+		add("vault", true, r.Vault.State())
 	}
 	add("psp_posture", true, r.postureState())
 
@@ -88,15 +88,15 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 // VaultProbe is the live Vault check for a host dependency supervisor; nil
 // when this runtime owns no Vault login.
 func (r *Runtime) VaultProbe(ctx context.Context) error {
-	if r == nil || r.MerchantSecretBackend == nil {
+	if r == nil || r.Vault == nil {
 		return nil
 	}
-	return r.MerchantSecretBackend.Probe(ctx)
+	return r.Vault.Probe(ctx)
 }
 
 // UsesVault reports whether this runtime supervises its own Vault login.
 func (r *Runtime) UsesVault() bool {
-	return r != nil && r.MerchantSecretBackend != nil && r.MerchantSecretBackend.VaultAuth != nil
+	return r != nil && r.Vault != nil && r.Vault.Auth != nil
 }
 
 // PostureState is the cached PSP posture: nil when every loaded PSP is

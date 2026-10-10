@@ -10,6 +10,7 @@ import (
 
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 func TestInvoicePeriods(t *testing.T) {
@@ -48,7 +49,7 @@ func TestInvoicePeriods(t *testing.T) {
 		"": InvoiceBoundaryFixedInterval, " Calendar_Month ": InvoiceBoundaryCalendarMonth,
 		"anniversary": InvoiceBoundaryAnniversary, "weekly": "",
 	} {
-		require.Equal(t, want, NormalizeInvoiceBoundary(in), in)
+		require.Equal(t, want, merchantconfig.NormalizeInvoiceBoundary(in), in)
 	}
 }
 

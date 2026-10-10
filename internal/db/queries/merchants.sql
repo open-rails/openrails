@@ -23,7 +23,7 @@ WHERE id = sqlc.arg(id)::uuid AND deleted_at IS NULL AND retired_at IS NULL;
 SELECT id FROM billing.merchants ORDER BY id;
 
 -- name: ListLiveMerchantsByGroupIDs :many
-SELECT id, slug, COALESCE(display_name, '')::text AS display_name, permission_group_id::text AS group_id
+SELECT id, slug, permission_group_id::text AS group_id
 FROM billing.merchants
 WHERE permission_group_id = ANY(sqlc.arg(group_ids)::text[]) AND deleted_at IS NULL
 ORDER BY slug;
@@ -38,10 +38,6 @@ LIMIT 2;
 SELECT * FROM billing.merchants
 WHERE api_host = sqlc.arg(api_host)::text AND deleted_at IS NULL
 LIMIT 2;
-
--- name: SetMerchantDisplayName :execrows
-UPDATE billing.merchants SET display_name = sqlc.arg(display_name)::text, updated_at = current_timestamp
-WHERE id = sqlc.arg(id)::uuid AND status = 'active' AND deleted_at IS NULL;
 
 -- name: LockMerchantNameForRename :one
 SELECT slug, slug_changed_at, now()::timestamptz AS now

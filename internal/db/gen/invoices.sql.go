@@ -882,17 +882,13 @@ JOIN billing.invoice_items ii
  AND ii.invoice_id IS NULL
  AND ii.status = 'pending'
  AND ii.invoice_at < $2::timestamptz
-LEFT JOIN LATERAL (
-    SELECT (p.policy ->> 'collection_threshold_amount')::bigint AS threshold
-    FROM billing.billing_policy_bindings b
-    JOIN billing.billing_policies p
-      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-    WHERE b.merchant_id = s.merchant_id
-      AND (b.customer_id = s.customer_id OR b.customer_id IS NULL)
-      AND (b.tier = s.tier OR b.tier IS NULL)
-    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
-    LIMIT 1
-) pol ON true
+JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
+CROSS JOIN LATERAL (
+    SELECT ($3::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN $3::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        $3::jsonb -> 'tiers' ->> s.tier,
+        $3::jsonb ->> 'default') ->> 'collection_threshold_amount')::bigint AS threshold
+) pol
 WHERE s.merchant_id = $1
   AND s.billing_mode = 'arrears'
   AND s.credit_limit_amount > 0
@@ -907,13 +903,14 @@ HAVING COALESCE(SUM(ii.amount), 0)::bigint + (
       AND i.amount_due > 0
 ) >= COALESCE(
     pol.threshold,
-    CASE WHEN $3::bigint > 0 THEN $3::bigint ELSE s.credit_limit_amount END)
+    CASE WHEN $4::bigint > 0 THEN $4::bigint ELSE s.credit_limit_amount END)
 ORDER BY period_starts_at ASC
 `
 
 type ListInvoiceThresholdCandidatesParams struct {
 	MerchantID   uuid.UUID
 	Cutoff       time.Time
+	Policies     []byte
 	MinThreshold int64
 }
 
@@ -924,13 +921,19 @@ type ListInvoiceThresholdCandidatesRow struct {
 	PeriodAnchor   time.Time
 }
 
-// or#897: the trigger amount is the BOUND billing policy's
-// collection_threshold_amount when the payer has one, else the merchant-wide
-// threshold, else the payer's own credit line. Resolved in SQL through the same
-// most-specific-wins rungs the admission path uses (money_settings.tier supplies
-// the tier rung), so a per-payer trigger costs no extra round trip.
+// or#897: the trigger amount is the payer's billing policy's
+// collection_threshold_amount when it has one, else the merchant-wide
+// threshold, else the payer's own credit line. policies is the merchant's
+// settings, {policies: {name: body}, tiers: {tier: name}, default: name}; the
+// payer's policy is its own assignment while the settings still declare it,
+// else its tier's (money_settings.tier), else the default.
 func (q *Queries) ListInvoiceThresholdCandidates(ctx context.Context, arg ListInvoiceThresholdCandidatesParams) ([]ListInvoiceThresholdCandidatesRow, error) {
-	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates, arg.MerchantID, arg.Cutoff, arg.MinThreshold)
+	rows, err := q.db.Query(ctx, listInvoiceThresholdCandidates,
+		arg.MerchantID,
+		arg.Cutoff,
+		arg.Policies,
+		arg.MinThreshold,
+	)
 	if err != nil {
 		return nil, err
 	}

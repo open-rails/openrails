@@ -17,10 +17,9 @@ import (
 // card renewal is: at its offsets from the first decline, ending after its
 // last one.
 func TestSolanaPullRetriesFollowMerchantPolicy(t *testing.T) {
-	s := openSolanaShop(t)
-	w := s.w
 	policy := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
-	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
+	s := openSolanaShop(t, func(w *world) { w.settings = billing.MerchantSettings{DunningPolicy: policy} })
+	w := s.w
 	b := s.buyer(t, false)
 	c := s.checkout(t, b, b.wallet.PublicKey())
 	sig := s.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now())

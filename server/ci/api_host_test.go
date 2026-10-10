@@ -106,7 +106,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
 	dns := newTXTServer(t)
-	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+	cp := f.newVaultServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.Engine.PublicBillingBaseURL = "https://" + shared
 		cfg.Engine.DashboardBaseURL = "https://" + console
 		deps.Engine.DNSResolver = dns.resolver()

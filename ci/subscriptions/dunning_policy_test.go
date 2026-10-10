@@ -17,7 +17,7 @@ import (
 // An invalid policy is refused whole.
 func TestMerchantDunningPolicy(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	w.armDestructive()
 	bad := &billing.DunningPolicy{Tiers: []billing.DunningTier{{RetryAfterHours: []int{24, 900}}}}
 	require.Error(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: bad}), "retries past the cycle are refused")
@@ -56,7 +56,7 @@ func TestDunningAccessPolicy(t *testing.T) {
 	for _, access := range []string{billing.DunningAccessKeep, billing.DunningAccessSuspend} {
 		t.Run(access, func(t *testing.T) {
 			t.Parallel()
-			w := newWorld(t)
+			w := newVaultWorld(t)
 			policy := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {MaxCycleHours: 672, RetryAfterHours: []int{24, 48}}, {RetryAfterHours: []int{48, 120, 216, 312}}}, AccessDuringDunning: access}
 			require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))
 			e := enroll(t, w, "stripe", embedded)
@@ -86,7 +86,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 	for _, rail := range []string{"stripe", "nmi"} {
 		t.Run(rail, func(t *testing.T) {
 			t.Parallel()
-			w := newWorld(t)
+			w := newVaultWorld(t)
 			require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessDuringDunning: billing.DunningAccessSuspend}}))
 			l := importLegacy(t, w, rail, embedded)
 			w.converge()
@@ -116,7 +116,7 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 // policy mid-case changes the next case, never this one.
 func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	opened := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: opened}))
 	e := enroll(t, w, "nmi", embedded)

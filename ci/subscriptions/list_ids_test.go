@@ -93,7 +93,10 @@ func (w *world) dropElsewhere(table string, merchant uuid.UUID) {
 // it has a fixture.
 func TestListsReadNamedRecords(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := prepareWorld(t, 12)
+	// Alert webhooks live in the merchant's configuration.
+	w.alertWebhooks = []openrails.AlertWebhookConfig{{Name: "ops", URL: "https://hooks.example.test/ops"}, {Name: "oncall", URL: "https://hooks.example.test/oncall"}}
+	w.start()
 	ctx := t.Context()
 	client := w.client[embedded]
 
@@ -144,17 +147,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 		{CustomerID: d.cid(), Currency: "USD", Amount: 30_000_000, Source: "support", SourceID: uuid.NewString()},
 	})
 	require.NoError(t, err)
-	// What detectors and alerting leave: findings, catalog drift among them,
-	// and an alert webhook.
-	for _, stmt := range []string{
-		`INSERT INTO billing.merchant_webhooks (merchant_id, name, destination_host, secret_version, format, enabled)
-			SELECT id, 'ops', 'hooks.example.test', 1, 'generic', true FROM billing.merchants WHERE slug = $1`,
-	} {
-		for range 2 {
-			_, err = w.pool.Exec(ctx, w.q(stmt), w.slug)
-			require.NoError(t, err)
-		}
-	}
+	// What detectors leave: findings, catalog drift among them.
 	for range 2 {
 		_, err = client.CreateProvisioningToken(ctx, billing.CreateProvisioningTokenParams{Name: "directory"})
 		require.NoError(t, err)
@@ -189,7 +182,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/renewals":                                     {"/v1/admin/renewals", "", "rebill_cycles", "", ""},
 		"GET /v1/admin/customers/{customer_id}/payment-methods":      {customer + "/payment-methods", "", "payment_methods", "", ""},
 		"GET /v1/admin/psps":                                         {"/v1/admin/psps", "", "psps", ", account_id = 'elsewhere'", ""},
-		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "merchant_webhooks", "", ""},
+		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "", "", ""},
 		"GET /v1/admin/provisioning-tokens":                          {"/v1/admin/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
 		"GET /v1/app/host-events":                                    {"/v1/app/host-events", "include_acknowledged=true", "host_outbox", "", ""},
 		"GET /v1/admin/findings":                                     {"/v1/admin/findings", "", "reconciliation_findings", "", ""},
@@ -226,7 +219,11 @@ func TestListsReadNamedRecords(t *testing.T) {
 		if len(mine) > 1 {
 			ask = mine[1:]
 		}
-		foreign := w.cloneElsewhere(fixture.table, mine[0], fixture.set)
+		// Another merchant's record; configuration has none in this schema.
+		foreign := mine[0][:len(mine[0])-36] + uuid.NewString()
+		if fixture.table != "" {
+			foreign = w.cloneElsewhere(fixture.table, mine[0], fixture.set)
+		}
 		unknown := foreign[:len(foreign)-36] + uuid.NewString()
 		named := append(append([]string{}, ask...), foreign, unknown, ask[0])
 		status, page = get("ids=" + strings.Join(named, ","))

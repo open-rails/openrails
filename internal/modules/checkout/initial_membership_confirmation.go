@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -152,7 +153,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 			if s.Config.HyperSwitch == nil {
 				return errors.New("engine HyperSwitch custody is not configured")
 			}
-			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, accepted.PSPID, s.Config.HyperSwitch.APIBaseURL)
+			frozen, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), charge.CustodyOf(d), method, accepted.PSPID, s.Config.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}
@@ -168,19 +169,22 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if price.ProductID != accepted.ProductID {
 			return errors.New("quoted initial membership has another catalog identity")
 		}
-		psp, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: accepted.PSPID})
+		if _, err := d.Gen(ctx).GetPSPForCutoverWrite(ctx, gen.GetPSPForCutoverWriteParams{MerchantID: mid.UUID(), ID: accepted.PSPID}); err != nil {
+			return err
+		}
+		psp, live, err := merchants.Of(d).PSPScopeByID(ctx, mid, accepted.PSPID)
 		if err != nil {
 			return err
 		}
-		if psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
+		if !live || psp.Archived || psp.Rail != method.Rail || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.Config)) {
 			return errors.New("new membership provider account is no longer available")
 		}
 		if method.CustodianID != nil {
-			custodian, err := d.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *method.CustodianID})
+			custodian, held, err := merchants.Of(d).CustodianScopeByID(ctx, mid, *method.CustodianID)
 			if err != nil {
 				return err
 			}
-			if custodian.Archived {
+			if !held || custodian.Archived {
 				return errors.New("new membership custodian is archived")
 			}
 		}

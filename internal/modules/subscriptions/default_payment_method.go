@@ -231,7 +231,7 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {
 		return nil, nil, fmt.Errorf("%w: rail %q charges no saved card", ErrDefaultPaymentMethodInvalid, method.Rail)
 	}
-	psp, err := charge.RoutePSP(ctx, q, method)
+	psp, err := charge.RoutePSP(ctx, charge.CustodyOf(d), method)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrDefaultPaymentMethodInvalid, err)
 	}

@@ -94,6 +94,17 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 	return client
 }
 
+// runtimeDeclaring boots a merchant whose file declares settings.
+func (f *fixture) runtimeDeclaring(t *testing.T, slug string, settings billing.MerchantSettings) *openrails.Client {
+	t.Helper()
+	cfg := f.config()
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, Settings: settings}
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
+	return client
+}
+
 func (f *fixture) dsn(t *testing.T) string {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))

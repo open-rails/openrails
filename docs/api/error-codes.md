@@ -44,13 +44,9 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `checkout_session_expired` | 410 | `invalid_request_error` | The checkout session expired. |
 | `checkout_session_not_found` | 404 | `invalid_request_error` | The checkout session does not exist. |
 | `checkout_session_unavailable` | 403 | `authorization_error` | The checkout session is not available to this caller. |
-| `credential_custody_transition_required` | 409 | `invalid_request_error` | Credential custody differs from the published backend. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_identity_mismatch` | 401 | `authentication_error` | The credential changed identity during the request. |
-| `credential_operation_conflict` | 409 | `invalid_request_error` | The credential operation conflicts with the published revision. |
 | `credential_revoked` | 401 | `authentication_error` | The credential or its session was revoked. |
-| `credential_source_read_only` | 405 | `invalid_request_error` | The provider credential source has no writable custody. |
-| `credential_store_read_only` | 403 | `authorization_error` | The credential store is read-only. |
 | `credit_grant_held` | 409 | `invalid_request_error` | Active holds need the grant's remaining credit. |
 | `credit_grant_not_found` | 404 | `invalid_request_error` | The credit grant does not exist. |
 | `credit_grant_unavailable` | 409 | `invalid_request_error` | The credit grant expired, ended or has no remaining credit. |
@@ -100,7 +96,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invoice_retry_outcome_unknown` | 409 | `invalid_request_error` | The last collection attempt's outcome is unknown. |
 | `invoker_scoped_principal` | 403 | `authorization_error` | An invoker-scoped credential spends a customer's balance but may not manage the account. |
 | `merchant_binding_mismatch` | 409 | `invalid_request_error` | The selected merchant is not the one the credential, deployment or request is bound to. |
-| `merchant_configuration_revision_conflict` | 409 | `invalid_request_error` | The merchant configuration changed; read its revision before applying. |
+| `merchant_config_read_only` | 409 | `invalid_request_error` | The merchant's configuration is read from a file; change the file. |
 | `merchant_context_mismatch` | 403 | `authorization_error` | The authorized merchant is not the one the request resolved. |
 | `merchant_directory_unavailable` | 503 | `api_error` | The merchant directory could not be read; retry. |
 | `merchant_not_found` | 404 | `invalid_request_error` | No active merchant answers to the selector. |

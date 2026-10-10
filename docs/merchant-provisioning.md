@@ -19,22 +19,22 @@ Three file-backed push surfaces (example shapes in `config/bootstrap.example.yam
 
 - `openrails push-auth-bootstrap` — AuthKit root authority: initial operator
   users and trusted remote applications. Default file `/etc/openrails/bootstrap.yaml`.
-- `openrails push-merchant-config` — merchants: identity, profile, invoice
-  policy, issuer-as-owner, PSPs (rail accounts + secrets). Default file
-  `/etc/openrails/merchants.yaml`.
+- `openrails push-merchant-config` — merchants: identity and issuer-as-owner;
+  without Vault the manifest also carries their configuration (settings, PSPs
+  with their secrets). Default file `/etc/openrails/merchants.yaml`.
 - `openrails apply-catalog --merchant NAME --file PATH` — one catalog application;
   a declarative document is safe to rerun on every boot.
 
 Catalog application uses its document contract, with `prune: false` by default.
-Merchant startup initialization uses `push-merchant-config --insert` (or `--seed`)
-and creates missing objects only. `--overwrite` and `--prune` are retired. Managed
-credentials use Client provider publication, not a manifest import into Vault/DB.
-Deliberate metadata changes use `apply-merchant-config` with an application ID and
-observed revision. See [the application contract](merchant-configuration-applications.md).
+`push-merchant-config --insert` (or `--seed`) creates missing merchants only;
+`--overwrite` and `--prune` are retired. Where configuration lives decides the
+rest ([merchant configuration](merchant-configuration.md)): without Vault the
+manifest is the configuration, read at every boot; with Vault the manifest
+names merchants only and a manifest declaring configuration is refused, while
+staff edit it over HTTP ([vault.md](vault.md)).
 
-AuthKit authority bootstrap remains first-run only. Merchant startup reloads
-snapshot credentials while preserving existing metadata and archived accounts.
-Catalog manifests are applied explicitly and are not replayed at ordinary boot.
+AuthKit authority bootstrap remains first-run only. Catalog manifests are
+applied explicitly and are not replayed at ordinary boot.
 
 Embedded hosts declare their merchant programmatically
 (`Config.Merchant`, the same shape) and pass their auth in `Deps`; the
@@ -172,7 +172,6 @@ merchants:
       jwks_uri: https://myapp.example/.well-known/jwks.json
     settings:                      # the configuration API's settings document
       profile:                     # customer-facing display
-        display_name: MyApp Billing
         logo_url: https://myapp.example/logo.png
         from_email: billing@myapp.example
         support_url: https://myapp.example/support
@@ -260,15 +259,14 @@ error, never a silent drop.
 - Embedded hosts merge them in their own config loader and pass the result as
   `Config.Merchant` (`openrails.ParseMerchantDeclaration` parses one merchant's
   YAML; secrets are `PSPConfig.Secrets`).
-- Standalone snapshot custody lists mounted files in `merchant_manifest_overlays`
+- The standalone server lists mounted files in `merchant_manifest_overlays`
   (env `MERCHANT_MANIFEST_OVERLAYS`).
 
 The engine itself reads no environment variable and no secret directory.
 
-## Secrets: seeding vs runtime source of truth
+## Credential names
 
-Secrets are addressed by `(merchant_id, name)`. PSP credentials use the
-canonical account-scoped name:
+Inside OpenRails a PSP credential is named by its account:
 
 ```text
 psps/<rail>/<environment>/<account_id>/<secret_key>
@@ -276,29 +274,10 @@ psps/<rail>/<environment>/<account_id>/<secret_key>
 
 Examples: `psps/nmi/live/100001/security_key`,
 `psps/stripe/live/acct_123/webhook_signing_secret`,
-`psps/ccbill/live/900000-0000/datalink_password`. The `account_id` segment is
-URL-escaped (CCBill's composite id is dash-joined precisely so it never embeds
-the `/` delimiter). Secret keys are validated against each rail's credential
-registry — unknown keys are rejected.
-
-Credential custody is selected explicitly by `secret_backend`:
-
-- `snapshot`: host-owned in-memory values, reloaded and validated at startup.
-- `vault`: managed KV-v2 with server-owned mount/scope and actual policy rights.
-- `db`: envelope-encrypted PostgreSQL storage; `ENCRYPTION_MASTER_KEY` is required
-  for managed storage in both sandbox and live deployments.
-
-Managed provider writes use versioned Client publication with stable operation
-identity and a revision precondition. Readers resolve the published credential
-version. Each credential slot also has a monotonic logical rotation generation,
-independent of the immutable secret candidate's backend version. Changing its
-value or custody advances that generation, including an A-to-B-to-A rotation;
-receipt replay, unchanged values in the same custody, and metadata-only edits do
-not. Qualification uses this generation to reject stale credentials. Retired
-overlap slots retain their generation so later reuse cannot reset it.
-Direct backend edits do not publish credentials. Changing custody is an
-explicit migration, independent of external HTTP publication. Snapshot values
-are never implicitly copied to a managed backend.
+`psps/ccbill/live/900000-0000/datalink_password`. The value is the PSP
+document's `secrets.<secret_key>`, in the manifest or in Vault. Secret keys are
+validated against each rail's credential registry — unknown keys are rejected.
+A changed credential is checked against its declared account before it is used.
 
 ## Deleting a merchant
 
@@ -317,8 +296,8 @@ Two things no deletion does, by construction:
 
 Moving a merchant's billing data to another deployment is an archive export and
 restore: see [merchant portability](merchant-portability.md). Recovering a whole
-deployment is Postgres point-in-time recovery with the `ENCRYPTION_MASTER_KEY`
-and Vault alongside it: see [backup and recovery](backup-and-recovery.md).
+deployment is Postgres point-in-time recovery with Vault (or the manifest)
+alongside it: see [backup and recovery](backup-and-recovery.md).
 
 ## API keys
 
@@ -363,12 +342,9 @@ external mount prefix; generated Stripe URLs use this same path.
 
 Merchant routes are scoped to the authenticated merchant; cross-merchant
 operations are the standalone operator's: the server's Go methods and the
-`openrails` CLI, never a route. PSP metadata and
-archive decisions are always available through the Client; writing a PSP
-credential needs a writable secret backend, so it is refused under `snapshot`
-custody. Catalog routes are `Permissions.Catalog`'s, their changes refused while
-`Config.Catalog` is the catalog's truth (standalone: allowed when
-`secret_backend` is `vault` or `db`, read-only under `snapshot`); the embedded
+`openrails` CLI, never a route. PSPs, settings and alert webhooks change only
+where Vault holds the configuration; with a file they are read-only. Catalog
+routes are `Permissions.Catalog`'s, and a document skips what an edit set; the embedded
 in-process Client is the process owner and writes its own catalog whatever the
 mount says. Catalog data always
 lives in the database. See [self-hosting-mode1.md](self-hosting-mode1.md).

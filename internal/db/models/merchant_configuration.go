@@ -4,8 +4,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// MerchantConfiguration is the JSONB payload stored in
-// billing.merchant_configurations.
+// MerchantConfiguration is a merchant's validated settings, as readers use
+// them (merchantconfig.Normalize).
 type MerchantConfiguration struct {
 	Profile MerchantProfileConfiguration `json:"profile,omitempty"`
 

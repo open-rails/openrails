@@ -3,7 +3,6 @@
 package subscriptions_test
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -130,9 +129,7 @@ type hyperSwitchMember struct {
 func newHyperSwitchMember(t *testing.T) (*world, *hyperSwitchMember) {
 	t.Helper()
 	hs, hsURL := newHSFake(t, "hs-merchant-e2e")
-	key := make([]byte, 32)
 	w := prepareWorld(t, 12, func(cfg *openrails.Config) {
-		cfg.Encryption = &openrails.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(key)}
 		cfg.HyperSwitch = &openrails.HyperSwitchConfig{APIBaseURL: hsURL, SDKURL: hsURL, AllowLoopbackHTTP: true}
 	})
 	w.custodians = map[string]openrails.CustodianConfig{"hs": {Kind: "hyperswitch", AccountID: hs.account,

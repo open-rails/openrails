@@ -19,7 +19,6 @@ import (
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
 	"catalog_restore_receipts":  "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
-	"credential_publications":   "deployment credential custody receipts; secrets are re-entered at destination",
 	"merchants":                 "destination identity and host authority are explicitly provisioned",
 	"merchant_slug_aliases":     "former names are directory identity, not billing history",
 	"merchant_api_host_claims":  "an unproven host claim; the destination claims and proves its own host",
@@ -28,19 +27,18 @@ var excludedTables = map[string]string{
 	"book_identity":             "the deployment's database identity",
 	"merchant_write_posture":    "deployment write posture: export sets the source readonly, restore the destination",
 	"webhook_health":            "telemetry", "webhook_health_daily": "telemetry", "admission_denials_hourly": "telemetry",
-	"card_attempt_failures": "card-testing telemetry",
-	"failed_usage_windows":  "live grace and cutoff windows; the destination counts afresh",
-	"payment_attempts":      "decline analytics, kept 25 months; money is payments and provider_intents",
-	"rebill_cycles":         "rebill analytics: expected rebills, derived from subscriptions",
-	"idempotency_keys":      "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and provider_intents; money is provider_intents and webhook_events",
-	"dashboard_configs":     "presentation",
-	"federated_grants":      "access authority; the destination invites its own staff",
-	"customer_contacts":     "a copy of the merchant's directory; the directory provisions the destination again",
-	"provisioning_tokens":   "credentials; the destination mints its own",
-	"merchant_deks":         "encryption key material", "merchant_secrets": "credentials are re-entered at destination",
-	"merchant_destructive_policy": "deployment safety policy", "merchant_webhooks": "destinations and signing-key versions are reconfigured",
-	"checkout_sessions": "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout attempt; a buyer mints a new one at the destination",
-	"notifications":     "inbox and notification delivery", "provider_mutation_logs": "operator evidence; raw bodies excluded",
+	"card_attempt_failures":       "card-testing telemetry",
+	"failed_usage_windows":        "live grace and cutoff windows; the destination counts afresh",
+	"payment_attempts":            "decline analytics, kept 25 months; money is payments and provider_intents",
+	"rebill_cycles":               "rebill analytics: expected rebills, derived from subscriptions",
+	"idempotency_keys":            "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and provider_intents; money is provider_intents and webhook_events",
+	"dashboard_configs":           "presentation",
+	"federated_grants":            "access authority; the destination invites its own staff",
+	"customer_contacts":           "a copy of the merchant's directory; the directory provisions the destination again",
+	"provisioning_tokens":         "credentials; the destination mints its own",
+	"merchant_destructive_policy": "deployment safety policy",
+	"checkout_sessions":           "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout attempt; a buyer mints a new one at the destination",
+	"notifications":               "inbox and notification delivery", "provider_mutation_logs": "operator evidence; raw bodies excluded",
 	"reconciliation_findings":       "operator observations",
 	"product_archive_operations":    "operation replay receipts; the refunds they produced are archived payments",
 	"account_updater_batches":       "unsupported provider job evidence; any rows refused",
@@ -68,12 +66,11 @@ var excludedTables = map[string]string{
 // unclassified even on a diagnostic table and must receive a new decision.
 var excludedColumns = map[string]string{
 	"catalog_restore_receipts":      "merchant_id digest rows restored_at",
-	"credential_publications":       "merchant_id operation_id rail environment account_id expected_revision request_metadata state result created_at published_at",
 	"destructive_action_switch":     "singleton enabled updated_by reason updated_at",
 	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at",
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
-	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at display_name api_host retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
+	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at api_host retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
 	"merchant_api_host_claims":      "merchant_id api_host token created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
@@ -89,10 +86,7 @@ var excludedColumns = map[string]string{
 	"federated_grants":              "merchant_id id email role issuer subject accepted_at created_at updated_at",
 	"customer_contacts":             "merchant_id customer_id email display_name user_name active provisioned_at directory_updated_at created_at updated_at",
 	"provisioning_tokens":           "merchant_id id name declared token_sha256 last_used_at created_at",
-	"merchant_deks":                 "merchant_id wrapped_dek created_at updated_at",
-	"merchant_secrets":              "merchant_id name value version created_at updated_at",
 	"merchant_destructive_policy":   "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
-	"merchant_webhooks":             "id merchant_id name destination_host secret_version format enabled created_at updated_at",
 	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at email_lease_expires_at",
 	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
@@ -122,11 +116,9 @@ var excludedColumns = map[string]string{
 // credential watermarks, or explicitly excluded raw/operational
 // data. A new unclassified column fails closed even when currently empty.
 var omittedColumns = map[string]string{
-	"custodians": "credential_versions",
-	// Credential publication state belongs to the source deployment's secret
-	// custody; credentials are re-entered at the destination, which
-	// fingerprints them under its own key.
-	"psps":              "credential_custody credential_refs credential_versions retired_credentials credentials_validated_at webhook_endpoint_id webhook_overlap_expires_at revision credential_fingerprint credential_duplicate_at",
+	// Credential evidence belongs to the source deployment's configuration;
+	// the destination validates and fingerprints its own.
+	"psps":              "credentials_validated_at webhook_endpoint_id credential_fingerprint credential_duplicate_at",
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
 	"customers":         "access_version",
 	"payments":          "destructive_run_class",

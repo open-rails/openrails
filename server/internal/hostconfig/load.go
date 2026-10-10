@@ -53,7 +53,7 @@ func loadConfigIfExists(k *koanf.Koanf, path string) error {
 
 // Top-level koanf keys, derived from fileConfig's tags so a new
 // multi-word top-level field can never silently miss the env mapping the way
-// SECRET_BACKEND did under first-underscore splitting (#710). Scalar keys map
+// PUBLIC_BILLING_BASE_URL would under first-underscore splitting (#710). Scalar keys map
 // only on an exact env-name match; nested keys (struct/map fields) also map
 // PREFIX_rest -> prefix.rest (DB_URL -> db.url).
 var envTopLevelScalarKeys, envTopLevelNestedKeys = topLevelKoanfKeys()
@@ -80,7 +80,7 @@ func topLevelKoanfKeys() (scalar, nested map[string]bool) {
 }
 
 // envKeyToConfigKey maps an env var name to its koanf config key.
-// Examples: SECRET_BACKEND -> secret_backend, DB_URL -> db.url. Names that
+// Examples: PUBLIC_BILLING_BASE_URL -> public_billing_base_url, DB_URL -> db.url. Names that
 // route to no config section return "" and are never loaded (the process env
 // is full of vars that are not ours — PATH, HOME, compose interpolation vars);
 // or#915 pairs this with a strict ErrorUnused unmarshal, so a name INSIDE one
@@ -294,10 +294,21 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("catalog_edits / CATALOG_EDITS was removed: catalog edits over HTTP are always on; a document skips what an edit set")
 	}
 	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
-		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: select secret_backend")
+		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: name vault.kv_mount and Vault holds merchant configuration")
 	}
 	if _, present := os.LookupEnv("MERCHANT_CONFIG_SOURCE"); k.Exists("merchant_config_source") || present {
-		return nil, fmt.Errorf("merchant_config_source / MERCHANT_CONFIG_SOURCE was removed: select secret_backend")
+		return nil, fmt.Errorf("merchant_config_source / MERCHANT_CONFIG_SOURCE was removed: name vault.kv_mount and Vault holds merchant configuration")
+	}
+	for key, env := range map[string]string{
+		"secret_backend": "SECRET_BACKEND", "credential_snapshot_id": "CREDENTIAL_SNAPSHOT_ID",
+		"credential_read_only": "CREDENTIAL_READ_ONLY", "alert_secret_backend": "ALERT_SECRET_BACKEND",
+	} {
+		if _, present := os.LookupEnv(env); k.Exists(key) || present {
+			return nil, fmt.Errorf("%s / %s was removed: name vault.kv_mount and Vault holds merchant configuration; without it the merchant manifest is the configuration", key, env)
+		}
+	}
+	if _, present := os.LookupEnv("ENCRYPTION_MASTER_KEY"); k.Exists("encryption") || present {
+		return nil, fmt.Errorf("encryption / ENCRYPTION_MASTER_KEY was removed: OpenRails keeps no credentials in the database")
 	}
 
 	for _, retired := range []string{"ENV", "API_URL", "NEW_SUBSCRIPTION_COLLECTION_POLICY"} {

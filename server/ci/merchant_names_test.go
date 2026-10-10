@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/internal/vaulttest"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,6 +35,19 @@ func (f *fixture) newServer(t *testing.T, edit func(*server.Config, *server.Deps
 	srv, err := f.buildServer(t, edit)
 	require.NoError(t, err)
 	return srv
+}
+
+// newVaultServer is newServer with Vault holding merchant configuration, so
+// provisioning records display names.
+func (f *fixture) newVaultServer(t *testing.T, edit func(*server.Config, *server.Deps)) *server.Server {
+	t.Helper()
+	vault := vaulttest.New(t)
+	return f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		cfg.Engine.Vault = vault.Config()
+		if edit != nil {
+			edit(cfg, deps)
+		}
+	})
 }
 
 // authSchema is the schema of the fixture's standalone AuthKit.

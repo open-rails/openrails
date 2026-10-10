@@ -1,41 +1,25 @@
-// Package merchants implements merchant provisioning, lifecycle, per-merchant
-// rail credentials, and webhook routing for OpenRails' merchant platform
-// (issue #225). It builds on the #223 merchant primitive (internal/merchant +
-// billing.merchants)
-// and the #224 in-process AuthKit control plane (server/internal/controlplane): the
-// lifecycle service records merchant permission-group ids through control-plane
-// core calls and records merchant directory state directly in openrails.*
-// (OpenRails-owned control-plane state).
+// Package merchants implements merchant provisioning, lifecycle, PSPs and
+// custodians, and webhook routing. A merchant's identity is a Postgres row; its
+// configuration, credentials included, is its documents in a file or Vault
+// (internal/merchantdocs), which this package joins with the identities history
+// points at.
 package merchants
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"net/url"
 	"path"
 	"strings"
 
-	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/custodians"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// A merchant secret has exactly ONE spelling: the PSP-scoped name
-// `psps/<rail>/<environment>/<account_id>/<key>` built by PSPSecretName. The
-// flat `<rail>/<purpose>` names (stripe/secret_key, nmi/mobius/security_key, …)
-// were retired in #884 — they were write-only surface, read only on a
-// `pool == nil` branch that no production construction can reach, and they baked
-// a PSP key ("mobius") into names presented as rail-generic.
-
-// PSPSecretName returns the canonical secret-store name for a
-// PSP-owned credential. The merchant id still namespaces the store;
-// this path adds provider identity so one merchant can rotate or run multiple
-// accounts of the same provider without credential collisions.
+// PSPSecretName names one credential slot of a PSP:
+// psps/<rail>/<environment>/<account_id>/<key>. It is an address resolved
+// against the PSP document whose identity it names, never a storage path.
 func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 	rail = normalizeProviderSecretType(rail)
 	environment = normalizeProviderSecretEnvironment(environment)
@@ -53,19 +37,11 @@ func PSPSecretName(rail, environment, accountID, key string) (string, error) {
 	if accountID == "" {
 		return "", apperr.Invalidf("PSP secret requires account id")
 	}
-	// The prefix is part of the DURABLE canonical secret-name shape (persisted
-	// in the merchant-secret store, including HashiCorp Vault KV paths).
-	// Renaming it means migrating stored names in EVERY deployment (SQL for
-	// DB-backed, a KV move for Vault-backed) — treat it with
-	// stripeapi.APIVersion discipline: never float it casually.
 	return path.Join("psps", rail, environment, url.PathEscape(accountID), key), nil
 }
 
 // CustodianSecretName is the custody sibling of PSPSecretName (or#880):
-// `custodians/<kind>/<environment>/<account_id>/<key>`. It scopes by the
-// custodian's IDENTITY — not by the merchant's nickname for it — for the same
-// reason PSPSecretName does (#884): a stored name must survive a re-key of the
-// manifest, and one identity must address one credential set.
+// custodians/<kind>/<environment>/<account_id>/<key>.
 func CustodianSecretName(kind, environment, accountID, key string) (string, error) {
 	d, err := custodians.Require(kind)
 	if err != nil {
@@ -83,8 +59,6 @@ func CustodianSecretName(kind, environment, accountID, key string) (string, erro
 	if accountID == "" {
 		return "", fmt.Errorf("custodian secret requires account id")
 	}
-	// Same durability contract as the psps/ prefix: this string is persisted
-	// in every secret backend, including Vault KV paths. Never float it.
 	return path.Join("custodians", d.Kind, environment, url.PathEscape(accountID), slotName), nil
 }
 
@@ -189,312 +163,4 @@ func normalizeProviderSecretEnvironment(environment string) string {
 	default:
 		return ""
 	}
-}
-
-// MerchantSecretStatus is the read-only dashboard/admin view of one merchant
-// secret slot. It never contains plaintext. The advertised slots come from the
-// rail credential registry (#884) — the same source the money path reads with.
-type MerchantSecretStatus struct {
-	Name string `json:"name"`
-	// Rail is the gateway kind for a PSP-scoped credential; "" for a
-	// custodian-scoped one (or#880 — custody is not a rail).
-	Rail string `json:"rail"`
-	// Custodian is the vendor kind for a custodian-scoped credential; "" for a
-	// PSP-scoped one. Exactly one of Rail/Custodian is set.
-	Custodian        string `json:"custodian,omitempty"`
-	Key              string `json:"key"`
-	DisplayLabel     string `json:"display_label"`
-	MerchantWritable bool   `json:"merchant_writable"`
-	Configured       bool   `json:"configured"`
-	Version          int    `json:"version,omitempty"`
-}
-
-// ErrSecretNotFound is returned by a MerchantSecretStore when no secret exists for
-// the (merchant, name) pair. This is a TERMINAL condition for that (merchant, name):
-// the secret is genuinely absent (merchant never configured it, or was
-// deprovisioned). Callers distinguish "not configured" from a backend error with
-// errors.Is.
-var ErrSecretNotFound = errors.New("merchants: merchant secret not found")
-
-// ErrSecretBackendUnavailable wraps any OPERATIONAL failure of the underlying
-// secret backend — Vault unreachable / sealed / permission-denied, a DB query
-// error, or a not-yet-wired Vault client. It is distinct from ErrSecretNotFound
-// (terminal absence) precisely so money-path callers can fail closed correctly:
-//
-//   - secret ABSENT (ErrSecretNotFound)      -> terminal for that merchant; never
-//     retry, and (critically) NEVER treat as "verification disabled".
-//   - backend UNAVAILABLE (this error)       -> RETRY; do NOT cancel a
-//     subscription, delete a merchant, or skip a webhook signature check.
-//
-// The recurring Solana pull worker and the webhook signature verifier both branch
-// on errors.Is(err, ErrSecretBackendUnavailable) to retry rather than treat a
-// transient Vault outage as "no secret".
-var ErrSecretBackendUnavailable = errors.New("merchants: merchant secret backend unavailable")
-
-// Secret is a stored per-merchant secret value plus its version (bumped on every
-// rotation), so callers can audit/rotate without re-reading the plaintext.
-type Secret struct {
-	Name    string
-	Value   string
-	Version int
-}
-
-// MerchantSecretReader is the read-only half of the per-merchant secret store.
-// Checkout, vaulting, and workers use this so fixed-credential runtimes do not
-// need write access merely to resolve credentials.
-type MerchantSecretReader interface {
-	Get(ctx context.Context, merchantID billing.MerchantID, name string) (Secret, error)
-}
-
-// VersionedSecretReader is the cross-node ROTATION CUTOVER contract (or#812).
-//
-// A read-through secret cache is per-process, so a credential rotated on node A
-// stays cached on node B until B's entry expires — up to DefaultSecretCacheTTL
-// of a retired credential still being presented to a gateway. The fix is a
-// versioned read: the PSP row (shared DB, re-read live on every credential
-// resolution) records the Secret.Version each credential reached at its last
-// rotation, and a reader that holds an OLDER version must go back to the
-// backend instead of answering from cache.
-//
-// Only the caching wrapper needs to implement this; ReadSecretRef degrades to
-// a plain Get for uncached stores, then verifies the returned version too.
-type VersionedSecretReader interface {
-	GetAtLeastVersion(ctx context.Context, merchantID billing.MerchantID, name string, minVersion int) (Secret, error)
-}
-
-// ExactSecretReader resolves only a published immutable version.
-type ExactSecretReader interface {
-	GetVersion(context.Context, billing.MerchantID, string, int) (Secret, error)
-}
-
-// SecretRef names a credential AND the version floor a reader must satisfy for
-// it. MinVersion 0 means "no floor recorded" — the pre-rotation state, and the
-// state of every secret written outside the provider-config API.
-type SecretRef struct {
-	Retired    bool   `json:"-"`
-	Name       string `json:"name"`
-	MinVersion int    `json:"version"`
-	Custody    string `json:"custody,omitempty"`
-}
-
-// ReadSecretRef enforces the recorded version floor for every backend. A
-// version-aware cache may refresh first, but a lagging backend is unavailable,
-// never permission to present a retired credential.
-func ReadSecretRef(ctx context.Context, reader MerchantSecretReader, id billing.MerchantID, ref SecretRef) (Secret, error) {
-	if ref.Retired {
-		return Secret{}, ErrSecretNotFound
-	}
-	if reader == nil {
-		return Secret{}, errors.New("merchants: no secret store configured")
-	}
-	if ref.Custody != "" && ref.Custody != SecretCustodyIdentity(reader) {
-		return Secret{}, ErrCredentialCustodyTransitionRequired
-	}
-	if ref.MinVersion < 0 {
-		return Secret{}, fmt.Errorf("%w: invalid credential version floor", ErrSecretBackendUnavailable)
-	}
-	var secret Secret
-	var err error
-	if versioned, ok := reader.(ExactSecretReader); ok && ref.MinVersion > 0 {
-		secret, err = versioned.GetVersion(ctx, id, ref.Name, ref.MinVersion)
-	} else {
-		secret, err = reader.Get(ctx, id, ref.Name)
-	}
-	if err != nil {
-		return Secret{}, err
-	}
-	if ref.MinVersion > 0 && secret.Version != ref.MinVersion {
-		return Secret{}, fmt.Errorf("%w: credential version %d differs from published version %d", ErrSecretBackendUnavailable, secret.Version, ref.MinVersion)
-	}
-	return secret, nil
-}
-
-// PSPSecretResolver resolves the canonical secret name for the
-// active PSP a merchant should use.
-type PSPSecretResolver interface {
-	ActivePSPSecretName(ctx context.Context, merchantID billing.MerchantID, rail, environment, key string) (string, bool, error)
-}
-
-// PSPSecretRefResolver is PSPSecretResolver plus the rotation version floor —
-// the form every credential read should use (or#812).
-type PSPSecretRefResolver interface {
-	ActivePSPSecretRef(ctx context.Context, merchantID billing.MerchantID, rail, environment, key string) (SecretRef, bool, error)
-}
-
-// PSPScope is the configured PSP selected for a
-// merchant rail/environment.
-type PSPScope struct {
-	ID          uuid.UUID
-	Rail        string
-	Environment string
-	AccountID   string
-	// Key is the manifest account key ("mobius") — the
-	// payment-provider vocabulary catalog links and checkout use.
-	Key      string
-	Settings map[string]any
-	// CustodianID references the custodian holding the instruments charged
-	// through this PSP (or#880). nil = the PSP holds its own.
-	CustodianID *uuid.UUID
-	// CredentialVersions holds logical per-slot rotation generations for
-	// published credentials. CredentialRefs owns their physical versions.
-	// Legacy rows without references use these values as backend floors.
-	CredentialVersions map[string]int
-	CredentialRefs     map[string]SecretRef
-	RetiredCredentials map[string]bool
-	// SignerChange is a pending, unapproved Transit signer public key (Solana).
-	SignerChange string
-	// DuplicateAccount: another live PSP already declares this gateway
-	// account; no credential of this one is read.
-	DuplicateAccount bool
-}
-
-// SecretRef returns the exact published name and physical backend version.
-// Legacy rows without published references retain their canonical-name floor.
-func (s PSPScope) SecretRef(key string) (SecretRef, error) {
-	if s.DuplicateAccount {
-		// Read as absent: nothing arms a duplicate declaration.
-		return SecretRef{Retired: true}, nil
-	}
-	if s.RetiredCredentials[NormalizeCredentialVersionKey(key)] {
-		return SecretRef{Retired: true}, nil
-	}
-	if ref, ok := s.CredentialRefs[NormalizeCredentialVersionKey(key)]; ok {
-		return validatePublishedRef(s.Rail, s.Environment, s.AccountID, key, ref)
-	}
-	name, err := PSPSecretName(s.Rail, s.Environment, s.AccountID, key)
-	if err != nil {
-		return SecretRef{}, err
-	}
-	return SecretRef{Name: name, MinVersion: s.CredentialVersions[NormalizeCredentialVersionKey(key)]}, nil
-}
-
-// PSPSecretRef is the published reference of one credential of a PSP row, for
-// the paths that hold the row rather than a resolved PSPScope.
-func PSPSecretRef(row gen.BillingPsp, key string) (SecretRef, error) {
-	return pspScopeFromRow(row).publishedRef(key)
-}
-
-// NormalizeCredentialVersionKey is the canonical form credential-version keys
-// are recorded under: lowercase, trimmed. It deliberately does NOT go through
-// NormalizePSPSecretKey (which rejects unknown keys) — a version floor for a
-// key this build does not recognise is still worth honouring.
-func NormalizeCredentialVersionKey(key string) string {
-	return strings.ToLower(strings.TrimSpace(key))
-}
-
-// PSPScopeResolver resolves the selected PSP without
-// requiring a particular secret key.
-type PSPScopeResolver interface {
-	ActivePSPScope(ctx context.Context, merchantID billing.MerchantID, rail, environment string) (PSPScope, bool, error)
-}
-
-// PSPKeyResolver resolves a declared account by its manifest
-// account key — the payment-provider name checkout requests
-// and catalog provider_links use.
-type PSPKeyResolver interface {
-	PSPScopeByKey(ctx context.Context, merchantID billing.MerchantID, key, environment string) (PSPScope, bool, error)
-}
-
-// PSPRailScopesResolver lists every non-archived account on a rail kind —
-// checkout's unambiguous rail-kind fallback (#848).
-type PSPRailScopesResolver interface {
-	ActivePSPScopesForRail(ctx context.Context, merchantID billing.MerchantID, rail, environment string) ([]PSPScope, error)
-}
-
-// ArchivedPSPKeyResolver reports whether a key names an ARCHIVED account
-// (or#288). Routing needs it to tell "you retired this PSP" (not_armed) from
-// "no such PSP was ever declared" (unknown_selector) — two very different
-// answers to "why didn't my checkout go there".
-type ArchivedPSPKeyResolver interface {
-	PSPKeyArchived(ctx context.Context, merchantID billing.MerchantID, key, environment string) (bool, error)
-}
-
-// MerchantSecretStore is the per-merchant secrets abstraction (issue #225). Every
-// operation is namespaced by merchant id so one merchant can never read or
-// overwrite another merchant's Stripe credentials or webhook signing secrets.
-//
-// Two implementations ship:
-//
-//   - dbSecretStore / memSecretStore: build and run WITHOUT a live Vault (the
-//     dev / self-hosted default). DB-backed persists to billing.merchant_secrets.
-//   - vaultSecretStore: a documented adapter that resolves the SAME (merchant,
-//     name) addressing to a merchant-scoped Vault KV path. It is a stub today and
-//     is wired in managed deployments without any schema or caller change.
-type MerchantSecretStore interface {
-	MerchantSecretReader
-	// Get returns the secret for (merchant, name), or ErrSecretNotFound.
-	// Put creates or rotates the secret for (merchant, name). It is idempotent on
-	// value: putting the same value twice is a no-op rotation. Returns the stored
-	// secret (with its new version).
-	Put(ctx context.Context, merchantID billing.MerchantID, name, value string) (Secret, error)
-	// Delete removes the secret for (merchant, name). Deleting a missing secret is
-	// a no-op (idempotent), so it is safe in merchant-delete purge.
-	Delete(ctx context.Context, merchantID billing.MerchantID, name string) error
-	// List enumerates the secret NAMES (never values) held for a merchant. Used by
-	// the export path for Vault-side secret enumeration (GDPR / portability).
-	List(ctx context.Context, merchantID billing.MerchantID) ([]string, error)
-}
-
-// validateSecretRef guards the (merchant, name) addressing shared by every store
-// so a blank/zero merchant or empty name can never read or clobber a secret.
-func validateSecretRef(merchantID billing.MerchantID, name string) error {
-	if merchantID.IsZero() {
-		return fmt.Errorf("merchants: secret access requires a merchant id")
-	}
-	if cleanSecretName(name) == "" {
-		return fmt.Errorf("merchants: secret access requires a name")
-	}
-	return nil
-}
-
-// cleanSecretName normalises a secret name. It REJECTS (by returning "") a
-// name containing a path-traversal segment: every caller allowlists the name
-// and accountID is PathEscaped, so this is not reachable today — but the
-// function's output is joined into a Vault path, and a guard that only trims
-// slashes is one refactor away from being the hole (SEC-24 item 6).
-func cleanSecretName(name string) string {
-	cleaned := strings.Trim(strings.TrimSpace(name), "/")
-	if cleaned == "." || cleaned == ".." {
-		return ""
-	}
-	for _, seg := range strings.Split(cleaned, "/") {
-		if seg == ".." || seg == "." {
-			return ""
-		}
-	}
-	return cleaned
-}
-
-// PSPIdentityScopeResolver resolves immutable account identity for existing
-// obligations. Archived PSPs remain available; new admission uses active scopes.
-type PSPIdentityScopeResolver interface {
-	PSPScopeByID(ctx context.Context, merchantID billing.MerchantID, pspID uuid.UUID) (PSPScope, bool, error)
-}
-
-// CredentialRefs returns the exact immutable candidate selected by publication.
-func validatePublishedRef(rail, environment, accountID, key string, ref SecretRef) (SecretRef, error) {
-	canonical, err := PSPSecretName(rail, environment, accountID, key)
-	if err != nil {
-		return SecretRef{}, err
-	}
-	if strings.HasPrefix(ref.Custody, "snapshot:") {
-		identity, err := uuid.Parse(strings.TrimPrefix(ref.Custody, "snapshot:"))
-		if err != nil || identity == uuid.Nil || ref.Name != canonical || ref.MinVersion <= 0 {
-			return SecretRef{}, ErrSecretBackendUnavailable
-		}
-		return ref, nil
-	}
-	parts := strings.SplitN(ref.Name, "/", 3)
-	matching := len(parts) == 3 && parts[2] == canonical
-	if len(parts) == 3 && key == "webhook_signing_secret_previous" {
-		current, _ := PSPSecretName(rail, environment, accountID, "webhook_signing_secret")
-		matching = matching || parts[2] == current
-	}
-	if len(parts) != 3 || parts[0] != "credential_candidates" || !matching || ref.MinVersion <= 0 {
-		return SecretRef{}, ErrSecretBackendUnavailable
-	}
-	if _, err := uuid.Parse(parts[1]); err != nil {
-		return SecretRef{}, ErrSecretBackendUnavailable
-	}
-	return ref, nil
 }

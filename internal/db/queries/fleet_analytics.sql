@@ -5,7 +5,7 @@
 SELECT count(*)::bigint AS total,
        (count(*) FILTER (WHERE EXISTS (
            SELECT 1 FROM billing.psps p
-            WHERE p.merchant_id = m.id AND NOT p.archived)))::bigint AS armed,
+            WHERE p.merchant_id = m.id AND p.superseded_at IS NULL)))::bigint AS armed,
        (count(*) FILTER (WHERE EXISTS (
            SELECT 1 FROM billing.payments pay
             WHERE pay.merchant_id = m.id AND pay.status = 'succeeded'

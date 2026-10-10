@@ -7,7 +7,7 @@ import (
 
 // pspWriteErrors are the refusals of a PSP write, beside the route's own.
 func pspWriteErrors(own ...string) []string {
-	return codes(append(own, "credential_custody_transition_required", "credential_operation_conflict", "credential_source_read_only", "credential_store_read_only", "invalid_param", "psp_credentials_rejected", "service_unavailable")...)
+	return codes(append(own, "invalid_param", "psp_credentials_rejected", "revision_mismatch", "service_unavailable")...)
 }
 
 // pspsRoutes is a merchant's PSPs (accounts on rails), the rails they can be
@@ -15,14 +15,13 @@ func pspWriteErrors(own ...string) []string {
 var pspsRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListPSPs",
 		Query: params(queryOf(handlers.PSPListQuery{}), idsParam, integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
-	{Method: POST, Path: "/v1/admin/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreatePSP", Sensitive: true,
+	{Method: POST, Path: "/v1/admin/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreatePSP", Sensitive: true, When: FeatureMerchantConfigEdits,
 		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
 	{Method: GET, Path: "/v1/admin/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetPSP",
 		Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.GetPSP)},
-	// Credentials rotate here; settings changes work with a read-only
-	// credential backend. Archiving writes only the PSP row, never a secret,
-	// never the provider: a terminated account archives from any deployment.
-	{Method: PATCH, Path: "/v1/admin/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdatePSP", Sensitive: true,
+	// Settings change, credentials rotate and the PSP archives here. Archiving
+	// never calls the provider: a terminated account archives too.
+	{Method: PATCH, Path: "/v1/admin/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdatePSP", Sensitive: true, When: FeatureMerchantConfigEdits,
 		Request: billing.UpdatePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: pspWriteErrors("psp_last_active", "psp_not_found"), Handler: h(handlers.UpdatePSP)},
 	// or#288: which PSP a checkout would get, and why. A projection of the
 	// PSP catalog, so it takes the same read.
@@ -37,5 +36,5 @@ var pspsRoutes = []Route{
 	// its merchant; runtime bindings and signatures remain mandatory. The body
 	// is the provider's own payload.
 	{Method: POST, Path: "/v1/webhooks/{rail}/{account_id}", Group: Webhooks, Auth: AuthProvider, NoConn: true,
-		Query: params(text("eventType")), Request: Stream{"application/json"}, Responses: []Reply{{200, handlers.WebhookReceipt{}}}, Errors: codes("authentication_required", "credential_custody_transition_required", "invalid_param", "resource_access_denied", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
+		Query: params(text("eventType")), Request: Stream{"application/json"}, Responses: []Reply{{200, handlers.WebhookReceipt{}}}, Errors: codes("authentication_required", "invalid_param", "resource_access_denied", "service_unavailable", "webhook_account_mismatch"), Handler: h(handlers.Webhook)},
 }

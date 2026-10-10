@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
-	"github.com/open-rails/openrails/internal/http/routesurface"
 )
 
 func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
@@ -125,20 +124,17 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	revalidate.Header.Set("If-None-Match", doc.Header().Get("ETag"))
 	require.Equal(t, http.StatusNotModified, serve(t, mux, revalidate).Code)
 
-	// Provider credential writes are advertised only for a writable DB backend,
-	// with the merchant-config group on.
-	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
-		for _, writable := range []bool{false, true} {
-			mux := http.NewServeMux()
-			(&Server{cfg: &config.Config{}, groups: groups, permissions: staffPermissionsFor(groups), runtime: &app.Runtime{
-				Config:            &config.Config{SecretBackend: source},
-				RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable},
-			}}).registerStandaloneMetaRoutes(mux)
-			w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/config", nil))
-			var doc billing.PublicConfig
-			require.NoError(t, json.Unmarshal(w.Body.Bytes(), &doc))
-			require.Equal(t, source == config.SecretBackendDB && writable, doc.Capabilities.Features["provider_credential_writes"], "%s writable=%v", source, writable)
-		}
+	// Merchant-config edits are advertised only where Vault holds it, with the
+	// merchant-config group on.
+	for _, kvMount := range []string{"", "kv"} {
+		mux := http.NewServeMux()
+		(&Server{cfg: &config.Config{}, groups: groups, permissions: staffPermissionsFor(groups), runtime: &app.Runtime{
+			Config: &config.Config{Vault: &config.VaultConfig{KVMount: kvMount}},
+		}}).registerStandaloneMetaRoutes(mux)
+		w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/config", nil))
+		var doc billing.PublicConfig
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &doc))
+		require.Equal(t, kvMount != "", doc.Capabilities.Features["merchant_config_edits"], kvMount)
 	}
 }
 

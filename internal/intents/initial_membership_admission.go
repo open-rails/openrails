@@ -103,7 +103,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 			return err
 		}
 		if terms.Terms.CollectionPolicy == models.CollectionPolicyEngine && terms.HyperSwitch != nil {
-			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), method, terms.Instrument.PSPID, terms.HyperSwitch.APIBaseURL)
+			binding, err := charge.FreezeHyperSwitchBinding(ctx, d.Gen(ctx), charge.CustodyOf(d), method, terms.Instrument.PSPID, terms.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}

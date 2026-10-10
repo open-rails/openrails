@@ -6,8 +6,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
+	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 )
 
 // openEmbeddedDB borrows the host pool or opens the configured database.
@@ -36,4 +38,18 @@ func openEmbeddedDB(ctx context.Context, cfg *config.Config, pool *pgxpool.Pool)
 		}
 	}
 	return database, nil
+}
+
+// bindMerchantConfig binds the configuration database reads merchant settings
+// through: given (a running app's), else one this process opens.
+func bindMerchantConfig(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, given db.MerchantConfig) (func(), error) {
+	if given != nil {
+		database.SetMerchantConfig(given)
+		return func() {}, nil
+	}
+	_, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, merchantID, nil, "", nil)
+	if err != nil {
+		return nil, fmt.Errorf("merchant configuration unavailable: %w", err)
+	}
+	return closeConfig, nil
 }

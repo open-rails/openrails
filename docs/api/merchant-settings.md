@@ -4,19 +4,20 @@ A merchant's settings (`billing.MerchantSettings`) are part of its
 configuration: `GET /v1/admin/configuration` (`Client.GetMerchantConfiguration`)
 reads them with the configuration's revision, and
 `PATCH /v1/admin/configuration` (`Client.UpdateMerchantConfiguration`)
-changes them against that revision
-([configuration applications](../merchant-configuration-applications.md)). A
-mode-1 merchant declares the same document under `settings:` in its YAML.
+changes them against that revision where Vault holds the configuration
+([merchant configuration](../merchant-configuration.md)). A merchant whose
+configuration is a file declares the same document under `settings:` in its
+YAML.
 
 The settings hold the profile, invoice/arrears policy, checkout routing, the
 dunning policy, named billing policies, default/tier bindings and delegated
-wasted-spend limits. An application changes only the fields it names; an
-explicit empty list removes those declarations. Unknown fields are rejected.
+wasted-spend limits. An update changes only the fields it names; an explicit
+empty list removes those declarations. Unknown fields are rejected.
 
-All policy references must name policies in the resulting document. Invalid
-fields, missing references or database errors leave every setting unchanged.
-Financial policy resolution reads PostgreSQL directly, so another runtime never
-keeps an old cached cap.
+All policy references must name policies in the resulting document, and an
+update refuses to remove a policy customers are assigned. Invalid fields or
+missing references leave every setting unchanged. Every replica reloads the
+settings as soon as an update commits.
 
 A customer's own policy is one of its customer settings (below), outside the
 merchant settings. Removing a named policy a customer is still bound to is

@@ -23,20 +23,14 @@ import (
 // usage event, and the windows are PostgreSQL rows written with the event.
 func TestFailedUsage(t *testing.T) {
 	f := newFixture(t)
-	client := f.runtime(t, "failed-"+uuid.NewString()[:8])
-	ctx := merchant.WithID(t.Context(), client.MerchantID())
-	config, err := client.GetMerchantConfiguration(ctx)
-	require.NoError(t, err)
-	_, err = client.UpdateMerchantConfiguration(ctx, billing.UpdateMerchantConfigurationParams{
-		IdempotencyKey: uuid.NewString(), ExpectedRevision: &config.Revision,
-		Settings: &billing.MerchantSettings{
-			BillingPolicies: []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap",
-				BadSpendWindows: []billing.BudgetWindow{{Key: "hour", WindowSeconds: 3600, Limit: 30_000, Currency: "USD"}}}},
-			BillingPolicyBindings:             []billing.BillingPolicyBinding{{PolicyName: "grace"}},
-			DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{{Key: "burst", WindowSeconds: 3600, Limit: 50_000, Currency: "USD"}},
-		},
+	client := f.runtimeDeclaring(t, "failed-"+uuid.NewString()[:8], billing.MerchantSettings{
+		BillingPolicies: []billing.BillingPolicy{{Name: "grace", Kind: "outstanding_cap",
+			BadSpendWindows: []billing.BudgetWindow{{Key: "hour", WindowSeconds: 3600, Limit: 30_000, Currency: "USD"}}}},
+		BillingPolicyBindings:             []billing.BillingPolicyBinding{{PolicyName: "grace"}},
+		DelegatedInvokerWastedSpendLimits: []billing.BudgetWindow{{Key: "burst", WindowSeconds: 3600, Limit: 50_000, Currency: "USD"}},
 	})
-	require.NoError(t, err)
+	ctx := merchant.WithID(t.Context(), client.MerchantID())
+	var err error
 	customer := billing.CustomerID(uuid.New())
 	_, err = createCreditGrant(ctx, client, customer, billing.CreateCreditGrantParams{Currency: "USD", Amount: 1_000_000, Source: "support", SourceID: "seed"})
 	require.NoError(t, err)

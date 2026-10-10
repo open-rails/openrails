@@ -53,16 +53,16 @@ there is no separate private/service listener.
   `redis.ca_cert` (`REDIS_CA_CERT`, the PEM CA) as it needs. While a declared
   Redis does not answer, each process keeps them in its own memory and
   readiness reports Redis degraded without failing.
-- **HashiCorp Vault** — optional. Two independent uses: KV storage for merchant
-  secrets (`secret_backend: vault`) and Transit signing for Solana custody. See
-  [vault.md](vault.md).
+- **HashiCorp Vault** — optional. Name a KV mount (`vault.kv_mount`) and Vault
+  holds merchant configuration; name only a Transit mount and it only signs
+  Solana transactions. See [vault.md](vault.md).
 
 **Configuration** is a `config.yaml` (see `config.example.yaml` for the full
-surface: listener, db, redis, auth issuer, encryption, vault, rate limits,
+surface: listener, db, redis, auth issuer, vault, rate limits,
 trusted proxies, captcha, admin console) plus an environment overlay: an env var
 maps onto the config tree by prefix, e.g. `DB_URL` → `db.url`,
-`PROVIDER_WRITE_MODE` → `provider_write_mode`, `SECRET_BACKEND` →
-`secret_backend`. For the two operating dials there are also CLI flags.
+`PROVIDER_WRITE_MODE` → `provider_write_mode`, `VAULT_KV_MOUNT` →
+`vault.kv_mount`. For the two operating dials there are also CLI flags.
 Precedence: **flag beats env beats yaml.** An env var inside a section that
 names no key refuses boot, except the variables Kubernetes adds for each
 Service in the namespace (`REDIS_SERVICE_HOST`, `DB_PORT=tcp://…`), which are
@@ -91,29 +91,26 @@ openrails run-server --config /etc/openrails/config.yaml \
   every environment — credential validation, not the env string, keeps it
   honest.
 - An `https` `auth.issuer`.
-- **Credential custody**: explicitly select `secret_backend: snapshot`, `vault`,
-  or `db`. Managed DB storage requires `ENCRYPTION_MASTER_KEY` (base64, 32-byte
-  AES-256) even in sandbox. Snapshot credentials stay in process memory.
 - Behind a load balancer, set `trusted_proxies` to its CIDR range or
   `X-Forwarded-For` is ignored and rate limiting keys on the LB's address.
 
-### Credential custody and configuration publication
+### Where merchant configuration lives
 
-Merchant metadata lives in PostgreSQL. `secret_backend` selects snapshot, Vault
-or encrypted DB credential custody. The server mounts the admin API and the
-merchant's configuration, guarded by its merchant persona's permissions:
-`server.MerchantRead` for reads, `server.MerchantWrite` for actions on
-customers, `server.MerchantAdmin` for the configuration (PSPs, settings,
-catalog edits, billing import and export). Credential mutation additionally
-requires a writable backend.
+A merchant's configuration (display name, settings, alert webhooks, PSPs and
+custodians, credentials included) lives in the merchant manifest or, when a KV
+mount is named, in Vault; never in PostgreSQL. With the manifest it is read at
+boot and the edit routes are not mounted. With Vault the manifest names
+merchants only (a manifest declaring configuration is refused at boot) and
+staff edit configuration over HTTP at the revision they read. See
+[merchant configuration](merchant-configuration.md) and [vault.md](vault.md).
 
-Startup initializes missing identities and metadata and reloads snapshot values.
-It preserves subsequent API edits and archived providers. Explicit metadata
-applications carry a stable ID and revision precondition; managed credentials use
-separate publication operations. See [metadata applications](merchant-configuration-applications.md).
+The server mounts the admin API and the merchant's configuration, guarded by
+its merchant persona's permissions: `server.MerchantRead` for reads,
+`server.MerchantWrite` for actions on customers, `server.MerchantAdmin` for the
+configuration (PSPs, settings, catalog edits, billing import and export).
 
 Catalogs always use database state, edited over HTTP (the remote Client
-included) whatever the `secret_backend`. `openrails apply-catalog` and the
+included). `openrails apply-catalog` and the
 applications route apply documents that share the catalog with those edits: a
 document skips a product, price or meter whose field an edit set differently,
 reports it and exits non-zero, unless `--force-conflicts` ([catalog
@@ -121,7 +118,7 @@ ownership](catalog-ownership.md)). An already applied document replays, so it
 never overwrites later edits. This does not change provider permissions,
 sandbox/live posture, or `provider_write_mode`.
 
-Snapshot walkthrough (file layout, YAML secret overlays via
+Manifest walkthrough (file layout, YAML secret overlays via
 `merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).
 
 ### First run
@@ -148,9 +145,9 @@ On an empty install, in order:
 #    First-run only when applied at startup; explicit here.
 openrails push-auth-bootstrap --config /etc/openrails/config.yaml --file /etc/openrails/bootstrap.yaml
 
-# 2. Merchants: identity, profile, PSPs (rail accounts + secrets), and your
-#    app's issuer registered as merchant OWNER (the manifest's
-#    remote_application block).
+# 2. Merchants: identity and your app's issuer registered as merchant OWNER
+#    (the manifest's remote_application block). Without Vault the manifest
+#    also carries their configuration, read at every boot.
 openrails push-merchant-config --config /etc/openrails/config.yaml --file /etc/openrails/merchants.yaml --insert
 
 # 3. Catalog: products, entitlements, prices and validated provider bindings.
@@ -158,10 +155,9 @@ openrails push-merchant-config --config /etc/openrails/config.yaml --file /etc/o
 openrails apply-catalog --merchant your-merchant --config /etc/openrails/config.yaml --file /etc/openrails/catalog.yaml
 ```
 
-Startup loads a configured merchant snapshot into process memory and initializes
-missing metadata. Existing API edits and archived accounts survive restarts.
-AuthKit bootstrap is first-run only; catalog application is always explicit.
-Use metadata applications for deliberate versioned configuration changes.
+Startup provisions the manifest's missing merchants and, without Vault, reads
+their configuration. AuthKit bootstrap is first-run only; catalog application
+is always explicit.
 
 **Backend credentials.** Your backend is a client of the issuer you
 registered in step 2 (see [trusted issuers](#trusted-issuers-staff-machines-and-customers)):

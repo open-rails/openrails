@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
 )
 
@@ -22,7 +23,8 @@ func (w *world) undoRun(run uuid.UUID) map[string]any {
 	w.t.Helper()
 	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull,
 		DB: &config.DBConfig{URL: w.dsn}, Database: config.DatabaseConfig{Schema: w.schema}}
-	opts := hosttools.UndoRunOptions{Config: cfg, PGXPool: w.pool, MerchantID: w.client[embedded].MerchantID(), RunID: run.String(), Actor: "e2e", Format: "json"}
+	opts := hosttools.UndoRunOptions{Config: cfg, PGXPool: w.pool, MerchantID: w.client[embedded].MerchantID(), RunID: run.String(), Actor: "e2e", Format: "json",
+		MerchantConfig: engine.Graph(w.rt).Runtime.DB.MerchantConfig()}
 	var plan strings.Builder
 	opts.Out = &plan
 	require.NoError(w.t, hosttools.UndoRun(w.t.Context(), opts))

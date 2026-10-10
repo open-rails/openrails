@@ -104,17 +104,16 @@ instance and no sticky session. Without Redis, run one instance.
 
 ### What must be identical
 
-- **Configuration**: the schemas, `TestMode`, `ProviderWriteMode`,
-  `Config.Merchant` with its PSPs and secrets, `Config.Catalog`,
+- **Configuration**: the schemas, `TestMode`, `ProviderWriteMode`, the
+  merchant's configuration (`Config.Merchant` with its PSPs and secrets, or the
+  same Vault KV mount), `Config.Catalog`,
   `Config.RateLimits`, `Config.Captcha`, `Config.TrustedProxies` and
   `Config.ReturnOrigins`. Every start applies the declaration: instances
   declaring different SCIM tokens replace each other's token at each start.
 - **Routes**: every instance mounts the same `openrails.Routes` (prefix,
   permission bundles, admin console). A load balancer sends any request to any
   instance, so a route mounted on some instances is a 404 on the others.
-- **Keys**: `encryption.master_key` (an instance with another key cannot read
-  merchant credentials, and the first to create a merchant's data key locks
-  the others out of it); the standalone signing key (`auth.active_key_id` and
+- **Keys**: the standalone signing key (`auth.active_key_id` and
   `auth.active_private_key_pem`, or `keys.json` in `auth.keys_path`) and the
   `totp.key` beside it, since a token one instance signs is refused by another
   (`auth.allow_ephemeral_signing_key` makes a key per process: one instance
@@ -144,13 +143,14 @@ FX rates into its own memory every 2 hours, whether or not it calls `Start`.
 
 ### Caches
 
-Catalog, merchant settings and lookups, PSPs, write posture, the kill switch
-and entitlements are read from PostgreSQL per request: an edit through one
-instance is read by every other on its next request. Per-instance caches:
+Catalog, merchant lookups, write posture, the kill switch and entitlements are
+read from PostgreSQL per request: an edit through one instance is read by every
+other on its next request. Merchant configuration (settings, PSPs, credentials)
+is a file or Vault, cached per instance. Per-instance caches:
 
 | Cache | An edit elsewhere shows after |
 |---|---|
-| Merchant secrets (database backend) | at once for PSP credentials (read by version); up to 15 minutes for other secrets |
+| Merchant configuration | an edit through OpenRails: at once (`NOTIFY`); one made in Vault directly: within 30 seconds of the merchant's next use; a file: the instance's next start |
 | Solana keypair signer | 60 seconds |
 | FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
@@ -171,7 +171,9 @@ instance is read by every other on its next request. Per-instance caches:
   so instances add throughput. Readiness needs the instance's own workers, so
   every `run-server` instance runs them (`--no-workers` is never ready); add
   `run-worker` instances for background work that serves no HTTP.
-- PostgreSQL is the limit: size `max_connections` for every instance's pool.
+- PostgreSQL is the limit: size `max_connections` for every instance's pool,
+  plus one connection per instance whose merchant configuration is in Vault (it
+  listens for edits).
 
 ### Rolling upgrades
 
@@ -229,18 +231,13 @@ the opposite direction and never mutates a payment rail.
 
 ### Merchant secrets
 
-PSP secrets in `push-merchant-config` are seed material, not the runtime
-source of truth. The manifest key is `merchants.<slug>.psps.<psp-key>`
-(secret overlays: `merchant_manifest_overlays`); the retired anchors
-(`accounts`, `rail_merchant_accounts`, `provider_accounts`) fail loudly with
-a rename error. The command imports each PSP's secrets under the canonical
-scoped name `psps/<rail>/<environment>/<account_id>/<secret_key>` into the
-backend the server reads (`secret_backend: db | vault`): Vault KV-v2 path
-`<mount>/openrails/merchants/<merchant-slug>/<name>`, or
-`billing.merchant_secrets` envelope-encrypted under
-`encryption.master_key` / `ENCRYPTION_MASTER_KEY`. Runtime checkout,
-webhooks, tokenization, provider intents, and pulls all arm per-PSP from that
-scoped name.
+A PSP's secrets are part of the merchant's configuration: the manifest's
+`merchants.<slug>.psps.<psp-key>.secrets` (secret overlays:
+`merchant_manifest_overlays`) without Vault, the PSP's Vault document with it
+([vault.md](vault.md)). The retired anchors (`accounts`,
+`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename
+error. Checkout, webhooks, tokenization, provider intents and pulls all arm
+per PSP from it.
 
 ## Private Standalone First Run
 
@@ -427,11 +424,11 @@ One local check stands: two live PSPs on a rail holding the same account
 credential (NMI `security_key`, Stripe `secret_key`) are one gateway account
 declared twice. The later one stays disarmed — its credentials read as absent,
 so its intents park and checkout never offers it — and a
-`consistency.duplicate_gateway_account` finding names it. Declared PSPs are
-compared at startup; published ones store `psps.credential_fingerprint`, an
-HMAC of the credential under a key derived from `encryption.master_key`
-(nothing is stored, and published PSPs are not compared, without one).
-Archiving the duplicate, or publishing its own credential, clears it.
+`consistency.duplicate_gateway_account` finding names it. With the
+configuration in a file its PSPs are compared at startup; with Vault each
+stores `psps.credential_fingerprint`, an HMAC of the credential under a random
+key Vault holds. Archiving the duplicate, or giving it its own credential,
+clears it.
 
 Every provider intent is stamped at enqueue with the `psp_id` it was produced
 against, and the executor/verifier arm the rail client for **that** PSP row
@@ -448,15 +445,10 @@ Rules:
     anything is written (NMI and CCBill today). A probe failure fails the whole
     request — no secret is stored, no watermark moves, and the **old credential
     keeps serving**, unchanged, everywhere.
-  - a committed rotation is **deployment-wide at the next read**, not
-    per-node. Each node fronts the secret backend with an in-process TTL cache,
-    so the rotation records the credential's new secret version on the shared
-    PSP row (`psps.credential_versions`, surfaced as
-    `credentials.<key>.rotation_version`). Every credential resolution already
-    re-reads that row, and no node may answer from a cache entry below the
-    recorded version — so a retired credential cannot be presented after the
-    rotation commits, on any node, without waiting out a TTL. Restarts and
-    manual cache flushes are not part of the procedure.
+  - a committed rotation rewrites the PSP's Vault document alone, and every
+    replica reloads the merchant at once (Postgres `NOTIFY`); no restart or
+    cache flush is part of the procedure. Name the PSP's `expected_revision`
+    and a concurrent edit is refused (`409 revision_mismatch`).
   - omit a credential from the request to leave it (and its watermark) alone;
     re-submitting an identical value is a no-op, not a rotation.
 - **Moving to a DIFFERENT PSP**: never repoint an existing PSP
@@ -956,7 +948,7 @@ comment states it, and a table added without one fails the build.
 
 | Class | What it means |
 |---|---|
-| Permanent | Never pruned: the ledger, grants, payments, invoices and their items and payments, receipts (catalog and configuration applications, credential publications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, metered rating watermarks, destructive runs and their before-images. |
+| Permanent | Never pruned: the ledger, grants, payments, invoices and their items and payments, receipts (catalog applications, product archive operations, credited and review Solana Pay receipts), operation authorizations and their cost qualifications, refusals and resolutions, metered rating watermarks, destructive runs and their before-images. |
 | Partitioned | Monthly partitions, created ahead and dropped whole by the calendar. No row is read to prune them. |
 | Rows | Rows past a period are deleted by the hourly cleanup job, oldest first. |
 | State | Configuration and entities (merchants, PSPs, catalog with its price keys and field owners, customers, subscriptions, payment methods, cursors): one row per thing that exists. |
@@ -1174,9 +1166,9 @@ credentials and never relaxes issuer, signing, storage or proxy protections.
 
 Narrow local exceptions are configured explicitly under `auth` (for example
 `allow_loopback_http`, `allow_missing_senders`, `direct_peer_ip`).
-Managed DB credentials always require encryption. `public_billing_base_url` is
-only the public callback/link mount base; issuer, `auth.request_origin`, remote
-Client server URL and `dashboard_base_url` are independent.
+`public_billing_base_url` is only the public callback/link mount base; issuer,
+`auth.request_origin`, remote Client server URL and `dashboard_base_url` are
+independent.
 
 Every subscription has one collector, fixed when it is created or imported
 (`subscriptions.collection_policy`):

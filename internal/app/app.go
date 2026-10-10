@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
 	"net"
 	"net/http"
@@ -56,6 +57,9 @@ type BootstrapOptions struct {
 	// Migrations replaces this build's migration files (test seam: an older
 	// build's chain).
 	Migrations fs.FS
+	// Vault is the host's authenticated client (Deps.Vault); nil logs in from
+	// Config.Vault.
+	Vault *vaultapi.Client
 
 	ConfiguredMerchant billing.MerchantID
 }
@@ -133,6 +137,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 			return nil
 		}(),
 		DB: dbOverride,
+		Vault: func() *vaultapi.Client {
+			if opts != nil {
+				return opts.Vault
+			}
+			return nil
+		}(),
 		Redis: func() *redis.Client {
 			if opts != nil {
 				return opts.Redis

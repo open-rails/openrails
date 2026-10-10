@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
@@ -87,8 +88,20 @@ func (w *NMIHistoryWorker) Work(ctx context.Context, _ *river.Job[NMIHistoryArgs
 }
 
 func (w *NMIHistoryWorker) readMerchant(ctx context.Context, mid uuid.UUID, now time.Time) error {
+	configuration := merchants.Of(w.DB)
+	if configuration == nil {
+		return errors.New("merchant configuration not wired")
+	}
+	live, err := configuration.ActivePSPScopesForRail(ctx, billing.MerchantID(mid), string(models.RailNMI), configuration.Environment())
+	if err != nil || len(live) == 0 {
+		return err
+	}
+	ids := make([]uuid.UUID, len(live))
+	for i, p := range live {
+		ids[i] = p.ID
+	}
 	due, err := w.DB.Gen(ctx).ListNMIHistoryDuePSPs(ctx, gen.ListNMIHistoryDuePSPsParams{
-		MerchantID: mid, DueBefore: now.Add(-nmiHistoryEvery), RowLimit: nmiHistoryPSPBatch,
+		MerchantID: mid, PspIds: ids, DueBefore: now.Add(-nmiHistoryEvery), RowLimit: nmiHistoryPSPBatch,
 	})
 	if err != nil {
 		return err

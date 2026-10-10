@@ -110,6 +110,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		Clock:           deps.Clock,
 		EmailSender:     deps.Email,
 		UserInfo:        deps.UserInfo,
+		Vault:           deps.Vault,
 	}
 	application, err := app.BootstrapWithOptions(ctx, &cfg, bootstrap)
 	if err != nil {
@@ -121,7 +122,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return nil, err
 	}
 	rt := application.Runtime
-	rt.VaultClient = deps.Vault
 	// Client operations need the same provider and secret graph as the
 	// standalone server; neither workers nor routes are prerequisites.
 	if err := rt.EnsureMerchantsService(ctx); err != nil {
@@ -157,7 +157,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		confirmSigner(application, declaration)
 	}
 	rt.CheckBookIdentity(ctx)
-	rt.StartCredentialFingerprints(declared...)
+	rt.PreloadMerchantConfig(declared...)
 	rt.StartProviderPosture(declared...)
 	return e, nil
 }

@@ -271,17 +271,6 @@ SELECT EXISTS (
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND status = 'active' AND parked_at IS NULL
 );
 
--- name: ListCustodianRoutePSPs :many
--- The live PSPs of a rail that reach a custodian, in its environment: the
--- PSPs a card it holds can be charged through. Two rows mean routing has no
--- single answer.
-SELECT p.id FROM billing.psps p
-JOIN billing.custodians c ON c.merchant_id = p.merchant_id AND c.id = p.custodian_id AND c.environment = p.environment
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.rail = sqlc.arg(rail)::text
-  AND p.custodian_id = sqlc.arg(custodian_id)::uuid AND NOT p.archived
-ORDER BY p.created_at, p.id
-LIMIT 2;
-
 -- name: GetPaymentMethodByCustodianRef :one
 -- A customer's custodian-held card by its custodian token.
 SELECT * FROM billing.payment_methods pm

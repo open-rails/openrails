@@ -92,14 +92,15 @@ SELECT p.id, r.read_at
 FROM billing.psps p
 LEFT JOIN billing.nmi_history_reads r ON r.merchant_id = p.merchant_id AND r.psp_id = p.id
 WHERE p.merchant_id = $1::uuid
-  AND p.rail = 'nmi' AND p.archived = false
-  AND (r.read_at IS NULL OR r.read_at < $2::timestamptz)
+  AND p.rail = 'nmi' AND p.id = ANY($2::uuid[])
+  AND (r.read_at IS NULL OR r.read_at < $3::timestamptz)
 ORDER BY p.id
-LIMIT $3::int
+LIMIT $4::int
 `
 
 type ListNMIHistoryDuePSPsParams struct {
 	MerchantID uuid.UUID
+	PspIds     []uuid.UUID
 	DueBefore  time.Time
 	RowLimit   int32
 }
@@ -110,10 +111,15 @@ type ListNMIHistoryDuePSPsRow struct {
 }
 
 // #1120: NMI's own authorization history, monthly per NMI PSP.
-// The merchant's live NMI PSPs never read, or last read before due_before,
-// with that read.
+// Of the merchant's live NMI PSPs (psp_ids), those never read, or last read
+// before due_before, with that read.
 func (q *Queries) ListNMIHistoryDuePSPs(ctx context.Context, arg ListNMIHistoryDuePSPsParams) ([]ListNMIHistoryDuePSPsRow, error) {
-	rows, err := q.db.Query(ctx, listNMIHistoryDuePSPs, arg.MerchantID, arg.DueBefore, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listNMIHistoryDuePSPs,
+		arg.MerchantID,
+		arg.PspIds,
+		arg.DueBefore,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

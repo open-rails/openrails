@@ -44,7 +44,7 @@ func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 		require.NoError(t, err)
 		require.Less(t, window, period, "the dunning window ends inside one cycle")
 
-		w := newWorld(t)
+		w := newVaultWorld(t)
 		require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: &billing.DunningPolicy{AccessWhileRenewalHeld: billing.DunningAccessSuspend}}))
 		e := enrollEvery(t, w, "nmi", embedded, hours)
 		end := e.periodEnd()

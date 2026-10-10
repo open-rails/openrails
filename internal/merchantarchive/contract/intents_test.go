@@ -239,13 +239,13 @@ func TestReadAppliesBillingContractOverIntactWire(t *testing.T) {
 		row    []*string
 		valid  bool
 	}{
-		{"supported", tables, []*string{&mid, &customer, &issuer, &ts, &ts}, true},
+		{"supported", tables, []*string{&mid, &customer, &issuer, &ts, &ts, nil}, true},
 		{"unknown table", []string{"merchant_secrets"}, nil, false},
 		{"missing tables", tables[:len(tables)-1], nil, false},
 		{"wrong order", append([]string{tables[1], tables[0]}, tables[2:]...), nil, false},
 		{"extra table", append(append([]string{}, tables...), tables[0]), nil, false},
 		{"wrong row width", tables, []*string{&mid}, false},
-		{"unsafe value", tables, []*string{&mid, &customer, &unsafe, &ts, &ts}, false},
+		{"unsafe value", tables, []*string{&mid, &customer, &unsafe, &ts, &ts, nil}, false},
 	} {
 		var artifact bytes.Buffer
 		w, err := archivewire.NewWriter(&artifact, mid)

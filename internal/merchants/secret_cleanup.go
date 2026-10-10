@@ -11,137 +11,67 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 )
 
-// SecretCleanupPlan captures a non-secret backend identity and immutable root.
-// Names describe the inventory; retries also re-list the root to catch writes
-// that committed after inventory capture but before the purge's merchant lock.
+// SecretCleanupPlan names the Vault documents a purge removes: the backend,
+// the merchant's subtree and the document paths captured before the purge.
+// Retries remove the whole subtree, catching documents written after the
+// capture.
 type SecretCleanupPlan struct {
 	Backend string   `json:"backend"`
 	Root    string   `json:"root"`
 	Names   []string `json:"names"`
 }
 
-type secretCleanupTarget interface {
-	cleanupTarget(billing.MerchantID) (string, string, error)
-}
-
-func baseSecretStore(store MerchantSecretStore) MerchantSecretStore {
-	for {
-		switch s := store.(type) {
-		case *lifecycleSecretStore:
-			store = s.MerchantSecretStore
-		case *manifestManagedSecretStore:
-			store = s.managed
-		case *cachedSecretStore:
-			store = s.inner
-		case *encryptedSecretStore:
-			store = s.inner
-		case *writeRestrictedSecretStore:
-			store = s.inner
-		default:
-			return store
-		}
-	}
-}
-
-func captureSecretCleanup(ctx context.Context, store MerchantSecretStore, id billing.MerchantID) (*SecretCleanupPlan, error) {
-	store = mutableSecretView(store)
-	if store == nil {
+// captureSecretCleanup plans the removal of the merchant's Vault documents;
+// nil when a file holds the configuration, which stays the operator's.
+func (s *Service) captureSecretCleanup(ctx context.Context, id billing.MerchantID) (*SecretCleanupPlan, error) {
+	if s.config == nil {
 		return nil, nil
 	}
-	base := baseSecretStore(store)
-	if _, ok := base.(*dbSecretStore); ok {
-		return nil, nil
-	} // purged in the DB transaction
-	target, ok := base.(secretCleanupTarget)
+	vault, ok := s.config.Source().(*merchantdocs.VaultSource)
 	if !ok {
-		return nil, fmt.Errorf("secret store %T does not support durable purge", base)
+		return nil, nil
 	}
-	backend, root, err := target.cleanupTarget(id)
+	set, err := vault.Load(ctx, id)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("inventory merchant configuration: %w", err)
 	}
-	names, err := store.List(ctx, id)
-	if err != nil {
-		return nil, fmt.Errorf("inventory external secrets: %w", err)
+	return &SecretCleanupPlan{Backend: "vault", Root: vault.MerchantPath(id), Names: documentNames(set)}, nil
+}
+
+func documentNames(set merchantdocs.Set) []string {
+	var names []string
+	if set.HasMerchant {
+		names = append(names, "merchant")
+	}
+	for _, key := range set.PSPKeys() {
+		names = append(names, merchantdocs.PSPDoc(key))
+	}
+	for _, key := range set.CustodianKeys() {
+		names = append(names, merchantdocs.CustodianDoc(key))
 	}
 	sort.Strings(names)
-	return &SecretCleanupPlan{Backend: backend, Root: root, Names: names}, nil
+	return names
 }
 
-func clearMerchantSecretCache(store MerchantSecretStore, id billing.MerchantID) {
-	switch s := store.(type) {
-	case *lifecycleSecretStore:
-		clearMerchantSecretCache(s.MerchantSecretStore, id)
-	case *manifestManagedSecretStore:
-		clearMerchantSecretCache(s.managed, id)
-	case *cachedSecretStore:
-		s.mu.Lock()
-		for key := range s.entries {
-			if key.merchant == id.String() {
-				delete(s.entries, key)
-			}
-		}
-		s.mu.Unlock()
-		clearMerchantSecretCache(s.inner, id)
-	case *encryptedSecretStore:
-		clearMerchantSecretCache(s.inner, id)
-	case *writeRestrictedSecretStore:
-		clearMerchantSecretCache(s.inner, id)
+func (s *Service) cleanupSecrets(ctx context.Context, id billing.MerchantID, plan SecretCleanupPlan) (int64, error) {
+	vault, ok := s.config.Source().(*merchantdocs.VaultSource)
+	if !ok || plan.Backend != "vault" || plan.Root != vault.MerchantPath(id) {
+		return 0, fmt.Errorf("the merchant configuration's Vault no longer matches the captured purge target")
 	}
-}
-
-func cleanupSecrets(ctx context.Context, store MerchantSecretStore, id billing.MerchantID, plan SecretCleanupPlan) (int64, error) {
-	clearMerchantSecretCache(store, id)
-	defer clearMerchantSecretCache(store, id)
-	store = mutableSecretView(store)
-	target, ok := baseSecretStore(store).(secretCleanupTarget)
-	if !ok {
-		return 0, fmt.Errorf("captured external secret backend is not configured")
-	}
-	backend, root, err := target.cleanupTarget(id)
-	if err != nil {
+	if err := s.config.Delete(ctx, id); err != nil {
 		return 0, err
 	}
-	if backend != plan.Backend || root != plan.Root {
-		return 0, fmt.Errorf("external secret cleanup backend/root no longer matches the captured target")
-	}
-	names, err := store.List(ctx, id)
+	remaining, err := vault.Load(ctx, id)
 	if err != nil {
-		return 0, fmt.Errorf("list external secrets for cleanup: %w", err)
+		return 0, fmt.Errorf("verify configuration cleanup: %w", err)
 	}
-	// Captured names are retried even when a partial/list-inconsistent backend
-	// omits one. Delete is idempotent and destroys all Vault versions.
-	all := map[string]struct{}{}
-	for _, name := range append(names, plan.Names...) {
-		if err := validateSecretRef(id, name); err != nil {
-			return 0, err
-		}
-		all[name] = struct{}{}
+	if left := documentNames(remaining); len(left) > 0 {
+		return 0, fmt.Errorf("configuration cleanup still has %d documents", len(left))
 	}
-	var deleted int64
-	var failure error
-	for name := range all {
-		if err := store.Delete(ctx, id, name); err != nil {
-			if failure == nil {
-				failure = fmt.Errorf("delete external secret %q: %w", name, err)
-			}
-			continue
-		}
-		deleted++
-	}
-	if failure != nil {
-		return deleted, failure
-	}
-	remaining, err := store.List(ctx, id)
-	if err != nil {
-		return deleted, fmt.Errorf("verify external secret cleanup: %w", err)
-	}
-	if len(remaining) > 0 {
-		return deleted, fmt.Errorf("external secret cleanup still has %d names", len(remaining))
-	}
-	return deleted, nil
+	return int64(len(plan.Names)), nil
 }
 
 // ErrSecretCleanupPending means database purge committed but external cleanup
@@ -173,7 +103,7 @@ func (s *Service) RetrySecretCleanup(ctx context.Context, id billing.MerchantID,
 		if proof.SecretCleanup == nil {
 			return fmt.Errorf("merchant purge has no captured cleanup target")
 		}
-		deleted, err := cleanupSecrets(ctx, s.secrets, id, *proof.SecretCleanup)
+		deleted, err := s.cleanupSecrets(ctx, id, *proof.SecretCleanup)
 		cleanupErr = err
 		status := "completed"
 		var message *string

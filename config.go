@@ -39,6 +39,9 @@ type (
 	// MerchantSecrets is MerchantDeclaration.Secrets: the merchant's own
 	// credentials (secrets.scim_token).
 	MerchantSecrets = config.MerchantSecrets
+	// AlertWebhookConfig is one of MerchantDeclaration.AlertWebhooks: where
+	// the merchant's operational alerts are posted.
+	AlertWebhookConfig = config.AlertWebhookConfig
 	// PSPConfig is one PSP of MerchantDeclaration.PSPs: the merchant's account
 	// on a rail, with its credentials and settings.
 	PSPConfig = config.PSPConfig
@@ -67,9 +70,6 @@ type (
 	RateLimit = config.RateLimit
 	// CaptchaConfig is Config.Captcha: the captcha account.
 	CaptchaConfig = config.CaptchaConfig
-	// EncryptionConfig is Config.Encryption: the master key for credentials
-	// stored in the database.
-	EncryptionConfig = config.EncryptionConfig
 	// VaultConfig is Config.Vault: the HashiCorp Vault connection OpenRails
 	// opens when Deps.Vault is nil.
 	VaultConfig = config.VaultConfig
@@ -129,13 +129,6 @@ const (
 	ProviderWritesLimited = config.ProviderWriteModeLimited
 	// ProviderWritesReadOnly makes no provider writes: it never charges anyone.
 	ProviderWritesReadOnly = config.ProviderWriteModeReadOnly
-
-	// SecretBackendSnapshot keeps host-supplied credentials in memory.
-	SecretBackendSnapshot = config.SecretBackendSnapshot
-	// SecretBackendVault stores credentials in HashiCorp Vault.
-	SecretBackendVault = config.SecretBackendVault
-	// SecretBackendDB stores credentials encrypted in the database.
-	SecretBackendDB = config.SecretBackendDB
 
 	// SubjectUser is a user: a customer, or staff.
 	SubjectUser = billingauth.SubjectUser

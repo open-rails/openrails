@@ -11,7 +11,7 @@ version: 1
 
 merchants:
   local-stack:
-    display_name: Local Stack
+    display_name: Local Stack Billing
 
     # Canonical API host (#734/#850): the Host header public routes resolve
     # this merchant from. Bare lowercase hostname, globally unique. Optional —
@@ -23,11 +23,10 @@ merchants:
       jwks_uri: https://local-stack.example/.well-known/jwks.json
 
     # The merchant's settings: the same document GET /v1/admin/configuration
-    # reads and an application changes (docs/api/merchant-settings.md), with the
-    # same field names and units. Omitted fields keep their stored values.
+    # reads and PATCH changes (docs/api/merchant-settings.md), with the same
+    # field names and units.
     settings:
       profile:
-        display_name: Local Stack Billing
         logo_url: https://local-stack.example/assets/logo.png
         from_email: billing@local-stack.example
         support_url: https://local-stack.example/support

@@ -7,7 +7,7 @@
 -- name: ListPlatformMerchants :many
 -- One page of the directory, newest first, after a (created_at, id) cursor;
 -- query searches current names only.
-SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
+SELECT id, slug, status, created_at, updated_at, deleted_at
 FROM billing.merchants
 WHERE (sqlc.narg(status)::text IS NULL OR status = sqlc.narg(status)::text)
   AND (sqlc.narg(query)::text IS NULL OR strpos(slug, lower(sqlc.narg(query)::text)) > 0)
@@ -16,7 +16,7 @@ ORDER BY created_at DESC, id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: GetPlatformMerchant :one
-SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
+SELECT id, slug, status, created_at, updated_at, deleted_at
 FROM billing.merchants
 WHERE id = $1;
 
@@ -26,7 +26,7 @@ UPDATE billing.merchants
        deleted_at = COALESCE(deleted_at, current_timestamp),
        updated_at = current_timestamp
  WHERE id = $1
-RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at;
+RETURNING id, slug, status, created_at, updated_at, deleted_at;
 
 -- name: RestorePlatformMerchant :one
 UPDATE billing.merchants
@@ -34,7 +34,7 @@ UPDATE billing.merchants
        deleted_at = NULL,
        updated_at = current_timestamp
  WHERE id = $1
-RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at;
+RETURNING id, slug, status, created_at, updated_at, deleted_at;
 
 -- Per-merchant list-view enrichment. Runs under a MerchantTx per directory
 -- row: psps + payments are merchant-owned, so the directory page loops cheap
@@ -42,9 +42,10 @@ RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at;
 -- (page-bounded).
 
 -- name: ListPlatformMerchantRailsArmed :many
+-- The rails the merchant holds a current PSP identity on.
 SELECT DISTINCT rail
 FROM billing.psps
-WHERE merchant_id = $1 AND NOT archived
+WHERE merchant_id = $1 AND superseded_at IS NULL
 ORDER BY rail;
 
 -- name: GetPlatformMerchantLastPayment :one

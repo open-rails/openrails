@@ -141,14 +141,22 @@ func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConfig) *rival {
 	t := w.t
 	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
-	rt, err := openrails.New(t.Context(), openrails.Config{
+	cfg := openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,
 		DB: &openrails.DBConfig{URL: w.dsn}, TrustedProxies: []string{"127.0.0.1/32"}, ReturnOrigins: []string{"https://e2e.test"},
 		Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps},
-	}, deps)
+	}
+	if w.vault != nil {
+		cfg.Merchant = openrails.MerchantDeclaration{Slug: slug}
+		cfg.Vault = w.vault.Config()
+	}
+	rt, err := openrails.New(t.Context(), cfg, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
+	if w.vault != nil && slug != w.slug {
+		writeVaultDocs(t, w.vault, rt, openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: psps})
+	}
 	routes := openrails.Routes{Auth: v, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
 	if slug != w.slug {
 		return w.serve(slug, rt, routes)

@@ -1,35 +1,13 @@
--- billing.custodians: merchant-scoped custodian registry (or#880). A row is
--- one merchant-owned account with a third-party card custodian. Referenced by
--- psps.custodian_id — one custodian can back many PSPs.
+-- billing.custodians: merchant-scoped custodian identities (or#880). A row is
+-- one merchant-owned account with a third-party card custodian; its
+-- configuration is the custodian document.
 
--- name: UpsertCustodian :one
-INSERT INTO billing.custodians (
-    merchant_id, key, kind, environment, account_id, settings, archived, credential_versions
-) VALUES (
-    sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(key)::text,
-    lower(sqlc.arg(kind)::text),
-    COALESCE(sqlc.narg(environment)::text, 'live'),
-    sqlc.arg(account_id)::text,
-    COALESCE(sqlc.narg(settings), '{}'::jsonb),
-    COALESCE(sqlc.narg(archived)::boolean, false),
-    COALESCE(sqlc.narg(credential_versions), '{}'::jsonb)
-)
-ON CONFLICT (kind, environment, account_id) DO UPDATE SET
-    key = EXCLUDED.key,
-    settings = EXCLUDED.settings,
-    archived = EXCLUDED.archived,
-    -- or#812: a floor NEVER goes backwards. An upsert that carries no floors
-    -- (the manifest plane, which seeds rather than rotates) leaves the stored
-    -- ones alone rather than clearing a rotation another writer recorded.
-    credential_versions = billing.custodians.credential_versions || COALESCE((
-        SELECT jsonb_object_agg(incoming.key, greatest(
-            incoming.value::bigint,
-            (billing.custodians.credential_versions ->> incoming.key)::bigint
-        ))
-        FROM jsonb_each_text(EXCLUDED.credential_versions) AS incoming
-    ), '{}'::jsonb),
-    updated_at = now()
+-- name: RegisterCustodian :one
+-- Records a custodian document's identity. An identity another merchant owns
+-- answers no row.
+INSERT INTO billing.custodians (merchant_id, key, kind, environment, account_id)
+VALUES (sqlc.arg(merchant_id)::uuid, sqlc.arg(key)::text, lower(sqlc.arg(kind)::text), sqlc.arg(environment)::text, sqlc.arg(account_id)::text)
+ON CONFLICT (kind, environment, account_id) DO UPDATE SET key = billing.custodians.key
 WHERE billing.custodians.merchant_id = EXCLUDED.merchant_id
 RETURNING *;
 

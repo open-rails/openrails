@@ -22,7 +22,7 @@ import (
 func TestMerchantCreationPolicy(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")
-	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+	cp := f.newVaultServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.MerchantCreation = &server.MerchantCreationConfig{ReservedSlugs: []string{reserved}, FreeAllowance: 1}
 		deps.HasVaultedPaymentMethod = func(context.Context, string) (bool, error) { return false, nil }
 	})

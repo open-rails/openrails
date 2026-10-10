@@ -177,8 +177,8 @@ func processResolvedMerchantWebhook(r *httprequest.Request, provider string, mer
 		return
 	}
 	if err != nil {
-		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-			r.ErrorCode(billing.CodeServiceUnavailable, "Secret backend temporarily unavailable, retry")
+		if errors.Is(err, merchants.ErrConfigUnavailable) {
+			r.ErrorCode(billing.CodeServiceUnavailable, "Merchant configuration temporarily unavailable, retry")
 			return
 		}
 		log.WithError(err).Error("merchant webhook: load merchant credentials failed")
@@ -464,8 +464,8 @@ func processMerchantNMIWebhookBody(r *httprequest.Request, provider string, merc
 		return false
 	}
 	if err != nil {
-		if errors.Is(err, merchants.ErrSecretBackendUnavailable) {
-			r.ErrorCode(billing.CodeServiceUnavailable, "Secret backend temporarily unavailable, retry")
+		if errors.Is(err, merchants.ErrConfigUnavailable) {
+			r.ErrorCode(billing.CodeServiceUnavailable, "Merchant configuration temporarily unavailable, retry")
 			return false
 		}
 		log.WithError(err).Error("merchant webhook: load nmi signing secret failed")

@@ -53,8 +53,8 @@ func (c *Client) GetPSP(ctx context.Context, id billing.PSPID, requestOptions ..
 }
 
 // CreatePSP arms a PSP. Credentials are write-only and are checked with the
-// provider before anything is stored. Retry with the same OperationID and
-// params to read the first result.
+// provider before anything is stored. It needs merchant configuration held in
+// Vault.
 func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
 	var out billing.PSP
 	if err := c.do(ctx, http.MethodPost, "/v1/admin/psps", params, &out, requestOptions...); err != nil {
@@ -63,10 +63,9 @@ func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, 
 	return &out, nil
 }
 
-// UpdatePSP changes a PSP's settings or rotates its credentials; new
-// credentials are checked with the provider first. ExpectedRevision is the
-// revision the caller read. Archived, alone, retires the PSP without a
-// provider call.
+// UpdatePSP changes a PSP's settings, rotates its credentials (checked with
+// the provider first) or archives it. It needs merchant configuration held in
+// Vault.
 func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing.UpdatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
 	path, err := pspPath(id)
 	if err != nil {

@@ -76,8 +76,8 @@ func TestClientRequestShapes(t *testing.T) {
 			return err
 		}, http.MethodGet, "/v1/admin/checkout-options", "price_key=pro-monthly&product_key=pro", nil},
 		{"settings carry named policies and tier bindings", func() error {
-			revision := "r1"
-			_, err := client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{IdempotencyKey: "a1", ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
+			revision := int64(1)
+			_, err := client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
 				BillingPolicies:       []billing.BillingPolicy{{Name: "api_line", Kind: "outstanding_cap", OutstandingCapAmount: 200_000_000}},
 				BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "api_line", Tier: "gold"}},
 			}})

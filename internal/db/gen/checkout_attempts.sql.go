@@ -717,15 +717,16 @@ func (q *Queries) GetCheckoutAttemptByReference(ctx context.Context, arg GetChec
 }
 
 const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
-SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.custodian_id, p.settings, p.signer, p.credential_custody, p.credential_refs, p.credential_versions, p.retired_credentials, p.credentials_validated_at, p.webhook_endpoint_id, p.webhook_overlap_expires_at, p.pending_signer_public_key, p.revision, p.archived, p.archived_at, p.created_at, p.updated_at, p.credential_fingerprint, p.credential_duplicate_at,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
-JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
-WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
+SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.credentials_validated_at, p.webhook_endpoint_id, p.pending_signer_public_key, p.created_at, p.updated_at, p.credential_fingerprint, p.credential_duplicate_at, p.superseded_at,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.created_at, c.updated_at FROM billing.psps p
+JOIN billing.custodians c ON c.merchant_id=p.merchant_id AND c.id=$1::uuid
+WHERE p.merchant_id=$2::uuid AND p.id=$3::uuid
 FOR SHARE OF p,c
 `
 
 type GetCheckoutCaptureAccountsForShareParams struct {
-	MerchantID uuid.UUID
-	PspID      uuid.UUID
+	CustodianID uuid.UUID
+	MerchantID  uuid.UUID
+	PspID       uuid.UUID
 }
 
 type GetCheckoutCaptureAccountsForShareRow struct {
@@ -733,10 +734,10 @@ type GetCheckoutCaptureAccountsForShareRow struct {
 	BillingCustodian BillingCustodian
 }
 
-// Recheck current authority after vendor metadata readback, inside only the
-// short local attachment transaction. Archive/reconfiguration serializes here.
+// Recheck the PSP and custodian identities after vendor metadata readback,
+// inside only the short local attachment transaction.
 func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg GetCheckoutCaptureAccountsForShareParams) (GetCheckoutCaptureAccountsForShareRow, error) {
-	row := q.db.QueryRow(ctx, getCheckoutCaptureAccountsForShare, arg.MerchantID, arg.PspID)
+	row := q.db.QueryRow(ctx, getCheckoutCaptureAccountsForShare, arg.CustodianID, arg.MerchantID, arg.PspID)
 	var i GetCheckoutCaptureAccountsForShareRow
 	err := row.Scan(
 		&i.BillingPsp.ID,
@@ -745,33 +746,20 @@ func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg Ge
 		&i.BillingPsp.Rail,
 		&i.BillingPsp.Environment,
 		&i.BillingPsp.AccountID,
-		&i.BillingPsp.CustodianID,
-		&i.BillingPsp.Settings,
-		&i.BillingPsp.Signer,
-		&i.BillingPsp.CredentialCustody,
-		&i.BillingPsp.CredentialRefs,
-		&i.BillingPsp.CredentialVersions,
-		&i.BillingPsp.RetiredCredentials,
 		&i.BillingPsp.CredentialsValidatedAt,
 		&i.BillingPsp.WebhookEndpointID,
-		&i.BillingPsp.WebhookOverlapExpiresAt,
 		&i.BillingPsp.PendingSignerPublicKey,
-		&i.BillingPsp.Revision,
-		&i.BillingPsp.Archived,
-		&i.BillingPsp.ArchivedAt,
 		&i.BillingPsp.CreatedAt,
 		&i.BillingPsp.UpdatedAt,
 		&i.BillingPsp.CredentialFingerprint,
 		&i.BillingPsp.CredentialDuplicateAt,
+		&i.BillingPsp.SupersededAt,
 		&i.BillingCustodian.ID,
 		&i.BillingCustodian.MerchantID,
 		&i.BillingCustodian.Key,
 		&i.BillingCustodian.Kind,
 		&i.BillingCustodian.Environment,
 		&i.BillingCustodian.AccountID,
-		&i.BillingCustodian.Settings,
-		&i.BillingCustodian.CredentialVersions,
-		&i.BillingCustodian.Archived,
 		&i.BillingCustodian.CreatedAt,
 		&i.BillingCustodian.UpdatedAt,
 	)

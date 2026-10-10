@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
@@ -102,9 +103,19 @@ func (h *HyperSwitchMethodDeleteHandler) admit(ctx context.Context, store *Store
 		if aliases.ForeignPayers != 0 || aliases.Total == 0 {
 			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
-		account, err := q.LockCustodianDeletionAccount(ctx, gen.LockCustodianDeletionAccountParams{MerchantID: mid.UUID(), ID: *pm.CustodianID})
+		if _, err := q.LockCustodianDeletionAccount(ctx, gen.LockCustodianDeletionAccountParams{MerchantID: mid.UUID(), ID: *pm.CustodianID}); err != nil {
+			return err
+		}
+		configuration := merchants.Of(h.DB)
+		if configuration == nil {
+			return errors.New("merchant configuration is unavailable")
+		}
+		account, ok, err := configuration.CustodianScopeByID(ctx, mid, *pm.CustodianID)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return paymentmethods.ErrPaymentMethodDeleteUnsafe
 		}
 		binding, err := deletionBinding(account, h.Rails.Config)
 		if err != nil {

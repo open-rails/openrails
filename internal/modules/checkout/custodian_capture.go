@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"net/mail"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -33,32 +32,14 @@ import (
 
 var ErrCheckoutCaptureUnavailable = errors.New("custodian capture is unavailable")
 
-type captureEncryption struct {
-	once   sync.Once
-	cipher *crypto.Encryptor
-	err    error
-}
-
-func (s *CheckoutAttemptService) SetMerchantSecretStore(store merchants.MerchantSecretReader) {
-	s.captureSecrets = store
-}
-func (s *CheckoutAttemptService) captureEncryptor() (*crypto.Encryptor, error) {
-	s.captureEncryption.once.Do(func() {
-		if s.config == nil || s.config.Encryption == nil || s.db == nil {
-			s.captureEncryption.err = ErrCheckoutCaptureUnavailable
-			return
-		}
-		store, err := crypto.NewDBDEKStore(s.db.DataPool())
-		if err != nil {
-			s.captureEncryption.err = err
-			return
-		}
-		s.captureEncryption.cipher, s.captureEncryption.err = crypto.NewEncryptor(s.config.Encryption.MasterKey, store)
-		if s.captureEncryption.err == nil && !s.captureEncryption.cipher.Enabled() {
-			s.captureEncryption.err = crypto.ErrEncryptionDisabled
-		}
-	})
-	return s.captureEncryption.cipher, s.captureEncryption.err
+// captureSealer seals the SDK authorization at rest under a key derived from
+// the custodian's API key; rotating the key strands only open setups.
+func captureSealer(custodian merchants.CustodianScope) (*crypto.Sealer, error) {
+	sealer, err := crypto.NewSealer(custodian.Secret(custodians.SecretAPIKey), "checkout-capture/v1")
+	if err != nil {
+		return nil, ErrCheckoutCaptureUnavailable
+	}
+	return sealer, nil
 }
 func captureAAD(owner billing.MerchantID, id uuid.UUID, state models.CheckoutCapture) crypto.AAD {
 	// Bind both the physical row and accepted authority; copying or editing
@@ -85,20 +66,34 @@ func captureSessionID(owner billing.MerchantID, customer uuid.UUID, key string) 
 func captureCustomerReference(owner billing.MerchantID, customer uuid.UUID) string {
 	return captureScopedID("openrails/custody-customer/v1", owner, customer, "").String()
 }
-func (s *CheckoutAttemptService) captureBinding(owner billing.MerchantID, psp gen.BillingPsp, custodian gen.BillingCustodian) (models.CheckoutCapture, error) {
+func (s *CheckoutAttemptService) captureBinding(owner billing.MerchantID, psp merchants.PSPScope, custodian merchants.CustodianScope) (models.CheckoutCapture, error) {
 	var empty models.CheckoutCapture
-	if s.config == nil || s.config.HyperSwitch == nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.config)) {
+	if s.config == nil || s.config.HyperSwitch == nil || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil || *psp.CustodianID != custodian.ID || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment || psp.Environment != config.ExpectedProviderEnvironment(config.IsTestMode(s.config)) {
 		return empty, ErrCheckoutCaptureUnavailable
 	}
-	var settings map[string]any
-	if json.Unmarshal(custodian.Settings, &settings) != nil {
-		return empty, ErrCheckoutCaptureUnavailable
-	}
-	parsed, err := custodians.ParseSettings(custodian.Kind, settings)
+	parsed, err := custodians.ParseSettings(custodian.Kind, custodian.Settings)
 	if err != nil {
 		return empty, ErrCheckoutCaptureUnavailable
 	}
 	return models.CheckoutCapture{MerchantID: owner.UUID(), PSPID: psp.ID, CustodianID: custodian.ID, AccountID: custodian.AccountID, Environment: custodian.Environment, ProfileID: parsed.ProfileID, PublicAPIKey: parsed.PublicAPIKey, APIBaseURL: strings.TrimRight(s.config.HyperSwitch.APIBaseURL, "/"), SDKURL: s.config.HyperSwitch.SDKURL}, nil
+}
+
+// captureAccounts is the PSP and the custodian holding its cards, as the
+// merchant's configuration has them.
+func (s *CheckoutAttemptService) captureAccounts(ctx context.Context, owner billing.MerchantID, pspID uuid.UUID) (merchants.PSPScope, merchants.CustodianScope, error) {
+	svc := merchants.Of(s.db)
+	if svc == nil {
+		return merchants.PSPScope{}, merchants.CustodianScope{}, ErrCheckoutCaptureUnavailable
+	}
+	psp, ok, err := svc.PSPScopeByID(ctx, owner, pspID)
+	if err != nil || !ok || psp.CustodianID == nil {
+		return merchants.PSPScope{}, merchants.CustodianScope{}, ErrCheckoutCaptureUnavailable
+	}
+	custodian, ok, err := svc.CustodianScopeByID(ctx, owner, *psp.CustodianID)
+	if err != nil || !ok {
+		return merchants.PSPScope{}, merchants.CustodianScope{}, ErrCheckoutCaptureUnavailable
+	}
+	return psp, custodian, nil
 }
 func (s *CheckoutAttemptService) captureFromSession(ctx context.Context, session *models.CheckoutAttempt) (models.CheckoutCapture, []byte, error) {
 	owner, err := merchant.Require(ctx)
@@ -112,32 +107,28 @@ func (s *CheckoutAttemptService) captureFromSession(ctx context.Context, session
 	state, err := models.DecodeCheckoutCapture(raw, owner.UUID(), session.CustomerID, session.PspID, session.Status, session.ExpiresAt)
 	return state, raw, err
 }
-func (s *CheckoutAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUID) (models.CheckoutCapture, *hyperswitch.Client, error) {
+func (s *CheckoutAttemptService) resolveCapture(ctx context.Context, pspID uuid.UUID) (models.CheckoutCapture, *hyperswitch.Client, *crypto.Sealer, error) {
 	var state models.CheckoutCapture
 	owner, err := merchant.Require(ctx)
 	if err != nil {
-		return state, nil, err
+		return state, nil, nil, err
 	}
-	if s.config == nil || s.config.HyperSwitch == nil || s.captureSecrets == nil {
-		return state, nil, ErrCheckoutCaptureUnavailable
+	if s.config == nil || s.config.HyperSwitch == nil {
+		return state, nil, nil, ErrCheckoutCaptureUnavailable
 	}
-	if _, err = s.captureEncryptor(); err != nil {
-		return state, nil, ErrCheckoutCaptureUnavailable
-	}
-	psp, err := s.db.Gen(ctx).GetPSP(ctx, gen.GetPSPParams{MerchantID: owner.UUID(), ID: pspID})
-	if err != nil || psp.MerchantID != owner.UUID() || psp.Archived || psp.Rail != "nmi" || psp.CustodianID == nil {
-		return state, nil, ErrCheckoutCaptureUnavailable
-	}
-	custodian, err := s.db.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: owner.UUID(), ID: *psp.CustodianID})
-	if err != nil || custodian.MerchantID != owner.UUID() || custodian.Archived || custodian.Kind != models.CustodianHyperSwitch || custodian.Environment != psp.Environment {
-		return state, nil, ErrCheckoutCaptureUnavailable
-	}
-	state, err = s.captureBinding(owner, psp, custodian)
+	psp, custodian, err := s.captureAccounts(ctx, owner, pspID)
 	if err != nil {
-		return state, nil, err
+		return state, nil, nil, err
 	}
-	client, err := railresolve.HyperSwitchClient(ctx, s.config, s.captureSecrets, owner, custodian)
-	return state, client, err
+	if state, err = s.captureBinding(owner, psp, custodian); err != nil {
+		return state, nil, nil, err
+	}
+	sealer, err := captureSealer(custodian)
+	if err != nil {
+		return state, nil, nil, err
+	}
+	client, err := railresolve.HyperSwitchClient(s.config, owner, custodian)
+	return state, client, sealer, err
 }
 func sameCaptureAccount(a, b models.CheckoutCapture) bool {
 	return a.MerchantID == b.MerchantID && a.PSPID == b.PSPID && a.CustodianID == b.CustodianID && a.AccountID == b.AccountID && a.Environment == b.Environment && a.ProfileID == b.ProfileID && a.PublicAPIKey == b.PublicAPIKey && a.APIBaseURL == b.APIBaseURL && a.SDKURL == b.SDKURL
@@ -208,7 +199,7 @@ func (s *CheckoutAttemptService) createPaymentMethodSetup(ctx context.Context, r
 	if err = s.requireProviderWrites(ctx); err != nil {
 		return nil, err
 	}
-	pending, client, err := s.resolveCapture(ctx, req.Payment.PSPID)
+	pending, client, sealer, err := s.resolveCapture(ctx, req.Payment.PSPID)
 	if err != nil {
 		return nil, err
 	}
@@ -263,11 +254,7 @@ func (s *CheckoutAttemptService) createPaymentMethodSetup(ctx context.Context, r
 	if vendorSession.ExpiresAt.Before(accepted.ExpiresAt) {
 		accepted.ExpiresAt = vendorSession.ExpiresAt.UTC().Truncate(time.Microsecond)
 	}
-	cipher, err := s.captureEncryptor()
-	if err != nil {
-		return nil, err
-	}
-	accepted.SecretCiphertext, err = cipher.Encrypt(ctx, owner, captureAAD(owner, id, accepted), []byte(vendorSession.SDKAuthorization))
+	accepted.SecretCiphertext, err = sealer.Seal(captureAAD(owner, id, accepted), []byte(vendorSession.SDKAuthorization))
 	if err != nil {
 		return nil, err
 	}
@@ -313,18 +300,14 @@ func (s *CheckoutAttemptService) renderPaymentMethodSetup(ctx context.Context, s
 	if s.config == nil || s.config.HyperSwitch == nil || state.APIBaseURL != strings.TrimRight(s.config.HyperSwitch.APIBaseURL, "/") || state.SDKURL != s.config.HyperSwitch.SDKURL {
 		return nil, ErrCheckoutCaptureUnavailable
 	}
-	current, client, err := s.resolveCapture(ctx, session.PspID)
+	current, client, sealer, err := s.resolveCapture(ctx, session.PspID)
 	if err != nil || !sameCaptureAccount(state, current) {
 		return nil, ErrCheckoutCaptureUnavailable
 	}
 	if err = client.CheckCaptureContract(ctx); err != nil {
 		return nil, ErrCheckoutCaptureUnavailable
 	}
-	cipher, err := s.captureEncryptor()
-	if err != nil {
-		return nil, err
-	}
-	secret, err := cipher.Decrypt(ctx, owner, captureAAD(owner, session.ID, state), state.SecretCiphertext)
+	secret, err := sealer.Open(captureAAD(owner, session.ID, state), state.SecretCiphertext)
 	if err != nil {
 		return nil, ErrCheckoutCaptureUnavailable
 	}
@@ -357,7 +340,7 @@ func (s *CheckoutAttemptService) confirmPaymentMethodSetup(ctx context.Context, 
 	if s.isExpired(session) || session.Status != models.CheckoutAttemptStatusRequiresAction {
 		return nil, ErrCheckoutAttemptExpired
 	}
-	current, client, err := s.resolveCapture(ctx, session.PspID)
+	current, client, _, err := s.resolveCapture(ctx, session.PspID)
 	if err != nil {
 		return nil, err
 	}
@@ -418,14 +401,17 @@ func (s *CheckoutAttemptService) confirmPaymentMethodSetup(ctx context.Context, 
 		if locked.Status != models.CheckoutAttemptStatusRequiresAction || !s.now().Before(canonical.ExpiresAt) {
 			return ErrCheckoutAttemptExpired
 		}
-		accounts, err := queries.GetCheckoutCaptureAccountsForShare(c, gen.GetCheckoutCaptureAccountsForShareParams{MerchantID: owner.UUID(), PspID: locked.PspID})
-		if err != nil {
+		if _, err := queries.GetCheckoutCaptureAccountsForShare(c, gen.GetCheckoutCaptureAccountsForShareParams{MerchantID: owner.UUID(), PspID: locked.PspID, CustodianID: canonical.CustodianID}); err != nil {
 			if db.IsNotFound(err) {
 				return ErrCheckoutAttemptConflict
 			}
 			return err
 		}
-		current, err := s.captureBinding(owner, accounts.BillingPsp, accounts.BillingCustodian)
+		psp, custodian, err := s.captureAccounts(c, owner, locked.PspID)
+		if err != nil {
+			return ErrCheckoutAttemptConflict
+		}
+		current, err := s.captureBinding(owner, psp, custodian)
 		if err != nil || !sameCaptureAccount(canonical, current) {
 			return ErrCheckoutAttemptConflict
 		}

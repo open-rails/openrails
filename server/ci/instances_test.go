@@ -23,11 +23,12 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/open-rails/openrails/server"
 )
 
-// Two standalone servers behind one load balancer share the database, Redis
-// and the signing key: they boot together, run one River fleet, accept each
+// Two standalone servers behind one load balancer share the database, Redis,
+// Vault and the signing key: they boot together, run one River fleet, accept each
 // other's sign-ins, read each other's writes, and each serves its private
 // listener.
 func TestServersShareOneDatabase(t *testing.T) {
@@ -42,7 +43,9 @@ func TestServersShareOneDatabase(t *testing.T) {
 	keys, totp := t.TempDir(), make([]byte, 32)
 	_, _ = rand.Read(totp)
 	require.NoError(t, os.WriteFile(filepath.Join(keys, "totp.key"), []byte(hex.EncodeToString(totp)), 0o600))
+	vault := vaulttest.New(t)
 	shared := func(cfg *server.Config, _ *server.Deps) {
+		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.Redis = &openrails.RedisConfig{Addr: redis}
 		cfg.Auth.AllowEphemeralSigningKey = false
 		cfg.Auth.ActiveKeyID, cfg.Auth.ActivePrivateKeyPEM, cfg.Auth.KeysPath = "e2e-shared", signing, keys

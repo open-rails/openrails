@@ -37,21 +37,27 @@ func (r pspResolver) ActivePSPScope(_ context.Context, id billing.MerchantID, _,
 type unavailableSecrets struct{}
 
 func (unavailableSecrets) Get(context.Context, billing.MerchantID, string) (merchants.Secret, error) {
-	return merchants.Secret{}, merchants.ErrSecretBackendUnavailable
+	return merchants.Secret{}, merchants.ErrConfigUnavailable
 }
 
 func testConfig() *config.Config {
 	return &config.Config{ProviderWriteMode: config.ProviderWriteModeFull, TestMode: config.CredentialPostureSandbox}
 }
 
-func secretsFor(t *testing.T, keys map[billing.MerchantID][2]string) merchants.MerchantSecretStore {
+// merchantSecrets reads each merchant's own credentials.
+type merchantSecrets map[billing.MerchantID]merchants.SecretMap
+
+func (m merchantSecrets) Get(ctx context.Context, id billing.MerchantID, name string) (merchants.Secret, error) {
+	return m[id].Get(ctx, id, name)
+}
+
+func secretsFor(t *testing.T, keys map[billing.MerchantID][2]string) merchants.MerchantSecretReader {
 	t.Helper()
-	store := merchants.NewMemorySecretStore()
+	store := merchantSecrets{}
 	for id, kv := range keys {
 		name, err := merchants.PSPSecretName("nmi", "live", kv[0], "security_key")
 		require.NoError(t, err)
-		_, err = store.Put(context.Background(), id, name, kv[1])
-		require.NoError(t, err)
+		store[id] = merchants.SecretMap{name: kv[1]}
 	}
 	return store
 }
@@ -111,9 +117,9 @@ func TestResolveNMIClientIsMerchantScopedAndFailsClosed(t *testing.T) {
 		errIs   error
 	}{
 		"no armed account":    {&RailPaymentMethodService{Config: testConfig()}, "missing client", nil},
-		"no secret store psp": {&RailPaymentMethodService{MerchantSecrets: merchants.NewMemorySecretStore()}, "missing client", nil},
-		"psp not armed":       {&RailPaymentMethodService{MerchantSecrets: merchants.NewMemorySecretStore(), ProviderSecrets: pspResolver{}, Config: testConfig()}, "missing scoped merchant NMI PSP", nil},
-		"backend unavailable": {&RailPaymentMethodService{MerchantSecrets: unavailableSecrets{}, ProviderSecrets: pspResolver{dbtest.TestMerchantID: "mobius"}, Config: testConfig()}, "", merchants.ErrSecretBackendUnavailable},
+		"no secret store psp": {&RailPaymentMethodService{MerchantSecrets: merchants.SecretMap{}}, "missing client", nil},
+		"psp not armed":       {&RailPaymentMethodService{MerchantSecrets: merchants.SecretMap{}, ProviderSecrets: pspResolver{}, Config: testConfig()}, "missing scoped merchant NMI PSP", nil},
+		"backend unavailable": {&RailPaymentMethodService{MerchantSecrets: unavailableSecrets{}, ProviderSecrets: pspResolver{dbtest.TestMerchantID: "mobius"}, Config: testConfig()}, "", merchants.ErrConfigUnavailable},
 	} {
 		_, _, err := tc.svc.resolveNMIClient(ctx, "nmi")
 		require.Error(t, err, name)

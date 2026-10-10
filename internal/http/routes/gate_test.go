@@ -223,7 +223,7 @@ func (v identityOnly) Can(ctx context.Context, scope billingauth.Scope, perm str
 // gatedRuntime is a database-free runtime bound to merchantA.
 func gatedRuntime(t *testing.T) *app.Runtime {
 	t.Helper()
-	rt := &app.Runtime{Config: &config.Config{}}
+	rt := &app.Runtime{Config: &config.Config{Vault: &config.VaultConfig{KVMount: "kv"}}}
 	rt.SetConfiguredMerchant(merchantA)
 	return rt
 }

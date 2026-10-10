@@ -11,8 +11,10 @@ import (
 var merchantRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/configuration", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetMerchantConfiguration", NoConn: true,
 		Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Handler: h(handlers.GetMerchantConfiguration)},
-	{Method: PATCH, Path: "/v1/admin/configuration", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdateMerchantConfiguration", Sensitive: true, NoConn: true, IdempotencyKey: true,
-		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationReceipt{}}}, Errors: codes("idempotency_key_required", "idempotency_key_reused", "invalid_param", "merchant_configuration_revision_conflict"), Handler: h(handlers.UpdateMerchantConfiguration)},
+	// Merchant configuration changes only where Vault holds it: a file is
+	// read-only.
+	{Method: PATCH, Path: "/v1/admin/configuration", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdateMerchantConfiguration", Sensitive: true, When: FeatureMerchantConfigEdits, NoConn: true,
+		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("invalid_param", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
 
 	// The host the merchant's public routes resolve from (#734).
 	{Method: GET, Path: "/v1/admin/api-host", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetAPIHost", When: FeatureMerchantDirectory, NoConn: true,
@@ -21,12 +23,12 @@ var merchantRoutes = []Route{
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/admin/alert-webhooks", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListAlertWebhooks",
 		Query: params(idsParam), Responses: []Reply{{200, billing.ListPage[billing.AlertWebhook]{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.ListAlertWebhooks)},
-	{Method: POST, Path: "/v1/admin/alert-webhooks", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreateAlertWebhook", Sensitive: true,
+	{Method: POST, Path: "/v1/admin/alert-webhooks", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreateAlertWebhook", Sensitive: true, When: FeatureMerchantConfigEdits,
 		Request: billing.CreateAlertWebhookParams{}, Responses: []Reply{{201, billing.AlertWebhook{}}}, Errors: codes("service_unavailable", "webhook_invalid"), Handler: h(handlers.CreateAlertWebhook)},
-	{Method: DELETE, Path: "/v1/admin/alert-webhooks/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "DeleteAlertWebhook", Sensitive: true,
+	{Method: DELETE, Path: "/v1/admin/alert-webhooks/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "DeleteAlertWebhook", Sensitive: true, When: FeatureMerchantConfigEdits,
 		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeleteAlertWebhook)},
-	{Method: PATCH, Path: "/v1/admin/alert-webhooks/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdateAlertWebhook", Sensitive: true,
-		Request: billing.UpdateAlertWebhookParams{}, Responses: []Reply{{200, billing.AlertWebhook{}}}, Errors: codes("invalid_param", "resource_conflict", "resource_not_found", "service_unavailable", "webhook_invalid"), Handler: h(handlers.UpdateAlertWebhook)},
+	{Method: PATCH, Path: "/v1/admin/alert-webhooks/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdateAlertWebhook", Sensitive: true, When: FeatureMerchantConfigEdits,
+		Request: billing.UpdateAlertWebhookParams{}, Responses: []Reply{{200, billing.AlertWebhook{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable", "webhook_invalid"), Handler: h(handlers.UpdateAlertWebhook)},
 
 	// The portable billing archive. Archives own their snapshot/restore
 	// transaction and its merchant pin; no outer merchant connection is held

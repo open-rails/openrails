@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -137,11 +138,15 @@ func (s *SubscriptionLifecycleService) engineCard(ctx context.Context, d *db.DB,
 	if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method); err != nil {
 		return method, err
 	}
-	psp, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: merchantID, ID: sub.PspID})
+	configuration := merchants.Of(d)
+	if configuration == nil {
+		return method, errors.New("merchant configuration is unavailable")
+	}
+	psp, ok, err := configuration.PSPScopeByID(ctx, billing.MerchantID(merchantID), sub.PspID)
 	if err != nil {
 		return method, err
 	}
-	if psp.Archived || psp.Rail != method.Rail {
+	if !ok || psp.Archived || psp.Rail != method.Rail {
 		return method, apperr.Conflictf("payment account is archived")
 	}
 	var binding *charge.HyperSwitchBinding
@@ -149,16 +154,16 @@ func (s *SubscriptionLifecycleService) engineCard(ctx context.Context, d *db.DB,
 		if s.Config == nil || s.Config.HyperSwitch == nil {
 			return method, errors.New("HyperSwitch deployment is unavailable")
 		}
-		frozen, err := charge.FreezeHyperSwitchBinding(ctx, q, method, sub.PspID, s.Config.HyperSwitch.APIBaseURL)
+		frozen, err := charge.FreezeHyperSwitchBinding(ctx, q, configuration, method, sub.PspID, s.Config.HyperSwitch.APIBaseURL)
 		if err != nil {
 			return method, err
 		}
 		binding = &frozen
-		custodian, err := q.GetCustodian(ctx, gen.GetCustodianParams{MerchantID: merchantID, ID: *method.CustodianID})
+		custodian, ok, err := configuration.CustodianScopeByID(ctx, billing.MerchantID(merchantID), *method.CustodianID)
 		if err != nil {
 			return method, err
 		}
-		if custodian.Archived {
+		if !ok || custodian.Archived {
 			return method, apperr.Conflictf("payment custodian is archived")
 		}
 	}

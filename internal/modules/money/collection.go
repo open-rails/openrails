@@ -109,7 +109,7 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if req.Initiator == charge.InitiatorMerchant {
 		// The card lost its agreement after enqueue: nothing is sent, and the
 		// next attempt stops for the customer.
-		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), method, req.Currency); err != nil {
+		if err := requireCollectionAgreement(ctx, c.db.Gen(ctx), charge.CustodyOf(c.db), method, req.Currency); err != nil {
 			if errors.Is(err, charge.ErrAgreementRequired) {
 				return nil, fmt.Errorf("%w: %w", charge.ErrInstrumentChanged, err)
 			}
@@ -192,7 +192,7 @@ func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req Charge
 			if req.HyperSwitch == nil {
 				return charge.ErrInstrumentChanged
 			}
-			binding, err := collectionHyperSwitchBinding(ctx, q, method, req.Instrument.PSPID, req.HyperSwitch.APIBaseURL)
+			binding, err := charge.FreezeHyperSwitchBinding(ctx, q, charge.CustodyOf(c.db), method, req.Instrument.PSPID, req.HyperSwitch.APIBaseURL)
 			if err != nil {
 				return err
 			}

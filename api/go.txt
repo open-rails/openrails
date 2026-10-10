@@ -9,9 +9,6 @@ pkg openrails, const ProviderWritesLimited untyped string = "limited"
 pkg openrails, const ProviderWritesReadOnly untyped string = "readonly"
 pkg openrails, const QueueBilling untyped string = "billing"
 pkg openrails, const Sandbox config.CredentialPosture = "sandbox"
-pkg openrails, const SecretBackendDB untyped string = "db"
-pkg openrails, const SecretBackendSnapshot untyped string = "snapshot"
-pkg openrails, const SecretBackendVault untyped string = "vault"
 pkg openrails, const SubjectApplication auth.SubjectKind = "application"
 pkg openrails, const SubjectUser auth.SubjectKind = "user"
 pkg openrails, func AccessCutoverPreflight(context.Context, *pgxpool.Pool, DatabaseConfig, string) (*billing.AccessCutoverReport, error)
@@ -149,7 +146,7 @@ pkg openrails, method (*Client) SetSubscriptionPaymentMethod(context.Context, bi
 pkg openrails, method (*Client) Start(context.Context, ...StartOption) error
 pkg openrails, method (*Client) UpdateAlertWebhook(context.Context, billing.AlertWebhookID, billing.UpdateAlertWebhookParams, ...RequestOption) (*billing.AlertWebhook, error)
 pkg openrails, method (*Client) UpdateCustomer(context.Context, billing.CustomerID, billing.UpdateCustomerParams, ...RequestOption) (*billing.Customer, error)
-pkg openrails, method (*Client) UpdateMerchantConfiguration(context.Context, billing.UpdateMerchantConfigurationParams, ...RequestOption) (*billing.MerchantConfigurationReceipt, error)
+pkg openrails, method (*Client) UpdateMerchantConfiguration(context.Context, billing.UpdateMerchantConfigurationParams, ...RequestOption) (*billing.MerchantConfigurationState, error)
 pkg openrails, method (*Client) UpdatePSP(context.Context, billing.PSPID, billing.UpdatePSPParams, ...RequestOption) (*billing.PSP, error)
 pkg openrails, method (*Client) UpdatePrice(context.Context, billing.PriceID, billing.UpdatePriceParams, ...RequestOption) (*billing.Price, error)
 pkg openrails, method (*Client) UpdateProduct(context.Context, billing.ProductID, billing.UpdateProductParams, ...RequestOption) (*billing.Product, error)
@@ -161,6 +158,12 @@ pkg openrails, method (InvoiceSweepArgs) Kind() string
 pkg openrails, method (NMIPSP) PSPConfig() PSPConfig
 pkg openrails, method (SolanaPSP) PSPConfig() PSPConfig
 pkg openrails, method (StripePSP) PSPConfig() PSPConfig
+pkg openrails, type AlertWebhookConfig = config.AlertWebhookConfig
+pkg openrails, type AlertWebhookConfig struct
+pkg openrails, type AlertWebhookConfig struct, Enabled *bool `yaml:"enabled,omitempty"`
+pkg openrails, type AlertWebhookConfig struct, Format string `yaml:"format,omitempty"`
+pkg openrails, type AlertWebhookConfig struct, Name string `yaml:"name,omitempty"`
+pkg openrails, type AlertWebhookConfig struct, URL string `yaml:"url"`
 pkg openrails, type Authenticator = billingauth.Authenticator
 pkg openrails, type CCBillPSP struct
 pkg openrails, type CCBillPSP struct, AccountID string `psp:"account_id"`
@@ -181,19 +184,15 @@ pkg openrails, type Client struct
 pkg openrails, type ClientOption func(*Client)
 pkg openrails, type Config = config.Config
 pkg openrails, type Config struct
-pkg openrails, type Config struct, AlertSecretBackend string
 pkg openrails, type Config struct, CCBillWebhookIPAllowlist []string
 pkg openrails, type Config struct, Captcha *config.CaptchaConfig
 pkg openrails, type Config struct, Catalog *catalog.Application
 pkg openrails, type Config struct, CatalogReconciliationInterval string
 pkg openrails, type Config struct, Checkout config.CheckoutConfig
 pkg openrails, type Config struct, CloudflareProxies []string
-pkg openrails, type Config struct, CredentialReadOnly bool
-pkg openrails, type Config struct, CredentialSnapshotID string
 pkg openrails, type Config struct, DB *config.DBConfig
 pkg openrails, type Config struct, DashboardBaseURL string
 pkg openrails, type Config struct, Database config.DatabaseConfig
-pkg openrails, type Config struct, Encryption *config.EncryptionConfig
 pkg openrails, type Config struct, EngineAdmissionHold bool
 pkg openrails, type Config struct, HyperSwitch *config.HyperSwitchConfig
 pkg openrails, type Config struct, LLM *config.LLMConfig
@@ -208,7 +207,6 @@ pkg openrails, type Config struct, RateLimitsDisabled bool
 pkg openrails, type Config struct, Redis *config.RedisConfig
 pkg openrails, type Config struct, ReturnOrigins []string
 pkg openrails, type Config struct, SMTP *config.SMTPConfig
-pkg openrails, type Config struct, SecretBackend string
 pkg openrails, type Config struct, TestMode config.CredentialPosture
 pkg openrails, type Config struct, TrustedProxies []string
 pkg openrails, type Config struct, Vault *config.VaultConfig
@@ -269,9 +267,6 @@ pkg openrails, type EmailSender = config.EmailSender
 pkg openrails, type EmailSender interface
 pkg openrails, type EmailSender interface, CheckHealth(context.Context) error
 pkg openrails, type EmailSender interface, Send(context.Context, config.Email) error
-pkg openrails, type EncryptionConfig = config.EncryptionConfig
-pkg openrails, type EncryptionConfig struct
-pkg openrails, type EncryptionConfig struct, MasterKey string
 pkg openrails, type HyperSwitchConfig = config.HyperSwitchConfig
 pkg openrails, type HyperSwitchConfig struct
 pkg openrails, type HyperSwitchConfig struct, APIBaseURL string
@@ -299,6 +294,7 @@ pkg openrails, type LoggerConfig struct, Level string
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
 pkg openrails, type MerchantDeclaration struct, APIHost string `yaml:"api_host,omitempty"`
+pkg openrails, type MerchantDeclaration struct, AlertWebhooks []config.AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Custodians map[string]config.CustodianConfig `yaml:"custodians,omitempty"`
 pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
 pkg openrails, type MerchantDeclaration struct, PSPs map[string]config.PSPConfig `yaml:"psps,omitempty"`
@@ -1481,7 +1477,6 @@ pkg openrails/billing, type CreatePSPParams struct
 pkg openrails/billing, type CreatePSPParams struct, AccountID string `json:"account_id"`
 pkg openrails/billing, type CreatePSPParams struct, Credentials map[string]string `json:"credentials"`
 pkg openrails/billing, type CreatePSPParams struct, Key string `json:"key"`
-pkg openrails/billing, type CreatePSPParams struct, OperationID uuid.UUID `json:"operation_id"`
 pkg openrails/billing, type CreatePSPParams struct, Rail Rail `json:"rail"`
 pkg openrails/billing, type CreatePSPParams struct, Settings map[string]any `json:"settings"`
 pkg openrails/billing, type CreatePaymentMethodParams struct
@@ -2009,13 +2004,10 @@ pkg openrails/billing, type Merchant struct, UpdatedAt time.Time `json:"updated_
 pkg openrails/billing, type MerchantAPIHost struct
 pkg openrails/billing, type MerchantAPIHost struct, APIHost *string `json:"api_host"`
 pkg openrails/billing, type MerchantAPIHost struct, Claim *APIHostClaim `json:"claim"`
-pkg openrails/billing, type MerchantConfigurationReceipt struct
-pkg openrails/billing, type MerchantConfigurationReceipt struct, Replayed bool `json:"replayed"`
-pkg openrails/billing, type MerchantConfigurationReceipt struct, Revision string `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct
 pkg openrails/billing, type MerchantConfigurationState struct, APIHost string `json:"api_host"`
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
-pkg openrails/billing, type MerchantConfigurationState struct, Revision string `json:"revision"`
+pkg openrails/billing, type MerchantConfigurationState struct, Revision int64 `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct, Settings MerchantSettings `json:"settings"`
 pkg openrails/billing, type MerchantID [16]byte
 pkg openrails/billing, type MerchantListParams struct
@@ -2026,7 +2018,6 @@ pkg openrails/billing, type MerchantName struct
 pkg openrails/billing, type MerchantName struct, ID MerchantID `json:"id"`
 pkg openrails/billing, type MerchantName struct, Name string `json:"name"`
 pkg openrails/billing, type MerchantProfile struct
-pkg openrails/billing, type MerchantProfile struct, DisplayName string `json:"display_name,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, FromEmail string `json:"from_email,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, LogoURL string `json:"logo_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, SignupURL string `json:"signup_url,omitempty"`
@@ -2327,7 +2318,6 @@ pkg openrails/billing, type OrderStatus string
 pkg openrails/billing, type PSP struct
 pkg openrails/billing, type PSP struct, AccountID string `json:"account_id"`
 pkg openrails/billing, type PSP struct, Archived bool `json:"archived"`
-pkg openrails/billing, type PSP struct, ArchivedAt *time.Time `json:"archived_at"`
 pkg openrails/billing, type PSP struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type PSP struct, Credentials map[string]PSPCredential `json:"credentials"`
 pkg openrails/billing, type PSP struct, Environment string `json:"environment"`
@@ -2340,7 +2330,6 @@ pkg openrails/billing, type PSP struct, Settings map[string]any `json:"settings"
 pkg openrails/billing, type PSP struct, UpdatedAt time.Time `json:"updated_at"`
 pkg openrails/billing, type PSPCredential struct
 pkg openrails/billing, type PSPCredential struct, Configured bool `json:"configured"`
-pkg openrails/billing, type PSPCredential struct, RotationVersion int `json:"rotation_version"`
 pkg openrails/billing, type PSPCredential struct, ValidatedAt *time.Time `json:"validated_at"`
 pkg openrails/billing, type PSPDeclaration struct
 pkg openrails/billing, type PSPDeclaration struct, AccountID string
@@ -3122,15 +3111,13 @@ pkg openrails/billing, type UpdateCustomerParams struct, InvoiceProfile catalog.
 pkg openrails/billing, type UpdateCustomerParams struct, TrustLevels []TrustLevel `json:"trust_levels,omitempty"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, DisplayName *string `json:"display_name,omitempty"`
-pkg openrails/billing, type UpdateMerchantConfigurationParams struct, ExpectedRevision *string `json:"expected_revision"`
-pkg openrails/billing, type UpdateMerchantConfigurationParams struct, IdempotencyKey string `json:"-"`
+pkg openrails/billing, type UpdateMerchantConfigurationParams struct, ExpectedRevision *int64 `json:"expected_revision"`
 pkg openrails/billing, type UpdateMerchantConfigurationParams struct, Settings *MerchantSettings `json:"settings,omitempty"`
 pkg openrails/billing, type UpdatePSPParams struct
 pkg openrails/billing, type UpdatePSPParams struct, AllowLast bool `json:"allow_last"`
 pkg openrails/billing, type UpdatePSPParams struct, Archived bool `json:"archived"`
 pkg openrails/billing, type UpdatePSPParams struct, Credentials map[string]string `json:"credentials"`
-pkg openrails/billing, type UpdatePSPParams struct, ExpectedRevision int64 `json:"expected_revision"`
-pkg openrails/billing, type UpdatePSPParams struct, OperationID uuid.UUID `json:"operation_id"`
+pkg openrails/billing, type UpdatePSPParams struct, ExpectedRevision *int64 `json:"expected_revision"`
 pkg openrails/billing, type UpdatePSPParams struct, RetireWebhookOverlap bool `json:"retire_webhook_overlap"`
 pkg openrails/billing, type UpdatePSPParams struct, Settings map[string]any `json:"settings"`
 pkg openrails/billing, type UpdatePaymentMethodParams struct

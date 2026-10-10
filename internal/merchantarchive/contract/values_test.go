@@ -188,15 +188,8 @@ func TestJSONContracts(t *testing.T) {
 		ok    []string
 		bad   []string
 	}{
-		{"merchant_configurations.config", nil, []string{
-			`{"api_key":"test"}`, `{"profile":{"secret":"test"}}`, `{"unknown":42}`,
-			`{"profile":{"secret":"x"},"profile":{"display_name":"normal"}}`,
-			`{"profile collection_threshold":42}`, `{"collection_threshold":"not-money"}`,
-			`{"profile":{"display_name":"4111111111111111"}}`,
-		}},
 		{"usage_events.dimensions", []string{`{"tokens":9007199254740993}`}, []string{`{"tokens":1e100}`, `{"tokens":1.5}`, `{"tokens":1} {}`}},
 		{"products.entitlements", []string{`[]`, `["premium","secret_content"]`}, []string{`null`, `{"premium":null}`, `["4111111111111111"]`}},
-		{"custodians.settings", []string{`{"public_api_key":"public","account_updater":true,"account_updater_lookahead_days":"30"}`}, []string{`{"secret_api_key":"x"}`, `{"account_updater":"maybe"}`}},
 		{"admission_operations.capture_terms", []string{`null`, `{"metadata":{"opaque":"replay-fact"}}`}, []string{`{"unknown_operation_field":true}`}},
 		{"catalog_meters.group_by", []string{`null`, `{"region":"$.region"}`}, []string{`{"region":1}`}},
 		{"catalog_rate_cards.filter", []string{`null`, `{"region":["us"]}`}, []string{`{"region":"us"}`}},

@@ -13,19 +13,18 @@ import (
 )
 
 const getPlatformMerchant = `-- name: GetPlatformMerchant :one
-SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
+SELECT id, slug, status, created_at, updated_at, deleted_at
 FROM billing.merchants
 WHERE id = $1
 `
 
 type GetPlatformMerchantRow struct {
-	ID          uuid.UUID
-	Slug        string
-	Status      string
-	DisplayName *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *time.Time
+	ID        uuid.UUID
+	Slug      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 }
 
 func (q *Queries) GetPlatformMerchant(ctx context.Context, id uuid.UUID) (GetPlatformMerchantRow, error) {
@@ -35,7 +34,6 @@ func (q *Queries) GetPlatformMerchant(ctx context.Context, id uuid.UUID) (GetPla
 		&i.ID,
 		&i.Slug,
 		&i.Status,
-		&i.DisplayName,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -96,7 +94,7 @@ const listPlatformMerchantRailsArmed = `-- name: ListPlatformMerchantRailsArmed 
 
 SELECT DISTINCT rail
 FROM billing.psps
-WHERE merchant_id = $1 AND NOT archived
+WHERE merchant_id = $1 AND superseded_at IS NULL
 ORDER BY rail
 `
 
@@ -104,6 +102,7 @@ ORDER BY rail
 // row: psps + payments are merchant-owned, so the directory page loops cheap
 // per-merchant index probes instead of one cross-merchant JOIN
 // (page-bounded).
+// The rails the merchant holds a current PSP identity on.
 func (q *Queries) ListPlatformMerchantRailsArmed(ctx context.Context, merchantID uuid.UUID) ([]string, error) {
 	rows, err := q.db.Query(ctx, listPlatformMerchantRailsArmed, merchantID)
 	if err != nil {
@@ -126,7 +125,7 @@ func (q *Queries) ListPlatformMerchantRailsArmed(ctx context.Context, merchantID
 
 const listPlatformMerchants = `-- name: ListPlatformMerchants :many
 
-SELECT id, slug, status, display_name, created_at, updated_at, deleted_at
+SELECT id, slug, status, created_at, updated_at, deleted_at
 FROM billing.merchants
 WHERE ($1::text IS NULL OR status = $1::text)
   AND ($2::text IS NULL OR strpos(slug, lower($2::text)) > 0)
@@ -144,13 +143,12 @@ type ListPlatformMerchantsParams struct {
 }
 
 type ListPlatformMerchantsRow struct {
-	ID          uuid.UUID
-	Slug        string
-	Status      string
-	DisplayName *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *time.Time
+	ID        uuid.UUID
+	Slug      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 }
 
 // Platform merchant directory (#721): cross-merchant operator reads over the
@@ -179,7 +177,6 @@ func (q *Queries) ListPlatformMerchants(ctx context.Context, arg ListPlatformMer
 			&i.ID,
 			&i.Slug,
 			&i.Status,
-			&i.DisplayName,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
@@ -200,17 +197,16 @@ UPDATE billing.merchants
        deleted_at = NULL,
        updated_at = current_timestamp
  WHERE id = $1
-RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at
+RETURNING id, slug, status, created_at, updated_at, deleted_at
 `
 
 type RestorePlatformMerchantRow struct {
-	ID          uuid.UUID
-	Slug        string
-	Status      string
-	DisplayName *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *time.Time
+	ID        uuid.UUID
+	Slug      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 }
 
 func (q *Queries) RestorePlatformMerchant(ctx context.Context, id uuid.UUID) (RestorePlatformMerchantRow, error) {
@@ -220,7 +216,6 @@ func (q *Queries) RestorePlatformMerchant(ctx context.Context, id uuid.UUID) (Re
 		&i.ID,
 		&i.Slug,
 		&i.Status,
-		&i.DisplayName,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
@@ -234,17 +229,16 @@ UPDATE billing.merchants
        deleted_at = COALESCE(deleted_at, current_timestamp),
        updated_at = current_timestamp
  WHERE id = $1
-RETURNING id, slug, status, display_name, created_at, updated_at, deleted_at
+RETURNING id, slug, status, created_at, updated_at, deleted_at
 `
 
 type SoftDeletePlatformMerchantRow struct {
-	ID          uuid.UUID
-	Slug        string
-	Status      string
-	DisplayName *string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	DeletedAt   *time.Time
+	ID        uuid.UUID
+	Slug      string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	DeletedAt *time.Time
 }
 
 func (q *Queries) SoftDeletePlatformMerchant(ctx context.Context, id uuid.UUID) (SoftDeletePlatformMerchantRow, error) {
@@ -254,7 +248,6 @@ func (q *Queries) SoftDeletePlatformMerchant(ctx context.Context, id uuid.UUID) 
 		&i.ID,
 		&i.Slug,
 		&i.Status,
-		&i.DisplayName,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,

@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/open-rails/openrails/openrailstest"
 )
 
@@ -29,6 +30,7 @@ func TestMembershipReceiptArrivesBySMTP(t *testing.T) {
 			From: openrails.EmailAddress{Name: "Merchant Billing", Address: "noreply@deploy.test"}}
 	})
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
+	w.vault = vaulttest.New(t)
 	w.start()
 	ctx := t.Context()
 	const from, to = "billing@merchant.test", "member@host.test"

@@ -91,7 +91,7 @@ explicit:
 | `Merchant` | no | The merchant this engine serves (section 5). |
 | `Catalog` | no | Optional startup batch, equivalent to calling `ApplyCatalog` once (section 5). Requires `Merchant`. |
 | `Checkout` | no | The shared payment page (`PageURL`, `EmbedOrigins`) when several sites sell through one (section 6). |
-| `SecretBackend` | default `snapshot` | Credential custody: host snapshot, Vault or encrypted database. |
+| `Vault` | no | The Vault connection (or `Deps.Vault`). Its `KVMount` makes Vault the home of the merchant's configuration; without one, `Merchant` is. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
 | `SMTP` | no | The built-in email sender: any SMTP server (`Host`, `Port`: 465 implicit TLS, else STARTTLS, 0 is 587; `Username`, `Password`; the deployment's `From`). SendGrid is `smtp.sendgrid.net` with username `apikey` and an API key as the password. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
 
@@ -242,18 +242,18 @@ A `settings` or `secrets` key outside its rail's row, in YAML or in a
 naming the PSP, the key and the keys the rail takes. A standalone manifest
 refuses it the same way.
 
-The database owns merchant metadata. Startup initializes missing metadata and
-reloads snapshot credentials without overwriting later API edits or reviving
-archived accounts. Deliberate metadata changes use
-`Client.UpdateMerchantConfiguration` with a stable `IdempotencyKey` and reviewed
-revision. Imported billing facts attributed to a PSP without credentials need
-its identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
+The merchant's configuration lives in `Config.Merchant` or in Vault, never in
+the database ([merchant configuration](merchant-configuration.md)). Declared in
+`Config.Merchant`, it is read at `New` and is read-only: change the declaration
+and construct a new engine. With `Config.Vault.KVMount` named, Vault holds it:
+`Config.Merchant` names the merchant only (`Slug`, `APIHost`; declaring more is
+refused), and `Client.UpdateMerchantConfiguration`, `CreatePSP`, `UpdatePSP`
+and the alert-webhook methods edit it at the revision they read
+([vault.md](vault.md)). `Permissions.MerchantConfig` publishes those routes
+with the rest of the merchant's configuration; the edits mount only with
+Vault. Imported billing facts attributed to a PSP without credentials need its
+identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
 during setup.
-
-`SecretBackend` selects only credential custody. Snapshot values stay in memory;
-managed PSP credentials are published through `Client.CreatePSP`/`UpdatePSP`
-with an operation ID and the expected PSP revision. `Permissions.MerchantConfig`
-publishes these routes with the rest of the merchant's configuration.
 
 **Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
 and set it as `Config.Catalog`; `New` applies it on every start, like calling
@@ -293,9 +293,8 @@ record directly. Each product/key chain has automatic price revisions starting a
 zero. New financial terms create a new revision; repeating or reactivating old
 terms reuses their original ID and revision. Keys, terms and product association
 are immutable; products and prices can be archived but never deleted. Changing a
-price never silently reprices existing subscriptions. For dynamic products with host-owned Stripe credentials use
-`SecretBackend: openrails.SecretBackendSnapshot` with the account in
-`Config.Merchant`; rotate by updating configuration and constructing a new engine.
+price never silently reprices existing subscriptions. For dynamic products with host-owned Stripe credentials declare
+the account in `Config.Merchant`; rotate by updating it and constructing a new engine.
 
 ### 6. Authentication and HTTP
 

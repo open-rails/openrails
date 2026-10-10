@@ -9,15 +9,12 @@ import (
 	"html"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
@@ -112,27 +109,17 @@ func (d *deliverer) deliverWebhook(ctx context.Context, ch ChannelRef, alert Ale
 	if !wh.Enabled {
 		return DeliveryResult{Channel: label, OK: false, Detail: "webhook disabled"}
 	}
-	if d.store.secrets == nil {
-		return DeliveryResult{Channel: label, OK: false, Detail: "webhook credentials unavailable"}
-	}
-	secret, err := merchants.ReadSecretRef(ctx, d.store.secrets, billing.MerchantID(wh.MerchantID), merchants.SecretRef{Name: merchants.AlertWebhookURLSecretName(wh.ID), MinVersion: wh.secretVersion})
-	if err != nil || secret.Version != wh.secretVersion {
-		return DeliveryResult{Channel: label, OK: false, Detail: "webhook credential rotation is incomplete; retry the URL update"}
-	}
-	destination, err := url.Parse(secret.Value)
-	if err != nil || !strings.EqualFold(destination.Host, wh.DestinationHost) {
-		return DeliveryResult{Channel: label, OK: false, Detail: "webhook destination metadata mismatch"}
-	}
+	destination := wh.url
 	body, err := shapeWebhookBody(wh.Format, alert)
 	if err != nil {
 		return DeliveryResult{Channel: label, OK: false, Detail: err.Error()}
 	}
 	// Re-validate at delivery: a sink stored before the policy tightened, or
 	// one whose scheme/host was edited out of band, never gets fetched (#SEC-21).
-	if err := d.outbound.ValidateURL(secret.Value); err != nil {
+	if err := d.outbound.ValidateURL(destination); err != nil {
 		return DeliveryResult{Channel: label, OK: false, Detail: httpx.FailureDetail(err)}
 	}
-	attempts, err := d.postWithRetry(ctx, secret.Value, body)
+	attempts, err := d.postWithRetry(ctx, destination, body)
 	res := DeliveryResult{Channel: label, Attempts: attempts, OK: err == nil}
 	if err != nil {
 		// #SEC-21: the raw dial error/status is an internal-network oracle —

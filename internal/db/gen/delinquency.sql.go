@@ -250,31 +250,31 @@ SELECT i.customer_id,
        COALESCE(pol.grace_days, -1)::int AS grace_days,
        COALESCE(pol.amount_floor, -1)::bigint AS amount_floor
 FROM billing.invoices i
-LEFT JOIN LATERAL (
-    SELECT (p.policy ->> 'delinquency_grace_days')::int AS grace_days,
-           (p.policy ->> 'delinquency_amount_floor')::bigint AS amount_floor
-    FROM billing.billing_policy_bindings b
-    JOIN billing.billing_policies p
-      ON p.merchant_id = b.merchant_id AND p.name = b.policy_name
-    LEFT JOIN billing.money_settings ms
-      ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
-    WHERE b.merchant_id = i.merchant_id
-      AND (b.customer_id = i.customer_id OR b.customer_id IS NULL)
-      AND (b.tier = ms.tier OR b.tier IS NULL)
-    ORDER BY (b.customer_id IS NOT NULL) DESC, (b.tier IS NOT NULL) DESC
-    LIMIT 1
-) pol ON true
-WHERE i.merchant_id = $1
+JOIN billing.customers c ON c.merchant_id = i.merchant_id AND c.id = i.customer_id
+LEFT JOIN billing.money_settings ms
+  ON ms.merchant_id = i.merchant_id AND ms.customer_id = i.customer_id AND ms.currency = i.currency
+CROSS JOIN LATERAL (
+    SELECT $1::jsonb -> 'policies' -> COALESCE(
+        CASE WHEN $1::jsonb -> 'policies' -> c.billing_policy IS NOT NULL THEN c.billing_policy END,
+        $1::jsonb -> 'tiers' ->> ms.tier,
+        $1::jsonb ->> 'default') AS body
+) bound
+CROSS JOIN LATERAL (
+    SELECT (bound.body ->> 'delinquency_grace_days')::int AS grace_days,
+           (bound.body ->> 'delinquency_amount_floor')::bigint AS amount_floor
+) pol
+WHERE i.merchant_id = $2
   AND i.status = 'open'
   AND i.amount_due > 0
   AND i.due_at IS NOT NULL
-  AND i.due_at < $2::timestamptz
+  AND i.due_at < $3::timestamptz
 GROUP BY i.customer_id, i.currency, pol.grace_days, pol.amount_floor
 ORDER BY MIN(i.due_at), i.customer_id, i.currency
-LIMIT $3
+LIMIT $4
 `
 
 type ListOverdueInvoiceAggregatesParams struct {
+	Policies   []byte
 	MerchantID uuid.UUID
 	Now        time.Time
 	RowLimit   int64
@@ -299,12 +299,18 @@ type ListOverdueInvoiceAggregatesRow struct {
 // has more overdue payers than the cap, the ones who have owed longest are the
 // ones evaluated — truncation with a defensible order beats an unbounded pass.
 //
-// or#897: each row also carries the BOUND policy's delinquency overrides, so a
-// pass over N payers stays one query. money_settings.tier supplies the tier
-// rung, so the same most-specific-wins resolution the admission path runs is
-// available here without an N+1 per candidate.
+// or#897: each row also carries its payer's billing policy's delinquency
+// overrides, so a pass over N payers stays one query. policies is the
+// merchant's settings, {policies: {name: body}, tiers: {tier: name}, default:
+// name}; the payer's policy is its own assignment while the settings still
+// declare it, else its tier's (money_settings.tier), else the default.
 func (q *Queries) ListOverdueInvoiceAggregates(ctx context.Context, arg ListOverdueInvoiceAggregatesParams) ([]ListOverdueInvoiceAggregatesRow, error) {
-	rows, err := q.db.Query(ctx, listOverdueInvoiceAggregates, arg.MerchantID, arg.Now, arg.RowLimit)
+	rows, err := q.db.Query(ctx, listOverdueInvoiceAggregates,
+		arg.Policies,
+		arg.MerchantID,
+		arg.Now,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}

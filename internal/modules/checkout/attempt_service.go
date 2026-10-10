@@ -30,7 +30,6 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/vault"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
@@ -119,8 +118,6 @@ type solanaTransactionService interface {
 }
 
 type CheckoutAttemptService struct {
-	captureSecrets           merchants.MerchantSecretReader
-	captureEncryption        captureEncryption
 	db                       *db.DB
 	repo                     *CheckoutAttemptRepo
 	priceService             *catalog.PriceService

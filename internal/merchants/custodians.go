@@ -2,7 +2,6 @@ package merchants
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,50 +10,46 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// or#880: custody is Layer B state exactly like a PSP is. A custodian is
-// declared once per merchant and referenced by every PSP whose gateway charges
-// the cards it holds, so this file is the ONE place a custodian row becomes a
-// scope — whether the row got there through the mode-1 manifest or a mode-2
-// API write.
-
 // ErrCustodianNotDeclared reports that a PSP references a custodian key no
-// custodians row carries. It is always fail-closed: a PSP whose custody cannot
-// be resolved must not arm, because charging it as though the gateway held the
-// card is the wrong charge, not a degraded one.
+// custodian document carries. It is always fail-closed: a PSP whose custody
+// cannot be resolved must not arm, because charging it as though the gateway
+// held the card is the wrong charge, not a degraded one.
 var ErrCustodianNotDeclared = errors.New("merchants: custodian is not declared")
 
-// CustodianScope is one resolved custodian row.
+// CustodianScope is one custodian: its identity joined with its document.
 type CustodianScope struct {
 	ID uuid.UUID
 	// Key is the merchant's name for it (the value a PSP references).
 	Key string
-	// Kind is the vendor (custodians registry): basis_theory today.
+	// Kind is the vendor (custodians registry).
 	Kind        string
 	Environment string
 	// AccountID is the custodian-native tenant identity.
 	AccountID string
 	Settings  map[string]any
-	Archived  bool
-	// CredentialVersions is the rotation watermark per credential key
-	// (or#812), read from the custodians row. Absent/zero = no floor.
-	CredentialVersions map[string]int
+	// Archived custodians take no new arrangement; one no document names is
+	// archived.
+	Archived bool
+	Revision int64
+	secrets  map[string]string
 }
 
-// SecretRef returns the custodian-scoped secret name for key together with the
-// rotation version floor recorded on this custodian row — the same versioned
-// read every PSP credential goes through (or#812), so a custodial key rotated
-// on one node is effective on every node the instant it commits.
+// SecretRef names the custodian's credential slot key.
 func (c CustodianScope) SecretRef(key string) (SecretRef, error) {
 	name, err := CustodianSecretName(c.Kind, c.Environment, c.AccountID, key)
 	if err != nil {
 		return SecretRef{}, err
 	}
-	return SecretRef{Name: name, MinVersion: c.CredentialVersions[NormalizeCredentialVersionKey(key)]}, nil
+	return SecretRef{Name: name}, nil
+}
+
+// Secret is the value of credential key, "" when the document holds none.
+func (c CustodianScope) Secret(key string) string {
+	return strings.TrimSpace(c.secrets[NormalizeCredentialVersionKey(key)])
 }
 
 // CustodianIdentity is the routing tuple an inbound custodian webhook resolves
@@ -68,85 +63,35 @@ type CustodianIdentity struct {
 	AccountID   string
 }
 
-func custodianScopeFrom(row gen.BillingCustodian) CustodianScope {
-	return CustodianScope{
-		ID:          row.ID,
-		Key:         strings.TrimSpace(row.Key),
-		Kind:        row.Kind,
-		Environment: row.Environment,
-		AccountID:   row.AccountID,
-		Settings:    decodeCustodianSettings(row.Settings),
-		Archived:    row.Archived,
-		// or#812: the floors ride on the row every resolution already re-reads.
-		CredentialVersions: decodeCredentialVersions(row.CredentialVersions),
-	}
-}
-
-func decodeCredentialVersions(raw []byte) map[string]int {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out map[string]int
-	if json.Unmarshal(raw, &out) != nil {
-		return nil
-	}
-	return out
-}
-
-func decodeCustodianSettings(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil
-	}
-	return out
-}
-
-// CustodianScopeByKey resolves a merchant's custodian by its declared key.
+// CustodianScopeByKey resolves a merchant's custodian by its key.
 func (s *Service) CustodianScopeByKey(ctx context.Context, id billing.MerchantID, key string) (CustodianScope, bool, error) {
-	key = strings.TrimSpace(key)
+	key = strings.ToLower(strings.TrimSpace(key))
 	if s == nil || s.pool == nil || id.IsZero() || key == "" {
 		return CustodianScope{}, false, nil
 	}
-	var row gen.BillingCustodian
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).GetCustodianByKey(ctx, gen.GetCustodianByKeyParams{
-			MerchantID: id.UUID(),
-			Key:        key,
-		})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return CustodianScope{}, false, nil
-	}
+	j, err := s.load(ctx, id)
 	if err != nil {
-		return CustodianScope{}, false, fmt.Errorf("load custodian %q: %w", key, err)
+		return CustodianScope{}, false, err
 	}
-	return custodianScopeFrom(row), true, nil
+	for _, c := range j.custodians {
+		if strings.EqualFold(c.Key, key) {
+			return c, true, nil
+		}
+	}
+	return CustodianScope{}, false, nil
 }
 
-// CustodianScopeByID resolves a custodian by its row id — the shape a PSP's
-// custodian_id reference takes.
+// CustodianScopeByID resolves a custodian by its identity id.
 func (s *Service) CustodianScopeByID(ctx context.Context, id billing.MerchantID, custodianID uuid.UUID) (CustodianScope, bool, error) {
 	if s == nil || s.pool == nil || id.IsZero() || custodianID == uuid.Nil {
 		return CustodianScope{}, false, nil
 	}
-	var row gen.BillingCustodian
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: id.UUID(), ID: custodianID})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return CustodianScope{}, false, nil
-	}
+	j, err := s.load(ctx, id)
 	if err != nil {
-		return CustodianScope{}, false, fmt.Errorf("load custodian %s: %w", custodianID, err)
+		return CustodianScope{}, false, err
 	}
-	return custodianScopeFrom(row), true, nil
+	c, ok := j.custodianByID(custodianID)
+	return c, ok, nil
 }
 
 // CustodianScopeByIdentity resolves a merchant's custodian by its vendor
@@ -162,111 +107,28 @@ func (s *Service) CustodianScopeByIdentity(ctx context.Context, id billing.Merch
 	if environment == "" {
 		return CustodianScope{}, false, errors.New("merchants: custodian environment must be live or test")
 	}
-	var row gen.BillingCustodian
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).GetCustodianByIdentity(ctx, gen.GetCustodianByIdentityParams{
-			MerchantID:  id.UUID(),
-			Kind:        kind,
-			Environment: &environment,
-			AccountID:   accountID,
-		})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return CustodianScope{}, false, nil
-	}
+	j, err := s.load(ctx, id)
 	if err != nil {
-		return CustodianScope{}, false, fmt.Errorf("load custodian %s/%s: %w", kind, accountID, err)
+		return CustodianScope{}, false, err
 	}
-	return custodianScopeFrom(row), true, nil
+	for _, c := range j.custodians {
+		if c.Kind == kind && c.Environment == environment && c.AccountID == accountID {
+			return c, true, nil
+		}
+	}
+	return CustodianScope{}, false, nil
 }
 
-// ListCustodians lists a merchant's declared custodians.
+// ListCustodians lists a merchant's custodians.
 func (s *Service) ListCustodians(ctx context.Context, id billing.MerchantID) ([]CustodianScope, error) {
 	if s == nil || s.pool == nil || id.IsZero() {
 		return nil, nil
 	}
-	var rows []gen.BillingCustodian
-	err := s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		rows, err = gen.New(tx).ListCustodiansForMerchant(ctx, id.UUID())
-		return err
-	})
+	j, err := s.load(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("list custodians: %w", err)
+		return nil, err
 	}
-	out := make([]CustodianScope, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, custodianScopeFrom(row))
-	}
-	return out, nil
-}
-
-// UpsertCustodian converges ONE declared custodian. Both ingestion planes go
-// through it, and both validate through config.ValidateCustodianEntry first —
-// so a value the manifest accepts is never one an API write silently drops.
-func (s *Service) UpsertCustodian(ctx context.Context, id billing.MerchantID, entry config.CustodianEntry, environment string) (CustodianScope, error) {
-	if s == nil || s.pool == nil || id.IsZero() {
-		return CustodianScope{}, errors.New("merchants: custodian upsert requires a merchant")
-	}
-	if err := config.ValidateCustodianEntry(entry); err != nil {
-		return CustodianScope{}, err
-	}
-	environment = normalizeProviderSecretEnvironment(environment)
-	if environment == "" {
-		return CustodianScope{}, errors.New("merchants: custodian environment must be live or test")
-	}
-	settings := entry.Settings
-	if settings == nil {
-		settings = map[string]any{}
-	}
-	settingsJSON, err := json.Marshal(settings)
-	if err != nil {
-		return CustodianScope{}, fmt.Errorf("encode custodian settings: %w", err)
-	}
-	// or#812: a caller that rotated a credential records its new version here;
-	// the upsert merges floors forward and never clears one it was not given.
-	versionsJSON, err := json.Marshal(nonNilVersions(entry.CredentialVersions))
-	if err != nil {
-		return CustodianScope{}, fmt.Errorf("encode custodian credential versions: %w", err)
-	}
-	archived := entry.Archived
-	kind := custodians.Normalize(entry.Kind)
-	if err := AssertCustodianUnowned(ctx, gen.New(s.pool), id.UUID(), kind, environment, entry.AccountID); err != nil {
-		return CustodianScope{}, err
-	}
-	var row gen.BillingCustodian
-	err = s.pool.MerchantTx(ctx, id, func(ctx context.Context, tx pgx.Tx) error {
-		var err error
-		row, err = gen.New(tx).UpsertCustodian(ctx, gen.UpsertCustodianParams{
-			MerchantID:         id.UUID(),
-			Key:                strings.TrimSpace(entry.Key),
-			Kind:               kind,
-			Environment:        &environment,
-			AccountID:          strings.TrimSpace(entry.AccountID),
-			Settings:           settingsJSON,
-			Archived:           &archived,
-			CredentialVersions: versionsJSON,
-		})
-		return err
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The upsert's WHERE clause guards the global identity; the preflight
-		// above should already have named the owner.
-		return CustodianScope{}, fmt.Errorf("custodian %q (%s): tenant %s: %w", entry.Key, kind, entry.AccountID, ErrCustodianOwnedByAnotherMerchant)
-	}
-	if err != nil {
-		return CustodianScope{}, fmt.Errorf("upsert custodian %q: %w", entry.Key, err)
-	}
-	return custodianScopeFrom(row), nil
-}
-
-func nonNilVersions(in map[string]int) map[string]int {
-	if in == nil {
-		return map[string]int{}
-	}
-	return in
+	return j.custodians, nil
 }
 
 // ErrCustodianOwnedByAnotherMerchant reports that the declared (kind,
@@ -340,4 +202,26 @@ func (s *Service) ResolveCustodianByIdentity(ctx context.Context, kind, environm
 		Environment: row.Environment,
 		AccountID:   row.AccountID,
 	}, true, nil
+}
+
+// CustodianRoutePSPs are the live PSPs of rail, in the custodian's
+// environment, that reach the custodian: the PSPs a card it holds can be
+// charged through, oldest first. More than one means routing has no single
+// answer.
+func (s *Service) CustodianRoutePSPs(ctx context.Context, id billing.MerchantID, rail string, custodianID uuid.UUID) ([]uuid.UUID, error) {
+	j, err := s.load(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	custodian, ok := j.custodianByID(custodianID)
+	if !ok {
+		return nil, nil
+	}
+	var out []uuid.UUID
+	for _, p := range j.psps {
+		if !p.Archived && p.Rail == rail && p.Environment == custodian.Environment && p.CustodianID != nil && *p.CustodianID == custodianID {
+			out = append(out, p.ID)
+		}
+	}
+	return out, nil
 }

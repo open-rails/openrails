@@ -43,7 +43,7 @@ func (b *Bundle) Mount(target any) error {
 // inventoryBundle builds every configured route family the way the engine does.
 func inventoryBundle(t *testing.T) *Bundle {
 	t.Helper()
-	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, SecretBackend: config.SecretBackendDB}
+	cfg := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly, Vault: &config.VaultConfig{KVMount: "kv"}}
 	rt := &app.Runtime{Config: cfg}
 	rt.SetConfiguredMerchant(testMerchant)
 	graph := &app.App{Config: cfg, Runtime: rt}

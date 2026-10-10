@@ -1,14 +1,11 @@
 package config
 
 import (
-	"encoding/base64"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 )
-
-var testMasterKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
 
 func validConfig() *Config {
 	return &Config{
@@ -24,41 +21,28 @@ func TestValidateRefusesUnsafeConfiguration(t *testing.T) {
 		edit func(*Config)
 		want string // "" = accepted
 	}{
-		"write mode omitted":     {func(c *Config) { c.ProviderWriteMode = "" }, ""},
-		"write mode padded":      {func(c *Config) { c.ProviderWriteMode = " Limited " }, ""},
-		"write mode typo":        {func(c *Config) { c.ProviderWriteMode = "redaonly" }, "must be one of full, limited, readonly"},
-		"write mode legacy test": {func(c *Config) { c.ProviderWriteMode = "test" }, "must be one of full, limited, readonly"},
-		"posture live":           {func(c *Config) { c.TestMode = CredentialPostureLive }, ""},
-		"posture omitted":        {func(c *Config) { c.TestMode = "" }, "test_mode is required"},
-		"posture garbage":        {func(c *Config) { c.TestMode = "yes" }, `invalid test_mode "yes"`},
-		"rate limits omitted":    {func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
-		"rate limits host-owned": {func(c *Config) { c.RateLimits, c.RateLimitsDisabled = nil, true }, ""},
-		"per-address ceiling":    {func(c *Config) { c.RateLimits = &RateLimitsConfig{"default": {RequestsPerMinute: 300}} }, "rate_limits.default is not a bucket"},
-		"captcha disabled":       {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, ""},
-		"captcha half pair":      {func(c *Config) { c.Captcha.SecretKey = "secret" }, "BOTH site_key and secret_key"},
-		"captcha unsupported":    {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "unsupported provider"},
-		"quiescence sub-second":  {func(c *Config) { c.ProviderBillingQuiescenceInterval = "500ms" }, "at least one second"},
-		"quiescence fractional":  {func(c *Config) { c.ProviderBillingQuiescenceInterval = "1500ms" }, "whole seconds"},
-		"reconcile typo":         {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
-		"db missing":             {func(c *Config) { c.DB = nil }, "database configuration is required"},
-		"db url undeterminable":  {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
-		"db schema injection":    {func(c *Config) { c.Database.Schema = "bill;drop" }, "not a valid Postgres identifier"},
-		"secret backend unknown": {func(c *Config) { c.SecretBackend = "consul" }, "secret_backend must be snapshot, db or vault"},
-		"db custody without key": {func(c *Config) { c.SecretBackend = SecretBackendDB }, "encryption.master_key"},
-		"db custody with key": {func(c *Config) {
-			c.SecretBackend, c.Encryption = SecretBackendDB, &EncryptionConfig{MasterKey: testMasterKey}
-		}, ""},
-		"alert db without key":  {func(c *Config) { c.AlertSecretBackend = SecretBackendDB }, "encryption.master_key"},
-		"alert snapshot":        {func(c *Config) { c.AlertSecretBackend = SecretBackendSnapshot }, "alert_secret_backend must be db or vault"},
-		"vault custody":         {func(c *Config) { c.SecretBackend, c.Vault = SecretBackendVault, &VaultConfig{} }, ""},
-		"snapshot id canonical": {func(c *Config) { c.CredentialSnapshotID = "4b1c9f0e-2a3d-4e5f-8a9b-0c1d2e3f4a5b" }, ""},
-		"snapshot id uppercase": {func(c *Config) { c.CredentialSnapshotID = "4B1C9F0E-2A3D-4E5F-8A9B-0C1D2E3F4A5B" }, "canonical nonzero UUID"},
-		"snapshot id nil":       {func(c *Config) { c.CredentialSnapshotID = "00000000-0000-0000-0000-000000000000" }, "canonical nonzero UUID"},
-		"master key not base64": {func(c *Config) { c.Encryption = &EncryptionConfig{MasterKey: "not!base64!"} }, "must be valid base64"},
-		"master key short": {func(c *Config) {
-			c.Encryption = &EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(make([]byte, 16))}
-		}, "must decode to 32 bytes"},
-		"master key blank":           {func(c *Config) { c.Encryption = &EncryptionConfig{MasterKey: "   "} }, ""},
+		"write mode omitted":         {func(c *Config) { c.ProviderWriteMode = "" }, ""},
+		"write mode padded":          {func(c *Config) { c.ProviderWriteMode = " Limited " }, ""},
+		"write mode typo":            {func(c *Config) { c.ProviderWriteMode = "redaonly" }, "must be one of full, limited, readonly"},
+		"write mode legacy test":     {func(c *Config) { c.ProviderWriteMode = "test" }, "must be one of full, limited, readonly"},
+		"posture live":               {func(c *Config) { c.TestMode = CredentialPostureLive }, ""},
+		"posture omitted":            {func(c *Config) { c.TestMode = "" }, "test_mode is required"},
+		"posture garbage":            {func(c *Config) { c.TestMode = "yes" }, `invalid test_mode "yes"`},
+		"rate limits omitted":        {func(c *Config) { c.RateLimits = nil }, "rate_limits is required"},
+		"rate limits host-owned":     {func(c *Config) { c.RateLimits, c.RateLimitsDisabled = nil, true }, ""},
+		"per-address ceiling":        {func(c *Config) { c.RateLimits = &RateLimitsConfig{"default": {RequestsPerMinute: 300}} }, "rate_limits.default is not a bucket"},
+		"captcha disabled":           {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: CaptchaProviderTurnstile} }, ""},
+		"captcha half pair":          {func(c *Config) { c.Captcha.SecretKey = "secret" }, "BOTH site_key and secret_key"},
+		"captcha unsupported":        {func(c *Config) { c.Captcha = &CaptchaConfig{Provider: "recaptcha", SiteKey: "s", SecretKey: "k"} }, "unsupported provider"},
+		"quiescence sub-second":      {func(c *Config) { c.ProviderBillingQuiescenceInterval = "500ms" }, "at least one second"},
+		"quiescence fractional":      {func(c *Config) { c.ProviderBillingQuiescenceInterval = "1500ms" }, "whole seconds"},
+		"reconcile typo":             {func(c *Config) { c.CatalogReconciliationInterval = "30minutes" }, "catalog_reconciliation_interval"},
+		"db missing":                 {func(c *Config) { c.DB = nil }, "database configuration is required"},
+		"db url undeterminable":      {func(c *Config) { c.DB = &DBConfig{} }, "database URL could not be determined"},
+		"db schema injection":        {func(c *Config) { c.Database.Schema = "bill;drop" }, "not a valid Postgres identifier"},
+		"vault kv mount":             {func(c *Config) { c.Vault = &VaultConfig{KVMount: "kv"} }, ""},
+		"vault kv mount escapes":     {func(c *Config) { c.Vault = &VaultConfig{KVMount: "kv/../sys"} }, "plain Vault path"},
+		"vault transit only":         {func(c *Config) { c.Vault = &VaultConfig{TransitMount: "transit"} }, ""},
 		"llm default provider":       {func(c *Config) { c.LLM = &LLMConfig{APIKey: "k"} }, ""},
 		"llm unknown provider":       {func(c *Config) { c.LLM = &LLMConfig{Provider: "gemini", APIKey: "k"} }, `invalid llm.provider "gemini"`},
 		"llm relative base":          {func(c *Config) { c.LLM = &LLMConfig{Provider: "openai", BaseURL: "api.openai.com/v1"} }, "invalid llm.base_url"},
@@ -149,8 +133,9 @@ func TestPostureAccessorsFailClosed(t *testing.T) {
 	require.Equal(t, ProviderEnvironmentLive, ExpectedProviderEnvironment(false))
 
 	var nilCfg *Config
-	require.Equal(t, SecretBackendSnapshot, SecretStoreBackend(nilCfg))
-	require.Equal(t, SecretBackendVault, SecretStoreBackend(&Config{SecretBackend: " Vault "}))
+	require.Empty(t, MerchantConfigKVMount(nilCfg))
+	require.Empty(t, MerchantConfigKVMount(&Config{Vault: &VaultConfig{TransitMount: "transit"}}), "a Transit-only Vault only signs")
+	require.Equal(t, "kv", MerchantConfigKVMount(&Config{Vault: &VaultConfig{KVMount: " /kv/ "}}))
 }
 
 func TestScalarParsingBoundaries(t *testing.T) {
@@ -252,14 +237,14 @@ func TestHyperSwitchEndpointsAreHostOwnedAndSecure(t *testing.T) {
 		{"missing", CredentialPostureSandbox, "", false},
 	} {
 		cfg := validConfig()
-		cfg.TestMode, cfg.Encryption = row.posture, &EncryptionConfig{MasterKey: testMasterKey}
+		cfg.TestMode = row.posture
 		cfg.HyperSwitch = &HyperSwitchConfig{AllowLoopbackHTTP: true, APIBaseURL: row.url, SDKURL: row.url}
 		require.Equal(t, row.ok, Validate(cfg) == nil, row.name)
 	}
 	cfg := validConfig()
 	cfg.HyperSwitch = &HyperSwitchConfig{APIBaseURL: "https://vault.example.test", SDKURL: "https://sdk.example.test"}
-	require.ErrorContains(t, Validate(cfg), "requires encryption.master_key")
-	cfg.HyperSwitch.AllowLoopbackHTTP, cfg.Encryption = false, &EncryptionConfig{MasterKey: testMasterKey}
+	require.NoError(t, Validate(cfg))
+	cfg.HyperSwitch.AllowLoopbackHTTP = false
 	cfg.HyperSwitch.SDKURL = "http://127.0.0.1:9099"
 	require.Error(t, Validate(cfg), "loopback HTTP needs the explicit exception")
 }

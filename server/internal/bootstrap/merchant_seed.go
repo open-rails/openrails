@@ -6,12 +6,11 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// ResolvePushMerchantConfigOptions accepts create-only initialization. Metadata
-// changes use explicit application IDs/revisions; managed credentials use their
-// provider publication operation. Custody never selects metadata authority.
-func ResolvePushMerchantConfigOptions(cfg *config.Config, seed, insert, overwrite, prune bool) (MerchantManifestReconcileOptions, error) {
+// ResolvePushMerchantConfigOptions accepts create-only provisioning of the
+// manifest's merchants. Configuration changes are edits at a revision.
+func ResolvePushMerchantConfigOptions(cfg *config.Config, seed, insert, overwrite, prune bool) (ReconcileOptions, error) {
 	if overwrite || prune {
-		return MerchantManifestReconcileOptions{}, fmt.Errorf("--overwrite/--prune are retired: use a metadata application with expected revision or the provider publication API")
+		return ReconcileOptions{}, fmt.Errorf("--overwrite/--prune are retired: edit the merchant's configuration at its revision (PATCH /v1/admin/configuration, the PSP routes)")
 	}
-	return MerchantManifestReconcileOptions{Insert: insert || seed}, nil
+	return ReconcileOptions{Insert: insert || seed}, nil
 }

@@ -38,10 +38,9 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if rt == nil {
 		return fmt.Errorf("merchant startup requires a runtime")
 	}
-	// The merchant credential plane (and its Transit client) is built first so
-	// the manifest reconcile signs with it rather than a Vault login of its own.
+	// With Vault holding merchant configuration, startup needs it reachable.
 	if err := rt.EnsureMerchantsService(ctx); err != nil {
-		log.WithError(err).Warn("merchant credentials unavailable at startup; sandbox PSPs verify on first use")
+		return err
 	}
 	slugs, pending, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, true)
 	if err != nil {
@@ -53,7 +52,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if pending {
 		rt.Go("solana transit signer", func(ctx context.Context) {
 			err := retry.Forever(ctx, func(ctx context.Context) error {
-				if err := rt.MerchantSecretBackend.State(); err != nil {
+				if err := rt.Vault.State(); err != nil {
 					return err
 				}
 				_, _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, false)
@@ -79,7 +78,7 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	}
 	rt.NMIPostureV5BaseURL = nmiProbeV5BaseURL
 	rt.CheckBookIdentity(ctx)
-	rt.StartCredentialFingerprints(declared...)
+	rt.PreloadMerchantConfig(declared...)
 	rt.StartProviderPosture(declared...)
 	return nil
 }
@@ -88,10 +87,10 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 // re-applies the boot manifest, provisioning it.
 func approveSolanaSigner(ctx context.Context, cfg *config.Config, application *app.App, cp *controlplane.ControlPlane, path string, overlays []string, mid billing.MerchantID, key string) error {
 	rt := application.Runtime
-	if rt.MerchantSecretBackend == nil || rt.Merchants == nil {
+	if rt.Vault == nil || rt.Vault.SolanaTransit == nil || rt.Merchants == nil {
 		return fmt.Errorf("no Vault Transit signer is configured")
 	}
-	if _, err := signeridentity.Approve(ctx, rt.DB, rt.Merchants, rt.MerchantSecretBackend.SolanaTransit, mid, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)), key); err != nil {
+	if _, err := signeridentity.Approve(ctx, rt.DB, rt.Merchants, rt.Vault.SolanaTransit, mid, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)), key); err != nil {
 		return err
 	}
 	if _, _, err := reconcileBootMerchantManifest(ctx, cfg, application, cp, path, overlays, false); err != nil {
@@ -131,16 +130,13 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if rt == nil {
 		return nil, false, fmt.Errorf("merchant startup requires a runtime")
 	}
-	opts := bootstrap.MerchantManifestReconcileOptions{StripeClients: rt.StripeClients, Insert: true}
-	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
-		if rt.ManifestSecrets == nil {
-			return nil, false, fmt.Errorf("snapshot credentials require the runtime snapshot plane")
-		}
-		opts.SecretStore = rt.ManifestSecrets.Seeder()
+	if rt.Merchants == nil {
+		return nil, false, fmt.Errorf("merchant startup requires the merchant configuration")
 	}
+	opts := bootstrap.ReconcileOptions{Insert: true, Merchants: rt.Merchants}
 	var signers []*signeridentity.Transit
-	if backend := rt.MerchantSecretBackend; backend != nil && backend.SolanaTransit != nil && rt.Merchants != nil {
-		opts.SolanaTransit = backend.SolanaTransit
+	if rt.Vault != nil && rt.Vault.SolanaTransit != nil {
+		opts.SolanaTransit = rt.Vault.SolanaTransit
 		environment := config.ExpectedProviderEnvironment(config.IsTestMode(cfg))
 		opts.WrapTransit = func(slug string, transit solanaint.TransitClient) solanaint.TransitClient {
 			signer := &signeridentity.Transit{TransitClient: transit, DB: rt.DB, Directory: rt.Merchants, Slug: slug,
@@ -153,7 +149,7 @@ func reconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 	if err := bootstrap.ReconcileMerchantManifestData(ctx, cfg, cp, manifest, opts); err != nil {
 		return nil, false, fmt.Errorf("merchant manifest %s: %w", path, err)
 	}
-	log.WithField("file", path).Info("merchant startup initialized; existing metadata preserved")
+	log.WithField("file", path).Info("merchant startup: manifest applied")
 	slugs := make([]string, 0, len(manifest.Merchants))
 	for slug := range manifest.Merchants {
 		slugs = append(slugs, slug)

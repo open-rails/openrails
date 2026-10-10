@@ -12,8 +12,6 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/custodians"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	log "github.com/sirupsen/logrus"
 )
@@ -228,7 +226,7 @@ func publicSettingValue(settings map[string]any, key string) string {
 // resolver checkout routes through. A PSP declared without credentials (an
 // import attribution) is an identity, never advertised as available.
 func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, environment string, armed func(context.Context, PSPScope) (bool, error)) ([]PublicPSPConfig, error) {
-	scopes, err := s.activePSPScopes(ctx, id, environment)
+	scopes, err := s.LivePSPScopes(ctx, id, environment)
 	if err != nil {
 		return nil, err
 	}
@@ -308,18 +306,19 @@ func (s *Service) PublicPSPs(ctx context.Context, id billing.MerchantID, environ
 // checkoutSelectors is every PSP key or rail the merchant's checkout routing
 // can pick; nil means no policy, so every armed PSP takes new checkouts.
 func (s *Service) checkoutSelectors(ctx context.Context, id billing.MerchantID) (map[string]bool, error) {
-	if s.database == nil {
+	if s.config == nil {
 		return nil, nil
 	}
-	conf, found, err := merchantconfig.NewStore(s.database).Get(merchant.WithID(ctx, id))
+	set, err := s.config.Get(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("load checkout routing policy: %w", err)
 	}
-	if !found || len(conf.CheckoutRouting) == 0 {
+	routing := set.Merchant.Value.Settings.CheckoutRouting
+	if routing == nil || len(*routing) == 0 {
 		return nil, nil
 	}
 	selectors := map[string]bool{}
-	for _, rule := range conf.CheckoutRouting {
+	for _, rule := range *routing {
 		for _, selector := range rule.Prefer {
 			selectors[strings.ToLower(strings.TrimSpace(selector))] = true
 		}

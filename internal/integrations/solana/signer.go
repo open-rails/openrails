@@ -11,7 +11,7 @@ import (
 const privateKeySecretName = "private_key"
 
 // MerchantSecretGetter is the per-merchant secret read the signer needs,
-// declared here so signing is independent of the secret backend. An adapter
+// declared here so signing is independent of where configuration lives. An adapter
 // over merchants.MerchantSecretReader satisfies it at the composition root.
 type MerchantSecretGetter interface {
 	// GetSecret returns the plaintext secret value for (merchant, name), or an

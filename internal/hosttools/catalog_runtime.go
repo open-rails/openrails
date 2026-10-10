@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchant"
+	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	catalogmodule "github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -69,28 +70,13 @@ func newCatalogRuntime(ctx context.Context, opts CatalogApplyOptions) (*app.Runt
 		return fail(fmt.Errorf("resolve catalog merchant %q: %w", opts.Merchant, err))
 	}
 	rt.SetConfiguredMerchant(selected.ID)
-	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
-		rt.Merchants, err = pullProviderManifestPlane(ctx, cfg, database, PullProviderOptions{
-			MerchantID: selected.ID, MerchantManifestPath: opts.MerchantManifestPath,
-		})
-		if err != nil {
-			return fail(fmt.Errorf("catalog runtime credential plane: %w", err))
-		}
-		if rt.Merchants == nil {
-			// No conventional snapshot is legal for a local-only catalog. It
-			// supplies no credential fallback: any required provider secret
-			// remains absent and reference validation must fail closed.
-			rt.ManifestSecrets = merchants.NewManifestSecretStore()
-			rt.Merchants, err = merchants.NewService(database.DataPool(), rt.ManifestSecrets, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
-			if err != nil {
-				return fail(err)
-			}
-		}
-	} else {
-		if err := rt.EnsureMerchantsService(ctx); err != nil {
-			return fail(fmt.Errorf("catalog runtime credential plane unavailable: %w", err))
-		}
+	merchantsSvc, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, selected.ID, nil, opts.MerchantManifestPath, nil)
+	if err != nil {
+		return fail(fmt.Errorf("catalog runtime merchant configuration: %w", err))
 	}
+	previous := cleanup
+	cleanup = func() { closeConfig(); previous() }
+	rt.Merchants, rt.MerchantConfig = merchantsSvc, merchantsSvc.Config()
 	rt.Merchants.StripeClients = rt.StripeClients
 	rt.RailConfigs = railresolve.NewMerchantsSource(cfg, func() *merchants.Service { return rt.Merchants })
 	// Catalog application verifies existing plans. This graph never constructs

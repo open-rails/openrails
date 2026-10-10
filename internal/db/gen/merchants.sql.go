@@ -84,7 +84,7 @@ func (q *Queries) GetMerchantAPIHostClaim(ctx context.Context, merchantID uuid.U
 }
 
 const getMerchantByGroupID = `-- name: GetMerchantByGroupID :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants WHERE permission_group_id = $1::text
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants WHERE permission_group_id = $1::text
 `
 
 // Includes retired rows so a group cannot silently acquire a new identity.
@@ -99,7 +99,6 @@ func (q *Queries) GetMerchantByGroupID(ctx context.Context, groupID string) (Bil
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.DisplayName,
 		&i.ApiHost,
 		&i.RetiredAt,
 		&i.GroupReleaseCompletedAt,
@@ -143,7 +142,7 @@ func (q *Queries) GetMerchantBySlugOrAlias(ctx context.Context, slug string) (Ge
 }
 
 const getUnretiredLiveMerchant = `-- name: GetUnretiredLiveMerchant :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
 WHERE id = $1::uuid AND deleted_at IS NULL AND retired_at IS NULL
 `
 
@@ -158,7 +157,6 @@ func (q *Queries) GetUnretiredLiveMerchant(ctx context.Context, id uuid.UUID) (B
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.DisplayName,
 		&i.ApiHost,
 		&i.RetiredAt,
 		&i.GroupReleaseCompletedAt,
@@ -259,7 +257,7 @@ func (q *Queries) ListAllMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 }
 
 const listLiveMerchantsByAPIHost = `-- name: ListLiveMerchantsByAPIHost :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
 WHERE api_host = $1::text AND deleted_at IS NULL
 LIMIT 2
 `
@@ -281,7 +279,6 @@ func (q *Queries) ListLiveMerchantsByAPIHost(ctx context.Context, apiHost string
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.DisplayName,
 			&i.ApiHost,
 			&i.RetiredAt,
 			&i.GroupReleaseCompletedAt,
@@ -300,7 +297,7 @@ func (q *Queries) ListLiveMerchantsByAPIHost(ctx context.Context, apiHost string
 }
 
 const listLiveMerchantsByGroupID = `-- name: ListLiveMerchantsByGroupID :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, display_name, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
 WHERE permission_group_id = $1::text AND deleted_at IS NULL
 LIMIT 2
 `
@@ -323,7 +320,6 @@ func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.DisplayName,
 			&i.ApiHost,
 			&i.RetiredAt,
 			&i.GroupReleaseCompletedAt,
@@ -342,17 +338,16 @@ func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string
 }
 
 const listLiveMerchantsByGroupIDs = `-- name: ListLiveMerchantsByGroupIDs :many
-SELECT id, slug, COALESCE(display_name, '')::text AS display_name, permission_group_id::text AS group_id
+SELECT id, slug, permission_group_id::text AS group_id
 FROM billing.merchants
 WHERE permission_group_id = ANY($1::text[]) AND deleted_at IS NULL
 ORDER BY slug
 `
 
 type ListLiveMerchantsByGroupIDsRow struct {
-	ID          uuid.UUID
-	Slug        string
-	DisplayName string
-	GroupID     string
+	ID      uuid.UUID
+	Slug    string
+	GroupID string
 }
 
 func (q *Queries) ListLiveMerchantsByGroupIDs(ctx context.Context, groupIds []string) ([]ListLiveMerchantsByGroupIDsRow, error) {
@@ -364,12 +359,7 @@ func (q *Queries) ListLiveMerchantsByGroupIDs(ctx context.Context, groupIds []st
 	var items []ListLiveMerchantsByGroupIDsRow
 	for rows.Next() {
 		var i ListLiveMerchantsByGroupIDsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Slug,
-			&i.DisplayName,
-			&i.GroupID,
-		); err != nil {
+		if err := rows.Scan(&i.ID, &i.Slug, &i.GroupID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -474,24 +464,6 @@ type SetMerchantAPIHostParams struct {
 
 func (q *Queries) SetMerchantAPIHost(ctx context.Context, arg SetMerchantAPIHostParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setMerchantAPIHost, arg.ApiHost, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setMerchantDisplayName = `-- name: SetMerchantDisplayName :execrows
-UPDATE billing.merchants SET display_name = $1::text, updated_at = current_timestamp
-WHERE id = $2::uuid AND status = 'active' AND deleted_at IS NULL
-`
-
-type SetMerchantDisplayNameParams struct {
-	DisplayName string
-	ID          uuid.UUID
-}
-
-func (q *Queries) SetMerchantDisplayName(ctx context.Context, arg SetMerchantDisplayNameParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setMerchantDisplayName, arg.DisplayName, arg.ID)
 	if err != nil {
 		return 0, err
 	}

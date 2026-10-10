@@ -562,7 +562,6 @@ export type CreateOrderParams = {
 }
 
 export type CreatePSPParams = {
-  operation_id?: string
   key?: string
   rail?: "ccbill" | "nmi" | "solana" | "stripe"
   account_id?: string
@@ -1122,20 +1121,14 @@ export type MerchantAPIHost = {
   claim: APIHostClaim | null
 }
 
-export type MerchantConfigurationReceipt = {
-  revision: string
-  replayed: boolean
-}
-
 export type MerchantConfigurationState = {
-  revision: string
+  revision: number
   display_name: string
   api_host: string
   settings: MerchantSettings
 }
 
 export type MerchantProfile = {
-  display_name?: string
   logo_url?: string
   from_email?: string
   support_url?: string
@@ -1473,7 +1466,6 @@ export type PSP = {
   environment: string
   account_id: string
   archived: boolean
-  archived_at: string | null
   open_obligations: number
   settings: Record<string, unknown> | null
   credentials: Record<string, PSPCredential> | null
@@ -1485,7 +1477,6 @@ export type PSP = {
 export type PSPCredential = {
   configured: boolean
   validated_at: string | null
-  rotation_version: number
 }
 
 export type PSPLinkState = {
@@ -2373,14 +2364,13 @@ export type UpdateCustomerParams = {
 }
 
 export type UpdateMerchantConfigurationParams = {
-  expected_revision?: string | null
+  expected_revision?: number | null
   settings?: MerchantSettings
   display_name?: string
 }
 
 export type UpdatePSPParams = {
-  operation_id?: string
-  expected_revision?: number
+  expected_revision?: number | null
   settings?: Record<string, unknown> | null
   credentials?: Record<string, string> | null
   retire_webhook_overlap?: boolean

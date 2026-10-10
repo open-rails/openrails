@@ -149,7 +149,7 @@ func TestOverdueInvoices(t *testing.T) {
 // case closes when the retries give up.
 func TestSubscriptionDunningCountsDown(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	w.armDestructive()
 	policy := &billing.DunningPolicy{Tiers: []billing.DunningTier{{MaxCycleHours: 96}, {RetryAfterHours: []int{24, 48}}}}
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{DunningPolicy: policy}))

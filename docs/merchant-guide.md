@@ -16,9 +16,8 @@ can be authored as `amount: 20 USD`; parsing produces those exact native units.
 The database is the catalog. The authorized in-process client can always edit
 individual records or apply a JSON/YAML batch. The catalog over HTTP is its own
 route group: an embedded host turns on `RouteGroups.Catalog` with
-`Permissions.Catalog` (changes refused while `Config.Catalog` is the catalog's
-truth); the standalone server turns on `route_groups.catalog`, and its changes
-follow `secret_backend` (`vault` or `db`).
+`Permissions.Catalog`; the standalone server turns on `route_groups.catalog`. A
+document skips what an edit set ([catalog ownership](catalog-ownership.md)).
 
 Each batch is applied atomically once per merchant, identified by a canonical
 content hash. Reapplying identical content returns the saved receipt even after
@@ -154,10 +153,9 @@ and never duplicated; a mismatch fails the apply loudly:
 openrails apply-catalog --merchant your-merchant --file catalog.yaml
 ```
 
-For host-owned credentials, `--merchant-manifest PATH` loads the same credential
-snapshot and overlays as the provider tools; otherwise the conventional merchant
-manifest path is used. Managed DB/Vault deployments read their configured backend
-and fail if it is unavailable. Recurring Solana references use public account and
+Without Vault, `--merchant-manifest PATH` loads the merchant's configuration and
+overlays as the provider tools do; otherwise the conventional merchant manifest
+path is used. With Vault it reads Vault and fails if Vault is unavailable. Recurring Solana references use public account and
 chain reads; catalog application does not construct a signer or submit a plan.
 
 The returned receipt's `application_id` is generated as `sha256:<content digest>`.

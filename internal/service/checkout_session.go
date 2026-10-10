@@ -24,6 +24,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
@@ -435,11 +436,11 @@ func (s *Service) hostedOffer(ctx context.Context, rt *app.Runtime, in CheckoutS
 	if price.TrialUnitAmount != nil {
 		offer.DueToday = *price.TrialUnitAmount
 	}
-	directory, err := rt.DB.Gen(ctx).GetMerchantConfigurationDirectory(ctx, mid.UUID())
+	settings, err := merchantconfig.NewStore(rt.DB).Settings(ctx)
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, fmt.Errorf("read merchant name: %w", err)
 	}
-	offer.MerchantDisplayName = strings.TrimSpace(directory.DisplayName)
+	offer.MerchantDisplayName = settings.Config.Profile.DisplayName
 	options, err := s.ListCheckoutOptions(ctx, billing.PriceID(price.ID), "", "")
 	if err != nil {
 		return checkoutsession.Offer{}, uuid.Nil, err

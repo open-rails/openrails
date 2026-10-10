@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -192,12 +193,13 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 	batch := w.merchantBatch()
 	dueWork := func(after *uuid.UUID, limit int32) ([]uuid.UUID, error) {
 		return directory.ListAccountUpdaterWorkMerchants(ctx, gen.ListAccountUpdaterWorkMerchantsParams{
-			Custodian:            models.CustodianBasisTheory,
-			Environment:          w.environment(),
-			Now:                  now,
-			DefaultLookaheadDays: int32(custodians.DefaultAccountUpdaterLookaheadDays),
-			After:                after,
-			MerchantLimit:        limit,
+			Custodian:        models.CustodianBasisTheory,
+			Environment:      w.environment(),
+			Now:              now,
+			MinLookaheadDays: 1,
+			MaxLookaheadDays: int32(custodians.MaxAccountUpdaterLookaheadDays),
+			After:            after,
+			MerchantLimit:    limit,
 		})
 	}
 	merchantIDs, err := dueWork(cursor, clampInt32(batch))
@@ -388,7 +390,7 @@ func (w AccountUpdaterBatchWorker) abandon(ctx context.Context, mid, batchID uui
 // inside the merchant's scope.
 func (w AccountUpdaterBatchWorker) submitMerchant(ctx context.Context, mid uuid.UUID, now time.Time, result *AccountUpdaterPassResult) error {
 	q := w.DB.Gen(ctx)
-	rows, err := q.ListCustodiansForMerchant(ctx, mid)
+	rows, err := merchants.Of(w.DB).ListCustodians(ctx, billing.MerchantID(mid))
 	if err != nil {
 		return fmt.Errorf("list custodians: %w", err)
 	}

@@ -21,7 +21,7 @@ import (
 // merchant's credentials resolving nothing; restore brings both back.
 func TestOperatorDirectoryAndWorkers(t *testing.T) {
 	f := newFixture(t)
-	cp := f.newServer(t, nil)
+	cp := f.newVaultServer(t, nil)
 	ctx := t.Context()
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)

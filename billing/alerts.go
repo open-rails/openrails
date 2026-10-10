@@ -99,7 +99,7 @@ type CreateAlertWebhookParams struct {
 }
 
 // UpdateAlertWebhookParams changes a webhook; omitted fields keep their
-// values, and a null name clears it. A new URL is stored as a new secret.
+// values, and a null name clears it.
 type UpdateAlertWebhookParams struct {
 	Name    catalog.Field[string]             `json:"name,omitzero"`
 	URL     catalog.Field[string]             `json:"url,omitzero"`

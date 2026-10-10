@@ -3,7 +3,6 @@ package hosttools
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
@@ -28,7 +26,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/merchantsecrets"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/reconcile"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
@@ -375,42 +372,15 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		cleanup()
 		return nil, nil, err
 	}
-	// #699/#788: pulls arm from the per-merchant secrets store, with the same
-	// semantics as the server's River pulls (store wins; a declared account with
-	// a missing secret is a rail NOT armed, loudly). MODE 1 (#723): the manifest
-	// is on disk for a one-off process too — an ephemeral in-memory plane seeded
-	// from it IS the store.
-	//
-	// or#893: a MODE-2 store/service build failure is a hard error. It used to
-	// warn and continue "arming from boot-config rails only" — but that plane
-	// was an empty config.PSPSet this function itself constructed and never
-	// filled, so the degradation armed NOTHING: the operator got a pull that
-	// read zero providers and reported success-shaped output over a snapshot it
-	// never fetched. There is no credential plane to fall back to; say so.
-	var merchantsSvc *merchants.Service
-	if config.SecretStoreBackend(cfg) == config.SecretBackendSnapshot {
-		svc, err := pullProviderManifestPlane(ctx, cfg, database, opts)
-		if err != nil {
-			cleanup()
-			return nil, nil, err
-		}
-		merchantsSvc = svc
-	} else {
-		backend, err := merchantsecrets.Build(ctx, cfg, database.DataPool())
-		if err == nil {
-			err = backend.Await(ctx, merchantsecrets.AwaitTimeout)
-		}
-		if err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("pull-provider: merchant secret store unavailable, so no rail can be armed: %w", err)
-		}
-		svc, err := merchants.NewService(database.DataPool(), backend.Secrets, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
-		if err != nil {
-			cleanup()
-			return nil, nil, fmt.Errorf("pull-provider: merchants service unavailable, so no rail can be armed: %w", err)
-		}
-		merchantsSvc = svc
+	// #699/#788: pulls arm from the merchant's configuration, with the same
+	// semantics as the server's River pulls: a declared account with a
+	// missing credential is a rail NOT armed, loudly.
+	merchantsSvc, closeConfig, err := boot.OneOffMerchants(ctx, cfg, database, opts.MerchantID, opts.MerchantManifest, opts.MerchantManifestPath, opts.MerchantManifestOverlays)
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("pull-provider: merchant configuration unavailable, so no rail can be armed: %w", err)
 	}
+	cleanup = func() { closeConfig(); _ = database.Close() }
 	stripeClients := opts.StripeClients
 	if stripeClients == nil {
 		stripeClients = stripeapi.NewFactory(nil)
@@ -427,83 +397,6 @@ func newPullProviderRuntime(ctx context.Context, opts PullProviderOptions) (*pul
 		Config:        cfg,
 		Merchants:     merchantsSvc,
 	}, cleanup, nil
-}
-
-// pullProviderManifestPlane builds the MODE-1 pull plane for a one-off process
-// (#723): the on-disk manifest seeds an EPHEMERAL in-memory secret store — the
-// same plane the server seeds at boot; nothing persists — and the merchants
-// service arms #699 pulls over it. A manifest that fails to load or seed aborts
-// the command. No manifest passed and none at the conventional path → nil
-// service: nothing can arm, and the caller's "no armed rail accounts for this
-// merchant" refusal names that plainly (or#893 — there is no second credential
-// plane to fall back to).
-func pullProviderManifestPlane(ctx context.Context, cfg *config.Config, database *db.DB, opts PullProviderOptions) (*merchants.Service, error) {
-	manifest := opts.MerchantManifest
-	if manifest == nil {
-		path := strings.TrimSpace(opts.MerchantManifestPath)
-		explicit := path != ""
-		if !explicit {
-			path = boot.DefaultMerchantConfigManifestPath
-		}
-		raw, err := os.ReadFile(path) // #nosec G304 -- path is opts.MerchantManifestPath (operator CLI flag) or a fixed conventional default
-		if os.IsNotExist(err) && !explicit {
-			log.Warn("pull-provider: snapshot credentials selected but no merchant manifest was supplied or found; no rail can be armed")
-			return nil, nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("pull-provider: read merchant manifest %s: %w", path, err)
-		}
-		overlays, err := boot.ReadMerchantManifestOverlays(opts.MerchantManifestOverlays)
-		if err != nil {
-			return nil, fmt.Errorf("pull-provider: %w", err)
-		}
-		manifest, err = boot.LoadMerchantConfigManifestWithOverlays(raw, overlays...)
-		if err != nil {
-			return nil, fmt.Errorf("pull-provider: merchant manifest %s: %w", path, err)
-		}
-	}
-	transitStore, err := merchantsecrets.BuildTransit(ctx, cfg)
-	if err == nil {
-		err = transitStore.Await(ctx, merchantsecrets.AwaitTimeout)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("pull-provider: %w", err)
-	}
-	transit := transitStore.SolanaTransit
-	plane := merchants.NewManifestSecretStore()
-	seeder := plane.Seeder()
-	directory, err := merchants.NewDirectoryService(database.DataPool())
-	if err != nil {
-		return nil, err
-	}
-	var selected *config.MerchantDeclaration
-	for name, mt := range manifest.Merchants {
-		owner, err := directory.GetBySlug(ctx, name)
-		if errors.Is(err, merchants.ErrMerchantNotFound) {
-			continue
-		}
-		if err != nil {
-			return nil, fmt.Errorf("pull-provider: resolve manifest merchant %q: %w", name, err)
-		}
-		if owner.ID != opts.MerchantID {
-			continue
-		}
-		if selected != nil {
-			return nil, fmt.Errorf("pull-provider: multiple manifest names resolve to merchant %s", opts.MerchantID)
-		}
-		selected = &mt
-	}
-	if selected == nil {
-		return nil, fmt.Errorf("pull-provider: manifest has no entry for merchant %s", opts.MerchantID)
-	}
-	if err := boot.SeedMerchantManifestSecretPlane(ctx, cfg, opts.MerchantID, *selected, seeder, transit); err != nil {
-		return nil, fmt.Errorf("pull-provider: seed merchant %s: %w", opts.MerchantID, err)
-	}
-	svc, err := merchants.NewService(database.DataPool(), plane, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))
-	if err != nil {
-		return nil, fmt.Errorf("pull-provider: build merchants service over the manifest plane: %w", err)
-	}
-	return svc, nil
 }
 
 func resolvePullPSPTarget(ctx context.Context, rt *pullProviderRuntime, pspStr string) (reconcile.Provider, reconcile.PSPBinding, error) {

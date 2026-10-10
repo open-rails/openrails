@@ -2,8 +2,6 @@ package billing
 
 import (
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // Rail is a gateway kind: the technology a PSP runs on.
@@ -21,7 +19,7 @@ const (
 type PSP struct {
 	ID PSPID `json:"id"`
 	// Key is the merchant's name for the PSP: the value price psp_links and
-	// checkout's payment.rail name it by. One live PSP holds a key.
+	// checkout's payment.rail name it by. A key names one PSP for good.
 	Key         string `json:"key"`
 	Rail        Rail   `json:"rail"`
 	Environment string `json:"environment"`
@@ -30,8 +28,7 @@ type PSP struct {
 	AccountID string `json:"account_id"`
 	// Archived PSPs take no new work and keep serving what they already
 	// carry until it drains.
-	Archived   bool       `json:"archived"`
-	ArchivedAt *time.Time `json:"archived_at"`
+	Archived bool `json:"archived"`
 	// OpenObligations counts the subscriptions and operations still bound to
 	// the PSP; an archived PSP with none is drained.
 	OpenObligations int64 `json:"open_obligations"`
@@ -39,8 +36,8 @@ type PSP struct {
 	// keys a browser uses: publishable_key (stripe), tokenization_key (nmi).
 	Settings    map[string]any           `json:"settings"`
 	Credentials map[string]PSPCredential `json:"credentials"`
-	// Revision counts configuration changes; an update names the revision it
-	// read.
+	// Revision advances with every change; an update may name the revision
+	// it read.
 	Revision  int64     `json:"revision"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -52,8 +49,6 @@ type PSPCredential struct {
 	// ValidatedAt is when the provider last accepted the credential; null
 	// when it was never checked.
 	ValidatedAt *time.Time `json:"validated_at"`
-	// RotationVersion counts the slot's rotations.
-	RotationVersion int `json:"rotation_version"`
 }
 
 // PSPListParams filters ListPSPs. Archived nil lists both states. IDs instead
@@ -67,10 +62,9 @@ type PSPListParams struct {
 }
 
 // CreatePSPParams arms a new PSP. Credentials are write-only and are checked
-// with the provider before anything is stored. Retrying with the same
-// OperationID and body returns the first result.
+// with the provider before anything is stored. Repeating a create that took
+// effect returns the PSP it made.
 type CreatePSPParams struct {
-	OperationID uuid.UUID         `json:"operation_id"`
 	Key         string            `json:"key"`
 	Rail        Rail              `json:"rail"`
 	AccountID   string            `json:"account_id"`
@@ -79,19 +73,19 @@ type CreatePSPParams struct {
 }
 
 // UpdatePSPParams changes a PSP's settings, rotates its credentials or
-// archives it. ExpectedRevision is the revision the caller read; a PSP changed
-// since is a conflict. Omitted credentials and settings keep their values.
+// archives it. ExpectedRevision, when set, is the revision the caller read: a
+// PSP changed since is refused with revision_mismatch. Omitted credentials and
+// settings keep their values.
 type UpdatePSPParams struct {
-	OperationID      uuid.UUID         `json:"operation_id"`
-	ExpectedRevision int64             `json:"expected_revision"`
+	ExpectedRevision *int64            `json:"expected_revision"`
 	Settings         map[string]any    `json:"settings"`
 	Credentials      map[string]string `json:"credentials"`
 	// RetireWebhookOverlap refuses the rotated-out webhook signing secret at
 	// once instead of at the end of its overlap.
 	RetireWebhookOverlap bool `json:"retire_webhook_overlap"`
-	// Archived retires the PSP, alone in its request: it takes no new work and
-	// serves its subscriptions until they drain; no provider call is made, and
-	// an archived PSP is never restored. The last active PSP on its rail
+	// Archived retires the PSP: it takes no new work and serves its
+	// subscriptions until they drain; no provider call is made, and an
+	// archived PSP is never restored. The last active PSP on its rail
 	// archives only with AllowLast, and new checkout on the rail stops.
 	Archived  bool `json:"archived"`
 	AllowLast bool `json:"allow_last"`

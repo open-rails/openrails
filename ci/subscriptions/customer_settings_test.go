@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -19,7 +18,7 @@ import (
 // default.
 func TestCustomerSettingsDocument(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	declareBillingPolicy(t, w, "enterprise")
 	a, b := w.newCustomer(), w.newCustomer()
 	net30 := billing.InvoiceProfile{NetTermsDays: 30, CollectionMethod: billing.CollectSendInvoice, PONumber: "PO-7",
@@ -81,7 +80,7 @@ func TestCustomerSettingsDocument(t *testing.T) {
 // the field and changes nothing.
 func TestCustomerSettingsRefusals(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	declareBillingPolicy(t, w, "enterprise")
 	a := w.newCustomer()
 	for _, refused := range []struct {
@@ -114,7 +113,7 @@ func TestCustomerSettingsRefusals(t *testing.T) {
 // machines carry no sign-in and are never asked.
 func TestCustomerSettingsStepUp(t *testing.T) {
 	t.Parallel()
-	w := newWorld(t)
+	w := newVaultWorld(t)
 	declareBillingPolicy(t, w, "enterprise")
 	c := w.newCustomer()
 	stale, fresh := w.auth.staleToken(t, "staff"), w.auth.token(t, "staff")
@@ -169,8 +168,8 @@ func declareBillingPolicy(t *testing.T, w *world, name string) {
 	got, err := client.GetMerchantConfiguration(t.Context())
 	require.NoError(t, err)
 	_, err = client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{
-		IdempotencyKey: uuid.NewString(), ExpectedRevision: &got.Revision,
-		Settings: &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{{Name: name, Kind: "outstanding_cap", OutstandingCapAmount: 100_000_000}}},
+		ExpectedRevision: &got.Revision,
+		Settings:         &billing.MerchantSettings{BillingPolicies: []billing.BillingPolicy{{Name: name, Kind: "outstanding_cap", OutstandingCapAmount: 100_000_000}}},
 	})
 	require.NoError(t, err)
 }

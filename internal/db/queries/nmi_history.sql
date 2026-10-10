@@ -1,13 +1,13 @@
 -- #1120: NMI's own authorization history, monthly per NMI PSP.
 
 -- name: ListNMIHistoryDuePSPs :many
--- The merchant's live NMI PSPs never read, or last read before due_before,
--- with that read.
+-- Of the merchant's live NMI PSPs (psp_ids), those never read, or last read
+-- before due_before, with that read.
 SELECT p.id, r.read_at
 FROM billing.psps p
 LEFT JOIN billing.nmi_history_reads r ON r.merchant_id = p.merchant_id AND r.psp_id = p.id
 WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND p.rail = 'nmi' AND p.archived = false
+  AND p.rail = 'nmi' AND p.id = ANY(sqlc.arg(psp_ids)::uuid[])
   AND (r.read_at IS NULL OR r.read_at < sqlc.arg(due_before)::timestamptz)
 ORDER BY p.id
 LIMIT sqlc.arg(row_limit)::int;

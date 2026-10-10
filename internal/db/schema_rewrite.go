@@ -83,7 +83,7 @@ func (r schemaRewriter) wrapDBTX(inner gen.DBTX) gen.DBTX {
 type schemaTx struct {
 	pgx.Tx
 	rw    schemaRewriter
-	river *riverBinding
+	river *runtimeBinding
 }
 
 func (t schemaTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
@@ -138,7 +138,7 @@ type Pool struct {
 	raw    *pgxpool.Pool
 	rw     schemaRewriter
 	schema string
-	river  *riverBinding
+	river  *runtimeBinding
 }
 
 // WrapPool wraps a raw pool for the configured schema; it is a pass-through for

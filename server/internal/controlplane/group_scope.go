@@ -32,10 +32,23 @@ func (c *ControlPlane) merchantGroup(ctx context.Context, mid billing.MerchantID
 	return iam.GroupByID(row.PermissionGroupID), nil
 }
 
-// directory is the merchant directory over the control plane's pool.
+// directory is the runtime's merchants service once bound (BindMerchants),
+// else a directory over the control plane's pool, which reads no
+// configuration.
 func (c *ControlPlane) directory() (*merchants.Service, error) {
 	if c == nil || c.pool == nil {
 		return nil, ErrNoControlPlane
 	}
+	if c.merchants != nil {
+		return c.merchants, nil
+	}
 	return merchants.NewDirectoryService(c.pool)
+}
+
+// BindMerchants gives the control plane the runtime's merchants service: the
+// merchant configuration display names are read from and written to.
+func (c *ControlPlane) BindMerchants(svc *merchants.Service) {
+	if c != nil {
+		c.merchants = svc
+	}
 }

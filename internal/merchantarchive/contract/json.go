@@ -86,29 +86,7 @@ func moneyStringValue(v any) bool {
 	n, err := strconv.ParseInt(s, 10, 64)
 	return err == nil && strconv.FormatInt(n, 10) == s
 }
-func booleanValue(v any) bool { _, ok := v.(bool); return ok }
-func booleanSetting(v any) bool {
-	if booleanValue(v) {
-		return true
-	}
-	s, ok := v.(string)
-	if !ok {
-		return false
-	}
-	_, err := strconv.ParseBool(s)
-	return err == nil
-}
-func integerSetting(v any) bool {
-	if integerValue(v) {
-		return true
-	}
-	s, ok := v.(string)
-	if !ok {
-		return false
-	}
-	_, err := strconv.ParseInt(s, 10, 64)
-	return err == nil
-}
+func booleanValue(v any) bool      { _, ok := v.(bool); return ok }
 func nullable(r jsonRule) jsonRule { return func(v any) bool { return v == nil || r(v) } }
 func object(fields map[string]jsonRule) jsonRule {
 	return func(v any) bool {
@@ -168,12 +146,9 @@ var priceBindingConfigurationJSON = object(map[string]jsonRule{
 })
 
 var budgetWindow = object(map[string]jsonRule{"key": textValue, "window_seconds": integerValue, "limit": integerValue, "currency": textValue})
-var profileJSON = object(map[string]jsonRule{"display_name": textValue, "logo_url": textValue, "from_email": textValue, "support_url": textValue, "signup_url": textValue})
 var contactsJSON = array(object(map[string]jsonRule{"name": textValue, "email": textValue}))
 var operatorResolutionJSON = object(map[string]jsonRule{"actor": textValue, "reason": textValue, "resolved_at": textValue, "step": textValue, "not_executed": booleanValue, "provider_reference": textValue})
 var invoiceLineJSON = array(object(map[string]jsonRule{"event_type": textValue, "amount": integerValue, "count": integerValue, "dimensions": dictionary(integerValue)}))
-var pspSettingsJSON = object(map[string]jsonRule{"publishable_key": textValue,
-	"tokenization_key": textValue, "tokenization_url": textValue, "card_entry": textValue, "rpc_provider": textValue, "recipient_wallet": textValue, "tokens": dictionary(object(map[string]jsonRule{"mint": textValue, "name": textValue}))})
 var rateJSON = object(map[string]jsonRule{
 	"model": textValue, "currency": textValue,
 	"flat": object(map[string]jsonRule{"amount": moneyStringValue}),
@@ -316,31 +291,19 @@ var jsonRules = map[string]jsonRule{
 		"declined": booleanValue, "response_code": integerValue, "localization_id": textValue, "provider_subscription_id": textValue,
 	})),
 
-	"custodians.settings":                        object(map[string]jsonRule{"public_api_key": textValue, "profile_id": textValue, "network_tokens": booleanSetting, "account_updater": booleanSetting, "account_updater_lookahead_days": integerSetting}),
-	"merchant_configuration_applications.result": object(map[string]jsonRule{"application_id": textValue, "revision": textValue, "replayed": booleanValue}),
-	"catalog_applications.result":                object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
-	"products.entitlements":                      array(textValue),
-	"subscriptions.entitlements_snapshot":        nullable(array(textValue)),
+	"catalog_applications.result":         object(map[string]jsonRule{"application_id": textValue, "catalog_id": textValue, "base_revision": integerValue, "applied_revision": integerValue, "replayed": booleanValue, "products_changed": integerValue, "prices_changed": integerValue}),
+	"products.entitlements":               array(textValue),
+	"subscriptions.entitlements_snapshot": nullable(array(textValue)),
 	// The model's legacy gateway_response column stores arbitrary subscription metadata.
 	"subscriptions.gateway_response":    metadataJSON,
 	"payments.entitlements_snapshot":    nullable(array(textValue)),
 	"payments.legacy_entitlement_hours": nullable(dictionary(integerValue)),
-	"billing_policies.policy": object(map[string]jsonRule{
-		"kind": textValue, "outstanding_cap_amount": integerValue, "spend_windows": array(budgetWindow), "bad_spend_windows": array(budgetWindow), "accrual_rate_cap_per_hour": integerValue, "accrual_rate_window_seconds": integerValue, "collection_threshold_amount": nullable(integerValue), "collection_cycle_boundary": func(v any) bool { return v == "" }, "delinquency_grace_days": nullable(integerValue), "delinquency_amount_floor": nullable(integerValue), "policy_currency": textValue,
-	}),
-	"catalog_meters.group_by": nullable(dictionary(textValue)),
-	"merchant_configurations.config": object(map[string]jsonRule{
-		"profile": profileJSON, "collection_threshold": nullable(integerValue), "monthly_floor": nullable(integerValue), "billing_period_boundary": textValue, "arrears_grace_days": nullable(integerValue), "arrears_delinquency_floor": nullable(integerValue), "delegated_invoker_wasted_spend_windows": array(budgetWindow), "alert_email": textValue, "reprice_notice_window_days": nullable(integerValue), "renewal_receipt_min_interval_hours": nullable(integerValue), "provider_refund_access": textValue,
-		"checkout_routing": array(object(map[string]jsonRule{"match": object(map[string]jsonRule{"currency": textValue, "product": textValue, "price": textValue, "mode": textValue, "country": textValue}), "prefer": array(textValue)})),
-		"dunning_policy":   object(map[string]jsonRule{"tiers": array(object(map[string]jsonRule{"max_cycle_hours": integerValue, "retry_after_hours": array(integerValue)})), "transient_retry_minutes": array(integerValue), "access_during_dunning": textValue}),
-	}),
-	"psps.settings":                    pspSettingsJSON,
-	"psps.signer":                      nullable(object(map[string]jsonRule{"mode": textValue, "key": textValue})),
-	"price_psp_bindings.configuration": priceBindingConfigurationJSON,
-	"catalog_rate_cards.filter":        nullable(dictionary(array(textValue))),
-	"catalog_rate_cards.allowance":     nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
-	"catalog_rate_cards.price":         rateJSON,
-	"invoices.line_items":              invoiceLineJSON, "invoices.money_movements": dictionary(integerValue), "invoices.tax": emptyObject, "invoices.billing_contacts": contactsJSON,
+	"catalog_meters.group_by":           nullable(dictionary(textValue)),
+	"price_psp_bindings.configuration":  priceBindingConfigurationJSON,
+	"catalog_rate_cards.filter":         nullable(dictionary(array(textValue))),
+	"catalog_rate_cards.allowance":      nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
+	"catalog_rate_cards.price":          rateJSON,
+	"invoices.line_items":               invoiceLineJSON, "invoices.money_movements": dictionary(integerValue), "invoices.tax": emptyObject, "invoices.billing_contacts": contactsJSON,
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),

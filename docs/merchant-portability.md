@@ -210,10 +210,11 @@ never provisions or rebinds the target implicitly.
    through your normal database recovery procedure.
 6. Validate customer balances, credit blocks, subscriptions, entitlements,
    catalog, and ledger totals through the ordinary destination client/API. Check
-   the retained provider/custodian references and restore destination credentials
-   separately only after the billing restore succeeds. Reapply any required
-   host configuration and manifest truth deliberately; a stale boot manifest can
-   overwrite restored configuration when the destination starts.
+   the retained provider/custodian references. The archive carries no merchant
+   configuration (settings, PSPs, credentials): copy the merchant's Vault
+   documents or manifest entry to the destination separately, only after the
+   billing restore succeeds. Its PSP and custodian identities are restored, so
+   the documents must name the same accounts.
 7. Switch application traffic and provider webhook destinations, then enable only
    the destination workers and arm the destination merchant
    (`openrails merchant arm --merchant NAME --by NAME` against the destination

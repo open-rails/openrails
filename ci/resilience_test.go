@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/hosttools"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
@@ -135,7 +134,7 @@ func checkoutPSP(t *testing.T, client *openrails.Client, rail string) (billing.P
 
 func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 	t.Helper()
-	return engine.Graph(rt).Runtime.MerchantSecretBackend.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
+	return engine.Graph(rt).Runtime.Vault.SolanaTransit.Sign(t.Context(), transitKey, []byte("e2e"))
 }
 
 // solanaSession sells a new one-time price, or a recurring one on the
@@ -283,7 +282,7 @@ func TestStoredSolanaIdentityServesWhileVaultIsDown(t *testing.T) {
 
 	fake.SetUp(true)
 	require.Eventually(t, func() bool { _, err := sign(t, second); return err == nil }, 30*time.Second, 50*time.Millisecond)
-	pub, err := engine.Graph(second).Runtime.MerchantSecretBackend.SolanaTransit.PublicKey(t.Context(), transitKey)
+	pub, err := engine.Graph(second).Runtime.Vault.SolanaTransit.PublicKey(t.Context(), transitKey)
 	require.NoError(t, err)
 	require.Equal(t, want, solanago.PublicKeyFromBytes(pub).String())
 }
@@ -307,7 +306,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 		return rt, client
 	}
 	solanaRows := func(account string) (active, archived int) {
-		rows, err := f.pool.Query(t.Context(), "SELECT archived FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND account_id = $1", account)
+		rows, err := f.pool.Query(t.Context(), "SELECT superseded_at IS NOT NULL FROM "+pgx.Identifier{f.schema, "psps"}.Sanitize()+" WHERE rail = 'solana' AND account_id = $1", account)
 		require.NoError(t, err)
 		defer rows.Close()
 		for rows.Next() {
@@ -358,7 +357,7 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	require.Equal(t, http.StatusUnprocessableEntity, solanaPayStatus(t, client, monthly), "a recurring Solana subscribe is refused")
 	signer := func(rt *openrails.Client) solanaint.Signer {
 		r := engine.Graph(rt).Runtime
-		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.MerchantSecretBackend.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))
+		return recurring.NewSignerFromPSPs(r.Merchants.Secrets(), r.Vault.SolanaTransit, r.DB, 0, config.ExpectedProviderEnvironment(true))
 	}
 	_, err = signer(second).PublicKey(merchant.WithID(t.Context(), mid), mid)
 	require.ErrorIs(t, err, vault.ErrSignerUnapproved, "recurring subscribe and prepare never sign for an unapproved identity")
@@ -368,27 +367,11 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	active, _ := solanaRows(rotated)
 	require.Zero(t, active, "an unapproved identity never receives money")
 
-	// Re-applying the PSP through the generic upsert (a manifest Overwrite)
-	// cannot clear a pending change: only the approval does.
-	database := engine.Graph(second).Runtime.DB
-	require.NoError(t, database.RunInMerchantScope(t.Context(), mid, "overwrite", func(ctx context.Context) error {
-		rows, err := database.Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
-		if err != nil {
-			return err
-		}
-		for _, row := range rows {
-			if row.Rail != "solana" {
-				continue
-			}
-			_, err := database.Gen(ctx).UpsertManifestPSP(ctx, gen.UpsertManifestPSPParams{ID: row.ID, MerchantID: row.MerchantID, Key: row.Key, Rail: row.Rail, Environment: row.Environment,
-				AccountID: row.AccountID, Archived: row.Archived, Settings: row.Settings, Signer: []byte(`{"mode":"vault_transit","key":"` + transitKey + `"}`), CustodianID: row.CustodianID})
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}))
-	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "a pending change survives an overwrite")
+	// Reloading the configuration cannot clear a pending change: only the
+	// approval does.
+	_, err = engine.Graph(second).Runtime.MerchantConfig.Reload(t.Context(), mid)
+	require.NoError(t, err)
+	require.ErrorIs(t, railConfig(second, mid), vault.ErrSignerUnapproved, "a pending change survives a reload")
 
 	// A database failure while checking the stored identity fails closed:
 	// nothing is provisioned or approved and the rail stays refused.
@@ -398,11 +381,11 @@ func TestTransitKeyChangeFailsClosedUntilApproved(t *testing.T) {
 	brokenDB, err := db.NewWithPGXPool(broken, f.schema)
 	require.NoError(t, err)
 	graph := engine.Graph(second).Runtime
-	check := &signeridentity.Transit{TransitClient: graph.MerchantSecretBackend.SolanaTransit, DB: brokenDB, Directory: graph.Merchants,
+	check := &signeridentity.Transit{TransitClient: graph.Vault.SolanaTransit, DB: brokenDB, Directory: graph.Merchants,
 		Slug: slug, Environment: config.ExpectedProviderEnvironment(true)}
 	_, err = check.PublicKey(t.Context(), transitKey)
 	require.ErrorIs(t, err, vault.ErrUnavailable, "an unreadable stored identity never accepts Vault's key")
-	_, err = signeridentity.Approve(t.Context(), brokenDB, graph.Merchants, graph.MerchantSecretBackend.SolanaTransit, mid, config.ExpectedProviderEnvironment(true), transitKey)
+	_, err = signeridentity.Approve(t.Context(), brokenDB, graph.Merchants, graph.Vault.SolanaTransit, mid, config.ExpectedProviderEnvironment(true), transitKey)
 	require.Error(t, err)
 	active, _ = solanaRows(rotated)
 	require.Zero(t, active)

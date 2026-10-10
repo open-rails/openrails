@@ -56,16 +56,16 @@ checkout-session events, `customer.subscription.updated/deleted`, `charge.succee
 `.automatically_updated`, and dispute open/close). Registration is skipped when the configured `public_billing_base_url` is not a public
 `https` URL, when the secret key is missing, or when provider writes are disabled.
 
-Signing-secret handling depends on credential custody:
+Signing-secret handling depends on where the configuration lives:
 
-- **Writable managed credentials** (`secret_backend: db` or `vault`): endpoint
-  creation stages the returned signing secret, then publishes its exact reference
-  with the provider revision. Only after publication can the old endpoint become
-  superseded. Failed publication preserves the previous active configuration.
-- **Snapshot or read-only credentials**: OpenRails cannot retain a newly minted
-  key durably, so it refuses endpoint creation. Register the endpoint once in the
-  Stripe Dashboard and supply its `whsec_…` in the externally managed credentials.
-  Reconciliation can manage the existing endpoint within provider-write policy.
+- **Vault**: endpoint creation writes the returned signing secret into the PSP's
+  document, keeping the outgoing one through the overlap. Only after that write
+  can the old endpoint become superseded; a failed write keeps the previous
+  configuration.
+- **A file**: OpenRails cannot retain a newly minted key, so it refuses endpoint
+  creation. Register the endpoint once in the Stripe Dashboard and declare its
+  `whsec_…`. Reconciliation can manage the existing endpoint within
+  provider-write policy.
 
 The endpoint's `api_version` is pinned to the same single constant that stamps the
 `Stripe-Version` header on every outbound call, so inbound event shapes and outbound

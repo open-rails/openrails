@@ -98,6 +98,9 @@ func ParseSettings(kind string, settings map[string]any) (Settings, error) {
 			}
 			switch slot.Name {
 			case SettingAccountUpdaterLookaheadDays:
+				if v > MaxAccountUpdaterLookaheadDays {
+					return Settings{}, fmt.Errorf("custodian %s: %s must be at most %d", d.Kind, slot.Name, MaxAccountUpdaterLookaheadDays)
+				}
 				out.AccountUpdaterLookaheadDays = v
 			}
 		}

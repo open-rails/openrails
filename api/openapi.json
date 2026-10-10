@@ -132,7 +132,6 @@
         "x-openrails-auth": "public",
         "x-openrails-mounted-when": "solana",
         "x-openrails-errors": [
-          "credential_custody_transition_required",
           "resource_conflict"
         ],
         "x-openrails-error-sets": [
@@ -185,7 +184,6 @@
           "card_not_saved",
           "checkout_session_not_found",
           "checkout_session_unavailable",
-          "credential_custody_transition_required",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -262,7 +260,6 @@
           "checkout_session_expired",
           "checkout_session_not_found",
           "checkout_session_unavailable",
-          "credential_custody_transition_required",
           "customer_proof_required",
           "idempotency_key_reused",
           "insufficient_funds",
@@ -473,7 +470,6 @@
           "card_not_saved",
           "checkout_session_not_found",
           "checkout_session_unavailable",
-          "credential_custody_transition_required",
           "idempotency_key_reused",
           "insufficient_funds",
           "invalid_param",
@@ -549,7 +545,6 @@
           "checkout_session_expired",
           "checkout_session_not_found",
           "checkout_session_unavailable",
-          "credential_custody_transition_required",
           "customer_action_required",
           "customer_proof_required",
           "idempotency_key_reused",
@@ -7989,7 +7984,6 @@
           "card_declined",
           "card_not_saved",
           "card_requires_https",
-          "credential_custody_transition_required",
           "invalid_param",
           "payment_duplicate_refused",
           "payment_provider_rejected",
@@ -8061,7 +8055,6 @@
           "card_declined",
           "card_not_saved",
           "card_requires_https",
-          "credential_custody_transition_required",
           "invalid_param",
           "payment_method_update_failed",
           "payment_method_update_retry_required",
@@ -8595,16 +8588,14 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
-          "credential_custody_transition_required",
-          "credential_operation_conflict",
-          "credential_source_read_only",
-          "credential_store_read_only",
           "invalid_param",
           "psp_claim_requires_proof",
           "psp_credentials_rejected",
           "psp_exists",
           "psp_key_taken",
+          "revision_mismatch",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -8705,15 +8696,13 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
-          "credential_custody_transition_required",
-          "credential_operation_conflict",
-          "credential_source_read_only",
-          "credential_store_read_only",
           "invalid_param",
           "psp_credentials_rejected",
           "psp_last_active",
           "psp_not_found",
+          "revision_mismatch",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
@@ -8861,7 +8850,6 @@
         "x-openrails-auth": "provider_signature",
         "x-openrails-errors": [
           "authentication_required",
-          "credential_custody_transition_required",
           "invalid_param",
           "resource_access_denied",
           "service_unavailable",
@@ -8909,15 +8897,6 @@
         "tags": [
           "merchant_config"
         ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -8933,7 +8912,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MerchantConfigurationReceipt"
+                  "$ref": "#/components/schemas/MerchantConfigurationState"
                 }
               }
             }
@@ -8950,11 +8929,11 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
-          "idempotency_key_required",
-          "idempotency_key_reused",
           "invalid_param",
-          "merchant_configuration_revision_conflict"
+          "revision_mismatch",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -9105,6 +9084,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "service_unavailable",
           "webhook_invalid"
@@ -9146,6 +9126,7 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
           "resource_not_found",
@@ -9201,9 +9182,9 @@
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "MerchantConfig",
         "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "merchant_config_edits",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_conflict",
           "resource_not_found",
           "service_unavailable",
           "webhook_invalid"
@@ -12959,9 +12940,6 @@
       "CreatePSPParams": {
         "type": "object",
         "properties": {
-          "operation_id": {
-            "type": "string"
-          },
           "key": {
             "type": "string"
           },
@@ -15577,26 +15555,11 @@
           "claim"
         ]
       },
-      "MerchantConfigurationReceipt": {
-        "type": "object",
-        "properties": {
-          "revision": {
-            "type": "string"
-          },
-          "replayed": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "revision",
-          "replayed"
-        ]
-      },
       "MerchantConfigurationState": {
         "type": "object",
         "properties": {
           "revision": {
-            "type": "string"
+            "type": "integer"
           },
           "display_name": {
             "type": "string"
@@ -15618,9 +15581,6 @@
       "MerchantProfile": {
         "type": "object",
         "properties": {
-          "display_name": {
-            "type": "string"
-          },
           "logo_url": {
             "type": "string"
           },
@@ -17105,17 +17065,6 @@
           "archived": {
             "type": "boolean"
           },
-          "archived_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "open_obligations": {
             "type": "integer"
           },
@@ -17162,7 +17111,6 @@
           "environment",
           "account_id",
           "archived",
-          "archived_at",
           "open_obligations",
           "settings",
           "credentials",
@@ -17187,15 +17135,11 @@
                 "type": "null"
               }
             ]
-          },
-          "rotation_version": {
-            "type": "integer"
           }
         },
         "required": [
           "configured",
-          "validated_at",
-          "rotation_version"
+          "validated_at"
         ]
       },
       "PSPLinkState": {
@@ -21389,7 +21333,7 @@
           "expected_revision": {
             "oneOf": [
               {
-                "type": "string"
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -21407,11 +21351,15 @@
       "UpdatePSPParams": {
         "type": "object",
         "properties": {
-          "operation_id": {
-            "type": "string"
-          },
           "expected_revision": {
-            "type": "integer"
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "settings": {
             "oneOf": [
@@ -22247,11 +22195,6 @@
       "type": "authorization_error",
       "meaning": "The checkout session is not available to this caller."
     },
-    "credential_custody_transition_required": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "Credential custody differs from the published backend."
-    },
     "credential_expired": {
       "status": 401,
       "type": "authentication_error",
@@ -22262,25 +22205,10 @@
       "type": "authentication_error",
       "meaning": "The credential changed identity during the request."
     },
-    "credential_operation_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The credential operation conflicts with the published revision."
-    },
     "credential_revoked": {
       "status": 401,
       "type": "authentication_error",
       "meaning": "The credential or its session was revoked."
-    },
-    "credential_source_read_only": {
-      "status": 405,
-      "type": "invalid_request_error",
-      "meaning": "The provider credential source has no writable custody."
-    },
-    "credential_store_read_only": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The credential store is read-only."
     },
     "credit_grant_held": {
       "status": 409,
@@ -22527,10 +22455,10 @@
       "type": "invalid_request_error",
       "meaning": "The selected merchant is not the one the credential, deployment or request is bound to."
     },
-    "merchant_configuration_revision_conflict": {
+    "merchant_config_read_only": {
       "status": 409,
       "type": "invalid_request_error",
-      "meaning": "The merchant configuration changed; read its revision before applying."
+      "meaning": "The merchant's configuration is read from a file; change the file."
     },
     "merchant_context_mismatch": {
       "status": 403,

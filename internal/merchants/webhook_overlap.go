@@ -1,18 +1,15 @@
 package merchants
 
 import (
-	"strings"
 	"time"
 
 	"github.com/jonboulle/clockwork"
-
-	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // SEC-29: a rotated-out webhook signing secret verifies only until an explicit
-// expiry. Rotation records it; a declared (snapshot) previous secret must carry
-// the same setting. No expiry, or an unparsable one, means the old secret is
-// refused.
+// expiry, the PSP's webhook_overlap_expires_at setting. Rotation records it; a
+// declared previous secret must carry it too. No expiry, or an unparsable one,
+// means the old secret is refused.
 const (
 	DefaultWebhookSecretOverlap = 24 * time.Hour
 	MaxWebhookSecretOverlap     = 7 * 24 * time.Hour
@@ -50,26 +47,10 @@ func (s *Service) overlapWindow() time.Duration {
 	return s.webhookSecretOverlap
 }
 
-// webhookOverlapExpiry reads the published expiry, else the declared setting.
-func webhookOverlapExpiry(row gen.BillingPsp) time.Time {
-	if row.WebhookOverlapExpiresAt != nil {
-		return row.WebhookOverlapExpiresAt.UTC()
-	}
-	raw, _ := rowSettings(row)[WebhookOverlapExpiresKey].(string)
-	at, err := time.Parse(time.RFC3339, strings.TrimSpace(raw))
-	if err != nil {
-		return time.Time{}
-	}
-	return at.UTC()
-}
-
-// previousWebhookRef returns the previous secret's reference only while its
-// overlap is open.
-func (s *Service) previousWebhookRef(scope pspSecretScope) (SecretRef, error) {
-	if scope.webhookOverlapUntil.IsZero() || !s.now().Before(scope.webhookOverlapUntil) {
-		return SecretRef{}, nil
-	}
-	return scope.secretRef("webhook_signing_secret_previous")
+// overlapOpen reports whether the PSP's rotated-out webhook secret still
+// verifies.
+func (s *Service) overlapOpen(scope PSPScope) bool {
+	return !scope.WebhookOverlapUntil.IsZero() && s.now().Before(scope.WebhookOverlapUntil)
 }
 
 // hasWebhookOverlap reports whether the rail keeps a previous webhook secret.

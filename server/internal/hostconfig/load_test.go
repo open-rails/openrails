@@ -55,8 +55,8 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	unsetenv(t, "DB_URL")
 	for key, value := range map[string]string{
 		"DB_HOST": "  example.com  ", "DB_PORT": "5432", "DB_DATABASE": "openrails", "DB_USERNAME": "  user  ", "DB_PASSWORD": "  pass  ", "DB_SQL_TRACE": "true", "DATABASE_SCHEMA": "  Custom_Billing  ", "DATABASE_RIVER_SCHEMA": "jobs",
-		"VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root",
-		"SECRET_BACKEND": "db", "ENCRYPTION_MASTER_KEY": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=", "EMAIL_SMTP_HOST": "smtp.sendgrid.net", "EMAIL_SMTP_PORT": "587", "EMAIL_SMTP_USERNAME": "apikey", "EMAIL_SMTP_PASSWORD": "SG.test-key", "EMAIL_SMTP_FROM": "Billing <noreply@billing.example>",
+		"VAULT_ADDR": "http://127.0.0.1:8200", "VAULT_TOKEN": "root", "VAULT_KV_MOUNT": "kv",
+		"EMAIL_SMTP_HOST": "smtp.sendgrid.net", "EMAIL_SMTP_PORT": "587", "EMAIL_SMTP_USERNAME": "apikey", "EMAIL_SMTP_PASSWORD": "SG.test-key", "EMAIL_SMTP_FROM": "Billing <noreply@billing.example>",
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
 		"TRUSTED_PROXIES":       `["10.0.0.0/8"]`,
 		"AUTHKIT_ACTIVE_KEY_ID": "kid-1", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----", "AUTHKIT_PUBLIC_KEYS": `{"kid-0":"pem"}`,
@@ -73,7 +73,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.Equal(t, "postgresql://user:pass@example.com:5432/openrails?sslmode=require", cfg.DB.URL, "parts without db.sslmode require TLS")
 	require.NotNil(t, cfg.Vault, "a VAULT_* setting declares the connection")
 	require.Equal(t, "http://127.0.0.1:8200", cfg.Vault.Address)
-	require.Equal(t, billing.SecretBackendDB, billing.SecretStoreBackend(cfg.Config))
+	require.Equal(t, "kv", billing.MerchantConfigKVMount(cfg.Config))
 	require.Equal(t, billing.SMTPConfig{Host: "smtp.sendgrid.net", Port: 587, Username: "apikey", Password: "SG.test-key",
 		From: billing.EmailAddress{Name: "Billing", Address: "noreply@billing.example"}}, *cfg.SMTP)
 	require.True(t, billing.IsLimitedMode(cfg.Config))
@@ -108,7 +108,8 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 
 func TestEnvKeyRouting(t *testing.T) {
 	for env, key := range map[string]string{
-		"SECRET_BACKEND":                    "secret_backend", // #710: multi-word top-level scalar
+		"PUBLIC_BILLING_BASE_URL":           "public_billing_base_url", // #710: multi-word top-level scalar
+		"SECRET_BACKEND":                    "",
 		"CATALOG_EDITS":                     "",
 		"DB_URL":                            "db.url",
 		"db_url":                            "db.url",

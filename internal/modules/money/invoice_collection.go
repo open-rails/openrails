@@ -378,7 +378,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		// The account the charge goes through: the card's own PSP, or the one
 		// PSP of its rail that reaches its custodian.
-		psp, err := charge.RoutePSP(ctx, q, *method)
+		psp, err := charge.RoutePSP(ctx, charge.CustodyOf(s.db), *method)
 		if err != nil {
 			return fmt.Errorf("route invoice %s collection: %w", invoice.ID, err)
 		}
@@ -404,7 +404,7 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		}
 		var custody *charge.HyperSwitchBinding
 		if method.Custodian == models.CustodianHyperSwitch {
-			binding, err := collectionHyperSwitchBinding(ctx, q, *method, psp, s.hyperSwitchDeployment)
+			binding, err := charge.FreezeHyperSwitchBinding(ctx, q, charge.CustodyOf(s.db), *method, psp, s.hyperSwitchDeployment)
 			if err != nil {
 				return err
 			}
@@ -527,7 +527,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 		return nil, ErrCustomerPaymentUnsupported
 	}
 	if opts.initiator == charge.InitiatorMerchant {
-		if err := requireCollectionAgreement(ctx, q, method, invoice.Currency); err != nil {
+		if err := requireCollectionAgreement(ctx, q, charge.CustodyOf(s.db), method, invoice.Currency); err != nil {
 			if opts.manual && errors.Is(err, charge.ErrAgreementRequired) {
 				return nil, fmt.Errorf("%w: %w", ErrDefaultPaymentMethodInvalid, err)
 			}
@@ -541,8 +541,8 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 // currency on a card without the customer's active unscheduled mandate for it
 // on the account that charges it (#1166): never given, or waiting for consent
 // after the card was reissued under another brand.
-func requireCollectionAgreement(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, currency string) error {
-	psp, err := charge.RoutePSP(ctx, q, method)
+func requireCollectionAgreement(ctx context.Context, q *gen.Queries, custody charge.Custody, method gen.BillingPaymentMethod, currency string) error {
+	psp, err := charge.RoutePSP(ctx, custody, method)
 	if err != nil {
 		return err
 	}

@@ -11,62 +11,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const deleteDeclarativeBillingPolicyBindings = `-- name: DeleteDeclarativeBillingPolicyBindings :exec
-DELETE FROM billing.billing_policy_bindings WHERE merchant_id = $1 AND customer_id IS NULL
-`
-
-func (q *Queries) DeleteDeclarativeBillingPolicyBindings(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteDeclarativeBillingPolicyBindings, merchantID)
-	return err
-}
-
-const deleteUndeclaredBillingPolicies = `-- name: DeleteUndeclaredBillingPolicies :exec
-DELETE FROM billing.billing_policies WHERE merchant_id = $1
-AND NOT (name = ANY(COALESCE($2::text[], '{}')))
-`
-
-type DeleteUndeclaredBillingPoliciesParams struct {
-	MerchantID uuid.UUID
-	Names      []string
-}
-
-func (q *Queries) DeleteUndeclaredBillingPolicies(ctx context.Context, arg DeleteUndeclaredBillingPoliciesParams) error {
-	_, err := q.db.Exec(ctx, deleteUndeclaredBillingPolicies, arg.MerchantID, arg.Names)
-	return err
-}
-
-const findRemovedCustomerPolicies = `-- name: FindRemovedCustomerPolicies :many
-SELECT DISTINCT policy_name FROM billing.billing_policy_bindings
-WHERE merchant_id = $1 AND customer_id IS NOT NULL
-AND NOT (policy_name = ANY(COALESCE($2::text[], '{}')))
-ORDER BY policy_name LIMIT 1
-`
-
-type FindRemovedCustomerPoliciesParams struct {
-	MerchantID uuid.UUID
-	Names      []string
-}
-
-func (q *Queries) FindRemovedCustomerPolicies(ctx context.Context, arg FindRemovedCustomerPoliciesParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, findRemovedCustomerPolicies, arg.MerchantID, arg.Names)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []string
-	for rows.Next() {
-		var policy_name string
-		if err := rows.Scan(&policy_name); err != nil {
-			return nil, err
-		}
-		items = append(items, policy_name)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const lockMerchantSettings = `-- name: LockMerchantSettings :one
 SELECT id FROM billing.merchants WHERE id = $1 FOR UPDATE
 `

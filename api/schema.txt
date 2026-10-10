@@ -49,6 +49,7 @@ migration 0045_fx_rates.up.sql sha256:ee2d349edc70458abfb37b11d5717ac0d6b66c899f
 migration 0046_drop_spend_delegations.up.sql sha256:d4cc778cfc0b467450c9480bad97bbaddeeb0100690bd918985c40fe29df37e0
 migration 0047_fx_rates_in_memory.up.sql sha256:d0d8e5e0ed5edff4e6508fac80dcc21dfdea09f045f4ad52b2d7be03dd841eeb
 migration 0048_drop_rate_windows.up.sql sha256:01a6fd529836c146961ab75ce3c57f8ceb83703a2e58faa4edae80dad260d90d
+migration 0049_merchant_config_out_of_postgres.up.sql sha256:c6a990f2d6fc2d5423f6cc1cdc905e265626a2ee06c9e1e896731183915c3ed9
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -141,40 +142,6 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   index CREATE INDEX admission_operations_customer_id_currency_expires_at_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, currency, expires_at) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX admission_operations_pkey ON ONLY billing.admission_operations USING btree (merchant_id, request_id, admitted_at)
   trigger CREATE TRIGGER immutable_admission_operation_facts BEFORE DELETE OR UPDATE ON billing.admission_operations FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'released_at')
-
-table billing.billing_policies
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column name text NOT NULL
-  column policy jsonb NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint billing_policies_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint billing_policies_name_key UNIQUE (merchant_id, name)
-  constraint billing_policies_pkey PRIMARY KEY (merchant_id, id)
-  index CREATE UNIQUE INDEX billing_policies_name_key ON billing.billing_policies USING btree (merchant_id, name)
-  index CREATE UNIQUE INDEX billing_policies_pkey ON billing.billing_policies USING btree (merchant_id, id)
-  trigger CREATE TRIGGER lock_merchant_billing_policy BEFORE INSERT OR DELETE OR UPDATE ON billing.billing_policies FOR EACH ROW EXECUTE FUNCTION billing.lock_merchant_configuration_write()
-
-table billing.billing_policy_bindings
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column customer_id uuid
-  column tier text
-  column policy_name text NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint billing_policy_bindings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint billing_policy_bindings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint billing_policy_bindings_pkey PRIMARY KEY (merchant_id, id)
-  constraint billing_policy_bindings_policy_name_fkey FOREIGN KEY (merchant_id, policy_name) REFERENCES billing.billing_policies(merchant_id, name) ON DELETE RESTRICT
-  constraint billing_policy_bindings_rung_check CHECK (((customer_id IS NULL) OR (tier IS NULL)))
-  index CREATE UNIQUE INDEX billing_policy_bindings_customer_id_key ON billing.billing_policy_bindings USING btree (merchant_id, customer_id) WHERE (customer_id IS NOT NULL)
-  index CREATE UNIQUE INDEX billing_policy_bindings_merchant_id_key ON billing.billing_policy_bindings USING btree (merchant_id) WHERE ((customer_id IS NULL) AND (tier IS NULL))
-  index CREATE UNIQUE INDEX billing_policy_bindings_pkey ON billing.billing_policy_bindings USING btree (merchant_id, id)
-  index CREATE INDEX billing_policy_bindings_policy_name_idx ON billing.billing_policy_bindings USING btree (merchant_id, policy_name)
-  index CREATE UNIQUE INDEX billing_policy_bindings_tier_key ON billing.billing_policy_bindings USING btree (merchant_id, tier) WHERE ((customer_id IS NULL) AND (tier IS NOT NULL))
-  trigger CREATE TRIGGER lock_merchant_policy_binding BEFORE INSERT OR DELETE OR UPDATE ON billing.billing_policy_bindings FOR EACH ROW EXECUTE FUNCTION billing.lock_merchant_configuration_write()
 
 table billing.book_identity
   column singleton boolean NOT NULL
@@ -486,24 +453,6 @@ table billing.cost_resolutions
   index CREATE UNIQUE INDEX cost_resolutions_pkey ON billing.cost_resolutions USING btree (merchant_id, operation_id)
   trigger CREATE TRIGGER immutable_cost_resolutions BEFORE DELETE OR UPDATE ON billing.cost_resolutions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
-table billing.credential_publications
-  column merchant_id uuid NOT NULL
-  column operation_id uuid NOT NULL
-  column rail text NOT NULL
-  column environment text NOT NULL
-  column account_id text NOT NULL
-  column expected_revision bigint NOT NULL
-  column request_metadata jsonb NOT NULL
-  column state text NOT NULL DEFAULT 'staging'::text
-  column result jsonb
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column published_at timestamp with time zone
-  constraint credential_publications_expected_revision_check CHECK ((expected_revision >= 0))
-  constraint credential_publications_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint credential_publications_pkey PRIMARY KEY (merchant_id, operation_id)
-  constraint credential_publications_state_check CHECK ((state = ANY (ARRAY['staging'::text, 'published'::text])))
-  index CREATE UNIQUE INDEX credential_publications_pkey ON billing.credential_publications USING btree (merchant_id, operation_id)
-
 table billing.custodians
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -511,9 +460,6 @@ table billing.custodians
   column kind text NOT NULL
   column environment text NOT NULL
   column account_id text NOT NULL
-  column settings jsonb NOT NULL
-  column credential_versions jsonb NOT NULL DEFAULT '{}'::jsonb
-  column archived boolean NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   constraint custodians_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text])))
@@ -662,8 +608,11 @@ table billing.customers
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column last_seen_at timestamp with time zone NOT NULL DEFAULT now()
   column access_version bigint NOT NULL DEFAULT 0
+  column billing_policy text
+  constraint customers_billing_policy_check CHECK ((billing_policy <> ''::text))
   constraint customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint customers_pkey PRIMARY KEY (merchant_id, id)
+  index CREATE INDEX customers_billing_policy_idx ON billing.customers USING btree (merchant_id, billing_policy) WHERE (billing_policy IS NOT NULL)
   index CREATE INDEX customers_id_idx ON billing.customers USING btree (id, merchant_id)
   index CREATE UNIQUE INDEX customers_pkey ON billing.customers USING btree (merchant_id, id)
 
@@ -1139,39 +1088,6 @@ table billing.merchant_api_host_claims
   constraint merchant_api_host_claims_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX merchant_api_host_claims_pkey ON billing.merchant_api_host_claims USING btree (merchant_id)
 
-table billing.merchant_configuration_applications
-  column merchant_id uuid NOT NULL
-  column application_id text NOT NULL
-  column request_sha256 bytea NOT NULL
-  column result jsonb NOT NULL
-  column applied_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_configuration_applications_application_id_check CHECK (((length(application_id) >= 1) AND (length(application_id) <= 128)))
-  constraint merchant_configuration_applications_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_configuration_applications_pkey PRIMARY KEY (merchant_id, application_id)
-  constraint merchant_configuration_applications_request_sha256_check CHECK ((octet_length(request_sha256) = 32))
-  constraint merchant_configuration_applications_result_check CHECK ((octet_length((result)::text) <= 16384))
-  index CREATE UNIQUE INDEX merchant_configuration_applications_pkey ON billing.merchant_configuration_applications USING btree (merchant_id, application_id)
-  trigger CREATE TRIGGER immutable_merchant_configuration_application BEFORE DELETE OR UPDATE ON billing.merchant_configuration_applications FOR EACH ROW EXECUTE FUNCTION billing.guard_catalog_application_receipt()
-
-table billing.merchant_configurations
-  column merchant_id uuid NOT NULL
-  column config jsonb NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_configurations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_configurations_pkey PRIMARY KEY (merchant_id)
-  index CREATE UNIQUE INDEX merchant_configurations_pkey ON billing.merchant_configurations USING btree (merchant_id)
-  trigger CREATE TRIGGER lock_merchant_configuration BEFORE INSERT OR DELETE OR UPDATE ON billing.merchant_configurations FOR EACH ROW EXECUTE FUNCTION billing.lock_merchant_configuration_write()
-
-table billing.merchant_deks
-  column merchant_id uuid NOT NULL
-  column wrapped_dek bytea NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_deks_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_deks_pkey PRIMARY KEY (merchant_id)
-  index CREATE UNIQUE INDEX merchant_deks_pkey ON billing.merchant_deks USING btree (merchant_id)
-
 table billing.merchant_destructive_policy
   column merchant_id uuid NOT NULL
   column destructive_actions_enabled boolean NOT NULL DEFAULT true
@@ -1184,17 +1100,6 @@ table billing.merchant_destructive_policy
   constraint merchant_destructive_policy_pkey PRIMARY KEY (merchant_id)
   index CREATE UNIQUE INDEX merchant_destructive_policy_pkey ON billing.merchant_destructive_policy USING btree (merchant_id)
 
-table billing.merchant_secrets
-  column merchant_id uuid NOT NULL
-  column name text NOT NULL
-  column value text NOT NULL
-  column version integer NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_secrets_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_secrets_pkey PRIMARY KEY (merchant_id, name)
-  index CREATE UNIQUE INDEX merchant_secrets_pkey ON billing.merchant_secrets USING btree (merchant_id, name)
-
 table billing.merchant_slug_aliases
   column slug text NOT NULL
   column merchant_id uuid NOT NULL
@@ -1204,23 +1109,6 @@ table billing.merchant_slug_aliases
   constraint merchant_slug_aliases_pkey PRIMARY KEY (slug)
   index CREATE INDEX merchant_slug_aliases_merchant_id_idx ON billing.merchant_slug_aliases USING btree (merchant_id)
   index CREATE UNIQUE INDEX merchant_slug_aliases_pkey ON billing.merchant_slug_aliases USING btree (slug)
-
-table billing.merchant_webhooks
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column name text
-  column destination_host text NOT NULL
-  column secret_version integer NOT NULL
-  column format text NOT NULL
-  column enabled boolean NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint merchant_webhooks_format_check CHECK ((format = ANY (ARRAY['generic'::text, 'discord'::text, 'slack'::text])))
-  constraint merchant_webhooks_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint merchant_webhooks_name_check CHECK ((name <> ''::text))
-  constraint merchant_webhooks_pkey PRIMARY KEY (merchant_id, id)
-  constraint merchant_webhooks_secret_version_check CHECK ((secret_version > 0))
-  index CREATE UNIQUE INDEX merchant_webhooks_pkey ON billing.merchant_webhooks USING btree (merchant_id, id)
 
 table billing.merchant_write_posture
   column merchant_id uuid NOT NULL
@@ -1243,7 +1131,6 @@ table billing.merchants
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column deleted_at timestamp with time zone
-  column display_name text
   column api_host text
   column retired_at timestamp with time zone
   column group_release_completed_at timestamp with time zone
@@ -2240,38 +2127,25 @@ table billing.psps
   column rail text NOT NULL
   column environment text NOT NULL
   column account_id text NOT NULL
-  column custodian_id uuid
-  column settings jsonb NOT NULL DEFAULT '{}'::jsonb
-  column signer jsonb
-  column credential_custody text
-  column credential_refs jsonb NOT NULL DEFAULT '{}'::jsonb
-  column credential_versions jsonb NOT NULL DEFAULT '{}'::jsonb
-  column retired_credentials text[] NOT NULL DEFAULT '{}'::text[]
   column credentials_validated_at timestamp with time zone
   column webhook_endpoint_id text
-  column webhook_overlap_expires_at timestamp with time zone
   column pending_signer_public_key text
-  column revision bigint NOT NULL DEFAULT 0
-  column archived boolean NOT NULL DEFAULT false
-  column archived_at timestamp with time zone
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column credential_fingerprint text
   column credential_duplicate_at timestamp with time zone
-  constraint psps_archived_at_check CHECK ((archived = (archived_at IS NOT NULL)))
+  column superseded_at timestamp with time zone
   constraint psps_credential_fingerprint_check CHECK ((credential_fingerprint ~ '^[0-9a-f]{64}$'::text))
-  constraint psps_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
   constraint psps_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text])))
   constraint psps_id_rail_key UNIQUE (merchant_id, id, rail)
   constraint psps_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint psps_nonempty_check CHECK (((btrim(key) <> ''::text) AND (btrim(account_id) <> ''::text)))
   constraint psps_pkey PRIMARY KEY (merchant_id, id)
   constraint psps_rail_check CHECK ((rail = ANY (ARRAY['nmi'::text, 'ccbill'::text, 'stripe'::text, 'solana'::text])))
-  index CREATE INDEX psps_custodian_id_idx ON billing.psps USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL)
-  index CREATE INDEX psps_environment_archived_rail_created_at_id_idx ON billing.psps USING btree (merchant_id, environment, archived, rail, created_at DESC, id DESC)
+  index CREATE INDEX psps_environment_rail_created_at_id_idx ON billing.psps USING btree (merchant_id, environment, rail, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX psps_id_rail_key ON billing.psps USING btree (merchant_id, id, rail)
-  index CREATE UNIQUE INDEX psps_live_credential_fingerprint_key ON billing.psps USING btree (rail, environment, credential_fingerprint) WHERE ((NOT archived) AND (credential_duplicate_at IS NULL) AND (credential_fingerprint IS NOT NULL))
-  index CREATE UNIQUE INDEX psps_live_key_key ON billing.psps USING btree (merchant_id, environment, lower(key)) WHERE (NOT archived)
+  index CREATE UNIQUE INDEX psps_key_key ON billing.psps USING btree (merchant_id, lower(key)) WHERE (superseded_at IS NULL)
+  index CREATE UNIQUE INDEX psps_live_credential_fingerprint_key ON billing.psps USING btree (rail, environment, credential_fingerprint) WHERE ((credential_duplicate_at IS NULL) AND (credential_fingerprint IS NOT NULL))
   index CREATE UNIQUE INDEX psps_pkey ON billing.psps USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psps_rail_environment_account_id_key ON billing.psps USING btree (rail, environment, account_id)
 
@@ -3222,8 +3096,6 @@ function billing.guard_billing_restore_receipt()
                     'account_updater_batches',
                     'admission_denials_hourly',
                     'admission_operations',
-                    'billing_policies',
-                    'billing_policy_bindings',
                     'card_attempt_failures',
                     'catalog_applications',
                     'catalog_field_owners',
@@ -3236,7 +3108,6 @@ function billing.guard_billing_restore_receipt()
                     'cost_qualifications',
                     'cost_refusals',
                     'cost_resolutions',
-                    'credential_publications',
                     'custodians',
                     'custody_migrations',
                     'customer_delinquency',
@@ -3258,12 +3129,7 @@ function billing.guard_billing_restore_receipt()
                     'ledger_transfers',
                     'maintenance_runs',
                     'mandates',
-                    'merchant_configuration_applications',
-                    'merchant_configurations',
-                    'merchant_deks',
                     'merchant_destructive_policy',
-                    'merchant_secrets',
-                    'merchant_webhooks',
                     'metered_rating_watermarks',
                     'money_settings',
                     'nmi_bulk_checkpoints',
@@ -3586,19 +3452,6 @@ function billing.ledger_transfers_apply_counters()
       RETURN NEW;
   END;
   $function$
-
-function billing.lock_merchant_configuration_write()
-  CREATE OR REPLACE FUNCTION billing.lock_merchant_configuration_write()
-   RETURNS trigger
-   LANGUAGE plpgsql
-  AS $function$
-  DECLARE mid uuid;
-  BEGIN
-   IF TG_OP='DELETE' THEN mid:=OLD.merchant_id; ELSE mid:=NEW.merchant_id; END IF;
-   PERFORM 1 FROM billing.merchants WHERE id=mid FOR UPDATE;
-   IF NOT FOUND THEN RAISE EXCEPTION 'merchant metadata requires a merchant' USING ERRCODE='P0002'; END IF;
-   IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
-  END $function$
 
 function billing.month_partitions(name)
   CREATE OR REPLACE FUNCTION billing.month_partitions(p_table name)

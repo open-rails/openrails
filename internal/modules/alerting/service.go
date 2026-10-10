@@ -4,13 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
-	"net/url"
+	"slices"
 	"strings"
 	"time"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/google/uuid"
 	"github.com/jonboulle/clockwork"
@@ -18,15 +14,14 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // Deps wires the alerting service.
 type Deps struct {
-	Secrets merchants.MerchantSecretStore
-	DB      *db.DB
+	DB *db.DB
 	// Email is the outbound alert-email sender seam (may be nil — email channel
 	// then fails soft with a note in the delivery record).
 	Email EmailSender
@@ -42,7 +37,7 @@ type Deps struct {
 	WebhookBackoff time.Duration
 }
 
-// Service owns merchant notifications and encrypted outbound webhook destinations.
+// Service owns merchant notifications and the merchant's alert webhooks.
 type Service struct {
 	db               *db.DB
 	store            *store
@@ -59,7 +54,6 @@ func NewService(deps Deps) *Service {
 		clock = clockwork.NewRealClock()
 	}
 	st := newStore(deps.DB)
-	st.secrets = deps.Secrets
 	return &Service{
 		db:               deps.DB,
 		store:            st,
@@ -70,10 +64,9 @@ func NewService(deps Deps) *Service {
 	}
 }
 
-// SetMerchantSecretStore wires the canonical runtime backend before serving.
-// The backend refuses webhook writes without configured encryption or Vault.
-func (s *Service) SetMerchantSecretStore(secrets merchants.MerchantSecretStore) {
-	s.store.secrets = secrets
+// SetMerchantConfig binds the merchant configuration webhooks live in.
+func (s *Service) SetMerchantConfig(config *merchantdocs.Cache) {
+	s.store.config = config
 }
 
 func (s *Service) now() time.Time { return s.clock.Now().UTC() }
@@ -89,12 +82,13 @@ func defaultChannels(sev Severity) []ChannelRef {
 
 // --- webhook CRUD ------------------------------------------------------------
 
-// CreateWebhook validates + persists an outbound webhook sink.
+// CreateWebhook validates and adds an alert webhook to the merchant document.
 func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebhookParams) (billing.AlertWebhook, error) {
 	ve := &ValidationError{}
-	if strings.TrimSpace(in.URL) == "" {
+	rawURL := strings.TrimSpace(in.URL)
+	if rawURL == "" {
 		ve.add("url", "required", "url is required")
-	} else if err := s.outbound.ValidateURL(in.URL); err != nil {
+	} else if err := s.outbound.ValidateURL(rawURL); err != nil {
 		// #SEC-21: scheme alone is not validation — a sink that names an
 		// internal address turns this endpoint into an SSRF primitive.
 		ve.add("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
@@ -113,9 +107,6 @@ func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebho
 	if in.Enabled != nil {
 		enabled = *in.Enabled
 	}
-	if s.store.secrets == nil {
-		return billing.AlertWebhook{}, ErrWebhookCredentialsUnavailable
-	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.AlertWebhook{}, err
@@ -124,35 +115,18 @@ func (s *Service) CreateWebhook(ctx context.Context, in billing.CreateAlertWebho
 	if err != nil {
 		return billing.AlertWebhook{}, err
 	}
-	rawURL := strings.TrimSpace(in.URL)
-	parsed, _ := url.Parse(rawURL)
-	secret, err := s.store.secrets.Put(ctx, mid, merchants.AlertWebhookURLSecretName(id), rawURL)
+	now := s.now()
+	hook := merchantdocs.AlertWebhook{
+		ID: billing.AlertWebhookID(id), Name: strings.TrimSpace(in.Name), URL: rawURL,
+		Format: billing.AlertWebhookFormat(format), Enabled: enabled, CreatedAt: now, UpdatedAt: now,
+	}
+	err = s.store.editWebhooks(ctx, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
+		return append(hooks, hook), nil
+	})
 	if err != nil {
 		return billing.AlertWebhook{}, err
 	}
-	version, err := webhookSecretVersion(secret.Version)
-	if err != nil {
-		return billing.AlertWebhook{}, err
-	}
-	webhook, err := s.store.createWebhook(ctx, id, in.Name, strings.ToLower(parsed.Host), version, format, enabled)
-	if err == nil {
-		return webhook.API(), nil
-	}
-	// A lost database acknowledgement may still have committed. A confirmed
-	// row wins; compensate only a rejected insert, never an unknown outcome.
-	checkCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-	defer cancel()
-	committed, readErr := s.store.getWebhook(checkCtx, id)
-	if readErr == nil {
-		return committed.API(), nil
-	}
-	var rejected *pgconn.PgError
-	if errors.As(err, &rejected) && errors.Is(readErr, pgx.ErrNoRows) {
-		if cleanupErr := s.store.secrets.Delete(checkCtx, mid, merchants.AlertWebhookURLSecretName(id)); cleanupErr != nil {
-			return billing.AlertWebhook{}, errors.Join(err, cleanupErr)
-		}
-	}
-	return billing.AlertWebhook{}, err
+	return webhookOf(mid, hook).API(), nil
 }
 
 // ListWebhooks returns the merchant's webhook sinks.
@@ -167,48 +141,33 @@ func (s *Service) ListWebhooks(ctx context.Context, params billing.AlertWebhookL
 
 // DeleteWebhook removes a webhook sink; returns false when nothing matched.
 func (s *Service) DeleteWebhook(ctx context.Context, webhookID billing.AlertWebhookID) (bool, error) {
-	id := webhookID.UUID()
-	if s.store.secrets == nil {
-		return false, ErrWebhookCredentialsUnavailable
+	deleted := false
+	err := s.store.editWebhooks(ctx, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
+		before := len(hooks)
+		hooks = slices.DeleteFunc(hooks, func(h merchantdocs.AlertWebhook) bool { return h.ID == webhookID })
+		deleted = len(hooks) != before
+		if !deleted {
+			return nil, ErrWebhookNotFound
+		}
+		return hooks, nil
+	})
+	if errors.Is(err, ErrWebhookNotFound) {
+		return false, nil
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return false, err
-	}
-	n, err := s.store.deleteWebhook(ctx, id)
-	if err != nil {
-		return false, err
-	}
-	// The name is deterministic, so retry can remove an orphan even if the
-	// metadata deletion committed before a secret backend outage.
-	if err := s.store.secrets.Delete(ctx, mid, merchants.AlertWebhookURLSecretName(id)); err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return deleted, err
 }
 
-var ErrWebhookCredentialsUnavailable = errors.New("encrypted webhook credentials are unavailable")
-var ErrWebhookRotationConflict = errors.New("webhook was rotated concurrently; reload and retry")
-
-func webhookSecretVersion(version int) (int32, error) {
-	if version < 1 || int64(version) > math.MaxInt32 {
-		return 0, ErrWebhookCredentialsUnavailable
-	}
-	return int32(version), nil
-}
-
-// UpdateWebhook changes a webhook's URL, name, format or enabled state;
-// omitted fields keep their values and a null name clears it.
+// UpdateWebhook changes a webhook's fields; omitted ones keep their values
+// and a null name clears it.
 func (s *Service) UpdateWebhook(ctx context.Context, webhookID billing.AlertWebhookID, in billing.UpdateAlertWebhookParams) (billing.AlertWebhook, error) {
 	ve := &ValidationError{}
-	if in.URL.Set && (in.URL.Null || strings.TrimSpace(in.URL.Value) == "") {
-		ve.add("url", "required", "url cannot be cleared")
-	}
-	if in.Name.Set && !in.Name.Null && strings.TrimSpace(in.Name.Value) == "" {
-		ve.add("name", "invalid", "name must not be empty; null clears it")
+	rawURL := strings.TrimSpace(in.URL.Value)
+	if in.URL.Set && (in.URL.Null || rawURL == "" || s.outbound.ValidateURL(rawURL) != nil) {
+		ve.add("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
 	}
 	if in.Format.Set && (in.Format.Null || !WebhookFormat(in.Format.Value).valid()) {
-		ve.add("format", "invalid", "format must be generic, discord or slack", string(FormatGeneric), string(FormatDiscord), string(FormatSlack))
+		ve.add("format", "invalid", fmt.Sprintf("format %q must be generic, discord or slack", in.Format.Value),
+			string(FormatGeneric), string(FormatDiscord), string(FormatSlack))
 	}
 	if in.Enabled.Set && in.Enabled.Null {
 		ve.add("enabled", "invalid", "enabled must be true or false")
@@ -216,69 +175,35 @@ func (s *Service) UpdateWebhook(ctx context.Context, webhookID billing.AlertWebh
 	if v := ve.orNil(); v != nil {
 		return billing.AlertWebhook{}, v
 	}
-	if in.URL.Set {
-		if _, err := s.setWebhookURL(ctx, webhookID, in.URL.Value); err != nil {
-			return billing.AlertWebhook{}, err
-		}
-	}
-	var name, format *string
-	var enabled *bool
-	if in.Name.Set && !in.Name.Null {
-		value := strings.TrimSpace(in.Name.Value)
-		name = &value
-	}
-	if in.Format.Set {
-		value := string(in.Format.Value)
-		format = &value
-	}
-	if in.Enabled.Set {
-		enabled = &in.Enabled.Value
-	}
-	webhook, err := s.store.updateWebhook(ctx, webhookID.UUID(), in.Name.Set, name, format, enabled)
-	return webhook.API(), err
-}
-
-// setWebhookURL replaces only the credential, retaining the webhook and all
-// delivery identity. A failed metadata write leaves delivery fail-closed on the
-// version mismatch; retrying the same URL repairs that pending rotation.
-func (s *Service) setWebhookURL(ctx context.Context, webhookID billing.AlertWebhookID, rawURL string) (billing.AlertWebhook, error) {
-	id := webhookID.UUID()
-	rawURL = strings.TrimSpace(rawURL)
-	if rawURL == "" || s.outbound.ValidateURL(rawURL) != nil {
-		return billing.AlertWebhook{}, singleFieldError("url", "invalid_url", "url must be an http(s) URL naming a publicly routable host")
-	}
-	if _, err := s.store.getWebhook(ctx, id); err != nil {
-		return billing.AlertWebhook{}, err
-	}
-	if s.store.secrets == nil {
-		return billing.AlertWebhook{}, ErrWebhookCredentialsUnavailable
-	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.AlertWebhook{}, err
 	}
-	secret, err := s.store.secrets.Put(ctx, mid, merchants.AlertWebhookURLSecretName(id), rawURL)
+	var updated merchantdocs.AlertWebhook
+	err = s.store.editWebhooks(ctx, func(hooks []merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error) {
+		i := slices.IndexFunc(hooks, func(h merchantdocs.AlertWebhook) bool { return h.ID == webhookID })
+		if i < 0 {
+			return nil, ErrWebhookNotFound
+		}
+		h := hooks[i]
+		if in.Name.Set {
+			h.Name = strings.TrimSpace(in.Name.Value)
+		}
+		if in.URL.Set {
+			h.URL = rawURL
+		}
+		if in.Format.Set {
+			h.Format = in.Format.Value
+		}
+		if in.Enabled.Set {
+			h.Enabled = in.Enabled.Value
+		}
+		h.UpdatedAt = s.now()
+		hooks[i], updated = h, h
+		return hooks, nil
+	})
 	if err != nil {
 		return billing.AlertWebhook{}, err
 	}
-	version, err := webhookSecretVersion(secret.Version)
-	if err != nil {
-		return billing.AlertWebhook{}, err
-	}
-	parsed, _ := url.Parse(rawURL)
-	webhook, err := s.store.rotateWebhookURL(ctx, id, strings.ToLower(parsed.Host), version)
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return webhook.API(), err
-	}
-	// Never delete a newer winning rotation. A removed resource can be cleaned
-	// by its deterministic name; official creation never reuses a webhook id.
-	if _, readErr := s.store.getWebhook(ctx, id); readErr == nil {
-		return billing.AlertWebhook{}, ErrWebhookRotationConflict
-	} else if !errors.Is(readErr, pgx.ErrNoRows) {
-		return billing.AlertWebhook{}, readErr
-	}
-	if cleanupErr := s.store.secrets.Delete(ctx, mid, merchants.AlertWebhookURLSecretName(id)); cleanupErr != nil {
-		return billing.AlertWebhook{}, cleanupErr
-	}
-	return billing.AlertWebhook{}, pgx.ErrNoRows
+	return webhookOf(mid, updated).API(), nil
 }

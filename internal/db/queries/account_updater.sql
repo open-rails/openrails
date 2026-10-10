@@ -2,24 +2,17 @@
 -- the per-instrument watermark. The two cross-merchant readers return ids only;
 -- instrument reads, provider calls and writes run per merchant.
 
--- CROSS-MERCHANT: merchants whose armed custodian holds an instrument backing a
--- subscription that renews inside the custodian's lookahead and was not
--- refreshed since. Starts at the custodian registry, so a merchant without the
--- add-on costs one index probe. Capped and cursored.
+-- CROSS-MERCHANT: merchants with a custodian holding an instrument that backs
+-- a subscription renewing within the longest lookahead and not refreshed
+-- the shortest lookahead: the merchants that may have due work. Whether the custodian is armed for the
+-- updater, and its own lookahead, are in the merchant's configuration, which
+-- the caller reads per merchant. Starts at the custodian registry, so a
+-- merchant without a custodian costs one index probe. Capped and cursored.
 -- name: ListAccountUpdaterWorkMerchants :many
-SELECT c.merchant_id
+SELECT DISTINCT c.merchant_id
 FROM billing.custodians c
-CROSS JOIN LATERAL (
-    -- The custodian's own declared lookahead, else the caller's default.
-    SELECT make_interval(days => COALESCE(
-        CASE WHEN c.settings ->> 'account_updater_lookahead_days' ~ '^[0-9]+$'
-             THEN (c.settings ->> 'account_updater_lookahead_days')::int END,
-        sqlc.arg(default_lookahead_days)::int)) AS lookahead
-) w
 WHERE c.kind = lower(sqlc.arg(custodian)::text)
   AND c.environment = sqlc.arg(environment)::text
-  AND NOT c.archived
-  AND COALESCE(c.settings ->> 'account_updater', 'false') IN ('true', 't', '1')
   AND (sqlc.narg(after)::uuid IS NULL OR c.merchant_id > sqlc.narg(after)::uuid)
   -- One open batch per custodian: a waiting merchant has results to ingest, not new work.
   AND NOT EXISTS (
@@ -32,7 +25,7 @@ WHERE c.kind = lower(sqlc.arg(custodian)::text)
            AND pm.custodian <> 'psp' AND pm.custodian = c.kind AND pm.custodian_id = c.id
            AND pm.rail_method_ref IS NOT NULL
            AND (pm.account_updater_checked_at IS NULL
-                OR pm.account_updater_checked_at < sqlc.arg(now)::timestamptz - w.lookahead)
+                OR pm.account_updater_checked_at < sqlc.arg(now)::timestamptz - make_interval(days => sqlc.arg(min_lookahead_days)::int))
            AND EXISTS (
                  SELECT 1 FROM billing.subscriptions s
                   WHERE s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
@@ -40,7 +33,7 @@ WHERE c.kind = lower(sqlc.arg(custodian)::text)
                     AND s.deleted_at IS NULL
                     AND s.status IN ('active', 'past_due')
                     AND s.current_period_ends_at IS NOT NULL
-                    AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz + w.lookahead))
+                    AND s.current_period_ends_at <= sqlc.arg(now)::timestamptz + make_interval(days => sqlc.arg(max_lookahead_days)::int)))
 ORDER BY c.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 

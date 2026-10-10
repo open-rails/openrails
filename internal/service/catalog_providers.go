@@ -10,8 +10,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchants"
 
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
@@ -496,16 +496,12 @@ func (s *Service) merchantAccountRails(ctx context.Context) map[string]railAccou
 	if err != nil {
 		return out
 	}
-	rows, err := s.catalogDatabase().Gen(ctx).ListPSPsForMerchant(ctx, mid.UUID())
+	rows, err := merchants.Of(s.catalogDatabase()).LivePSPScopes(ctx, mid, s.catalogProviderEnvironment())
 	if err != nil {
 		log.WithContext(ctx).WithError(err).Warn("catalog: list declared rail accounts failed; only rail names resolve")
 		return out
 	}
-	environment := s.catalogProviderEnvironment()
 	for _, row := range rows {
-		if row.Archived || row.Environment != environment {
-			continue
-		}
 		name := strings.ToLower(strings.TrimSpace(row.Key))
 		if name == "" {
 			continue
@@ -531,19 +527,13 @@ func (s *Service) syncSecondaryCatalogAccounts(ctx context.Context, rail string,
 		return
 	}
 	railName := strings.ToLower(strings.TrimSpace(rail))
-	rows, err := s.catalogDatabase().Gen(ctx).ListActivePSPsForRailEnvironment(ctx, gen.ListActivePSPsForRailEnvironmentParams{
-		MerchantID: mid.UUID(), Rail: railName, Environment: s.catalogProviderEnvironment(),
-	})
+	rows, err := merchants.Of(s.catalogDatabase()).ActivePSPScopesForRail(ctx, mid, railName, s.catalogProviderEnvironment())
 	if err != nil {
 		log.WithContext(ctx).WithError(err).WithField("rail", rail).
 			Warn("secondary catalog sync: list declared accounts failed")
 		return
 	}
-	environment := s.catalogProviderEnvironment()
 	for _, acct := range rows {
-		if acct.Archived || acct.Environment != environment {
-			continue
-		}
 		sctx := pctx
 		sctx.TargetAccountID = strings.TrimSpace(acct.AccountID)
 		if _, err := adapter.AutoCreate(ctx, sctx); err != nil && !errors.Is(err, errPendingManualLink) {

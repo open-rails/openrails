@@ -4,10 +4,7 @@ package admission
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -17,13 +14,12 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/budgets"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
-// BillingPolicyStore is the or#897 policy registry: named policies plus the
-// bindings that say which one applies to whom. It REPLACES payer_spend_limits,
-// which was the same machine with one implicit meaning — a window cap — and no
-// way to say that a different quantity is the one being capped.
+// BillingPolicyStore resolves a customer's billing policy (or#897): the named
+// policies, the tier map and the default are the merchant's settings; the
+// customer's own assignment is customers.billing_policy.
 type BillingPolicyStore struct {
 	db *db.DB
 }
@@ -87,179 +83,55 @@ func (p ResolvedPolicy) RateWindow() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-// UpsertPolicy declares (or redeclares) one named policy. The body must already
-// have passed merchantconfig.NormalizeBillingPolicy — both transports call it.
-func (s *BillingPolicyStore) UpsertPolicy(ctx context.Context, name string, policy models.BillingPolicy) error {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	now := time.Now().UTC()
-	policyJSON, err := json.Marshal(policy)
-	if err != nil {
-		return fmt.Errorf("admission: encode billing policy: %w", err)
-	}
-	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return s.db.Gen(ctx).UpsertBillingPolicy(ctx, gen.UpsertBillingPolicyParams{
-			ID:         uuidutil.NewV7(),
-			MerchantID: tid.UUID(),
-			Name:       name,
-			Policy:     policyJSON,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		})
-	})
-}
-
-// ListPolicies returns every declared policy, keyed by name.
-func (s *BillingPolicyStore) ListPolicies(ctx context.Context) (map[string]models.BillingPolicy, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]models.BillingPolicy{}
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.db.Gen(ctx).ListBillingPolicies(ctx, tid.UUID())
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			var body models.BillingPolicy
-			if len(r.Policy) > 0 {
-				if uerr := json.Unmarshal(r.Policy, &body); uerr != nil {
-					return fmt.Errorf("admission: decode billing policy %q: %w", r.Name, uerr)
-				}
-			}
-			out[r.Name] = body
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-// BindPolicy points one rung at a policy name. A non-zero payer binds the
-// per-customer rung; a non-empty tier binds the per-tier rung; neither binds the
-// merchant default. Binding moves no money — it is the merchant's runtime lever.
-func (s *BillingPolicyStore) BindPolicy(ctx context.Context, payer identity.CustomerID, tier, policyName string) error {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	tenantID := tid.UUID()
-	now := time.Now().UTC()
-	tier = strings.TrimSpace(tier)
-	if !payer.IsZero() && tier != "" {
-		return fmt.Errorf("admission: bind to a customer OR a tier, not both")
-	}
-	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		switch {
-		case !payer.IsZero():
-			// Materialize the payable customers row so the binding FK is satisfied
-			// on first write (same reason the retired table needed it, #317).
-			if _, err := db.EnsureCustomerID(ctx, s.db.Qx(ctx), tenantID, payer.UUID().String()); err != nil {
-				return err
-			}
-			subjectID := payer.UUID()
-			return q.UpsertBillingPolicyBindingCustomer(ctx, gen.UpsertBillingPolicyBindingCustomerParams{
-				ID: uuidutil.NewV7(), MerchantID: tenantID, CustomerID: &subjectID,
-				PolicyName: policyName, CreatedAt: now, UpdatedAt: now,
-			})
-		case tier != "":
-			return q.UpsertBillingPolicyBindingTier(ctx, gen.UpsertBillingPolicyBindingTierParams{
-				ID: uuidutil.NewV7(), MerchantID: tenantID, Tier: &tier,
-				PolicyName: policyName, CreatedAt: now, UpdatedAt: now,
-			})
-		default:
-			return q.UpsertBillingPolicyBindingDefault(ctx, gen.UpsertBillingPolicyBindingDefaultParams{
-				ID: uuidutil.NewV7(), MerchantID: tenantID,
-				PolicyName: policyName, CreatedAt: now, UpdatedAt: now,
-			})
-		}
-	})
-}
-
-// ListDeclarativeBindings returns the DECLARATIVE rungs — the merchant default
-// and the per-tier bindings. Per-customer bindings are excluded on purpose: they
-// are runtime segmentation state (one row per bound customer), so listing them
-// would scale with records on file rather than with configuration.
-func (s *BillingPolicyStore) ListDeclarativeBindings(ctx context.Context) ([]models.BillingPolicyBinding, error) {
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out []models.BillingPolicyBinding
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.db.Gen(ctx).ListDeclarativeBillingPolicyBindings(ctx, tid.UUID())
-		if err != nil {
-			return err
-		}
-		for _, r := range rows {
-			b := models.BillingPolicyBinding{
-				ID: r.ID, MerchantID: r.MerchantID, CustomerID: r.CustomerID,
-				PolicyName: r.PolicyName, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
-			}
-			if r.Tier != nil {
-				b.Tier = *r.Tier
-			}
-			out = append(out, b)
-		}
-		return nil
-	})
-	return out, err
-}
-
-// Resolve returns the effective policy for (payer, tier). No binding yields a
-// zero ResolvedPolicy, which the admission path reads as outstanding-cap
-// semantics over the payer's own arrears credit limit.
+// Resolve returns the effective policy for (payer, tier): the customer's own
+// assignment while the settings still declare it, else its tier's, else the
+// default. None yields a zero ResolvedPolicy, which the admission path reads as
+// outstanding-cap semantics over the payer's own arrears credit limit.
 func (s *BillingPolicyStore) Resolve(ctx context.Context, payer identity.CustomerID, tier string) (ResolvedPolicy, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return ResolvedPolicy{}, err
 	}
-	tenantID := tid.UUID()
-	subjectID := payer.UUID()
-	var out ResolvedPolicy
-	// The predicates are `= $n OR IS NULL`, so one read considers all three rungs
-	// and the ORDER BY picks the most specific.
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row, e := s.db.Gen(ctx).ResolveBillingPolicy(ctx, gen.ResolveBillingPolicyParams{
-			MerchantID: tenantID, CustomerID: &subjectID, Tier: &tier,
-		})
-		if errors.Is(e, pgx.ErrNoRows) {
-			return nil
-		}
-		if e != nil {
-			return e
-		}
-		var body models.BillingPolicy
-		if len(row.Policy) > 0 {
-			if uerr := json.Unmarshal(row.Policy, &body); uerr != nil {
-				return fmt.Errorf("admission: decode billing policy %q: %w", row.PolicyName, uerr)
-			}
-		}
-		out = ResolvedPolicy{
-			Name:                      row.PolicyName,
-			Kind:                      body.Kind,
-			OutstandingCapAmount:      body.OutstandingCapAmount,
-			SpendWindows:              toBudgetWindows(body.SpendWindows),
-			PolicyCurrency:            body.PolicyCurrency,
-			AccrualRateCapPerHour:     body.AccrualRateCapPerHour,
-			AccrualRateWindowSeconds:  body.AccrualRateWindowSeconds,
-			BadSpendWindows:           body.BadSpendWindows,
-			CollectionThresholdAmount: body.CollectionThresholdAmount,
-			DelinquencyGraceDays:      body.DelinquencyGraceDays,
-			DelinquencyAmountFloor:    body.DelinquencyAmountFloor,
-		}
-		return nil
-	})
+	settings, err := merchantconfig.NewStore(s.db).Settings(ctx)
 	if err != nil {
 		return ResolvedPolicy{}, err
 	}
-	return out, nil
+	if len(settings.Policies) == 0 {
+		return ResolvedPolicy{}, nil
+	}
+	var assigned string
+	if !payer.IsZero() {
+		err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
+			v, err := s.db.Gen(ctx).GetCustomerBillingPolicy(ctx, gen.GetCustomerBillingPolicyParams{MerchantID: tid.UUID(), CustomerID: payer.UUID()})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
+			}
+			if v != nil {
+				assigned = *v
+			}
+			return err
+		})
+		if err != nil {
+			return ResolvedPolicy{}, err
+		}
+	}
+	name, body, ok, _ := settings.Policy(assigned, tier)
+	if !ok {
+		return ResolvedPolicy{}, nil
+	}
+	return ResolvedPolicy{
+		Name:                      name,
+		Kind:                      body.Kind,
+		OutstandingCapAmount:      body.OutstandingCapAmount,
+		SpendWindows:              toBudgetWindows(body.SpendWindows),
+		PolicyCurrency:            body.PolicyCurrency,
+		AccrualRateCapPerHour:     body.AccrualRateCapPerHour,
+		AccrualRateWindowSeconds:  body.AccrualRateWindowSeconds,
+		BadSpendWindows:           body.BadSpendWindows,
+		CollectionThresholdAmount: body.CollectionThresholdAmount,
+		DelinquencyGraceDays:      body.DelinquencyGraceDays,
+		DelinquencyAmountFloor:    body.DelinquencyAmountFloor,
+	}, nil
 }
 
 func toBudgetWindows(ws []models.BudgetWindowPolicy) []budgets.BudgetWindow {

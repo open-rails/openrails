@@ -173,17 +173,17 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`, every route
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | GET | `/v1/admin/psps` | merchant | `MerchantConfig` | — | 200 `ListPage<PSP>` |  |
-| POST | `/v1/admin/psps` | merchant | `MerchantConfig` | `CreatePSPParams` | 201 `PSP` | sensitive |
+| POST | `/v1/admin/psps` | merchant | `MerchantConfig` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits`; sensitive |
 | GET | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | — | 200 `PSP` |  |
-| PATCH | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | `UpdatePSPParams` | 200 `PSP` | sensitive |
+| PATCH | `/v1/admin/psps/{id}` | merchant | `MerchantConfig` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
 | POST | `/v1/admin/psps/routing-preview` | merchant | `MerchantConfig` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
 | GET | `/v1/admin/configuration` | merchant | `MerchantConfig` | — | 200 `MerchantConfigurationState` |  |
-| PATCH | `/v1/admin/configuration` | merchant | `MerchantConfig` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` | sensitive; `Idempotency-Key` |
+| PATCH | `/v1/admin/configuration` | merchant | `MerchantConfig` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
 | GET | `/v1/admin/api-host` | merchant | `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory` |
 | GET | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | — | 200 `ListPage<AlertWebhook>` |  |
-| POST | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | sensitive |
-| DELETE | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | — | 204 — | sensitive |
-| PATCH | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | sensitive |
+| POST | `/v1/admin/alert-webhooks` | merchant | `MerchantConfig` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits`; sensitive |
+| DELETE | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | — | 204 — | when `merchant_config_edits`; sensitive |
+| PATCH | `/v1/admin/alert-webhooks/{id}` | merchant | `MerchantConfig` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits`; sensitive |
 | GET | `/v1/admin/billing-archive` | merchant | `MerchantConfig` | — | 200 `application/x-ndjson` | sensitive |
 | POST | `/v1/admin/billing-archive` | merchant | `MerchantConfig` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
 | POST | `/v1/admin/billing-import` | merchant | `MerchantConfig` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |

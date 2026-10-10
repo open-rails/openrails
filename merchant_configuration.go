@@ -3,13 +3,12 @@ package openrails
 import (
 	"context"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// GetMerchantConfiguration reads the merchant's non-secret configuration
-// and its revision.
+// GetMerchantConfiguration reads the merchant's configuration, never its
+// credentials, and its revision.
 func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...RequestOption) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
 	if err := c.do(ctx, http.MethodGet, "/v1/admin/configuration", nil, &out, options...); err != nil {
@@ -18,15 +17,12 @@ func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...Reques
 	return &out, nil
 }
 
-// UpdateMerchantConfiguration commits one configuration change against the
-// revision it read: omitted fields keep their stored values, and the same
-// IdempotencyKey replays its original receipt.
-func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationReceipt, error) {
-	if strings.TrimSpace(params.IdempotencyKey) == "" {
-		return nil, invalidErr("Idempotency-Key required")
-	}
-	var out billing.MerchantConfigurationReceipt
-	if err := c.doWithHeaders(ctx, http.MethodPatch, "/v1/admin/configuration", params, &out, http.Header{"Idempotency-Key": {params.IdempotencyKey}}, options...); err != nil {
+// UpdateMerchantConfiguration merges params into the merchant's configuration
+// and returns it. It needs merchant configuration held in Vault: a
+// configuration read from a file is read-only.
+func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationState, error) {
+	var out billing.MerchantConfigurationState
+	if err := c.do(ctx, http.MethodPatch, "/v1/admin/configuration", params, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

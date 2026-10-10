@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/mail"
 	"strings"
@@ -21,7 +20,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 // maxTrustLevelBytes bounds a stored trust level.
@@ -47,12 +45,17 @@ func (s *Service) UpdateCustomer(ctx context.Context, customer identity.Customer
 	if err != nil {
 		return nil, err
 	}
+	if change.policy != nil {
+		settings, err := merchantconfig.NewStore(s.rt.DB).Settings(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := settings.Policies[*change.policy]; !ok {
+			return nil, ErrBillingPolicyNotFound.WithParam("billing_policy")
+		}
+	}
 	err = s.rt.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		// Share the policy declarations' lock before reading them.
-		if _, err := q.ReadMerchantSettingsLock(ctx, mid.UUID()); err != nil {
-			return err
-		}
 		// A customer is the host's subject: one OpenRails has not billed yet
 		// is created, as every commerce write does.
 		if err := db.EnsureCustomerRowQ(ctx, q, mid.UUID(), change.customer); err != nil {
@@ -209,22 +212,8 @@ func (c customerSettingsChange) apply(ctx context.Context, q *gen.Queries, mid u
 		}
 	}
 	if c.setPolicy {
-		id := c.customer
-		if c.policy == nil {
-			if err := q.DeleteCustomerBillingPolicyBinding(ctx, gen.DeleteCustomerBillingPolicyBindingParams{MerchantID: mid, CustomerID: &id}); err != nil {
-				return err
-			}
-		} else {
-			if _, err := q.LockBillingPolicyName(ctx, gen.LockBillingPolicyNameParams{MerchantID: mid, Name: *c.policy}); errors.Is(err, pgx.ErrNoRows) {
-				return ErrBillingPolicyNotFound.WithParam("billing_policy")
-			} else if err != nil {
-				return err
-			}
-			if err := q.UpsertBillingPolicyBindingCustomer(ctx, gen.UpsertBillingPolicyBindingCustomerParams{
-				ID: uuidutil.NewV7(), MerchantID: mid, CustomerID: &id, PolicyName: *c.policy, CreatedAt: now, UpdatedAt: now,
-			}); err != nil {
-				return err
-			}
+		if _, err := q.SetCustomerBillingPolicy(ctx, gen.SetCustomerBillingPolicyParams{MerchantID: mid, CustomerID: c.customer, Policy: c.policy}); err != nil {
+			return err
 		}
 	}
 	if c.setProfile {
@@ -263,13 +252,10 @@ func customerSettings(ctx context.Context, q *gen.Queries, mid uuid.UUID, custom
 		return nil, err
 	}
 	for _, p := range policies {
-		if p.CustomerID == nil {
-			continue
-		}
-		doc := out[*p.CustomerID]
+		doc := out[p.CustomerID]
 		name := p.PolicyName
 		doc.BillingPolicy = &name
-		out[*p.CustomerID] = doc
+		out[p.CustomerID] = doc
 	}
 	profiles, err := money.InvoiceProfilesTx(ctx, q, mid, customers)
 	if err != nil {

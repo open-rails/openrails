@@ -29,7 +29,7 @@ func engineHyperSwitchPointer(custodian string, binding charge.HyperSwitchBindin
 
 // engineCollectionBinding checks psp, the account the charge goes through,
 // against the card and freezes a custodian card's binding.
-func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
+func engineCollectionBinding(ctx context.Context, q *gen.Queries, custody charge.Custody, method gen.BillingPaymentMethod, psp uuid.UUID, deployment string) (charge.HyperSwitchBinding, error) {
 	var binding charge.HyperSwitchBinding
 	if !charge.ChargeableOn(method, psp) {
 		return binding, errors.New("engine account does not hold the card")
@@ -42,7 +42,7 @@ func engineCollectionBinding(ctx context.Context, q *gen.Queries, method gen.Bil
 		return binding, errors.New("engine account is mismatched")
 	}
 	if method.Custodian == models.CustodianHyperSwitch {
-		return collectionHyperSwitchBinding(ctx, q, method, psp, deployment)
+		return charge.FreezeHyperSwitchBinding(ctx, q, custody, method, psp, deployment)
 	}
 	if method.Custodian != models.CustodianPSP || method.CustodianID != nil {
 		return binding, errors.New("engine card custody is unsupported")

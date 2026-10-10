@@ -72,29 +72,6 @@ type BillingAdmissionOperation struct {
 	ReleasedAt     *time.Time
 }
 
-// The merchant's named billing policies. The policy body declares WHICH quantity is capped (kind=outstanding_cap | window_spend_cap | accrual_rate_cap) and the limit. Merchants bind names to customers/tiers via billing_policy_bindings; OpenRails enforces, the merchant decides who gets which.
-type BillingBillingPolicy struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	Name       string
-	// JSONB policy body: kind, the kind's limit (outstanding_cap_amount micros / spend_windows), bad_spend_windows and policy_currency. Validated by ONE normalizer shared by the manifest loader and the config API.
-	Policy    []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-// Which named policy applies to whom. Three rungs, most specific wins: per-customer (customer_id set) > per-tier (tier set) > merchant default (both NULL). The binding is JUST a name reference — rebinding is the merchant's runtime lever and moves no money.
-type BillingBillingPolicyBinding struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID *uuid.UUID
-	// Trust tier this binding applies to. NULL on the customer and default rungs.
-	Tier       *string
-	PolicyName string
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 // Global by design, one row: the PostgreSQL cluster (system identifier), database and schema this billing book was armed in. Every provider write reads it; anywhere else the book is a copy and is readonly until `openrails book arm`. A promoted physical replica keeps all three; a physical clone does too, so rotate PSP credentials before running one.
 type BillingBookIdentity struct {
 	Singleton        bool
@@ -306,22 +283,7 @@ type BillingCostResolution struct {
 	ResolvedAt         time.Time
 }
 
-// Credential publication receipts. Identities and exact secret references only, never secret values. Retention: permanent, never pruned.
-type BillingCredentialPublication struct {
-	MerchantID       uuid.UUID
-	OperationID      uuid.UUID
-	Rail             string
-	Environment      string
-	AccountID        string
-	ExpectedRevision int64
-	RequestMetadata  []byte
-	State            string
-	Result           []byte
-	CreatedAt        time.Time
-	PublishedAt      *time.Time
-}
-
-// Merchant custodian registry. A row is one merchant-owned account with a third-party card custodian (Basis Theory today). Custody is orthogonal to the rail: this says who holds the card, psps says who charges it. Referenced by psps.custodian_id — one custodian can back many PSPs.
+// Merchant custodian identities. A row is one merchant-owned account with a third-party card custodian, the target of the cards it holds; its configuration (settings, credentials, archived) is the custodian document in a file or Vault. Custody is orthogonal to the rail: this says who holds the card, psps says who charges it.
 type BillingCustodian struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -332,12 +294,6 @@ type BillingCustodian struct {
 	Environment string
 	// The custodian-native tenant identity (Basis Theory: the tenant id). Operator-declared — there is no runtime whoami.
 	AccountID string
-	// Declared NON-secret knobs, validated against the kind's registry (internal/custodians): public_api_key, network_tokens. Credentials are merchant secrets under custodians/<kind>/<environment>/<account_id>/<key>.
-	Settings []byte
-	// Rotation watermarks, per credential key: the Secret.Version each credential reached at its last rotation. A reader holding an older cached version must go back to the backend, so a rotation on one node is effective on every node the instant it commits. Absent/zero = no floor.
-	CredentialVersions []byte
-	// Drain-only lifecycle flag, matching psps.archived: true keeps the custodian addressable for instruments it already holds but excludes it from new arrangements.
-	Archived  bool
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -380,6 +336,8 @@ type BillingCustomer struct {
 	LastSeenAt time.Time
 	// Steps with every statement that changes the customer's product access: a cached key set from an older version is stale.
 	AccessVersion int64
+	// The billing policy staff assigned this customer, by its name in the merchant's settings; NULL follows the tier, then the default.
+	BillingPolicy *string
 }
 
 // A customer's contact as the merchant's directory last reported it, when OpenRails is not embedded beside that directory: pushed over SCIM, or recorded from a verified access token's claims. Newest wins by directory_updated_at. Erasure keeps the row without its values, so an older report cannot restore them.
@@ -786,8 +744,6 @@ type BillingMerchant struct {
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	DeletedAt         *time.Time
-	// Human-readable merchant name for end-user display / invoices; NULL = fall back to slug.
-	DisplayName *string
 	// Canonical Host-header value this merchant resolves from, e.g. "api.acme.example". NULL = no Host resolution for this merchant. Lowercase, no scheme/port.
 	ApiHost                 *string
 	RetiredAt               *time.Time
@@ -807,33 +763,6 @@ type BillingMerchantApiHostClaim struct {
 	CreatedAt  time.Time
 }
 
-// One merchant-scoped JSON configuration row. Missing keys use service defaults.
-type BillingMerchantConfiguration struct {
-	MerchantID uuid.UUID
-	// JSONB merchant config. delegated_invoker_wasted_spend_windows is an array of {key, window_seconds, limit}; amount values use the request currency internal precision.
-	Config    []byte
-	CreatedAt time.Time
-	UpdatedAt time.Time
-}
-
-// Immutable replay receipts for merchant configuration applications. Retention: permanent, never pruned.
-type BillingMerchantConfigurationApplication struct {
-	MerchantID    uuid.UUID
-	ApplicationID string
-	RequestSha256 []byte
-	Result        []byte
-	AppliedAt     time.Time
-}
-
-// Wrapped per-merchant Data Encryption Keys for envelope encryption-at-rest. wrapped_dek = merchant DEK sealed with the master key (AES-256-GCM, nonce||ct||tag). Master key lives in config/env (self-hosted) or KMS (production), never in the DB. Merchant-owned; queries carry explicit merchant predicates.
-type BillingMerchantDek struct {
-	MerchantID uuid.UUID
-	// AES-256-GCM(master_key, merchant_dek): nonce(12) || ciphertext(32) || tag(16).
-	WrappedDek []byte
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 // Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.
 type BillingMerchantDestructivePolicy struct {
 	MerchantID                uuid.UUID
@@ -846,35 +775,12 @@ type BillingMerchantDestructivePolicy struct {
 	UpdatedAt            time.Time
 }
 
-// DB-backed per-merchant secret store. Namespaced by (merchant_id, name). The Vault-backed store keeps the same addressing but holds values in Vault. Merchant-owned; queries carry explicit merchant predicates.
-type BillingMerchantSecret struct {
-	MerchantID uuid.UUID
-	Name       string
-	Value      string
-	Version    int32
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
-
 // Former merchant names. An unexpired alias forwards to its merchant and blocks every other claim of the name; expires_at NULL keeps it forever. Written by a rename, removed when its merchant takes the name back, when it expires and is claimed, or when its merchant leaves the directory.
 type BillingMerchantSlugAlias struct {
 	Slug       string
 	MerchantID uuid.UUID
 	ExpiresAt  *time.Time
 	CreatedAt  time.Time
-}
-
-// Operator-configured OUTBOUND alert sinks. format shapes the POST body: generic=our alert JSON, discord={content}, slack={text}. NOT the inbound provider-webhook ingestion surface.
-type BillingMerchantWebhook struct {
-	ID              uuid.UUID
-	MerchantID      uuid.UUID
-	Name            *string
-	DestinationHost string
-	SecretVersion   int32
-	Format          string
-	Enabled         bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
 }
 
 // One merchant's provider write posture; no row is full. The effective mode is the lower of this and provider_write_mode. Export sets the source readonly and restore the destination; an operator arms it back to full.
@@ -1497,49 +1403,30 @@ type BillingProvisioningToken struct {
 	CreatedAt   time.Time
 }
 
-// Merchant PSP registry. A row is one merchant-owned payment-service-provider account on one rail. The rail vocabulary lives here only; every table that stores rail beside psp_id references (merchant_id, id, rail).
+// Merchant PSP identities. A row is one merchant-owned account on one rail, the target of every payment, subscription and card that names it, with what OpenRails discovers about it; its configuration (settings, credentials, archived) is the PSP document in a file or Vault. The rail vocabulary lives here only; every table that stores rail beside psp_id references (merchant_id, id, rail).
 type BillingPsp struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
-	// The merchant's name for the PSP (e.g. mobius): the value price psp_links and checkout's payment.rail name it by. Unique among the merchant's live PSPs in an environment.
+	// The merchant's name for the PSP (e.g. mobius): the key of its document. One current PSP holds a key.
 	Key  string
 	Rail string
 	// Provider environment: live or test, derived from the deployment's posture.
 	Environment string
 	// Operator-declared account identity on the rail (Stripe acct_, NMI gateway id, CCBill account-subaccount, Solana signer address).
 	AccountID string
-	// The custodian holding the instruments charged through this PSP. NULL = the PSP holds its own (Stripe pm_, NMI customer vault).
-	CustodianID *uuid.UUID
-	// Declared non-secret values, including the public keys a browser uses (publishable_key, tokenization_key).
-	Settings []byte
-	// Solana signer declaration: {mode, key}. NULL on other rails.
-	Signer []byte
-	// The secret backend holding the published credentials; snapshot for credentials a manifest supplies at startup.
-	CredentialCustody *string
-	// Published secret references per credential key: {name, min_version, custody}. Never secret values.
-	CredentialRefs []byte
-	// Rotation watermarks per credential key: a reader holding an older cached version goes back to the backend.
-	CredentialVersions []byte
-	// Credential keys retired from service (an overlapping webhook secret ended early).
-	RetiredCredentials []string
 	// When the provider last accepted the stored credentials; NULL when never checked.
 	CredentialsValidatedAt *time.Time
 	// The provider webhook endpoint OpenRails manages for this PSP.
-	WebhookEndpointID *string
-	// Until when the rotated-out webhook signing secret is still accepted.
-	WebhookOverlapExpiresAt *time.Time
-	PendingSignerPublicKey  *string
-	// Configuration revision: every settings, credential or archive change increments it; writers name the revision they read.
-	Revision int64
-	// Drain-only lifecycle flag. An archived PSP takes no new work and stays addressable for existing obligations and inbound events.
-	Archived   bool
-	ArchivedAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-	// HMAC-SHA256, under a key derived from encryption.master_key, of the credential naming the gateway account (NMI security_key, Stripe secret_key). Never the credential; NULL without a master key or before the credential is published.
+	WebhookEndpointID      *string
+	PendingSignerPublicKey *string
+	CreatedAt              time.Time
+	UpdatedAt              time.Time
+	// HMAC-SHA256, under a key held in Vault, of the credential naming the gateway account (NMI security_key, Stripe secret_key). Cleared when the PSP archives.
 	CredentialFingerprint *string
 	// When this PSP was found to declare a gateway account another live PSP on its rail already declares. Its credentials are not read, so it stays disarmed, until it is archived or given its own.
 	CredentialDuplicateAt *time.Time
+	// When OpenRails found the PSP's key naming another account. A superseded PSP takes no new work and drains, as an archived one does.
+	SupersededAt *time.Time
 }
 
 // A customer's customer object at one PSP. Two PSPs on one rail hold independent mappings.

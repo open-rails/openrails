@@ -1,5 +1,5 @@
-// Package alerting delivers immediate merchant notifications and manages encrypted
-// outbound webhook destinations.
+// Package alerting delivers immediate merchant notifications and manages the
+// merchant's alert webhooks.
 package alerting
 
 import (
@@ -31,7 +31,7 @@ const (
 )
 
 // ChannelRef identifies a notification destination. A webhook ref names
-// a merchant_webhooks row; email carries no reference.
+// one of the merchant document's alert webhooks; email carries no reference.
 type ChannelRef struct {
 	Type      ChannelType `json:"type"`
 	WebhookID *uuid.UUID  `json:"webhook_id,omitempty"`
@@ -50,13 +50,13 @@ func (f WebhookFormat) valid() bool {
 	return f == FormatGeneric || f == FormatDiscord || f == FormatSlack
 }
 
-// Webhook is a merchant_webhooks row with its credential version.
+// Webhook is one of the merchant document's alert webhooks.
 type Webhook struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
 	Name            *string
 	DestinationHost string
-	secretVersion   int
+	url             string
 	Format          WebhookFormat
 	Enabled         bool
 	CreatedAt       time.Time

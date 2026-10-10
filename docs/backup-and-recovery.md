@@ -2,14 +2,13 @@
 
 For operators running their own OpenRails infrastructure.
 
-Three things must be backed up, and **two of them are not in Postgres**. Restoring only the
-database leaves you with an unreadable system.
+Two things must be backed up, and **one of them is not in Postgres**. Restoring only the
+database leaves you with a system that cannot charge anyone.
 
 | What | Where it lives | Lose it and… |
 |---|---|---|
 | Application data | Postgres | everything |
-| `ENCRYPTION_MASTER_KEY` | your secret manager / env | **every DB-stored merchant secret is unrecoverable ciphertext** |
-| Merchant secrets | Vault, when `secret_backend=vault` | rails cannot arm; Postgres holds no copy |
+| Merchant configuration | Vault (with `vault.kv_mount`), else the merchant manifest | rails cannot arm; Postgres holds no copy |
 
 ## The constraint that shapes everything
 
@@ -56,26 +55,14 @@ time is gone. That makes it the right tool for genuine disaster — hardware los
 migration, a compromised instance — and the wrong tool for "merchant X's book was damaged."
 Scoped recovery is tracked separately; see the private `specs/application-rollback.md`.
 
-## The encryption master key
-
-When `secret_backend` is the DB-encrypted store, merchant secrets are encrypted at rest with a
-key derived from `ENCRYPTION_MASTER_KEY`. That key is **not in the database**. A database backup
-without it restores ciphertext nobody can read — NMI security keys, Stripe secret keys, CCBill
-DataLink passwords, webhook signing secrets, Solana keys, all unrecoverable.
-
-Back the key up independently of the database, in a different trust domain, and verify you can
-retrieve it *before* you need it. Rotating it requires re-encrypting stored secrets; do not
-rotate as part of an incident.
-
-Outside development, OpenRails refuses to boot the DB-encrypted store without this key set;
-that refusal is deliberate.
-
 ## Vault
 
-With `secret_backend=vault`, merchant secrets live in Vault and Postgres holds no copy. Back
-Vault up on its own schedule with its own procedure (`vault.md`), and make sure its retention at
-least matches the database's — a database restored to a point Vault can no longer serve is a
-system that cannot arm any rail.
+With `vault.kv_mount`, every merchant's configuration, credentials included, lives in Vault and
+Postgres holds no copy. Back Vault up on its own schedule with its own procedure (`vault.md`),
+and keep `credential_fingerprint_key` with it. Restoring Vault to an older point serves older
+configuration: credentials rotated since may no longer be accepted by the provider. A PSP
+identity Postgres records but Vault no longer describes is archived: it takes no new work and its
+obligations drain.
 
 ## What must never be rolled back
 
@@ -97,7 +84,7 @@ grant log by convergence, not restored directly — which is why the grant log m
 1. **Stop and drain the source writers, and disable their automatic restart.** A restored
    copy must become the sole authoritative database. Replicas may share that database;
    independently writable copies are not a supported active-active deployment.
-2. Restore Postgres to the target time; confirm `ENCRYPTION_MASTER_KEY` and Vault are available.
+2. Restore Postgres to the target time; confirm Vault (or the merchant manifest) is available.
 3. Start the restored instance. A restore into another cluster, database or schema is a copy
    of the book: every provider write stays readonly until `openrails book arm --by NAME`,
    which you run only once the source is stopped for good. A point-in-time restore of the same
@@ -142,6 +129,6 @@ converge`.
 ## Verify your backups
 
 An untested backup is a hypothesis. Periodically restore into a scratch instance and check that
-migrations are at the expected version, that a merchant's secrets actually decrypt, and that a
+migrations are at the expected version, that a merchant's PSPs arm from Vault, and that a
 provider pull produces a sane findings set. The failure you want to discover in a drill is a
-missing master key — not at 3am.
+Vault backup that does not match the database — not at 3am.

@@ -3,119 +3,117 @@ package alerting
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"net/url"
+	"slices"
+	"strings"
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// store uses the merchant-pinned connection for notification and webhook data.
+// ErrWebhookNotFound is an alert webhook the merchant document does not hold.
+var ErrWebhookNotFound = errors.New("alerting: alert webhook not found")
+
+// errConfigUnwired means no merchant configuration was bound to the service.
+var errConfigUnwired = errors.New("alerting: merchant configuration is not wired")
+
+// store keeps notifications in Postgres and webhooks in the merchant document.
 type store struct {
-	db      *db.DB
-	secrets merchants.MerchantSecretStore
+	db     *db.DB
+	config *merchantdocs.Cache
 }
 
 func newStore(database *db.DB) *store { return &store{db: database} }
 
-// --- webhooks ----------------------------------------------------------------
-
-func (s *store) createWebhook(ctx context.Context, id uuid.UUID, name, host string, version int32, format WebhookFormat, enabled bool) (Webhook, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return Webhook{}, err
-	}
-	row, err := s.db.Gen(ctx).CreateMerchantWebhook(ctx, gen.CreateMerchantWebhookParams{
-		ID: id, MerchantID: mid.UUID(), Name: name, DestinationHost: host, SecretVersion: version, Format: string(format), Enabled: enabled,
-	})
-	if err != nil {
-		return Webhook{}, err
-	}
-	return webhookFromRow(row), nil
-}
-
-func (s *store) rotateWebhookURL(ctx context.Context, id uuid.UUID, host string, version int32) (Webhook, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return Webhook{}, queryScopeErr
-	}
-
-	row, err := s.db.Gen(ctx).RotateMerchantWebhookURL(ctx, gen.RotateMerchantWebhookURLParams{MerchantID: queryMerchant.UUID(), ID: id, DestinationHost: host, SecretVersion: version})
-	if err != nil {
-		return Webhook{}, err
-	}
-	return webhookFromRow(row), nil
-}
-
-func (s *store) updateWebhook(ctx context.Context, id uuid.UUID, setName bool, name, format *string, enabled *bool) (Webhook, error) {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return Webhook{}, err
-	}
-	row, err := s.db.Gen(ctx).UpdateMerchantWebhook(ctx, gen.UpdateMerchantWebhookParams{
-		MerchantID: mid.UUID(), ID: id, SetName: setName, Name: name, Format: format, Enabled: enabled,
-	})
-	if err != nil {
-		return Webhook{}, err
-	}
-	return webhookFromRow(row), nil
-}
-
-func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return Webhook{}, queryScopeErr
-	}
-
-	row, err := s.db.Gen(ctx).GetMerchantWebhook(ctx, gen.GetMerchantWebhookParams{MerchantID: queryMerchant.UUID(), ID: id})
-	if err != nil {
-		return Webhook{}, err
-	}
-	return webhookFromRow(row), nil
-}
-
 func (s *store) listWebhooks(ctx context.Context, ids []uuid.UUID) ([]Webhook, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return nil, queryScopeErr
-	}
-	var rows []gen.BillingMerchantWebhook
-	var err error
-	if ids != nil {
-		rows, err = s.db.Gen(ctx).ListMerchantWebhooksByIDs(ctx, gen.ListMerchantWebhooksByIDsParams{MerchantID: queryMerchant.UUID(), Ids: ids})
-	} else {
-		rows, err = s.db.Gen(ctx).ListMerchantWebhooks(ctx, queryMerchant.UUID())
-	}
+	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Webhook, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, webhookFromRow(row))
+	if s.config == nil {
+		return nil, errConfigUnwired
+	}
+	set, err := s.config.Get(ctx, mid)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Webhook, 0, len(set.Merchant.Value.AlertWebhooks))
+	for _, hook := range set.Merchant.Value.AlertWebhooks {
+		if ids == nil || slices.Contains(ids, hook.ID.UUID()) {
+			out = append(out, webhookOf(mid, hook))
+		}
 	}
 	return out, nil
 }
 
-func (s *store) deleteWebhook(ctx context.Context, id uuid.UUID) (int64, error) {
-	queryMerchant, queryScopeErr := merchant.Require(ctx)
-	if queryScopeErr != nil {
-		return 0, queryScopeErr
+func (s *store) getWebhook(ctx context.Context, id uuid.UUID) (Webhook, error) {
+	hooks, err := s.listWebhooks(ctx, []uuid.UUID{id})
+	if err != nil {
+		return Webhook{}, err
 	}
-
-	return s.db.Gen(ctx).DeleteMerchantWebhook(ctx, gen.DeleteMerchantWebhookParams{MerchantID: queryMerchant.UUID(), ID: id})
+	if len(hooks) == 0 {
+		return Webhook{}, ErrWebhookNotFound
+	}
+	return hooks[0], nil
 }
 
-// --- row mapping -------------------------------------------------------------
-
-func webhookFromRow(row gen.BillingMerchantWebhook) Webhook {
-	return Webhook{
-		ID: row.ID, MerchantID: row.MerchantID, Name: row.Name, DestinationHost: row.DestinationHost, secretVersion: int(row.SecretVersion),
-		Format: WebhookFormat(row.Format), Enabled: row.Enabled,
-		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+// editWebhooks rewrites the merchant document's webhooks at its current
+// revision, retrying a lost race.
+func (s *store) editWebhooks(ctx context.Context, edit func([]merchantdocs.AlertWebhook) ([]merchantdocs.AlertWebhook, error)) error {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
 	}
+	if s.config == nil {
+		return errConfigUnwired
+	}
+	if !s.config.Writable() {
+		return merchants.ErrConfigReadOnly
+	}
+	for attempt := 0; ; attempt++ {
+		set, err := s.config.Reload(ctx, mid)
+		if err != nil {
+			return err
+		}
+		doc := set.Merchant.Value
+		hooks, err := edit(slices.Clone(doc.AlertWebhooks))
+		if err != nil {
+			return err
+		}
+		doc.AlertWebhooks = hooks
+		_, err = s.config.PutMerchant(ctx, mid, doc, set.Merchant.Revision)
+		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
+			if attempt >= 2 {
+				return merchants.ErrRevisionMismatch
+			}
+			continue
+		}
+		return err
+	}
+}
+
+func webhookOf(mid billing.MerchantID, hook merchantdocs.AlertWebhook) Webhook {
+	w := Webhook{
+		ID: hook.ID.UUID(), MerchantID: mid.UUID(), url: hook.URL,
+		Format: WebhookFormat(hook.Format), Enabled: hook.Enabled, CreatedAt: hook.CreatedAt, UpdatedAt: hook.UpdatedAt,
+	}
+	if name := strings.TrimSpace(hook.Name); name != "" {
+		w.Name = &name
+	}
+	if w.Format == "" {
+		w.Format = FormatGeneric
+	}
+	if parsed, err := url.Parse(hook.URL); err == nil {
+		w.DestinationHost = strings.ToLower(parsed.Host)
+	}
+	return w
 }
 
 // marshalJSON encodes v, substituting empty for a nil/zero value.

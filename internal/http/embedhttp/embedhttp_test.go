@@ -22,16 +22,17 @@ func TestCapabilities(t *testing.T) {
 	require.Equal(t, map[string]bool{"admin": true, "catalog": false, "merchant_config": false, "metrics": false, "app": true}, caps.RouteGroups)
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
-		"solana_subscription_management": false, "provider_credential_writes": false,
+		"solana_subscription_management": false, "merchant_config_edits": false,
 		"api_host": false, "catalog_copilot": false, "metrics_ask": false, "dashboard_generation": false,
 		"hosted_extra": true,
 	}, caps.Features)
 
-	// Credential writes need the merchant-config bundle.
-	writable := routesurface.ProviderRoutes{SecretWrite: true}
-	require.False(t, CapabilitiesFor(nil, httproutes.Permissions{AdminRead: "r", AdminUpdate: "w"}, false, writable, nil).Features["provider_credential_writes"])
-	config := CapabilitiesFor(nil, httproutes.Permissions{MerchantConfig: "c"}, false, writable, nil)
-	require.True(t, config.Features["provider_credential_writes"])
+	// Merchant-config edits need the group and an editable source.
+	editable := &app.Runtime{Config: &config.Config{Vault: &config.VaultConfig{KVMount: "kv"}}}
+	require.False(t, CapabilitiesFor(editable, httproutes.Permissions{AdminRead: "r", AdminUpdate: "w"}, false, routesurface.ProviderRoutes{}, nil).Features["merchant_config_edits"])
+	require.False(t, CapabilitiesFor(&app.Runtime{Config: &config.Config{}}, httproutes.Permissions{MerchantConfig: "c"}, false, routesurface.ProviderRoutes{}, nil).Features["merchant_config_edits"])
+	config := CapabilitiesFor(editable, httproutes.Permissions{MerchantConfig: "c"}, false, routesurface.ProviderRoutes{}, nil)
+	require.True(t, config.Features["merchant_config_edits"])
 	require.Equal(t, map[string]bool{"admin": false, "catalog": false, "merchant_config": true, "metrics": false, "app": false}, config.RouteGroups)
 }
 
@@ -106,26 +107,12 @@ func TestNewRoutes(t *testing.T) {
 	require.NotContains(t, keys, "GET /billing/v1/admin/psps", "configuration needs MerchantConfig")
 }
 
-// Provider credential writes need a DB secret backend that can write; an
-// explicit route override can neither grant them nor invent a Solana signer.
+// An explicit route selection wins; without one an unbound runtime mounts
+// every provider route and each request checks its own account.
 func TestProviderRoutesForRuntime(t *testing.T) {
-	for _, source := range []string{config.SecretBackendSnapshot, config.SecretBackendDB} {
-		for _, writable := range []bool{false, true} {
-			for _, explicit := range []bool{false, true} {
-				rt := &app.Runtime{Config: &config.Config{SecretBackend: source}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
-				var override *routesurface.ProviderRoutes
-				if explicit {
-					all := routesurface.AllProviderRoutes()
-					override = &all
-				}
-				routes := ProviderRoutesForRuntime(rt, override)
-				require.Equal(t, source == config.SecretBackendDB && writable, routes.SecretWrite, "%s/%v/%v", source, writable, explicit)
-				require.False(t, routes.SolanaSigning)
-				require.True(t, routes.Webhooks)
-				require.Equal(t, writable, rt.RouteCapabilities.SecretWrite, "route gating never mutates runtime capabilities")
-			}
-		}
-	}
+	only := routesurface.ProviderRoutes{Webhooks: true}
+	require.Equal(t, only, ProviderRoutesForRuntime(&app.Runtime{Config: &config.Config{}}, &only))
+	require.Equal(t, routesurface.AllProviderRoutes(), ProviderRoutesForRuntime(&app.Runtime{Config: &config.Config{}}, nil))
 }
 
 // Native adapters mirror gin's tree: catch-all subtrees own their descendants

@@ -23,8 +23,8 @@ type Deps struct {
 	Postgres *pgxpool.Pool
 	// Redis is optional shared storage for rate limits and abuse statistics.
 	Redis *redis.Client
-	// Vault is a borrowed, authenticated client for Config.SecretBackend
-	// vault. The host owns its renewal; OpenRails never revokes it.
+	// Vault is a borrowed, authenticated client; Config.Vault still names its
+	// mounts. The host owns its renewal; OpenRails never revokes it.
 	Vault *vaultapi.Client
 
 	// ConsoleAssets is a host-built admin console (web/admin's Vite build,

@@ -29,7 +29,7 @@ type ManagedStripeWebhookParams struct {
 
 	StripeClients       *stripeapi.Factory
 	Config              *config.Config
-	SecretStore         merchants.MerchantSecretStore
+	SecretStore         merchants.MerchantSecretReader
 	MerchantID          billing.MerchantID
 	ProviderEnvironment string
 	PspID               string

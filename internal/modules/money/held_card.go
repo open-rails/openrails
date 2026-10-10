@@ -55,11 +55,11 @@ func (b *MerchantCollectionAdapterBuilder) ReadHeldCard(ctx context.Context, m g
 		}
 		return paymentmethods.HeldCard{Card: paymentmethods.Card{Card: *state.Card, Fingerprint: state.Fingerprint}, Source: paymentmethods.SourceProviderRead}, nil
 	case m.Custodian == models.CustodianHyperSwitch && m.CustodianID != nil:
-		row, err := b.DB.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: m.MerchantID, ID: *m.CustodianID})
-		if err != nil {
-			return paymentmethods.HeldCard{}, err
+		custodian, ok, err := svc.CustodianScopeByID(ctx, mid, *m.CustodianID)
+		if err != nil || !ok {
+			return paymentmethods.HeldCard{}, fmt.Errorf("read HyperSwitch method: custodian unavailable: %v", err)
 		}
-		client, err := railresolve.HyperSwitchClient(ctx, b.Config, svc.Secrets(), mid, row)
+		client, err := railresolve.HyperSwitchClient(b.Config, mid, custodian)
 		if err != nil {
 			return paymentmethods.HeldCard{}, err
 		}

@@ -20,7 +20,7 @@ func CapabilitiesFor(rt *app.Runtime, perms routes.Permissions, programmatic boo
 		"stripe_billing_portal":          providerRoutes.StripePortal,
 		"solana_one_time_payments":       providerRoutes.Solana,
 		"solana_subscription_management": providerRoutes.SolanaSigning,
-		"provider_credential_writes":     config && providerRoutes.SecretWrite,
+		"merchant_config_edits":          config && rt.MerchantConfigEditable(),
 		"api_host":                       config && rt != nil && rt.Merchants != nil,
 		"catalog_copilot":                catalog && rt != nil && rt.CopilotService.Configured(),
 		"metrics_ask":                    metrics && rt != nil && rt.DashboardService.AskConfigured(),

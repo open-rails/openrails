@@ -15,9 +15,8 @@ import (
 const approvePSPPendingSigner = `-- name: ApprovePSPPendingSigner :execrows
 UPDATE billing.psps
 SET pending_signer_public_key = NULL,
-    archived = true,
-    archived_at = COALESCE(archived_at, now()),
-    revision = revision + 1,
+    superseded_at = COALESCE(superseded_at, now()),
+    credential_fingerprint = NULL,
     updated_at = now()
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
@@ -31,81 +30,14 @@ type ApprovePSPPendingSignerParams struct {
 }
 
 // #1101: the operator approval is the only writer that clears a pending
-// signer. The stored identity drains; the approved one is provisioned next.
+// signer. The stored identity is superseded and drains; the approved one is
+// registered next.
 func (q *Queries) ApprovePSPPendingSigner(ctx context.Context, arg ApprovePSPPendingSignerParams) (int64, error) {
 	result, err := q.db.Exec(ctx, approvePSPPendingSigner, arg.MerchantID, arg.ID, arg.PublicKey)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const archivePSP = `-- name: ArchivePSP :one
-UPDATE billing.psps
-SET archived = true,
-    archived_at = now(),
-    revision = revision + 1,
-    updated_at = now()
-WHERE id = $1::uuid AND merchant_id = $2::uuid
-RETURNING id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at
-`
-
-type ArchivePSPParams struct {
-	ID         uuid.UUID
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) ArchivePSP(ctx context.Context, arg ArchivePSPParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, archivePSP, arg.ID, arg.MerchantID)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
-		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
-	)
-	return i, err
-}
-
-const archivedPSPKeyExists = `-- name: ArchivedPSPKeyExists :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.psps
-    WHERE merchant_id = $1::uuid AND lower(key) = lower($2::text)
-      AND environment = $3::text AND archived = true
-)
-`
-
-type ArchivedPSPKeyExistsParams struct {
-	MerchantID  uuid.UUID
-	Key         string
-	Environment string
-}
-
-func (q *Queries) ArchivedPSPKeyExists(ctx context.Context, arg ArchivedPSPKeyExistsParams) (bool, error) {
-	row := q.db.QueryRow(ctx, archivedPSPKeyExists, arg.MerchantID, arg.Key, arg.Environment)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
 }
 
 const clearPSPCredentialDuplicate = `-- name: ClearPSPCredentialDuplicate :exec
@@ -123,25 +55,21 @@ func (q *Queries) ClearPSPCredentialDuplicate(ctx context.Context, arg ClearPSPC
 	return err
 }
 
-const countActivePSPsForNewWork = `-- name: CountActivePSPsForNewWork :one
-SELECT count(*)::bigint FROM billing.psps
-WHERE merchant_id = $1::uuid
-  AND rail = lower($2::text)
-  AND environment = COALESCE($3::text, 'live')
-  AND archived = false
+const clearPSPCredentialFingerprint = `-- name: ClearPSPCredentialFingerprint :exec
+UPDATE billing.psps SET credential_fingerprint = NULL, credential_duplicate_at = NULL
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+  AND (credential_fingerprint IS NOT NULL OR credential_duplicate_at IS NOT NULL)
 `
 
-type CountActivePSPsForNewWorkParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment *string
+type ClearPSPCredentialFingerprintParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
-func (q *Queries) CountActivePSPsForNewWork(ctx context.Context, arg CountActivePSPsForNewWorkParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countActivePSPsForNewWork, arg.MerchantID, arg.Rail, arg.Environment)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
+// An archived PSP releases its gateway account.
+func (q *Queries) ClearPSPCredentialFingerprint(ctx context.Context, arg ClearPSPCredentialFingerprintParams) error {
+	_, err := q.db.Exec(ctx, clearPSPCredentialFingerprint, arg.MerchantID, arg.ID)
+	return err
 }
 
 const countPSPOpenObligations = `-- name: CountPSPOpenObligations :many
@@ -190,26 +118,6 @@ func (q *Queries) CountPSPOpenObligations(ctx context.Context, arg CountPSPOpenO
 	return items, nil
 }
 
-const countPSPsForRailEnvironment = `-- name: CountPSPsForRailEnvironment :one
-SELECT count(*)::bigint FROM billing.psps
-WHERE merchant_id = $1::uuid
-  AND rail = lower($2::text)
-  AND environment = COALESCE($3::text, 'live')
-`
-
-type CountPSPsForRailEnvironmentParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment *string
-}
-
-func (q *Queries) CountPSPsForRailEnvironment(ctx context.Context, arg CountPSPsForRailEnvironmentParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countPSPsForRailEnvironment, arg.MerchantID, arg.Rail, arg.Environment)
-	var column_1 int64
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const declarePSPIdentity = `-- name: DeclarePSPIdentity :one
 INSERT INTO billing.psps (id, merchant_id, rail, environment, account_id, key)
 VALUES ($1::uuid, $2::uuid, $3::text,
@@ -217,7 +125,7 @@ VALUES ($1::uuid, $2::uuid, $3::text,
 ON CONFLICT (rail, environment, account_id) DO UPDATE SET id=billing.psps.id
 WHERE billing.psps.merchant_id=EXCLUDED.merchant_id
   AND billing.psps.key = EXCLUDED.key
-RETURNING id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at
+RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at
 `
 
 type DeclarePSPIdentityParams struct {
@@ -229,8 +137,8 @@ type DeclarePSPIdentityParams struct {
 	Key         string
 }
 
-// Declaration supplies attribution only. A matching existing account retains
-// its original ID, key, archive state, custody and credentials.
+// Declaration supplies attribution only. A matching existing account keeps
+// its original id, key and discovered state.
 func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentityParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, declarePSPIdentity,
 		arg.ID,
@@ -248,171 +156,20 @@ func (q *Queries) DeclarePSPIdentity(ctx context.Context, arg DeclarePSPIdentity
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
 		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
-	)
-	return i, err
-}
-
-const getActivePSPByKey = `-- name: GetActivePSPByKey :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid AND lower(key) = lower($2::text)
-  AND environment = $3::text AND NOT archived
-`
-
-type GetActivePSPByKeyParams struct {
-	MerchantID  uuid.UUID
-	Key         string
-	Environment string
-}
-
-func (q *Queries) GetActivePSPByKey(ctx context.Context, arg GetActivePSPByKeyParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, getActivePSPByKey, arg.MerchantID, arg.Key, arg.Environment)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
-		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
-	)
-	return i, err
-}
-
-const getActivePSPForNewWork = `-- name: GetActivePSPForNewWork :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid
-  AND rail = lower($2::text)
-  AND environment = COALESCE($3::text, 'live')
-  AND archived = false
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-`
-
-type GetActivePSPForNewWorkParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment *string
-}
-
-// The newest non-archived account on a rail+environment. Existing provider-bound
-// work must use its recorded psp_id instead of this selector.
-func (q *Queries) GetActivePSPForNewWork(ctx context.Context, arg GetActivePSPForNewWorkParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, getActivePSPForNewWork, arg.MerchantID, arg.Rail, arg.Environment)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
-		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
-	)
-	return i, err
-}
-
-const getNewestPSPForRail = `-- name: GetNewestPSPForRail :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid AND rail = lower($2::text)
-  AND environment = $3::text
-ORDER BY created_at DESC, id DESC
-LIMIT 1
-`
-
-type GetNewestPSPForRailParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-}
-
-// Archived included: the drain-pull leg (#699).
-func (q *Queries) GetNewestPSPForRail(ctx context.Context, arg GetNewestPSPForRailParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, getNewestPSPForRail, arg.MerchantID, arg.Rail, arg.Environment)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
-		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
+		&i.SupersededAt,
 	)
 	return i, err
 }
 
 const getPSP = `-- name: GetPSP :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE psps.merchant_id = $2::uuid AND id = $1
 `
 
@@ -431,33 +188,23 @@ func (q *Queries) GetPSP(ctx context.Context, arg GetPSPParams) (BillingPsp, err
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
 		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
+		&i.SupersededAt,
 	)
 	return i, err
 }
 
 const getPSPByIdentity = `-- name: GetPSPByIdentity :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE merchant_id = $1::uuid
   AND rail = lower($2::text)
-  AND environment = COALESCE($3::text, 'live')
+  AND environment = $3::text
   AND account_id = $4::text
 LIMIT 1
 `
@@ -465,7 +212,7 @@ LIMIT 1
 type GetPSPByIdentityParams struct {
 	MerchantID  uuid.UUID
 	Rail        string
-	Environment *string
+	Environment string
 	AccountID   string
 }
 
@@ -484,76 +231,14 @@ func (q *Queries) GetPSPByIdentity(ctx context.Context, arg GetPSPByIdentityPara
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
 		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
-	)
-	return i, err
-}
-
-const getPSPByRailIdentity = `-- name: GetPSPByRailIdentity :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE psps.merchant_id = $1::uuid AND rail = lower($2::text)
-  AND environment = COALESCE($3::text, 'live')
-  AND account_id = $4::text
-LIMIT 1
-`
-
-type GetPSPByRailIdentityParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment *string
-	AccountID   string
-}
-
-func (q *Queries) GetPSPByRailIdentity(ctx context.Context, arg GetPSPByRailIdentityParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, getPSPByRailIdentity,
-		arg.MerchantID,
-		arg.Rail,
-		arg.Environment,
-		arg.AccountID,
-	)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
-		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
+		&i.SupersededAt,
 	)
 	return i, err
 }
@@ -577,8 +262,7 @@ func (q *Queries) GetPSPEnvironmentForRail(ctx context.Context, arg GetPSPEnviro
 }
 
 const getPSPForCutoverWrite = `-- name: GetPSPForCutoverWrite :one
-
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE id = $1::uuid AND merchant_id = $2::uuid
 FOR SHARE
 `
@@ -588,10 +272,6 @@ type GetPSPForCutoverWriteParams struct {
 	MerchantID uuid.UUID
 }
 
-// or#880: the custody sibling moved to internal/db/queries/custodians.sql
-// (ResolveCustodianOwnerByIdentity). Custody identity is the CUSTODIAN's, not
-// a PSP's — and one custodian may back several PSPs, so "the" PSP was never a
-// well-defined answer.
 func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutoverWriteParams) (BillingPsp, error) {
 	row := q.db.QueryRow(ctx, getPSPForCutoverWrite, arg.ID, arg.MerchantID)
 	var i BillingPsp
@@ -602,24 +282,14 @@ func (q *Queries) GetPSPForCutoverWrite(ctx context.Context, arg GetPSPForCutove
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
 		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
+		&i.SupersededAt,
 	)
 	return i, err
 }
@@ -644,250 +314,8 @@ func (q *Queries) GetPSPIDByRailAccount(ctx context.Context, arg GetPSPIDByRailA
 	return id, err
 }
 
-const listActivePSPsForEnvironment = `-- name: ListActivePSPsForEnvironment :many
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid AND environment = $2::text AND archived = false
-ORDER BY rail ASC, created_at DESC, id DESC
-`
-
-type ListActivePSPsForEnvironmentParams struct {
-	MerchantID  uuid.UUID
-	Environment string
-}
-
-func (q *Queries) ListActivePSPsForEnvironment(ctx context.Context, arg ListActivePSPsForEnvironmentParams) ([]BillingPsp, error) {
-	rows, err := q.db.Query(ctx, listActivePSPsForEnvironment, arg.MerchantID, arg.Environment)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPsp
-	for rows.Next() {
-		var i BillingPsp
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Key,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.CustodianID,
-			&i.Settings,
-			&i.Signer,
-			&i.CredentialCustody,
-			&i.CredentialRefs,
-			&i.CredentialVersions,
-			&i.RetiredCredentials,
-			&i.CredentialsValidatedAt,
-			&i.WebhookEndpointID,
-			&i.WebhookOverlapExpiresAt,
-			&i.PendingSignerPublicKey,
-			&i.Revision,
-			&i.Archived,
-			&i.ArchivedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.CredentialFingerprint,
-			&i.CredentialDuplicateAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActivePSPsForRailEnvironment = `-- name: ListActivePSPsForRailEnvironment :many
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid AND rail = lower($2::text)
-  AND environment = $3::text AND archived = false
-ORDER BY created_at DESC, id DESC
-`
-
-type ListActivePSPsForRailEnvironmentParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-}
-
-func (q *Queries) ListActivePSPsForRailEnvironment(ctx context.Context, arg ListActivePSPsForRailEnvironmentParams) ([]BillingPsp, error) {
-	rows, err := q.db.Query(ctx, listActivePSPsForRailEnvironment, arg.MerchantID, arg.Rail, arg.Environment)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPsp
-	for rows.Next() {
-		var i BillingPsp
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Key,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.CustodianID,
-			&i.Settings,
-			&i.Signer,
-			&i.CredentialCustody,
-			&i.CredentialRefs,
-			&i.CredentialVersions,
-			&i.RetiredCredentials,
-			&i.CredentialsValidatedAt,
-			&i.WebhookEndpointID,
-			&i.WebhookOverlapExpiresAt,
-			&i.PendingSignerPublicKey,
-			&i.Revision,
-			&i.Archived,
-			&i.ArchivedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.CredentialFingerprint,
-			&i.CredentialDuplicateAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLivePSPsForRail = `-- name: ListLivePSPsForRail :many
-SELECT id, merchant_id, rail, environment, account_id, key
-FROM billing.psps
-WHERE merchant_id = $1::uuid
-  AND rail = $2::text
-  AND archived = false
-ORDER BY account_id
-`
-
-type ListLivePSPsForRailParams struct {
-	MerchantID uuid.UUID
-	Rail       string
-}
-
-type ListLivePSPsForRailRow struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-	AccountID   string
-	Key         string
-}
-
-// One merchant's live PSPs on a rail, read inside that merchant's scope (the
-// second leg of the ListRailArmedMerchants fan-out).
-func (q *Queries) ListLivePSPsForRail(ctx context.Context, arg ListLivePSPsForRailParams) ([]ListLivePSPsForRailRow, error) {
-	rows, err := q.db.Query(ctx, listLivePSPsForRail, arg.MerchantID, arg.Rail)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListLivePSPsForRailRow
-	for rows.Next() {
-		var i ListLivePSPsForRailRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.Key,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPSPs = `-- name: ListPSPs :many
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid
-  AND environment = $2::text
-  AND ($3::text IS NULL OR rail = $3::text)
-  AND ($4::boolean IS NULL OR archived = $4::boolean)
-  AND ($5::timestamptz IS NULL
-       OR (created_at, id) < ($5::timestamptz, $6::uuid))
-ORDER BY created_at DESC, id DESC
-LIMIT $7::int
-`
-
-type ListPSPsParams struct {
-	MerchantID  uuid.UUID
-	Environment string
-	Rail        *string
-	Archived    *bool
-	AfterAt     *time.Time
-	AfterID     *uuid.UUID
-	RowLimit    int32
-}
-
-// One page of the merchant's PSPs in its environment, newest first.
-func (q *Queries) ListPSPs(ctx context.Context, arg ListPSPsParams) ([]BillingPsp, error) {
-	rows, err := q.db.Query(ctx, listPSPs,
-		arg.MerchantID,
-		arg.Environment,
-		arg.Rail,
-		arg.Archived,
-		arg.AfterAt,
-		arg.AfterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPsp
-	for rows.Next() {
-		var i BillingPsp
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Key,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.CustodianID,
-			&i.Settings,
-			&i.Signer,
-			&i.CredentialCustody,
-			&i.CredentialRefs,
-			&i.CredentialVersions,
-			&i.RetiredCredentials,
-			&i.CredentialsValidatedAt,
-			&i.WebhookEndpointID,
-			&i.WebhookOverlapExpiresAt,
-			&i.PendingSignerPublicKey,
-			&i.Revision,
-			&i.Archived,
-			&i.ArchivedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.CredentialFingerprint,
-			&i.CredentialDuplicateAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPSPsByIDs = `-- name: ListPSPsByIDs :many
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -913,24 +341,14 @@ func (q *Queries) ListPSPsByIDs(ctx context.Context, arg ListPSPsByIDsParams) ([
 			&i.Rail,
 			&i.Environment,
 			&i.AccountID,
-			&i.CustodianID,
-			&i.Settings,
-			&i.Signer,
-			&i.CredentialCustody,
-			&i.CredentialRefs,
-			&i.CredentialVersions,
-			&i.RetiredCredentials,
 			&i.CredentialsValidatedAt,
 			&i.WebhookEndpointID,
-			&i.WebhookOverlapExpiresAt,
 			&i.PendingSignerPublicKey,
-			&i.Revision,
-			&i.Archived,
-			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CredentialFingerprint,
 			&i.CredentialDuplicateAt,
+			&i.SupersededAt,
 		); err != nil {
 			return nil, err
 		}
@@ -943,12 +361,13 @@ func (q *Queries) ListPSPsByIDs(ctx context.Context, arg ListPSPsByIDsParams) ([
 }
 
 const listPSPsForMerchant = `-- name: ListPSPsForMerchant :many
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at FROM billing.psps
 WHERE merchant_id = $1::uuid
-ORDER BY rail, environment, created_at, id
+ORDER BY created_at, id
 `
 
-// Every PSP of the merchant, both environments and archived ones included.
+// Every PSP identity of the merchant, both environments and superseded ones
+// included, oldest first.
 func (q *Queries) ListPSPsForMerchant(ctx context.Context, merchantID uuid.UUID) ([]BillingPsp, error) {
 	rows, err := q.db.Query(ctx, listPSPsForMerchant, merchantID)
 	if err != nil {
@@ -965,24 +384,14 @@ func (q *Queries) ListPSPsForMerchant(ctx context.Context, merchantID uuid.UUID)
 			&i.Rail,
 			&i.Environment,
 			&i.AccountID,
-			&i.CustodianID,
-			&i.Settings,
-			&i.Signer,
-			&i.CredentialCustody,
-			&i.CredentialRefs,
-			&i.CredentialVersions,
-			&i.RetiredCredentials,
 			&i.CredentialsValidatedAt,
 			&i.WebhookEndpointID,
-			&i.WebhookOverlapExpiresAt,
 			&i.PendingSignerPublicKey,
-			&i.Revision,
-			&i.Archived,
-			&i.ArchivedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.CredentialFingerprint,
 			&i.CredentialDuplicateAt,
+			&i.SupersededAt,
 		); err != nil {
 			return nil, err
 		}
@@ -999,7 +408,7 @@ SELECT DISTINCT p.merchant_id
 FROM billing.psps p
 JOIN billing.merchants m ON m.id = p.merchant_id
 WHERE p.rail = ANY($1::text[])
-  AND p.archived = false
+  AND p.superseded_at IS NULL
   AND m.deleted_at IS NULL
   AND ($2::uuid IS NULL OR p.merchant_id > $2::uuid)
 ORDER BY p.merchant_id
@@ -1012,9 +421,10 @@ type ListRailArmedMerchantsParams struct {
 	MerchantLimit   int32
 }
 
-// CROSS-MERCHANT: an ordered page of merchants after the cursor, armed on at
-// least one of the named rails (live PSP, undeleted merchant). Ids only; each
-// merchant's PSP rows are read inside its own scope.
+// CROSS-MERCHANT: an ordered page of merchants after the cursor holding a
+// current PSP on one of the named rails (undeleted merchant). Ids only; each
+// merchant's PSPs are read inside its own scope, where its configuration says
+// which are archived.
 func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedMerchantsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listRailArmedMerchants, arg.Rails, arg.AfterMerchantID, arg.MerchantLimit)
 	if err != nil {
@@ -1028,66 +438,6 @@ func (q *Queries) ListRailArmedMerchants(ctx context.Context, arg ListRailArmedM
 			return nil, err
 		}
 		items = append(items, merchant_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const lockPSPsForRailEnvironment = `-- name: LockPSPsForRailEnvironment :many
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
-WHERE merchant_id = $1::uuid AND rail = $2::text
-  AND environment = $3::text
-ORDER BY created_at, id
-FOR UPDATE
-`
-
-type LockPSPsForRailEnvironmentParams struct {
-	MerchantID  uuid.UUID
-	Rail        string
-	Environment string
-}
-
-// One lock order so concurrent archives serialize instead of deadlocking.
-func (q *Queries) LockPSPsForRailEnvironment(ctx context.Context, arg LockPSPsForRailEnvironmentParams) ([]BillingPsp, error) {
-	rows, err := q.db.Query(ctx, lockPSPsForRailEnvironment, arg.MerchantID, arg.Rail, arg.Environment)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingPsp
-	for rows.Next() {
-		var i BillingPsp
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.Key,
-			&i.Rail,
-			&i.Environment,
-			&i.AccountID,
-			&i.CustodianID,
-			&i.Settings,
-			&i.Signer,
-			&i.CredentialCustody,
-			&i.CredentialRefs,
-			&i.CredentialVersions,
-			&i.RetiredCredentials,
-			&i.CredentialsValidatedAt,
-			&i.WebhookEndpointID,
-			&i.WebhookOverlapExpiresAt,
-			&i.PendingSignerPublicKey,
-			&i.Revision,
-			&i.Archived,
-			&i.ArchivedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.CredentialFingerprint,
-			&i.CredentialDuplicateAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1130,74 +480,63 @@ func (q *Queries) MerchantHasPSPs(ctx context.Context, merchantID uuid.UUID) (bo
 	return exists, err
 }
 
-const publishPSP = `-- name: PublishPSP :one
-
-INSERT INTO billing.psps (
-    id, merchant_id, key, rail, environment, account_id, settings,
-    credential_custody, credential_refs,
-    credential_versions, retired_credentials, credentials_validated_at,
-    webhook_endpoint_id, webhook_overlap_expires_at, revision
-) VALUES (
-    $1::uuid, $2::uuid, $3::text,
-    lower($4::text), $5::text, $6::text,
-    $7::jsonb, $8::text, $9::jsonb,
-    $10::jsonb, $11::text[],
-    $12::timestamptz, $13::text,
-    $14::timestamptz, $15::bigint
+const pSPExistsOnRail = `-- name: PSPExistsOnRail :one
+SELECT EXISTS (
+    SELECT 1 FROM billing.psps
+    WHERE rail = lower($1::text) AND environment = $2::text
 )
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET
-    settings = EXCLUDED.settings,
-    credential_custody = EXCLUDED.credential_custody,
-    credential_refs = EXCLUDED.credential_refs,
-    credential_versions = EXCLUDED.credential_versions,
-    retired_credentials = EXCLUDED.retired_credentials,
-    credentials_validated_at = EXCLUDED.credentials_validated_at,
-    webhook_endpoint_id = EXCLUDED.webhook_endpoint_id,
-    webhook_overlap_expires_at = EXCLUDED.webhook_overlap_expires_at,
-    revision = EXCLUDED.revision,
-    updated_at = now()
-WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at
 `
 
-type PublishPSPParams struct {
-	ID                      uuid.UUID
-	MerchantID              uuid.UUID
-	Key                     string
-	Rail                    string
-	Environment             string
-	AccountID               string
-	Settings                []byte
-	CredentialCustody       *string
-	CredentialRefs          []byte
-	CredentialVersions      []byte
-	RetiredCredentials      []string
-	CredentialsValidatedAt  *time.Time
-	WebhookEndpointID       *string
-	WebhookOverlapExpiresAt *time.Time
-	Revision                int64
+type PSPExistsOnRailParams struct {
+	Rail        string
+	Environment string
 }
 
-// billing.psps: merchant-scoped PSP (payment-service-provider account) registry.
-// A credential publication: the caller holds the row lock and supplies every
-// credential column. The key is set once, on insert.
-func (q *Queries) PublishPSP(ctx context.Context, arg PublishPSPParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, publishPSP,
+// CROSS-MERCHANT: whether any merchant holds a PSP identity on rail in
+// environment, archived ones included.
+func (q *Queries) PSPExistsOnRail(ctx context.Context, arg PSPExistsOnRailParams) (bool, error) {
+	row := q.db.QueryRow(ctx, pSPExistsOnRail, arg.Rail, arg.Environment)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const registerPSP = `-- name: RegisterPSP :one
+
+INSERT INTO billing.psps (id, merchant_id, key, rail, environment, account_id)
+VALUES ($1::uuid, $2::uuid, $3::text,
+        lower($4::text), $5::text, $6::text)
+ON CONFLICT (rail, environment, account_id) DO UPDATE SET
+    key = EXCLUDED.key,
+    superseded_at = NULL,
+    updated_at = now()
+WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
+RETURNING id, merchant_id, key, rail, environment, account_id, credentials_validated_at, webhook_endpoint_id, pending_signer_public_key, created_at, updated_at, credential_fingerprint, credential_duplicate_at, superseded_at
+`
+
+type RegisterPSPParams struct {
+	ID          uuid.UUID
+	MerchantID  uuid.UUID
+	Key         string
+	Rail        string
+	Environment string
+	AccountID   string
+}
+
+// billing.psps: merchant-scoped PSP identities. A PSP's configuration
+// (settings, credentials, archived) is its document in a file or Vault; a row
+// holds the identity history points at and what OpenRails discovers.
+// Records a PSP document's identity under its natural-key id, current under
+// the document's key. An identity another merchant owns answers no row; a key
+// another current PSP of the merchant holds violates psps_key_key.
+func (q *Queries) RegisterPSP(ctx context.Context, arg RegisterPSPParams) (BillingPsp, error) {
+	row := q.db.QueryRow(ctx, registerPSP,
 		arg.ID,
 		arg.MerchantID,
 		arg.Key,
 		arg.Rail,
 		arg.Environment,
 		arg.AccountID,
-		arg.Settings,
-		arg.CredentialCustody,
-		arg.CredentialRefs,
-		arg.CredentialVersions,
-		arg.RetiredCredentials,
-		arg.CredentialsValidatedAt,
-		arg.WebhookEndpointID,
-		arg.WebhookOverlapExpiresAt,
-		arg.Revision,
 	)
 	var i BillingPsp
 	err := row.Scan(
@@ -1207,24 +546,14 @@ func (q *Queries) PublishPSP(ctx context.Context, arg PublishPSPParams) (Billing
 		&i.Rail,
 		&i.Environment,
 		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
 		&i.CredentialsValidatedAt,
 		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
 		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.CredentialFingerprint,
 		&i.CredentialDuplicateAt,
+		&i.SupersededAt,
 	)
 	return i, err
 }
@@ -1233,13 +562,13 @@ const resolvePSPOwnerByRailIdentity = `-- name: ResolvePSPOwnerByRailIdentity :o
 SELECT id, merchant_id, rail, environment, account_id
 FROM billing.psps
 WHERE rail = lower($1::text)
-  AND environment = COALESCE($2::text, 'live')
+  AND environment = $2::text
   AND account_id = $3::text
 `
 
 type ResolvePSPOwnerByRailIdentityParams struct {
 	Rail        string
-	Environment *string
+	Environment string
 	AccountID   string
 }
 
@@ -1279,10 +608,27 @@ type SetPSPCredentialFingerprintParams struct {
 }
 
 // Records the keyed fingerprint of the credential naming the PSP's gateway
-// account. The live fingerprint index refuses it when another live PSP on the
-// rail already holds it.
+// account. The live fingerprint index refuses it when another PSP on the rail
+// already holds it.
 func (q *Queries) SetPSPCredentialFingerprint(ctx context.Context, arg SetPSPCredentialFingerprintParams) error {
 	_, err := q.db.Exec(ctx, setPSPCredentialFingerprint, arg.Fingerprint, arg.MerchantID, arg.ID)
+	return err
+}
+
+const setPSPCredentialsValidated = `-- name: SetPSPCredentialsValidated :exec
+UPDATE billing.psps SET credentials_validated_at = $1::timestamptz, updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
+`
+
+type SetPSPCredentialsValidatedParams struct {
+	ValidatedAt *time.Time
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+}
+
+// When the provider last accepted the PSP's credentials.
+func (q *Queries) SetPSPCredentialsValidated(ctx context.Context, arg SetPSPCredentialsValidatedParams) error {
+	_, err := q.db.Exec(ctx, setPSPCredentialsValidated, arg.ValidatedAt, arg.MerchantID, arg.ID)
 	return err
 }
 
@@ -1309,92 +655,37 @@ func (q *Queries) SetPSPPendingSigner(ctx context.Context, arg SetPSPPendingSign
 	return result.RowsAffected(), nil
 }
 
-const upsertManifestPSP = `-- name: UpsertManifestPSP :one
-INSERT INTO billing.psps (
-    id, merchant_id, key, rail, environment, account_id, archived, archived_at,
-    custodian_id, settings, signer, credential_custody
-) VALUES (
-    $1::uuid, $2::uuid, $3::text,
-    lower($4::text), $5::text, $6::text,
-    $7::boolean, CASE WHEN $7::boolean THEN now() END,
-    $8::uuid, $9::jsonb, $10::jsonb, 'snapshot'
-)
-ON CONFLICT (rail, environment, account_id) DO UPDATE SET
-    key = EXCLUDED.key,
-    archived = EXCLUDED.archived,
-    archived_at = CASE WHEN EXCLUDED.archived THEN COALESCE(billing.psps.archived_at, now()) END,
-    -- Custody is declarative: a re-apply that no longer names a custodian
-    -- un-arms the arrangement.
-    custodian_id = EXCLUDED.custodian_id,
-    settings = EXCLUDED.settings,
-    signer = EXCLUDED.signer,
-    credential_custody = 'snapshot',
-    credential_refs = '{}',
-    credential_versions = '{}',
-    retired_credentials = '{}',
-    credentials_validated_at = NULL,
-    webhook_endpoint_id = NULL,
-    webhook_overlap_expires_at = NULL,
-    revision = billing.psps.revision + 1,
-    updated_at = now()
-WHERE billing.psps.merchant_id = EXCLUDED.merchant_id
-RETURNING id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at
+const setPSPWebhookEndpoint = `-- name: SetPSPWebhookEndpoint :exec
+UPDATE billing.psps SET webhook_endpoint_id = $1::text, updated_at = now()
+WHERE merchant_id = $2::uuid AND id = $3::uuid
 `
 
-type UpsertManifestPSPParams struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	Key         string
-	Rail        string
-	Environment string
-	AccountID   string
-	Archived    bool
-	CustodianID *uuid.UUID
-	Settings    []byte
-	Signer      []byte
+type SetPSPWebhookEndpointParams struct {
+	EndpointID *string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
 }
 
-// A manifest declaration overwrites the declared fields and resets credential
-// publication state to the startup snapshot.
-func (q *Queries) UpsertManifestPSP(ctx context.Context, arg UpsertManifestPSPParams) (BillingPsp, error) {
-	row := q.db.QueryRow(ctx, upsertManifestPSP,
-		arg.ID,
-		arg.MerchantID,
-		arg.Key,
-		arg.Rail,
-		arg.Environment,
-		arg.AccountID,
-		arg.Archived,
-		arg.CustodianID,
-		arg.Settings,
-		arg.Signer,
-	)
-	var i BillingPsp
-	err := row.Scan(
-		&i.ID,
-		&i.MerchantID,
-		&i.Key,
-		&i.Rail,
-		&i.Environment,
-		&i.AccountID,
-		&i.CustodianID,
-		&i.Settings,
-		&i.Signer,
-		&i.CredentialCustody,
-		&i.CredentialRefs,
-		&i.CredentialVersions,
-		&i.RetiredCredentials,
-		&i.CredentialsValidatedAt,
-		&i.WebhookEndpointID,
-		&i.WebhookOverlapExpiresAt,
-		&i.PendingSignerPublicKey,
-		&i.Revision,
-		&i.Archived,
-		&i.ArchivedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.CredentialFingerprint,
-		&i.CredentialDuplicateAt,
-	)
-	return i, err
+// The provider webhook endpoint OpenRails manages for the PSP.
+func (q *Queries) SetPSPWebhookEndpoint(ctx context.Context, arg SetPSPWebhookEndpointParams) error {
+	_, err := q.db.Exec(ctx, setPSPWebhookEndpoint, arg.EndpointID, arg.MerchantID, arg.ID)
+	return err
+}
+
+const supersedePSP = `-- name: SupersedePSP :exec
+UPDATE billing.psps
+SET superseded_at = COALESCE(superseded_at, now()), credential_fingerprint = NULL, pending_signer_public_key = NULL, updated_at = now()
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+`
+
+type SupersedePSPParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+// The PSP's key now names another account: it drains and releases its
+// gateway account's fingerprint.
+func (q *Queries) SupersedePSP(ctx context.Context, arg SupersedePSPParams) error {
+	_, err := q.db.Exec(ctx, supersedePSP, arg.MerchantID, arg.ID)
+	return err
 }

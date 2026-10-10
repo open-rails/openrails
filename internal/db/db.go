@@ -20,7 +20,7 @@ import (
 type DB struct {
 	pool  *pgxpool.Pool
 	pgtx  pgx.Tx
-	river *riverBinding
+	river *runtimeBinding
 
 	// ownsPool: NewDB created the pool and Close() must close it; pools
 	// injected by embedded hosts (NewWithPGXPool) stay open.
@@ -72,7 +72,7 @@ func NewDB(ctx context.Context, cfg *config.Config) (_ *DB, err error) {
 	if err != nil {
 		return nil, err
 	}
-	return &DB{river: &riverBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg)), partitions: &partitionState{}}, nil
+	return &DB{river: &runtimeBinding{}, pool: pool, ownsPool: true, rw: newSchemaRewriter(config.SchemaName(cfg)), partitions: &partitionState{}}, nil
 }
 
 // newTunedPGXPool parses the connection string, applies the pool tuning,
@@ -163,7 +163,7 @@ func NewWithPGXPool(pool *pgxpool.Pool, schema string) (*DB, error) {
 	if pool == nil {
 		return nil, fmt.Errorf("pgx pool is nil")
 	}
-	return &DB{river: &riverBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}}, nil
+	return &DB{river: &runtimeBinding{}, pool: pool, rw: newSchemaRewriter(schema), partitions: &partitionState{}}, nil
 }
 
 // DataPool returns a schema-aware wrapper over the base pool for the rare
@@ -198,7 +198,7 @@ func NewWithPgxTx(tx pgx.Tx) *DB {
 		return &DB{pgtx: tx, rw: scoped.rw, river: scoped.river}
 	}
 	rw := newSchemaRewriter("")
-	return &DB{pgtx: rw.wrapTx(tx), rw: rw, river: &riverBinding{}}
+	return &DB{pgtx: rw.wrapTx(tx), rw: rw, river: &runtimeBinding{}}
 }
 
 func (d *DB) NewWithPgxTx(tx pgx.Tx) *DB {

@@ -5,23 +5,19 @@ import (
 	"time"
 )
 
-// UpdateMerchantConfigurationParams is an explicit, replayable metadata update
-// against ExpectedRevision, the revision the caller read. Omitted fields
-// preserve stored values. IdempotencyKey (the Idempotency-Key header, at most
-// 128 bytes) replays the first result; the same key with other content is
-// refused. Credentials and provider lifecycle changes use the PSP methods; the
-// operator binds the API host (the merchant manifest, or the server's
-// SetMerchantAPIHost), and a hosted product claims one for its merchant.
+// UpdateMerchantConfigurationParams merges into the merchant's configuration:
+// omitted fields keep their values. ExpectedRevision, when set, is the
+// revision the caller read; a configuration changed since is refused with
+// revision_mismatch. Credentials and PSPs use the PSP methods.
 type UpdateMerchantConfigurationParams struct {
-	IdempotencyKey   string            `json:"-"`
-	ExpectedRevision *string           `json:"expected_revision"`
+	ExpectedRevision *int64            `json:"expected_revision"`
 	Settings         *MerchantSettings `json:"settings,omitempty"`
 	DisplayName      *string           `json:"display_name,omitempty"`
 }
 
 // MarshalJSON preserves explicit empty policy lists across both Client
 // transports. MerchantSettings omitempty tags otherwise turn a clear into
-// omission, which means preserve for a metadata application.
+// omission, which means keep.
 func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 	type plain UpdateMerchantConfigurationParams
 	body, err := json.Marshal(plain(p))
@@ -52,17 +48,10 @@ func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 	return json.Marshal(document)
 }
 
-// MerchantConfigurationReceipt records a committed metadata application. Replay
-// returns the original revision even when later operations changed metadata.
-type MerchantConfigurationReceipt struct {
-	Revision string `json:"revision"`
-	Replayed bool   `json:"replayed"`
-}
-
-// MerchantConfigurationState contains current non-secret metadata and an opaque
-// revision for optimistic concurrency. Merchant selection does not grant access.
+// MerchantConfigurationState is the merchant's configuration, never its
+// credentials. Revision advances with every change; an update may name it.
 type MerchantConfigurationState struct {
-	Revision    string           `json:"revision"`
+	Revision    int64            `json:"revision"`
 	DisplayName string           `json:"display_name"`
 	APIHost     string           `json:"api_host"`
 	Settings    MerchantSettings `json:"settings"`

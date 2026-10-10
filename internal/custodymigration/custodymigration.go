@@ -66,6 +66,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	boot "github.com/open-rails/openrails/internal/merchantbootstrap"
+	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 )
 
@@ -165,6 +167,9 @@ type Options struct {
 
 	// BatchID stamps the run. Zero = generated.
 	BatchID uuid.UUID
+	// MerchantManifestPath is the merchant manifest when a file holds
+	// merchant configuration; "" is the conventional path.
+	MerchantManifestPath string
 }
 
 // Outcome is the per-token verdict vocabulary.
@@ -316,53 +321,44 @@ func Migrate(ctx context.Context, opts Options) (Result, error) {
 	// Resolve the declared targets ONCE, before any row moves: an undeclared
 	// custodian or a PSP that charges through someone else's vault is a
 	// declaration error, and finding it on row 4000 is worthless.
-	var (
-		custodian gen.BillingCustodian
-		targetPSP *gen.BillingPsp
-	)
-	err = database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := database.Gen(ctx)
-		custodian, err = q.GetCustodianByKey(ctx, gen.GetCustodianByKeyParams{
-			MerchantID: merchantID.UUID(), Key: custodianKey,
-		})
+	configuration, closeConfig, err := boot.OneOffMerchants(ctx, opts.Config, database, merchantID, nil, opts.MerchantManifestPath, nil)
+	if err != nil {
+		return res, fmt.Errorf("custody migration: merchant configuration: %w", err)
+	}
+	defer closeConfig()
+	custodian, ok, err := configuration.CustodianScopeByKey(ctx, merchantID, custodianKey)
+	if err != nil {
+		return res, fmt.Errorf("custody migration: resolve custodian %q: %w", custodianKey, err)
+	}
+	if !ok {
+		return res, fmt.Errorf("custody migration: merchant declares no custodian %q — declare merchants.<slug>.custodians.%s.<kind> first", custodianKey, custodianKey)
+	}
+	if custodian.Archived {
+		return res, fmt.Errorf("custody migration: custodian %q is archived — an archived custodian drains existing instruments, it does not receive new ones", custodianKey)
+	}
+	if custodians.Normalize(custodian.Kind) != models.CustodianBasisTheory {
+		return res, fmt.Errorf("custody migration: custodian %q is kind %q; only %q holds cards today", custodianKey, custodian.Kind, models.CustodianBasisTheory)
+	}
+	var targetPSP *merchants.PSPScope
+	if !exp.PSP.isZero() {
+		environment := strings.TrimSpace(exp.PSP.Environment)
+		if environment == "" {
+			environment = "live"
+		}
+		psp, ok, err := configuration.PSPScopeByAccountID(ctx, merchantID, exp.PSP.Rail, strings.TrimSpace(exp.PSP.AccountID))
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("custody migration: merchant declares no custodian %q — declare merchants.<slug>.custodians.%s.<kind> first", custodianKey, custodianKey)
-			}
-			return fmt.Errorf("custody migration: resolve custodian %q: %w", custodianKey, err)
+			return res, fmt.Errorf("custody migration: resolve PSP %s: %w", exp.PSP, err)
 		}
-		if custodian.Archived {
-			return fmt.Errorf("custody migration: custodian %q is archived — an archived custodian drains existing instruments, it does not receive new ones", custodianKey)
-		}
-		if custodians.Normalize(custodian.Kind) != models.CustodianBasisTheory {
-			return fmt.Errorf("custody migration: custodian %q is kind %q; only %q holds cards today", custodianKey, custodian.Kind, models.CustodianBasisTheory)
-		}
-		if exp.PSP.isZero() {
-			return nil
-		}
-		psp, perr := q.GetPSPByIdentity(ctx, gen.GetPSPByIdentityParams{
-			MerchantID:  merchantID.UUID(),
-			Rail:        exp.PSP.Rail,
-			Environment: nilIfEmpty(exp.PSP.Environment),
-			AccountID:   strings.TrimSpace(exp.PSP.AccountID),
-		})
-		if perr != nil {
-			if errors.Is(perr, pgx.ErrNoRows) {
-				return fmt.Errorf("custody migration: merchant declares no PSP %s", exp.PSP)
-			}
-			return fmt.Errorf("custody migration: resolve PSP %s: %w", exp.PSP, perr)
+		if !ok || psp.Environment != environment {
+			return res, fmt.Errorf("custody migration: merchant declares no PSP %s", exp.PSP)
 		}
 		if psp.CustodianID == nil || *psp.CustodianID != custodian.ID {
-			return fmt.Errorf("custody migration: PSP %s does not reference custodian %q — a remapped instrument would be charged by a gateway that cannot detokenize it", exp.PSP, custodianKey)
+			return res, fmt.Errorf("custody migration: PSP %s does not reference custodian %q — a remapped instrument would be charged by a gateway that cannot detokenize it", exp.PSP, custodianKey)
 		}
 		if psp.Archived {
-			return fmt.Errorf("custody migration: PSP %s is archived — it drains existing obligations, it does not take on a migrated book", exp.PSP)
+			return res, fmt.Errorf("custody migration: PSP %s is archived — it drains existing obligations, it does not take on a migrated book", exp.PSP)
 		}
 		targetPSP = &psp
-		return nil
-	})
-	if err != nil {
-		return res, err
 	}
 	res.Custodian = custodianKey
 
@@ -412,8 +408,8 @@ type planner struct {
 	batchID     uuid.UUID
 	sourceRail  string
 	sourcePSPID uuid.UUID
-	custodian   gen.BillingCustodian
-	targetPSP   *gen.BillingPsp
+	custodian   merchants.CustodianScope
+	targetPSP   *merchants.PSPScope
 	exportedAt  time.Time
 	apply       bool
 	seenSource  map[string]int

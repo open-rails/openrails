@@ -13,8 +13,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -32,19 +32,19 @@ func TestRailDefinitions(t *testing.T) {
 
 func TestPSPView(t *testing.T) {
 	now := time.Date(2026, 6, 21, 12, 0, 0, 0, time.UTC)
-	configured := func(keys ...string) (out []MerchantSecretStatus) {
-		for _, key := range keys {
-			out = append(out, MerchantSecretStatus{Key: key, Configured: true})
+	scope := func(rail string, secrets ...string) PSPScope {
+		p := PSPScope{Key: "main", Rail: rail, Environment: "live", AccountID: "acct_123", ValidatedAt: &now, secrets: map[string]string{}}
+		for _, key := range secrets {
+			p.secrets[key] = "v"
 		}
-		return out
+		return p
 	}
 
-	got := pspView(gen.BillingPsp{
-		Key: "main", Rail: "stripe", Environment: "live", AccountID: "acct_123", CredentialsValidatedAt: &now,
-		Settings: []byte(`{"publishable_key":"pk_live_123"}`), CredentialVersions: []byte(`{"secret_key":3}`), Revision: 4,
-	}, configured("secret_key", "webhook_signing_secret"), 2)
+	stripe := scope("stripe", "secret_key", "webhook_signing_secret")
+	stripe.Settings, stripe.Revision = map[string]any{"publishable_key": "pk_live_123"}, 4
+	got := pspView(stripe, 2)
 	require.Equal(t, map[string]any{"publishable_key": "pk_live_123"}, got.Settings)
-	require.Equal(t, billing.PSPCredential{Configured: true, ValidatedAt: &now, RotationVersion: 3}, got.Credentials["secret_key"])
+	require.Equal(t, billing.PSPCredential{Configured: true, ValidatedAt: &now}, got.Credentials["secret_key"])
 	require.True(t, got.Credentials["webhook_signing_secret"].Configured)
 	require.Nil(t, got.Credentials["webhook_signing_secret"].ValidatedAt, "format-only secrets carry no live validation")
 	require.False(t, got.Credentials["webhook_signing_secret_thin"].Configured)
@@ -53,11 +53,9 @@ func TestPSPView(t *testing.T) {
 
 	// A validation time without the checked credential still configured is
 	// hidden.
-	for _, statuses := range [][]MerchantSecretStatus{nil, configured("webhook_signing_secret")} {
-		got := pspView(gen.BillingPsp{Rail: "nmi", Environment: "live", AccountID: "gw", CredentialsValidatedAt: &now}, statuses, 0)
-		require.Nil(t, got.Credentials["security_key"].ValidatedAt)
-	}
-	require.NotNil(t, pspView(gen.BillingPsp{Rail: "nmi", AccountID: "gw", CredentialsValidatedAt: &now}, configured("security_key"), 0).Credentials["security_key"].ValidatedAt)
+	require.Nil(t, pspView(scope("nmi"), 0).Credentials["security_key"].ValidatedAt)
+	require.Nil(t, pspView(scope("nmi", "webhook_signing_secret"), 0).Credentials["security_key"].ValidatedAt)
+	require.NotNil(t, pspView(scope("nmi", "security_key"), 0).Credentials["security_key"].ValidatedAt)
 
 	// CCBill validation proves the DataLink pair, never the webhook salt.
 	for key, want := range map[string]bool{"datalink_username": true, "datalink_password": true, "salt": false} {
@@ -66,7 +64,7 @@ func TestPSPView(t *testing.T) {
 	require.Nil(t, credentialValidatedAt("solana", "private_key", &now))
 }
 
-func TestPSPSettingsAndFloors(t *testing.T) {
+func TestPSPSettings(t *testing.T) {
 	// An API write overlays the stored settings; an empty value removes a key.
 	require.Equal(t, map[string]any{"tokenization_key": "tk", "publishable_key": "pk"},
 		mergeSettings(map[string]any{"tokenization_key": "tk", "card_entry": "browser"}, map[string]any{"publishable_key": "pk", "card_entry": ""}))
@@ -74,16 +72,6 @@ func TestPSPSettingsAndFloors(t *testing.T) {
 	require.Error(t, validatePSPSettings("stripe", map[string]any{"tokenization_key": "tk"}, nil), "a setting of another rail")
 	require.Error(t, validatePSPSettings("stripe", map[string]any{"publishable_key": "sk_test_1"}, nil))
 	require.Error(t, validatePSPSettings("nmi", map[string]any{"tokenization_key": "same"}, map[string]string{"security_key": "same"}), "a credential stored as a setting")
-
-	require.Equal(t, map[string]int{"secret_key": 5, "webhook_signing_secret": 2}, mergeCredentialVersions(
-		map[string]int{"Secret_Key": 5, "webhook_signing_secret": 1, "bogus": 0},
-		map[string]int{"secret_key": 4, "webhook_signing_secret": 2},
-	))
-	require.Nil(t, mergeCredentialVersions(nil, map[string]int{"x": 0}))
-
-	state := credentialState(gen.BillingPsp{RetiredCredentials: []string{"Security_Key"}, CredentialRefs: []byte(`{"secret_key":{"name":"n","version":1}}`)})
-	require.True(t, state.Retired["security_key"])
-	require.Equal(t, 1, state.Refs["secret_key"].MinVersion)
 }
 
 func TestProbeNMIAndCCBillCredentials(t *testing.T) {
@@ -93,32 +81,29 @@ func TestProbeNMIAndCCBillCredentials(t *testing.T) {
 		_, _ = w.Write([]byte(`<?xml version="1.0"?><nm_response></nm_response>`))
 	}))
 	t.Cleanup(nmi.Close)
-	svc := &Service{secrets: NewMemorySecretStore(), nmiCredentialProbeQueryURL: nmi.URL}
-	ok, err := svc.probePaymentProviderCredentials(t.Context(), billing.MerchantID(uuid.New()), "nmi", "test", "gateway", map[string]string{"security_key": "security-key"})
+	svc := &Service{nmiCredentialProbeQueryURL: nmi.URL}
+	id := billing.MerchantID(uuid.New())
+	ok, err := svc.probePaymentProviderCredentials(t.Context(), id, merchantdocs.PSP{Rail: "nmi", Environment: "test", AccountID: "gateway", Secrets: map[string]string{"security_key": "security-key"}})
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// A partial CCBill update is probed as the effective (supplied + stored) pair.
 	ccbill := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.NoError(t, r.ParseForm())
 		assert.Equal(t, "new-user", r.Form.Get("username"))
 		assert.Equal(t, "stored-pass", r.Form.Get("password"))
 	}))
 	t.Cleanup(ccbill.Close)
-	id := billing.MerchantID(uuid.New())
-	store := NewMemorySecretStore()
-	_, err = store.Put(t.Context(), id, "psps/ccbill/live/900000-0000/datalink_password", "stored-pass")
-	require.NoError(t, err)
-	svc = &Service{secrets: store, ccbillCredentialProbeBaseURL: ccbill.URL}
-	ok, err = svc.probePaymentProviderCredentials(t.Context(), id, "ccbill", "live", "900000-0000", map[string]string{"datalink_username": "new-user"})
+	svc = &Service{ccbillCredentialProbeBaseURL: ccbill.URL}
+	pair := merchantdocs.PSP{Rail: "ccbill", Environment: "live", AccountID: "900000-0000", Secrets: map[string]string{"datalink_username": "new-user", "datalink_password": "stored-pass"}}
+	ok, err = svc.probePaymentProviderCredentials(t.Context(), id, pair)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	svc = &Service{secrets: NewMemorySecretStore()}
-	ok, err = svc.probePaymentProviderCredentials(t.Context(), id, "ccbill", "live", "900000-0000", map[string]string{"datalink_username": "user"})
+	svc = &Service{}
+	ok, err = svc.probePaymentProviderCredentials(t.Context(), id, merchantdocs.PSP{Rail: "ccbill", Environment: "live", AccountID: "900000-0000", Secrets: map[string]string{"datalink_username": "user"}})
 	require.ErrorContains(t, err, "required together")
 	require.False(t, ok)
-	ok, err = svc.probePaymentProviderCredentials(t.Context(), id, "ccbill", "live", "900000-0000", nil)
+	ok, err = svc.probePaymentProviderCredentials(t.Context(), id, merchantdocs.PSP{Rail: "ccbill", Environment: "live", AccountID: "900000-0000"})
 	require.NoError(t, err)
 	require.False(t, ok, "nothing to probe is not a validation")
 }
@@ -180,7 +165,7 @@ func TestStripeCredentialProbeBindsAccountAndEnvironment(t *testing.T) {
 				}
 				return &http.Response{StatusCode: status, Header: http.Header{"Location": {"https://unexpected.example/secret"}}, Body: io.NopCloser(strings.NewReader(body))}, nil
 			}))}
-			ok, err := svc.probePaymentProviderCredentials(context.Background(), billing.MerchantID(uuid.New()), "stripe", tc.environment, "acct_selected", map[string]string{"secret_key": tc.key})
+			ok, err := svc.probePaymentProviderCredentials(context.Background(), billing.MerchantID(uuid.New()), merchantdocs.PSP{Rail: "stripe", Environment: tc.environment, AccountID: "acct_selected", Secrets: map[string]string{"secret_key": tc.key}})
 			require.Equal(t, tc.ok, ok)
 			if tc.ok {
 				require.NoError(t, err)

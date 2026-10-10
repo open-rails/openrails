@@ -102,9 +102,14 @@ func (c *ControlPlane) ListMerchantsForSubject(ctx context.Context, subject stri
 	if err != nil {
 		return nil, err
 	}
+	directory, err := c.directory()
+	if err != nil {
+		return nil, err
+	}
 	out := make([]MerchantForSubject, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, MerchantForSubject{ID: billing.MerchantID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName})
+		id := billing.MerchantID(row.ID)
+		out = append(out, MerchantForSubject{ID: id, Slug: row.Slug, DisplayName: directory.DisplayName(ctx, id)})
 	}
 	return out, nil
 }

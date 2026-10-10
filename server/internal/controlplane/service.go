@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/open-rails/openrails/internal/merchants"
+
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
@@ -53,6 +55,8 @@ type ControlPlane struct {
 	// resource verifies trusted issuers' RFC 9068 access tokens (#1140); nil
 	// accepts none.
 	resource *resourceServer
+	// merchants is the runtime's merchants service (BindMerchants).
+	merchants *merchants.Service
 }
 
 type options struct {

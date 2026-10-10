@@ -89,16 +89,10 @@ type fileConfig struct {
 	RateLimits         *billing.RateLimitsConfig `koanf:"rate_limits"`
 	RateLimitsDisabled bool                      `koanf:"rate_limits_disabled"`
 	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
-	Encryption         *billing.EncryptionConfig `koanf:"encryption"`
 	Vault              *billing.VaultConfig      `koanf:"vault"`
 	AdminConsole       *adminConsoleFile         `koanf:"admin_console"`
 	LLM                *billing.LLMConfig        `koanf:"llm"`
 	RouteGroups        billing.RouteGroups       `koanf:"route_groups"`
-
-	SecretBackend        string `koanf:"secret_backend"`
-	CredentialSnapshotID string `koanf:"credential_snapshot_id"`
-	CredentialReadOnly   bool   `koanf:"credential_read_only"`
-	AlertSecretBackend   string `koanf:"alert_secret_backend"`
 
 	MerchantManifestOverlays []string `koanf:"merchant_manifest_overlays"`
 
@@ -253,13 +247,8 @@ func (f *fileConfig) config() (*Config, error) {
 			RateLimits:                        f.RateLimits,
 			RateLimitsDisabled:                f.RateLimitsDisabled,
 			Captcha:                           f.Captcha,
-			Encryption:                        f.Encryption,
 			Vault:                             f.Vault,
 			LLM:                               f.LLM,
-			SecretBackend:                     f.SecretBackend,
-			CredentialSnapshotID:              f.CredentialSnapshotID,
-			CredentialReadOnly:                f.CredentialReadOnly,
-			AlertSecretBackend:                f.AlertSecretBackend,
 			CatalogReconciliationInterval:     f.CatalogReconciliationInterval,
 			ProviderBillingQuiescenceInterval: f.ProviderBillingQuiescenceInterval,
 			WebhookSecretOverlap:              f.WebhookSecretOverlap,

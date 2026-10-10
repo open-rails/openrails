@@ -1,13 +1,8 @@
 package merchants
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"testing"
 
-	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -46,20 +41,17 @@ func TestPSPSecretNameIsCanonicalAndRoundTrips(t *testing.T) {
 	}
 }
 
-// SEC-24 item 6: the cleaned name is joined into a Vault path, so traversal
-// segments are refused even though callers allowlist names today.
+// SEC-24 item 6: traversal segments never name a credential.
 func TestSecretNameRejectsTraversal(t *testing.T) {
-	mid := billing.MerchantID(uuid.New())
 	for _, name := range []string{"..", "../../root", "psps/../../other-merchant/nmi/security_key", "stripe/../../..", "./stripe/secret_key", "stripe/./secret_key", "/../", " / "} {
 		require.Empty(t, cleanSecretName(name), name)
-		require.Error(t, validateSecretRef(mid, name), name)
 	}
 	for _, name := range []string{"psps/stripe/live/acct_884_test/secret_key", "/psps/nmi/production/100001/security_key/"} {
 		require.NotEmpty(t, cleanSecretName(name), name)
-		require.NoError(t, validateSecretRef(mid, name), name)
 	}
-	require.Error(t, validateSecretRef(billing.MerchantID{}, stripeKeyName))
 }
+
+const stripeKeyName = "psps/stripe/live/acct_884_test/secret_key"
 
 func TestSecretWritability(t *testing.T) {
 	solana, err := PSPSecretName("solana", "live", "authority", "private_key")
@@ -80,75 +72,6 @@ func TestSecretWritability(t *testing.T) {
 	} {
 		require.Equal(t, writable, SecretWritable(name), name)
 	}
-}
-
-func TestCredentialWritesRequirePublication(t *testing.T) {
-	ctx, id := t.Context(), billing.MerchantID(uuid.New())
-	store := NewMemorySecretStore()
-	svc, err := NewSecretManagementService(store)
-	require.NoError(t, err)
-	_, err = NewSecretManagementService(nil)
-	require.Error(t, err)
-
-	for _, name := range []string{stripeKeyName, "stripe/secret_key", "nmi/mobius/security_key", "unknown/provider_key"} {
-		_, err := svc.PutCredential(ctx, id, name, "sk_test_123")
-		require.Error(t, err, name)
-	}
-	require.Error(t, svc.DeleteCredential(ctx, id, "stripe/secret_key"), "retired names are not deletable")
-
-	// Managed status is write-only: listing exposes metadata, never values.
-	_, err = store.Put(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret", "whsec_123")
-	require.NoError(t, err)
-	statuses, err := svc.ListSecretStatuses(ctx, id)
-	require.NoError(t, err)
-	require.Len(t, statuses, 1)
-	require.True(t, statuses[0].Configured)
-	require.Equal(t, 1, statuses[0].Version)
-	require.NotContains(t, fmt.Sprintf("%+v", statuses), "whsec_123")
-	require.NoError(t, svc.DeleteCredential(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret"))
-	_, err = store.Get(ctx, id, "psps/stripe/live/acct_884_test/webhook_signing_secret")
-	require.ErrorIs(t, err, ErrSecretNotFound)
-}
-
-func TestValidateCredentialNeverPersists(t *testing.T) {
-	ctx, id := t.Context(), billing.MerchantID(uuid.New())
-	store := NewMemorySecretStore()
-	svc := &Service{secrets: store}
-	probeErr := errors.New("Stripe refused access")
-	for _, tc := range []struct {
-		value   string
-		probe   error
-		probed  bool
-		wantErr error
-	}{
-		{value: "sk_test_123", probed: true},
-		{value: "sk_live_123", probed: true},
-		{value: "rk_test_123", probed: true},
-		{value: "rk_live_123", probe: probeErr, probed: true, wantErr: probeErr},
-		{value: "pk_test_123"},
-		{value: "whsec_123"},
-		{value: "not-stripe"},
-		{value: "   "}, // empty loads the stored value, which is absent
-	} {
-		probed := false
-		err := svc.ValidateCredential(ctx, id, stripeKeyName, tc.value, func(_ context.Context, supplied string) error {
-			probed = true
-			require.Equal(t, tc.value, supplied)
-			return tc.probe
-		})
-		require.Equal(t, tc.probed, probed, tc.value)
-		switch {
-		case tc.wantErr != nil:
-			require.ErrorIs(t, err, tc.wantErr)
-		case tc.probed:
-			require.NoError(t, err)
-		default:
-			require.Error(t, err, tc.value)
-		}
-	}
-	names, err := store.List(ctx, id)
-	require.NoError(t, err)
-	require.Empty(t, names, "validation never saves")
 }
 
 // #662: the PSP id is a pure function of the canonical global natural key.

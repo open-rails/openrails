@@ -3,8 +3,6 @@
 package ci_test
 
 import (
-	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -16,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/vaulttest"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/server"
 )
@@ -30,13 +29,10 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 	ctx := t.Context()
 	gateway := nmimock.New(nmimock.Options{})
 	t.Cleanup(gateway.Close)
-	key := make([]byte, 32)
-	_, err := rand.Read(key)
-	require.NoError(t, err)
+	vault := vaulttest.New(t)
 	srv := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
-		cfg.Engine.SecretBackend = openrails.SecretBackendDB
-		cfg.Engine.Encryption = &openrails.EncryptionConfig{MasterKey: base64.StdEncoding.EncodeToString(key)}
+		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
 	})
 	engine := srv.Client()
@@ -47,7 +43,7 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
 		require.NoError(t, err)
 		at := openrails.ForMerchantID(m.MerchantID)
-		_, err = engine.CreatePSP(ctx, billing.CreatePSPParams{OperationID: uuid.New(), Key: "nmi", Rail: billing.RailNMI, AccountID: account,
+		_, err = engine.CreatePSP(ctx, billing.CreatePSPParams{Key: "nmi", Rail: billing.RailNMI, AccountID: account,
 			Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
 			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}}, at)
 		require.NoError(t, err)

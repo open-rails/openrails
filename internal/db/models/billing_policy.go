@@ -1,11 +1,5 @@
 package models
 
-import (
-	"time"
-
-	"github.com/google/uuid"
-)
-
 // BillingPolicyKind names which quantity a policy caps.
 type BillingPolicyKind string
 
@@ -96,18 +90,4 @@ func (p BillingPolicy) RateWindowSeconds() int64 {
 		return p.AccrualRateWindowSeconds
 	}
 	return DefaultAccrualRateWindowSeconds
-}
-
-// BillingPolicyBinding is one row of billing.billing_policy_bindings: which
-// named policy applies to whom. Exactly one rung is populated — CustomerID for
-// a per-customer override, Tier for a per-tier override, neither for the
-// merchant default.
-type BillingPolicyBinding struct {
-	ID         uuid.UUID  `json:"id"`
-	MerchantID uuid.UUID  `json:"merchant_id"`
-	CustomerID *uuid.UUID `json:"customer_id,omitempty"`
-	Tier       string     `json:"tier,omitempty"`
-	PolicyName string     `json:"policy"`
-	CreatedAt  time.Time  `json:"created_at"`
-	UpdatedAt  time.Time  `json:"updated_at"`
 }

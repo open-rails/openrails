@@ -4,13 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 )
 
 // OpenRails owns merchant names (#1106). merchants.slug is the name of every
@@ -90,9 +93,56 @@ func (s *Service) ListByGroups(ctx context.Context, groupIDs []string) ([]Direct
 	}
 	var out []DirectoryRef
 	for _, row := range rows {
-		out = append(out, DirectoryRef{ID: billing.MerchantID(row.ID), Slug: row.Slug, DisplayName: row.DisplayName, GroupID: row.GroupID})
+		out = append(out, DirectoryRef{ID: billing.MerchantID(row.ID), Slug: row.Slug, DisplayName: s.DisplayName(ctx, billing.MerchantID(row.ID)), GroupID: row.GroupID})
 	}
 	return out, nil
+}
+
+// DisplayName is the display name the merchant's configuration sets; "" when
+// it sets none or cannot be read now.
+func (s *Service) DisplayName(ctx context.Context, id billing.MerchantID) string {
+	if s == nil || s.config == nil {
+		return ""
+	}
+	set, err := s.config.Get(ctx, id)
+	if err != nil {
+		return ""
+	}
+	return set.Merchant.Value.DisplayName
+}
+
+// SetDisplayName sets the merchant document's display name; "" is a no-op.
+// A manifest's merchants take theirs from the manifest.
+func (s *Service) SetDisplayName(ctx context.Context, id billing.MerchantID, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil
+	}
+	if s == nil || s.config == nil {
+		return errors.New("merchants: merchant configuration unavailable")
+	}
+	if !s.config.Writable() {
+		return ErrConfigReadOnly
+	}
+	for attempt := 0; ; attempt++ {
+		set, err := s.config.Reload(ctx, id)
+		if err != nil {
+			return err
+		}
+		doc := set.Merchant.Value
+		if doc.DisplayName == name {
+			return nil
+		}
+		doc.DisplayName = name
+		_, err = s.config.PutMerchant(ctx, id, doc, set.Merchant.Revision)
+		if errors.Is(err, merchantdocs.ErrRevisionMismatch) {
+			if attempt >= 2 {
+				return ErrRevisionMismatch
+			}
+			continue
+		}
+		return err
+	}
 }
 
 // nameClaimError maps the live-name index and the alias guard to one refusal.
@@ -103,4 +153,20 @@ func nameClaimError(err error) error {
 		return fmt.Errorf("%w: %w", billing.ErrMerchantNameTaken, err)
 	}
 	return err
+}
+
+// MerchantSettings is the merchant document's display name and settings: the
+// configuration a database handle reads through (db.MerchantConfig).
+func (s *Service) MerchantSettings(ctx context.Context, id billing.MerchantID) (string, billing.MerchantSettings, error) {
+	if s == nil || s.config == nil {
+		return "", billing.MerchantSettings{}, errors.New("merchants: merchant configuration unavailable")
+	}
+	return s.config.MerchantSettings(ctx, id)
+}
+
+// Of is the merchants service bound to d as its merchant configuration; nil
+// when none is.
+func Of(d *db.DB) *Service {
+	s, _ := d.MerchantConfig().(*Service)
+	return s
 }

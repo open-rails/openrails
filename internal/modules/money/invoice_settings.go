@@ -13,9 +13,9 @@ const (
 	DefaultInvoiceCollectionThresholdAmount int64 = 50_000_000
 	DefaultInvoiceMonthlyFloorAmount        int64 = 1_000_000
 
-	InvoiceBoundaryCalendarMonth = "calendar_month"
-	InvoiceBoundaryFixedInterval = "fixed_interval"
-	InvoiceBoundaryAnniversary   = "anniversary"
+	InvoiceBoundaryCalendarMonth = merchantconfig.InvoiceBoundaryCalendarMonth
+	InvoiceBoundaryFixedInterval = merchantconfig.InvoiceBoundaryFixedInterval
+	InvoiceBoundaryAnniversary   = merchantconfig.InvoiceBoundaryAnniversary
 
 	fixedInvoiceInterval = 30 * 24 * time.Hour
 )
@@ -51,7 +51,7 @@ func (s *MoneyService) InvoiceSettings(ctx context.Context) (InvoiceSettings, er
 		out.MonthlyFloorAmount = *cfg.InvoiceMonthlyFloor
 	}
 	if strings.TrimSpace(cfg.InvoiceBillingBoundary) != "" {
-		boundary := NormalizeInvoiceBoundary(cfg.InvoiceBillingBoundary)
+		boundary := merchantconfig.NormalizeInvoiceBoundary(cfg.InvoiceBillingBoundary)
 		if boundary == "" {
 			return out, fmt.Errorf("invalid invoice billing_period_boundary %q", cfg.InvoiceBillingBoundary)
 		}
@@ -60,25 +60,12 @@ func (s *MoneyService) InvoiceSettings(ctx context.Context) (InvoiceSettings, er
 	return out, nil
 }
 
-func NormalizeInvoiceBoundary(boundary string) string {
-	switch strings.ToLower(strings.TrimSpace(boundary)) {
-	case "", InvoiceBoundaryFixedInterval:
-		return InvoiceBoundaryFixedInterval
-	case InvoiceBoundaryCalendarMonth:
-		return InvoiceBoundaryCalendarMonth
-	case InvoiceBoundaryAnniversary:
-		return InvoiceBoundaryAnniversary
-	default:
-		return ""
-	}
-}
-
 func PreviousInvoicePeriod(now, anchor time.Time, boundary string) (time.Time, time.Time, error) {
 	to, err := CurrentInvoicePeriodStart(now, anchor, boundary)
 	if err != nil {
 		return time.Time{}, time.Time{}, err
 	}
-	switch NormalizeInvoiceBoundary(boundary) {
+	switch merchantconfig.NormalizeInvoiceBoundary(boundary) {
 	case InvoiceBoundaryCalendarMonth:
 		return addMonthsClamped(to, -1), to, nil
 	case InvoiceBoundaryAnniversary:
@@ -90,7 +77,7 @@ func PreviousInvoicePeriod(now, anchor time.Time, boundary string) (time.Time, t
 
 func CurrentInvoicePeriodStart(now, anchor time.Time, boundary string) (time.Time, error) {
 	now = now.UTC()
-	switch NormalizeInvoiceBoundary(boundary) {
+	switch merchantconfig.NormalizeInvoiceBoundary(boundary) {
 	case InvoiceBoundaryCalendarMonth:
 		return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC), nil
 	case InvoiceBoundaryAnniversary:
