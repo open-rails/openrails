@@ -908,19 +908,20 @@ type BillingOperationAuthorizationExtension struct {
 	CreatedAt        time.Time
 }
 
-// One purchase (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time. A decline leaves it open with last_payment_error; it is numbered from document_sequences when paid. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One purchase (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
 type BillingOrder struct {
-	MerchantID     uuid.UUID
-	ID             uuid.UUID
-	CustomerID     uuid.UUID
-	Origin         string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Origin     string
+	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired.
 	Status         string
 	Currency       string
 	Total          int64
 	Number         *string
 	IdempotencyKey *string
 	RequestDigest  []byte
-	// The saved card the latest attempt charged; a retry may name it again.
+	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.
 	PaymentMethodID *uuid.UUID
 	PspID           *uuid.UUID
 	// The checkout attempt last started for the order.
@@ -928,11 +929,13 @@ type BillingOrder struct {
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
 	ExpiresAt        time.Time
-	PaidAt           *time.Time
+	CompletedAt      *time.Time
 	CanceledAt       *time.Time
 	ExpiredAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
+	PaymentStatus string
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.

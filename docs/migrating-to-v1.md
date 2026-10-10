@@ -241,7 +241,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `SetDefaultPaymentMethod` | Removed: a charge names its card; the customer sets a default card per currency on `/v1/me` |
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListPayments(` and `client.ListPaymentAttempts(` with `InvoiceID`, `client.CreatePayment(` with `InvoiceID` |
 | `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomer(` with `InvoiceProfile`; `client.GetCustomer(`. No profile already means net 0, charged automatically |
-| `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderPaid` |
+| `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderComplete` |
 | `billing.ChannelAdmin` | Removed: a payment's channel is `billing.ChannelRail` or `billing.ChannelManual` |
 | `CreateOffChannelPayment` answered `{payment_id, status, entitlements}` | `client.CreatePayment(` with the `OrderID` of an unpaid order; it answers the `billing.Payment`, and changed terms under the same transaction id are `billing.ErrIdempotencyKeyReused` |
 | `Subscription.RailSubscriptionID`, `CreditGrant.SourceID`, `AlertWebhook.Name` as `string` (`""` when absent) | `*string`, nil when absent |

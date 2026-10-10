@@ -66,9 +66,9 @@ func TestRecordedOrderPayment(t *testing.T) {
 
 			paid, err := client.GetOrder(t.Context(), order)
 			require.NoError(t, err)
-			require.Equal(t, billing.OrderPaid, paid.Status)
+			require.Equal(t, billing.OrderComplete, paid.Status)
 			require.NotNil(t, paid.Number)
-			bought, err := client.ListOrders(t.Context(), billing.OrderListParams{CustomerID: c.cid(), PriceID: life.ID, Status: billing.OrderPaid})
+			bought, err := client.ListOrders(t.Context(), billing.OrderListParams{CustomerID: c.cid(), PriceID: life.ID, Status: billing.OrderComplete})
 			require.NoError(t, err)
 			require.Len(t, bought.Items, 1, "staff find who bought a price")
 			require.Equal(t, order, bought.Items[0].ID)

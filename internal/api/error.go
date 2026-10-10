@@ -54,7 +54,9 @@ type APIError struct {
 	RequestID  string
 	Param      *string
 	Metadata   map[string]any
-	cause      error
+	// Order is the order a failed payment left open.
+	Order *billing.Order
+	cause error
 }
 
 // Error implements the error interface
@@ -76,6 +78,7 @@ func (e *APIError) ToResponse() ErrorResponse {
 			RequestID: e.RequestID,
 			Param:     e.Param,
 			Metadata:  e.Metadata,
+			Order:     e.Order,
 		},
 	}
 }

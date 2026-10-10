@@ -78,7 +78,7 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 			key = &in.IdempotencyKey
 		}
 		if err := q.CreateOrder(ctx, gen.CreateOrderParams{MerchantID: mid.UUID(), ID: id, CustomerID: in.CustomerID, Origin: string(in.Origin),
-			Status: string(billing.OrderOpen), Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: in.RequestDigest,
+			Currency: quote.Currency, Total: quote.Total, IdempotencyKey: key, RequestDigest: in.RequestDigest,
 			ExpiresAt: now.Add(in.TTL), Now: now}); err != nil {
 			return err
 		}
@@ -303,7 +303,7 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 		if customerID != uuid.Nil && order.CustomerID != customerID {
 			return ErrNotFound
 		}
-		if order.Status != string(billing.OrderOpen) && order.Status != string(billing.OrderRequiresAction) {
+		if order.Status != string(billing.OrderOpen) {
 			if status == billing.OrderExpired {
 				return nil
 			}
@@ -316,7 +316,7 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 		if _, err := q.CloseOrder(ctx, gen.CloseOrderParams{MerchantID: mid.UUID(), ID: id, Status: string(status), Now: now}); err != nil {
 			return err
 		}
-		if order.Status == string(billing.OrderRequiresAction) {
+		if order.AwaitsCustomer() {
 			awaiting = order.AttemptID
 		}
 		if order.AttemptID != nil {
@@ -327,6 +327,7 @@ func (s *Service) close(ctx context.Context, customerID, id uuid.UUID, status bi
 		if _, err := q.ReleaseOrderClaims(ctx, gen.ReleaseOrderClaimsParams{MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: id}); err != nil {
 			return err
 		}
+		order.Status, order.PaymentStatus = string(status), string(billing.OrderPaymentRequiresPaymentMethod)
 		return s.event(ctx, q, &order.BillingOrder, "order."+string(status), now, nil)
 	})
 	if err != nil || awaiting == nil || s.Abandon == nil {
@@ -345,13 +346,10 @@ func attemptClosed(status billing.OrderStatus) string {
 	return "canceled"
 }
 
-// event enqueues one host event of an order transition.
+// event enqueues one host event of an order transition; order is the row as
+// the transition leaves it.
 func (s *Service) event(ctx context.Context, q *gen.Queries, order *gen.BillingOrder, kind string, at time.Time, extra map[string]any) error {
-	status := kind[len("order."):]
-	if kind == "order.payment_failed" {
-		status = string(billing.OrderOpen)
-	}
-	data := map[string]any{"customer_id": order.CustomerID.String(), "status": status}
+	data := map[string]any{"customer_id": order.CustomerID.String(), "status": order.Status, "payment_status": order.PaymentStatus}
 	for k, v := range extra {
 		data[k] = v
 	}

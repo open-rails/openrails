@@ -13,7 +13,13 @@ import (
 )
 
 type SaleParams struct {
+	// CustomerVaultID charges a stored card; PaymentToken (Collect.js) charges
+	// a card just entered instead.
 	CustomerVaultID string
+	PaymentToken    string
+	// SaveCard, with PaymentToken, stores the card in a new vault in the same
+	// sale (customer_vault=add_customer) under these billing details.
+	SaveCard *CreateCustomerVaultData
 	// BillingID targets one stored card in the vault; empty charges the
 	// priority-1 entry. Set it when the vault may hold several.
 	BillingID string
@@ -29,8 +35,10 @@ type SaleParams struct {
 
 type SaleResponse struct {
 	TransactionID string
-	Authcode      string
-	ResponseText  string
+	// CustomerVaultID is the vault a SaveCard sale created.
+	CustomerVaultID string
+	Authcode        string
+	ResponseText    string
 	// AVSResponse and CVVResponse are the gateway's verification letters.
 	AVSResponse, CVVResponse string
 }
@@ -54,8 +62,11 @@ func (c *NMIClient) RunSale(ctx context.Context, params SaleParams) (*SaleRespon
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(params.CustomerVaultID) == "" {
-		return nil, errors.New("customer vault ID is required")
+	if (strings.TrimSpace(params.CustomerVaultID) == "") == (strings.TrimSpace(params.PaymentToken) == "") {
+		return nil, errors.New("a sale charges either a customer vault or a payment token")
+	}
+	if params.SaveCard != nil && (params.PaymentToken == "" || params.BillingID != "") {
+		return nil, errors.New("only a payment token sale saves its card")
 	}
 	if params.Amount <= 0 {
 		return nil, errors.New("amount must be greater than 0")
@@ -93,10 +104,26 @@ func (c *NMIClient) runClassicSale(ctx context.Context, params SaleParams, curre
 	values := url.Values{
 		"type":              {"sale"},
 		"security_key":      {c.SecurityKey},
-		"customer_vault_id": {params.CustomerVaultID},
 		"amount":            {amount},
 		"currency":          {currency},
 		"order_description": {orderDesc},
+	}
+	if params.PaymentToken != "" {
+		values.Set("payment_token", strings.TrimSpace(params.PaymentToken))
+	} else {
+		values.Set("customer_vault_id", params.CustomerVaultID)
+	}
+	if data := params.SaveCard; data != nil {
+		values.Set("customer_vault", "add_customer")
+		for key, value := range map[string]string{
+			"first_name": data.FirstName, "last_name": data.LastName, "company": data.Company,
+			"address1": data.Address1, "address2": data.Address2, "city": data.City, "state": data.State,
+			"zip": data.Zip, "country": data.Country, "phone": data.Phone, "email": data.Email,
+		} {
+			if value = strings.TrimSpace(value); value != "" {
+				values.Set(key, value)
+			}
+		}
 	}
 	if billingID != "" {
 		values.Set("billing_id", billingID)

@@ -25,11 +25,12 @@ func ParseSaleResponse(raw string) (*SaleResponse, error) {
 
 func saleResponse(output url.Values, raw string) *SaleResponse {
 	return &SaleResponse{
-		TransactionID: output.Get("transactionid"),
-		Authcode:      output.Get("authcode"),
-		ResponseText:  responseText(output, raw),
-		AVSResponse:   strings.TrimSpace(output.Get("avsresponse")),
-		CVVResponse:   strings.TrimSpace(output.Get("cvvresponse")),
+		TransactionID:   output.Get("transactionid"),
+		CustomerVaultID: strings.TrimSpace(output.Get("customer_vault_id")),
+		Authcode:        output.Get("authcode"),
+		ResponseText:    responseText(output, raw),
+		AVSResponse:     strings.TrimSpace(output.Get("avsresponse")),
+		CVVResponse:     strings.TrimSpace(output.Get("cvvresponse")),
 	}
 }
 
