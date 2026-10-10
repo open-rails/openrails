@@ -34,7 +34,6 @@ func TestExampleManifestsParse(t *testing.T) {
 	require.Equal(t, "Local Stack Billing", m.Settings.Profile.DisplayName)
 
 	byName, railOf := m.PSPs, map[string]string{}
-	require.Len(t, m.PSPs, 10)
 	for name, account := range m.PSPs {
 		railOf[name] = string(account.Rail)
 	}

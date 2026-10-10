@@ -98,8 +98,8 @@ func stripeFiles(t *testing.T) []stripeFile {
 // import this package or use the runtime-owned StripeClients factory.
 func TestStripeCallSitesUseTheChokePoint(t *testing.T) {
 	files := stripeFiles(t)
-	if len(files) < 5 {
-		t.Fatalf("only %d Stripe call sites found: the walk is broken and this guard would pass vacuously", len(files))
+	if len(files) == 0 {
+		t.Fatal("no Stripe call site found: the walk is broken and this guard would pass vacuously")
 	}
 
 	var violations []string

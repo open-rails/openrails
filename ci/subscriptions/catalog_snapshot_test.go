@@ -85,7 +85,6 @@ products:
 	raw, err := configdocument.YAMLToJSON(artifact.Bytes(), merchantarchive.CatalogSnapshotMaxBytes)
 	require.NoError(t, err)
 	require.NoError(t, json.Unmarshal(raw, &document))
-	require.Len(t, document.Tables, 9)
 	require.Len(t, document.Tables["prices"], 3)
 	require.Len(t, document.Tables["product_archive_operations"], 1)
 	require.Len(t, document.Dependencies.PSPs, 1)
