@@ -109,7 +109,7 @@ docker-compose.local.yml
 
 # Cache directories
 .cache/
-node_modules/ # if any frontend assets
+node_modules
 
 # Build tools
 Makefile.local
@@ -163,3 +163,6 @@ plans/
 
 # Python bytecode
 __pycache__/
+
+# Playwright MCP browser session output
+.playwright-mcp/
