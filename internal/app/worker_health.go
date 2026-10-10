@@ -11,18 +11,13 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// #689 worker health wiring: kinds are noted as workers register and periodic
-// cadences as schedules are declared, so the health checker knows every kind
-// and what "on time" means with zero per-worker code.
+// Kinds are noted as workers register and cadences as schedules are declared,
+// so the health checker knows every kind and its expected cadence with no
+// per-worker code.
 //
-// #895: the bookkeeping middleware is installed PER WORKER, at registration,
-// not on the client. It used to be a client-level river.Config.Middleware
-// entry, which meant an embedded host could adopt the fleet via AddWorkersTo
-// and simply omit it, causing every periodic kind to report never_succeeded
-// forever. River
-// honours Worker.Middleware(job) per work unit (internal/jobexecutor), so
-// attaching it here makes the omission unrepresentable: registering an
-// OpenRails worker registers its bookkeeping, with no host cooperation.
+// The bookkeeping middleware is installed per worker, not on the client: River
+// honours Worker.Middleware per job, so registering an OpenRails worker
+// registers its bookkeeping and a host-owned client cannot omit it.
 
 // workerHealthRegistrations lazily builds the runtime's registration set.
 func (r *Runtime) workerHealthRegistrations() *riverjobs.WorkerRegistrations {
@@ -41,10 +36,9 @@ type healthTrackedWorker[T river.JobArgs] struct {
 	structural rivertype.WorkerMiddleware
 }
 
-// Middleware order matters. `health` is OUTERMOST so its bookkeeping records the
-// error the queue actually acts on — i.e. the structural refusal, not the raw
-// driver error underneath it (or#901) — and, inside it, the liveness reaper's
-// NoProgressError rather than the bare context cancellation (xs-007 row 31).
+// Middleware puts health outermost, so it records the error the queue acts
+// on: the structural refusal rather than the raw driver error, and the liveness
+// reaper's NoProgressError rather than a bare context cancellation.
 func (w *healthTrackedWorker[T]) Middleware(job *rivertype.JobRow) []rivertype.WorkerMiddleware {
 	inner := w.inner.Middleware(job)
 	out := make([]rivertype.WorkerMiddleware, 0, len(inner)+3)
@@ -62,14 +56,11 @@ func (w *healthTrackedWorker[T]) NextRetry(job *river.Job[T]) time.Time {
 const riverNoJobTimeout = -1
 
 // Timeout is -1 for every OpenRails worker, whatever the inner worker or the
-// host's client says (xs-007 row 31). River resolves the job's clock as
-// cmp.Or(worker.Timeout(), client.JobTimeout), so declaring it HERE — on the
-// wrapper every OpenRails worker is registered through — is what makes a
-// host-owned client's JobTimeout (River's default: 1 minute) unable to cancel
-// billing work. Per-worker overrides would have to be remembered by every
-// future worker; a client-level setting is the host's to forget. The wrapper
-// is the one place that cannot be bypassed. A job ends on observed lack of
-// progress (riverjobs.JobLivenessMiddleware), never on a clock.
+// host's client says. River resolves cmp.Or(worker.Timeout(),
+// client.JobTimeout), so declaring it on the wrapper every worker registers
+// through stops a host client's JobTimeout (default 1 minute) from cancelling
+// billing work. A job ends on observed lack of progress
+// (riverjobs.JobLivenessMiddleware), never on a clock.
 func (w *healthTrackedWorker[T]) Timeout(*river.Job[T]) time.Duration {
 	return riverNoJobTimeout
 }
@@ -79,8 +70,8 @@ func (w *healthTrackedWorker[T]) Work(ctx context.Context, job *river.Job[T]) er
 }
 
 // addTrackedWorker registers a worker, notes its kind for health seeding, and
-// attaches the health bookkeeping (#895) and liveness (xs-007 row 31)
-// middlewares to the worker itself.
+// attaches the health, liveness and structural-failure middlewares to the
+// worker itself.
 func addTrackedWorker[T river.JobArgs](r *Runtime, workers *river.Workers, worker river.Worker[T]) error {
 	return addTrackedWorkerWithLiveness(r, workers, worker,
 		riverjobs.NewJobLivenessMiddleware(r.riverTableAccess, r.workerHealthRegistrations()))

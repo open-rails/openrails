@@ -105,8 +105,7 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 	return out, nil
 }
 
-// SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235
-// admin surface). Thin passthrough to the credits service.
+// SetCreditAccountSettings upserts a payer's spend policy in one currency.
 func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string, in money.AccountSettingsInput) error {
 	if payer.IsZero() {
 		return fmt.Errorf("payer required")
@@ -115,16 +114,14 @@ func (s *Service) SetCreditAccountSettings(ctx context.Context, payer identity.C
 	if err != nil {
 		return err
 	}
-	// Pin a merchant connection for the upsert (#227).
 	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		_, err := s.moneyService().UpsertAccountSettings(ctx, payer, currency, in)
 		return err
 	})
 }
 
-// GetCreditAccountSettings returns a payer's stored account settings
-// (billing mode, credit limit and collection method) for the
-// customer billing-account admin surface (issue #242). Merchant-scoped.
+// GetCreditAccountSettings returns a payer's stored account settings in one
+// currency (billing mode, default card, credit limit).
 func (s *Service) GetCreditAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {

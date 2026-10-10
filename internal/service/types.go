@@ -1,10 +1,6 @@
-// Package service provides the in-process billing API for embedded hosts.
-//
-// All types in this file are exported and safe to use by external packages.
-// These types do not import from internal/* packages.
+// Package service is the in-process billing API under the Client and the HTTP
+// routes.
 package service
-
-// -------------------------------- Pagination --------------------------------
 
 // PaginationOptions specifies limit/offset pagination parameters.
 type PaginationOptions struct {

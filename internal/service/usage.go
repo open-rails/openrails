@@ -22,30 +22,27 @@ func NewUsageIdempotencyKey(eventType, source, sourceID string) (UsageIdempotenc
 	return money.NewIdempotencyKey(money.UsageOperation(eventType), source, sourceID)
 }
 
-// RecordUsageInput is one host-reported metered usage event (#797).
+// RecordUsageInput is one host-reported metered usage event.
 //
-// Key is REQUIRED and is the idempotency coordinate within
-// (merchant, payer, currency): claimed under the payer's spend lock by a lookup
-// over the ingest window, and for a priced event by the ledger's operation
-// coordinate for good. Build it with
+// Key is required: the idempotency coordinate within (merchant, payer,
+// currency), claimed under the payer's spend lock over the ingest window and,
+// for a priced event, permanently by the ledger. Build it with
 // NewUsageIdempotencyKey(EventType, source, sourceID); its operation must match
-// EventType, so two different event types at one
-// (source, source_id) are two charges rather than one collision (or#894). Both
-// halves must be REPRODUCIBLE by the caller across retries of the same logical
-// event: a value minted per attempt passes every check here and guarantees
+// EventType, so two event types at one (source, source_id) are two charges,
+// not a collision. Both halves must be reproducible across retries of the same
+// logical event: a value minted per attempt passes every check and guarantees
 // nothing.
 //
-// A replay under the same key with the SAME Amount returns success and neither
-// re-records nor re-charges. A replay with a DIFFERENT Amount is refused with
-// money.ErrIdempotencyKeyReused (or#891) rather than answered with the first
-// event, so a corrected charge cannot silently keep the original number.
+// A replay with the same Amount succeeds without re-recording or re-charging;
+// a different Amount is refused with money.ErrIdempotencyKeyReused, so a
+// corrected charge never silently keeps the original number.
 //
-// Amount is the host-priced cost in the currency's internal precision;
-// 0 records a free/metered-only event whose Dimensions still aggregate
-// through rate-card rating (gauge meters report unit-second quantities).
+// Amount is the host-priced cost in the currency's internal precision; 0
+// records a free event whose Dimensions still aggregate through rate-card
+// rating (gauge meters report unit-second quantities).
 //
-// Failed records usage that failed (see billing.UsageFailed): the windows it
-// counts toward are resolved here from InvokerType.
+// Failed records failed usage (see billing.UsageFailed); the windows it counts
+// toward are resolved from InvokerType.
 type RecordUsageInput struct {
 	CustomerID  identity.CustomerID
 	Invoker     string
@@ -62,10 +59,10 @@ type RecordUsageInput struct {
 	OccurredAt time.Time
 }
 
-// RecordUsage durably records a metered usage event (and debits the ledger for
-// a non-zero Amount) via money.RecordUsage (#289/#797). Idempotent on
-// (merchant, payer, currency, usage:<event_type>, source, source_id); a replay
-// carrying a different Amount returns money.ErrIdempotencyKeyReused.
+// RecordUsage durably records a metered usage event, debiting the ledger for a
+// non-zero Amount. Idempotent on (merchant, payer, currency,
+// usage:<event_type>, source, source_id); a replay with a different Amount
+// returns money.ErrIdempotencyKeyReused.
 func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billing.UsageEvent, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -128,10 +125,9 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 	return out, nil
 }
 
-// FinalizeInvoice closes the rating window [from, to) for one payer: the
-// metered rating sweep rates reported usage through the catalog rate cards
-// (allowances + per-period watermarks) and the resulting statement is
-// finalized as an invoice (#797 public export). Idempotent per window.
+// FinalizeInvoice closes the rating window [from, to) for one payer: reported
+// usage is rated through the catalog rate cards (allowances, per-period
+// watermarks) and the statement finalized as an invoice. Idempotent per window.
 func (s *Service) FinalizeInvoice(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*billing.Invoice, error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {

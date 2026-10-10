@@ -11,13 +11,11 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// #895: OpenRails' own liveness answer for "is the cron system progressing?".
-//
-// The detector must not require the monitored subsystem to be alive, so it is
-// NOT a River job: StartRiverProgressMonitor runs an ordinary goroutine that
-// reads River's own river_job watermarks. It keeps reporting — and alerting —
-// when River was never started, was started without OpenRails' workers, or is
-// wedged.
+// OpenRails' own answer to "is the cron system progressing?". The detector must
+// not depend on what it monitors, so it is not a River job:
+// StartRiverProgressMonitor runs a plain goroutine reading River's river_job
+// watermarks, which keeps alerting when River never started, runs without
+// OpenRails' workers, or is wedged.
 
 // riverProgressMonitor lazily builds the monitor. It is safe to call before or
 // after a River client exists; the monitor reads tables, not clients.
@@ -39,9 +37,8 @@ func (r *Runtime) riverProgressMonitor() *riverjobs.ProgressMonitor {
 	return r.progress
 }
 
-// riverStatsPool returns the pool used to read River's own tables. They live
-// in the SAME database as the billing schema (host-chosen schema, `public` by
-// default, #545), so the app pool reads them directly.
+// riverStatsPool returns the pool used to read River's own tables, which live
+// in the billing database (Database.RiverSchema).
 func (r *Runtime) riverStatsPool() *pgxpool.Pool {
 	if r.DB != nil {
 		return r.DB.Pool()
@@ -50,7 +47,7 @@ func (r *Runtime) riverStatsPool() *pgxpool.Pool {
 }
 
 // StartRiverProgressMonitor starts the out-of-River progress detector, once.
-// The returned stop function is idempotent; Runtime.Close calls it.
+// Runtime.Close stops it.
 func (r *Runtime) StartRiverProgressMonitor(ctx context.Context) {
 	if r == nil || r.DB == nil {
 		return

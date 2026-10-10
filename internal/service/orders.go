@@ -25,10 +25,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// Orders (#1168): a customer previews, buys (one call, or create then pay),
-// confirms after acting, cancels and reads their own orders. The order id is
-// not a credential: every action is the customer's own, and another
-// customer's order does not exist.
+// Orders: a customer previews, buys (one call, or create then pay), confirms
+// after acting, cancels and reads their own orders. The order id is not a
+// credential: every action is the customer's own, and another customer's
+// order does not exist.
 
 var (
 	// ErrIdempotencyKeyInUse: the request first sent with the key is still

@@ -111,8 +111,7 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 				event.Payment.SubscriptionID = &subscriptionID
 			}
 		case billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared:
-			// Storage predates the public wire DTO and stores money as JSON
-			// integers. Decode those fields explicitly before the Client emits
+			// Stored payloads hold money as JSON integers; the Client emits
 			// lossless decimal strings at the HTTP boundary.
 			var payload struct {
 				billing.DelinquencyHostEvent

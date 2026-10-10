@@ -9,9 +9,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// railArmed reports whether the ctx merchant's rail is armed (#788 Layer C).
-// Resolution errors read as unarmed — every caller refuses to act on false,
-// never default-allows.
+// railArmed reports whether the ctx merchant's rail is armed. Resolution
+// errors read as unarmed: every caller refuses to act on false.
 func (s *Service) railArmed(ctx context.Context, rail string) bool {
 	if s == nil || s.rt == nil || s.rt.RailConfigs == nil {
 		return false
@@ -24,9 +23,9 @@ func (s *Service) railArmed(ctx context.Context, rail string) bool {
 	return armed
 }
 
-// resolveNMIClientForMerchant arms the ctx merchant's NMI client from the
-// armed rail state (#788). nil = not armed / not resolvable (callers skip
-// their NMI pass — they never fall back to another credential source).
+// resolveNMIClientForMerchant arms the ctx merchant's NMI client. nil = not
+// armed or not resolvable; callers skip their NMI pass and never fall back to
+// another credential source.
 func (s *Service) resolveNMIClientForMerchant(ctx context.Context) *nmi.NMIClient {
 	if s == nil || s.rt == nil || s.rt.CollectionResolver == nil {
 		return nil
