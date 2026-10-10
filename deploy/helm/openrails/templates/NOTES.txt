@@ -1,0 +1,9 @@
+OpenRails {{ include "openrails.tag" . }} is starting; it migrates its schema at boot.
+
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "openrails.fullname" . }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "openrails.fullname" . }} 3053:{{ .Values.service.port }}
+  curl http://127.0.0.1:3053/health/ready
+{{- if .Values.ingress.enabled }}
+
+Public URL: https://{{ first .Values.ingress.hosts }}
+{{- end }}

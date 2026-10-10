@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "openrails.fullname" . }}
+  labels:
+    {{- include "openrails.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    {{- include "openrails.config" . | nindent 4 }}
+  {{- range $name, $content := .Values.files }}
+  {{ $name }}: |
+    {{- if kindIs "string" $content }}
+    {{- $content | trimSuffix "\n" | nindent 4 }}
+    {{- else }}
+    {{- toYaml $content | nindent 4 }}
+    {{- end }}
+  {{- end }}

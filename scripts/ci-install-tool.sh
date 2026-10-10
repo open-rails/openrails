@@ -7,7 +7,7 @@
 # no version and no integrity check. Measured on ubuntu-latest: `task` 61s,
 # `gosec` 47s; this path is ~2s.
 #
-#   scripts/ci-install-tool.sh <task|gosec|sqlc> [dest-dir]   # default: bin/
+#   scripts/ci-install-tool.sh <task|gosec|sqlc|helm> [dest-dir]   # default: bin/
 #
 # Prints the absolute path of the installed binary on stdout; everything else
 # goes to stderr, so:  TASK="$(scripts/ci-install-tool.sh task)"
@@ -25,7 +25,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-tool="${1:?usage: ci-install-tool.sh <task|gosec|sqlc> [dest-dir]}"
+tool="${1:?usage: ci-install-tool.sh <task|gosec|sqlc|helm> [dest-dir]}"
 dest="${2:-bin}"
 
 case "$(uname -s)-$(uname -m)" in
@@ -57,6 +57,13 @@ case "$tool" in
         sha256="497ae4fcdfa64c5b0c311ffe4c2bd991e43991e82e5367792ed78bc2dca27354"
         member="sqlc"
         ;;
+    helm)
+        version="3.19.0"
+        url="https://get.helm.sh/helm-v${version}-linux-amd64.tar.gz"
+        # upstream helm-v3.19.0-linux-amd64.tar.gz.sha256sum
+        sha256="a7f81ce08007091b86d8bd696eb4d86b8d0f2e1b9f6c714be62f82f96a594496"
+        member="linux-amd64/helm"
+        ;;
     *)
         echo "ci-install-tool: unknown tool '$tool'" >&2
         exit 2
@@ -64,7 +71,7 @@ case "$tool" in
 esac
 
 mkdir -p "$dest"
-out="$(cd "$dest" && pwd)/${member}-${version}"
+out="$(cd "$dest" && pwd)/${member##*/}-${version}"
 
 if [ ! -x "$out" ]; then
     tmp="$(mktemp -d)"

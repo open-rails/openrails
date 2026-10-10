@@ -1,0 +1,181 @@
+# OpenRails standalone server. Postgres 18+ and Redis (or Garnet) are not part
+# of this chart: name them in config and secrets. docs/kubernetes.md has a
+# walkthrough.
+
+# Every pod serves the API and runs the workers. More than one needs Redis
+# (config.redis) for AuthKit's rate limits and its keys from secrets.authKeys.
+replicaCount: 1
+
+image:
+  repository: docker.io/openrails/openrails # or ghcr.io/open-rails/openrails
+  tag: "" # default: the chart's appVersion, vX.Y.Z
+  digest: "" # sha256:…; pins the image over the tag
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# The command; the chart appends --config=/etc/openrails/config.yaml.
+args: [run-server]
+
+# config.yaml, rendered as is (config.example.yaml lists every key). Keep
+# secrets out: they come from `secrets`, as environment variables or files
+# named like them (db.url is DB_URL). host, port and private_port are the
+# chart's (ports.http, metrics.port).
+config:
+  test_mode: sandbox # sandbox | live; required
+  provider_write_mode: readonly # full | limited | readonly; required
+  # public_billing_base_url: https://billing.example.com
+  # auth:
+  #   issuer: https://billing.example.com # https, required
+  #   request_origin: https://billing.example.com
+  # Optional, no default; without it OpenRails counts its limits in Postgres.
+  # AuthKit's limits need it unless auth.allow_memory (one replica only).
+  # redis:
+  #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
+  # The ingress controller's pod or node CIDR: without it the client IP is the
+  # proxy's.
+  # trusted_proxies: [10.244.0.0/16]
+  # resource_server:
+  #   identifier: https://billing.example.com
+  #   trusted_issuers: []
+  # Vault holds merchant configuration and secrets when a KV mount is named.
+  # vault:
+  #   address: https://vault.example.com:8200
+  #   auth_method: kubernetes # mounts the ServiceAccount token
+  #   k8s_role: openrails
+
+# More files in /etc/openrails, each a YAML document or a string. The server
+# reads these names when present:
+#   merchants.yaml  merchant manifest, applied at every boot (its secrets go in
+#                   secrets.merchantOverlays)
+#   bootstrap.yaml  AuthKit's first-run operators and trusted applications
+#   catalog.yaml    the default of `openrails apply-catalog --file`
+files: {}
+
+# Secrets come from existing Secrets; the chart creates none.
+secrets:
+  # Environment variables from Secret keys, such as CloudNativePG's app Secret:
+  #   DB_URL: {name: openrails-db-app, key: uri}
+  env: {}
+  # Secrets whose keys are environment variable names (DB_URL, REDIS_URL,
+  # REDIS_PASSWORD, REDIS_CA_CERT, EMAIL_SMTP_PASSWORD, VAULT_TOKEN,
+  # RESOURCE_SERVER_DPOP_NONCE_KEY, …), mounted as files at /vault/secrets.
+  # Environment variables win over files.
+  files: []
+  # A Secret holding AuthKit's keys.json and totp.key, mounted at /vault/auth
+  # and reloaded when it changes. Empty mounts a scratch directory, which
+  # only auth.allow_ephemeral_signing_key can use, and only with one replica.
+  authKeys: ""
+  # Merchant manifest overlays: a Secret key holding YAML in the manifest's
+  # shape (PSP credentials kept outside Vault), added to
+  # merchant_manifest_overlays.
+  #   - {name: shop-psps, key: overlay.yaml}
+  merchantOverlays: []
+
+env: []
+envFrom: []
+
+ports:
+  http: 3053
+
+# The private listener: GET /metrics, never routed by the ingress.
+metrics:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # Every path of each host goes to the server: the API, webhooks and the
+  # admin console. Per-merchant API hosts can be a wildcard (*.api.example.com).
+  hosts: []
+  tls: []
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# The server waits for Postgres and migrates before it listens.
+startupProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  periodSeconds: 5
+  failureThreshold: 120
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 3
+# Postgres and the local workers; Redis, Vault and PSPs never fail it.
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  periodSeconds: 10
+  timeoutSeconds: 3
+
+# On SIGTERM the server turns unready and drains on its own: drain_delay
+# (5s) then shutdown_timeout (20s). Raise this with them.
+terminationGracePeriodSeconds: 30
+
+strategy: {}
+
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # Mounted anyway when config.vault.auth_method is kubernetes.
+  automountToken: false
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+# Rendered with tpl, so a selector can use the chart's labels:
+#   - maxSkew: 1
+#     topologyKey: topology.kubernetes.io/zone
+#     whenUnsatisfiable: ScheduleAnyway
+#     labelSelector:
+#       matchLabels:
+#         app.kubernetes.io/instance: '{{ .Release.Name }}'
+topologySpreadConstraints: []
+
+extraVolumes: []
+extraVolumeMounts: []
+
+nameOverride: ""
+fullnameOverride: ""

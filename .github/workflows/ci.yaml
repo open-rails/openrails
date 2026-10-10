@@ -115,11 +115,19 @@ jobs:
           cache-dependency-path: web/admin/pnpm-lock.yaml
       - run: bash scripts/check.sh console
 
+  chart:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - run: HELM="$(scripts/ci-install-tool.sh helm)" bash scripts/check.sh chart
+
   # The required check: every part above must pass. A skipped, cancelled or
   # failed part never turns into a successful aggregate.
   checks:
     name: Checks
-    needs: [go-test, lint, console]
+    needs: [go-test, lint, console, chart]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2

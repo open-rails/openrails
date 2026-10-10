@@ -1,0 +1,52 @@
+# Every optional part on: helm lint and helm template in CI.
+replicaCount: 2
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+config:
+  test_mode: live
+  provider_write_mode: full
+  public_billing_base_url: https://billing.example.com
+  auth:
+    issuer: https://billing.example.com
+    request_origin: https://billing.example.com
+  redis:
+    addr: redis:6379
+  trusted_proxies: [10.244.0.0/16]
+  vault:
+    address: https://vault.example.com:8200
+    auth_method: kubernetes
+    k8s_role: openrails
+files:
+  merchants.yaml:
+    version: 1
+    merchants:
+      shop:
+        display_name: Shop
+  catalog.yaml: |
+    version: 1
+secrets:
+  env:
+    DB_URL: {name: openrails-db-app, key: uri}
+  files: [openrails-secrets, openrails-smtp]
+  authKeys: openrails-auth-keys
+  merchantOverlays:
+    - {name: shop-psps, key: overlay.yaml}
+metrics:
+  serviceMonitor:
+    enabled: true
+ingress:
+  enabled: true
+  className: traefik
+  hosts: [billing.example.com, "*.api.billing.example.com"]
+  tls:
+    - secretName: billing-tls
+      hosts: [billing.example.com, "*.api.billing.example.com"]
+podDisruptionBudget:
+  enabled: true
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/instance: '{{ .Release.Name }}'

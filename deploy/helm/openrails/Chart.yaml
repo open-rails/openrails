@@ -1,0 +1,15 @@
+apiVersion: v2
+name: openrails
+description: OpenRails standalone billing server
+type: application
+# The release workflow publishes the chart with version X.Y.Z and appVersion
+# vX.Y.Z from each vX.Y.Z tag; a checkout runs the image master publishes.
+version: 0.0.0
+appVersion: latest
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/open-rails/openrails
+sources:
+  - https://github.com/open-rails/openrails
+keywords:
+  - billing
+  - payments

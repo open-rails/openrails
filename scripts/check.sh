@@ -80,11 +80,21 @@ console() {
   (cd server && go build -o /dev/null ./cmd/openrails)
 }
 
+# The Helm chart, with its defaults and with every optional part on.
+chart() {
+  local helm="${HELM:-helm}" dir=deploy/helm/openrails values
+  for values in "$dir/values.yaml" "$dir/ci/full-values.yaml"; do
+    "$helm" lint --strict "$dir" -f "$values"
+    "$helm" template openrails "$dir" -f "$values" >/dev/null
+  done
+}
+
 checks() {
   guards
   build
   go_tests
   console
+  chart
 }
 
 e2e() {
@@ -97,7 +107,8 @@ case "${1:-all}" in
   build) build ;;
   go) guards; go_tests ;;
   console) console ;;
+  chart) chart ;;
   e2e) e2e ;;
   all) checks; e2e ;;
-  *) echo "usage: bash scripts/check.sh [checks|build|go|console|e2e|all]" >&2; exit 2 ;;
+  *) echo "usage: bash scripts/check.sh [checks|build|go|console|chart|e2e|all]" >&2; exit 2 ;;
 esac

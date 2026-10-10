@@ -1,0 +1,171 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "openrails.fullname" . }}
+  labels:
+    {{- include "openrails.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  revisionHistoryLimit: 5
+  {{- with .Values.strategy }}
+  strategy:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "openrails.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "openrails.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "openrails.serviceAccountName" . }}
+      automountServiceAccountToken: {{ include "openrails.automountToken" . }}
+      # Not needed by OpenRails; off to keep the pod's env clean.
+      enableServiceLinks: false
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: openrails
+          image: {{ include "openrails.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            {{- toYaml .Values.args | nindent 12 }}
+            - --config=/etc/openrails/config.yaml
+          {{- if or .Values.secrets.env .Values.env }}
+          env:
+            {{- range $name, $ref := .Values.secrets.env }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required (printf "secrets.env.%s.name is required" $name) $ref.name }}
+                  key: {{ required (printf "secrets.env.%s.key is required" $name) $ref.key }}
+            {{- end }}
+            {{- with .Values.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          {{- end }}
+          {{- with .Values.envFrom }}
+          envFrom:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.ports.http }}
+            {{- if .Values.metrics.enabled }}
+            - name: metrics
+              containerPort: {{ .Values.metrics.port }}
+            {{- end }}
+          {{- with .Values.startupProbe }}
+          startupProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/openrails
+              readOnly: true
+            {{- if .Values.secrets.files }}
+            - name: secret-files
+              mountPath: /vault/secrets
+              readOnly: true
+            {{- end }}
+            - name: auth-keys
+              mountPath: /vault/auth
+              {{- if .Values.secrets.authKeys }}
+              readOnly: true
+              {{- end }}
+            {{- if .Values.secrets.merchantOverlays }}
+            - name: overlays
+              mountPath: /vault/overlays
+              readOnly: true
+            {{- end }}
+            - name: tmp
+              mountPath: /tmp
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "openrails.fullname" . }}
+        {{- with .Values.secrets.files }}
+        - name: secret-files
+          projected:
+            sources:
+              {{- range . }}
+              - secret:
+                  name: {{ . }}
+              {{- end }}
+        {{- end }}
+        - name: auth-keys
+          {{- if .Values.secrets.authKeys }}
+          secret:
+            secretName: {{ .Values.secrets.authKeys }}
+            defaultMode: 0440
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        {{- with .Values.secrets.merchantOverlays }}
+        - name: overlays
+          projected:
+            sources:
+              {{- range . }}
+              - secret:
+                  name: {{ required "secrets.merchantOverlays[].name is required" .name }}
+                  items:
+                    - key: {{ required "secrets.merchantOverlays[].key is required" .key }}
+                      path: {{ .name }}/{{ .key }}
+              {{- end }}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.topologySpreadConstraints }}
+      topologySpreadConstraints:
+        {{- tpl (toYaml .) $ | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

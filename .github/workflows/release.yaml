@@ -1,7 +1,8 @@
 name: Release
 
 # A v* tag publishes the GitHub Release (.goreleaser.yaml): binaries, checksums,
-# SBOMs, generated notes and build provenance; then @openrails/billing-ui to npm.
+# SBOMs, generated notes and build provenance; then @openrails/billing-ui to npm
+# and the Helm chart to oci://ghcr.io/open-rails/charts/openrails.
 # scripts/release cuts one: vX.Y.Z and server/vX.Y.Z on one master commit. The
 # binary is built from the server module.
 # Pull requests that change the release build run it as a snapshot.
@@ -98,6 +99,36 @@ jobs:
           path: build/billing-ui/*.tgz
           if-no-files-found: error
           retention-days: 7
+
+  chart:
+    name: Publish the Helm chart
+    needs: goreleaser
+    if: github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      packages: write # ghcr.io/open-rails/charts/openrails
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      # Chart version X.Y.Z runs image vX.Y.Z; a pull request packages a snapshot.
+      - name: Package
+        run: |
+          version=0.0.0-snapshot
+          [[ "$GITHUB_EVENT_NAME" == push ]] && version="${GITHUB_REF_NAME#v}"
+          helm="$(scripts/ci-install-tool.sh helm)"
+          echo "HELM=$helm" >> "$GITHUB_ENV"
+          "$helm" lint --strict deploy/helm/openrails
+          "$helm" package deploy/helm/openrails --version "$version" --app-version "v$version" --destination dist/chart
+      - name: Push
+        if: github.event_name == 'push'
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          scripts/ci-retry.sh bash -c '"$HELM" registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin <<<"$GHCR_TOKEN"'
+          scripts/ci-retry.sh "$HELM" push dist/chart/openrails-*.tgz oci://ghcr.io/open-rails/charts
 
   npm:
     name: Publish @openrails/billing-ui to npm
