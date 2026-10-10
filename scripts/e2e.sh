@@ -18,6 +18,7 @@ cd "$(dirname "$0")/.."
 # Each module is proven on its own, never through a developer's go.work.
 export GOWORK=off
 : "${OPENRAILS_E2E_DSN:?Set OPENRAILS_E2E_DSN to a disposable PostgreSQL database}"
+[[ -n "${OPENRAILS_E2E_VAULT_ADDR:-}" ]] || echo "e2e: OPENRAILS_E2E_VAULT_ADDR is unset; tests that need Vault skip" >&2
 workers="${OPENRAILS_E2E_WORKERS:-1}"
 worker="${OPENRAILS_E2E_WORKER:-0}"
 jobs="${OPENRAILS_E2E_JOBS:-4}"

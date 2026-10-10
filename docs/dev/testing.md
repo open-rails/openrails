@@ -19,6 +19,7 @@ database is missing.
 ```bash
 OPENRAILS_E2E_DSN='postgres://postgres:postgres@127.0.0.1:5432/openrails_test?sslmode=disable' \
 OPENRAILS_E2E_REDIS_ADDR=127.0.0.1:6379 \
+OPENRAILS_E2E_VAULT_ADDR=http://127.0.0.1:8200 OPENRAILS_E2E_VAULT_TOKEN=e2e-root \
   bash scripts/e2e.sh
 ```
 
@@ -47,6 +48,17 @@ card-attack captcha test only.
 - Adversarial cases (IDOR, merchant isolation, webhook forgery, double-spend
   races, revocation, credential class) are indexed in
   [security tests](../security-tests.md).
+
+Vault is a dev server, as CI runs it:
+
+```bash
+docker run -d --rm --name openrails-e2e-vault -p 8200:8200 \
+  -e VAULT_DEV_ROOT_TOKEN_ID=e2e-root mirror.gcr.io/hashicorp/vault:2.1.1
+```
+
+A test that needs it calls `vaulttest.New`, which mounts a KV v2 engine of its
+own and removes it when the test ends; without `OPENRAILS_E2E_VAULT_ADDR` the
+test is skipped.
 
 Fakes check provider request and receipt contracts. They are not live PSP or
 chain qualification, which is a separate operator activity

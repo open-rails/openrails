@@ -169,6 +169,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   regressions; they need no database. The root's source guards walk `server/` too.
 - `ci/` and `server/ci` are the end-to-end suites (build tags `e2e,integration`;
   `scripts/e2e.sh` runs both with `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18).
-  Every test gets its own schema. A deliberate behaviour change must sweep them: `grep`
+  Every test gets its own schema; a test needing Vault gets its own KV v2 mount from
+  `internal/vaulttest` (`OPENRAILS_E2E_VAULT_ADDR`/`_TOKEN`, a dev server; skipped
+  when unset). A deliberate behaviour change must sweep them: `grep`
   `ci/` and `server/ci` for the codes, constants and statuses you changed.
   Green-in-my-package is not green.
