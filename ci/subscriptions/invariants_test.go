@@ -76,19 +76,6 @@ func (w *world) checkMoneyInvariants() {
 		}
 	}
 	rows.Close()
-	rows, err = w.pool.Query(ctx, `SELECT rail_payment_id FROM `+schema+`.invoice_payments WHERE status = 'settled' AND rail_payment_id IS NOT NULL`)
-	if err != nil {
-		t.Errorf("invariants: read invoice payments: %v", err)
-		return
-	}
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err == nil {
-			local[id] = true
-		}
-	}
-	rows.Close()
-
 	unresolved := 0
 	if err := w.pool.QueryRow(ctx, `SELECT count(*) FROM `+schema+`.provider_intents
 		WHERE status IN ('in_flight', 'unknown_needs_verify', 'failed_retryable', 'pending')

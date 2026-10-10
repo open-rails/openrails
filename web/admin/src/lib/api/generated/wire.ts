@@ -150,6 +150,7 @@ export type ApplyProduct = {
   tier_group?: string | null
   tier_rank?: number | null
   archived?: boolean | null
+  ownership?: "consumable" | "extend" | "unique" | null
   entitlements?: string[]
   credit_grant?: CreditGrantSpec | null
   prices?: Record<string, ApplyPrice>
@@ -561,25 +562,15 @@ export type CreateFederatedGrantParams = {
   role?: string
 }
 
-export type CreateInvoicePaymentParams = {
-  amount?: string
-  reference?: string
-}
-
 export type CreateMerchantParams = {
   name?: string
   display_name?: string
 }
 
-export type CreateOffChannelPaymentParams = {
-  price_id?: string
-  transaction_id?: string
-  amount?: string
-  currency?: string
-  purchased_at?: string
-  discount_code?: string
-  discount_reason?: string
-  discount_metadata?: Record<string, unknown>
+export type CreateOrderParams = {
+  lines?: OrderLineParams[]
+  expected_total?: string
+  payment?: OrderPayment
 }
 
 export type CreatePSPParams = {
@@ -596,6 +587,14 @@ export type CreatePaymentMethodParams = {
   payment_token?: string
   card?: CardEntry
   billing_details?: BillingDetails
+}
+
+export type CreatePaymentParams = {
+  invoice_id?: string
+  order_id?: string
+  amount?: string
+  transaction_id?: string
+  paid_at?: string
 }
 
 export type CreatePriceMigrationParams = {
@@ -657,6 +656,7 @@ export type CreateProductParams = {
   credit_grant?: CreditGrantSpec
   tier_group?: string
   tier_rank?: number
+  ownership?: "consumable" | "extend" | "unique"
   archived?: boolean
 }
 
@@ -1023,12 +1023,13 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "payment.settled" | "product.entitlements_changed"
+  type: "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.expired" | "order.paid" | "order.payment_failed" | "order.requires_action" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
   delinquency: DelinquencyHostEvent | null
   product_entitlements: ProductEntitlementsChangedEvent | null
+  order: OrderHostEvent | null
 }
 
 export type HostEventLookup = {
@@ -1090,7 +1091,8 @@ export type Invoice = {
 
 export type InvoiceCollection = {
   invoice: Invoice
-  payment: InvoicePayment
+  payment_id: string | null
+  operation: PaymentOperation
   replayed: boolean
 }
 
@@ -1108,24 +1110,9 @@ export type InvoiceLineItem = {
 
 export type InvoicePayNow = {
   invoice: Invoice
-  payment: InvoicePayment
+  payment_id: string | null
   operation: PaymentOperation
   replayed: boolean
-}
-
-export type InvoicePayment = {
-  id: string
-  invoice_id: string
-  currency: string
-  amount: string
-  status: "attempted" | "failed" | "settled"
-  payment_method_id: string | null
-  rail: string | null
-  transaction_id: string | null
-  failure_code: string | null
-  failure_reason: string | null
-  attempted_at: string
-  settled_at: string | null
 }
 
 export type InvoiceProfile = {
@@ -1367,6 +1354,8 @@ export type NextAction = {
   type: string
   url: string | null
   transactions: string[]
+  psp_id: string | null
+  payload: Record<string, string> | null
 }
 
 export type Notification = {
@@ -1451,6 +1440,94 @@ export type OpenProviderOperationParams = {
   authorization_body?: string | null
   authorization_body_sha256?: string
   overdraft_amount?: string
+}
+
+export type Order = {
+  id: string
+  customer_id: string
+  origin: "customer" | "merchant"
+  status: "canceled" | "expired" | "open" | "paid" | "processing" | "requires_action"
+  number: string | null
+  currency: string
+  total: string
+  lines: OrderLine[]
+  next_action: NextAction | null
+  last_payment_error: PaymentFailure | null
+  payment_options: OrderPaymentOption[]
+  payment_method_id: string | null
+  payment_id: string | null
+  expires_at: string
+  paid_at: string | null
+  canceled_at: string | null
+  expired_at: string | null
+  created_at: string
+}
+
+export type OrderHostEvent = {
+  order_id: string
+  customer_id: string
+  status: "canceled" | "expired" | "open" | "paid" | "processing" | "requires_action"
+  total: string
+  currency: string
+  number: string | null
+  payment_id: string | null
+}
+
+export type OrderLine = {
+  id: string
+  price_id: string
+  product_id: string
+  description: string
+  quantity: number | null
+  unit_amount: string
+  amount: string
+  ownership: "consumable" | "extend" | "unique"
+  billing_interval_hours: number | null
+  access_duration_hours: number | null
+  subscription_id: string | null
+  product_access_id: string | null
+}
+
+export type OrderLineParams = {
+  price_id?: string
+  quantity?: number
+}
+
+export type OrderLineRefusal = {
+  code: string
+  message: string
+  owned_by: string | null
+  hint: string | null
+}
+
+export type OrderPayment = {
+  payment_method_id?: string
+}
+
+export type OrderPaymentOption = {
+  psp_id: string
+  rail: string
+  accepts: string[]
+}
+
+export type OrderPreview = {
+  currency: string
+  total: string
+  lines: OrderPreviewLine[]
+  payment_options: OrderPaymentOption[]
+}
+
+export type OrderPreviewLine = {
+  price_id: string
+  product_id: string
+  description: string
+  quantity: number | null
+  unit_amount: string
+  amount: string
+  ownership: "consumable" | "extend" | "unique"
+  billing_interval_hours: number | null
+  access_duration_hours: number | null
+  refusal: OrderLineRefusal | null
 }
 
 export type PSP = {
@@ -1541,6 +1618,11 @@ export type PayInvoiceParams = {
   payment_method_id?: string
 }
 
+export type PayOrderParams = {
+  payment?: OrderPayment
+  expected_total?: string
+}
+
 export type Payment = {
   id: string
   kind: "charge" | "chargeback" | "dispute_reversal" | "refund"
@@ -1550,7 +1632,9 @@ export type Payment = {
   currency: string
   customer_id: string
   subscription_id: string | null
-  price_id: string
+  order_id: string | null
+  invoice_id: string | null
+  price_id: string | null
   price: Price | null
   product: ProductSummary | null
   channel: "manual" | "rail"
@@ -1591,8 +1675,8 @@ export type PaymentAttempt = {
   amount: string
   currency: string
   attempted_at: string
-  checkout_id: string
-  checkout_target: string
+  invoice_id: string | null
+  order_id: string | null
   cycle_id: string | null
   subscription_id: string | null
   payment_method_id: string | null
@@ -1673,14 +1757,11 @@ export type PaymentRecovery = {
 export type PaymentSettledEvent = {
   payment_id: string
   customer_id: string
-  price_id: string
+  order_id?: string
+  price_id?: string
   subscription_id?: string
   amount: string
   currency: string
-}
-
-export type PaymentSettlementStatus = {
-  settled: boolean
 }
 
 export type PendingAction = {
@@ -1712,6 +1793,10 @@ export type PlatformMerchant = {
 
 export type PortalResponse = {
   url: string
+}
+
+export type PreviewOrderParams = {
+  lines?: OrderLineParams[]
 }
 
 export type PreviewPSPRoutingParams = {
@@ -1815,6 +1900,7 @@ export type Product = {
   credit_grant?: CreditGrantSpec
   tier_group: string | null
   tier_rank: number
+  ownership: "consumable" | "extend" | "unique" | null
   archived: boolean
   prices: Price[]
   created_at: string
@@ -2432,6 +2518,7 @@ export type UpdateProductParams = {
   credit_grant?: CreditGrantSpec | null
   tier_group?: string | null
   tier_rank?: number | null
+  ownership?: "consumable" | "extend" | "unique" | null
   archived?: boolean | null
 }
 

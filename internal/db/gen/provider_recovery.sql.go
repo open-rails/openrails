@@ -79,10 +79,10 @@ SELECT EXISTS (
     WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
       AND purchased_at < $3::timestamptz
   UNION ALL
-  SELECT 1 FROM billing.invoice_payments ip
+  SELECT 1 FROM billing.payments ip
     JOIN billing.invoices i ON i.merchant_id=ip.merchant_id AND i.id=ip.invoice_id
     WHERE ip.merchant_id=$1::uuid AND ip.psp_id=$2::uuid
-      AND i.period_starts_at < $3::timestamptz
+      AND ip.invoice_id IS NOT NULL AND i.period_starts_at < $3::timestamptz
   UNION ALL
   SELECT 1 FROM billing.provider_intents pi
     LEFT JOIN billing.invoices i ON i.merchant_id=pi.merchant_id AND i.id::text=pi.payload->>'invoice_id'

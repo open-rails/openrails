@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -21,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/idempotency"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -35,7 +35,6 @@ var (
 	// running.
 	ErrIdempotencyKeyInUse = apperr.New(http.StatusConflict, billing.CodeIdempotencyKeyInUse, "The request first sent with this Idempotency-Key is still running.")
 	errOrderKeyReused      = apperr.New(http.StatusUnprocessableEntity, billing.CodeIdempotencyKeyReused, "The Idempotency-Key was first sent with a different request.")
-	errOrderCustomerBlock  = apperr.New(http.StatusForbidden, "customer_blocked", "This customer may not buy.")
 	errOrdersFenced        = apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "The merchant takes no orders right now.")
 )
 
@@ -376,6 +375,23 @@ func (s *Service) listOrders(ctx context.Context, params billing.OrderListParams
 	if err != nil {
 		return billing.ListPage[billing.Order]{}, err
 	}
+	if params.IDs != nil {
+		ids := make([]uuid.UUID, len(params.IDs))
+		for i, id := range params.IDs {
+			ids[i] = id.UUID()
+		}
+		rows, err := rt.Orders.ListByIDs(ctx, ids)
+		if err != nil {
+			return billing.ListPage[billing.Order]{}, err
+		}
+		out := billing.ListPage[billing.Order]{Items: make([]billing.Order, 0, len(rows))}
+		for _, o := range rows {
+			if params.CustomerID.IsZero() || o.CustomerID == params.CustomerID.UUID() {
+				out.Items = append(out.Items, o.View(nil, nil))
+			}
+		}
+		return out, nil
+	}
 	var filter orders.ListFilter
 	if !params.CustomerID.IsZero() {
 		filter.CustomerID = new(params.CustomerID.UUID())
@@ -481,24 +497,11 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, m
 	return orders.ErrOptionMissing
 }
 
-// orderCustomerAllowed refuses a customer the merchant blocked, and every
-// customer of a merchant whose provider writes are fenced.
-func (s *Service) orderCustomerAllowed(ctx context.Context, customer billing.CustomerID) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
+// orderCustomerAllowed refuses every customer of a merchant whose provider
+// writes are fenced.
+func (s *Service) orderCustomerAllowed(ctx context.Context, _ billing.CustomerID) error {
 	if err := s.rt.CheckoutAttemptService.TakesOrders(ctx); err != nil {
 		return errOrdersFenced
-	}
-	row, err := s.rt.DB.Gen(ctx).GetCustomer(ctx, gen.GetCustomerParams{MerchantID: mid.UUID(), ID: customer.UUID()})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows):
-		return nil
-	case err != nil:
-		return err
-	case row.Blocked:
-		return errOrderCustomerBlock
 	}
 	return nil
 }
@@ -527,4 +530,23 @@ func orderDigest(v any) []byte {
 	raw, _ := json.Marshal(v)
 	sum := sha256.Sum256(raw)
 	return sum[:]
+}
+
+// RecordPayment records money the merchant received outside OpenRails for an
+// invoice or an order. created is false when the same remittance was already
+// recorded.
+func (s *Service) RecordPayment(ctx context.Context, params billing.CreatePaymentParams) (payment *models.Payment, created bool, err error) {
+	ctx, release, err := s.pin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer release()
+	if params.InvoiceID != nil {
+		return s.moneyService().RecordInvoiceRemittance(ctx, money.InvoiceRemittance{InvoiceID: params.InvoiceID.UUID(), Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})
+	}
+	rt, err := s.orderRuntime()
+	if err != nil {
+		return nil, false, err
+	}
+	return rt.Orders.RecordRemittance(ctx, orders.Remittance{OrderID: params.OrderID.UUID(), Amount: params.Amount, TransactionID: params.TransactionID, PaidAt: params.PaidAt})
 }

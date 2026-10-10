@@ -1,14 +1,14 @@
 -- name: GetInvoiceRecoveryPayment :many
-SELECT * FROM billing.invoice_payments
+SELECT * FROM billing.payments
 WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND psp_id=sqlc.arg(psp_id)::uuid
- AND rail_payment_id=sqlc.arg(transaction_id)::text
+ AND transaction_id=sqlc.arg(transaction_id)::text AND invoice_id IS NOT NULL
 LIMIT 2;
 
 -- A transaction already allocated to a subscription or purchase cannot also
 -- settle an invoice, including soft-deleted financial rows.
 -- name: InvoiceRecoveryHasOtherPayment :one
 SELECT EXISTS(SELECT 1 FROM billing.payments WHERE merchant_id=sqlc.arg(merchant_id)::uuid
- AND psp_id=sqlc.arg(psp_id)::uuid AND transaction_id=sqlc.arg(transaction_id)::text)::boolean;
+ AND psp_id=sqlc.arg(psp_id)::uuid AND transaction_id=sqlc.arg(transaction_id)::text AND invoice_id IS NULL)::boolean;
 
 -- name: InvoiceRecoveryVaultCustomers :many
 SELECT DISTINCT customer_id FROM billing.payment_methods
@@ -24,9 +24,9 @@ SELECT COALESCE(sum(l.amount),0)::bigint AS amount,
    AND l.currency=p.currency AND l.currency=sqlc.arg(currency)::text
    AND l.transfer_type='owed_payment' AND l.operation IN ('invoice_payment','manual_invoice_payment')
    AND l.amount>0 AND p.amount>=l.amount),true)::boolean AS consistent
-FROM billing.invoice_payments p LEFT JOIN billing.ledger_transfers l
+FROM billing.payments p LEFT JOIN billing.ledger_transfers l
  ON l.merchant_id=p.merchant_id AND l.id=p.ledger_transfer_id
-WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.invoice_id=sqlc.arg(invoice_id)::uuid AND p.status='settled';
+WHERE p.merchant_id=sqlc.arg(merchant_id)::uuid AND p.invoice_id=sqlc.arg(invoice_id)::uuid AND p.status='succeeded' AND p.deleted_at IS NULL;
 
 -- A full observed payment can settle a previously uncollectible invoice just
 -- as customer pay-now does. This intermediate state is inside the locked payment

@@ -252,6 +252,9 @@ func ListOrders(r *httprequest.Request) {
 			return
 		}
 	}
+	if params.IDs, ok = listIDs(r, billing.ParseOrderID); !ok {
+		return
+	}
 	svc := orderService(r)
 	if svc == nil {
 		return

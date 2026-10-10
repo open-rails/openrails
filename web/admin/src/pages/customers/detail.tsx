@@ -10,7 +10,6 @@ import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { priceAmountLabel } from "@/pages/catalog/price-format"
 import { FormFieldErrors } from "@/components/form-field-errors"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
@@ -48,7 +47,6 @@ import {
   formatCardExpiry,
   formatDate,
   formatNativeAmount,
-  nativeAmountFromInput,
   shortId,
 } from "@/lib/format"
 import type { CustomerContact } from "@/lib/api/generated/wire"
@@ -100,7 +98,6 @@ export function CustomerDetailPage() {
         </div>
         <div className="ml-auto flex gap-2">
           <GrantProductAccessDialog customerId={customerId} />
-          <OffChannelPaymentDialog customerId={customerId} />
         </div>
       </div>
 
@@ -662,248 +659,6 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                     disabled={!productId || !canSubmit || isSubmitting}
                   >
                     {isSubmitting ? "Granting…" : "Grant access"}
-                  </Button>
-                </>
-              )}
-            </form.Subscribe>
-          </DialogFooter>
-        </form>
-      </DialogContent>
-    </Dialog>
-  )
-}
-
-function OffChannelPaymentDialog({ customerId }: { customerId: string }) {
-  const [open, setOpen] = React.useState(false)
-  const queryClient = useQueryClient()
-  const recordPayment = useMutation(
-    adminMutations.recordCustomerOffChannelPayment(queryClient, customerId)
-  )
-  const { data: prices } = useQuery({
-    ...adminQueries.allPrices(),
-    enabled: open,
-  })
-  const receivedAmount = (value: string, priceId: string) =>
-    nativeAmountFromInput(
-      value,
-      prices?.data.find((price) => price.id === priceId)?.currency ?? ""
-    )
-  const amountError = (value: string, priceId: string) => {
-    const price = prices?.data.find((price) => price.id === priceId)
-    if (!value)
-      return price?.customer_amount
-        ? "Enter the deposit amount received"
-        : undefined
-    const amount = receivedAmount(value, priceId)
-    if (amount === null || BigInt(amount) < 0n)
-      return "Enter a non-negative amount"
-    const range = price?.customer_amount
-    if (
-      range &&
-      (BigInt(amount) < BigInt(range.min_amount) ||
-        BigInt(amount) > BigInt(range.max_amount))
-    ) {
-      return "Enter an amount within the deposit limits"
-    }
-    return undefined
-  }
-  const form = useForm({
-    defaultValues: { priceId: "", transactionId: "", amount: "" },
-    onSubmit: async ({ value }) => {
-      const invalid = amountError(value.amount, value.priceId)
-      if (invalid) {
-        toast.error(invalid)
-        return
-      }
-      const amount = value.amount
-        ? receivedAmount(value.amount, value.priceId)
-        : undefined
-      if (amount === null || amount?.startsWith("-")) {
-        toast.error("Enter a non-negative amount in the price's currency")
-        return
-      }
-      try {
-        const result = await recordPayment.mutateAsync({
-          price_id: value.priceId,
-          transaction_id: value.transactionId.trim(),
-          ...(amount !== undefined ? { amount } : {}),
-        })
-        toast.success(
-          result.recorded ? "Payment recorded" : "Payment already recorded"
-        )
-        handleOpenChange(false)
-      } catch (err) {
-        toastApiError(err, "Record off-channel payment")
-      }
-    },
-  })
-
-  const handleOpenChange = (next: boolean) => {
-    setOpen(next)
-    if (!next) {
-      form.reset()
-      recordPayment.reset()
-    }
-  }
-
-  return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogTrigger
-        render={
-          <Button variant="outline" size="sm">
-            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Off-channel
-            payment
-          </Button>
-        }
-      />
-      <DialogContent className={DIALOG_FORM}>
-        <DialogHeader>
-          <DialogTitle>Record a payment taken elsewhere</DialogTitle>
-          <DialogDescription>
-            For money you already collected outside OpenRails, such as a bank
-            transfer or a card taken over the phone. This records the sale and
-            starts the customer's access. It does not charge anyone.
-          </DialogDescription>
-        </DialogHeader>
-        <form
-          onSubmit={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-            void form.handleSubmit()
-          }}
-          className="grid gap-4"
-        >
-          <div className="grid gap-3">
-            <form.Field
-              name="priceId"
-              validators={{
-                onChange: ({ value }) => (value ? undefined : "Pick a price"),
-              }}
-            >
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="oc-price">Price</Label>
-                  <Select
-                    value={field.state.value}
-                    onValueChange={(value) => field.handleChange(value ?? "")}
-                  >
-                    <SelectTrigger
-                      className="w-full"
-                      id="oc-price"
-                      aria-invalid={field.state.meta.errors.length > 0}
-                    >
-                      <SelectValue placeholder="Pick a price" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(prices?.data ?? []).map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {priceAmountLabel(p)}
-                          {p.billing_interval_hours ? " · recurring" : ""} (
-                          {shortId(p.id)})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <FormFieldErrors errors={field.state.meta.errors} />
-                </div>
-              )}
-            </form.Field>
-            <form.Field
-              name="transactionId"
-              validators={{
-                onChange: ({ value }) =>
-                  value.trim() ? undefined : "Enter a transaction id",
-              }}
-            >
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="oc-txn">Reference</Label>
-                  {/* The reference is the idempotency key: naming that plainly
-                      is what stops the same payment being recorded twice. */}
-                  <p className="text-[13px] text-muted-foreground">
-                    Your reference for this payment, such as the bank transfer
-                    number. Recording the same reference twice will not charge
-                    or credit the customer again.
-                  </p>
-                  <Input
-                    id="oc-txn"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    placeholder="TRF-4471"
-                    aria-invalid={field.state.meta.errors.length > 0}
-                  />
-                  <FormFieldErrors errors={field.state.meta.errors} />
-                </div>
-              )}
-            </form.Field>
-            <form.Field
-              name="amount"
-              validators={{
-                onChangeListenTo: ["priceId"],
-                onChange: ({ value, fieldApi }) => {
-                  return amountError(
-                    value,
-                    fieldApi.form.getFieldValue("priceId")
-                  )
-                },
-              }}
-            >
-              {(field) => (
-                <div className="grid gap-1.5">
-                  <Label htmlFor="oc-amount">Amount received</Label>
-                  <p className="text-[13px] text-muted-foreground">
-                    Required for a customer-selected deposit; optional for a
-                    fixed price if the received amount differs. Enter it as a
-                    decimal, such as 19.90.
-                  </p>
-                  <Input
-                    id="oc-amount"
-                    type="number"
-                    step="any"
-                    min="0"
-                    placeholder="Amount received, e.g. 100.00"
-                    value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    aria-invalid={field.state.meta.errors.length > 0}
-                  />
-                  <FormFieldErrors errors={field.state.meta.errors} />
-                </div>
-              )}
-            </form.Field>
-          </div>
-          <DialogFooter>
-            <form.Subscribe
-              selector={(state) =>
-                [
-                  state.values.priceId,
-                  state.values.transactionId,
-                  state.canSubmit,
-                  state.isSubmitting,
-                ] as const
-              }
-            >
-              {([priceId, transactionId, canSubmit, isSubmitting]) => (
-                <>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={isSubmitting}
-                    onClick={() => handleOpenChange(false)}
-                  >
-                    Cancel
-                  </Button>
-                  <Button
-                    type="submit"
-                    disabled={
-                      !priceId ||
-                      !transactionId.trim() ||
-                      !canSubmit ||
-                      isSubmitting
-                    }
-                  >
-                    {isSubmitting ? "Recording…" : "Record payment"}
                   </Button>
                 </>
               )}

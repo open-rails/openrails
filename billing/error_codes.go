@@ -49,6 +49,9 @@ const (
 	CodeOrderNotPayable          = "order_not_payable"
 	CodeOrderNotCancelable       = "order_not_cancelable"
 	CodePaymentOptionUnavailable = "payment_option_unavailable"
+	// Payments recorded outside OpenRails.
+	CodePaymentExceedsDue     = "payment_exceeds_due"
+	CodeOrderHasRecurringLine = "order_has_recurring_line"
 	// CodeModelUnavailable: the language model behind an ask or generate
 	// route did not answer.
 	CodeModelUnavailable = "model_unavailable"
@@ -254,6 +257,8 @@ var errorCodes = []ErrorCode{
 	{CodeOrderNotPayable, 409, invalid, "The order takes no payment: it is paid, canceled or expired."},
 	{CodeOrderNotCancelable, 409, invalid, "Only an open order, or one awaiting the customer's action, can be canceled."},
 	{CodePaymentOptionUnavailable, 422, invalid, "No PSP that can take the order's lines accepts this payment."},
+	{CodeOrderHasRecurringLine, 409, invalid, "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid."},
+	{CodePaymentExceedsDue, 409, invalid, "The recorded payment exceeds what the invoice has due, or is not the order's total."},
 
 	// Subscriptions and tier changes.
 	{CodeCatalogBenefitOverlap, 409, invalid, "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group."},
@@ -293,9 +298,6 @@ var errorCodes = []ErrorCode{
 	{CodeInvoiceRetryInProgress, 409, invalid, "A collection attempt on this invoice is unresolved."},
 	{CodeInvoiceRetryOutcomeUnknown, 409, invalid, "The last collection attempt's outcome is unknown."},
 	{CodeInvoiceRetryIdempotencyConflict, 409, invalid, "The idempotency key names a different collection attempt."},
-	{CodeInvoicePaymentReferenceUsed, 409, invalid, "The payment reference is already recorded."},
-	{CodeInvoicePaymentExceedsDue, 409, invalid, "The recorded payment exceeds the amount due."},
-	{CodeInvoicePaymentInvalid, 400, invalid, "The recorded payment is invalid."},
 	{CodeCollectionPaymentMethodRequired, 400, invalid, "Collection needs a payment method for the invoice's currency."},
 	{CodeCollectionPaymentMethodInvalid, 400, invalid, "The collection payment method cannot pay this invoice."},
 

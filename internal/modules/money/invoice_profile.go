@@ -20,7 +20,7 @@ const MaxInvoiceNetTermsDays = int64((1<<63 - 1) / (24 * time.Hour))
 // Invoice collection methods (#798). charge_automatically charges the saved
 // payment method via ChargeOutstanding; send_invoice is a manual-remittance
 // terms receivable the collection path never touches — payment arrives via
-// RecordOutOfBandInvoicePayment.
+// RecordInvoiceRemittance.
 const (
 	CollectionChargeAutomatically = "charge_automatically"
 	CollectionSendInvoice         = "send_invoice"

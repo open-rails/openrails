@@ -9,7 +9,7 @@ actions `Permissions.AdminWrite`.
 
 - `GET /v1/admin/invoices`: a staff read. Filters: `customer_id`, `currency`, `status`, `period_starts_after`, and `period_starts_before`. Period filters select `period_starts_at` in the half-open range `[period_starts_after, period_starts_before)`. Results are a cursor page `{data, next_cursor}` (query `limit`, `cursor`), newest first.
 - `GET /v1/admin/invoices/{id}`: the issued facts, customer UUID, monetary/collection state, and permitted `available_actions`. The customer's cards for a retry are read from `GET /v1/admin/customers/{customer_id}/payment-methods`.
-- `GET /v1/admin/invoices/{id}/payments`: payment/collection history, a cursor page, a staff read.
+- An invoice's payments are `GET /v1/admin/payments?invoice_id=`; its collection attempts, declines included, are `GET /v1/admin/payment-attempts?invoice_id=`. A repayment from the customer's balance moves no money: it is a ledger transfer, not a payment.
 - A customer's invoice profile is its `invoice_profile` customer setting, read and written with `GET` / `PATCH /v1/admin/customers/{customer_id}` ([customer settings](api/merchant-settings.md#customer-settings)). Null means none: net 0, charged automatically. Profiles contain payment terms, collection method, PO, tax facts, contacts, and memo. Existing issued invoices retain their original snapshots. Tax facts do not calculate tax.
 
 `available_actions` lists only the actions whose routes' permission admits the caller. On the standalone server viewers read invoices; support and owners also act on them.
@@ -20,10 +20,11 @@ actions `Permissions.AdminWrite`.
 |---|---|---|
 | `POST /invoices/{id}/void` | `VoidInvoice` | Voids draft/open/past-due invoices and writes off the remaining debt through the existing ledger operation. Repeating an already completed void returns its current state. |
 | `POST /invoices/{id}/uncollectible` | `MarkInvoiceUncollectible` | Stops scheduled collection of open/past-due invoices; the debt remains owed. Repeating the same completed transition returns its current state. |
-| `POST /invoices/{id}/payments` | `CreateInvoicePayment` | Records an external remittance with positive `amount` and a non-empty `reference` (up to 255 bytes). It does not charge a provider. Reusing an applied reference is a 409 conflict, never a second settlement. |
 | `POST /invoices/{id}/retry-collection` | `RetryInvoiceCollection` | Starts one durable `invoice_collection` operation bound to an explicit customer-owned `payment_method_id` and `Idempotency-Key` (1–255 bytes). Reusing the key returns that operation's durable state (200 settled/failed, 202 still unresolved) without another provider charge; the same key with a different method is a 409 conflict. |
 
-Successful local actions return 200; an unresolved collection answers 202 with its live attempt. Invalid state, conflicting remittance/reference, a live collection operation and a new retry key while an operation is unresolved return 409. Invalid input returns 400; foreign or missing invoice/customer IDs return 404; a caller its permission refuses gets 403.
+Money received outside OpenRails is recorded with `POST /v1/admin/payments` (`CreatePayment`): `{invoice_id, amount, transaction_id, paid_at}`, a positive `amount` up to `amount_due` and a `transaction_id` of 1–255 bytes. It charges no provider. The same `transaction_id` with the same terms answers the first payment; with other terms, or on another invoice, it is 422 `idempotency_key_reused`, never a second settlement. More than is due is 409 `payment_exceeds_due`.
+
+Successful local actions return 200; an unresolved collection answers 202. Invalid state, a live collection operation and a new retry key while an operation is unresolved return 409. Invalid input returns 400; foreign or missing invoice/customer IDs return 404; a caller its permission refuses gets 403.
 
 A never-attempted open invoice is not manually retryable. Retry eligibility applies to past-due/uncollectible automatic invoices and open automatic invoices with a prior failure. While `collection_intent_id` names a live operation the invoice accepts no support mutation; an operation the verifier cannot settle is resolved with `openrails intents resolve` (exact provider receipt or provider-confirmed non-execution, see [provider uncertainty](provider-uncertainty.md)). There is no unpark/force-resend operation.
 

@@ -197,19 +197,47 @@ func (s *Service) List(ctx context.Context, filter ListFilter, page billing.Page
 		return billing.ListPage[*Order]{}, err
 	}
 	cut := pagination.Cut(rows, limit, func(r gen.BillingOrder) any { return pagination.TimeID{At: r.CreatedAt, ID: r.ID} })
-	ids := make([]uuid.UUID, len(cut.Items))
-	for i, r := range cut.Items {
-		ids[i] = r.ID
-	}
-	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: mid.UUID(), OrderIds: ids})
+	items, err := s.attachLines(ctx, q, mid.UUID(), cut.Items)
 	if err != nil {
 		return billing.ListPage[*Order]{}, err
+	}
+	return billing.ListPage[*Order]{Items: items, Next: cut.Next}, nil
+}
+
+// ListByIDs reads the merchant's named orders, newest first; unknown ones
+// are absent.
+func (s *Service) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]*Order, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	q := s.DB.Gen(ctx)
+	rows, err := q.ListOrdersByIDs(ctx, gen.ListOrdersByIDsParams{MerchantID: mid.UUID(), Ids: ids})
+	if err != nil {
+		return nil, err
+	}
+	return s.attachLines(ctx, q, mid.UUID(), rows)
+}
+
+// attachLines reads the lines of a page of orders.
+func (s *Service) attachLines(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, rows []gen.BillingOrder) ([]*Order, error) {
+	ids := make([]uuid.UUID, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+	}
+	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: merchantID, OrderIds: ids})
+	if err != nil {
+		return nil, err
 	}
 	byOrder := map[uuid.UUID][]gen.BillingOrderLine{}
 	for _, l := range lines {
 		byOrder[l.OrderID] = append(byOrder[l.OrderID], l)
 	}
-	return pagination.Map(cut, func(r gen.BillingOrder) *Order { return &Order{BillingOrder: r, Lines: byOrder[r.ID]} }), nil
+	out := make([]*Order, len(rows))
+	for i, r := range rows {
+		out[i] = &Order{BillingOrder: r, Lines: byOrder[r.ID]}
+	}
+	return out, nil
 }
 
 func (s *Service) load(ctx context.Context, q *gen.Queries, merchantID, id uuid.UUID, lock bool) (*Order, error) {

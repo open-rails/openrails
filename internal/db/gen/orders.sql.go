@@ -773,6 +773,60 @@ func (q *Queries) ListOrderSweepMerchants(ctx context.Context, arg ListOrderSwee
 	return items, nil
 }
 
+const listOrdersByIDs = `-- name: ListOrdersByIDs :many
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, paid_at, canceled_at, expired_at, created_at, updated_at FROM billing.orders
+WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
+ORDER BY created_at DESC, id DESC
+`
+
+type ListOrdersByIDsParams struct {
+	MerchantID uuid.UUID
+	Ids        []uuid.UUID
+}
+
+// The merchant's named orders, newest first.
+func (q *Queries) ListOrdersByIDs(ctx context.Context, arg ListOrdersByIDsParams) ([]BillingOrder, error) {
+	rows, err := q.db.Query(ctx, listOrdersByIDs, arg.MerchantID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingOrder
+	for rows.Next() {
+		var i BillingOrder
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.CustomerID,
+			&i.Origin,
+			&i.Status,
+			&i.Currency,
+			&i.Total,
+			&i.Number,
+			&i.IdempotencyKey,
+			&i.RequestDigest,
+			&i.PaymentMethodID,
+			&i.PspID,
+			&i.AttemptID,
+			&i.PaymentID,
+			&i.LastPaymentError,
+			&i.ExpiresAt,
+			&i.PaidAt,
+			&i.CanceledAt,
+			&i.ExpiredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrdersPage = `-- name: ListOrdersPage :many
 SELECT o.merchant_id, o.id, o.customer_id, o.origin, o.status, o.currency, o.total, o.number, o.idempotency_key, o.request_digest, o.payment_method_id, o.psp_id, o.attempt_id, o.payment_id, o.last_payment_error, o.expires_at, o.paid_at, o.canceled_at, o.expired_at, o.created_at, o.updated_at FROM billing.orders o
 WHERE o.merchant_id = $1::uuid

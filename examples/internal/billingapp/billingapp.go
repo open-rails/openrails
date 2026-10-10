@@ -203,17 +203,22 @@ func Run(ctx context.Context, client *openrails.Client, in Inputs) (Report, erro
 		return r, fmt.Errorf("invoice profile: %w", err)
 	}
 	r.InvoiceProfileSet = terms.Settings.InvoiceProfile != nil && terms.Settings.InvoiceProfile.NetTermsDays == 14
-	payment := billing.CreateInvoicePaymentParams{Amount: invoice.AmountDue / 2, Reference: in.Run + ":wire"}
-	paid, err := client.CreateInvoicePayment(ctx, invoiceID, payment)
+	remittance := billing.CreatePaymentParams{InvoiceID: &invoiceID, Amount: invoice.AmountDue / 2, TransactionID: in.Run + ":wire"}
+	first, err := client.CreatePayment(ctx, remittance)
 	if err != nil {
 		return r, fmt.Errorf("record invoice payment: %w", err)
 	}
+	paid, err := client.GetInvoice(ctx, invoiceID)
+	if err != nil {
+		return r, fmt.Errorf("read paid invoice: %w", err)
+	}
 	r.InvoiceDueAfterPaid = paid.AmountDue
-	_, err = client.CreateInvoicePayment(ctx, invoiceID, payment)
-	r.InvoicePaidTwice = err == nil
-	if !errors.Is(err, billing.ErrConflict) {
+	// The same remittance again answers the first payment.
+	replay, err := client.CreatePayment(ctx, remittance)
+	if err != nil {
 		return r, fmt.Errorf("replayed remittance: %w", err)
 	}
+	r.InvoicePaidTwice = replay.ID != first.ID
 	voided, err := client.VoidInvoice(ctx, invoiceID)
 	if err != nil {
 		return r, fmt.Errorf("void invoice: %w", err)

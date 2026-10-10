@@ -1,12 +1,12 @@
 import { api, type PageRequest } from "./client"
 import { getCustomer, updateCustomer } from "./endpoints"
 import type {
-  CreateInvoicePaymentParams,
+  CreatePaymentParams,
   Invoice,
   InvoiceCollection,
-  InvoicePayment,
   InvoiceProfile,
   ListPage,
+  Payment,
   RetryInvoiceCollectionParams,
 } from "./generated/wire"
 
@@ -34,13 +34,14 @@ export const listInvoices = (
   })
 export const getInvoice = (id: string, signal?: AbortSignal) =>
   api<Invoice>(`/admin/invoices/${id}`, { signal })
+// An invoice's payments are payments naming it.
 export const listInvoicePayments = (
   id: string,
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<InvoicePayment>>(`/admin/invoices/${id}/payments`, {
-    query: { ...page },
+  api<ListPage<Payment>>("/admin/payments", {
+    query: { invoice_id: id, ...page },
     signal,
   })
 // getInvoiceProfile is the customer's invoice_profile setting; null while it
@@ -66,20 +67,26 @@ export interface InvoiceActionRequest {
   paymentMethodId?: string
   idempotencyKey?: string
 }
-export function applyInvoiceAction(request: InvoiceActionRequest) {
+export function applyInvoiceAction(
+  request: InvoiceActionRequest
+): Promise<Invoice | InvoiceCollection | Payment> {
+  if (request.action === "record_payment") {
+    const body: CreatePaymentParams = {
+      invoice_id: request.id,
+      amount: request.amount ?? "",
+      transaction_id: request.reference ?? "",
+    }
+    return api<Payment>("/admin/payments", { method: "POST", body })
+  }
   const path = {
     void: "void",
     mark_uncollectible: "uncollectible",
-    record_payment: "payments",
     retry_collection: "retry-collection",
   }[request.action]
-  const body:
-    CreateInvoicePaymentParams | RetryInvoiceCollectionParams | undefined =
-    request.action === "record_payment"
-      ? { amount: request.amount, reference: request.reference }
-      : request.action === "retry_collection"
-        ? { payment_method_id: request.paymentMethodId }
-        : undefined
+  const body: RetryInvoiceCollectionParams | undefined =
+    request.action === "retry_collection"
+      ? { payment_method_id: request.paymentMethodId }
+      : undefined
   return api<Invoice | InvoiceCollection>(
     `/admin/invoices/${request.id}/${path}`,
     {

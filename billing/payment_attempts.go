@@ -43,10 +43,9 @@ type PaymentAttempt struct {
 	Amount        int64        `json:"amount,string"`
 	Currency      string       `json:"currency"`
 	AttemptedAt   time.Time    `json:"attempted_at"`
-	// CheckoutID groups one buyer's attempts on one target (a price or
-	// card_save, CheckoutTarget) until it is approved.
-	CheckoutID      string           `json:"checkout_id"`
-	CheckoutTarget  string           `json:"checkout_target"`
+	// InvoiceID or OrderID is what the attempt tried to pay.
+	InvoiceID       *InvoiceID       `json:"invoice_id"`
+	OrderID         *OrderID         `json:"order_id"`
 	CycleID         *RebillCycleID   `json:"cycle_id"`
 	SubscriptionID  *SubscriptionID  `json:"subscription_id"`
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
@@ -72,11 +71,12 @@ type PaymentAttemptListParams struct {
 	Source, ObservedVia, AVSResult, CVVResult              []string
 	PSPID                                                  PSPID
 	CustomerID                                             CustomerID
-	// CheckoutID is the grouping id of one buyer's attempts on one target.
-	CheckoutID     string
-	SubscriptionID SubscriptionID
-	CycleID        RebillCycleID
-	Since, Until   time.Time
+	PaymentID                                              PaymentID
+	InvoiceID                                              InvoiceID
+	OrderID                                                OrderID
+	SubscriptionID                                         SubscriptionID
+	CycleID                                                RebillCycleID
+	Since, Until                                           time.Time
 }
 
 // RebillCycle is one paid period that came due (#1111) and what its attempts

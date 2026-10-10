@@ -80,7 +80,7 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 		return billed, statement
 	}
 	pay := func(id billing.InvoiceID, amount int64) {
-		_, err := client.CreateInvoicePayment(ctx, id, billing.CreateInvoicePaymentParams{Amount: amount, Reference: "remit-" + uuid.NewString()})
+		_, err := client.CreatePayment(ctx, billing.CreatePaymentParams{InvoiceID: &id, Amount: amount, TransactionID: "remit-" + uuid.NewString()})
 		require.NoError(t, err)
 	}
 	requireStatement := func(c *customer, status billing.InvoiceStatus, total, paid, due int64) *billing.Invoice {
@@ -154,8 +154,9 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 	pay(requireStatement(plain, billing.InvoiceOpen, tail, 0, tail).ID, tail)
 	requireStatement(plain, billing.InvoicePaid, tail, tail, 0)
 
-	// What each statement says was paid is what its invoices received, and
-	// the ledger holds no debt for any of them.
+	// What each statement says was paid is what its invoices received, as
+	// payments or repayments from funding, and the ledger holds no debt for
+	// any of them.
 	for c, ids := range map[*customer][]billing.InvoiceID{covered: coveredBy, split: append(splitBy, statement.ID), plain: nil} {
 		_, s := invoices(c)
 		if c == plain {
@@ -163,13 +164,16 @@ func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 		}
 		var received int64
 		for _, id := range ids {
-			payments, err := client.ListInvoicePayments(ctx, id, billing.InvoicePaymentListParams{})
+			payments, err := client.ListPayments(ctx, billing.PaymentListParams{InvoiceID: id})
 			require.NoError(t, err)
 			for _, p := range payments.Items {
-				if p.Status == billing.InvoicePaymentSettled {
+				if p.Status == billing.PaymentSucceeded {
 					received += p.Amount
 				}
 			}
+			var repaid int64
+			require.NoError(t, w.pool.QueryRow(ctx, w.q(`SELECT COALESCE(sum(amount), 0) FROM billing.ledger_transfers WHERE invoice_id = $1 AND transfer_type = 'owed_repayment'`), id.UUID()).Scan(&repaid))
+			received += repaid
 		}
 		require.Equal(t, s.AmountPaid, received)
 		balance, err := client.GetBalance(ctx, c.cid(), "USD")

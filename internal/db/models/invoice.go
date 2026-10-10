@@ -51,6 +51,7 @@ type Invoice struct {
 	FinalizedAt                  *time.Time `json:"finalized_at,omitempty"`
 	ExternalInvoiceID            *string    `json:"external_invoice_id,omitempty"`
 	CollectionFailureCount       int32      `json:"collection_failure_count"`
+	CollectionAttemptCount       int32      `json:"collection_attempt_count"`
 	CollectionFailedAt           *time.Time `json:"collection_failed_at,omitempty"`
 	NextCollectionAttemptAt      *time.Time `json:"next_collection_attempt_at,omitempty"`
 	LastCollectionFailureCode    *string    `json:"last_collection_failure_code,omitempty"`
@@ -59,24 +60,6 @@ type Invoice struct {
 	CollectionIntentID *uuid.UUID `json:"collection_intent_id,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
-}
-
-// InvoicePaymentAttempt is one provider collection attempt against an invoice.
-type InvoicePaymentAttempt struct {
-	ID              uuid.UUID  `json:"id"`
-	InvoiceID       uuid.UUID  `json:"invoice_id"`
-	Currency        string     `json:"currency"`
-	Amount          int64      `json:"amount"`
-	Status          string     `json:"status"`
-	PaymentMethodID *uuid.UUID `json:"payment_method_id,omitempty"`
-	Rail            *string    `json:"rail,omitempty"`
-	RailPaymentID   *string    `json:"rail_payment_id,omitempty"`
-	FailureCode     *string    `json:"failure_code,omitempty"`
-	FailureReason   *string    `json:"failure_reason,omitempty"`
-	FailureMessage  *string    `json:"failure_message,omitempty"`
-	AttemptedAt     time.Time  `json:"attempted_at"`
-	SettledAt       *time.Time `json:"settled_at,omitempty"`
-	CreatedAt       time.Time  `json:"created_at"`
 }
 
 // InvoiceContact is one billing contact on an invoice / invoice profile (#798).

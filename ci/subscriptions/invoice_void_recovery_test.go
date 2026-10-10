@@ -62,6 +62,9 @@ func TestNMIVoidCannotCompleteRecoveryWithUnresolvedInvoiceMoney(t *testing.T) {
 				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status FROM billing.reconciliation_findings WHERE merchant_id=$1 AND psp_id=$2 AND finding_type='pull.charge.missing' AND subject_key=$3`), mid.UUID(), psp.UUID(), transaction).Scan(&status))
 				require.Equal(t, "requires_review", status)
 			}
+			if recorded {
+				w.waive("evidenced", "the provider voids a recorded invoice payment; the reversal stays held for review")
+			}
 			w.nmi.Void(transaction) // dashboard action at the local provider fixture
 			w.advance(10 * time.Minute)
 			refreshHeld()

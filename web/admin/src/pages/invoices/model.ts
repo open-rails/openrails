@@ -2,6 +2,7 @@ import type {
   Invoice,
   InvoiceCollection,
   InvoiceProfile,
+  Payment,
 } from "@/lib/api/generated/wire"
 import type { InvoiceAction } from "@/lib/api/invoice-endpoints"
 import { amountFromInput } from "@/lib/format"
@@ -24,17 +25,31 @@ export const invoiceActionDescriptions: Record<InvoiceAction, string> = {
 export function allowedInvoiceActions(invoice: Invoice) {
   return invoice.available_actions ?? []
 }
-export function invoiceResultMessage(result: Invoice | InvoiceCollection) {
-  if ("payment" in result) {
-    if (result.payment.status === "settled")
+export function invoiceResultMessage(
+  result: Invoice | InvoiceCollection | Payment
+) {
+  if ("kind" in result) return "Payment recorded."
+  if ("operation" in result) {
+    if (result.payment_id)
       return result.replayed
         ? "Existing payment confirmed."
         : "Invoice payment collected."
-    if (result.payment.status === "failed")
-      return "Collection failed. Review the payment history before trying again."
+    if (result.operation.status === "failed_terminal")
+      return "Collection failed. Review the payment attempts before trying again."
     return "Collection is pending verification. No new collection should be started."
   }
   return "Invoice updated."
+}
+// collectionSettled reports whether a collection reached its outcome, so a
+// new retry needs a new key.
+export function collectionSettled(
+  result: Invoice | InvoiceCollection | Payment
+) {
+  return (
+    "operation" in result &&
+    (result.operation.status === "succeeded" ||
+      result.operation.status === "failed_terminal")
+  )
 }
 export function invoicePaymentAmount(
   input: string,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
@@ -34,8 +35,9 @@ type Memberships interface {
 }
 
 // Charge is money a provider took for an order, as its qualified receipt
-// reports it.
+// reports it, or (Manual) money the merchant received outside OpenRails.
 type Charge struct {
+	Manual          bool
 	PaymentID       uuid.UUID
 	AttemptID       uuid.UUID
 	PSPID           uuid.UUID
@@ -159,7 +161,7 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	}
 	// A one-time order's storing charge on a PSP vault is the card's
 	// card-on-file consent; a Stripe card has its own from its setup.
-	if charge != nil && !recurring && charge.Cites == nil && charge.Rail != string(models.RailStripe) {
+	if charge != nil && !charge.Manual && !recurring && charge.Cites == nil && charge.Rail != string(models.RailStripe) {
 		if err := mandates.RecordStored(ctx, q, mandates.Stored{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,
 			Rail: charge.Rail, Currency: order.Currency, Lineage: *charge.lineage(), AcceptedAt: now}); err != nil {
 			return "", err
@@ -230,14 +232,15 @@ func (s *Service) reclaim(ctx context.Context, q *gen.Queries, order *Order, now
 
 // recordPayment writes the charge as the order's payment.
 func (s *Service) recordPayment(ctx context.Context, d *db.DB, order *Order, charge *Charge) (*models.Payment, error) {
-	psp := charge.PSPID
-	kind := payments.AttemptInitial
 	payment := &models.Payment{
-		ID: charge.PaymentID, CustomerID: order.CustomerID, OrderID: &order.ID,
-		Channel: models.ChannelRail, Rail: models.Rail(charge.Rail), PspID: &psp, TransactionID: charge.TransactionID,
+		ID: charge.PaymentID, CustomerID: order.CustomerID, OrderID: &order.ID, TransactionID: charge.TransactionID,
 		Amount: charge.Amount, ListAmount: order.Total, Currency: order.Currency, Status: payments.PaymentStatusSucceededValue,
-		PurchasedAt: charge.PurchasedAt, CreatedAt: s.now(), AttemptKind: &kind, Metadata: charge.Metadata,
-		MoneyMovement: models.MoneyMovementRail,
+		PurchasedAt: charge.PurchasedAt, CreatedAt: s.now(), Metadata: charge.Metadata,
+		Channel: models.ChannelManual, MoneyMovement: models.MoneyMovementNone,
+	}
+	if !charge.Manual {
+		psp, kind := charge.PSPID, payments.AttemptInitial
+		payment.Channel, payment.Rail, payment.PspID, payment.AttemptKind, payment.MoneyMovement = models.ChannelRail, models.Rail(charge.Rail), &psp, &kind, models.MoneyMovementRail
 	}
 	if charge.TokenType != "" {
 		payment.TokenType = &charge.TokenType
@@ -406,4 +409,92 @@ func (s *Service) Pending(ctx context.Context, orderID, attemptID uuid.UUID, sta
 		return err
 	}
 	return s.event(ctx, q, &order.BillingOrder, "order.requires_action", now, nil)
+}
+
+// Remittance is money the merchant received for an order outside OpenRails.
+// TransactionID is its identity: recording it again with the same terms
+// answers the first payment.
+type Remittance struct {
+	OrderID       uuid.UUID
+	Amount        int64
+	TransactionID string
+	// PaidAt defaults to now; a replay that omits it does not compare it.
+	PaidAt *time.Time
+}
+
+// RecordRemittance pays an open order with money received outside OpenRails:
+// a manual payment, then what Paid does. An order with a recurring line is
+// refused, since its renewals need the customer's card. created is false
+// when the same remittance was already recorded.
+func (s *Service) RecordRemittance(ctx context.Context, in Remittance) (payment *models.Payment, created bool, err error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	in.TransactionID = strings.TrimSpace(in.TransactionID)
+	if in.OrderID == uuid.Nil || in.Amount <= 0 || in.TransactionID == "" {
+		return nil, false, errors.New("order, positive amount and transaction id are required")
+	}
+	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		d := s.DB.NewWithPgxTx(tx)
+		q := d.Gen(ctx)
+		head, err := q.GetOrder(ctx, gen.GetOrderParams{MerchantID: mid.UUID(), ID: in.OrderID})
+		if db.IsNotFound(err) {
+			return ErrNotFound
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: head.CustomerID}); err != nil {
+			return err
+		}
+		order, err := s.load(ctx, q, mid.UUID(), in.OrderID, true)
+		if err != nil {
+			return err
+		}
+		prior, err := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: mid.UUID(), Channel: string(models.ChannelManual), TransactionID: in.TransactionID})
+		switch {
+		case err == nil:
+			if prior.OrderID == nil || *prior.OrderID != in.OrderID || prior.Amount != in.Amount || in.PaidAt != nil && !prior.PurchasedAt.Equal(in.PaidAt.UTC().Truncate(time.Microsecond)) {
+				return billing.ErrIdempotencyKeyReused
+			}
+			payment, err = models.PaymentFromGen(prior)
+			return err
+		case !db.IsNotFound(err):
+			return err
+		}
+		now := s.now()
+		switch {
+		case order.HasRecurring():
+			return ErrRecurringLine
+		case order.Status == string(billing.OrderRequiresAction) || order.Status == string(billing.OrderProcessing):
+			return ErrInProgress
+		case order.Status != string(billing.OrderOpen) || !order.ExpiresAt.After(now):
+			return ErrNotPayable
+		case in.Amount != order.Total:
+			return ErrAmountNotTotal
+		}
+		paidAt := now
+		if in.PaidAt != nil {
+			paidAt = in.PaidAt.UTC()
+		}
+		charge := Charge{Manual: true, PaymentID: uuidutil.NewV7(), TransactionID: in.TransactionID, Amount: in.Amount, Currency: order.Currency, PurchasedAt: paidAt.Truncate(time.Microsecond)}
+		if _, err := s.settle(ctx, d, order, &charge); err != nil {
+			if db.IsUniqueViolation(err) {
+				return billing.ErrIdempotencyKeyReused
+			}
+			return err
+		}
+		row, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: mid.UUID(), ID: charge.PaymentID})
+		if err != nil {
+			return err
+		}
+		created = true
+		payment, err = models.PaymentFromGen(row)
+		return err
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return payment, created, nil
 }

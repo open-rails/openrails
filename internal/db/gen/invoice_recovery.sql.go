@@ -47,9 +47,9 @@ func (q *Queries) GetInvoiceRecoveryLedgerTransfer(ctx context.Context, arg GetI
 }
 
 const getInvoiceRecoveryPayment = `-- name: GetInvoiceRecoveryPayment :many
-SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, channel, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
+SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, invoice_id, ledger_transfer_id FROM billing.payments
 WHERE merchant_id=$1::uuid AND psp_id=$2::uuid
- AND rail_payment_id=$3::text
+ AND transaction_id=$3::text AND invoice_id IS NOT NULL
 LIMIT 2
 `
 
@@ -59,37 +59,51 @@ type GetInvoiceRecoveryPaymentParams struct {
 	TransactionID string
 }
 
-func (q *Queries) GetInvoiceRecoveryPayment(ctx context.Context, arg GetInvoiceRecoveryPaymentParams) ([]BillingInvoicePayment, error) {
+func (q *Queries) GetInvoiceRecoveryPayment(ctx context.Context, arg GetInvoiceRecoveryPaymentParams) ([]BillingPayment, error) {
 	rows, err := q.db.Query(ctx, getInvoiceRecoveryPayment, arg.MerchantID, arg.PspID, arg.TransactionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []BillingInvoicePayment
+	var items []BillingPayment
 	for rows.Next() {
-		var i BillingInvoicePayment
+		var i BillingPayment
 		if err := rows.Scan(
 			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.InvoiceID,
-			&i.LedgerTransferID,
-			&i.Currency,
-			&i.Amount,
-			&i.Status,
+			&i.PriceID,
 			&i.Channel,
 			&i.Rail,
-			&i.RailPaymentID,
-			&i.FailureCode,
-			&i.FailureMessage,
-			&i.AttemptedAt,
-			&i.SettledAt,
+			&i.TransactionID,
+			&i.Amount,
+			&i.ListAmount,
+			&i.Currency,
+			&i.Status,
+			&i.SubscriptionID,
+			&i.RefundedPaymentID,
+			&i.DiscountCode,
+			&i.DiscountReason,
+			&i.DiscountMetadata,
+			&i.Metadata,
+			&i.PurchasedAt,
 			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.CardBrand,
+			&i.CardLast4,
+			&i.MerchantID,
+			&i.CustomerID,
 			&i.PspID,
+			&i.AttemptKind,
+			&i.FailureCode,
 			&i.FailureReason,
-			&i.PaymentMethodID,
-			&i.IdempotencyKey,
+			&i.ReversalKind,
+			&i.TokenType,
+			&i.DeletedAt,
+			&i.DestructiveRunID,
+			&i.DestructiveRunClass,
+			&i.MoneyMovement,
+			&i.CreditGrantSnapshot,
+			&i.OrderID,
+			&i.InvoiceID,
+			&i.LedgerTransferID,
 		); err != nil {
 			return nil, err
 		}
@@ -147,9 +161,9 @@ SELECT COALESCE(sum(l.amount),0)::bigint AS amount,
    AND l.currency=p.currency AND l.currency=$1::text
    AND l.transfer_type='owed_payment' AND l.operation IN ('invoice_payment','manual_invoice_payment')
    AND l.amount>0 AND p.amount>=l.amount),true)::boolean AS consistent
-FROM billing.invoice_payments p LEFT JOIN billing.ledger_transfers l
+FROM billing.payments p LEFT JOIN billing.ledger_transfers l
  ON l.merchant_id=p.merchant_id AND l.id=p.ledger_transfer_id
-WHERE p.merchant_id=$2::uuid AND p.invoice_id=$3::uuid AND p.status='settled'
+WHERE p.merchant_id=$2::uuid AND p.invoice_id=$3::uuid AND p.status='succeeded' AND p.deleted_at IS NULL
 `
 
 type InvoiceRecoveryAllocationTotalParams struct {
@@ -174,7 +188,7 @@ func (q *Queries) InvoiceRecoveryAllocationTotal(ctx context.Context, arg Invoic
 
 const invoiceRecoveryHasOtherPayment = `-- name: InvoiceRecoveryHasOtherPayment :one
 SELECT EXISTS(SELECT 1 FROM billing.payments WHERE merchant_id=$1::uuid
- AND psp_id=$2::uuid AND transaction_id=$3::text)::boolean
+ AND psp_id=$2::uuid AND transaction_id=$3::text AND invoice_id IS NULL)::boolean
 `
 
 type InvoiceRecoveryHasOtherPaymentParams struct {

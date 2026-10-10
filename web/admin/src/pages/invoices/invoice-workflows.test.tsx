@@ -7,8 +7,8 @@ import type { ReactNode } from "react"
 import { MemoryRouter } from "react-router-dom"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-import type { InvoicePayment } from "@/lib/api/generated/wire"
 import {
+  aPayment,
   aPaymentMethod,
   anInvoice,
   client,
@@ -44,20 +44,13 @@ const invoice = anInvoice("inv_1", {
   amount_due: "5000000",
   available_actions: ["retry_collection"],
 })
-const paid = (i: number): InvoicePayment => ({
-  id: `invpay_${i}`,
-  invoice_id: "inv_1",
-  currency: "USD",
-  amount: "1000000",
-  status: "failed",
-  payment_method_id: "pm_1",
-  rail: "nmi",
-  transaction_id: `txn_${i}`,
-  failure_code: "05",
-  failure_reason: "do not honor",
-  attempted_at: "2026-09-18T00:00:00Z",
-  settled_at: null,
-})
+const paid = (i: number) =>
+  aPayment(`pay_${i}`, {
+    invoice_id: "inv_1",
+    price_id: null,
+    amount: "1000000",
+    transaction_id: `txn_${i}`,
+  })
 
 it("retries collection with a card read from the customer's saved methods", async () => {
   routes["/admin/customers/cus_1/payment-methods"] = cursorPages(
@@ -66,7 +59,8 @@ it("retries collection with a card read from the customer's saved methods", asyn
   )
   routes["POST /admin/invoices/inv_1/retry-collection"] = {
     invoice: { ...invoice, status: "paid" },
-    payment: { ...paid(9), status: "settled" },
+    payment_id: "pay_9",
+    operation: { id: "pop_9", status: "succeeded" },
     replayed: false,
   }
   await show(<InvoiceDetail invoice={invoice} />)
@@ -87,7 +81,7 @@ it("retries collection with a card read from the customer's saved methods", asyn
 })
 
 it("pages the payment history by cursor", async () => {
-  routes["/admin/invoices/inv_1/payments"] = cursorPages(
+  routes["/admin/payments"] = cursorPages(
     Array.from({ length: 21 }, (_, i) => paid(i)),
     20
   )
@@ -98,9 +92,10 @@ it("pages the payment history by cursor", async () => {
   )!
   await act(async () => next.click())
   await vi.waitFor(() => expect(text()).toContain("txn_20"))
-  expect(sent("/admin/invoices/inv_1/payments").map((r) => r.query)).toEqual(
-    ["limit=20", "limit=20&cursor=20"]
-  )
+  expect(sent("/admin/payments").map((r) => r.query)).toEqual([
+    "invoice_id=inv_1&limit=20",
+    "invoice_id=inv_1&limit=20&cursor=20",
+  ])
 })
 
 it("creates the profile of a customer who has none", async () => {

@@ -9,6 +9,7 @@ export type OpenRailsErrorCode =
   | "allowance_meter_not_found"
   | "allowance_source_in_use"
   | "allowance_source_invalid"
+  | "already_owned"
   | "api_host_claim_missing"
   | "api_host_reserved"
   | "api_host_taken"
@@ -77,6 +78,7 @@ export type OpenRailsErrorCode =
   | "host_event_not_found"
   | "host_merchant_mismatch"
   | "host_principal_invalid"
+  | "idempotency_key_in_use"
   | "idempotency_key_required"
   | "idempotency_key_reused"
   | "insufficient_credits"
@@ -99,9 +101,6 @@ export type OpenRailsErrorCode =
   | "invites_disabled"
   | "invoice_action_not_allowed"
   | "invoice_not_retryable"
-  | "invoice_payment_exceeds_due"
-  | "invoice_payment_invalid"
-  | "invoice_payment_reference_used"
   | "invoice_retry_idempotency_conflict"
   | "invoice_retry_in_progress"
   | "invoice_retry_outcome_unknown"
@@ -124,7 +123,14 @@ export type OpenRailsErrorCode =
   | "model_unavailable"
   | "name_reserved"
   | "name_taken"
+  | "order_has_recurring_line"
+  | "order_line_unavailable"
+  | "order_not_cancelable"
+  | "order_not_payable"
+  | "order_payment_in_progress"
+  | "order_total_changed"
   | "payment_duplicate_refused"
+  | "payment_exceeds_due"
   | "payment_failed"
   | "payment_idempotency_conflict"
   | "payment_in_progress"
@@ -142,6 +148,7 @@ export type OpenRailsErrorCode =
   | "payment_not_found"
   | "payment_not_refundable"
   | "payment_not_retryable"
+  | "payment_option_unavailable"
   | "payment_provider_rejected"
   | "permission_required"
   | "price_change_currency_mismatch"
@@ -171,6 +178,7 @@ export type OpenRailsErrorCode =
   | "psp_last_active"
   | "psp_not_found"
   | "purchase_review_resolved"
+  | "quantity_not_allowed"
   | "rate_card_currency_mismatch"
   | "rate_card_has_overrides"
   | "rate_card_product_not_found"
@@ -244,6 +252,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   allowance_meter_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card's allowance meter does not exist." },
   allowance_source_in_use: { status: 409, type: "invalid_request_error", meaning: "The allowance source is in use." },
   allowance_source_invalid: { status: 409, type: "invalid_request_error", meaning: "The allowance source cannot back this rate card." },
+  already_owned: { status: 409, type: "invalid_request_error", meaning: "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume." },
   api_host_claim_missing: { status: 409, type: "invalid_request_error", meaning: "No api_host has been claimed." },
   api_host_reserved: { status: 400, type: "invalid_request_error", meaning: "The api_host serves this deployment." },
   api_host_taken: { status: 409, type: "invalid_request_error", meaning: "The api_host is assigned to another merchant." },
@@ -312,8 +321,9 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_merchant_mismatch: { status: 403, type: "authorization_error", meaning: "The credential's merchant is not the one this host serves." },
   host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant." },
+  idempotency_key_in_use: { status: 409, type: "invalid_request_error", meaning: "The request first sent with this Idempotency-Key is still running; retry once it finishes." },
   idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "The operation needs an Idempotency-Key header." },
-  idempotency_key_reused: { status: 409, type: "invalid_request_error", meaning: "The idempotency key already committed with different terms." },
+  idempotency_key_reused: { status: 422, type: "invalid_request_error", meaning: "The idempotency key already committed with different terms." },
   insufficient_credits: { status: 402, type: "card_error", meaning: "The customer's credit balance does not cover the operation." },
   insufficient_funds: { status: 402, type: "card_error", meaning: "The payment instrument lacks funds." },
   insufficient_scope: { status: 403, type: "authorization_error", meaning: "The access token was not granted the scope this surface requires." },
@@ -334,9 +344,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   invites_disabled: { status: 409, type: "invalid_request_error", meaning: "The email has no verified account and invitations by registration are disabled." },
   invoice_action_not_allowed: { status: 409, type: "invalid_request_error", meaning: "The invoice's status does not allow this action." },
   invoice_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The invoice cannot be collected again." },
-  invoice_payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds the amount due." },
-  invoice_payment_invalid: { status: 400, type: "invalid_request_error", meaning: "The recorded payment is invalid." },
-  invoice_payment_reference_used: { status: 409, type: "invalid_request_error", meaning: "The payment reference is already recorded." },
   invoice_retry_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key names a different collection attempt." },
   invoice_retry_in_progress: { status: 409, type: "invalid_request_error", meaning: "A collection attempt on this invoice is unresolved." },
   invoice_retry_outcome_unknown: { status: 409, type: "invalid_request_error", meaning: "The last collection attempt's outcome is unknown." },
@@ -359,7 +366,14 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   model_unavailable: { status: 502, type: "api_error", meaning: "The language model did not answer; retry, or ask a narrower question." },
   name_reserved: { status: 409, type: "invalid_request_error", meaning: "The merchant name is reserved." },
   name_taken: { status: 409, type: "invalid_request_error", meaning: "The merchant name is taken." },
+  order_has_recurring_line: { status: 409, type: "invalid_request_error", meaning: "An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid." },
+  order_line_unavailable: { status: 422, type: "invalid_request_error", meaning: "A line cannot be bought; param names it and metadata.code says why." },
+  order_not_cancelable: { status: 409, type: "invalid_request_error", meaning: "Only an open order, or one awaiting the customer's action, can be canceled." },
+  order_not_payable: { status: 409, type: "invalid_request_error", meaning: "The order takes no payment: it is paid, canceled or expired." },
+  order_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this order is unresolved; read the order." },
+  order_total_changed: { status: 409, type: "invalid_request_error", meaning: "The order's total is not expected_total; preview it again." },
   payment_duplicate_refused: { status: 409, type: "invalid_request_error", meaning: "The provider refused an identical charge it had just made; retry after its duplicate window." },
+  payment_exceeds_due: { status: 409, type: "invalid_request_error", meaning: "The recorded payment exceeds what the invoice has due, or is not the order's total." },
   payment_failed: { status: 402, type: "card_error", meaning: "The payment was not made." },
   payment_idempotency_conflict: { status: 409, type: "invalid_request_error", meaning: "The idempotency key belongs to another payment request." },
   payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment is already unresolved; read the resource before retrying." },
@@ -377,6 +391,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_not_found: { status: 404, type: "invalid_request_error", meaning: "The payment or payment operation does not exist." },
   payment_not_refundable: { status: 400, type: "invalid_request_error", meaning: "The payment is not a completed rail charge, or the amount exceeds what remains refundable." },
   payment_not_retryable: { status: 409, type: "invalid_request_error", meaning: "The resource is not payable now." },
+  payment_option_unavailable: { status: 422, type: "invalid_request_error", meaning: "No PSP that can take the order's lines accepts this payment." },
   payment_provider_rejected: { status: 502, type: "api_error", meaning: "The provider refused to process the charge for a gateway or account reason." },
   permission_required: { status: 403, type: "authorization_error", meaning: "The credential lacks the permission the route requires." },
   price_change_currency_mismatch: { status: 422, type: "invalid_request_error", meaning: "The target price must be in the subscription's currency." },
@@ -406,6 +421,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   psp_last_active: { status: 409, type: "invalid_request_error", meaning: "The PSP is the last active one on its rail; pass allow_last to archive it." },
   psp_not_found: { status: 404, type: "invalid_request_error", meaning: "The PSP does not exist." },
   purchase_review_resolved: { status: 409, type: "invalid_request_error", meaning: "The purchase review was already resolved." },
+  quantity_not_allowed: { status: 422, type: "invalid_request_error", meaning: "The line's recurring price has no seats: it takes no quantity." },
   rate_card_currency_mismatch: { status: 409, type: "invalid_request_error", meaning: "The rate card's currency does not match." },
   rate_card_has_overrides: { status: 409, type: "invalid_request_error", meaning: "The rate card still has customer overrides." },
   rate_card_product_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card names a product that does not exist." },

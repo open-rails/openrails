@@ -189,6 +189,7 @@ func invoiceFromGen(r gen.BillingInvoice) (*models.Invoice, error) {
 		FinalizedAt:                  r.FinalizedAt,
 		ExternalInvoiceID:            r.ExternalInvoiceID,
 		CollectionFailureCount:       r.CollectionFailureCount,
+		CollectionAttemptCount:       r.CollectionAttemptCount,
 		CollectionFailedAt:           r.CollectionFailedAt,
 		NextCollectionAttemptAt:      r.NextCollectionAttemptAt,
 		LastCollectionFailureCode:    r.LastCollectionFailureCode,
@@ -214,23 +215,4 @@ func invoiceFromGen(r gen.BillingInvoice) (*models.Invoice, error) {
 		}
 	}
 	return m, nil
-}
-
-func invoicePaymentAttemptFromGen(r gen.BillingInvoicePayment) models.InvoicePaymentAttempt {
-	return models.InvoicePaymentAttempt{
-		ID:              r.ID,
-		InvoiceID:       r.InvoiceID,
-		Currency:        r.Currency,
-		Amount:          r.Amount,
-		Status:          r.Status,
-		PaymentMethodID: r.PaymentMethodID,
-		Rail:            r.Rail,
-		RailPaymentID:   r.RailPaymentID,
-		FailureCode:     r.FailureCode,
-		FailureReason:   r.FailureReason,
-		FailureMessage:  r.FailureMessage,
-		AttemptedAt:     r.AttemptedAt,
-		SettledAt:       r.SettledAt,
-		CreatedAt:       r.CreatedAt,
-	}
 }

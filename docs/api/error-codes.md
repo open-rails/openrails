@@ -14,6 +14,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `allowance_meter_not_found` | 404 | `invalid_request_error` | The rate card's allowance meter does not exist. |
 | `allowance_source_in_use` | 409 | `invalid_request_error` | The allowance source is in use. |
 | `allowance_source_invalid` | 409 | `invalid_request_error` | The allowance source cannot back this rate card. |
+| `already_owned` | 409 | `invalid_request_error` | The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume. |
 | `api_host_claim_missing` | 409 | `invalid_request_error` | No api_host has been claimed. |
 | `api_host_reserved` | 400 | `invalid_request_error` | The api_host serves this deployment. |
 | `api_host_taken` | 409 | `invalid_request_error` | The api_host is assigned to another merchant. |
@@ -82,8 +83,9 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_merchant_mismatch` | 403 | `authorization_error` | The credential's merchant is not the one this host serves. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |
+| `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
 | `idempotency_key_required` | 400 | `invalid_request_error` | The operation needs an Idempotency-Key header. |
-| `idempotency_key_reused` | 409 | `invalid_request_error` | The idempotency key already committed with different terms. |
+| `idempotency_key_reused` | 422 | `invalid_request_error` | The idempotency key already committed with different terms. |
 | `insufficient_credits` | 402 | `card_error` | The customer's credit balance does not cover the operation. |
 | `insufficient_funds` | 402 | `card_error` | The payment instrument lacks funds. |
 | `insufficient_scope` | 403 | `authorization_error` | The access token was not granted the scope this surface requires. |
@@ -104,9 +106,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `invites_disabled` | 409 | `invalid_request_error` | The email has no verified account and invitations by registration are disabled. |
 | `invoice_action_not_allowed` | 409 | `invalid_request_error` | The invoice's status does not allow this action. |
 | `invoice_not_retryable` | 409 | `invalid_request_error` | The invoice cannot be collected again. |
-| `invoice_payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds the amount due. |
-| `invoice_payment_invalid` | 400 | `invalid_request_error` | The recorded payment is invalid. |
-| `invoice_payment_reference_used` | 409 | `invalid_request_error` | The payment reference is already recorded. |
 | `invoice_retry_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key names a different collection attempt. |
 | `invoice_retry_in_progress` | 409 | `invalid_request_error` | A collection attempt on this invoice is unresolved. |
 | `invoice_retry_outcome_unknown` | 409 | `invalid_request_error` | The last collection attempt's outcome is unknown. |
@@ -129,7 +128,14 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `model_unavailable` | 502 | `api_error` | The language model did not answer; retry, or ask a narrower question. |
 | `name_reserved` | 409 | `invalid_request_error` | The merchant name is reserved. |
 | `name_taken` | 409 | `invalid_request_error` | The merchant name is taken. |
+| `order_has_recurring_line` | 409 | `invalid_request_error` | An order with a recurring line is paid by the customer, whose card its renewals charge; it cannot be recorded as paid. |
+| `order_line_unavailable` | 422 | `invalid_request_error` | A line cannot be bought; param names it and metadata.code says why. |
+| `order_not_cancelable` | 409 | `invalid_request_error` | Only an open order, or one awaiting the customer's action, can be canceled. |
+| `order_not_payable` | 409 | `invalid_request_error` | The order takes no payment: it is paid, canceled or expired. |
+| `order_payment_in_progress` | 409 | `invalid_request_error` | A payment on this order is unresolved; read the order. |
+| `order_total_changed` | 409 | `invalid_request_error` | The order's total is not expected_total; preview it again. |
 | `payment_duplicate_refused` | 409 | `invalid_request_error` | The provider refused an identical charge it had just made; retry after its duplicate window. |
+| `payment_exceeds_due` | 409 | `invalid_request_error` | The recorded payment exceeds what the invoice has due, or is not the order's total. |
 | `payment_failed` | 402 | `card_error` | The payment was not made. |
 | `payment_idempotency_conflict` | 409 | `invalid_request_error` | The idempotency key belongs to another payment request. |
 | `payment_in_progress` | 409 | `invalid_request_error` | A payment is already unresolved; read the resource before retrying. |
@@ -147,6 +153,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_not_found` | 404 | `invalid_request_error` | The payment or payment operation does not exist. |
 | `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
+| `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
 | `payment_provider_rejected` | 502 | `api_error` | The provider refused to process the charge for a gateway or account reason. |
 | `permission_required` | 403 | `authorization_error` | The credential lacks the permission the route requires. |
 | `price_change_currency_mismatch` | 422 | `invalid_request_error` | The target price must be in the subscription's currency. |
@@ -176,6 +183,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |
 | `psp_not_found` | 404 | `invalid_request_error` | The PSP does not exist. |
 | `purchase_review_resolved` | 409 | `invalid_request_error` | The purchase review was already resolved. |
+| `quantity_not_allowed` | 422 | `invalid_request_error` | The line's recurring price has no seats: it takes no quantity. |
 | `rate_card_currency_mismatch` | 409 | `invalid_request_error` | The rate card's currency does not match. |
 | `rate_card_has_overrides` | 409 | `invalid_request_error` | The rate card still has customer overrides. |
 | `rate_card_product_not_found` | 404 | `invalid_request_error` | The rate card names a product that does not exist. |

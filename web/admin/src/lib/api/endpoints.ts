@@ -2,7 +2,6 @@
 // wire types where the route has them, else src/lib/api/types.ts.
 import {
   api,
-  apiResponse,
   type CursorEnvelope,
   type PageRequest,
 } from "./client"
@@ -10,7 +9,6 @@ import type {
   Allowance,
   CatalogApplicationReceipt,
   CatalogDriftRefresh,
-  CreateOffChannelPaymentParams,
   CreatePriceParams,
   Customer,
   ListPage,
@@ -169,20 +167,6 @@ export const revokeProductAccess = (customerId: string, grantId: string) =>
     method: "DELETE",
   })
 
-// createOffChannelPayment records a payment taken outside any rail. The
-// transaction id is its identity: recorded is false when it was already
-// recorded with the same terms (200 instead of 201).
-export const createOffChannelPayment = async (
-  customerId: string,
-  body: CreateOffChannelPaymentParams
-) => {
-  const { status, body: payment } = await apiResponse<Payment>(
-    `/admin/customers/${customerId}/payments/off-channel`,
-    { method: "POST", body }
-  )
-  return { payment, recorded: status === 201 }
-}
-
 // --- Subscriptions ---
 
 export interface SubscriptionFilters {
@@ -257,7 +241,9 @@ export const changeSubscriptionTier = (
 export interface PaymentFilters {
   customer_id?: string
   subscription_id?: string
-  price_id?: string
+  invoice_id?: string
+  order_id?: string
+  status?: Payment["status"]
   rail?: string
   kind?: Payment["kind"]
   transaction_id?: string
@@ -316,7 +302,9 @@ export const ATTEMPT_FILTERS = [
   "cvv_result",
   "psp_id",
   "customer_id",
-  "checkout_id",
+  "payment_id",
+  "invoice_id",
+  "order_id",
   "subscription_id",
   "cycle_id",
   "since",

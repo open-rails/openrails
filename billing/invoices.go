@@ -9,23 +9,11 @@ import (
 // InvoiceID names one invoice; it travels as inv_<uuid>.
 type InvoiceID uuid.UUID
 
-// InvoicePaymentID names one payment applied to an invoice; it travels as
-// invpay_<uuid>.
-type InvoicePaymentID uuid.UUID
-
-const (
-	InvoiceIDPrefix        = "inv_"
-	InvoicePaymentIDPrefix = "invpay_"
-)
+const InvoiceIDPrefix = "inv_"
 
 func ParseInvoiceID(s string) (InvoiceID, error) {
 	u, err := parsePrefixedID("invoice", InvoiceIDPrefix, s)
 	return InvoiceID(u), err
-}
-
-func ParseInvoicePaymentID(s string) (InvoicePaymentID, error) {
-	u, err := parsePrefixedID("invoice payment", InvoicePaymentIDPrefix, s)
-	return InvoicePaymentID(u), err
 }
 
 func (id InvoiceID) UUID() uuid.UUID              { return uuid.UUID(id) }
@@ -34,18 +22,6 @@ func (id InvoiceID) String() string               { return formatPrefixedID(Invo
 func (id InvoiceID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
 func (id *InvoiceID) UnmarshalText(text []byte) error {
 	parsed, err := ParseInvoiceID(string(text))
-	*id = parsed
-	return err
-}
-
-func (id InvoicePaymentID) UUID() uuid.UUID { return uuid.UUID(id) }
-func (id InvoicePaymentID) IsZero() bool    { return uuid.UUID(id) == uuid.Nil }
-func (id InvoicePaymentID) String() string {
-	return formatPrefixedID(InvoicePaymentIDPrefix, uuid.UUID(id))
-}
-func (id InvoicePaymentID) MarshalText() ([]byte, error) { return []byte(id.String()), nil }
-func (id *InvoicePaymentID) UnmarshalText(text []byte) error {
-	parsed, err := ParseInvoicePaymentID(string(text))
 	*id = parsed
 	return err
 }
@@ -152,33 +128,6 @@ type InvoiceContact struct {
 	Email string `json:"email"`
 }
 
-// InvoicePaymentStatus is where a payment applied to an invoice stands.
-type InvoicePaymentStatus string
-
-const (
-	InvoicePaymentAttempted InvoicePaymentStatus = "attempted"
-	InvoicePaymentSettled   InvoicePaymentStatus = "settled"
-	InvoicePaymentFailed    InvoicePaymentStatus = "failed"
-)
-
-// InvoicePayment is one payment applied to an invoice: a collection charge
-// (Rail and PaymentMethodID set) or money the merchant recorded.
-type InvoicePayment struct {
-	ID              InvoicePaymentID     `json:"id"`
-	InvoiceID       InvoiceID            `json:"invoice_id"`
-	Currency        string               `json:"currency"`
-	Amount          int64                `json:"amount,string"`
-	Status          InvoicePaymentStatus `json:"status"`
-	PaymentMethodID *PaymentMethodID     `json:"payment_method_id"`
-	Rail            *string              `json:"rail"`
-	// TransactionID is the provider's id of the charge.
-	TransactionID *string    `json:"transaction_id"`
-	FailureCode   *string    `json:"failure_code"`
-	FailureReason *string    `json:"failure_reason"`
-	AttemptedAt   time.Time  `json:"attempted_at"`
-	SettledAt     *time.Time `json:"settled_at"`
-}
-
 // InvoiceListParams selects invoices, newest period first; every filter is
 // optional. PeriodStartsAfter (inclusive) and PeriodStartsBefore (exclusive)
 // bound the invoice's period_starts_at. Overdue keeps the open invoices still
@@ -197,14 +146,6 @@ type InvoiceListParams struct {
 	PageRequest
 }
 
-// InvoicePaymentListParams pages an invoice's payments, newest first. IDs
-// instead reads 1 to MaxBatchItems of its named payments in one page; unknown
-// ones are absent.
-type InvoicePaymentListParams struct {
-	PageRequest
-	IDs []InvoicePaymentID
-}
-
 // RetryInvoiceCollectionParams charges an open invoice to one of the
 // customer's cards. A retry with the same IdempotencyKey answers the first
 // attempt.
@@ -214,11 +155,14 @@ type RetryInvoiceCollectionParams struct {
 }
 
 // InvoiceCollection is the outcome of a collection charge: the invoice, the
-// charge applied to it, and whether this answers an earlier request.
+// payment when the charge settled, its operation, unresolved while the
+// provider decides, and whether this answers an earlier request. A decline
+// is the invoice's last collection failure and a payment attempt.
 type InvoiceCollection struct {
-	Invoice  Invoice        `json:"invoice"`
-	Payment  InvoicePayment `json:"payment"`
-	Replayed bool           `json:"replayed"`
+	Invoice   Invoice          `json:"invoice"`
+	PaymentID *PaymentID       `json:"payment_id"`
+	Operation PaymentOperation `json:"operation"`
+	Replayed  bool             `json:"replayed"`
 }
 
 // PayInvoiceParams is the customer paying an invoice now with one of its
@@ -228,21 +172,14 @@ type PayInvoiceParams struct {
 	IdempotencyKey  string          `json:"-"`
 }
 
-// InvoicePayNow is the outcome of a customer paying an invoice: the charge
-// and its operation, unresolved while the provider (or 3-D Secure) decides.
+// InvoicePayNow is the outcome of a customer paying an invoice: the payment
+// when the charge settled, and its operation, unresolved while the provider
+// (or 3-D Secure) decides.
 type InvoicePayNow struct {
 	Invoice   Invoice          `json:"invoice"`
-	Payment   InvoicePayment   `json:"payment"`
+	PaymentID *PaymentID       `json:"payment_id"`
 	Operation PaymentOperation `json:"operation"`
 	Replayed  bool             `json:"replayed"`
-}
-
-// CreateInvoicePaymentParams records money received outside collection.
-// Reference is the remittance's identity: recording it again with the same
-// amount answers the first record, with another amount is refused.
-type CreateInvoicePaymentParams struct {
-	Amount    int64  `json:"amount,string"`
-	Reference string `json:"reference"`
 }
 
 // Invoice operation refusals carry these StatusError.Code values.
@@ -252,9 +189,6 @@ const (
 	CodeInvoiceRetryInProgress          = "invoice_retry_in_progress"
 	CodeInvoiceRetryOutcomeUnknown      = "invoice_retry_outcome_unknown"
 	CodeInvoiceRetryIdempotencyConflict = "invoice_retry_idempotency_conflict"
-	CodeInvoicePaymentReferenceUsed     = "invoice_payment_reference_used"
-	CodeInvoicePaymentExceedsDue        = "invoice_payment_exceeds_due"
-	CodeInvoicePaymentInvalid           = "invoice_payment_invalid"
 	CodeCollectionPaymentMethodRequired = "collection_payment_method_required"
 	CodeCollectionPaymentMethodInvalid  = "collection_payment_method_invalid"
 )

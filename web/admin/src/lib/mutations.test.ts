@@ -33,7 +33,6 @@ const ratePrice = { model: "per_unit" as const, currency: "USD", per_unit: { uni
 const rateCard = { product_id: "prod_1", filter: {}, price: ratePrice }
 const meter = { event_type: "token.used", value_property: "tokens", aggregation: "sum" as const, unit: "tokens", group_by: {} }
 const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
-const offChannel = { price_id: "price_1", transaction_id: "external-1" }
 const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
 const application = { schema_version: 1, products: {} }
 const effectiveAt = "2026-09-05T00:00:00.000Z"
@@ -60,8 +59,6 @@ const cases: Case[] = [
     "POST /admin/product-access", customerTree, { items: [{ customer_id: "cus_1", product_id: "prod_1", hours: 48, note: "support fix" }] }],
   ["revokes product access", (c, g) => g(M.revokeCustomerProductAccess(c, "cus_1"), "acc_1"),
     "DELETE /admin/customers/cus_1/product-access/acc_1", customerTree],
-  ["records an off-channel payment", (c, g) => g(M.recordCustomerOffChannelPayment(c, "cus_1"), offChannel),
-    "POST /admin/customers/cus_1/payments/off-channel", [...customerTree, "payment", "payments"], offChannel],
   ["asks the catalog copilot without invalidating the catalog", (_c, g) => g(M.askCatalogCopilot(), "what do we sell?"),
     "POST /admin/catalog/ask", []],
   ["loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), { productKey: "pro", priceKey: "monthly" }),
@@ -196,17 +193,6 @@ it("exports every payment by cursor, under the list's filters", async () => {
   expect(requests.map((request) => request.query)).toEqual([
     "kind=refund&rail=nmi&limit=200", "kind=refund&rail=nmi&limit=200&cursor=2",
   ])
-})
-
-it("tells a new off-channel payment from one already recorded", async () => {
-  const queryClient = client()
-  selectMerchant("merchant-a")
-  const recorded = aPayment("pay_1", { channel: "manual", rail: null, psp_id: null })
-  for (const [status, isNew] of [[201, true], [200, false]] as const) {
-    routes["POST /admin/customers/cus_1/payments/off-channel"] = () => Response.json(recorded, { status })
-    expect(await exec(queryClient, M.recordCustomerOffChannelPayment(queryClient, "cus_1"), offChannel))
-      .toEqual({ payment: recorded, recorded: isNew })
-  }
 })
 
 describe("price change", () => {

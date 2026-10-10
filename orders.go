@@ -12,6 +12,9 @@ import (
 func (c *Client) ListOrders(ctx context.Context, params billing.OrderListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Order], error) {
 	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "price_id": params.PriceID.String(), "status": string(params.Status)})
+	if err := setIDs(q, params.IDs); err != nil {
+		return nil, err
+	}
 	var out billing.ListPage[billing.Order]
 	if err := c.do(ctx, http.MethodGet, "/v1/admin/orders?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err

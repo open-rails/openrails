@@ -444,15 +444,20 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 			return err
 		}
 
-		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
+		settled, err := invoicePaymentRecorded(ctx, q, intent, p)
 		if err != nil {
-			return fmt.Errorf("load attempt: %w", err)
+			return err
 		}
-		switch attempt.Status {
-		case "settled":
+		if settled {
 			return complete()
-		case "failed":
-			return fmt.Errorf("attempt %s already failed; a confirmed charge %s needs repair", attempt.ID, transactionID)
+		}
+		if owned, err := invoiceCollectionOwned(ctx, q, intent, p); err != nil {
+			return err
+		} else if !owned {
+			return fmt.Errorf("invoice %s collection already ended without a payment; confirmed charge %s needs repair", p.InvoiceID, transactionID)
+		}
+		if strings.TrimSpace(transactionID) == "" {
+			return errors.New("collection receipt names no provider transaction")
 		}
 		// An approved storing charge establishes the card's agreements only from
 		// retained provider custody and in the settlement transaction.
@@ -511,15 +516,12 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 				return fmt.Errorf("credit invoice rounding surplus: %w", err)
 			}
 		}
-		settled, err := q.SettleClaimedInvoicePaymentAttempt(ctx, gen.SettleClaimedInvoicePaymentAttemptParams{
-			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
-			LedgerTransferID: &transfer.ID, RailPaymentID: optionalString(transactionID), Now: now,
-		})
-		if err != nil {
-			return err
-		}
-		if settled != 1 {
-			return errors.New("settle attempt: claim lost")
+		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
+			ID: p.PaymentID, MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, LedgerTransferID: transfer.ID,
+			Channel: string(models.ChannelRail), Rail: &rail, PspID: &p.Instrument.PSPID, TransactionID: transactionID,
+			Amount: chargedAmount, Currency: currency, PaidAt: now, Now: now, TokenType: optionalString(payments.DefaultTokenType(rail, p.Instrument.Custodian)),
+		}); err != nil {
+			return fmt.Errorf("record invoice payment: %w", err)
 		}
 		if err := recordInvoiceAttempt(ctx, q, intent, p, rail, attempts.Attempt{Approved: true, TransactionID: transactionID}, now); err != nil {
 			return err
@@ -569,19 +571,17 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		complete := func() error {
 			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence("collection refused: "+failureCode, evidence), now)
 		}
-		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
-		if err != nil {
-			return fmt.Errorf("load attempt: %w", err)
-		}
-		switch attempt.Status {
-		case "failed":
-			return complete()
-		case "settled":
-			return fmt.Errorf("attempt %s already settled; refusal contradicts a recorded charge", attempt.ID)
+		if settled, err := invoicePaymentRecorded(ctx, q, intent, p); err != nil {
+			return err
+		} else if settled {
+			return fmt.Errorf("payment %s already settled; refusal contradicts a recorded charge", p.PaymentID)
 		}
 		row, err := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, ID: p.InvoiceID})
 		if err != nil {
 			return fmt.Errorf("lock invoice: %w", err)
+		}
+		if row.CollectionIntentID == nil || *row.CollectionIntentID != intent.ID {
+			return complete()
 		}
 		invoice, err = invoiceFromGen(row)
 		if err != nil {
@@ -591,18 +591,6 @@ func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent g
 		action, err = collection.FailureAction(invoiceCycleHours(invoice), rail, &code, int(invoice.CollectionFailureCount), invoice.CollectionFailedAt, now)
 		if err != nil {
 			return err
-		}
-		failureReason := decline.ReasonFor(rail, failureCode)
-		failed, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
-			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
-			RailPaymentID: optionalString(transactionID), FailureCode: &code, FailureReason: &failureReason,
-			FailureMessage: optionalString(failureMessage), Now: now,
-		})
-		if err != nil {
-			return err
-		}
-		if failed != 1 {
-			return errors.New("fail attempt: claim lost")
 		}
 		if err := recordInvoiceAttempt(ctx, q, intent, p, rail, attempts.Attempt{Answer: decline.Evidence{Code: failureCode, Text: failureMessage}, TransactionID: transactionID}, now); err != nil {
 			return err
@@ -662,21 +650,15 @@ func (h *InvoiceCollectionHandler) finalizeNotExecuted(ctx context.Context, inte
 		complete := func() error {
 			return intents.NewStore(h.DB.NewWithPgxTx(tx)).CompleteInvoiceCollection(ctx, intent, intents.TerminalWithEvidence(reason, evidence), now)
 		}
-		attempt, err := q.GetInvoicePaymentAttempt(ctx, gen.GetInvoicePaymentAttemptParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID})
-		if err != nil {
-			return fmt.Errorf("load attempt: %w", err)
-		}
-		switch attempt.Status {
-		case "failed":
-			return complete()
-		case "settled":
-			return fmt.Errorf("attempt %s already settled; non-execution contradicts a recorded charge", attempt.ID)
-		}
-		if _, err := q.FailClaimedInvoicePaymentAttempt(ctx, gen.FailClaimedInvoicePaymentAttemptParams{
-			MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, AttemptID: p.AttemptID,
-			FailureCode: &code, FailureReason: &code, FailureMessage: &reason, Now: now,
-		}); err != nil {
+		if settled, err := invoicePaymentRecorded(ctx, q, intent, p); err != nil {
 			return err
+		} else if settled {
+			return fmt.Errorf("payment %s already settled; non-execution contradicts a recorded charge", p.PaymentID)
+		}
+		if owned, err := invoiceCollectionOwned(ctx, q, intent, p); err != nil {
+			return err
+		} else if !owned {
+			return complete()
 		}
 		released, err := q.ReleaseInvoiceCollection(ctx, gen.ReleaseInvoiceCollectionParams{MerchantID: intent.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, IntentID: intent.ID, NextAttemptAt: &now, Now: now})
 		if err != nil {
@@ -781,8 +763,28 @@ func recordInvoiceAttempt(ctx context.Context, q *gen.Queries, in gen.BillingPro
 		rail = in.Rail
 	}
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail, a.Kind, a.At, a.Step = in.MerchantID, p.CustomerID, p.Instrument.PSPID, rail, attempts.Invoice, at, "charge"
-	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID, a.InvoiceID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID, &p.InvoiceID
 	a.TokenType = payments.DefaultTokenType(rail, p.Instrument.Custodian)
 	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, q, a)
+}
+
+// invoicePaymentRecorded reports whether the collection's payment is written:
+// the charge settled the invoice.
+func invoicePaymentRecorded(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (bool, error) {
+	_, err := q.GetInvoicePayment(ctx, gen.GetInvoicePaymentParams{MerchantID: in.MerchantID, CustomerID: p.CustomerID, InvoiceID: p.InvoiceID, ID: p.PaymentID})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// invoiceCollectionOwned locks the invoice and reports whether this
+// collection still owns it; one that ended released it.
+func invoiceCollectionOwned(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload) (bool, error) {
+	row, err := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: in.MerchantID, CustomerID: p.CustomerID, ID: p.InvoiceID})
+	if err != nil {
+		return false, fmt.Errorf("lock invoice: %w", err)
+	}
+	return row.CollectionIntentID != nil && *row.CollectionIntentID == in.ID, nil
 }

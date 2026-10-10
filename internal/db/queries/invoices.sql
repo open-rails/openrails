@@ -416,101 +416,31 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = sqlc.arg(invoice_id)
   AND (external_invoice_id IS NULL OR external_invoice_id = sqlc.arg(external_invoice_id));
 
 -- name: InsertInvoicePayment :exec
-INSERT INTO billing.invoice_payments (
-    id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
-    currency, amount, status, channel, rail, rail_payment_id,
-    failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
-    payment_method_id, idempotency_key, psp_id
+-- A payment that paid an invoice: a settled collection charge or a recorded
+-- remittance, with the owed-payment transfer that settled it.
+INSERT INTO billing.payments (
+    id, merchant_id, customer_id, invoice_id, ledger_transfer_id, channel, rail, psp_id, transaction_id,
+    amount, list_amount, currency, status, purchased_at, created_at, money_movement, token_type
 ) VALUES (
-    $1, $2, $3, sqlc.arg(invoice_id), sqlc.narg(ledger_transfer_id),
-    sqlc.arg(currency), sqlc.arg(amount), sqlc.arg(status), sqlc.arg(channel)::text, sqlc.narg(rail),
-    sqlc.narg(rail_payment_id), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(failure_message),
-    sqlc.arg(attempted_at), sqlc.narg(settled_at), sqlc.arg(created_at), sqlc.arg(updated_at),
-    sqlc.narg(payment_method_id), sqlc.narg(idempotency_key), sqlc.narg(psp_id)::uuid
+    sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(invoice_id)::uuid, sqlc.arg(ledger_transfer_id)::uuid,
+    sqlc.arg(channel)::text, sqlc.narg(rail)::text, sqlc.narg(psp_id)::uuid, sqlc.arg(transaction_id)::text,
+    sqlc.arg(amount)::bigint, sqlc.arg(amount)::bigint, sqlc.arg(currency)::text, 'succeeded', sqlc.arg(paid_at)::timestamptz, sqlc.arg(now)::timestamptz,
+    CASE WHEN sqlc.arg(channel)::text = 'rail' THEN 'rail' ELSE 'none' END, sqlc.narg(token_type)::text
 );
 
--- name: GetInvoicePaymentAttemptByKey :one
-SELECT * FROM billing.invoice_payments
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND idempotency_key = sqlc.arg(idempotency_key)
-LIMIT 1;
-
--- name: GetInvoicePaymentAttempt :one
-SELECT * FROM billing.invoice_payments
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND id = sqlc.arg(attempt_id)
-LIMIT 1;
-
--- name: FailClaimedInvoicePaymentAttempt :execrows
-UPDATE billing.invoice_payments
-SET status = 'failed',
-    rail_payment_id = sqlc.narg(rail_payment_id),
-    failure_code = sqlc.narg(failure_code),
-    failure_reason = sqlc.arg(failure_reason),
-    failure_message = sqlc.narg(failure_message),
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND id = sqlc.arg(attempt_id)
-  AND status = 'attempted';
-
--- name: SettleClaimedInvoicePaymentAttempt :execrows
-UPDATE billing.invoice_payments
-SET status = 'settled',
-    ledger_transfer_id = sqlc.arg(ledger_transfer_id),
-    rail_payment_id = sqlc.narg(rail_payment_id),
-    settled_at = sqlc.arg(now)::timestamptz,
-    updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND id = sqlc.arg(attempt_id)
-  AND status = 'attempted';
-
--- name: ListInvoicePaymentsPage :many
--- One page of an invoice's payments, newest first, after a (created_at, id)
--- cursor.
-SELECT p.*
-FROM billing.invoice_payments p
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND p.customer_id = sqlc.arg(customer_id)::uuid
-  AND p.invoice_id = sqlc.arg(invoice_id)::uuid
-  AND (sqlc.narg(after_at)::timestamptz IS NULL
-       OR (p.created_at, p.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
-ORDER BY p.created_at DESC, p.id DESC
-LIMIT sqlc.arg(row_limit)::int;
-
--- name: ListInvoicePaymentsByIDs :many
--- An invoice's named payments, newest first.
-SELECT p.*
-FROM billing.invoice_payments p
-WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.id = ANY(sqlc.arg(ids)::uuid[])
-  AND p.customer_id = sqlc.arg(customer_id)::uuid
-  AND p.invoice_id = sqlc.arg(invoice_id)::uuid
-ORDER BY p.created_at DESC, p.id DESC;
-
--- name: CountInvoicePaymentAttemptsByPayer :one
-SELECT count(*)
-FROM billing.invoice_payments p
-JOIN billing.invoices i
-  ON i.merchant_id = p.merchant_id
- AND i.customer_id = p.customer_id
- AND i.id = p.invoice_id
-WHERE p.merchant_id = $1
-  AND p.customer_id = $2
-  AND p.invoice_id = $3;
+-- name: GetInvoicePayment :one
+SELECT * FROM billing.payments
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND invoice_id = sqlc.arg(invoice_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: ClaimInvoiceCollection :execrows
 -- Points the invoice at its one live collection operation; reclaiming an
 -- `uncollectible` invoice reopens it (a manual retry undoing a terminal
--- outcome). The previous failure code stays as forensics.
+-- outcome). The previous failure code stays as forensics. Each claim counts
+-- one collection attempt.
 UPDATE billing.invoices
 SET status = 'open',
+    collection_attempt_count = collection_attempt_count + 1,
     next_collection_attempt_at = NULL,
     uncollectible_at = NULL,
     collection_intent_id = sqlc.arg(intent_id)::uuid,
@@ -567,21 +497,23 @@ WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE;
 
--- name: ListEncodedInvoiceAttemptsForArchive :many
--- The archive validates both copies of the generated payer-scoped coordinate
--- against the canonical collection operation before exporting or restoring it.
-SELECT sqlc.embed(a), sqlc.embed(i), l.amount AS ledger_amount,
+-- name: ListInvoiceCollectionsForArchive :many
+-- Every terminal invoice collection with the payment its payload names, if
+-- any, and that payment's ledger transfer: the archive checks each pair
+-- before exporting or restoring it.
+SELECT sqlc.embed(i), a.id AS payment_id, a.customer_id AS payment_customer_id, a.invoice_id AS payment_invoice_id,
+    a.psp_id AS payment_psp_id, a.rail AS payment_rail, a.transaction_id AS payment_transaction_id, a.amount AS payment_amount,
+    a.currency AS payment_currency, a.status AS payment_status, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
         AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
-FROM billing.invoice_payments a
-JOIN billing.provider_intents i ON i.merchant_id = a.merchant_id
-    AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
+FROM billing.provider_intents i
+LEFT JOIN billing.payments a ON a.merchant_id = i.merchant_id AND a.id = (i.payload->>'payment_id')::uuid
 LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
-WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
-  AND (sqlc.narg(after_id)::uuid IS NULL OR a.id > sqlc.narg(after_id)::uuid)
-ORDER BY a.id
+WHERE i.merchant_id = sqlc.arg(merchant_id)::uuid AND i.intent_type = 'invoice_collection'
+  AND (sqlc.narg(after_id)::uuid IS NULL OR i.id > sqlc.narg(after_id)::uuid)
+ORDER BY i.id
 LIMIT sqlc.arg(page_size)::int;
 
 -- name: ListOwedInvoiceClaims :many

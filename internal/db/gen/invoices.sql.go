@@ -138,6 +138,7 @@ func (q *Queries) AttachPendingInvoiceItemsToInvoice(ctx context.Context, arg At
 const claimInvoiceCollection = `-- name: ClaimInvoiceCollection :execrows
 UPDATE billing.invoices
 SET status = 'open',
+    collection_attempt_count = collection_attempt_count + 1,
     next_collection_attempt_at = NULL,
     uncollectible_at = NULL,
     collection_intent_id = $3::uuid,
@@ -160,7 +161,8 @@ type ClaimInvoiceCollectionParams struct {
 
 // Points the invoice at its one live collection operation; reclaiming an
 // `uncollectible` invoice reopens it (a manual retry undoing a terminal
-// outcome). The previous failure code stays as forensics.
+// outcome). The previous failure code stays as forensics. Each claim counts
+// one collection attempt.
 func (q *Queries) ClaimInvoiceCollection(ctx context.Context, arg ClaimInvoiceCollectionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, claimInvoiceCollection,
 		arg.MerchantID,
@@ -175,78 +177,8 @@ func (q *Queries) ClaimInvoiceCollection(ctx context.Context, arg ClaimInvoiceCo
 	return result.RowsAffected(), nil
 }
 
-const countInvoicePaymentAttemptsByPayer = `-- name: CountInvoicePaymentAttemptsByPayer :one
-SELECT count(*)
-FROM billing.invoice_payments p
-JOIN billing.invoices i
-  ON i.merchant_id = p.merchant_id
- AND i.customer_id = p.customer_id
- AND i.id = p.invoice_id
-WHERE p.merchant_id = $1
-  AND p.customer_id = $2
-  AND p.invoice_id = $3
-`
-
-type CountInvoicePaymentAttemptsByPayerParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	InvoiceID  uuid.UUID
-}
-
-func (q *Queries) CountInvoicePaymentAttemptsByPayer(ctx context.Context, arg CountInvoicePaymentAttemptsByPayerParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countInvoicePaymentAttemptsByPayer, arg.MerchantID, arg.CustomerID, arg.InvoiceID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
-const failClaimedInvoicePaymentAttempt = `-- name: FailClaimedInvoicePaymentAttempt :execrows
-UPDATE billing.invoice_payments
-SET status = 'failed',
-    rail_payment_id = $4,
-    failure_code = $5,
-    failure_reason = $6,
-    failure_message = $7,
-    updated_at = $8::timestamptz
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND id = $9
-  AND status = 'attempted'
-`
-
-type FailClaimedInvoicePaymentAttemptParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	InvoiceID      uuid.UUID
-	RailPaymentID  *string
-	FailureCode    *string
-	FailureReason  *string
-	FailureMessage *string
-	Now            time.Time
-	AttemptID      uuid.UUID
-}
-
-func (q *Queries) FailClaimedInvoicePaymentAttempt(ctx context.Context, arg FailClaimedInvoicePaymentAttemptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, failClaimedInvoicePaymentAttempt,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.InvoiceID,
-		arg.RailPaymentID,
-		arg.FailureCode,
-		arg.FailureReason,
-		arg.FailureMessage,
-		arg.Now,
-		arg.AttemptID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const getInvoiceByPeriod = `-- name: GetInvoiceByPeriod :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2
   AND period_starts_at = $3 AND period_ends_at = $4 AND currency = $5
 LIMIT 1
@@ -310,12 +242,13 @@ func (q *Queries) GetInvoiceByPeriod(ctx context.Context, arg GetInvoiceByPeriod
 		&i.LastCollectionFailureCode,
 		&i.LastCollectionFailureMessage,
 		&i.CollectionIntentID,
+		&i.CollectionAttemptCount,
 	)
 	return i, err
 }
 
 const getInvoiceForPayer = `-- name: GetInvoiceForPayer :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 `
@@ -369,12 +302,13 @@ func (q *Queries) GetInvoiceForPayer(ctx context.Context, arg GetInvoiceForPayer
 		&i.LastCollectionFailureCode,
 		&i.LastCollectionFailureMessage,
 		&i.CollectionIntentID,
+		&i.CollectionAttemptCount,
 	)
 	return i, err
 }
 
 const getInvoiceForPayerForUpdate = `-- name: GetInvoiceForPayerForUpdate :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count FROM billing.invoices
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $3
 LIMIT 1
 FOR UPDATE
@@ -429,106 +363,68 @@ func (q *Queries) GetInvoiceForPayerForUpdate(ctx context.Context, arg GetInvoic
 		&i.LastCollectionFailureCode,
 		&i.LastCollectionFailureMessage,
 		&i.CollectionIntentID,
+		&i.CollectionAttemptCount,
 	)
 	return i, err
 }
 
-const getInvoicePaymentAttempt = `-- name: GetInvoicePaymentAttempt :one
-SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, channel, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND id = $4
-LIMIT 1
+const getInvoicePayment = `-- name: GetInvoicePayment :one
+SELECT id, price_id, channel, rail, transaction_id, amount, list_amount, currency, status, subscription_id, refunded_payment_id, discount_code, discount_reason, discount_metadata, metadata, purchased_at, created_at, card_brand, card_last4, merchant_id, customer_id, psp_id, attempt_kind, failure_code, failure_reason, reversal_kind, token_type, deleted_at, destructive_run_id, destructive_run_class, money_movement, credit_grant_snapshot, order_id, invoice_id, ledger_transfer_id FROM billing.payments
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND invoice_id = $3::uuid AND id = $4::uuid
 `
 
-type GetInvoicePaymentAttemptParams struct {
+type GetInvoicePaymentParams struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	InvoiceID  uuid.UUID
-	AttemptID  uuid.UUID
+	ID         uuid.UUID
 }
 
-func (q *Queries) GetInvoicePaymentAttempt(ctx context.Context, arg GetInvoicePaymentAttemptParams) (BillingInvoicePayment, error) {
-	row := q.db.QueryRow(ctx, getInvoicePaymentAttempt,
+func (q *Queries) GetInvoicePayment(ctx context.Context, arg GetInvoicePaymentParams) (BillingPayment, error) {
+	row := q.db.QueryRow(ctx, getInvoicePayment,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.InvoiceID,
-		arg.AttemptID,
+		arg.ID,
 	)
-	var i BillingInvoicePayment
+	var i BillingPayment
 	err := row.Scan(
 		&i.ID,
-		&i.MerchantID,
-		&i.CustomerID,
-		&i.InvoiceID,
-		&i.LedgerTransferID,
-		&i.Currency,
-		&i.Amount,
-		&i.Status,
+		&i.PriceID,
 		&i.Channel,
 		&i.Rail,
-		&i.RailPaymentID,
-		&i.FailureCode,
-		&i.FailureMessage,
-		&i.AttemptedAt,
-		&i.SettledAt,
+		&i.TransactionID,
+		&i.Amount,
+		&i.ListAmount,
+		&i.Currency,
+		&i.Status,
+		&i.SubscriptionID,
+		&i.RefundedPaymentID,
+		&i.DiscountCode,
+		&i.DiscountReason,
+		&i.DiscountMetadata,
+		&i.Metadata,
+		&i.PurchasedAt,
 		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PspID,
-		&i.FailureReason,
-		&i.PaymentMethodID,
-		&i.IdempotencyKey,
-	)
-	return i, err
-}
-
-const getInvoicePaymentAttemptByKey = `-- name: GetInvoicePaymentAttemptByKey :one
-SELECT id, merchant_id, customer_id, invoice_id, ledger_transfer_id, currency, amount, status, channel, rail, rail_payment_id, failure_code, failure_message, attempted_at, settled_at, created_at, updated_at, psp_id, failure_reason, payment_method_id, idempotency_key FROM billing.invoice_payments
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND idempotency_key = $4
-LIMIT 1
-`
-
-type GetInvoicePaymentAttemptByKeyParams struct {
-	MerchantID     uuid.UUID
-	CustomerID     uuid.UUID
-	InvoiceID      uuid.UUID
-	IdempotencyKey *string
-}
-
-func (q *Queries) GetInvoicePaymentAttemptByKey(ctx context.Context, arg GetInvoicePaymentAttemptByKeyParams) (BillingInvoicePayment, error) {
-	row := q.db.QueryRow(ctx, getInvoicePaymentAttemptByKey,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.InvoiceID,
-		arg.IdempotencyKey,
-	)
-	var i BillingInvoicePayment
-	err := row.Scan(
-		&i.ID,
+		&i.CardBrand,
+		&i.CardLast4,
 		&i.MerchantID,
 		&i.CustomerID,
+		&i.PspID,
+		&i.AttemptKind,
+		&i.FailureCode,
+		&i.FailureReason,
+		&i.ReversalKind,
+		&i.TokenType,
+		&i.DeletedAt,
+		&i.DestructiveRunID,
+		&i.DestructiveRunClass,
+		&i.MoneyMovement,
+		&i.CreditGrantSnapshot,
+		&i.OrderID,
 		&i.InvoiceID,
 		&i.LedgerTransferID,
-		&i.Currency,
-		&i.Amount,
-		&i.Status,
-		&i.Channel,
-		&i.Rail,
-		&i.RailPaymentID,
-		&i.FailureCode,
-		&i.FailureMessage,
-		&i.AttemptedAt,
-		&i.SettledAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.PspID,
-		&i.FailureReason,
-		&i.PaymentMethodID,
-		&i.IdempotencyKey,
 	)
 	return i, err
 }
@@ -635,17 +531,14 @@ func (q *Queries) InsertInvoice(ctx context.Context, arg InsertInvoiceParams) er
 }
 
 const insertInvoicePayment = `-- name: InsertInvoicePayment :exec
-INSERT INTO billing.invoice_payments (
-    id, merchant_id, customer_id, invoice_id, ledger_transfer_id,
-    currency, amount, status, channel, rail, rail_payment_id,
-    failure_code, failure_reason, failure_message, attempted_at, settled_at, created_at, updated_at,
-    payment_method_id, idempotency_key, psp_id
+INSERT INTO billing.payments (
+    id, merchant_id, customer_id, invoice_id, ledger_transfer_id, channel, rail, psp_id, transaction_id,
+    amount, list_amount, currency, status, purchased_at, created_at, money_movement, token_type
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $9::text, $10,
-    $11, $12, $13, $14,
-    $15, $16, $17, $18,
-    $19, $20, $21::uuid
+    $1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid,
+    $6::text, $7::text, $8::uuid, $9::text,
+    $10::bigint, $10::bigint, $11::text, 'succeeded', $12::timestamptz, $13::timestamptz,
+    CASE WHEN $6::text = 'rail' THEN 'rail' ELSE 'none' END, $14::text
 )
 `
 
@@ -654,25 +547,20 @@ type InsertInvoicePaymentParams struct {
 	MerchantID       uuid.UUID
 	CustomerID       uuid.UUID
 	InvoiceID        uuid.UUID
-	LedgerTransferID *uuid.UUID
-	Currency         string
-	Amount           int64
-	Status           string
+	LedgerTransferID uuid.UUID
 	Channel          string
 	Rail             *string
-	RailPaymentID    *string
-	FailureCode      *string
-	FailureReason    *string
-	FailureMessage   *string
-	AttemptedAt      time.Time
-	SettledAt        *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	PaymentMethodID  *uuid.UUID
-	IdempotencyKey   *string
 	PspID            *uuid.UUID
+	TransactionID    string
+	Amount           int64
+	Currency         string
+	PaidAt           time.Time
+	Now              time.Time
+	TokenType        *string
 }
 
+// A payment that paid an invoice: a settled collection charge or a recorded
+// remittance, with the owed-payment transfer that settled it.
 func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePaymentParams) error {
 	_, err := q.db.Exec(ctx, insertInvoicePayment,
 		arg.ID,
@@ -680,22 +568,15 @@ func (q *Queries) InsertInvoicePayment(ctx context.Context, arg InsertInvoicePay
 		arg.CustomerID,
 		arg.InvoiceID,
 		arg.LedgerTransferID,
-		arg.Currency,
-		arg.Amount,
-		arg.Status,
 		arg.Channel,
 		arg.Rail,
-		arg.RailPaymentID,
-		arg.FailureCode,
-		arg.FailureReason,
-		arg.FailureMessage,
-		arg.AttemptedAt,
-		arg.SettledAt,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-		arg.PaymentMethodID,
-		arg.IdempotencyKey,
 		arg.PspID,
+		arg.TransactionID,
+		arg.Amount,
+		arg.Currency,
+		arg.PaidAt,
+		arg.Now,
+		arg.TokenType,
 	)
 	return err
 }
@@ -818,68 +699,57 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 	return items, nil
 }
 
-const listEncodedInvoiceAttemptsForArchive = `-- name: ListEncodedInvoiceAttemptsForArchive :many
-SELECT a.id, a.merchant_id, a.customer_id, a.invoice_id, a.ledger_transfer_id, a.currency, a.amount, a.status, a.channel, a.rail, a.rail_payment_id, a.failure_code, a.failure_message, a.attempted_at, a.settled_at, a.created_at, a.updated_at, a.psp_id, a.failure_reason, a.payment_method_id, a.idempotency_key, i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, l.amount AS ledger_amount,
+const listInvoiceCollectionsForArchive = `-- name: ListInvoiceCollectionsForArchive :many
+SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, a.id AS payment_id, a.customer_id AS payment_customer_id, a.invoice_id AS payment_invoice_id,
+    a.psp_id AS payment_psp_id, a.rail AS payment_rail, a.transaction_id AS payment_transaction_id, a.amount AS payment_amount,
+    a.currency AS payment_currency, a.status AS payment_status, l.amount AS ledger_amount,
     COALESCE(l.merchant_id = a.merchant_id AND l.customer_id = a.customer_id
         AND l.invoice_id = a.invoice_id AND l.currency = a.currency
         AND l.source = 'invoice_charge' AND l.source_id = i.idempotency_key
         AND l.operation = 'invoice_payment' AND l.transfer_type = 'owed_payment', false)::boolean AS ledger_matches
-FROM billing.invoice_payments a
-JOIN billing.provider_intents i ON i.merchant_id = a.merchant_id
-    AND i.idempotency_key = a.idempotency_key AND i.intent_type = 'invoice_collection'
+FROM billing.provider_intents i
+LEFT JOIN billing.payments a ON a.merchant_id = i.merchant_id AND a.id = (i.payload->>'payment_id')::uuid
 LEFT JOIN billing.ledger_transfers l ON l.merchant_id = a.merchant_id AND l.id = a.ledger_transfer_id
-WHERE a.merchant_id = $1::uuid AND a.idempotency_key LIKE 'invoice_collection:%'
-  AND ($2::uuid IS NULL OR a.id > $2::uuid)
-ORDER BY a.id
+WHERE i.merchant_id = $1::uuid AND i.intent_type = 'invoice_collection'
+  AND ($2::uuid IS NULL OR i.id > $2::uuid)
+ORDER BY i.id
 LIMIT $3::int
 `
 
-type ListEncodedInvoiceAttemptsForArchiveParams struct {
+type ListInvoiceCollectionsForArchiveParams struct {
 	MerchantID uuid.UUID
 	AfterID    *uuid.UUID
 	PageSize   int32
 }
 
-type ListEncodedInvoiceAttemptsForArchiveRow struct {
-	BillingInvoicePayment BillingInvoicePayment
+type ListInvoiceCollectionsForArchiveRow struct {
 	BillingProviderIntent BillingProviderIntent
+	PaymentID             *uuid.UUID
+	PaymentCustomerID     *uuid.UUID
+	PaymentInvoiceID      *uuid.UUID
+	PaymentPspID          *uuid.UUID
+	PaymentRail           *string
+	PaymentTransactionID  *string
+	PaymentAmount         *int64
+	PaymentCurrency       *string
+	PaymentStatus         *string
 	LedgerAmount          *int64
 	LedgerMatches         bool
 }
 
-// The archive validates both copies of the generated payer-scoped coordinate
-// against the canonical collection operation before exporting or restoring it.
-func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg ListEncodedInvoiceAttemptsForArchiveParams) ([]ListEncodedInvoiceAttemptsForArchiveRow, error) {
-	rows, err := q.db.Query(ctx, listEncodedInvoiceAttemptsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
+// Every terminal invoice collection with the payment its payload names, if
+// any, and that payment's ledger transfer: the archive checks each pair
+// before exporting or restoring it.
+func (q *Queries) ListInvoiceCollectionsForArchive(ctx context.Context, arg ListInvoiceCollectionsForArchiveParams) ([]ListInvoiceCollectionsForArchiveRow, error) {
+	rows, err := q.db.Query(ctx, listInvoiceCollectionsForArchive, arg.MerchantID, arg.AfterID, arg.PageSize)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListEncodedInvoiceAttemptsForArchiveRow
+	var items []ListInvoiceCollectionsForArchiveRow
 	for rows.Next() {
-		var i ListEncodedInvoiceAttemptsForArchiveRow
+		var i ListInvoiceCollectionsForArchiveRow
 		if err := rows.Scan(
-			&i.BillingInvoicePayment.ID,
-			&i.BillingInvoicePayment.MerchantID,
-			&i.BillingInvoicePayment.CustomerID,
-			&i.BillingInvoicePayment.InvoiceID,
-			&i.BillingInvoicePayment.LedgerTransferID,
-			&i.BillingInvoicePayment.Currency,
-			&i.BillingInvoicePayment.Amount,
-			&i.BillingInvoicePayment.Status,
-			&i.BillingInvoicePayment.Channel,
-			&i.BillingInvoicePayment.Rail,
-			&i.BillingInvoicePayment.RailPaymentID,
-			&i.BillingInvoicePayment.FailureCode,
-			&i.BillingInvoicePayment.FailureMessage,
-			&i.BillingInvoicePayment.AttemptedAt,
-			&i.BillingInvoicePayment.SettledAt,
-			&i.BillingInvoicePayment.CreatedAt,
-			&i.BillingInvoicePayment.UpdatedAt,
-			&i.BillingInvoicePayment.PspID,
-			&i.BillingInvoicePayment.FailureReason,
-			&i.BillingInvoicePayment.PaymentMethodID,
-			&i.BillingInvoicePayment.IdempotencyKey,
 			&i.BillingProviderIntent.ID,
 			&i.BillingProviderIntent.MerchantID,
 			&i.BillingProviderIntent.Rail,
@@ -908,6 +778,15 @@ func (q *Queries) ListEncodedInvoiceAttemptsForArchive(ctx context.Context, arg 
 			&i.BillingProviderIntent.CustodianID,
 			&i.BillingProviderIntent.Subject,
 			&i.BillingProviderIntent.Credential,
+			&i.PaymentID,
+			&i.PaymentCustomerID,
+			&i.PaymentInvoiceID,
+			&i.PaymentPspID,
+			&i.PaymentRail,
+			&i.PaymentTransactionID,
+			&i.PaymentAmount,
+			&i.PaymentCurrency,
+			&i.PaymentStatus,
 			&i.LedgerAmount,
 			&i.LedgerMatches,
 		); err != nil {
@@ -982,142 +861,6 @@ func (q *Queries) ListInvoicePayers(ctx context.Context, arg ListInvoicePayersPa
 	for rows.Next() {
 		var i ListInvoicePayersRow
 		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.PeriodAnchor); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listInvoicePaymentsByIDs = `-- name: ListInvoicePaymentsByIDs :many
-SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.channel, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
-FROM billing.invoice_payments p
-WHERE p.merchant_id = $1::uuid AND p.id = ANY($2::uuid[])
-  AND p.customer_id = $3::uuid
-  AND p.invoice_id = $4::uuid
-ORDER BY p.created_at DESC, p.id DESC
-`
-
-type ListInvoicePaymentsByIDsParams struct {
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
-	CustomerID uuid.UUID
-	InvoiceID  uuid.UUID
-}
-
-// An invoice's named payments, newest first.
-func (q *Queries) ListInvoicePaymentsByIDs(ctx context.Context, arg ListInvoicePaymentsByIDsParams) ([]BillingInvoicePayment, error) {
-	rows, err := q.db.Query(ctx, listInvoicePaymentsByIDs,
-		arg.MerchantID,
-		arg.Ids,
-		arg.CustomerID,
-		arg.InvoiceID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingInvoicePayment
-	for rows.Next() {
-		var i BillingInvoicePayment
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.InvoiceID,
-			&i.LedgerTransferID,
-			&i.Currency,
-			&i.Amount,
-			&i.Status,
-			&i.Channel,
-			&i.Rail,
-			&i.RailPaymentID,
-			&i.FailureCode,
-			&i.FailureMessage,
-			&i.AttemptedAt,
-			&i.SettledAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.PspID,
-			&i.FailureReason,
-			&i.PaymentMethodID,
-			&i.IdempotencyKey,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listInvoicePaymentsPage = `-- name: ListInvoicePaymentsPage :many
-SELECT p.id, p.merchant_id, p.customer_id, p.invoice_id, p.ledger_transfer_id, p.currency, p.amount, p.status, p.channel, p.rail, p.rail_payment_id, p.failure_code, p.failure_message, p.attempted_at, p.settled_at, p.created_at, p.updated_at, p.psp_id, p.failure_reason, p.payment_method_id, p.idempotency_key
-FROM billing.invoice_payments p
-WHERE p.merchant_id = $1::uuid
-  AND p.customer_id = $2::uuid
-  AND p.invoice_id = $3::uuid
-  AND ($4::timestamptz IS NULL
-       OR (p.created_at, p.id) < ($4::timestamptz, $5::uuid))
-ORDER BY p.created_at DESC, p.id DESC
-LIMIT $6::int
-`
-
-type ListInvoicePaymentsPageParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	InvoiceID  uuid.UUID
-	AfterAt    *time.Time
-	AfterID    *uuid.UUID
-	RowLimit   int32
-}
-
-// One page of an invoice's payments, newest first, after a (created_at, id)
-// cursor.
-func (q *Queries) ListInvoicePaymentsPage(ctx context.Context, arg ListInvoicePaymentsPageParams) ([]BillingInvoicePayment, error) {
-	rows, err := q.db.Query(ctx, listInvoicePaymentsPage,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.InvoiceID,
-		arg.AfterAt,
-		arg.AfterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingInvoicePayment
-	for rows.Next() {
-		var i BillingInvoicePayment
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.InvoiceID,
-			&i.LedgerTransferID,
-			&i.Currency,
-			&i.Amount,
-			&i.Status,
-			&i.Channel,
-			&i.Rail,
-			&i.RailPaymentID,
-			&i.FailureCode,
-			&i.FailureMessage,
-			&i.AttemptedAt,
-			&i.SettledAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.PspID,
-			&i.FailureReason,
-			&i.PaymentMethodID,
-			&i.IdempotencyKey,
-		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1413,7 +1156,7 @@ SET status = 'uncollectible',
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status = 'open'
   AND collection_intent_id IS NULL
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count
 `
 
 type MarkInvoiceUncollectibleForPayerParams struct {
@@ -1471,6 +1214,7 @@ func (q *Queries) MarkInvoiceUncollectibleForPayer(ctx context.Context, arg Mark
 		&i.LastCollectionFailureCode,
 		&i.LastCollectionFailureMessage,
 		&i.CollectionIntentID,
+		&i.CollectionAttemptCount,
 	)
 	return i, err
 }
@@ -1673,46 +1417,6 @@ func (q *Queries) SetInvoiceExternalID(ctx context.Context, arg SetInvoiceExtern
 		arg.ExternalInvoiceID,
 		arg.Now,
 		arg.InvoiceID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const settleClaimedInvoicePaymentAttempt = `-- name: SettleClaimedInvoicePaymentAttempt :execrows
-UPDATE billing.invoice_payments
-SET status = 'settled',
-    ledger_transfer_id = $4,
-    rail_payment_id = $5,
-    settled_at = $6::timestamptz,
-    updated_at = $6::timestamptz
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND invoice_id = $3
-  AND id = $7
-  AND status = 'attempted'
-`
-
-type SettleClaimedInvoicePaymentAttemptParams struct {
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	InvoiceID        uuid.UUID
-	LedgerTransferID *uuid.UUID
-	RailPaymentID    *string
-	Now              time.Time
-	AttemptID        uuid.UUID
-}
-
-func (q *Queries) SettleClaimedInvoicePaymentAttempt(ctx context.Context, arg SettleClaimedInvoicePaymentAttemptParams) (int64, error) {
-	result, err := q.db.Exec(ctx, settleClaimedInvoicePaymentAttempt,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.InvoiceID,
-		arg.LedgerTransferID,
-		arg.RailPaymentID,
-		arg.Now,
-		arg.AttemptID,
 	)
 	if err != nil {
 		return 0, err
@@ -1994,7 +1698,7 @@ SET status = 'voided',
 WHERE merchant_id = $1 AND customer_id = $2 AND id = $4
   AND status IN ('draft', 'open')
   AND collection_intent_id IS NULL
-RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id
+RETURNING id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count
 `
 
 type VoidInvoiceForPayerParams struct {
@@ -2052,6 +1756,7 @@ func (q *Queries) VoidInvoiceForPayer(ctx context.Context, arg VoidInvoiceForPay
 		&i.LastCollectionFailureCode,
 		&i.LastCollectionFailureMessage,
 		&i.CollectionIntentID,
+		&i.CollectionAttemptCount,
 	)
 	return i, err
 }

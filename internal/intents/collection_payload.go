@@ -26,7 +26,7 @@ type InvoiceCollectionPayload struct {
 	Initiator           charge.Initiator           `json:"initiator"`
 	InvoiceID           uuid.UUID                  `json:"invoice_id"`
 	CustomerID          uuid.UUID                  `json:"customer_id"`
-	AttemptID           uuid.UUID                  `json:"attempt_id"`
+	PaymentID           uuid.UUID                  `json:"payment_id"`
 	PaymentMethodID     uuid.UUID                  `json:"payment_method_id"`
 	Rail                string                     `json:"rail"`
 	Instrument          charge.FrozenInstrument    `json:"instrument"`
@@ -46,7 +46,7 @@ func DecodeInvoiceCollectionPayload(intent gen.BillingProviderIntent) (InvoiceCo
 	if err := json.Unmarshal(intent.Payload, &p); err != nil {
 		return p, fmt.Errorf("decode invoice collection payload: %w", err)
 	}
-	if p.InvoiceID == uuid.Nil || p.CustomerID == uuid.Nil || p.AttemptID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
+	if p.InvoiceID == uuid.Nil || p.CustomerID == uuid.Nil || p.PaymentID == uuid.Nil || p.PaymentMethodID == uuid.Nil || p.Rail == "" || p.Amount <= 0 || p.AmountMinor <= 0 || p.Currency == "" {
 		return p, errors.New("invoice collection payload is incomplete")
 	}
 	if p.Initiator != charge.InitiatorMerchant && p.Initiator != charge.InitiatorCustomer {

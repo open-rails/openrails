@@ -9,9 +9,9 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
@@ -65,24 +65,6 @@ func InvoiceView(inv *models.Invoice, now time.Time) billing.Invoice {
 		LastCollectionFailureCode: inv.LastCollectionFailureCode,
 		AvailableActions:          money.InvoiceActions(inv, now),
 		CreatedAt:                 inv.CreatedAt,
-	}
-}
-
-// InvoicePaymentView is a payment applied to an invoice on the wire.
-func InvoicePaymentView(a models.InvoicePaymentAttempt) billing.InvoicePayment {
-	return billing.InvoicePayment{
-		ID:              billing.InvoicePaymentID(a.ID),
-		InvoiceID:       billing.InvoiceID(a.InvoiceID),
-		Currency:        a.Currency,
-		Amount:          a.Amount,
-		Status:          billing.InvoicePaymentStatus(a.Status),
-		PaymentMethodID: (*billing.PaymentMethodID)(a.PaymentMethodID),
-		Rail:            a.Rail,
-		TransactionID:   a.RailPaymentID,
-		FailureCode:     a.FailureCode,
-		FailureReason:   a.FailureReason,
-		AttemptedAt:     a.AttemptedAt,
-		SettledAt:       a.SettledAt,
 	}
 }
 
@@ -154,37 +136,19 @@ func (s *Service) invoiceRecovery(ctx context.Context, invoice *models.Invoice) 
 		out.BlockedReason = "invoice_not_payable"
 	default:
 		out.Retryable = true
-		// The newest payment is the invoice's standing; a later pending or
-		// settled one does not inherit an older decline.
+		// The newest answer is the invoice's standing; a later approval does
+		// not inherit an older decline.
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
-		latest, err := s.rt.DB.Gen(ctx).ListInvoicePaymentsPage(ctx, gen.ListInvoicePaymentsPageParams{MerchantID: mid.UUID(), CustomerID: invoice.CustomerID, InvoiceID: invoice.ID, RowLimit: 1})
-		if err != nil {
+		latest, err := s.rt.DB.Gen(ctx).LatestInvoiceAttempt(ctx, gen.LatestInvoiceAttemptParams{MerchantID: mid.UUID(), InvoiceID: invoice.ID})
+		if err != nil && !db.IsNotFound(err) {
 			return nil, err
 		}
-		if len(latest) > 0 && latest[0].Status == "failed" && latest[0].Rail != nil && latest[0].FailureCode != nil {
-			out.LastFailureReason = decline.ReasonFor(*latest[0].Rail, *latest[0].FailureCode)
+		if err == nil && latest.Reason != nil {
+			out.LastFailureReason = *latest.Reason
 		}
-	}
-	return out, nil
-}
-
-// ListInvoicePayments is one page of an invoice's payments, newest first.
-func (s *Service) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, params billing.InvoicePaymentListParams) (billing.ListPage[billing.InvoicePayment], error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return billing.ListPage[billing.InvoicePayment]{}, err
-	}
-	defer release()
-	rows, err := s.moneyService().ListInvoicePayments(ctx, payer, invoiceID, params)
-	if err != nil {
-		return billing.ListPage[billing.InvoicePayment]{}, err
-	}
-	out := billing.ListPage[billing.InvoicePayment]{Items: make([]billing.InvoicePayment, 0, len(rows.Items)), Next: rows.Next}
-	for _, row := range rows.Items {
-		out.Items = append(out.Items, InvoicePaymentView(row))
 	}
 	return out, nil
 }
@@ -210,7 +174,7 @@ func (s *Service) ApplyInvoiceAction(ctx context.Context, payer identity.Custome
 
 // RetryInvoiceCollection charges an open invoice to one of its customer's
 // cards through the invoice_collection operation.
-func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, p billing.RetryInvoiceCollectionParams) (*billing.InvoiceCollection, error) {
+func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, p billing.RetryInvoiceCollectionParams) (out *billing.InvoiceCollection, err error) {
 	rt, err := s.runtime()
 	if err != nil {
 		return nil, err
@@ -218,7 +182,6 @@ func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.Cus
 	if rt.MoneyCharger == nil {
 		return nil, fmt.Errorf("invoice collection charger not configured")
 	}
-	var out *billing.InvoiceCollection
 	err = s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		result, err := s.moneyService().RetryInvoiceCollection(ctx, rt.IntentRunner(), payer, money.InvoiceCollectionRetryRequest{
 			InvoiceID: invoiceID, IdempotencyKey: p.IdempotencyKey, PaymentMethodID: p.PaymentMethodID.UUID(),
@@ -226,7 +189,8 @@ func (s *Service) RetryInvoiceCollection(ctx context.Context, payer identity.Cus
 		if err != nil {
 			return err
 		}
-		out = &billing.InvoiceCollection{Invoice: InvoiceView(result.Invoice, s.now()), Payment: InvoicePaymentView(result.Attempt), Replayed: result.Replayed}
+		out = &billing.InvoiceCollection{Invoice: InvoiceView(result.Invoice, s.now()), PaymentID: invoicePaymentID(result.Payment), Replayed: result.Replayed,
+			Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.Operation.ID), Status: result.Operation.Status}}
 		return s.markDelinquent(ctx, &out.Invoice)
 	})
 	return out, err
@@ -248,8 +212,16 @@ func (s *Service) PayInvoice(ctx context.Context, payer identity.CustomerID, inv
 		if err := customerPaymentRefusal(result.Operation); err != nil {
 			return err
 		}
-		out = &billing.InvoicePayNow{Invoice: InvoiceView(result.Invoice, s.now()), Payment: InvoicePaymentView(result.Attempt), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.Operation.ID), Status: result.Operation.Status}, Replayed: result.Replayed}
+		out = &billing.InvoicePayNow{Invoice: InvoiceView(result.Invoice, s.now()), PaymentID: invoicePaymentID(result.Payment), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.Operation.ID), Status: result.Operation.Status}, Replayed: result.Replayed}
 		return s.markDelinquent(ctx, &out.Invoice)
 	})
 	return out, err
+}
+
+func invoicePaymentID(p *models.Payment) *billing.PaymentID {
+	if p == nil {
+		return nil
+	}
+	id := billing.PaymentID(p.ID)
+	return &id
 }

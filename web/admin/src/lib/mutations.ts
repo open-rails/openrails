@@ -17,7 +17,6 @@ import {
   changeSubscriptionPaymentMethod,
   changeSubscriptionTier,
   createApiKey,
-  createOffChannelPayment,
   createPrice,
   createProduct,
   createWebhook,
@@ -74,7 +73,6 @@ import {
   type Widget,
 } from "@/lib/api/metrics"
 import type {
-  CreateOffChannelPaymentParams,
   Customer,
 } from "@/lib/api/generated/wire"
 import type { MerchantSettings, AdminSubscription } from "@/lib/api/types"
@@ -376,24 +374,6 @@ export const adminMutations = {
       mutationKey: [...customerKey, "product-access", "revoke"],
       mutationFn: (grantId: string) => revokeProductAccess(customerId, grantId),
       onSuccess: invalidateTreeOnSuccess(queryClient, customerKey),
-    })
-  },
-  recordCustomerOffChannelPayment: (
-    queryClient: QueryClient,
-    customerId: string
-  ) => {
-    const keys = merchantQueryKeys()
-    const customerKey = keys.customer(customerId)
-    const paymentsKey = keys.payments()
-    return mutationOptions({
-      mutationKey: [...customerKey, "payments", "off-channel"],
-      mutationFn: (payment: CreateOffChannelPaymentParams) =>
-        createOffChannelPayment(customerId, payment),
-      onSuccess: () =>
-        Promise.all([
-          queryClient.invalidateQueries({ queryKey: customerKey }),
-          queryClient.invalidateQueries({ queryKey: paymentsKey }),
-        ]),
     })
   },
   askCatalogCopilot: () => {

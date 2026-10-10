@@ -18,7 +18,8 @@ func (c *Client) ListPaymentAttempts(ctx context.Context, filter billing.Payment
 		"response_code": commaList(filter.ResponseCode), "card_entry": commaList(filter.CardEntry), "source": commaList(filter.Source),
 		"observed_via": commaList(filter.ObservedVia), "avs_result": commaList(filter.AVSResult), "cvv_result": commaList(filter.CVVResult),
 		"psp_id": filter.PSPID.String(), "customer_id": filter.CustomerID.String(),
-		"checkout_id": filter.CheckoutID, "subscription_id": filter.SubscriptionID.String(), "cycle_id": filter.CycleID.String(),
+		"payment_id": filter.PaymentID.String(), "invoice_id": filter.InvoiceID.String(), "order_id": filter.OrderID.String(),
+		"subscription_id": filter.SubscriptionID.String(), "cycle_id": filter.CycleID.String(),
 		"since": timeQuery(filter.Since), "until": timeQuery(filter.Until)})
 	if err := setIDs(q, filter.IDs); err != nil {
 		return nil, err

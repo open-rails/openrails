@@ -248,13 +248,17 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 		}
 		// The customer pays in person: a recurring line opens a recurring
 		// agreement, a one-time order reuses the card on file; each cites the
-		// card's lineage, or this charge stores it.
+		// card's lineage, or this charge stores it. On Stripe an order that
+		// starts a subscription stores its own agreement (setup_future_usage),
+		// as an enrollment does, and Stripe links the rest.
 		instrument, agreement := charge.FreezeInstrument(row, chosen.PSPID), charge.AgreementCardOnFile
 		if order.HasRecurring() {
 			agreement = charge.AgreementRecurring
 		}
-		if instrument.Mandate, err = mandates.Citable(ctx, q, mid.UUID(), order.CustomerID, method.ID, chosen.PSPID, row.Rail, agreement); err != nil {
-			return err
+		if !(order.HasRecurring() && row.Rail == string(models.RailStripe)) {
+			if instrument.Mandate, err = mandates.Citable(ctx, q, mid.UUID(), order.CustomerID, method.ID, chosen.PSPID, row.Rail, agreement); err != nil {
+				return err
+			}
 		}
 		payload := payments.NMISalePayload{
 			CheckoutAttemptID: attemptID, RequestFingerprint: fingerprint, Provider: target.Rail, PSP: target.PSP,

@@ -64,7 +64,7 @@ describe("invoice requests and cache", () => {
     await queries.fetchQuery(invoiceQueries.list({ currency: "JPY", status: "open", overdue: "true" }, 25, "cur_2"))
     await queries.fetchQuery(invoiceQueries.payments("invoice-1", 20, "cur_3"))
     expect(requests.map((r) => r.query)).toEqual([
-      "currency=JPY&status=open&overdue=true&limit=25&cursor=cur_2", "limit=20&cursor=cur_3",
+      "currency=JPY&status=open&overdue=true&limit=25&cursor=cur_2", "invoice_id=invoice-1&limit=20&cursor=cur_3",
     ])
   })
 
@@ -133,11 +133,11 @@ describe("invoice support model", () => {
   })
 
   it("never describes a failed or uncertain collection as paid", () => {
-    const result = (status: string, replayed = false) =>
-      ({ payment: { status }, replayed }) as unknown as InvoiceCollection
-    expect(invoiceResultMessage(result("failed"))).toContain("failed")
-    expect(invoiceResultMessage(result("attempted"))).toContain("pending verification")
-    expect(invoiceResultMessage(result("settled", true))).toBe("Existing payment confirmed.")
+    const result = (status: string, paymentId: string | null = null, replayed = false) =>
+      ({ payment_id: paymentId, operation: { id: "pop_1", status }, replayed }) as unknown as InvoiceCollection
+    expect(invoiceResultMessage(result("failed_terminal"))).toContain("failed")
+    expect(invoiceResultMessage(result("unknown_needs_verify"))).toContain("pending verification")
+    expect(invoiceResultMessage(result("succeeded", "pay_1", true))).toBe("Existing payment confirmed.")
     expect(invoiceResultMessage(invoice([]))).toBe("Invoice updated.")
   })
 })

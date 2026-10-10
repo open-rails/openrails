@@ -158,8 +158,10 @@ type OrderLineRefusal struct {
 
 // OrderListParams selects orders, newest first; every filter is optional.
 // PriceID names orders with a line on that price. A customer's own list
-// ignores CustomerID.
+// ignores CustomerID. IDs instead reads 1 to MaxBatchItems named orders in
+// one page; unknown ones are absent.
 type OrderListParams struct {
+	IDs        []OrderID
 	CustomerID CustomerID
 	PriceID    PriceID
 	Status     OrderStatus

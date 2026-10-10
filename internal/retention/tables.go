@@ -36,7 +36,6 @@ var Tables = map[string]Table{
 	"invoices":                            {Permanent, permanent},
 	"invoice_collection_cadence":          {Permanent, permanent},
 	"invoice_items":                       {Permanent, permanent},
-	"invoice_payments":                    {Permanent, permanent},
 	"operation_authorizations":            {Permanent, permanent},
 	"operation_authorization_extensions":  {Permanent, permanent},
 	"cost_qualifications":                 {Permanent, permanent},

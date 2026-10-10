@@ -55,6 +55,10 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		id := billing.OrderID(*p.OrderID)
 		out.OrderID = &id
 	}
+	if p.InvoiceID != nil {
+		id := billing.InvoiceID(*p.InvoiceID)
+		out.InvoiceID = &id
+	}
 	if p.PriceID != uuid.Nil {
 		id := billing.PriceID(p.PriceID)
 		out.PriceID = &id

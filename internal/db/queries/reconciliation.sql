@@ -343,7 +343,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscriptions.
 
 -- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at
+       subscription_id, refunded_payment_id, purchased_at, invoice_id
 FROM billing.payments
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (sqlc.arg(rails)::text[])
   AND deleted_at IS NULL
@@ -413,10 +413,10 @@ ON CONFLICT DO NOTHING;
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind, money_movement
+    customer_id, psp_id, reversal_kind, money_movement, order_id, invoice_id
 ) VALUES (
     sqlc.arg(merchant_id)::uuid,
-    sqlc.arg(price_id), 'rail', sqlc.arg(rail)::text,
+    sqlc.narg(price_id), 'rail', sqlc.arg(rail)::text,
     sqlc.arg(transaction_id), sqlc.arg(amount), sqlc.arg(amount),
     sqlc.arg(currency),
     'succeeded', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
@@ -424,7 +424,10 @@ INSERT INTO billing.payments (
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     -- or#827: a refund is real (negative) money movement at the rail; the
     -- settlement feed excludes it on amount/refunded_payment_id, not on this.
-    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail'
+    sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail',
+    -- A refund names what its charge paid.
+    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid),
+    (SELECT o.invoice_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid)
 )
 ON CONFLICT DO NOTHING;
 
@@ -967,12 +970,3 @@ SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND finding_type = ANY(sqlc.arg(finding_types)::text[])
   AND status = 'requires_review';
 
--- Canonical invoice receipts live outside billing.payments. Recognize settled
--- NMI charges by their exact accepted PSP and transaction, never by a vault.
--- name: ReconcileListInvoicePaymentsByTransactionIDs :many
-SELECT id, customer_id, invoice_id, rail_payment_id::text, amount, currency
-FROM billing.invoice_payments
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND psp_id = sqlc.arg(psp_id)::uuid AND rail = sqlc.arg(rail)::text AND status = 'settled'
-  AND rail_payment_id IS NOT NULL
-  AND rail_payment_id = ANY(sqlc.arg(transaction_ids)::text[]);

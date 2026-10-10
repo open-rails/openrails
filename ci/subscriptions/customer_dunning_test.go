@@ -136,7 +136,9 @@ func TestOverdueInvoices(t *testing.T) {
 	require.Equal(t, http.StatusBadRequest, status, "past_due is not an invoice status: %v", body)
 
 	// Paid, it is no longer overdue.
-	paid, err := client.CreateInvoicePayment(ctx, invoice.ID, billing.CreateInvoicePaymentParams{Amount: owed, Reference: "wire-1"})
+	_, err = client.CreatePayment(ctx, billing.CreatePaymentParams{InvoiceID: &invoice.ID, Amount: owed, TransactionID: "wire-1"})
+	require.NoError(t, err)
+	paid, err := client.GetInvoice(ctx, invoice.ID)
 	require.NoError(t, err)
 	require.False(t, paid.Delinquent)
 	require.Empty(t, overdue(remote))

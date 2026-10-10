@@ -196,6 +196,8 @@ type BillingCheckoutAttempt struct {
 	DestructiveRunClass *string
 	// Processor-routing decision trace, written once at creation: {policy: explicit|merchant|default, rule: matched merchant-rule index, selected: PSP key, rail, fallbacks: [remaining eligible PSP keys, ranked], skipped: [{selector, reason}]}. Skip reasons are PRE-CHARGE availability classes (not_armed, credentials_missing, link_missing, mode_unsupported, service_unavailable, ambiguous_selector, unknown_selector, resolve_failed); a decline is never one of them. NULL = created before the column existed.
 	RoutingReason []byte
+	// The order this attempt pays (mode order).
+	OrderID *uuid.UUID
 }
 
 // One checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt numbers the current payment attempt and attempt_id is the checkout attempt it created; attempt advances only after that attempt failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it. Retention: rows are deleted at purge_at, 24 hours after the session expired.
@@ -467,6 +469,14 @@ type BillingDestructiveRunBeforeImage struct {
 	DestructiveRunClass string
 }
 
+// The merchant's gapless document number: the last one issued. A number is taken in the transaction that pays an order, so an abandoned order consumes none.
+type BillingDocumentSequence struct {
+	MerchantID uuid.UUID
+	LastNumber int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 // Failed usage counted per customer and configured window: the customer's grace (invoker empty) or a delegated invoker's cutoff. Retention: rows are deleted once their window has ended.
 type BillingFailedUsageWindow struct {
 	MerchantID uuid.UUID
@@ -521,7 +531,7 @@ type BillingGrant struct {
 	GrantReason *string
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions and product key changes. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes and order transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -601,7 +611,8 @@ type BillingInvoice struct {
 	LastCollectionFailureCode    *string
 	LastCollectionFailureMessage *string
 	// The live invoice_collection operation (provider_intents) charging this invoice. One operation at a time; set on enqueue, cleared only by that operation's terminal outcome. Blocks competing collection, void, uncollectible and out-of-band payment while set.
-	CollectionIntentID *uuid.UUID
+	CollectionIntentID     *uuid.UUID
+	CollectionAttemptCount int32
 }
 
 // Last fully scanned thirty-day invoice collection period per merchant. Advancing this marker requires successful admission of the whole eligible scan; accepted operations recover independently. Included in merchant archives. Retention: permanent, never pruned.
@@ -626,32 +637,6 @@ type BillingInvoiceItem struct {
 	Metadata   []byte
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
-}
-
-// Payment attempts and settled payments allocated to a specific invoice. Retention: permanent, never pruned.
-type BillingInvoicePayment struct {
-	ID               uuid.UUID
-	MerchantID       uuid.UUID
-	CustomerID       uuid.UUID
-	InvoiceID        uuid.UUID
-	LedgerTransferID *uuid.UUID
-	Currency         string
-	Amount           int64
-	Status           string
-	Channel          string
-	Rail             *string
-	RailPaymentID    *string
-	FailureCode      *string
-	FailureMessage   *string
-	AttemptedAt      time.Time
-	SettledAt        *time.Time
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	// PSP that took this invoice payment attempt. Set exactly when channel = rail (invoice_payments_channel_psp_check).
-	PspID           *uuid.UUID
-	FailureReason   *string
-	PaymentMethodID *uuid.UUID
-	IdempotencyKey  *string
 }
 
 // Per-invoker spend limits: the payer caps how much a delegated invoker/role can spend of the payer's money. {scope, scope_key, windows[]} composed in one admit verdict over the payer balance. Payer-set only.
@@ -1014,10 +999,73 @@ type BillingOperationAuthorizationExtension struct {
 	CreatedAt        time.Time
 }
 
+// One purchase (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time. A decline leaves it open with last_payment_error; it is numbered from document_sequences when paid. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+type BillingOrder struct {
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+	CustomerID     uuid.UUID
+	Origin         string
+	Status         string
+	Currency       string
+	Total          int64
+	Number         *string
+	IdempotencyKey *string
+	RequestDigest  []byte
+	// The saved card the latest attempt charged; a retry may name it again.
+	PaymentMethodID *uuid.UUID
+	PspID           *uuid.UUID
+	// The checkout attempt last started for the order.
+	AttemptID        *uuid.UUID
+	PaymentID        *uuid.UUID
+	LastPaymentError []byte
+	ExpiresAt        time.Time
+	PaidAt           *time.Time
+	CanceledAt       *time.Time
+	ExpiredAt        *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+// One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.
+type BillingOrderLine struct {
+	MerchantID  uuid.UUID
+	ID          uuid.UUID
+	OrderID     uuid.UUID
+	CustomerID  uuid.UUID
+	Position    int32
+	PriceID     uuid.UUID
+	ProductID   uuid.UUID
+	Description string
+	Quantity    *int32
+	UnitAmount  int64
+	Amount      int64
+	Ownership   string
+	// product:<id> or tier_group:<group>: the ownership a unique line claims while its order is live.
+	ClaimKey             *string
+	BillingIntervalHours *int32
+	AccessDurationHours  *int32
+	CreditGrant          []byte
+	SubscriptionID       *uuid.UUID
+	ProductAccessID      *uuid.UUID
+	CreatedAt            time.Time
+}
+
+// At most one live ownership per customer and key (product or tier group). An order claims its unique lines when created; paying hands each claim to the subscription or product access it produced; cancel, expiry, the subscription's end or the access's revocation deletes it.
+type BillingOwnershipClaim struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	ClaimKey   string
+	OrderID    uuid.UUID
+	HolderType string
+	HolderID   uuid.UUID
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 // Records of all payment transactions. Retention: permanent, never pruned.
 type BillingPayment struct {
 	ID      uuid.UUID
-	PriceID uuid.UUID
+	PriceID *uuid.UUID
 	// How the money arrived: rail (through a PSP) or manual (recorded by the merchant). Manual rows have no rail and no PSP.
 	Channel       string
 	Rail          *string
@@ -1025,7 +1073,7 @@ type BillingPayment struct {
 	Amount        int64
 	ListAmount    int64
 	Currency      string
-	// pending (a refund awaiting its PSP), succeeded, refunded (an NMI same-id refund marks its sale), or failed (only a refund the PSP refused; a declined charge is a payment attempt).
+	// pending (a refund awaiting its PSP), succeeded, refunded (an NMI same-id refund marks its sale), or failed: a refund the PSP refused, or a decline recorded before declines were payment attempts. No writer records a failed charge.
 	Status string
 	// Links a payment to the subscription that generated it (nullable for one-off payments)
 	SubscriptionID    *uuid.UUID
@@ -1060,6 +1108,11 @@ type BillingPayment struct {
 	MoneyMovement string
 	// Accepted credit promise and first successful fulfillment dates; independent of subsequent catalog edits.
 	CreditGrantSnapshot []byte
+	// The order this charge (or its refund) paid; its lines say what it bought, and price_id is then NULL.
+	OrderID *uuid.UUID
+	// The invoice this payment paid, with ledger_transfer_id the owed payment that settled it. A balance repayment moves no money and is only its ledger transfer.
+	InvoiceID        *uuid.UUID
+	LedgerTransferID *uuid.UUID
 }
 
 // One row per authorization answered by a PSP: the $0 card verification, sales, rebills and retries. Never the PAN or CVV. checkout_id groups one buyer's attempts on one target (checkout_target: a price id or card_save) until the target is approved. Retention: rows are deleted 25 months (761 days) after attempted_at.
@@ -1108,6 +1161,8 @@ type BillingPaymentAttempt struct {
 	MandateID *uuid.UUID
 	// The initial transaction id the attempt sent the provider, verbatim.
 	SentInitialTransactionID *string
+	InvoiceID                *uuid.UUID
+	OrderID                  *uuid.UUID
 }
 
 // A customer's stored payment instrument.
@@ -1255,6 +1310,8 @@ type BillingProduct struct {
 	Revision   int64
 	// Purchased currency credit policy; accepted checkouts freeze amount and expiry duration.
 	CreditGrant []byte
+	// unique (one live holding per customer, per tier group when set), consumable (units stack, quantity counts them) or extend (a later purchase starts when the current window ends). NULL derives it: consumable for a credit product, extend when every price is one-time with an access duration, unique otherwise.
+	Ownership *string
 }
 
 // Product access windows projected from access grants: a purchase, a subscription period, a grace allowance or a free grant of one product for [starts_at, ends_at). A customer holds the keys the product grants while a window is live; windows may overlap and reads take their union. Rebuildable from the grant ledger.

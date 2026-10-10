@@ -290,7 +290,7 @@ func TestNMIInvoiceFiveDayStartupRecovery(t *testing.T) {
 			c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"currency": "USD", "payment_method_id": method})
 			smallInvoice := func() billing.InvoiceID {
 				id := newNMIInvoice(f, c)
-				_, err := w.client[remote].CreateInvoicePayment(t.Context(), id, billing.CreateInvoicePaymentParams{Amount: 90_000_000, Reference: "partial-" + id.String()})
+				_, err := w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &id, Amount: 90_000_000, TransactionID: "partial-" + id.String()})
 				require.NoError(t, err)
 				return id
 			}

@@ -62,7 +62,6 @@ var pendingNumericMoney = map[string]string{
 	"internal/db/models/invoice.go:Invoice.Tax tax":                                                                          notHTTPStorageRow,
 	"internal/db/models/invoice.go:Invoice.TotalAmount total_amount":                                                         notHTTPStorageRow,
 	"internal/db/models/invoice.go:InvoiceLineItem.Amount amount":                                                            notHTTPStorageRow,
-	"internal/db/models/invoice.go:InvoicePaymentAttempt.Amount amount":                                                      notHTTPStorageRow,
 	"internal/db/models/merchant_configuration.go:MerchantConfiguration.ArrearsDelinquencyFloor arrears_delinquency_floor":   notHTTPStorageRow,
 	"internal/db/models/merchant_configuration.go:MerchantConfiguration.InvoiceCollectionThreshold collection_threshold":     notHTTPStorageRow,
 	"internal/db/models/merchant_configuration.go:MerchantConfiguration.InvoiceMonthlyFloor monthly_floor":                   notHTTPStorageRow,

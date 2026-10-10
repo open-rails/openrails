@@ -109,7 +109,7 @@ func TestHostSettlementDedupeKeyNamesItsPayment(t *testing.T) {
 	checkRows(t, cases)
 }
 
-const collectionPayload = `{"initiator":"%s","invoice_id":"10000000-0000-0000-0000-000000000001","customer_id":"10000000-0000-0000-0000-000000000002","attempt_id":"10000000-0000-0000-0000-000000000003","payment_method_id":"10000000-0000-0000-0000-000000000004","rail":"nmi","currency":"USD","amount":50000,"amount_minor":5,"description":"invoice","instrument":{"psp_id":"10000000-0000-0000-0000-000000000005","custodian":"psp","rail_customer_ref":"vault-original","rail_method_ref":"billing-original"}}`
+const collectionPayload = `{"initiator":"%s","invoice_id":"10000000-0000-0000-0000-000000000001","customer_id":"10000000-0000-0000-0000-000000000002","payment_id":"10000000-0000-0000-0000-000000000003","payment_method_id":"10000000-0000-0000-0000-000000000004","rail":"nmi","currency":"USD","amount":50000,"amount_minor":5,"description":"invoice","instrument":{"psp_id":"10000000-0000-0000-0000-000000000005","custodian":"psp","rail_customer_ref":"vault-original","rail_method_ref":"billing-original"}}`
 
 func collectionIntent(t *testing.T, initiator, origin, actor, key string) map[string]string {
 	t.Helper()

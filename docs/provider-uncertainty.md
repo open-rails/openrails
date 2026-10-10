@@ -49,8 +49,8 @@ upgrade rule: a roster row matching only vault and plan is surfaced as an
 operator candidate, not adopted.
 
 Invoice collection is an `invoice_collection` operation on the same ledger:
-one per attempt, enqueued atomically with its `invoice_payments` row and the
-invoice's `collection_intent_id` pointer, which blocks every competing
+one per attempt, enqueued atomically with the invoice's `collection_intent_id`
+pointer, which blocks every competing
 collection, void, uncollectible and out-of-band payment until the operation
 ends. The operation id is the provider identity (NMI order id, Stripe
 idempotency-key root), so a client retry key, a restart or a resumed lease

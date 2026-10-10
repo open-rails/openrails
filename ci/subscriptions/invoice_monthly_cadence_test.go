@@ -40,7 +40,7 @@ func TestInvoiceMonthlyCadenceSerializesReplicas(t *testing.T) {
 	a.settleCollectionScans()
 	small := func(on ...*world) billing.InvoiceID {
 		id := newNMIInvoice(f, c, on...)
-		_, err := a.client[remote].CreateInvoicePayment(t.Context(), id, billing.CreateInvoicePaymentParams{Amount: 90_000_000, Reference: "partial-" + id.String()})
+		_, err := a.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &id, Amount: 90_000_000, TransactionID: "partial-" + id.String()})
 		require.NoError(t, err)
 		return id
 	}

@@ -19,7 +19,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 import { useCursorPages } from "@/lib/cursor-pages"
-import type { Invoice, InvoicePayment } from "@/lib/api/generated/wire"
+import type { Invoice, Payment } from "@/lib/api/generated/wire"
 import type { InvoiceAction } from "@/lib/api/invoice-endpoints"
 import { invoiceQueries, invoiceActionMutation } from "@/lib/invoice-queries"
 import { adminQueries } from "@/lib/queries"
@@ -32,6 +32,7 @@ import {
 } from "@/lib/format"
 import {
   allowedInvoiceActions,
+  collectionSettled,
   invoiceActionDescriptions,
   invoiceActionLabels,
   invoicePaymentAmount,
@@ -39,10 +40,10 @@ import {
   taxDisplay,
 } from "./model"
 
-const historyColumns: ColumnDef<InvoicePayment, unknown>[] = [
+const historyColumns: ColumnDef<Payment, unknown>[] = [
   {
-    header: "Attempted",
-    cell: ({ row }) => formatDate(row.original.attempted_at),
+    header: "Paid",
+    cell: ({ row }) => formatDate(row.original.created_at),
   },
   {
     header: "Amount",
@@ -53,15 +54,13 @@ const historyColumns: ColumnDef<InvoicePayment, unknown>[] = [
     header: "Status",
     cell: ({ row }) => <StatusBadge status={row.original.status} />,
   },
-  { header: "Method", cell: ({ row }) => row.original.rail ?? "—" },
   {
-    header: "Reference",
-    cell: ({ row }) => row.original.transaction_id ?? shortId(row.original.id),
+    header: "Method",
+    cell: ({ row }) => row.original.rail ?? row.original.channel,
   },
   {
-    header: "Failure",
-    cell: ({ row }) =>
-      row.original.failure_reason ?? row.original.failure_code ?? "—",
+    header: "Reference",
+    cell: ({ row }) => row.original.transaction_id || shortId(row.original.id),
   },
 ]
 export function InvoiceDetailPage() {
@@ -132,12 +131,7 @@ export function InvoiceDetail({ invoice }: { invoice: Invoice }) {
         idempotencyKey: retryKey,
       })
       toast(invoiceResultMessage(result))
-      if (
-        "payment" in result &&
-        (result.payment.status === "settled" ||
-          result.payment.status === "failed")
-      )
-        setRetryKey(crypto.randomUUID())
+      if (collectionSettled(result)) setRetryKey(crypto.randomUUID())
       setAction(null)
     } catch (failure) {
       setError(

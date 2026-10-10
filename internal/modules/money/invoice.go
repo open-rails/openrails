@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -561,125 +562,109 @@ func (s *MoneyService) MarkInvoiceUncollectible(ctx context.Context, payer ident
 	return inv, nil
 }
 
-func (s *MoneyService) RecordOutOfBandInvoicePayment(ctx context.Context, payer identity.CustomerID, id uuid.UUID, amount int64, railPaymentID string) (*models.Invoice, error) {
+// InvoiceRemittance is money the merchant received for an invoice outside
+// OpenRails. TransactionID is its identity: recording it again with the same
+// terms answers the first payment.
+type InvoiceRemittance struct {
+	InvoiceID     uuid.UUID
+	Amount        int64
+	TransactionID string
+	// PaidAt defaults to now; a replay that omits it does not compare it.
+	PaidAt *time.Time
+}
+
+// RecordInvoiceRemittance records a remittance as a manual payment on its
+// invoice and settles that much of what the invoice claims. created is false
+// when the same remittance was already recorded.
+func (s *MoneyService) RecordInvoiceRemittance(ctx context.Context, in InvoiceRemittance) (payment *models.Payment, created bool, err error) {
 	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
+		return nil, false, fmt.Errorf("money service not initialized")
 	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
+	in.TransactionID = strings.TrimSpace(in.TransactionID)
+	if in.InvoiceID == uuid.Nil || in.Amount <= 0 || in.TransactionID == "" {
+		return nil, false, fmt.Errorf("invoice, positive amount and transaction id are required")
 	}
-	if id == uuid.Nil {
-		return nil, fmt.Errorf("invoice_id required")
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, false, err
 	}
-	if amount <= 0 {
-		return nil, fmt.Errorf("amount must be positive")
-	}
-	railPaymentID = strings.TrimSpace(railPaymentID)
-	if railPaymentID == "" {
-		return nil, fmt.Errorf("rail_payment_id required")
-	}
-	var inv *models.Invoice
-	err := s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
-		tid, terr := merchant.Require(ctx)
-		if terr != nil {
-			return terr
-		}
-		invoiceRow, e := q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{
-			MerchantID: tid.UUID(),
-			CustomerID: payer.UUID(),
-			ID:         id,
-		})
+		invoiceRow, e := q.GetMerchantInvoice(ctx, gen.GetMerchantInvoiceParams{MerchantID: mid.UUID(), ID: in.InvoiceID})
 		if e != nil {
 			return e
 		}
-		sourceID := railPaymentID
-		manualPayCoord := ledger.Coord{Operation: ledger.OpManualInvoicePay, Source: "manual_invoice_payment", SourceID: sourceID}
-		// An accepted remittance is checked before paid status, a reduced due
-		// amount, or a later collection can prevent a harmless receipt replay.
-		if prior, derr := q.GetLedgerTransferByCoords(ctx, gen.GetLedgerTransferByCoordsParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: normalizeCurrency(invoiceRow.Currency),
-			TransferType: "owed_payment", Operation: string(manualPayCoord.Operation),
-			Source: manualPayCoord.Source, SourceID: manualPayCoord.SourceID,
-		}); derr == nil {
-			if prior.Amount != amount || prior.InvoiceID == nil || *prior.InvoiceID != id {
-				return ErrInvoicePaymentReferenceUsed
-			}
-			inv, e = invoiceFromGen(invoiceRow)
+		if _, e := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: invoiceRow.CustomerID}); e != nil {
 			return e
-		} else if !errors.Is(derr, pgx.ErrNoRows) {
-			return derr
+		}
+		if invoiceRow, e = q.GetInvoiceForPayerForUpdate(ctx, gen.GetInvoiceForPayerForUpdateParams{MerchantID: mid.UUID(), CustomerID: invoiceRow.CustomerID, ID: in.InvoiceID}); e != nil {
+			return e
+		}
+		// A recorded remittance answers its replay before paid status, a
+		// reduced due amount or a later collection could refuse it.
+		prior, e := q.GetPaymentByPSPTransactionID(ctx, gen.GetPaymentByPSPTransactionIDParams{MerchantID: mid.UUID(), Channel: string(models.ChannelManual), TransactionID: in.TransactionID})
+		switch {
+		case e == nil:
+			if prior.InvoiceID == nil || *prior.InvoiceID != in.InvoiceID || prior.Amount != in.Amount || in.PaidAt != nil && !prior.PurchasedAt.Equal(in.PaidAt.UTC().Truncate(time.Microsecond)) {
+				return billing.ErrIdempotencyKeyReused
+			}
+			payment, e = models.PaymentFromGen(prior)
+			return e
+		case !errors.Is(e, pgx.ErrNoRows):
+			return e
 		}
 		if invoiceRow.Status != "open" || invoiceRow.CollectionIntentID != nil {
 			return ErrInvoiceActionNotAllowed
 		}
-		if amount > invoiceRow.AmountDue {
-			return ErrInvoicePaymentExceedsDue
+		if in.Amount > invoiceRow.AmountDue {
+			return ErrPaymentExceedsDue
 		}
 		now := s.now()
-		n, e := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{
-			MerchantID: tid.UUID(),
-			CustomerID: payer.UUID(),
-			InvoiceID:  id,
-			Snapshot:   amount,
-			Now:        now,
-		})
+		paidAt := now
+		if in.PaidAt != nil {
+			paidAt = in.PaidAt.UTC().Truncate(time.Microsecond)
+		}
+		n, e := q.ApplyInvoicePaymentSnapshot(ctx, gen.ApplyInvoicePaymentSnapshotParams{MerchantID: mid.UUID(), CustomerID: invoiceRow.CustomerID, InvoiceID: in.InvoiceID, Snapshot: in.Amount, Now: now})
 		if e != nil {
 			return e
 		}
 		if n == 0 {
 			return fmt.Errorf("invoice payment was not applied")
 		}
-		if e := statement.Follow(ctx, q, tid.UUID(), payer.UUID(), invoiceRow.Currency, id, now); e != nil {
+		if e := statement.Follow(ctx, q, mid.UUID(), invoiceRow.CustomerID, invoiceRow.Currency, in.InvoiceID, now); e != nil {
 			return e
 		}
-		// Settle the arrears liability via a #512 ledger owed-payment transfer
-		// (DR processor_clearing / CR arrears_liability).
-		ml := s.moneyLedger(q, tid.UUID())
-		tr, e := ml.PayOwed(ctx, payer.UUID(), normalizeCurrency(invoiceRow.Currency), amount, manualPayCoord, &id)
+		// The owed-payment transfer settles the arrears liability (DR
+		// processor_clearing / CR arrears_liability) at the remittance's
+		// unique coordinate.
+		coord := ledger.Coord{Operation: ledger.OpManualInvoicePay, Source: "manual_invoice_payment", SourceID: in.TransactionID}
+		tr, e := s.moneyLedger(q, mid.UUID()).PayOwed(ctx, invoiceRow.CustomerID, normalizeCurrency(invoiceRow.Currency), in.Amount, coord, &in.InvoiceID)
 		if e != nil {
 			return e
 		}
-		// Another invoice can have raced the reference lookup under its own row
-		// lock. The ledger's unique coordinate is authoritative; a mismatched
-		// receipt rolls back this invoice snapshot as well as any local work.
-		if tr.Amount != amount || tr.InvoiceID == nil || *tr.InvoiceID != id {
-			return ErrInvoicePaymentReferenceUsed
+		if tr.Amount != in.Amount || tr.InvoiceID == nil || *tr.InvoiceID != in.InvoiceID {
+			return billing.ErrIdempotencyKeyReused
 		}
-		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID:               uuidutil.NewV7(),
-			MerchantID:       tid.UUID(),
-			CustomerID:       payer.UUID(),
-			InvoiceID:        id,
-			LedgerTransferID: &tr.ID,
-			Currency:         invoiceRow.Currency,
-			Amount:           amount,
-			Status:           "settled",
-			Channel:          string(models.ChannelManual),
-			RailPaymentID:    &railPaymentID,
-			AttemptedAt:      now,
-			SettledAt:        &now,
-			CreatedAt:        now,
-			UpdatedAt:        now,
-		}); e != nil {
+		id := uuidutil.NewV7()
+		if e := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{ID: id, MerchantID: mid.UUID(), CustomerID: invoiceRow.CustomerID, InvoiceID: in.InvoiceID,
+			LedgerTransferID: tr.ID, Channel: string(models.ChannelManual), TransactionID: in.TransactionID, Amount: in.Amount, Currency: invoiceRow.Currency, PaidAt: paidAt, Now: now}); e != nil {
+			if db.IsUniqueViolation(e) {
+				return billing.ErrIdempotencyKeyReused
+			}
 			return e
 		}
-		row, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
-			MerchantID: tid.UUID(),
-			CustomerID: payer.UUID(),
-			ID:         id,
-		})
+		row, e := q.GetInvoicePayment(ctx, gen.GetInvoicePaymentParams{MerchantID: mid.UUID(), CustomerID: invoiceRow.CustomerID, InvoiceID: in.InvoiceID, ID: id})
 		if e != nil {
 			return e
 		}
-		var merr error
-		inv, merr = invoiceFromGen(row)
-		return merr
+		created = true
+		payment, e = models.PaymentFromGen(row)
+		return e
 	})
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return inv, nil
+	return payment, created, nil
 }
 
 // FinalizeDueInvoicesForBoundary finalizes the previous period of every

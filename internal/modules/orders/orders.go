@@ -41,6 +41,8 @@ var (
 	ErrInProgress      = apperr.New(http.StatusConflict, billing.CodeOrderPaymentInProgress, "A payment on this order is unresolved.")
 	ErrTotalChanged    = apperr.New(http.StatusConflict, billing.CodeOrderTotalChanged, "The order's total is not expected_total.")
 	ErrOptionMissing   = apperr.New(http.StatusUnprocessableEntity, billing.CodePaymentOptionUnavailable, "No PSP that can take these lines accepts this payment.")
+	ErrRecurringLine   = apperr.New(http.StatusConflict, billing.CodeOrderHasRecurringLine, "An order with a recurring line is paid by its customer; it cannot be recorded as paid.")
+	ErrAmountNotTotal  = apperr.New(http.StatusConflict, billing.CodePaymentExceedsDue, "A recorded payment must be the order's total.")
 	errLateApprovalDup = errors.New("order payment contradicts the recorded one")
 )
 

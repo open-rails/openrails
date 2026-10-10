@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/money/statement"
+	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -249,7 +250,7 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 			return err
 		}
 		if len(prior) > 0 {
-			if (invoice.Status != "paid" && invoice.Status != "open") || invoice.AmountDue != 0 || len(prior) != 1 || prior[0].InvoiceID != invoice.ID || prior[0].CustomerID != invoice.CustomerID || prior[0].Amount != charged || prior[0].Currency != invoice.Currency || prior[0].Status != "settled" || prior[0].Channel != string(models.ChannelRail) || prior[0].Rail == nil || *prior[0].Rail != "nmi" || prior[0].LedgerTransferID == nil {
+			if (invoice.Status != "paid" && invoice.Status != "open") || invoice.AmountDue != 0 || len(prior) != 1 || prior[0].InvoiceID == nil || *prior[0].InvoiceID != invoice.ID || prior[0].CustomerID != invoice.CustomerID || prior[0].Amount != charged || prior[0].Currency != invoice.Currency || prior[0].Status != "succeeded" || prior[0].Channel != string(models.ChannelRail) || prior[0].Rail == nil || *prior[0].Rail != "nmi" || prior[0].LedgerTransferID == nil {
 				return fmt.Errorf("%w: transaction allocation conflicts", ErrInvoiceRecoveryHeld)
 			}
 			transfer, err := q.GetInvoiceRecoveryLedgerTransfer(ctx, gen.GetInvoiceRecoveryLedgerTransferParams{MerchantID: mid.UUID(), TransferID: *prior[0].LedgerTransferID})
@@ -302,7 +303,7 @@ func (s *MoneyService) RecoverObservedInvoicePayment(ctx context.Context, receip
 				return err
 			}
 		}
-		if err = q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{ID: uuidutil.NewV7(), MerchantID: mid.UUID(), CustomerID: invoice.CustomerID, InvoiceID: invoice.ID, LedgerTransferID: &transfer.ID, Currency: invoice.Currency, Amount: charged, Status: "settled", Channel: string(models.ChannelRail), Rail: new("nmi"), RailPaymentID: &facts.Sale.TransactionID, PspID: &receipt.psp, AttemptedAt: facts.PaidAt, SettledAt: &facts.PaidAt, CreatedAt: s.now(), UpdatedAt: s.now()}); err != nil {
+		if err = q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{ID: uuidutil.NewV7(), MerchantID: mid.UUID(), CustomerID: invoice.CustomerID, InvoiceID: invoice.ID, LedgerTransferID: transfer.ID, Currency: invoice.Currency, Amount: charged, Channel: string(models.ChannelRail), Rail: new("nmi"), TransactionID: facts.Sale.TransactionID, PspID: &receipt.psp, PaidAt: facts.PaidAt, Now: s.now(), TokenType: new(charge.TokenTypePSPToken)}); err != nil {
 			return err
 		}
 		settled, err := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{MerchantID: mid.UUID(), CustomerID: invoice.CustomerID, ID: invoice.ID})

@@ -13,7 +13,7 @@ import (
 )
 
 const getMerchantInvoice = `-- name: GetMerchantInvoice :one
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count FROM billing.invoices
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -65,12 +65,13 @@ func (q *Queries) GetMerchantInvoice(ctx context.Context, arg GetMerchantInvoice
 		&i.LastCollectionFailureCode,
 		&i.LastCollectionFailureMessage,
 		&i.CollectionIntentID,
+		&i.CollectionAttemptCount,
 	)
 	return i, err
 }
 
 const listInvoicesByIDs = `-- name: ListInvoicesByIDs :many
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count FROM billing.invoices
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY period_starts_at DESC, id DESC
 `
@@ -129,6 +130,7 @@ func (q *Queries) ListInvoicesByIDs(ctx context.Context, arg ListInvoicesByIDsPa
 			&i.LastCollectionFailureCode,
 			&i.LastCollectionFailureMessage,
 			&i.CollectionIntentID,
+			&i.CollectionAttemptCount,
 		); err != nil {
 			return nil, err
 		}
@@ -141,7 +143,7 @@ func (q *Queries) ListInvoicesByIDs(ctx context.Context, arg ListInvoicesByIDsPa
 }
 
 const listInvoicesPage = `-- name: ListInvoicesPage :many
-SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id FROM billing.invoices
+SELECT id, merchant_id, customer_id, currency, invoice_number, period_starts_at, period_ends_at, usage_total, deposits_total, owed_accrued, owed_paid, closing_balance, subtotal_amount, total_amount, amount_paid, amount_due, line_items, money_movements, status, collection_method, issued_at, due_at, paid_at, voided_at, uncollectible_at, finalized_at, external_invoice_id, created_at, updated_at, po_number, tax, billing_contacts, memo, collection_failure_count, collection_failed_at, next_collection_attempt_at, last_collection_failure_code, last_collection_failure_message, collection_intent_id, collection_attempt_count FROM billing.invoices
 WHERE merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
   AND ($3::text IS NULL OR currency = $3::text)
@@ -232,6 +234,7 @@ func (q *Queries) ListInvoicesPage(ctx context.Context, arg ListInvoicesPagePara
 			&i.LastCollectionFailureCode,
 			&i.LastCollectionFailureMessage,
 			&i.CollectionIntentID,
+			&i.CollectionAttemptCount,
 		); err != nil {
 			return nil, err
 		}

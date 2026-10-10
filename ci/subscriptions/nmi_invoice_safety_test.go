@@ -112,7 +112,7 @@ func requireInvoicePaidOnce(f *fleet, id billing.InvoiceID, sales, requests int,
 	require.Equal(f.t, nmiInvoiceAmount, invoice.AmountPaid)
 	require.Len(f.t, f.base.nmi.ledger(""), sales)
 	require.Len(f.t, f.base.nmi.Attempts(), requests, "same shared database never resends the accepted collection")
-	payments, err := f.any().client[remote].ListInvoicePayments(f.t.Context(), id, billing.InvoicePaymentListParams{})
+	payments, err := f.any().client[remote].ListPayments(f.t.Context(), billing.PaymentListParams{InvoiceID: id})
 	require.NoError(f.t, err)
 	require.Len(f.t, payments.Items, 1+manual)
 	var count int
@@ -136,10 +136,9 @@ func requireInvoicePaidOnce(f *fleet, id billing.InvoiceID, sales, requests int,
 	for _, payment := range payments.Items {
 		if payment.Rail != nil {
 			require.Equal(f.t, "nmi", *payment.Rail)
-			require.Equal(f.t, billing.InvoicePaymentSettled, payment.Status)
+			require.Equal(f.t, billing.PaymentSucceeded, payment.Status)
 			require.Equal(f.t, amount, payment.Amount)
-			require.NotNil(f.t, payment.TransactionID)
-			require.Equal(f.t, f.base.nmi.ledger("")[sales-1].ID, *payment.TransactionID, "retained exact provider receipt became the local invoice payment")
+			require.Equal(f.t, f.base.nmi.ledger("")[sales-1].ID, payment.TransactionID, "retained exact provider receipt became the local invoice payment")
 		}
 	}
 }
@@ -182,7 +181,7 @@ func TestNMIInvoiceReplicasCollectRemainingAmountOnce(t *testing.T) {
 	f.settle()
 	requireInvoicePaidOnce(f, first, 1, 1, nmiInvoiceAmount, 0)
 	invoice := newNMIInvoice(f, c)
-	_, err := f.any().client[remote].CreateInvoicePayment(t.Context(), invoice, billing.CreateInvoicePaymentParams{Amount: 25_000_000, Reference: "bank-partial"})
+	_, err := f.any().client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &invoice, Amount: 25_000_000, TransactionID: "bank-partial"})
 	require.NoError(t, err)
 	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"currency": "USD", "payment_method_id": method})
 	// Every process is off for five days; clocks advance while none can submit.

@@ -193,11 +193,11 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.Equal(t, billing.InvoiceStatus("paid"), paid.Status)
 		require.EqualValues(t, 0, paid.AmountDue)
 		require.EqualValues(t, 300_000, paid.AmountPaid)
-		history, err := client.ListInvoicePayments(ctx, billing.InvoiceID(inv.ID), billing.InvoicePaymentListParams{})
+		// A balance repayment moves no money: it is a ledger transfer, not a
+		// payment.
+		history, err := client.ListPayments(ctx, billing.PaymentListParams{InvoiceID: billing.InvoiceID(inv.ID)})
 		require.NoError(t, err)
-		require.Len(t, history.Items, 1)
-		require.EqualValues(t, 300_000, history.Items[0].Amount)
-		require.Nil(t, history.Items[0].Rail)
+		require.Empty(t, history.Items)
 
 		// Repaid before any invoice: the period's invoice claims nothing.
 		early := newCustomer()

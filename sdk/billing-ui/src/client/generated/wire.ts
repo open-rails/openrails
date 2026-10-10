@@ -276,24 +276,9 @@ export type InvoiceLineItem = {
 
 export type InvoicePayNow = {
   invoice: Invoice
-  payment: InvoicePayment
+  payment_id: string | null
   operation: PaymentOperation
   replayed: boolean
-}
-
-export type InvoicePayment = {
-  id: string
-  invoice_id: string
-  currency: string
-  amount: string
-  status: "attempted" | "failed" | "settled"
-  payment_method_id: string | null
-  rail: string | null
-  transaction_id: string | null
-  failure_code: string | null
-  failure_reason: string | null
-  attempted_at: string
-  settled_at: string | null
 }
 
 export type MarkNotificationsReadParams = {
@@ -495,6 +480,7 @@ export type Payment = {
   customer_id: string
   subscription_id: string | null
   order_id: string | null
+  invoice_id: string | null
   price_id: string | null
   price: Price | null
   product: ProductSummary | null

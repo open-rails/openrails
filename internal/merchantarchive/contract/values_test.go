@@ -109,7 +109,6 @@ func TestOnlyTerminalStateIsPortable(t *testing.T) {
 	checkRows(t, []rowCase{
 		{"pending payment", "payments", map[string]string{"status": "pending"}, false},
 		{"settled payment", "payments", map[string]string{"status": "succeeded"}, true},
-		{"attempted invoice payment", "invoice_payments", map[string]string{"status": "attempted"}, false},
 		{"open checkout", "checkout_attempts", map[string]string{"status": "open"}, false},
 		{"expired checkout", "checkout_attempts", map[string]string{"status": "expired"}, true},
 		{"admitted admission", "admission_operations", map[string]string{"state": "admitted"}, false},

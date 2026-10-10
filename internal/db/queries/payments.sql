@@ -10,7 +10,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id
+    money_movement, order_id, invoice_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
     sqlc.arg(currency),
@@ -25,7 +25,7 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(invoice_id)::uuid
 );
 
 -- name: CreatePaymentIfNotExists :execrows
@@ -36,7 +36,7 @@ INSERT INTO billing.payments (
     metadata, purchased_at, created_at, card_brand,
     card_last4, customer_id, psp_id,
     attempt_kind, failure_code, failure_reason, reversal_kind, token_type,
-    money_movement, order_id
+    money_movement, order_id, invoice_id
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, sqlc.arg(channel)::text, sqlc.narg(rail)::text, $3, $4, $5,
     sqlc.arg(currency),
@@ -51,21 +51,13 @@ INSERT INTO billing.payments (
     sqlc.narg(psp_id)::uuid,
     sqlc.narg(attempt_kind), sqlc.narg(failure_code), sqlc.narg(failure_reason), sqlc.narg(reversal_kind),
     sqlc.narg(token_type),
-    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid
+    sqlc.arg(money_movement)::text, sqlc.narg(order_id)::uuid, sqlc.narg(invoice_id)::uuid
 )
 ON CONFLICT DO NOTHING;
 
 -- name: GetPaymentByID :one
 SELECT * FROM billing.payments WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
-
--- name: GetPaymentWithPriceProduct :one
-SELECT sqlc.embed(purch), sqlc.embed(p), sqlc.embed(prod)
-FROM billing.payments purch
-JOIN billing.prices p ON p.id = purch.price_id
-JOIN billing.products prod ON prod.id = p.product_id
-WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.id = $1
-  AND purch.deleted_at IS NULL;
 
 -- name: ListRefundsForPayment :many
 SELECT * FROM billing.payments
@@ -221,11 +213,22 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.deleted_at IS NULL
   AND (sqlc.narg(customer_id)::uuid IS NULL OR p.customer_id = sqlc.narg(customer_id)::uuid)
   AND (sqlc.narg(subscription_id)::uuid IS NULL OR p.subscription_id = sqlc.narg(subscription_id)::uuid)
-  AND (sqlc.narg(price_id)::uuid IS NULL OR p.price_id = sqlc.narg(price_id)::uuid)
+  AND (sqlc.narg(invoice_id)::uuid IS NULL OR p.invoice_id = sqlc.narg(invoice_id)::uuid)
+  AND (sqlc.narg(order_id)::uuid IS NULL OR p.order_id = sqlc.narg(order_id)::uuid)
   AND (sqlc.narg(rail)::text IS NULL OR p.rail = sqlc.narg(rail)::text)
   AND (sqlc.narg(transaction_id)::text IS NULL OR p.transaction_id = sqlc.narg(transaction_id)::text)
   AND (sqlc.narg(kind)::text IS NULL OR COALESCE(p.reversal_kind,
         CASE WHEN p.refunded_payment_id IS NOT NULL OR p.amount < 0 THEN 'refund' ELSE 'charge' END) = sqlc.narg(kind)::text)
+  -- status is the wire's: a charge's succeeded refunds make it
+  -- partially_refunded or refunded.
+  AND (sqlc.narg(status)::text IS NULL OR sqlc.narg(status)::text = CASE
+        WHEN p.status <> 'succeeded' THEN p.status
+        WHEN p.reversal_kind IS NOT NULL OR p.refunded_payment_id IS NOT NULL OR p.amount <= 0 THEN 'succeeded'
+        ELSE (SELECT CASE WHEN COALESCE(sum(abs(r.amount::numeric)), 0) = 0 THEN 'succeeded'
+                          WHEN sum(abs(r.amount::numeric)) >= p.amount THEN 'refunded' ELSE 'partially_refunded' END
+              FROM billing.payments r
+              WHERE r.merchant_id = p.merchant_id AND r.refunded_payment_id = p.id AND r.status = 'succeeded' AND r.deleted_at IS NULL)
+      END)
   AND (sqlc.narg(after_at)::timestamptz IS NULL
        OR (p.created_at, p.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY p.created_at DESC, p.id DESC

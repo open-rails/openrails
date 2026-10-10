@@ -23,7 +23,7 @@ import (
 // ListPaymentAttempts lists the merchant's payment attempts, newest first
 // (#1116).
 //
-//	GET /admin/payment-attempts?kind&owner&category&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&checkout_id&subscription_id&cycle_id&since&until&limit&offset
+//	GET /admin/payment-attempts?kind&owner&category&reason&response_code&card_entry&source&observed_via&avs_result&cvv_result&psp_id&customer_id&payment_id&invoice_id&order_id&subscription_id&cycle_id&since&until&limit&offset
 //
 // A text filter takes one value or a comma-separated list.
 func ListPaymentAttempts(r *httprequest.Request) {
@@ -49,7 +49,16 @@ func ListPaymentAttempts(r *httprequest.Request) {
 		MerchantID: mid, Kinds: q.list("kind"), Owners: q.list("owner"), Categories: q.list("category"), Reasons: q.list("reason"),
 		ResponseCodes: q.list("response_code"), CardEntries: q.list("card_entry"), Sources: q.list("source"), ObservedVias: q.list("observed_via"),
 		AvsResults: q.list("avs_result"), CvvResults: q.list("cvv_result"), PspID: q.typed("psp_id", parsePSPID), CustomerID: q.uuid("customer_id"),
-		CheckoutID: q.uuid("checkout_id"), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
+		PaymentID: q.typed("payment_id", func(s string) (uuid.UUID, error) {
+			id, err := billing.ParsePaymentID(s)
+			return id.UUID(), err
+		}), InvoiceID: q.typed("invoice_id", func(s string) (uuid.UUID, error) {
+			id, err := billing.ParseInvoiceID(s)
+			return id.UUID(), err
+		}), OrderID: q.typed("order_id", func(s string) (uuid.UUID, error) {
+			id, err := billing.ParseOrderID(s)
+			return id.UUID(), err
+		}), SubscriptionID: q.typed("subscription_id", func(s string) (uuid.UUID, error) {
 			id, err := billing.ParseSubscriptionID(s)
 			return id.UUID(), err
 		}), CycleID: q.typed("cycle_id", func(s string) (uuid.UUID, error) {
@@ -213,10 +222,15 @@ func paymentAttemptToAPI(a gen.BillingPaymentAttempt) billing.PaymentAttempt {
 		CVVResult: normalize.FromPtr(a.CvvResult), Card: models.CardFromColumns(a.CardBrand, a.CardLast4, nil, nil).Details(),
 		CardBIN: normalize.FromPtr(a.CardBin), TokenType: normalize.FromPtr(a.TokenType), TransactionID: normalize.FromPtr(a.TransactionID),
 		Rail: a.Rail, PSPID: billing.PSPID(a.PspID), CustomerID: billing.CustomerID(a.CustomerID), Amount: a.Amount, Currency: normalize.FromPtr(a.Currency),
-		AttemptedAt: a.AttemptedAt, CheckoutTarget: normalize.FromPtr(a.CheckoutTarget), EnrichedAt: a.EnrichedAt,
+		AttemptedAt: a.AttemptedAt, EnrichedAt: a.EnrichedAt,
 	}
-	if a.CheckoutID != nil {
-		out.CheckoutID = a.CheckoutID.String()
+	if a.InvoiceID != nil {
+		id := billing.InvoiceID(*a.InvoiceID)
+		out.InvoiceID = &id
+	}
+	if a.OrderID != nil {
+		id := billing.OrderID(*a.OrderID)
+		out.OrderID = &id
 	}
 	if a.CycleID != nil {
 		id := billing.RebillCycleID(*a.CycleID)

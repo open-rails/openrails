@@ -80,7 +80,7 @@ func TestObservedInvoiceRecoveryRefusesContradictoryFacts(t *testing.T) {
 				_, err := w.client[remote].VoidInvoice(t.Context(), invoice)
 				require.NoError(t, err)
 			case "already_paid":
-				_, err := w.client[remote].CreateInvoicePayment(t.Context(), invoice, billing.CreateInvoicePaymentParams{Amount: 50_000_000, Reference: "already-remitted"})
+				_, err := w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &invoice, Amount: 50_000_000, TransactionID: "already-remitted"})
 				require.NoError(t, err)
 			}
 			sale = w.nmi.AddSale(sale)
@@ -94,7 +94,7 @@ func TestObservedInvoiceRecoveryRefusesContradictoryFacts(t *testing.T) {
 			}
 			before, err := w.client[remote].GetInvoice(t.Context(), invoice)
 			require.NoError(t, err)
-			beforePayments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
+			beforePayments, err := w.client[remote].ListPayments(t.Context(), billing.PaymentListParams{InvoiceID: invoice})
 			require.NoError(t, err)
 			beforeWrites := len(w.nmi.Attempts())
 			psp := w.psp["nmi"].UUID()
@@ -109,7 +109,7 @@ func TestObservedInvoiceRecoveryRefusesContradictoryFacts(t *testing.T) {
 			after, err := w.client[remote].GetInvoice(t.Context(), invoice)
 			require.NoError(t, err)
 			require.Equal(t, before, after)
-			afterPayments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
+			afterPayments, err := w.client[remote].ListPayments(t.Context(), billing.PaymentListParams{InvoiceID: invoice})
 			require.NoError(t, err)
 			require.Equal(t, beforePayments, afterPayments)
 			var allocations int
@@ -150,7 +150,7 @@ func TestObservedInvoiceRecoveryRefusesExistingSubscriptionAllocation(t *testing
 	stillDue, err := w.client[remote].GetInvoice(t.Context(), invoice)
 	require.NoError(t, err)
 	require.Equal(t, int64(50_000_000), stillDue.AmountDue)
-	payments, err := w.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
+	payments, err := w.client[remote].ListPayments(t.Context(), billing.PaymentListParams{InvoiceID: invoice})
 	require.NoError(t, err)
 	require.Empty(t, payments.Items)
 	require.Empty(t, w.nmi.Attempts())
@@ -172,15 +172,15 @@ func TestObservedInvoiceRecoveryReplayChecksActualLedgerBinding(t *testing.T) {
 	require.NoError(t, err)
 
 	otherInvoice := observedInvoice(t, w, c, 50_000_000)
-	_, err = w.client[remote].CreateInvoicePayment(t.Context(), otherInvoice, billing.CreateInvoicePaymentParams{Amount: 50_000_000, Reference: "other-invoice-bank-payment"})
+	_, err = w.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &otherInvoice, Amount: 50_000_000, TransactionID: "other-invoice-bank-payment"})
 	require.NoError(t, err)
 	// Deliberately corrupt the restored linkage without changing the amount or
 	// receipt ID. A nonnil transfer pointer alone must not bless this archive.
 	var wrongTransfer uuid.UUID
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT ledger_transfer_id FROM billing.invoice_payments WHERE invoice_id=$1`), otherInvoice.UUID()).Scan(&wrongTransfer))
-	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.invoice_payments SET ledger_transfer_id=NULL WHERE invoice_id=$1`), otherInvoice.UUID())
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT ledger_transfer_id FROM billing.payments WHERE invoice_id=$1`), otherInvoice.UUID()).Scan(&wrongTransfer))
+	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.payments WHERE invoice_id=$1`), otherInvoice.UUID())
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.invoice_payments SET ledger_transfer_id=$1 WHERE invoice_id=$2`), wrongTransfer, invoice.UUID())
+	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET ledger_transfer_id=$1 WHERE invoice_id=$2`), wrongTransfer, invoice.UUID())
 	require.NoError(t, err)
 	_, err = rt.MoneyService.RecoverObservedInvoicePayment(ctx, receipt)
 	require.ErrorIs(t, err, money.ErrInvoiceRecoveryHeld)
@@ -212,7 +212,7 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			method := c.saveCard("nmi", visa)
 			invoice := observedInvoice(t, source, c, tc.amount)
 			if tc.manual > 0 {
-				_, err := source.client[remote].CreateInvoicePayment(t.Context(), invoice, billing.CreateInvoicePaymentParams{Amount: tc.manual, Reference: "retained-bank-payment"})
+				_, err := source.client[remote].CreatePayment(t.Context(), billing.CreatePaymentParams{InvoiceID: &invoice, Amount: tc.manual, TransactionID: "retained-bank-payment"})
 				require.NoError(t, err)
 			}
 			if tc.uncollectible {
@@ -285,7 +285,7 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			require.Equal(t, billing.InvoicePaid, paid.Status)
 			require.Zero(t, paid.AmountDue)
 			require.Equal(t, tc.amount, paid.AmountPaid)
-			payments, err := target.client[remote].ListInvoicePayments(t.Context(), invoice, billing.InvoicePaymentListParams{})
+			payments, err := target.client[remote].ListPayments(t.Context(), billing.PaymentListParams{InvoiceID: invoice})
 			require.NoError(t, err)
 			wantPayments := 1
 			if tc.manual > 0 {
@@ -294,11 +294,11 @@ func TestObservedInvoiceRecoveryFromOldBackup(t *testing.T) {
 			require.Len(t, payments.Items, wantPayments)
 			var providerPayments int
 			for _, payment := range payments.Items {
-				if payment.TransactionID != nil && *payment.TransactionID == transaction {
+				if payment.TransactionID == transaction {
 					providerPayments++
 					require.NotNil(t, payment.Rail)
 					require.Equal(t, "nmi", *payment.Rail)
-					require.Nil(t, payment.PaymentMethodID, "lost method/initiator is not invented")
+					require.Equal(t, billing.PaymentSucceeded, payment.Status)
 				}
 			}
 			require.Equal(t, 1, providerPayments)

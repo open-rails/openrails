@@ -43,6 +43,10 @@ type Payment struct {
 	SubscriptionID *uuid.UUID `json:"subscription_id,omitempty"`
 	// OrderID is the order this charge (or its refund) paid.
 	OrderID *uuid.UUID `json:"order_id,omitempty"`
+	// InvoiceID is the invoice this payment paid, settled by the owed
+	// payment LedgerTransferID.
+	InvoiceID        *uuid.UUID `json:"invoice_id,omitempty"`
+	LedgerTransferID *uuid.UUID `json:"ledger_transfer_id,omitempty"`
 
 	// Optional linkage back to the payment that this record refunds
 	RefundedPaymentID *uuid.UUID `json:"refunded_payment_id,omitempty"`

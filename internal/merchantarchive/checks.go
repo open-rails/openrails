@@ -81,7 +81,7 @@ var excludedColumns = map[string]string{
 	"admission_denials_hourly":      "merchant_id customer_id denial_reason hour_at denials updated_at",
 	"card_attempt_failures":         "merchant_id subject bucket_at failures",
 	"failed_usage_windows":          "merchant_id customer_id currency invoker window_key window_start window_end amount",
-	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id",
+	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id invoice_id order_id",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason",
 	"payment_method_updates":        "id merchant_id payment_method_id customer_id psp_id source kind event_ref occurred_at created_at",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
@@ -266,7 +266,7 @@ var preflightChecks = []rowCheck{
 	{"solana_pay_references", "status='pending'"},
 	{"solana_pay_receipts", "review_reason IS NOT NULL AND disposition <> 'duplicate' AND resolved_at IS NULL"},
 	{"provider_intents", "status IN ('pending','in_flight','unknown_needs_verify','failed_retryable')"},
-	{"payments", "status='pending'"}, {"invoice_payments", "status='attempted'"},
+	{"payments", "status='pending'"},
 	{"invoices", "collection_intent_id IS NOT NULL"},
 	{"admission_operations", "state='open'"},
 	{"host_outbox", "delivered_at IS NULL"}, {"webhook_events", "completed_at IS NULL"},
@@ -343,13 +343,10 @@ var referenceChecks = []rowCheck{
 	{"metered_rating_watermarks", `NOT EXISTS(SELECT 1 FROM billing.customers c WHERE c.merchant_id=$1 AND c.id=metered_rating_watermarks.customer_id)`},
 	{"ledger_transfers", `source_id LIKE 'invoice_collection:%' AND
 	 (source<>'invoice_charge' OR operation<>'invoice_payment' OR transfer_type<>'owed_payment' OR
-	 NOT EXISTS(SELECT 1 FROM billing.invoice_payments a WHERE a.merchant_id=$1
-	 AND a.ledger_transfer_id=ledger_transfers.id AND a.idempotency_key=ledger_transfers.source_id
+	 NOT EXISTS(SELECT 1 FROM billing.payments a WHERE a.merchant_id=$1
+	 AND a.ledger_transfer_id=ledger_transfers.id
 	 AND a.customer_id=ledger_transfers.customer_id AND a.invoice_id=ledger_transfers.invoice_id
-	 AND a.currency=ledger_transfers.currency AND a.status='settled'))`},
-	{"invoice_payments", `idempotency_key LIKE 'invoice_collection:%'
-	 AND NOT EXISTS(SELECT 1 FROM billing.provider_intents i WHERE i.merchant_id=$1
-	 AND i.intent_type='invoice_collection' AND i.idempotency_key=invoice_payments.idempotency_key)`},
+	 AND a.currency=ledger_transfers.currency AND a.status='succeeded'))`},
 	{"provider_intents", `(subscription_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.subscriptions s WHERE s.merchant_id=$1 AND s.id=provider_intents.subscription_id))
 	 OR (payment_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=provider_intents.payment_id))
 	 OR (price_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM billing.prices p WHERE p.merchant_id=$1 AND p.id=provider_intents.price_id))`},
@@ -401,7 +398,7 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 	}
 	var after *uuid.UUID
 	for {
-		rows, err := gen.New(tx).ListEncodedInvoiceAttemptsForArchive(ctx, gen.ListEncodedInvoiceAttemptsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
+		rows, err := gen.New(tx).ListInvoiceCollectionsForArchive(ctx, gen.ListInvoiceCollectionsForArchiveParams{MerchantID: id.UUID(), AfterID: after, PageSize: 256})
 		if err != nil {
 			return err
 		}
@@ -409,35 +406,37 @@ func validateReferences(ctx context.Context, tx pgx.Tx, id billing.MerchantID) e
 			return nil
 		}
 		for _, row := range rows {
-			a, operation := row.BillingInvoicePayment, row.BillingProviderIntent
-			p, err := intents.DecodeInvoiceCollectionPayload(operation)
-			if err != nil {
-				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: err}
-			}
-			methodMatches := a.PaymentMethodID != nil && *a.PaymentMethodID == p.PaymentMethodID
-			if a.PaymentMethodID == nil {
-				deletions, err := gen.New(tx).ListMethodDeletesForArchive(ctx, gen.ListMethodDeletesForArchiveParams{MerchantID: operation.MerchantID, PaymentMethodID: p.PaymentMethodID})
-				if err != nil {
-					return err
-				}
-				if len(deletions) == 1 {
-					method, customer, err := intents.DeletedMethod(deletions[0])
-					methodMatches = err == nil && method == p.PaymentMethodID && customer == p.CustomerID
-				}
-			}
-			receipt, collected, receiptErr := intents.LoadCollectedReceipt(operation)
-			amount, amountErr := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
-			matches := a.MerchantID == operation.MerchantID && a.ID == p.AttemptID && a.CustomerID == p.CustomerID && a.InvoiceID == p.InvoiceID &&
-				methodMatches && a.PspID != nil && *a.PspID == p.Instrument.PSPID &&
-				a.IdempotencyKey != nil && *a.IdempotencyKey == operation.IdempotencyKey && a.Currency == p.Currency && a.Amount == amount &&
-				(p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) || p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)) && a.Rail != nil && *a.Rail == p.Rail
-			terminal := operation.Status == intents.StatusFailedTerminal && a.Status == "failed" && !collected ||
-				operation.Status == intents.StatusSucceeded && a.Status == "settled" && collected && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount && a.RailPaymentID != nil && *a.RailPaymentID == receipt.TransactionID()
-			if receiptErr != nil || amountErr != nil || !matches || !terminal {
-				return &Error{Code: "unsupported_state", Table: "invoice_payments", Err: fmt.Errorf("encoded attempt key does not name its canonical collection outcome")}
+			if !invoiceCollectionCanonical(row) {
+				return &Error{Code: "unsupported_state", Table: "payments", Err: fmt.Errorf("invoice collection %s does not name its canonical payment", row.BillingProviderIntent.ID)}
 			}
 		}
-		next := rows[len(rows)-1].BillingInvoicePayment.ID
+		next := rows[len(rows)-1].BillingProviderIntent.ID
 		after = &next
 	}
+}
+
+// invoiceCollectionCanonical reports whether a terminal invoice collection and
+// the payment its payload names agree: a settled one wrote exactly its
+// receipt's payment and owed-payment transfer, any other wrote none.
+func invoiceCollectionCanonical(row gen.ListInvoiceCollectionsForArchiveRow) bool {
+	operation := row.BillingProviderIntent
+	p, err := intents.DecodeInvoiceCollectionPayload(operation)
+	if err != nil {
+		return false
+	}
+	origin := p.Initiator == charge.InitiatorCustomer || operation.Origin == string(intents.OriginAdmin) && intents.InvoiceCollectionRetryKeyValid(p.InvoiceID, operation.IdempotencyKey) ||
+		p.Initiator == charge.InitiatorMerchant && operation.Origin == string(intents.OriginSystem)
+	receipt, collected, receiptErr := intents.LoadCollectedReceipt(operation)
+	charged, amountErr := moneyutil.RailMinorToNative(p.Currency, p.AmountMinor)
+	if !origin || receiptErr != nil || amountErr != nil {
+		return false
+	}
+	if operation.Status != intents.StatusSucceeded {
+		return row.PaymentID == nil && !collected
+	}
+	return collected && row.PaymentID != nil && *row.PaymentID == p.PaymentID && row.PaymentCustomerID != nil && *row.PaymentCustomerID == p.CustomerID &&
+		row.PaymentInvoiceID != nil && *row.PaymentInvoiceID == p.InvoiceID && row.PaymentPspID != nil && *row.PaymentPspID == p.Instrument.PSPID &&
+		row.PaymentRail != nil && *row.PaymentRail == p.Rail && row.PaymentTransactionID != nil && *row.PaymentTransactionID == receipt.TransactionID() &&
+		row.PaymentAmount != nil && *row.PaymentAmount == charged && row.PaymentCurrency != nil && *row.PaymentCurrency == p.Currency &&
+		row.PaymentStatus != nil && *row.PaymentStatus == "succeeded" && row.LedgerMatches && row.LedgerAmount != nil && *row.LedgerAmount == p.Amount
 }

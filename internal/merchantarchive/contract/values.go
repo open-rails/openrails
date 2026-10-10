@@ -115,12 +115,8 @@ func ValidateValues(p Profile, values []*string) error {
 	if err != nil {
 		return err
 	}
-	if p.Name == "invoice_payments" || p.Name == "ledger_transfers" {
-		keyField := "idempotency_key"
-		if p.Name == "ledger_transfers" {
-			keyField = "source_id"
-		}
-		key, payer, invoice := value(p, values, keyField), value(p, values, "customer_id"), value(p, values, "invoice_id")
+	if p.Name == "ledger_transfers" {
+		key, payer, invoice := value(p, values, "source_id"), value(p, values, "customer_id"), value(p, values, "invoice_id")
 		if key != nil && strings.HasPrefix(*key, "invoice_collection:") {
 			payerID, invoiceID := uuid.Nil, uuid.Nil
 			if payer != nil {
@@ -220,10 +216,6 @@ func ValidateValues(p Profile, values []*string) error {
 			return bad() // Any live collection must resolve before cutover.
 		case "payments.status":
 			if v == "pending" {
-				return bad()
-			}
-		case "invoice_payments.status":
-			if v == "attempted" {
 				return bad()
 			}
 		case "checkout_attempts.status":

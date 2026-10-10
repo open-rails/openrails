@@ -116,6 +116,11 @@ func TestListsReadNamedRecords(t *testing.T) {
 	require.NoError(t, err)
 	_, err = client.CreatePriceMigration(ctx, billing.CreatePriceMigrationParams{ProductKey: product.Key, PriceKey: price.Key, ToPriceID: next.ID, EffectiveAt: w.clock.Now().Add(45 * 24 * time.Hour)})
 	require.NoError(t, err)
+	// Two unpaid orders.
+	for _, entitlement := range []string{"ids:order-1", "ids:order-2"} {
+		open := c.order(http.MethodPost, "/orders", "ids-"+uuid.NewString(), map[string]any{"lines": []any{line(w.lifetime(entitlement, 1_000_000), 0)}})
+		require.Equal(t, http.StatusCreated, open.status, "%v", open.body)
+	}
 	// Two free product grants.
 	gift := w.giftProduct("content:gift")
 	c.grant(gift, &hours, nil)
@@ -168,7 +173,6 @@ func TestListsReadNamedRecords(t *testing.T) {
 	}
 
 	customer, funded := "/v1/admin/customers/"+c.id, "/v1/admin/customers/"+d.id
-	invoice := invoices.Items[0].ID.String()
 	fixtures := map[string]struct{ path, query, table, set, key string }{
 		"GET /v1/admin/customers":                                    {"/v1/admin/customers", "", "customers", "", ""},
 		"GET /v1/admin/catalog/products":                             {"/v1/admin/catalog/products", "", "products", "", ""},
@@ -179,7 +183,7 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/customers/{customer_id}/credit-grants":        {funded + "/credit-grants", "", "grants", "", ""},
 		"GET /v1/admin/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},
 		"GET /v1/admin/invoices":                                     {"/v1/admin/invoices", "", "invoices", "", ""},
-		"GET /v1/admin/invoices/{id}/payments":                       {"/v1/admin/invoices/" + invoice + "/payments", "", "invoice_payments", "", ""},
+		"GET /v1/admin/orders":                                       {"/v1/admin/orders", "", "orders", "", ""},
 		"GET /v1/admin/payments":                                     {"/v1/admin/payments", "", "payments", "", ""},
 		"GET /v1/admin/payment-attempts":                             {"/v1/admin/payment-attempts", "", "payment_attempts", "", ""},
 		"GET /v1/admin/rebill-cycles":                                {"/v1/admin/rebill-cycles", "", "rebill_cycles", "", ""},

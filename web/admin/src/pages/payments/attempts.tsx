@@ -249,10 +249,14 @@ export function AttemptDetailPage() {
             "—"
           )}
         </Fact>
-        <Fact label="Checkout">
-          {a.checkout_id ? (
-            <To to={`/payments/attempts?checkout_id=${a.checkout_id}`}>
-              {`${a.checkout_target || "checkout"} attempts`}
+        <Fact label="Paying">
+          {a.invoice_id ? (
+            <To to={`/invoices/${a.invoice_id}`}>
+              {shortId(a.invoice_id, 16)}
+            </To>
+          ) : a.order_id ? (
+            <To to={`/payments/attempts?order_id=${a.order_id}`}>
+              {shortId(a.order_id, 16)}
             </To>
           ) : (
             "—"

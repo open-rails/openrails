@@ -69,22 +69,6 @@ func (c *Client) MarkInvoiceUncollectible(ctx context.Context, id billing.Invoic
 	return invoiceCall[billing.Invoice](ctx, c, http.MethodPost, id, "/uncollectible", nil, nil, requestOptions)
 }
 
-// CreateInvoicePayment records money received outside collection and
-// answers the invoice. Reference identifies the remittance, so a retry
-// records it once.
-func (c *Client) CreateInvoicePayment(ctx context.Context, id billing.InvoiceID, params billing.CreateInvoicePaymentParams, requestOptions ...RequestOption) (*billing.Invoice, error) {
-	return invoiceCall[billing.Invoice](ctx, c, http.MethodPost, id, "/payments", params, nil, requestOptions)
-}
-
-// ListInvoicePayments is one page of an invoice's payments, newest first.
-func (c *Client) ListInvoicePayments(ctx context.Context, id billing.InvoiceID, params billing.InvoicePaymentListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.InvoicePayment], error) {
-	q := pageValues(nil, params.PageRequest)
-	if err := setIDs(q, params.IDs); err != nil {
-		return nil, err
-	}
-	return invoiceCall[billing.ListPage[billing.InvoicePayment]](ctx, c, http.MethodGet, id, "/payments?"+q.Encode(), nil, nil, requestOptions)
-}
-
 // RetryInvoiceCollection charges an open invoice to one of its customer's
 // cards now. The same IdempotencyKey answers the first attempt.
 func (c *Client) RetryInvoiceCollection(ctx context.Context, id billing.InvoiceID, params billing.RetryInvoiceCollectionParams, requestOptions ...RequestOption) (*billing.InvoiceCollection, error) {

@@ -1141,7 +1141,7 @@ WHERE s.merchant_id = $1::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-        AND p.deleted_at IS NULL AND p.status = 'completed'
+        AND p.deleted_at IS NULL AND p.status = 'succeeded'
         AND p.purchased_at >= s.current_period_ends_at
   )
 ORDER BY s.current_period_ends_at, s.id
@@ -1196,7 +1196,7 @@ FROM billing.subscriptions s
 JOIN LATERAL (
     SELECT p.id, p.transaction_id, p.purchased_at FROM billing.payments p
     WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-      AND p.status = 'completed' AND p.deleted_at IS NULL
+      AND p.status = 'succeeded' AND p.deleted_at IS NULL
     ORDER BY p.purchased_at DESC, p.id DESC
     LIMIT 1
 ) p ON true
@@ -1542,12 +1542,12 @@ func (q *Queries) ListReconciliationRuns(ctx context.Context, arg ListReconcilia
 }
 
 const listRecordedSubscriptionCharges = `-- name: ListRecordedSubscriptionCharges :many
-SELECT subscription_id, transaction_id::text AS transaction_id, 'completed'::text AS status,
+SELECT subscription_id, transaction_id::text AS transaction_id, 'succeeded'::text AS status,
        purchased_at::timestamptz AS occurred_at, amount::bigint AS amount, currency::text AS currency,
        ''::text AS response_code
 FROM billing.payments
 WHERE merchant_id = $1::uuid AND subscription_id = ANY($2::uuid[])
-  AND purchased_at >= $3::timestamptz AND status = 'completed' AND deleted_at IS NULL
+  AND purchased_at >= $3::timestamptz AND status = 'succeeded' AND deleted_at IS NULL
 UNION ALL
 SELECT subscription_id, transaction_id::text, 'failed'::text, attempted_at::timestamptz, amount::bigint,
        COALESCE(currency, '')::text, COALESCE(response_code, '')::text
@@ -1611,7 +1611,7 @@ WHERE s.merchant_id = $1::uuid
   AND NOT EXISTS (
       SELECT 1 FROM billing.payments p
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
-        AND p.status = 'completed' AND p.deleted_at IS NULL
+        AND p.status = 'succeeded' AND p.deleted_at IS NULL
   )
 ORDER BY s.created_at, s.id
 LIMIT $4::int
@@ -2172,7 +2172,7 @@ INSERT INTO billing.payments (
     $2, 'rail', $3::text,
     $4, $5, $5,
     $6,
-    'completed', $7, $8,
+    'succeeded', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $10, $11::uuid,
     -- or#827: the row mirrors a charge the rail actually settled.
@@ -2225,65 +2225,6 @@ func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBac
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const reconcileListInvoicePaymentsByTransactionIDs = `-- name: ReconcileListInvoicePaymentsByTransactionIDs :many
-SELECT id, customer_id, invoice_id, rail_payment_id::text, amount, currency
-FROM billing.invoice_payments
-WHERE merchant_id = $1::uuid
-  AND psp_id = $2::uuid AND rail = $3::text AND status = 'settled'
-  AND rail_payment_id IS NOT NULL
-  AND rail_payment_id = ANY($4::text[])
-`
-
-type ReconcileListInvoicePaymentsByTransactionIDsParams struct {
-	MerchantID     uuid.UUID
-	PspID          uuid.UUID
-	Rail           string
-	TransactionIds []string
-}
-
-type ReconcileListInvoicePaymentsByTransactionIDsRow struct {
-	ID            uuid.UUID
-	CustomerID    uuid.UUID
-	InvoiceID     uuid.UUID
-	RailPaymentID string
-	Amount        int64
-	Currency      string
-}
-
-// Canonical invoice receipts live outside billing.payments. Recognize settled
-// NMI charges by their exact accepted PSP and transaction, never by a vault.
-func (q *Queries) ReconcileListInvoicePaymentsByTransactionIDs(ctx context.Context, arg ReconcileListInvoicePaymentsByTransactionIDsParams) ([]ReconcileListInvoicePaymentsByTransactionIDsRow, error) {
-	rows, err := q.db.Query(ctx, reconcileListInvoicePaymentsByTransactionIDs,
-		arg.MerchantID,
-		arg.PspID,
-		arg.Rail,
-		arg.TransactionIds,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ReconcileListInvoicePaymentsByTransactionIDsRow
-	for rows.Next() {
-		var i ReconcileListInvoicePaymentsByTransactionIDsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.CustomerID,
-			&i.InvoiceID,
-			&i.RailPaymentID,
-			&i.Amount,
-			&i.Currency,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const reconcileListPaymentMethodsByRails = `-- name: ReconcileListPaymentMethodsByRails :many
@@ -2347,7 +2288,7 @@ func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg Re
 
 const reconcileListPaymentsByTransactionIDs = `-- name: ReconcileListPaymentsByTransactionIDs :many
 SELECT id, customer_id, rail, transaction_id, amount, currency, status,
-       subscription_id, refunded_payment_id, purchased_at
+       subscription_id, refunded_payment_id, purchased_at, invoice_id
 FROM billing.payments
 WHERE payments.merchant_id = $1::uuid AND rail::text = ANY ($2::text[])
   AND deleted_at IS NULL
@@ -2373,6 +2314,7 @@ type ReconcileListPaymentsByTransactionIDsRow struct {
 	SubscriptionID    *uuid.UUID
 	RefundedPaymentID *uuid.UUID
 	PurchasedAt       time.Time
+	InvoiceID         *uuid.UUID
 }
 
 func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg ReconcileListPaymentsByTransactionIDsParams) ([]ReconcileListPaymentsByTransactionIDsRow, error) {
@@ -2400,6 +2342,7 @@ func (q *Queries) ReconcileListPaymentsByTransactionIDs(ctx context.Context, arg
 			&i.SubscriptionID,
 			&i.RefundedPaymentID,
 			&i.PurchasedAt,
+			&i.InvoiceID,
 		); err != nil {
 			return nil, err
 		}
@@ -2714,18 +2657,21 @@ const reconcileRecordRefund = `-- name: ReconcileRecordRefund :execrows
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, refunded_payment_id, metadata, purchased_at,
-    customer_id, psp_id, reversal_kind, money_movement
+    customer_id, psp_id, reversal_kind, money_movement, order_id, invoice_id
 ) VALUES (
     $1::uuid,
     $2, 'rail', $3::text,
     $4, $5, $5,
     $6,
-    'completed', $7, $8,
+    'succeeded', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     -- or#827: a refund is real (negative) money movement at the rail; the
     -- settlement feed excludes it on amount/refunded_payment_id, not on this.
-    $11, $12::uuid, 'refund', 'rail'
+    $11, $12::uuid, 'refund', 'rail',
+    -- A refund names what its charge paid.
+    (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid),
+    (SELECT o.invoice_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid)
 )
 ON CONFLICT DO NOTHING
 `
@@ -2896,7 +2842,7 @@ SELECT EXISTS (
     SELECT 1 FROM billing.payments p
     WHERE p.merchant_id = $1::uuid
       AND p.subscription_id = $2::uuid
-      AND p.deleted_at IS NULL AND p.status = 'completed'
+      AND p.deleted_at IS NULL AND p.status = 'succeeded'
       AND ($3::timestamptz IS NULL OR p.purchased_at >= $3::timestamptz)
 )::bool AS paid
 `

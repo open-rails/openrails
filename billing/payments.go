@@ -15,7 +15,9 @@ const (
 )
 
 // PaymentStatus is where a payment stands. A charge with refunds against it
-// reads refunded or partially_refunded.
+// reads refunded or partially_refunded. A charge never fails: a decline is a
+// PaymentAttempt. A refund the PSP refused is failed, as are decline records
+// kept from before declines were attempts.
 type PaymentStatus string
 
 const (
@@ -50,8 +52,10 @@ type Payment struct {
 	SubscriptionID *SubscriptionID `json:"subscription_id"`
 	// OrderID is the order the charge paid; its lines say what it bought.
 	OrderID *OrderID `json:"order_id"`
+	// InvoiceID is the invoice the payment paid.
+	InvoiceID *InvoiceID `json:"invoice_id"`
 	// PriceID, Price and Product are what a one-price charge bought; a
-	// refund names its charge's. Null on an order's charge.
+	// refund names its charge's. Null on an order's or invoice's payment.
 	PriceID           *PriceID        `json:"price_id"`
 	Price             *Price          `json:"price"`
 	Product           *ProductSummary `json:"product"`
@@ -77,25 +81,26 @@ type PaymentListParams struct {
 	IDs            []PaymentID
 	CustomerID     CustomerID
 	SubscriptionID SubscriptionID
-	PriceID        PriceID
+	InvoiceID      InvoiceID
+	OrderID        OrderID
+	Status         PaymentStatus
 	Rail           string
 	Kind           PaymentKind
 	TransactionID  string
 	PageRequest
 }
 
-// CreateOffChannelPaymentParams records a purchase paid outside any rail
-// (cash, bank transfer): the customer gets what the price grants.
-// TransactionID is the remittance's identity: recording it again with the
-// same terms answers the first record, with other terms is
-// idempotency_key_reused. Amount defaults to the price's amount.
-type CreateOffChannelPaymentParams struct {
-	PriceID          PriceID        `json:"price_id"`
-	TransactionID    string         `json:"transaction_id"`
-	Amount           *int64         `json:"amount,omitempty,string"`
-	Currency         string         `json:"currency,omitempty"`
-	PurchasedAt      *time.Time     `json:"purchased_at,omitempty"`
-	DiscountCode     *string        `json:"discount_code,omitempty"`
-	DiscountReason   *string        `json:"discount_reason,omitempty"`
-	DiscountMetadata map[string]any `json:"discount_metadata,omitempty"`
+// CreatePaymentParams records money the merchant received outside OpenRails
+// (cash, a bank transfer) for one invoice or one order; it moves no money.
+// An invoice takes up to what it has due; an order takes its total, and one
+// with a recurring line is refused, since its renewals charge the customer's
+// card. TransactionID is the remittance's identity: recording it again with
+// the same terms answers the first payment, with other terms is
+// idempotency_key_reused. PaidAt defaults to now.
+type CreatePaymentParams struct {
+	InvoiceID     *InvoiceID `json:"invoice_id,omitempty"`
+	OrderID       *OrderID   `json:"order_id,omitempty"`
+	Amount        int64      `json:"amount,string"`
+	TransactionID string     `json:"transaction_id"`
+	PaidAt        *time.Time `json:"paid_at,omitempty"`
 }

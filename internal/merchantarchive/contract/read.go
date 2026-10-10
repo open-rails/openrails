@@ -49,9 +49,15 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		}
 		return nil
 	}
+	// A version 1 archive's invoice_payments table is gone: its settled rows
+	// are payments since migration 35, so one with rows is refused.
+	invoicePayments := false
 	info, err := archivewire.Read(src, onHeader, func(r archivewire.Record) error {
 		legacy := version == 1
 		if r.Kind == "table" {
+			if invoicePayments = legacy && r.Table == "invoice_payments"; invoicePayments {
+				return nil
+			}
 			if legacy && table >= 0 && profiles[table].Name == "products" {
 				current := r.Table == "product_entitlements"
 				if err := flushProducts(products, current, emit); err != nil {
@@ -71,6 +77,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 				return fmt.Errorf("invalid archive table order")
 			}
 			return nil
+		}
+		if invoicePayments {
+			return fmt.Errorf("a version 1 archive with invoice payments: restore it on a release before orders, then export it again")
 		}
 		p := profiles[table]
 		// Usage events before failed usage all succeeded and forgave nothing.

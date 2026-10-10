@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -24,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -466,13 +468,23 @@ func paymentListParams(r *httprequest.Request) (billing.PaymentListParams, bool)
 	params := billing.PaymentListParams{PageRequest: page, Rail: strings.TrimSpace(r.Query("rail")), TransactionID: strings.TrimSpace(r.Query("transaction_id"))}
 	for name, parse := range map[string]func(string) error{
 		"subscription_id": func(v string) (err error) { params.SubscriptionID, err = billing.ParseSubscriptionID(v); return },
-		"price_id":        func(v string) (err error) { params.PriceID, err = billing.ParsePriceID(v); return },
+		"invoice_id":      func(v string) (err error) { params.InvoiceID, err = billing.ParseInvoiceID(v); return },
+		"order_id":        func(v string) (err error) { params.OrderID, err = billing.ParseOrderID(v); return },
 	} {
 		if raw := strings.TrimSpace(r.Query(name)); raw != "" {
 			if parse(raw) != nil {
 				r.APIError(api.Coded(billing.CodeInvalidQuery, name+" is invalid").WithParam(name))
 				return billing.PaymentListParams{}, false
 			}
+		}
+	}
+	if status := billing.PaymentStatus(strings.TrimSpace(r.Query("status"))); status != "" {
+		switch status {
+		case billing.PaymentPending, billing.PaymentSucceeded, billing.PaymentFailed, billing.PaymentRefunded, billing.PaymentPartiallyRefunded:
+			params.Status = status
+		default:
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
+			return billing.PaymentListParams{}, false
 		}
 	}
 	if kind := billing.PaymentKind(strings.TrimSpace(r.Query("kind"))); kind != "" {
@@ -530,74 +542,56 @@ func GetPayment(r *httprequest.Request) {
 	r.SuccessJSON(PaymentToAPI(payment, refunds))
 }
 
-// CreateOffChannelPayment (POST /admin/customers/{customer_id}/payments/off-channel)
-// records a purchase paid outside any rail: 201 with the payment, 200 when the
-// same transaction_id was already recorded with the same terms, and 409
+// CreatePayment (POST /admin/payments) records money received outside
+// OpenRails for one invoice or one order: 201 with the payment, 200 when the
+// same transaction_id was already recorded with the same terms, and 422
 // idempotency_key_reused when it was recorded with other terms.
-func CreateOffChannelPayment(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
-	if !ok {
-		return
-	}
-	var req billing.CreateOffChannelPaymentParams
+func CreatePayment(r *httprequest.Request) {
+	var req billing.CreatePaymentParams
 	if !r.BindJSON(&req) {
 		return
 	}
-	if req.PriceID.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "price_id is required").WithParam("price_id"))
-		return
-	}
-	transactionID := strings.TrimSpace(req.TransactionID)
-	if transactionID == "" || len(transactionID) > 255 {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "transaction_id of 1-255 bytes is required").WithParam("transaction_id"))
-		return
-	}
-	if req.Amount != nil && *req.Amount < 0 {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must not be negative").WithParam("amount"))
-		return
-	}
-	var purchasedAt *time.Time
-	if req.PurchasedAt != nil {
-		at := req.PurchasedAt.UTC()
-		purchasedAt = &at
-	}
-	currency := strings.ToUpper(strings.TrimSpace(req.Currency))
-	ctx := r.Request.Context()
-	if existing, err := r.State.PaymentService.GetManualByTransactionID(ctx, transactionID); err == nil {
-		if !offChannelTermsMatch(existing, customer.UUID(), req.PriceID.UUID(), req.Amount, currency, purchasedAt) {
-			r.ErrorCode(billing.CodeIdempotencyKeyReused, "transaction_id was already recorded with other terms")
-			return
-		}
-		writeRecordedPayment(r, http.StatusOK, existing.ID)
-		return
-	}
-	register := &payments.RegisterPurchaseRequest{UserID: customer.String(), PriceID: req.PriceID.UUID(), Channel: models.ChannelManual, TransactionID: transactionID,
-		Currency: currency, PurchasedAt: purchasedAt, DiscountCode: req.DiscountCode, DiscountReason: req.DiscountReason, DiscountMetadata: req.DiscountMetadata}
-	if req.Amount != nil {
-		register.Amount, register.AmountProvided = *req.Amount, true
-	}
-	result, err := r.State.CheckoutService.RegisterPurchase(ctx, register)
-	if err != nil {
-		writeRefusal(r, err, "failed to record the payment")
-		return
-	}
-	writeRecordedPayment(r, http.StatusCreated, result.PaymentID)
-}
-
-// offChannelTermsMatch reports whether a recorded off-channel payment is the
-// one a retry describes.
-func offChannelTermsMatch(p *models.Payment, customer, price uuid.UUID, amount *int64, currency string, purchasedAt *time.Time) bool {
+	req.TransactionID = strings.TrimSpace(req.TransactionID)
 	switch {
-	case p.CustomerID != customer, p.PriceID != price:
-		return false
-	case amount != nil && *amount != p.Amount:
-		return false
-	case currency != "" && currency != p.Currency:
-		return false
-	case purchasedAt != nil && !purchasedAt.Truncate(time.Microsecond).Equal(p.PurchasedAt.UTC().Truncate(time.Microsecond)):
-		return false
+	case (req.InvoiceID == nil) == (req.OrderID == nil),
+		req.InvoiceID != nil && req.InvoiceID.IsZero(), req.OrderID != nil && req.OrderID.IsZero():
+		r.APIError(api.Coded(billing.CodeInvalidParam, "name exactly one of invoice_id and order_id").WithParam("invoice_id"))
+		return
+	case req.Amount <= 0:
+		r.APIError(api.Coded(billing.CodeInvalidParam, "amount must be positive").WithParam("amount"))
+		return
+	case req.TransactionID == "" || len(req.TransactionID) > 255 || cardguard.ContainsPAN(req.TransactionID):
+		r.APIError(api.Coded(billing.CodeInvalidParam, "transaction_id of 1-255 bytes without card data is required").WithParam("transaction_id"))
+		return
+	case req.PaidAt != nil && req.PaidAt.After(r.Clock.Now().Add(time.Minute)):
+		r.APIError(api.Coded(billing.CodeInvalidParam, "paid_at must not be in the future").WithParam("paid_at"))
+		return
 	}
-	return true
+	svc := orderService(r)
+	if svc == nil {
+		return
+	}
+	payment, created, err := svc.RecordPayment(r.Request.Context(), req)
+	switch {
+	case err == nil:
+	case db.IsNotFound(err):
+		r.ErrorCode(billing.CodeResourceNotFound, "invoice or order not found")
+		return
+	case errors.Is(err, billing.ErrIdempotencyKeyReused):
+		r.ErrorCode(billing.CodeIdempotencyKeyReused, "transaction_id was already recorded with other terms")
+		return
+	case errors.Is(err, money.ErrInvoiceActionNotAllowed), errors.Is(err, money.ErrPaymentExceedsDue):
+		writeInvoiceError(r, err)
+		return
+	default:
+		writeOrderError(r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	writeRecordedPayment(r, status, payment.ID)
 }
 
 func writeRecordedPayment(r *httprequest.Request, status int, id uuid.UUID) {

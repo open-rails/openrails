@@ -146,7 +146,7 @@ export const render = (node: ReactNode, queryClient = client()) =>
 
 const WHEN = "2026-09-18T00:00:00Z"
 export const aProduct = (id: string, tierRank = 0, overrides: Partial<Product> = {}): Product => ({
-  id, key: id, revision: 0, display_name: id, description: "", entitlements: [], tier_group: "plans",
+  id, key: id, revision: 0, display_name: id, description: "", entitlements: [], tier_group: "plans", ownership: null,
   tier_rank: tierRank, archived: false, prices: [], created_at: WHEN, updated_at: WHEN,
   ...overrides,
 })
@@ -159,7 +159,7 @@ export const aPrice = (id: string, productId: string, overrides: Partial<Price> 
 
 export const aPayment = (id: string, overrides: Partial<Payment> = {}): Payment => ({
   id, kind: "charge", status: "succeeded", amount: "20000000", amount_refunded: "0",
-  currency: "USD", customer_id: "cus_1", subscription_id: null, price_id: "price_1",
+  currency: "USD", customer_id: "cus_1", subscription_id: null, order_id: null, invoice_id: null, price_id: "price_1",
   price: null, product: null, channel: "rail", rail: "nmi", psp_id: "psp_1",
   transaction_id: `txn_${id}`, card: null, failure: null, refunded_payment_id: null,
   reason: null, refunds: [], created_at: WHEN,

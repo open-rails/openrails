@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (213), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (219), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
@@ -45,6 +45,13 @@ A customer acting on its own account.
 | POST | `/v1/me/checkout-sessions` | customer | — | `MintCheckoutSessionParams` | 201 `CheckoutSessionLink` |  |
 | GET | `/v1/me/checkout-sessions/{id}` | customer | — | — | 200 `CheckoutSession` |  |
 | POST | `/v1/me/checkout-sessions/{id}/pay` | customer | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
+| POST | `/v1/me/orders/preview` | customer | — | `PreviewOrderParams` | 200 `OrderPreview` |  |
+| POST | `/v1/me/orders` | customer | — | `CreateOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
+| GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |
+| GET | `/v1/me/orders/{id}` | customer | — | — | 200 `Order` |  |
+| POST | `/v1/me/orders/{id}/pay` | customer | — | `PayOrderParams` | 200 `Order` | `Idempotency-Key` |
+| POST | `/v1/me/orders/{id}/confirm` | customer | — | — | 200 `Order` |  |
+| POST | `/v1/me/orders/{id}/cancel` | customer | — | — | 200 `Order` |  |
 | POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `CustomerCancelSubscriptionParams` | 200 `Subscription` |  |
 | POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 200 `Subscription` |  |
 | PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` |  |
@@ -86,6 +93,8 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | GET | `/v1/admin/config` | merchant | `AdminRead` | — | 200 `PublicConfig` |  |
 | POST | `/v1/admin/checkout-sessions` | merchant | `AdminWrite` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
 | GET | `/v1/admin/checkout-options` | merchant | `AdminRead` | — | 200 `ListPage<CheckoutOption>` |  |
+| GET | `/v1/admin/orders` | merchant | `AdminRead` | — | 200 `ListPage<Order>` |  |
+| GET | `/v1/admin/orders/{id}` | merchant | `AdminRead` | — | 200 `Order` |  |
 | GET | `/v1/admin/catalog/revision` | merchant | `AdminRead` | — | 200 `CatalogRevision` |  |
 | GET | `/v1/admin/catalog/meters` | merchant | `AdminRead` | — | 200 `ListPage<Meter>` |  |
 | GET | `/v1/admin/catalog/meters/{key}` | merchant | `AdminRead` | — | 200 `Meter` |  |
@@ -148,13 +157,10 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `AdminWrite` | `CloseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
 | GET | `/v1/admin/invoices` | merchant | `AdminRead` | — | 200 `ListPage<Invoice>` |  |
 | GET | `/v1/admin/invoices/{id}` | merchant | `AdminRead` | — | 200 `Invoice` |  |
-| GET | `/v1/admin/invoices/{id}/payments` | merchant | `AdminRead` | — | 200 `ListPage<InvoicePayment>` |  |
-| POST | `/v1/admin/invoices/{id}/payments` | merchant | `AdminWrite` | `CreateInvoicePaymentParams` | 200 `Invoice` | sensitive; limit `off_channel` |
 | POST | `/v1/admin/invoices/{id}/void` | merchant | `AdminWrite` | — | 200 `Invoice` | sensitive; limit `destructive` |
 | POST | `/v1/admin/invoices/{id}/uncollectible` | merchant | `AdminWrite` | — | 200 `Invoice` | sensitive; limit `destructive` |
 | POST | `/v1/admin/invoices/{id}/retry-collection` | merchant | `AdminWrite` | `RetryInvoiceCollectionParams` | 200 `InvoiceCollection`<br>202 `InvoiceCollection` | sensitive; limit `off_channel`; `Idempotency-Key` |
-| GET | `/v1/admin/customers/{customer_id}/payment-settlement-status` | merchant | `AdminRead` | — | 200 `PaymentSettlementStatus` |  |
-| POST | `/v1/admin/customers/{customer_id}/payments/off-channel` | merchant | `AdminWrite` | `CreateOffChannelPaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
+| POST | `/v1/admin/payments` | merchant | `AdminWrite` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `AdminRead` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `AdminRead` | — | 200 `Payment` |  |
 | POST | `/v1/admin/payments/{id}/refunds` | merchant | `AdminWrite` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |

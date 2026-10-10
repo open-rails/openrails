@@ -421,7 +421,7 @@ func TestRetentionDeletesOnlyRowsPastTheirPeriod(t *testing.T) {
 	require.NoError(t, err)
 	permanent := func() map[string]int {
 		out := map[string]int{}
-		for _, table := range []string{"ledger_accounts", "ledger_transfers", "grants", "payments", "invoices", "invoice_items", "invoice_payments"} {
+		for _, table := range []string{"ledger_accounts", "ledger_transfers", "grants", "payments", "invoices", "invoice_items"} {
 			out[table] = w.count(`SELECT count(*) FROM billing.`+table+` WHERE merchant_id = $1`, w.merchant)
 		}
 		return out

@@ -18,39 +18,68 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// An off-channel payment is idempotent by transaction id: the same terms
-// answer the first payment, changed terms are refused (H-040), never
-// answered as if they had been recorded.
-func TestOffChannelPaymentIdempotency(t *testing.T) {
+// Money received outside OpenRails pays an open order (decision 16): a manual
+// payment idempotent by transaction id, the order paid and fulfilled, and
+// staff find it by price and status. An order with a recurring line is
+// refused: its renewals need the customer's card.
+func TestRecordedOrderPayment(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
 		t.Run(string(tp), func(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			c := w.newCustomer()
-			price := w.permanent("content:post")
-			priceID := price.ID
+			life := w.lifetime("recorded:post", 2_000_000)
 			client := w.client[tp]
-			params := billing.CreateOffChannelPaymentParams{PriceID: priceID, TransactionID: "cash-" + uuid.NewString()}
-
-			first, err := client.CreateOffChannelPayment(t.Context(), c.cid(), params)
+			open := c.order(http.MethodPost, "/orders", "open-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}})
+			require.Equal(t, http.StatusCreated, open.status, "%v", open.body)
+			order, err := billing.ParseOrderID(open.body["id"].(string))
 			require.NoError(t, err)
-			require.Equal(t, []any{billing.PaymentCharge, billing.PaymentSucceeded, int64(2_000_000), "USD"}, []any{first.Kind, first.Status, first.Amount, first.Currency})
-			require.NotEqual(t, billing.ChannelRail, first.Channel)
-			require.Nil(t, first.Rail)
-			require.True(t, c.entitled("content:post"))
 
-			again, err := client.CreateOffChannelPayment(t.Context(), c.cid(), params)
+			short := billing.CreatePaymentParams{OrderID: &order, Amount: 1_000_000, TransactionID: "cash-short-" + uuid.NewString()}
+			_, err = client.CreatePayment(t.Context(), short)
+			requireCode(t, err, http.StatusConflict, "payment_exceeds_due")
+
+			params := billing.CreatePaymentParams{OrderID: &order, Amount: 2_000_000, TransactionID: "cash-" + uuid.NewString()}
+			first, err := client.CreatePayment(t.Context(), params)
+			require.NoError(t, err)
+			require.Equal(t, []any{billing.PaymentCharge, billing.PaymentSucceeded, int64(2_000_000), "USD", billing.ChannelManual}, []any{first.Kind, first.Status, first.Amount, first.Currency, first.Channel})
+			require.Nil(t, first.Rail)
+			require.Equal(t, &order, first.OrderID)
+			require.True(t, c.entitled("recorded:post"))
+
+			again, err := client.CreatePayment(t.Context(), params)
 			require.NoError(t, err)
 			require.Equal(t, first.ID, again.ID, "the same terms answer the first payment")
-
 			changed := params
-			amount := int64(1_000_000)
-			changed.Amount = &amount
-			_, err = client.CreateOffChannelPayment(t.Context(), c.cid(), changed)
+			changed.Amount = 3_000_000
+			_, err = client.CreatePayment(t.Context(), changed)
 			require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 			requireCode(t, err, http.StatusUnprocessableEntity, "idempotency_key_reused")
+			_, err = client.CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: &order, Amount: 2_000_000, TransactionID: "cash-twice-" + uuid.NewString()})
+			requireCode(t, err, http.StatusConflict, "order_not_payable")
 			require.Len(t, completed(w.payments(tp, c.id)), 1, "nothing else was recorded")
+
+			paid, err := client.GetOrder(t.Context(), order)
+			require.NoError(t, err)
+			require.Equal(t, billing.OrderPaid, paid.Status)
+			require.NotNil(t, paid.Number)
+			bought, err := client.ListOrders(t.Context(), billing.OrderListParams{CustomerID: c.cid(), PriceID: life.ID, Status: billing.OrderPaid})
+			require.NoError(t, err)
+			require.Len(t, bought.Items, 1, "staff find who bought a price")
+			require.Equal(t, order, bought.Items[0].ID)
+			byOrder, err := client.ListPayments(t.Context(), billing.PaymentListParams{OrderID: order})
+			require.NoError(t, err)
+			require.Len(t, byOrder.Items, 1)
+			require.Equal(t, first.ID, byOrder.Items[0].ID)
+
+			member := w.membership("recorded:member", 5_000_000)
+			recurring := c.order(http.MethodPost, "/orders", "member-"+uuid.NewString(), map[string]any{"lines": []any{line(member, 0)}})
+			require.Equal(t, http.StatusCreated, recurring.status, "%v", recurring.body)
+			memberOrder, err := billing.ParseOrderID(recurring.body["id"].(string))
+			require.NoError(t, err)
+			_, err = client.CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: &memberOrder, Amount: 5_000_000, TransactionID: "cash-member-" + uuid.NewString()})
+			requireCode(t, err, http.StatusConflict, "order_has_recurring_line")
 		})
 	}
 }
@@ -61,12 +90,15 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
-	price := w.permanent("content:post")
-	priceID := price.ID
 	client := w.client[remote]
 	var recorded []billing.PaymentID
 	for i := range 5 {
-		p, err := client.CreateOffChannelPayment(t.Context(), c.cid(), billing.CreateOffChannelPaymentParams{PriceID: priceID, TransactionID: fmt.Sprintf("cash-%d-%s", i, uuid.NewString())})
+		price := w.permanent(fmt.Sprintf("content:post-%d", i))
+		open := c.order(http.MethodPost, "/orders", fmt.Sprintf("open-%d-%s", i, uuid.NewString()), map[string]any{"lines": []any{line(price, 0)}})
+		require.Equal(t, http.StatusCreated, open.status, "%v", open.body)
+		order, err := billing.ParseOrderID(open.body["id"].(string))
+		require.NoError(t, err)
+		p, err := client.CreatePayment(t.Context(), billing.CreatePaymentParams{OrderID: &order, Amount: price.UnitAmount, TransactionID: fmt.Sprintf("cash-%d-%s", i, uuid.NewString())})
 		require.NoError(t, err)
 		recorded = append([]billing.PaymentID{p.ID}, recorded...)
 	}

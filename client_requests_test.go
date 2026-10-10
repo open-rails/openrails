@@ -292,14 +292,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.MarkInvoiceUncollectible(ctx, billing.InvoiceID{})
 			return err
 		},
-		"invoice payment": func() error {
-			_, err := c.CreateInvoicePayment(ctx, billing.InvoiceID{}, billing.CreateInvoicePaymentParams{})
-			return err
-		},
-		"invoice payments": func() error {
-			_, err := c.ListInvoicePayments(ctx, billing.InvoiceID{}, billing.InvoicePaymentListParams{})
-			return err
-		},
 		"retry invoice": func() error {
 			_, err := c.RetryInvoiceCollection(ctx, billing.InvoiceID{}, billing.RetryInvoiceCollectionParams{IdempotencyKey: "k"})
 			return err
@@ -316,11 +308,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.UpdateCustomer(ctx, billing.CustomerID{}, billing.UpdateCustomerParams{})
 			return err
 		},
-		"order":                 func() error { _, err := c.GetOrder(ctx, billing.OrderID{}); return err },
-		"off-channel payment": func() error {
-			_, err := c.CreateOffChannelPayment(ctx, billing.CustomerID(uuid.New()), billing.CreateOffChannelPaymentParams{})
-			return err
-		},
+		"order":        func() error { _, err := c.GetOrder(ctx, billing.OrderID{}); return err },
 		"subscription": func() error { _, err := c.GetSubscription(ctx, billing.SubscriptionID{}); return err },
 		"cancel subscription": func() error {
 			_, err := c.CancelSubscription(ctx, billing.SubscriptionID{}, billing.CancelSubscriptionParams{})

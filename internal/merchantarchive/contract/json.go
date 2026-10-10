@@ -227,7 +227,7 @@ var jsonRules = map[string]jsonRule{
 	// accepted terms for replay; none of these fields contains card data.
 	"provider_intents.invoice_collection.payload": object(map[string]jsonRule{
 		"initiator":  textValue,
-		"invoice_id": uuidValue, "customer_id": uuidValue, "attempt_id": uuidValue, "payment_method_id": uuidValue,
+		"invoice_id": uuidValue, "customer_id": uuidValue, "payment_id": uuidValue, "payment_method_id": uuidValue,
 		"rail": textValue, "currency": textValue, "amount": integerValue, "amount_minor": integerValue, "description": textValue, "provider_customer_ref": textValue,
 		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
 		"instrument":  object(map[string]jsonRule{"psp_id": uuidValue, "custodian": textValue, "custodian_id": uuidValue, "rail_customer_ref": textValue, "rail_method_ref": textValue, "mandate": mandateJSON}),

@@ -203,6 +203,8 @@ WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
   AND p.status = 'succeeded'
   AND p.amount > 0
   AND p.subscription_id IS NULL
+  -- An order's lines name what they produced; an invoice's payment grants nothing.
+  AND p.order_id IS NULL AND p.invoice_id IS NULL
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants g
       WHERE g.merchant_id = p.merchant_id AND g.event = 'grant'

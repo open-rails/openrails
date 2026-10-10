@@ -14,6 +14,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -102,56 +103,18 @@ func GetInvoice(gate StaffCan) func(*httprequest.Request) {
 	}
 }
 
-// ListInvoicePayments (GET /admin/invoices/{id}/payments) is one page of an
-// invoice's payments, newest first.
-func ListInvoicePayments(r *httprequest.Request) {
-	svc, invoice, ok := loadMerchantInvoice(r)
-	if !ok {
-		return
-	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
-	ids, ok := listIDs(r, billing.ParseInvoicePaymentID)
-	if !ok {
-		return
-	}
-	out, err := svc.ListInvoicePayments(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID.UUID(), billing.InvoicePaymentListParams{PageRequest: page, IDs: ids})
-	if err != nil {
-		writeInvoiceError(r, err)
-		return
-	}
-	r.SuccessJSON(out)
-}
-
-// VoidInvoice, MarkInvoiceUncollectible and CreateInvoicePayment change an
-// invoice and answer it.
+// VoidInvoice and MarkInvoiceUncollectible change an invoice and answer it.
 func VoidInvoice(r *httprequest.Request) { applyInvoiceAction(r, billing.InvoiceActionVoid) }
 func MarkInvoiceUncollectible(r *httprequest.Request) {
 	applyInvoiceAction(r, billing.InvoiceActionUncollectible)
 }
-func CreateInvoicePayment(r *httprequest.Request) {
-	applyInvoiceAction(r, billing.InvoiceActionRecordPayment)
-}
 
 func applyInvoiceAction(r *httprequest.Request, action billing.InvoiceAction) {
-	var body billing.CreateInvoicePaymentParams
-	if action == billing.InvoiceActionRecordPayment {
-		if !r.BindJSON(&body) {
-			return
-		}
-		body.Reference = strings.TrimSpace(body.Reference)
-		if body.Amount <= 0 || body.Reference == "" || len(body.Reference) > 255 {
-			r.ErrorCode(billing.CodeInvoicePaymentInvalid, "a positive amount and a reference of 1-255 bytes are required")
-			return
-		}
-	}
 	svc, invoice, ok := loadMerchantInvoice(r)
 	if !ok {
 		return
 	}
-	out, err := svc.ApplyInvoiceAction(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID.UUID(), money.InvoiceAdminMutation{Action: action, Amount: body.Amount, Reference: body.Reference})
+	out, err := svc.ApplyInvoiceAction(r.Request.Context(), identity.CustomerID(invoice.CustomerID), invoice.ID.UUID(), money.InvoiceAdminMutation{Action: action})
 	if err != nil {
 		writeInvoiceError(r, err)
 		return
@@ -188,7 +151,7 @@ func RetryInvoiceCollection(r *httprequest.Request) {
 		return
 	}
 	status := http.StatusOK
-	if out.Payment.Status == billing.InvoicePaymentAttempted {
+	if out.Operation.Status != intents.StatusSucceeded && out.Operation.Status != intents.StatusFailedTerminal {
 		status = http.StatusAccepted
 	}
 	r.JSON(status, out)
@@ -314,7 +277,7 @@ func loadMerchantInvoice(r *httprequest.Request) (*billingservice.Service, *bill
 var invoiceActionRoutes = map[billing.InvoiceAction]string{
 	billing.InvoiceActionVoid:            "POST /v1/admin/invoices/{id}/void",
 	billing.InvoiceActionUncollectible:   "POST /v1/admin/invoices/{id}/uncollectible",
-	billing.InvoiceActionRecordPayment:   "POST /v1/admin/invoices/{id}/payments",
+	billing.InvoiceActionRecordPayment:   "POST /v1/admin/payments",
 	billing.InvoiceActionRetryCollection: "POST /v1/admin/invoices/{id}/retry-collection",
 }
 
@@ -342,9 +305,7 @@ var invoiceRefusals = []struct {
 	{money.ErrInvoiceRetryInProgress, billing.CodeInvoiceRetryInProgress},
 	{money.ErrInvoiceRetryOutcomeUnknown, billing.CodeInvoiceRetryOutcomeUnknown},
 	{money.ErrInvoiceRetryIdempotencyConflict, billing.CodeInvoiceRetryIdempotencyConflict},
-	{money.ErrInvoicePaymentReferenceUsed, billing.CodeInvoicePaymentReferenceUsed},
-	{money.ErrInvoicePaymentExceedsDue, billing.CodeInvoicePaymentExceedsDue},
-	{money.ErrInvoicePaymentInvalid, billing.CodeInvoicePaymentInvalid},
+	{money.ErrPaymentExceedsDue, billing.CodePaymentExceedsDue},
 	{money.ErrCollectionPaymentMethodInvalid, billing.CodeCollectionPaymentMethodInvalid},
 	{money.ErrCollectionPaymentMethodRequired, billing.CodeCollectionPaymentMethodRequired},
 }

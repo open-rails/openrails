@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -104,10 +103,8 @@ func (s *MoneyService) GetMerchantInvoice(ctx context.Context, id uuid.UUID) (*m
 }
 
 var (
-	ErrInvoiceActionNotAllowed     = errors.New("invoice action is not allowed in its current state")
-	ErrInvoicePaymentReferenceUsed = errors.New("manual payment reference already applied")
-	ErrInvoicePaymentExceedsDue    = errors.New("payment amount exceeds invoice amount_due")
-	ErrInvoicePaymentInvalid       = errors.New("positive amount and payment reference are required")
+	ErrInvoiceActionNotAllowed = errors.New("invoice action is not allowed in its current state")
+	ErrPaymentExceedsDue       = errors.New("payment amount exceeds invoice amount_due")
 )
 
 // InvoiceAdminActions describes support operations without granting permission.
@@ -138,26 +135,16 @@ func InvoiceActions(invoice *models.Invoice, now time.Time) []billing.InvoiceAct
 }
 
 type InvoiceAdminMutation struct {
-	Action    billing.InvoiceAction
-	Amount    int64
-	Reference string
+	Action billing.InvoiceAction
 }
 
 // ApplyInvoiceAdminMutation keeps administrative changes local and transaction-locked.
-// Remittances use their receipt-aware recorder. Collection runs separately, so
-// no provider operation runs inside a local transaction.
+// Collection runs separately, so no provider operation runs inside a local
+// transaction.
 func (s *MoneyService) ApplyInvoiceAdminMutation(ctx context.Context, payer identity.CustomerID, id uuid.UUID, in InvoiceAdminMutation) (*models.Invoice, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
-	}
-	if in.Action == billing.InvoiceActionRecordPayment {
-		if in.Amount <= 0 || strings.TrimSpace(in.Reference) == "" {
-			return nil, ErrInvoicePaymentInvalid
-		}
-		// The recorder locks the invoice and checks the accepted receipt before
-		// current-state eligibility: a paid invoice must still answer its replay.
-		return s.RecordOutOfBandInvoicePayment(ctx, payer, id, in.Amount, in.Reference)
 	}
 	var out *models.Invoice
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {

@@ -57,6 +57,12 @@ WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY o.created_at DESC, o.id DESC
 LIMIT sqlc.arg(row_limit)::int;
 
+-- name: ListOrdersByIDs :many
+-- The merchant's named orders, newest first.
+SELECT * FROM billing.orders
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid[])
+ORDER BY created_at DESC, id DESC;
+
 -- name: GetOrderLine :one
 SELECT * FROM billing.order_lines
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;

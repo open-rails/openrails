@@ -7,10 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/pagination"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -46,57 +44,13 @@ type InvoiceCollectionRetryRequest struct {
 	PaymentMethodID uuid.UUID
 }
 
+// InvoiceCollectionRetryResult is the invoice after its collection ran, with
+// the payment when the charge settled.
 type InvoiceCollectionRetryResult struct {
 	Invoice   *models.Invoice
-	Attempt   models.InvoicePaymentAttempt
+	Payment   *models.Payment
 	Replayed  bool
 	Operation gen.BillingProviderIntent
-}
-
-// ListInvoicePayments is one page of a payer's invoice's payments, newest
-// first.
-func (s *MoneyService) ListInvoicePayments(ctx context.Context, payer identity.CustomerID, invoiceID uuid.UUID, params billing.InvoicePaymentListParams) (billing.ListPage[models.InvoicePaymentAttempt], error) {
-	var out billing.ListPage[models.InvoicePaymentAttempt]
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return out, err
-	}
-	if params.IDs != nil {
-		rows, err := s.db.Gen(ctx).ListInvoicePaymentsByIDs(ctx, gen.ListInvoicePaymentsByIDsParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID, Ids: uuidutil.Of(params.IDs),
-		})
-		if err != nil {
-			return out, fmt.Errorf("list invoice payments: %w", err)
-		}
-		for _, row := range rows {
-			out.Items = append(out.Items, invoicePaymentAttemptFromGen(row))
-		}
-		return out, nil
-	}
-	page := params.PageRequest
-	limit, err := pagination.Limit(page)
-	if err != nil {
-		return out, err
-	}
-	afterAt, afterID, err := pagination.After(page.Cursor)
-	if err != nil {
-		return out, err
-	}
-	// Distinguish an existing invoice with no payments from an inaccessible id.
-	if _, err := s.GetInvoiceByID(ctx, payer, invoiceID); err != nil {
-		return out, fmt.Errorf("load invoice: %w", err)
-	}
-	rows, err := s.db.Gen(ctx).ListInvoicePaymentsPage(ctx, gen.ListInvoicePaymentsPageParams{
-		MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit),
-	})
-	if err != nil {
-		return out, fmt.Errorf("list invoice payments: %w", err)
-	}
-	attempts := make([]models.InvoicePaymentAttempt, 0, len(rows))
-	for _, row := range rows {
-		attempts = append(attempts, invoicePaymentAttemptFromGen(row))
-	}
-	return pagination.Cut(attempts, limit, func(a models.InvoicePaymentAttempt) any { return pagination.TimeID{At: a.CreatedAt, ID: a.ID} }), nil
 }
 
 // collectionPaymentMethodID selects the explicit invoice collection method.
@@ -393,13 +347,22 @@ func (s *MoneyService) retryInvoiceCollection(ctx context.Context, runner *inten
 	if err != nil {
 		return nil, err
 	}
-	attemptRow, err := s.db.Gen(loadCtx).GetInvoicePaymentAttemptByKey(loadCtx, gen.GetInvoicePaymentAttemptByKeyParams{
-		MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: request.InvoiceID, IdempotencyKey: &key,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("load invoice retry outcome: %w", err)
+	out := &InvoiceCollectionRetryResult{Invoice: invoice, Replayed: replayed, Operation: operation}
+	if operation.Status != intents.StatusSucceeded {
+		return out, nil
 	}
-	return &InvoiceCollectionRetryResult{Invoice: invoice, Attempt: invoicePaymentAttemptFromGen(attemptRow), Replayed: replayed, Operation: operation}, nil
+	p, err := intents.DecodeInvoiceCollectionPayload(operation)
+	if err != nil {
+		return nil, err
+	}
+	row, err := s.db.Gen(loadCtx).GetInvoicePayment(loadCtx, gen.GetInvoicePaymentParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: request.InvoiceID, ID: p.PaymentID})
+	if err != nil {
+		return nil, fmt.Errorf("load invoice payment: %w", err)
+	}
+	if out.Payment, err = models.PaymentFromGen(row); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func scheduledInvoiceCollectionKey(invoiceID uuid.UUID, ordinal int64) string {
@@ -441,8 +404,8 @@ type invoiceCollectionEnqueue struct {
 }
 
 // enqueueInvoiceCollection freezes one collection attempt atomically: the
-// intent, its invoice_payments row and the invoice's pointer at the operation
-// commit together, or nothing does. A client retry key is looked up under
+// intent and the invoice's pointer at the operation commit together, or
+// nothing does. A client retry key is looked up under
 // the invoice lock, so two equal concurrent retries serialize on the row and
 // the second replays the first's operation instead of seeing its in-flight
 // state (replayed=true). intentID == Nil means the invoice was not eligible
@@ -568,23 +531,18 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 				return errors.New("Stripe collection customer mapping is empty")
 			}
 		}
-		chargedAmount, err := moneyutil.RailMinorToNative(invoice.Currency, amountMinor)
-		if err != nil {
+		if _, err := moneyutil.RailMinorToNative(invoice.Currency, amountMinor); err != nil {
 			return fmt.Errorf("invoice %s rounded charge is not representable: %w", invoice.ID, err)
-		}
-		attempts, err := q.CountInvoicePaymentAttemptsByPayer(ctx, gen.CountInvoicePaymentAttemptsByPayerParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID})
-		if err != nil {
-			return fmt.Errorf("count invoice collection attempts: %w", err)
 		}
 		key := opts.operationKey
 		if key == "" {
-			key = scheduledInvoiceCollectionKey(invoiceID, attempts)
+			key = scheduledInvoiceCollectionKey(invoiceID, int64(invoice.CollectionAttemptCount))
 		}
-		attemptID := uuidutil.NewV7()
+		paymentID := uuidutil.NewV7()
 		intent, err := intents.NewStore(s.db.NewWithPgxTx(tx)).Enqueue(ctx, intents.EnqueueParams{
 			MerchantID: tid.UUID(), Provider: normalizeRail(method.Rail), PspID: psp, IntentType: TypeInvoiceCollection,
 			Payload: intents.InvoiceCollectionPayload{
-				InvoiceID: invoiceID, CustomerID: payer.UUID(), AttemptID: attemptID, PaymentMethodID: method.ID, Initiator: opts.initiator,
+				InvoiceID: invoiceID, CustomerID: payer.UUID(), PaymentID: paymentID, PaymentMethodID: method.ID, Initiator: opts.initiator,
 				Rail: normalizeRail(method.Rail), Instrument: instrument,
 				HyperSwitch: custody,
 				Currency:    invoice.Currency, Amount: invoice.AmountDue, AmountMinor: amountMinor,
@@ -609,18 +567,9 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 		if canonical.InvoiceID != invoiceID || canonical.CustomerID != payer.UUID() || canonical.PaymentMethodID != method.ID || canonical.Initiator != opts.initiator {
 			return ErrInvoiceRetryIdempotencyConflict
 		}
-		if canonical.AttemptID != attemptID {
+		if canonical.PaymentID != paymentID {
 			intentID, replayed = intent.ID, true
 			return nil
-		}
-		if err := q.InsertInvoicePayment(ctx, gen.InsertInvoicePaymentParams{
-			ID: attemptID, MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID,
-			Currency: invoice.Currency, Amount: chargedAmount, Status: "attempted",
-			Channel: string(models.ChannelRail), Rail: new(normalizeRail(method.Rail)),
-			AttemptedAt: now, CreatedAt: now, UpdatedAt: now,
-			PaymentMethodID: &method.ID, IdempotencyKey: &key, PspID: &psp,
-		}); err != nil {
-			return fmt.Errorf("record invoice collection attempt: %w", err)
 		}
 		claimed, err := q.ClaimInvoiceCollection(ctx, gen.ClaimInvoiceCollectionParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), InvoiceID: invoiceID, IntentID: intent.ID, Now: now})
 		if err != nil {

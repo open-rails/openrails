@@ -449,7 +449,7 @@ func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderInte
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
 	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
 	if p.OrderID != uuid.Nil {
-		a.Target = p.OrderID.String()
+		a.Target, a.OrderID = p.OrderID.String(), &p.OrderID
 	}
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
 	a.TokenType = charge.TokenTypePSPToken

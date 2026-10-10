@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -129,6 +128,7 @@ func paymentInsertParams(p *models.Payment) (gen.CreatePaymentParams, error) {
 		TokenType:           p.TokenType,
 		MoneyMovement:       string(movement),
 		OrderID:             p.OrderID,
+		InvoiceID:           p.InvoiceID,
 	}, nil
 }
 
@@ -204,8 +204,8 @@ func (r *PaymentRepo) GetByID(ctx context.Context, id uuid.UUID) (*models.Paymen
 	return models.PaymentFromGen(row)
 }
 
-// GetByIDWithDetails fetches a payment with all related entities (Price, Product, Subscription)
-// and also loads any refund entries linked to this payment
+// GetByIDWithDetails fetches a payment with its price, product and
+// subscription where it has them, and its refunds.
 func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*models.Payment, []*models.Payment, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
@@ -213,37 +213,17 @@ func (r *PaymentRepo) GetByIDWithDetails(ctx context.Context, id uuid.UUID) (*mo
 	}
 
 	q := r.db.Gen(ctx)
-	row, err := q.GetPaymentWithPriceProduct(ctx, gen.GetPaymentWithPriceProductParams{MerchantID: queryMerchant.UUID(), ID: id})
+	row, err := q.GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: queryMerchant.UUID(), ID: id})
 	if err != nil {
 		return nil, nil, err
 	}
-	payment, err := models.PaymentFromGen(row.BillingPayment)
+	payment, err := models.PaymentFromGen(row)
 	if err != nil {
 		return nil, nil, err
 	}
-	price, err := r.db.PriceFromGen(ctx, row.BillingPrice)
-	if err != nil {
+	// An order's or invoice's payment names no price.
+	if err := r.attachPaymentRelations(ctx, []*models.Payment{payment}); err != nil {
 		return nil, nil, err
-	}
-	product, err := r.db.ProductFromGen(ctx, row.BillingProduct)
-	if err != nil {
-		return nil, nil, err
-	}
-	price.Product = product
-	payment.Price = price
-
-	if payment.SubscriptionID != nil {
-		subRow, err := q.GetSubscriptionByID(ctx, gen.GetSubscriptionByIDParams{MerchantID: queryMerchant.UUID(), ID: *payment.SubscriptionID})
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil, err
-		}
-		if err == nil {
-			sub, err := models.SubscriptionFromGen(subRow)
-			if err != nil {
-				return nil, nil, err
-			}
-			payment.Subscription = sub
-		}
 	}
 
 	refundRows, err := q.ListRefundsForPayment(ctx, gen.ListRefundsForPaymentParams{MerchantID: queryMerchant.UUID(), RefundedPaymentID: &id})
@@ -588,9 +568,17 @@ func (r *PaymentRepo) ListPage(ctx context.Context, p billing.PaymentListParams)
 		id := p.SubscriptionID.UUID()
 		params.SubscriptionID = &id
 	}
-	if !p.PriceID.IsZero() {
-		id := p.PriceID.UUID()
-		params.PriceID = &id
+	if !p.InvoiceID.IsZero() {
+		id := p.InvoiceID.UUID()
+		params.InvoiceID = &id
+	}
+	if !p.OrderID.IsZero() {
+		id := p.OrderID.UUID()
+		params.OrderID = &id
+	}
+	if p.Status != "" {
+		status := string(p.Status)
+		params.Status = &status
 	}
 	if p.Rail != "" {
 		params.Rail = &p.Rail

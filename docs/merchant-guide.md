@@ -226,7 +226,7 @@ reference: [api/routes.md](api/routes.md).
 | Find overdue invoices | `GET /v1/admin/invoices?overdue=true` (each says whether it is `delinquent`) | Invoices → Overdue only |
 | Follow failed renewals | `GET /v1/admin/subscriptions?dunning=true` (each with its `dunning`) | Subscriptions → Dunning |
 | Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `DELETE /v1/admin/customers/{customer_id}/product-access/{id}` | Customers → profile |
-| Record an off-channel/manual purchase | `POST /v1/admin/customers/{customer_id}/payments/off-channel` | Customers → profile |
+| Record money received outside OpenRails for an invoice or an order | `POST /v1/admin/payments` | Invoices → detail |
 | List / inspect payments | `GET /v1/admin/payments[/{id}]` | Payments |
 | Refund (with explicit `revoke_access` choice) | `POST /v1/admin/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
 | List / inspect subscriptions | `GET /v1/admin/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
@@ -308,7 +308,7 @@ switched on: `Routes.AdminConsole` embedded, `admin_console.enabled: true` (env
 login (password standalone; OIDC when the embedded host configures it). Build and
 mount details: `docs/admin-console.md`.
 
-Pages: **Customers** (search → profile with grant/revoke and off-channel payment),
+Pages: **Customers** (search → profile with grant/revoke),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-
 method change), **Payments** (filters, detail, rail-aware refund), **Catalog**
 (products/prices CRUD, archive/restore, durable catalog batch application, drift

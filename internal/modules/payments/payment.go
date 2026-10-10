@@ -207,6 +207,7 @@ func (s *PaymentService) refundLocked(ctx context.Context, originalPaymentID uui
 		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
 		OrderID:        orig.OrderID,
+		InvoiceID:      orig.InvoiceID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id
@@ -282,6 +283,7 @@ func (s *PaymentService) reserveRefundLocked(ctx context.Context, originalPaymen
 		PriceID:        orig.PriceID,
 		SubscriptionID: orig.SubscriptionID,
 		OrderID:        orig.OrderID,
+		InvoiceID:      orig.InvoiceID,
 		RefundedPaymentID: func() *uuid.UUID {
 			id := orig.ID
 			return &id
@@ -459,6 +461,11 @@ func (s *PaymentService) ValidateRefund(ctx context.Context, orig *models.Paymen
 	// to guess from with the row's own positive marker.
 	if orig.MoneyMovement != models.MoneyMovementRail {
 		return errors.New("payment records no money movement at the rail and is not refundable")
+	}
+	// An invoice's payment settled a ledger debt; refunding it would reopen
+	// the debt, which the ledger does not do.
+	if orig.InvoiceID != nil {
+		return errors.New("an invoice's payment is not refundable")
 	}
 
 	refundedTotal, err := s.repo.GetRefundTotalByPaymentID(ctx, orig.ID)

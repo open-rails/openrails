@@ -183,15 +183,13 @@ CREATE UNIQUE INDEX checkout_attempts_order_id_live_key ON billing.checkout_atte
 CREATE INDEX checkout_attempts_order_id_idx ON billing.checkout_attempts USING btree (merchant_id, order_id) WHERE order_id IS NOT NULL;
 ALTER TABLE billing.orders ADD CONSTRAINT orders_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE SET NULL (attempt_id) DEFERRABLE INITIALLY DEFERRED;
 
--- Payment statuses speak the wire's words. A charge never fails (a decline is
--- a payment attempt); only a refund the PSP refused is failed. The rows move
--- before the settlement trigger learns the new word, so history publishes
--- nothing again.
+-- Payment statuses speak the wire's words. A charge never fails: a decline is
+-- a payment attempt. The rows move before the settlement trigger learns the
+-- new word, so history publishes nothing again.
 ALTER TABLE billing.payments DROP CONSTRAINT payments_status_check;
 UPDATE billing.payments SET status = 'succeeded' WHERE status = 'completed';
 ALTER TABLE billing.payments ADD CONSTRAINT payments_status_check CHECK (status IN ('pending', 'succeeded', 'failed', 'refunded'));
-ALTER TABLE billing.payments ADD CONSTRAINT payments_failed_refund_check CHECK (status <> 'failed' OR refunded_payment_id IS NOT NULL);
-COMMENT ON COLUMN billing.payments.status IS 'pending (a refund awaiting its PSP), succeeded, refunded (an NMI same-id refund marks its sale), or failed (only a refund the PSP refused; a declined charge is a payment attempt).';
+COMMENT ON COLUMN billing.payments.status IS 'pending (a refund awaiting its PSP), succeeded, refunded (an NMI same-id refund marks its sale), or failed: a refund the PSP refused, or a decline recorded before declines were payment attempts. No writer records a failed charge.';
 CREATE OR REPLACE FUNCTION billing.enqueue_payment_settlement_event() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
@@ -216,7 +214,6 @@ $$;
 -- (a one-price sale before orders) a price.
 ALTER TABLE billing.payments ADD COLUMN order_id uuid;
 ALTER TABLE billing.payments ALTER COLUMN price_id DROP NOT NULL;
-ALTER TABLE billing.payments ADD CONSTRAINT payments_payable_check CHECK (order_id IS NULL OR price_id IS NULL);
 ALTER TABLE billing.payments ADD CONSTRAINT payments_order_id_fkey
     FOREIGN KEY (merchant_id, customer_id, order_id) REFERENCES billing.orders(merchant_id, customer_id, id);
 COMMENT ON COLUMN billing.payments.order_id IS 'The order this charge (or its refund) paid; its lines say what it bought, and price_id is then NULL.';
@@ -224,6 +221,60 @@ CREATE INDEX payments_order_id_idx ON billing.payments USING btree (merchant_id,
 -- At most one successful charge per order.
 CREATE UNIQUE INDEX payments_order_id_charge_key ON billing.payments USING btree (merchant_id, order_id)
     WHERE order_id IS NOT NULL AND refunded_payment_id IS NULL AND status IN ('succeeded', 'refunded') AND deleted_at IS NULL;
+
+-- Invoice payments are payments (#1175): a settled invoice charge or a
+-- remittance recorded against an invoice names it and the ledger transfer
+-- that paid it; each attempt's answer is a payment attempt. A payment pays
+-- exactly one thing: an order, an invoice, or (a renewal, or a one-price
+-- sale before orders) a price.
+ALTER TABLE billing.payments ADD COLUMN invoice_id uuid;
+ALTER TABLE billing.payments ADD COLUMN ledger_transfer_id uuid;
+ALTER TABLE billing.payments ADD CONSTRAINT payments_payable_check CHECK (num_nonnulls(order_id, invoice_id, price_id) = 1);
+-- A reversal names its charge's invoice but settled no transfer.
+ALTER TABLE billing.payments ADD CONSTRAINT payments_invoice_ledger_check CHECK (CASE WHEN refunded_payment_id IS NULL
+    THEN (invoice_id IS NULL) = (ledger_transfer_id IS NULL) ELSE ledger_transfer_id IS NULL END);
+ALTER TABLE billing.payments ADD CONSTRAINT payments_invoice_id_fkey
+    FOREIGN KEY (merchant_id, customer_id, currency, invoice_id) REFERENCES billing.invoices(merchant_id, customer_id, currency, id);
+-- Deferred: a restore loads payments before the ledger.
+ALTER TABLE billing.payments ADD CONSTRAINT payments_ledger_transfer_id_fkey
+    FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES billing.ledger_transfers(merchant_id, customer_id, currency, id)
+    DEFERRABLE INITIALLY DEFERRED;
+COMMENT ON COLUMN billing.payments.invoice_id IS 'The invoice this payment paid, with ledger_transfer_id the owed payment that settled it. A balance repayment moves no money and is only its ledger transfer.';
+CREATE INDEX payments_invoice_id_idx ON billing.payments USING btree (merchant_id, invoice_id) WHERE invoice_id IS NOT NULL;
+CREATE UNIQUE INDEX payments_ledger_transfer_id_key ON billing.payments USING btree (merchant_id, ledger_transfer_id) WHERE ledger_transfer_id IS NOT NULL AND deleted_at IS NULL;
+
+-- A payment attempt names the invoice or order it tried to pay.
+ALTER TABLE billing.payment_attempts ADD COLUMN invoice_id uuid;
+ALTER TABLE billing.payment_attempts ADD COLUMN order_id uuid;
+ALTER TABLE billing.payment_attempts ADD CONSTRAINT payment_attempts_payable_check CHECK (invoice_id IS NULL OR order_id IS NULL);
+ALTER TABLE billing.payment_attempts ADD CONSTRAINT payment_attempts_invoice_id_fkey FOREIGN KEY (merchant_id, invoice_id) REFERENCES billing.invoices(merchant_id, id);
+ALTER TABLE billing.payment_attempts ADD CONSTRAINT payment_attempts_order_id_fkey FOREIGN KEY (merchant_id, order_id) REFERENCES billing.orders(merchant_id, id) ON DELETE SET NULL (order_id);
+CREATE INDEX payment_attempts_invoice_id_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, invoice_id, attempted_at) WHERE invoice_id IS NOT NULL;
+CREATE INDEX payment_attempts_order_id_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, order_id, attempted_at) WHERE order_id IS NOT NULL;
+CREATE INDEX payment_attempts_payment_id_idx ON billing.payment_attempts USING btree (merchant_id, payment_id) WHERE payment_id IS NOT NULL;
+UPDATE billing.payment_attempts a SET invoice_id = (i.payload->>'invoice_id')::uuid
+FROM billing.provider_intents i
+WHERE a.merchant_id = i.merchant_id AND a.provider_intent_id = i.id AND i.intent_type = 'invoice_collection';
+
+-- A collection's idempotency key carries its ordinal on the invoice.
+ALTER TABLE billing.invoices ADD COLUMN collection_attempt_count integer DEFAULT 0 NOT NULL;
+ALTER TABLE billing.invoices ADD CONSTRAINT invoices_collection_attempt_count_check CHECK (collection_attempt_count >= 0);
+UPDATE billing.invoices i SET collection_attempt_count = c.n
+FROM (SELECT merchant_id, invoice_id, count(*)::integer AS n FROM billing.invoice_payments GROUP BY merchant_id, invoice_id) c
+WHERE i.merchant_id = c.merchant_id AND i.id = c.invoice_id;
+
+-- Settled invoice payments move to payments without publishing history to
+-- the host again; their attempts are already payment attempts, and balance
+-- repayments are ledger transfers.
+ALTER TABLE billing.payments DISABLE TRIGGER payments_enqueue_settlement_event;
+INSERT INTO billing.payments (merchant_id, id, customer_id, invoice_id, ledger_transfer_id, channel, rail, psp_id, transaction_id,
+    amount, list_amount, currency, status, purchased_at, created_at, money_movement)
+SELECT merchant_id, id, customer_id, invoice_id, ledger_transfer_id, channel, rail, psp_id, COALESCE(rail_payment_id, id::text),
+    amount, amount, currency, 'succeeded', COALESCE(settled_at, attempted_at), created_at, CASE WHEN channel = 'rail' THEN 'rail' ELSE 'none' END
+FROM billing.invoice_payments
+WHERE status = 'settled' AND channel IN ('rail', 'manual') AND ledger_transfer_id IS NOT NULL;
+ALTER TABLE billing.payments ENABLE TRIGGER payments_enqueue_settlement_event;
+DROP TABLE billing.invoice_payments;
 
 -- Order events reach the host through the outbox.
 ALTER TABLE billing.host_outbox DROP CONSTRAINT host_outbox_payload_check;
@@ -302,7 +353,6 @@ BEGIN
                   'idempotency_keys',
                   'invoice_collection_cadence',
                   'invoice_items',
-                  'invoice_payments',
                   'invoices',
                   'invoker_spend_limits',
                   'ledger_accounts',
