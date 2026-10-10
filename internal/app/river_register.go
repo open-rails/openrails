@@ -334,9 +334,6 @@ func (r *Runtime) buildIntentRegistry(clock clockwork.Clock) *intents.Registry {
 		// mover.
 		money.NewInvoiceCollectionHandler(r.DB, r.MoneyCharger, r.CollectionResolver, r.Posture(), clock),
 		money.NewSubscriptionCollectionHandler(r.DB, r.CollectionResolver, r.Config, clock),
-		intents.NewStripeArchiveProductHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
-		intents.NewStripeArchivePriceHandler(r.DB, r.Config, r.RailConfigs, clock, r.StripeClients),
-		intents.NewSolanaSunsetPlanHandler(r.DB, r.SolanaPlanService, r.SolanaRPCResolver.ChainReader(), clock),
 		// The account-updater batch submit is a paid provider write, so it
 		// rides the intent ledger too.
 		intents.NewAccountUpdaterBatchHandler(r.DB, r.Config, r.RailConfigs, clock),

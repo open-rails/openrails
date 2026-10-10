@@ -475,7 +475,7 @@ func (s *Service) VerifyPriceSync(ctx context.Context, priceID uuid.UUID) (map[s
 		}
 		drift, missing, verifyErr := adapter.Verify(verifyCtx, ids, local)
 		if verifyErr != nil {
-			if errors.Is(verifyErr, errProviderNotArmed) {
+			if errors.Is(verifyErr, errSyncDisabled) {
 				state.SyncStatus = billing.SyncStatusSyncDisabled
 			} else {
 				state.Status = billing.PSPLinkError

@@ -172,10 +172,8 @@ execute; `full` executes everything; an unrecognized origin parks.
 
 Every outbound provider mutation flows through the ledger: deferred NMI
 deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
-cancels, catalog archive ops (`stripe_archive_product`/`stripe_archive_price`/
-`solana_sunset_plan`), payment-method swaps, vault deletes, checkout NMI
-sales and Solana recurring pulls. NMI deliberately has
-NO catalog-archive write path (plan edits affect live subscribers).
+cancels, payment-method swaps, vault deletes, checkout NMI sales and Solana
+recurring pulls.
 
 Execution is **effectively-once**, never assumed exactly-once. Per class:
 money-movers park ambiguous outcomes as `unknown_needs_verify` and are
@@ -858,7 +856,7 @@ Row retention:
 | Table | Deleted |
 |---|---|
 | `subscription_status_transitions` | 25 months (761 days) after `occurred_at` |
-| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, catalog archive, Solana plan sunset, account-updater batch), 25 months after they last changed |
+| `provider_intents` | finished intents that only instructed a provider (subscription cancel, payment-method and source update, card vault, network token, account-updater batch), 25 months after they last changed |
 | `provider_mutation_logs` | 25 months after `created_at` |
 | `cost_observations` | 90 days after their operation was settled or released |
 | `reconciliation_findings` | resolved findings, 12 months (366 days) after they were resolved and last seen |

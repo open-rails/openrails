@@ -2,7 +2,6 @@ package recurring
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -401,44 +400,6 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		MerchantAddress: merchant.String(),
 		Signature:       sig.String(),
 	}, nil
-}
-
-// ErrPlanSunsetNotOwned: the plan at the PDA belongs to another merchant; the
-// sunset is refused before any on-chain action.
-var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this merchant's merchant; refusing to sunset")
-
-// SunsetPlan flips an on-chain plan to status=sunset via update_plan: new
-// subscribes are refused while existing subscriptions keep billing (Stripe's
-// active=false). current is the decoded plan account; its mutable fields are
-// echoed so only status changes. Signed by the merchant's key, which must own
-// the plan.
-func (s *PlanService) SunsetPlan(ctx context.Context, tenantID billing.MerchantID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (signature string, err error) {
-	if current == nil {
-		return "", fmt.Errorf("recurring: sunset requires the current plan account")
-	}
-	merchant, err := s.submitter.MerchantAddress(ctx, tenantID)
-	if err != nil {
-		return "", fmt.Errorf("recurring: resolve merchant merchant address: %w", err)
-	}
-	if !current.Owner.Equals(merchant) {
-		return "", fmt.Errorf("%w (plan owner %s, merchant merchant %s)", ErrPlanSunsetNotOwned, current.Owner, merchant)
-	}
-	ix, err := subscriptions.BuildUpdatePlan(subscriptions.UpdatePlanParams{
-		Owner:       merchant,
-		PlanPDA:     planPDA,
-		Status:      subscriptions.PlanStatusSunset,
-		EndTs:       current.EndTs,
-		Pullers:     current.Pullers,
-		MetadataURI: current.MetadataURI,
-	})
-	if err != nil {
-		return "", fmt.Errorf("recurring: build update_plan: %w", err)
-	}
-	sig, err := s.submitter.Submit(ctx, tenantID, []solanago.Instruction{ix})
-	if err != nil {
-		return "", fmt.Errorf("recurring: submit update_plan (sunset): %w", err)
-	}
-	return sig.String(), nil
 }
 
 // ensureReceivingATA idempotently provisions owner's associated token account for

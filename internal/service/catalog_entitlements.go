@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
+	log "github.com/sirupsen/logrus"
 )
 
 // keyEdit attributes a key change to now on the engine clock and to the
@@ -148,7 +149,8 @@ func storedReceipt(r billing.CatalogApplicationReceipt) storedCatalogReceipt {
 }
 
 // syncStripeFeatures mirrors a product's keys onto its Stripe Product, best
-// effort, once one exists; drift surfaces on the next verified read.
+// effort, once one exists. Nothing compares Features later: a failure is
+// logged, and the next change of the product's keys syncs again.
 func (s *Service) syncStripeFeatures(ctx context.Context, productID uuid.UUID) {
 	if s.rt == nil || s.rt.Config == nil {
 		return
@@ -162,7 +164,10 @@ func (s *Service) syncStripeFeatures(ctx context.Context, productID uuid.UUID) {
 		return
 	}
 	stripeSvc := &catalog.StripeCatalogService{StripeClients: s.rt.StripeClients, Config: s.rt.Config, Rails: s.rt.RailConfigs}
-	_ = stripeSvc.SyncProductFeatures(ctx, stripeProductID, product.Entitlements)
+	if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, product.Entitlements); err != nil {
+		log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
+			Warn("stripe entitlement-feature sync failed (best-effort); Features stay stale until the product's keys change again")
+	}
 }
 
 // announceKeyChanges counts each changed product's holders into its change

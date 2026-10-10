@@ -225,7 +225,7 @@ type DriftSnapshot struct {
 }
 
 // BuildDriftSnapshot is pure; tests use it without a database. A zero pspID
-// includes links of every account (the catalog-extras view).
+// includes links of every account.
 func BuildDriftSnapshot(products []*models.Product, prices []*models.Price, pspID uuid.UUID) DriftSnapshot {
 	snap := DriftSnapshot{
 		ProductByID:      make(map[string]*models.Product, len(products)),
@@ -441,4 +441,21 @@ func ComputeNMIDrift(plans []NMIPlan, snap DriftSnapshot, now time.Time) []model
 		}
 	}
 	return events
+}
+
+// RemoteStripePriceKey reads the retained local price ID, else the OpenRails
+// metadata/lookup marker. A financial-terms marker never selects a same-money
+// local row.
+func RemoteStripePriceKey(sp StripePrice) string {
+	if id, err := uuid.Parse(strings.TrimSpace(sp.Metadata[StripeMetadataOpenRailsPriceID])); err == nil && id != uuid.Nil {
+		return id.String()
+	}
+	if key := strings.TrimSpace(sp.Metadata[StripeMetadataOpenRailsPriceKey]); key != "" {
+		return key
+	}
+	const prefix = "openrails."
+	if key := strings.TrimSpace(sp.LookupKey); strings.HasPrefix(key, prefix) {
+		return strings.TrimPrefix(key, prefix)
+	}
+	return ""
 }

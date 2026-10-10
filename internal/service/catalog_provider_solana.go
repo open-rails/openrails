@@ -426,8 +426,7 @@ func (a *solanaAdapter) Verify(ctx context.Context, ids map[string]string, _ *pr
 	return drift, false, nil
 }
 
-// Update is a no-op: Solana plan terms are immutable on-chain. Sunsetting a
-// plan is a solana_sunset_plan intent (ArchiveCatalogExtras).
+// Update is a no-op: Solana plan terms are immutable on-chain.
 func (a *solanaAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {
 	return nil
 }

@@ -260,18 +260,3 @@ func TestPublishPlanValidatesTermsBeforeSubmit(t *testing.T) {
 }
 
 // Sunset only a plan this merchant owns, echoing its mutable fields.
-func TestSunsetPlanOwnership(t *testing.T) {
-	svc, sub := newPlanService(t, planChain{mintDecimals: 6})
-	planPDA := randKey(t).PublicKey()
-
-	_, err := svc.SunsetPlan(context.Background(), testMerchantID, planPDA, &subscriptions.PlanAccount{Owner: randKey(t).PublicKey()})
-	require.ErrorIs(t, err, ErrPlanSunsetNotOwned)
-	_, err = svc.SunsetPlan(context.Background(), testMerchantID, planPDA, nil)
-	require.Error(t, err)
-	require.Empty(t, sub.submits)
-
-	sig, err := svc.SunsetPlan(context.Background(), testMerchantID, planPDA, &subscriptions.PlanAccount{Owner: sub.merchantPub})
-	require.NoError(t, err)
-	require.NotEmpty(t, sig)
-	require.Len(t, sub.submits, 1)
-}

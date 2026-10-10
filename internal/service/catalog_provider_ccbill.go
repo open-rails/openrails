@@ -69,10 +69,10 @@ func (a *ccbillAdapter) AutoCreate(_ context.Context, _ autoCreateContext) (map[
 	return nil, errPendingManualLink
 }
 
+// Verify cannot read CCBill, which has no catalog read API: the link is
+// sync_disabled, never in_sync.
 func (a *ccbillAdapter) Verify(_ context.Context, _ map[string]string, _ *priceVerifyContext) ([]billing.DriftField, bool, error) {
-	// CCBill has no read API; report no drift and signal sync_disabled via the
-	// dispatcher (it treats nil/nil/nil as sync_disabled).
-	return nil, false, nil
+	return nil, false, fmt.Errorf("ccbill has no catalog read API: %w", errSyncDisabled)
 }
 
 func (a *ccbillAdapter) Update(_ context.Context, _ map[string]string, _ mutableUpdate) error {

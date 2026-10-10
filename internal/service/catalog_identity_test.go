@@ -80,14 +80,6 @@ func TestNMIPlanIDShape(t *testing.T) {
 	minted := nmiDeterministicPlanID(id)
 	require.Equal(t, nmiDeterministicPlanID(id), minted)
 	require.NotEqual(t, minted, nmiDeterministicPlanID(uuid.New()))
-	require.True(t, isContentAddressedNMIPlanID(minted), minted)
-	for id, want := range map[string]bool{
-		"premium-usd-23000000-30": true, "pro-eur-999-365": true, "vip-gold-usd-999-onetime": true, "a-b-c-usd-1-7": true,
-		"legacy-vip-plan": false, "premium-usd-23x0-30": false, "premium-us-2300-30": false, "premium-USD-2300-30": false,
-		"-usd-2300-30": false, "usd-2300-30": false, "": false, "or-not-a-uuid": false,
-	} {
-		require.Equal(t, want, isContentAddressedNMIPlanID(id), id)
-	}
 }
 
 // CUR-8: service entry points accept only registered currencies.

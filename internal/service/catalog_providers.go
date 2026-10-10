@@ -43,16 +43,19 @@ const providerLookupKey = "lookup_key"
 // adapter's billing.PendingAction template) rather than failing the whole call.
 var errPendingManualLink = errors.New("provider requires a manual link")
 
-// errProviderNotArmed is a Verify answered without a provider round trip: no
-// account with usable credentials is armed for the link's rail, so the link
-// reports sync_disabled rather than an error.
-var errProviderNotArmed = errors.New("provider is not armed")
+// errSyncDisabled is a Verify that cannot read the provider, so the link
+// reports sync_disabled rather than in_sync or an error.
+var errSyncDisabled = errors.New("provider sync is disabled")
+
+// errProviderNotArmed: no account with usable credentials is armed for the
+// link's rail.
+var errProviderNotArmed = fmt.Errorf("provider is not armed: %w", errSyncDisabled)
 
 // errRemoteWritesDisabled is the sentinel adapters return from a write point
 // (find-or-create inside Attach, AutoCreate) when catalog provider writes are
 // blocked by the operating mode (mode=limited/readonly, #346). The dispatcher
 // converts it to pending_manual_link — the price still applies locally and the
-// provider slot converges on a later push-merchant-catalog once writes are allowed.
+// provider slot stays pending until it is linked.
 // Verification reads always run.
 var errRemoteWritesDisabled = errors.New("catalog provider writes are disabled (mode=limited/readonly)")
 
@@ -118,9 +121,9 @@ type providerAdapter interface {
 	// Verify performs a live retrieve against the remote object and computes
 	// drift vs. the OpenRails-side snapshot. Returns drift fields (empty when
 	// in sync), missing=true when the remote object 404s, and any transport /
-	// adapter-specific error. Adapters without a read API return
-	// (nil, false, nil) to signal sync_disabled (the dispatcher maps this to
-	// billing.SyncStatusSyncDisabled).
+	// adapter-specific error. An adapter that cannot read the provider returns
+	// an error wrapping errSyncDisabled, which the dispatcher reports as
+	// billing.SyncStatusSyncDisabled.
 	Verify(ctx context.Context, ids map[string]string, local *priceVerifyContext) (drift []billing.DriftField, missing bool, err error)
 
 	// Update propagates mutable fields to the remote object. Adapters without a

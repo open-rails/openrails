@@ -231,7 +231,7 @@ func (a *stripeAdapter) AutoCreate(ctx context.Context, in autoCreateContext) (m
 	if !in.RemoteWritesDisabled && in.Product != nil && len(in.Product.Entitlements) > 0 {
 		if err := stripeSvc.SyncProductFeatures(ctx, stripeProductID, in.Product.Entitlements); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("stripe_product_id", stripeProductID).
-				Warn("stripe entitlement-feature sync failed (best-effort); drift surfaces on reconcile")
+				Warn("stripe entitlement-feature sync failed (best-effort); Features stay stale until the product's keys change again")
 		}
 	}
 
