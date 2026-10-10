@@ -57,12 +57,6 @@ type Options struct {
 	// the issuer, which for a hosted product serves no pages.
 	Frontend authkit.FrontendConfig
 
-	// TrustedProxies and CloudflareProxies override the engine's for AuthKit's
-	// client-IP resolver; only CloudflareProxies may assert CF-Connecting-IP
-	// (ak#298).
-	TrustedProxies    []string
-	CloudflareProxies []string
-
 	// AuthRateLimitOverrides overlays bucket limits onto AuthKit's defaults
 	// (authkit.DefaultRateLimits, #743).
 	AuthRateLimitOverrides map[string]authkit.RateLimit
@@ -103,12 +97,6 @@ func ControlPlaneOptions(opts Options) ([]controlplane.Option, error) {
 	}
 	if opts.Frontend != (authkit.FrontendConfig{}) {
 		out = append(out, controlplane.WithFrontend(opts.Frontend))
-	}
-	if len(opts.TrustedProxies) > 0 {
-		out = append(out, controlplane.WithTrustedProxies(opts.TrustedProxies))
-	}
-	if len(opts.CloudflareProxies) > 0 {
-		out = append(out, controlplane.WithCloudflareProxies(opts.CloudflareProxies))
 	}
 	if len(opts.AuthRateLimitOverrides) > 0 {
 		out = append(out, controlplane.WithRateLimitOverrides(opts.AuthRateLimitOverrides))

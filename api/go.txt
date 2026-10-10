@@ -3560,7 +3560,6 @@ pkg openrails/server, type Config struct, Addr string
 pkg openrails/server, type Config struct, AdminConsole *openrails.AdminConsole
 pkg openrails/server, type Config struct, Auth AuthConfig
 pkg openrails/server, type Config struct, AuthRateLimits map[string]AuthRateLimit
-pkg openrails/server, type Config struct, CloudflareProxies []string
 pkg openrails/server, type Config struct, ConsoleIssuer *ConsoleIssuer
 pkg openrails/server, type Config struct, Engine openrails.Config
 pkg openrails/server, type Config struct, FrontendBaseURL string
@@ -3571,7 +3570,6 @@ pkg openrails/server, type Config struct, PasswordlessLogin bool
 pkg openrails/server, type Config struct, PrivateAddr string
 pkg openrails/server, type Config struct, Registration iam.RegistrationMode
 pkg openrails/server, type Config struct, ResourceServer *ResourceServerConfig
-pkg openrails/server, type Config struct, TrustedProxies []string
 pkg openrails/server, type ConsoleIssuer = hostconfig.ConsoleIssuer
 pkg openrails/server, type ConsoleIssuer struct
 pkg openrails/server, type ConsoleIssuer struct, ClientID string

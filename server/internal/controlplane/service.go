@@ -65,8 +65,6 @@ type options struct {
 	email                        authkit.EmailSender
 	sms                          authkit.SMSSender
 	frontend                     authkit.FrontendConfig
-	trustedProxies               []string
-	cloudflareProxies            []string
 	directPeerIP                 bool
 	rateLimitOverrides           map[string]authkit.RateLimit
 	redis                        *redis.Client
@@ -125,18 +123,6 @@ func WithFrontend(fc authkit.FrontendConfig) Option {
 	return func(o *options) { o.frontend = fc }
 }
 
-// WithTrustedProxies overrides the configured reverse-proxy CIDRs of AuthKit's
-// client-IP resolver.
-func WithTrustedProxies(cidrs []string) Option {
-	return func(o *options) { o.trustedProxies = append([]string(nil), cidrs...) }
-}
-
-// WithCloudflareProxies overrides the configured Cloudflare egress CIDRs
-// (ak#298). Only these peers may assert CF-Connecting-IP.
-func WithCloudflareProxies(cidrs []string) Option {
-	return func(o *options) { o.cloudflareProxies = append([]string(nil), cidrs...) }
-}
-
 // WithDirectPeerIP declares that AuthKit receives the client's direct connection.
 func WithDirectPeerIP() Option {
 	return func(o *options) { o.directPeerIP = true }
@@ -174,19 +160,12 @@ func newOptions(opts []Option) options {
 	return out
 }
 
-// clientIPPosture resolves the client-IP declaration (ak#299): host options
-// override config, direct-peer excludes proxy lists, and an undeclared posture
-// refuses to boot rather than sharing one rate-limit bucket behind an unknown
-// proxy.
+// clientIPPosture resolves the client-IP declaration (ak#299): AuthKit trusts
+// exactly the engine's proxies, since both serve behind the same ones;
+// direct-peer excludes proxy lists, and an undeclared posture refuses to boot
+// rather than sharing one rate-limit bucket behind an unknown proxy.
 func clientIPPosture(cfg *config.Config, auth *hostconfig.AuthConfig, options options) (authkit.HTTPConfig, error) {
-	proxies := cfg.TrustedProxies
-	if len(options.trustedProxies) > 0 {
-		proxies = options.trustedProxies
-	}
-	cloudflare := cfg.CloudflareProxies
-	if len(options.cloudflareProxies) > 0 {
-		cloudflare = options.cloudflareProxies
-	}
+	proxies, cloudflare := cfg.TrustedProxies, cfg.CloudflareProxies
 	directPeer := auth.DirectPeerIP || options.directPeerIP
 	switch {
 	case directPeer && (len(proxies) > 0 || len(cloudflare) > 0):

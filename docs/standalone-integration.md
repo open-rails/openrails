@@ -400,10 +400,10 @@ each acts for.
 
 | `server.Config` | Meaning |
 |---|---|
-| `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. |
+| `Engine` | The engine's `openrails.Config`. `Engine.Catalog` is refused: each merchant manages its catalog through the API. `Engine.TrustedProxies` and `Engine.CloudflareProxies` declare the proxies in front of the whole server: the engine's rate limits, logs and webhook sources and AuthKit's all resolve the client through them. |
 | `Auth` | The server's AuthKit: `Issuer` (required), signing keys, `Naming`, its tables' `Schema` (default `profiles`), development allowances. |
 | `Registration`, `LocalSignIn`, `PasswordlessLogin`, `PasswordlessAutoRegistration` | Who may create accounts and sign in at the server itself. Without `LocalSignIn` people sign in at a trusted issuer. |
-| `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits` | AuthKit's emailed links, client-IP posture and rate limits. |
+| `FrontendBaseURL`, `AuthRateLimits` | AuthKit's emailed links and rate limits. |
 | `MerchantCreation` | The policy for merchants users create (`ProvisionMerchant` with an owner) and rename: reserved names, a pattern and a free allowance. |
 | `ResourceServer` | The trusted issuers whose access tokens the admin API accepts (above). |
 | `AdminConsole`, `ConsoleIssuer` | The admin console; `ConsoleIssuer` signs staff in to it at a trusted issuer. |

@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 // This file holds the net/http base middleware (issue #282; sole stack since
@@ -250,10 +251,10 @@ func RecoverHTTP() HTTPMiddleware {
 	}
 }
 
-// RequestLogHTTP logs one line per request (method, path, status, latency) —
-// the neutral analogue of the gin logger the standalone server used. skipPaths
-// are not logged (health probes).
-func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
+// RequestLogHTTP logs one line per request (method, path, status, latency,
+// the client resolved through proxies) — the neutral analogue of the gin
+// logger the standalone server used. skipPaths are not logged (health probes).
+func RequestLogHTTP(proxies *iputil.TrustedProxies, skipPaths ...string) HTTPMiddleware {
 	skip := make(map[string]bool, len(skipPaths))
 	for _, p := range skipPaths {
 		skip[p] = true
@@ -272,7 +273,7 @@ func RequestLogHTTP(skipPaths ...string) HTTPMiddleware {
 			log.WithFields(log.Fields{
 				"status":     sw.status(),
 				"latency":    time.Since(start).String(),
-				"ip":         r.RemoteAddr,
+				"ip":         proxies.ClientIP(r),
 				"request_id": requestID,
 			}).Info(r.Method + " " + LogPath(r))
 		})

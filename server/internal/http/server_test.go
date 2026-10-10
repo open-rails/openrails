@@ -222,7 +222,7 @@ func TestRouteBudgetOutlivesServerWriteTimeout(t *testing.T) {
 	const serverWrite = 300 * time.Millisecond
 	const work = 3 * serverWrite
 	handler := func(budgeted bool) http.Handler {
-		return middleware.RequestLogHTTP()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		return middleware.RequestLogHTTP(nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			req := httprequest.NewHTTP(w, r, nil)
 			if budgeted {
 				_, cancel := req.Budget(10 * work)

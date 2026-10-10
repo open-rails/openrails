@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/archivewire"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 // The body cap is enforced on the whole body before any handler runs, webhook
@@ -186,7 +187,7 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/v1/me/checkout", nil)
 		req.Header.Set("X-Request-ID", sent)
 		w := httptest.NewRecorder()
-		RequestLogHTTP()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(w, req)
+		RequestLogHTTP(nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })).ServeHTTP(w, req)
 		id := w.Header().Get("X-Request-ID")
 		if want == "" {
 			require.NoError(t, uuid.Validate(id), "missing or oversized ids are replaced")
@@ -202,9 +203,32 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 
 	buf.Reset()
 	w := httptest.NewRecorder()
-	RequestLogHTTP("/health/live")(okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health/live", nil))
+	RequestLogHTTP(nil, "/health/live")(okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health/live", nil))
 	require.NoError(t, uuid.Validate(w.Header().Get("X-Request-ID")))
 	require.Zero(t, buf.Len(), "skipped paths are not logged")
+}
+
+// The request log names the client resolved through trusted proxies, never
+// the proxy's socket, and an untrusted peer's X-Forwarded-For names nobody.
+func TestRequestLogHTTPLogsResolvedClient(t *testing.T) {
+	logger := log.StandardLogger()
+	out, formatter := logger.Out, logger.Formatter
+	t.Cleanup(func() { logger.SetOutput(out); logger.SetFormatter(formatter) })
+	var buf bytes.Buffer
+	logger.SetOutput(&buf)
+	logger.SetFormatter(&log.JSONFormatter{DisableTimestamp: true})
+	logged := RequestLogHTTP(iputil.ParseTrustedProxies([]string{"10.244.0.0/16"}))(okHandler())
+
+	for peer, want := range map[string]string{"10.244.0.53:33550": "198.51.100.7", "203.0.113.9:4000": "203.0.113.9"} {
+		buf.Reset()
+		req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+		req.RemoteAddr = peer
+		req.Header.Set("X-Forwarded-For", "198.51.100.7")
+		logged.ServeHTTP(httptest.NewRecorder(), req)
+		var entry map[string]any
+		require.NoError(t, json.Unmarshal(buf.Bytes(), &entry))
+		require.Equal(t, want, entry["ip"], "peer %s", peer)
+	}
 }
 
 // #336: there is no default merchant; an unresolved merchant pins nothing so

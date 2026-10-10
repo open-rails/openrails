@@ -78,7 +78,9 @@ const (
 type Config struct {
 	// Engine is the engine's configuration, as any host passes to
 	// openrails.New. The server's merchants manage their catalogs through the
-	// API, so Engine.Catalog is refused.
+	// API, so Engine.Catalog is refused. Engine.TrustedProxies and
+	// Engine.CloudflareProxies name the proxies in front of the whole server,
+	// AuthKit included.
 	Engine openrails.Config
 
 	// Auth is the server's own AuthKit. Auth.Issuer is required.
@@ -99,10 +101,6 @@ type Config struct {
 	// FrontendBaseURL is where emailed links point. Empty is Auth.Issuer,
 	// which for a hosted product serves no pages.
 	FrontendBaseURL string
-	// TrustedProxies and CloudflareProxies override Engine's for AuthKit's
-	// client-IP resolver; only CloudflareProxies may assert CF-Connecting-IP.
-	TrustedProxies    []string
-	CloudflareProxies []string
 	// AuthRateLimits overlays AuthKit's default rate-limit buckets by name.
 	AuthRateLimits map[string]AuthRateLimit
 	// MerchantCreation is the policy for the merchants users create and
@@ -195,9 +193,8 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		Auth: cfg.Auth, Registration: cfg.Registration, ResourceServer: cfg.ResourceServer,
 		PasswordlessLogin: cfg.PasswordlessLogin, PasswordlessAutoRegistration: cfg.PasswordlessAutoRegistration,
 		LocalSignIn: cfg.LocalSignIn, EmailSender: deps.AuthEmail, SMSSender: deps.SMS,
-		Frontend:       authkit.FrontendConfig{BaseURL: cfg.FrontendBaseURL},
-		TrustedProxies: cfg.TrustedProxies, CloudflareProxies: cfg.CloudflareProxies,
-		Redis: s.graph.RedisClient,
+		Frontend: authkit.FrontendConfig{BaseURL: cfg.FrontendBaseURL},
+		Redis:    s.graph.RedisClient,
 	}
 	if opts.EmailSender == nil && s.graph.Runtime.EmailSender != nil {
 		opts.EmailSender = controlplane.AuthKitSender{Sender: s.graph.Runtime.EmailSender}

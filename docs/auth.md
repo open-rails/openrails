@@ -129,8 +129,9 @@ verified identity and sender proof. Permission checks are not memoized.
 Configure `trusted_proxies` with actual proxy CIDRs or set
 `auth.direct_peer_ip: true` for direct client connections. Cloudflare-specific
 headers are trusted only from declared `cloudflare_proxies`; generic proxy
-trust does not confer that authority. Embedded hosts set the same on
-`Config.TrustedProxies` and `Config.CloudflareProxies`. Direct-peer and proxy
+trust does not confer that authority. Go hosts set the same on
+`Config.TrustedProxies` and `Config.CloudflareProxies` (a standalone server's
+`Engine`); AuthKit and the engine trust the same proxies. Direct-peer and proxy
 declarations are mutually exclusive.
 
 Development signing keys persist under `auth.keys_path`; production supplies

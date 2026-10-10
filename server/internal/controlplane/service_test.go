@@ -122,7 +122,6 @@ func TestClientIPPostureMustBeDeclared(t *testing.T) {
 		{wantErr: "explicit client-IP posture"},
 		{direct: true},
 		{cfg: config.Config{TrustedProxies: proxies}},
-		{cfg: config.Config{TrustedProxies: []string{"192.168.0.0/16"}}, opts: options{trustedProxies: proxies}},
 		{cfg: config.Config{CloudflareProxies: proxies}},
 		{cfg: config.Config{TrustedProxies: proxies}, direct: true, wantErr: "conflicts"},
 		{cfg: config.Config{CloudflareProxies: proxies}, opts: options{directPeerIP: true}, wantErr: "conflicts"},
@@ -136,7 +135,7 @@ func TestClientIPPostureMustBeDeclared(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, tc.direct || tc.opts.directPeerIP, got.DirectPeerIP)
 		if len(cfg.TrustedProxies) > 0 {
-			require.Equal(t, proxies, got.TrustedProxies, "options override config")
+			require.Equal(t, proxies, got.TrustedProxies, "AuthKit trusts the engine's proxies")
 		}
 	}
 }

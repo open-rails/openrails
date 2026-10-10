@@ -1200,7 +1200,7 @@
       "type Actor struct {\n}",
       "type AuthConfig = hostconfig.AuthConfig",
       "type AuthRateLimit = hostconfig.AuthRateLimit",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tAdminConsole *openrails.AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tAddr string\n\n\tPrivateAddr string\n}",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tAdminConsole *openrails.AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tAddr string\n\n\tPrivateAddr string\n}",
       "type ConsoleIssuer = hostconfig.ConsoleIssuer",
       "type Deps struct {\n\tEngine openrails.Deps\n\n\tSMS authkit.SMSSender\n\n\tAuthEmail authkit.EmailSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
