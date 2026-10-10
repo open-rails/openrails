@@ -43,7 +43,6 @@ unindexed-filter AdminListReconciliationFindings # optional admin filter, paged
 unindexed-filter ListReconciliationFindings      # optional admin filter, paged
 unindexed-filter ListProviderIntents                 # optional admin filter, paged
 unindexed-filter CountProviderIntents                # optional admin filter, paged
-unindexed-filter ListSubscriptionRepricesPage    # optional admin filter, keyset page
 unindexed-filter ListPricesFiltered              # optional admin filter, keyset page
 
 # Transaction-level concurrency fences are executable SQL but cannot be
@@ -54,6 +53,7 @@ unplannable LockUsageEventsForMeterCorrection # LOCK TABLE closes the meter-corr
 # windows per listed subscription.
 unbounded-many CountLiveProductHolders       # one row per edited product, counted once per catalog edit
 unbounded-many ListLiveAccessBySubscriptions # live windows of a page of subscriptions
+unbounded-many ListPendingScheduledChanges   # at most one scheduled change per subscription of a page
 
 # The cutover to product access: an operator action, once per merchant.
 unbounded-many ListAccessCutoverApprovals              # the changes an operator approved for one merchant
@@ -109,7 +109,7 @@ unbounded-many ListInvoicePayers                           # or#837 aggregate ov
 unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all open invoices
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.
-unbounded-many ListActiveSubscriptionsByPriceIDs         # or#837 fan-out per price
+unbounded-many ListMigratableSubscriptionsByPriceIDs     # or#837 fan-out per price: a price migration's cohort
 unbounded-many ListSubscriptionsByPaymentMethodIDs       # or#837 fan-out per payment method
 unbounded-many ListLatestChargeByPaymentMethodIDs        # or#837 fan-out per payment method
 unbounded-many ListPaymentMethodsByRails                 # or#837 every payment method on a rail

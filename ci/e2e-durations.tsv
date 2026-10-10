@@ -262,6 +262,10 @@ ci/subscriptions	TestOversizedIdempotencyKeyIsInvalid	10.5
 ci/subscriptions	TestPaymentAttemptRetention	10.8
 ci/subscriptions	TestPaymentHealthAlerts	5.3
 ci/subscriptions	TestPaymentListsPageByCursor	6.6
+ci/subscriptions	TestPriceMigrationAtRenewal	16.0
+ci/subscriptions	TestPriceMigrationOfEveryVersion	12.0
+ci/subscriptions	TestPriceMigrationOnADate	16.0
+ci/subscriptions	TestPriceMigrationProviderOwned	18.0
 ci/subscriptions	TestProviderDashboardRefundAccessPolicy	47.7
 ci/subscriptions	TestProviderDunningAccessSuspend	9.6
 ci/subscriptions	TestProviderOwnedLifecycle	61.6
@@ -288,7 +292,6 @@ ci/subscriptions	TestReplicasSettledBeforeAdmission	20.6
 ci/subscriptions	TestReplicasShortLeaseSendsNothing	20.6
 ci/subscriptions	TestReplicasStalledExecutorSendsNothing	16.3
 ci/subscriptions	TestReplicasStalledHeartbeatLeavesOthersLease	15.0
-ci/subscriptions	TestRepriceBatches	20.9
 ci/subscriptions	TestSecurityAutomationCredentialCannotCharge	14.1
 ci/subscriptions	TestSecurityCCBillPeriodEndsAreBounded	17.2
 ci/subscriptions	TestSecurityCardAttackModeIsPerMerchant	22.4
