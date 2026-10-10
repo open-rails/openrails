@@ -14,6 +14,12 @@ type FXRefreshArgs struct{}
 
 func (FXRefreshArgs) Kind() string { return KindFXRefresh }
 
+// FXRefreshInsertOpts make every replica's insert of a period's refresh one
+// job.
+func FXRefreshInsertOpts() *river.InsertOpts {
+	return &river.InsertOpts{Queue: QueueBilling, UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: fx.RefreshInterval}}
+}
+
 // FXRefreshWorker reads every currency's FX rates for the whole fleet: River's
 // leader alone schedules it, and every replica quotes what it stored.
 type FXRefreshWorker struct {

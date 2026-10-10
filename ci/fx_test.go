@@ -17,6 +17,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/engine"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -101,13 +102,18 @@ func (f *fixture) fxEngine(t *testing.T, fx *fakeFX, start bool) *openrails.Clie
 	return client
 }
 
-// One refresh serves the fleet: two replicas running workers read each
-// currency's file once (34 requests, not one per pair), and both quote every
-// pair from PostgreSQL. A failing primary is read from the fallback.
+// One refresh serves the fleet: both replicas schedule the period's refresh,
+// which runs once and reads each currency's file once (34 requests, not one
+// per pair), and both quote every pair from PostgreSQL. A failing primary is
+// read from the fallback.
 func TestFXRefreshOncePerFleet(t *testing.T) {
 	fx, f := newFakeFX(t), newFixture(t)
 	a, b := f.fxEngine(t, fx, true), f.fxEngine(t, fx, true)
 	codes := moneyutil.CurrencyCodes()
+	for _, replica := range []*openrails.Client{a, b} {
+		_, err := engine.Graph(replica).Runtime.RiverClient.Insert(t.Context(), riverjobs.FXRefreshArgs{}, riverjobs.FXRefreshInsertOpts())
+		require.NoError(t, err)
+	}
 	require.Eventually(t, func() bool { return fx.requests(fxPrimary, "") >= len(codes) }, 60*time.Second, 50*time.Millisecond, "the refresh ran")
 	require.Never(t, func() bool { return fx.requests(fxPrimary, "") > len(codes) }, 3*time.Second, 100*time.Millisecond, "once for the fleet")
 	for _, code := range codes {

@@ -94,25 +94,40 @@ func (r *Rates) QuoteToUSD(ctx context.Context, currency string) (*Quote, error)
 	return r.Quote(ctx, currency, money.DefaultCurrency)
 }
 
+// refreshReads bounds a refresh's concurrent source reads.
+const refreshReads = 8
+
 // Refresh reads every currency's table, one request each, and stores every
 // pair for the fleet. A base that fails keeps its stored rates; the error
 // names how many failed.
 func (r *Rates) Refresh(ctx context.Context) error {
+	results := make([]Table, len(r.currencies))
+	failures := make([]error, len(r.currencies))
+	slots := make(chan struct{}, refreshReads)
+	var wg sync.WaitGroup
+	for i, base := range r.currencies {
+		wg.Go(func() {
+			slots <- struct{}{}
+			defer func() { <-slots }()
+			t, err := r.source.Table(ctx, base, r.currencies)
+			if err == nil && staleRate(t.AsOf, r.now()) {
+				err = fmt.Errorf("FX rates for %s are stale (as of %s)", base, t.AsOf.Format(time.DateOnly))
+			}
+			results[i], failures[i] = t, err
+		})
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
 	var tables []Table
 	var errs []error
-	for _, base := range r.currencies {
-		t, err := r.source.Table(ctx, base, r.currencies)
-		if err == nil && staleRate(t.AsOf, r.now()) {
-			err = fmt.Errorf("FX rates for %s are stale (as of %s)", base, t.AsOf.Format(time.DateOnly))
-		}
-		if err != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-			errs = append(errs, err)
+	for i := range r.currencies {
+		if failures[i] != nil {
+			errs = append(errs, failures[i])
 			continue
 		}
-		tables = append(tables, t)
+		tables = append(tables, results[i])
 	}
 	if err := r.store(ctx, r.now(), tables...); err != nil {
 		return err

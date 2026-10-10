@@ -678,17 +678,15 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
-	// Every 2 hours and on start: one FX refresh for the fleet (34 requests),
-	// which every replica quotes from.
+	// Every 2 hours: one FX refresh for the fleet (34 requests), which every
+	// replica quotes from. Not on start: the stored rates outlive a restart,
+	// and a quote that finds none fresh reads its base currency itself.
 	jobs = append(jobs, r.healthPeriodic(
 		fx.RefreshInterval,
 		func() (river.JobArgs, *river.InsertOpts) {
-			return riverjobs.FXRefreshArgs{}, &river.InsertOpts{
-				Queue:      riverjobs.QueueBilling,
-				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: fx.RefreshInterval},
-			}
+			return riverjobs.FXRefreshArgs{}, riverjobs.FXRefreshInsertOpts()
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		&river.PeriodicJobOpts{RunOnStart: false},
 	))
 
 	// Every 5 minutes: flush admission-denial counters from Redis to PG.

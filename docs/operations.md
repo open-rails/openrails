@@ -1086,7 +1086,7 @@ of leader neither delays nor repeats a period's run.
 | Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
-| FX refresh (+ start) | 2 h |
+| FX refresh | 2 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
 | Solana gas alert · Solana ledger reconcile | 6 h |
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
