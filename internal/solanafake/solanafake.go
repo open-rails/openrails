@@ -53,6 +53,10 @@ type Node struct {
 	token2022 map[string]*extensions
 	// forgotten signatures this node answers as unknown, for so many reads.
 	forgotten map[string]int
+	// gate stalls every answer until it closes (Hold); stalled names each
+	// stalled method.
+	gate    chan struct{}
+	stalled chan string
 }
 
 type extensions struct {
@@ -119,7 +123,25 @@ func New() *Node {
 }
 
 func (n *Node) URL() string { return n.server.URL }
-func (n *Node) Close()      { n.server.Close() }
+
+// Hold stalls every answer until release, as a node that stops responding;
+// stalled names each stalled method. A caller that gives up is let go.
+func (n *Node) Hold() (stalled <-chan string, release func()) {
+	gate, names := make(chan struct{}), make(chan string, 64)
+	n.mu.Lock()
+	n.gate, n.stalled = gate, names
+	n.mu.Unlock()
+	var once sync.Once
+	return names, func() {
+		once.Do(func() {
+			n.mu.Lock()
+			n.gate, n.stalled = nil, nil
+			n.mu.Unlock()
+			close(gate)
+		})
+	}
+}
+func (n *Node) Close() { n.server.Close() }
 
 // Mint stores an initialized SPL Token mint account.
 func (n *Node) Mint(address string, decimals byte) {
@@ -611,6 +633,20 @@ func (n *Node) serve(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
+	}
+	n.mu.Lock()
+	gate, stalled := n.gate, n.stalled
+	n.mu.Unlock()
+	if gate != nil {
+		select {
+		case stalled <- req.Method:
+		default:
+		}
+		select {
+		case <-gate:
+		case <-r.Context().Done():
+			return
+		}
 	}
 	reply := map[string]any{"jsonrpc": "2.0", "id": req.ID}
 	switch req.Method {

@@ -137,23 +137,46 @@ func (p *SolanaPayPoller) PollOnce(ctx context.Context) error {
 		byMerchant[r.MerchantID] = append(byMerchant[r.MerchantID], r)
 	}
 	for mid, group := range byMerchant {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		mctx := merchant.WithID(ctx, billing.MerchantID(mid))
+		if ctx.Err() != nil {
+			p.release(mctx, group)
+			continue
+		}
 		if err := p.db.RunInMerchantConn(mctx, func(ctx context.Context) error {
 			p.pollMerchant(ctx, billing.MerchantID(mid), group)
 			return nil
 		}); err != nil {
+			if ctx.Err() != nil {
+				p.release(mctx, group)
+				continue
+			}
 			log.WithError(err).WithField("merchant_id", mid.String()).Warn("Solana Pay merchant pass failed")
 		}
 	}
-	return nil
+	return ctx.Err()
+}
+
+// release hands claimed references back when the poller stops before
+// reading them, so the next process reads them at once instead of after the
+// lease. It undoes ClaimDue, on a fresh connection: the pass's may be gone.
+func (p *SolanaPayPoller) release(ctx context.Context, refs []gen.BillingSolanaPayReference) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	now, q := p.clock.Now(), p.db.GenDirectory()
+	for _, r := range refs {
+		if err := q.ScheduleSolanaPayPoll(ctx, gen.ScheduleSolanaPayPollParams{MerchantID: r.MerchantID, Reference: r.Reference, NextPollAt: now}); err != nil {
+			log.WithError(err).WithField("reference", r.Reference).Warn("Solana Pay: a claimed reference waits out its lease")
+		}
+	}
 }
 
 func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid billing.MerchantID, refs []gen.BillingSolanaPayReference) {
 	ledger := NewPayLedger(p.db)
 	rpc, err := p.rpcBuilder.Resolve(ctx, mid)
+	if ctx.Err() != nil {
+		p.release(ctx, refs)
+		return
+	}
 	if rpc == nil {
 		log.WithError(err).WithField("merchant_id", mid.String()).Warn("Solana Pay pass deferred: merchant RPC not armed")
 		for _, r := range refs {
@@ -161,11 +184,16 @@ func (p *SolanaPayPoller) pollMerchant(ctx context.Context, mid billing.Merchant
 		}
 		return
 	}
-	for _, r := range refs {
+	for i, r := range refs {
 		if ctx.Err() != nil {
+			p.release(ctx, refs[i:])
 			return
 		}
 		next, err := p.check(ctx, rpc, ledger, r)
+		if ctx.Err() != nil {
+			p.release(ctx, refs[i:])
+			return
+		}
 		if err != nil {
 			log.WithError(err).WithFields(log.Fields{"merchant_id": mid.String(), "reference": r.Reference}).Warn("Solana Pay reference check failed")
 			next = errorRecheck

@@ -219,6 +219,24 @@ func (p *solanaPay) eventually(cond func() bool, what string) {
 	require.Eventually(p.w.t, cond, 20*time.Second, 50*time.Millisecond, what)
 }
 
+// until awaits what a poller read finds. A read reschedules the reference on
+// the engine clock, which stands still unless moved, so the clock moves past
+// the pending recheck between checks, as time does between real reads.
+func (p *solanaPay) until(cond func() bool, what string) {
+	p.w.t.Helper()
+	p.eventually(func() bool {
+		p.w.clock.Advance(4 * time.Second)
+		return cond()
+	}, what)
+}
+
+// nextPoll is when the poller reads the reference next.
+func (p *solanaPay) nextPoll(req transferRequest) time.Time {
+	var at time.Time
+	require.NoError(p.w.t, p.w.pool.QueryRow(p.w.t.Context(), p.sql(`SELECT next_poll_at FROM $schema.solana_pay_references WHERE reference = $1`), req.reference).Scan(&at))
+	return at
+}
+
 func uuidOf(_ *testing.T, id billing.CheckoutAttemptID) uuid.UUID { return id.UUID() }
 
 // Two replicas' pollers and a burst of relayed confirmations race on one
@@ -259,7 +277,7 @@ func TestSolanaPaySecondTransferIsFlagged(t *testing.T) {
 	p := newSolanaPay(t)
 	req := p.checkout(p.w.newCustomer())
 	first := p.pay(req, req.amount)
-	p.eventually(func() bool { return p.status(req) == "succeeded" }, "first transfer credited")
+	p.until(func() bool { return p.status(req) == "succeeded" }, "first transfer credited")
 
 	second := p.pay(req, req.amount)
 	p.eventually(func() bool {
@@ -310,7 +328,7 @@ func TestSolanaPayAmountMismatch(t *testing.T) {
 	p := newSolanaPay(t)
 	short := p.checkout(p.w.newCustomer())
 	under := p.pay(short, short.amount-1)
-	p.eventually(func() bool { d, _ := p.receipt(under); return d != "" }, "underpayment recorded")
+	p.until(func() bool { d, _ := p.receipt(under); return d != "" }, "underpayment recorded")
 	d, reason := p.receipt(under)
 	require.Equal(t, []string{"review", "underpaid"}, []string{d, reason})
 	require.Equal(t, 0, p.payments(short))
@@ -318,7 +336,7 @@ func TestSolanaPayAmountMismatch(t *testing.T) {
 
 	extra := p.checkout(p.w.newCustomer())
 	over := p.pay(extra, extra.amount+1)
-	p.eventually(func() bool { return p.status(extra) == "succeeded" }, "overpayment credited")
+	p.until(func() bool { return p.status(extra) == "succeeded" }, "overpayment credited")
 	d, reason = p.receipt(over)
 	require.Equal(t, []string{"credited", "overpaid"}, []string{d, reason})
 	require.Equal(t, 1, p.reviewAlerts(over))
@@ -326,11 +344,13 @@ func TestSolanaPayAmountMismatch(t *testing.T) {
 
 // The only replica stops while a checkout awaits payment and the wallet pays
 // meanwhile; after the restart the pending state is intact and the transfer
-// is credited.
+// is credited. The poller has read the reference before the stop, so the
+// restarted one reads it again on its schedule.
 func TestSolanaPayPendingSurvivesRestart(t *testing.T) {
 	p := newSolanaPay(t)
 	req := p.checkout(p.w.newCustomer())
 	require.Equal(t, "pending", p.referenceStatus(req))
+	p.eventually(func() bool { return p.nextPoll(req).After(p.w.clock.Now()) }, "read while pending")
 
 	p.stopWorkers[p.w]()
 	p.w.stop()
@@ -338,10 +358,44 @@ func TestSolanaPayPendingSurvivesRestart(t *testing.T) {
 	p.w.start()
 	p.runWorkers(p.w)
 
-	p.eventually(func() bool { return p.status(req) == "succeeded" }, "credited after restart")
+	p.until(func() bool { return p.status(req) == "succeeded" }, "credited after restart")
 	d, _ := p.receipt(sig)
 	require.Equal(t, "credited", d)
 	require.Equal(t, 1, p.payments(req))
+}
+
+// A poller stopped in the middle of reading a reference hands it back: the
+// restarted process reads it at once, not after the claim's lease.
+func TestSolanaPayStopMidReadReleasesTheReference(t *testing.T) {
+	p := newSolanaPay(t)
+	req := p.checkout(p.w.newCustomer())
+	stalled, release := p.fake.Hold()
+	t.Cleanup(release)
+	p.eventually(func() bool {
+		for {
+			select {
+			case method := <-stalled:
+				if method == "getSignaturesForAddress" {
+					return true
+				}
+			default:
+				p.w.clock.Advance(4 * time.Second)
+				return false
+			}
+		}
+	}, "the poller is reading the reference")
+	require.True(t, p.nextPoll(req).After(p.w.clock.Now()), "claimed for the read")
+
+	p.stopWorkers[p.w]()
+	release()
+	require.WithinDuration(t, p.w.clock.Now(), p.nextPoll(req), 0, "the claim is handed back")
+
+	p.w.stop()
+	sig := p.pay(req, req.amount)
+	p.w.start()
+	p.runWorkers(p.w)
+	p.eventually(func() bool { return p.status(req) == "succeeded" }, "read at once after the restart, with no clock movement")
+	require.Equal(t, "credited", p.receiptOn(req, sig))
 }
 
 type solanaPayGC struct{}
@@ -355,7 +409,7 @@ func TestSolanaPayGCRemovesOnlySettledRows(t *testing.T) {
 	p := newSolanaPay(t)
 	paid := p.checkout(p.w.newCustomer())
 	credit := p.pay(paid, paid.amount)
-	p.eventually(func() bool { return p.status(paid) == "succeeded" }, "paid")
+	p.until(func() bool { return p.status(paid) == "succeeded" }, "paid")
 	stray, err := p.fake.Pay(solanafake.Transfer{Payer: solanago.NewWallet().PublicKey(), Recipient: solanago.NewWallet().PublicKey().String(),
 		Mint: paid.mint, Amount: 1, Reference: paid.reference, Memo: paid.memo, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
@@ -454,7 +508,7 @@ func TestSolanaPayOneTransferCreditsOneCheckout(t *testing.T) {
 		Amount: a.amount, Reference: a.reference, Also: []string{b.reference}, BlockTime: p.w.clock.Now()})
 	require.NoError(t, err)
 
-	p.eventually(func() bool { return p.status(a) == "succeeded" || p.status(b) == "succeeded" }, "one checkout credited")
+	p.until(func() bool { return p.status(a) == "succeeded" || p.status(b) == "succeeded" }, "one checkout credited")
 	p.eventually(func() bool {
 		p.w.clock.Advance(2 * time.Minute)
 		return p.referenceStatus(a) != "pending" || p.referenceStatus(b) != "pending"
@@ -505,14 +559,6 @@ func (p *solanaPay) sessionTerms(buyer *customer, id billing.CheckoutAttemptID) 
 	units, err := strconv.ParseUint(amount, 10, 64)
 	require.NoError(p.w.t, err)
 	return transferRequest{buyer: buyer, id: id, recipient: recipient, mint: mint, amount: units, reference: reference, memo: solanaint.PurchaseMemo(uuidOf(p.w.t, id))}
-}
-
-func (p *solanaPay) until(cond func() bool, what string) {
-	p.w.t.Helper()
-	p.eventually(func() bool {
-		p.w.clock.Advance(4 * time.Second)
-		return cond()
-	}, what)
 }
 
 // An attacker's own payment that also names a victim's reference cannot
