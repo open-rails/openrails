@@ -37,7 +37,7 @@ services:
       E2E_BASE_URL: http://localhost:8080
       E2E_USERS: reader1,reader2,reader3,reader4
       E2E_PASSWORD: correct horse battery staple
-    command: [sh, -c, "node ../e2e-seed.mjs && npx playwright test"]
+    command: [sh, -c, "node ../e2e-seed.mjs && npx playwright test --output /tmp/test-results"] # results stay in the container
     depends_on:
       app: { condition: service_healthy }
       catalog: { condition: service_completed_successfully }
