@@ -1,5 +1,11 @@
 # Changelog
 
+## Checkout saves a new card under its PSP
+
+- Inside a `BillingProvider`, `Checkout` saved a new card with the session
+  option's id as `psp_id`, which `POST /me/payment-methods` refuses
+  (`invalid_param`); it now sends the option's `psp_id`.
+
 ## A default card per currency
 
 - `setDefaultPaymentMethod({currency, paymentMethodId})` (`PUT

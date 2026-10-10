@@ -476,7 +476,7 @@ export function Checkout({
           }
         const display = cardEntryDisplay(card)
         const method = await client.addPaymentMethod({
-          psp_id: rail.id,
+          psp_id: rail.psp_id ?? rail.id,
           card,
           billing_details: billingDetailsOf(parsed.data),
         })
@@ -501,7 +501,7 @@ export function Checkout({
         }
       }
       const method = await client.addPaymentMethod({
-        psp_id: rail.id,
+        psp_id: rail.psp_id ?? rail.id,
         payment_token: tokenized.token,
         billing_details: billingDetailsOf(parsed.data),
       })

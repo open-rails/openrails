@@ -21,6 +21,7 @@ function checkoutOption(
         : "redirect"
   return {
     id: `option_${rail}`,
+    psp_id: `psp_${rail}`,
     rail,
     mode: rail === "solana" ? "one_off" : "subscription",
     driver,
@@ -1060,7 +1061,7 @@ describe("one card panel", () => {
       calls.push({ path: input, body: JSON.parse(String(init.body)) })
       return Response.json({
         id: "pm_new",
-        psp_id: "option_nmi",
+        psp_id: "psp_nmi",
         card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2027 },
       })
     })
@@ -1105,7 +1106,7 @@ describe("one card panel", () => {
       {
         path: "/billing/v1/me/payment-methods",
         body: {
-          psp_id: "option_nmi",
+          psp_id: "psp_nmi",
           payment_token: "preview_payment_token",
           billing_details: {
             name: "Pat Reader",
@@ -1207,6 +1208,7 @@ describe("one card panel", () => {
 describe("server card entry", () => {
   const cardRail: PaymentOption = {
     id: "option_nmi",
+    psp_id: "psp_nmi",
     rail: "nmi",
     mode: "subscription",
     driver: "card",
@@ -1240,7 +1242,7 @@ describe("server card entry", () => {
       calls.push({ path: input, body: JSON.parse(String(init.body)) })
       return Response.json({
         id: "pm_card",
-        psp_id: "option_nmi",
+        psp_id: "psp_nmi",
         card: { brand: "visa", last4: "1111", exp_month: 10, exp_year: 2027 },
       })
     })
@@ -1275,7 +1277,7 @@ describe("server card entry", () => {
       {
         path: "/billing/v1/me/payment-methods",
         body: {
-          psp_id: "option_nmi",
+          psp_id: "psp_nmi",
           card,
           billing_details: {
             name: "Pat Reader",
