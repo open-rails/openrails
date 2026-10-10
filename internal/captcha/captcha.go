@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/httpx"
 )
 
@@ -62,11 +63,13 @@ type siteVerifyVerifier struct {
 	verifyURLOverride string
 }
 
-// ChallengeStore tracks challenged subjects in Redis, falling back to this
-// process's memory only while Redis cannot be written. One per process.
-// Subjects are rate-limit identities such as "ip:203.0.113.1" or "user:abc".
+// ChallengeStore tracks challenged subjects where every replica reads them: in
+// Redis, else in PostgreSQL. This process's memory holds only a marker
+// neither could write. One per process. Subjects are rate-limit identities
+// such as "ip:203.0.113.1" or "user:abc".
 type ChallengeStore struct {
 	rdb        *redis.Client
+	windows    *ratelimit.Windows
 	mu         sync.Mutex
 	challenged map[string]time.Time
 }
@@ -156,10 +159,12 @@ func (v *siteVerifyVerifier) Verify(ctx context.Context, req VerifyRequest) (*Ve
 	return result, nil
 }
 
-// NewChallengeStore creates a captcha challenge store.
-func NewChallengeStore(rdb *redis.Client) *ChallengeStore {
+// NewChallengeStore creates a captcha challenge store over Redis or, without
+// it, the PostgreSQL windows.
+func NewChallengeStore(rdb *redis.Client, windows *ratelimit.Windows) *ChallengeStore {
 	return &ChallengeStore{
 		rdb:        rdb,
+		windows:    windows,
 		challenged: make(map[string]time.Time),
 	}
 }
@@ -183,17 +188,27 @@ func (s *ChallengeStore) exists(ctx context.Context, redisKey, memoryKey string,
 	if s == nil {
 		return false, nil
 	}
+	answered := false
 	if s.rdb != nil {
 		n, err := s.rdb.Exists(ctx, redisKey).Result()
 		if err == nil && n > 0 {
 			return true, nil
 		}
+		answered = err == nil
 		if err != nil {
-			log.WithError(err).Warn("captcha redis lookup failed; using in-memory store")
+			log.WithError(err).Warn("captcha Redis lookup failed; reading PostgreSQL")
 		}
-		// If Redis misses after a prior fallback write, memory may still contain
-		// the authoritative challenge for this process.
 	}
+	if !answered && s.windows != nil {
+		_, live, err := s.windows.Live(ctx, redisKey)
+		if live {
+			return true, nil
+		}
+		if err != nil {
+			log.WithError(err).Error("captcha PostgreSQL lookup failed; reading this process only")
+		}
+	}
+	// A marker neither store could write is in this process's memory.
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -215,14 +230,21 @@ func (s *ChallengeStore) set(ctx context.Context, redisKey, memoryKey string, me
 	if ttl <= 0 {
 		ttl = 15 * time.Minute
 	}
-	// Memory is only the fallback for a Redis write that failed: a marker
-	// kept in memory as well would outlive a solve on another pod.
+	// Memory is only the fallback for a shared write that failed: a marker
+	// kept in memory as well would outlive a solve on another replica.
 	if s.rdb != nil {
 		err := s.rdb.Set(ctx, redisKey, "1", ttl).Err()
 		if err == nil {
 			return nil
 		}
-		log.WithError(err).Warn("captcha redis set failed; using in-memory store")
+		log.WithError(err).Warn("captcha Redis set failed; writing PostgreSQL")
+	}
+	if s.windows != nil {
+		err := s.windows.Mark(ctx, redisKey, time.Now().Add(ttl))
+		if err == nil {
+			return nil
+		}
+		log.WithError(err).Error("captcha PostgreSQL write failed; this process only holds the challenge")
 	}
 	now := time.Now()
 	s.mu.Lock()
@@ -239,6 +261,11 @@ func (s *ChallengeStore) del(ctx context.Context, redisKey, memoryKey string, me
 	if s.rdb != nil {
 		if err := s.rdb.Del(ctx, redisKey).Err(); err != nil {
 			log.WithError(err).Warn("captcha redis delete failed")
+		}
+	}
+	if s.windows != nil {
+		if err := s.windows.Clear(ctx, redisKey); err != nil {
+			log.WithError(err).Warn("captcha PostgreSQL delete failed")
 		}
 	}
 	s.mu.Lock()

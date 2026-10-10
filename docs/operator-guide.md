@@ -9,7 +9,7 @@ territory. The primary deep manual is [operations.md](operations.md).
 | Service | Required | What it does | Losing it |
 |---|---|---|---|
 | **Postgres 18+** | yes | Source of truth: double-entry money ledger, grant ledger, subscriptions, entitlements, catalog, the provider-intent ledger, and River's job queue. Can share an instance with your host app — OpenRails owns one schema (default `billing`) and its River's (default `billing_river`). | Data loss. Provider-owned facts (charges, remote subscription liveness) can be re-imported with `pull-provider`, but the ledger, credits, entitlements, and catalog are OpenRails-owned and exist nowhere else. **Back this up.** |
-| **Redis-compatible service** (Garnet recommended) | optional | Shared route/admin rate limits, captcha escalation of card abuse, FX quote caching, and admission-denial counters flushed to Postgres every 5 minutes. The atomic spending-admission gate and failed-usage grace and cutoff windows are in PostgreSQL. | Boot and readiness do not require Redis. HTTP rate limits fall back to per-process memory; FX uses fresh local rates. Denial statistics are best-effort. No money path needs Redis. |
+| **Redis-compatible service** (Garnet recommended) | optional | Shared route/admin rate limits, captcha escalation of card abuse, FX quote caching, and admission-denial counters flushed to Postgres every 5 minutes. The atomic spending-admission gate and failed-usage grace and cutoff windows are in PostgreSQL. | Boot and readiness do not require Redis. Rate limits, admin lockouts and captcha challenges are kept in PostgreSQL instead, still shared by every replica; FX uses fresh local rates; the card-abuse captcha accelerator is off. Denial statistics are best-effort. No money path needs Redis. |
 | **HashiCorp Vault** | optional | Primary merchant-secret backend in production (`secret_backend: vault`), and/or Transit signing for Solana custody — two independent capabilities, grantable separately. See [vault.md](vault.md). | With an effective `secret_backend: db`, secrets live envelope-encrypted in `billing.merchant_secrets` instead. `encryption.master_key` / env `ENCRYPTION_MASTER_KEY` (base64, 32 bytes) is what encrypts them; construction refuses managed DB storage without encryption in both sandbox and live. Snapshot credentials stay in process memory. |
 
 OpenRails' own JWT signing keys come from `AUTHKIT_KEYS_PATH/keys.json`
@@ -147,7 +147,7 @@ openrails merchants create acme --display-name Acme [--owner-user-id <uuid>]
 openrails merchants rename acme acme-shop       # the former name forwards (auth.naming)
 openrails merchants delete <merchant-id>        # soft: off the lists, credentials resolve nothing, records kept
 openrails merchants restore <merchant-id>
-openrails admin-lockouts unlock <user-id>       # with Redis; without it a lockout lives in the serving process
+openrails admin-lockouts unlock <user-id>       # every replica's lockout, in Redis or PostgreSQL
 ```
 
 ### When things drift

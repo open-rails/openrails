@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
@@ -33,9 +34,11 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	var rdb *redis.Client
 	var resolver *iputil.TrustedProxies
 	var store *captcha.ChallengeStore
+	var windows *ratelimit.Windows
 	if rt != nil {
 		rdb = rt.RedisClient
 		store = rt.CaptchaStore
+		windows = rt.RateWindows
 		resolver = rt.TrustedProxies
 		if rt.Config != nil {
 			rateLimits = rt.Config.RateLimits
@@ -45,7 +48,7 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 	for i := range mux.Entries {
 		mux.Entries[i].Browser = true
 	}
-	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, store, resolver)
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, rdb, windows, store, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		canonical := entry.Path
 		if selfPrefix != "" {

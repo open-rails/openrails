@@ -1580,6 +1580,13 @@ type BillingPspRefreshWatermark struct {
 	UpdatedAt   time.Time
 }
 
+// Global by design: the rate-limit windows, admin lockouts and captcha challenges every replica counts when no Redis is configured, keyed as in Redis. Retention: rows are deleted once expired.
+type BillingRateWindow struct {
+	Key       string
+	Hits      int64
+	ExpiresAt time.Time
+}
+
 // One expected rebill per (subscription, due_at): the moment its paid period came due. Its attempts are payment_attempts.cycle_id. Retention: rows are deleted 25 months (761 days) after due_at, once their attempts are gone.
 type BillingRebillCycle struct {
 	ID             uuid.UUID

@@ -80,6 +80,7 @@ var Tables = map[string]Table{
 	"nmi_history_months":              {Rows, "rows are deleted 25 months (761 days) after their month."},
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"card_attempt_failures":           {Rows, "buckets are deleted once older than the longest card-abuse window."},
+	"rate_windows":                    {Rows, "rows are deleted once expired."},
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
 

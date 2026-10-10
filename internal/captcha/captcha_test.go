@@ -96,7 +96,7 @@ func TestPolicy(t *testing.T) {
 
 func TestChallengeStore(t *testing.T) {
 	ctx := context.Background()
-	s := NewChallengeStore(nil)
+	s := NewChallengeStore(nil, nil)
 	require.NoError(t, s.MarkChallenged(ctx, "ip:203.0.113.1", time.Minute))
 	on, err := s.IsChallenged(ctx, "ip:203.0.113.1")
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func (r *sharedRedis) client() *redis.Client {
 func TestChallengeSolvedOnAnotherPod(t *testing.T) {
 	ctx := context.Background()
 	shared := &sharedRedis{keys: map[string]bool{}}
-	a, b := NewChallengeStore(shared.client()), NewChallengeStore(shared.client())
+	a, b := NewChallengeStore(shared.client(), nil), NewChallengeStore(shared.client(), nil)
 
 	require.NoError(t, a.MarkChallenged(ctx, "user:u1", time.Minute))
 	on, err := b.IsChallenged(ctx, "user:u1")

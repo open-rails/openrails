@@ -41,7 +41,7 @@ func captchaServer(provider string, store *captcha.ChallengeStore) *Server {
 // Captcha discovery is mounted under each surface prefix, reports a pending
 // challenge for the caller's address or user, and never serves the secret.
 func TestCaptchaDiscoveryRoutes(t *testing.T) {
-	store := captcha.NewChallengeStore(nil)
+	store := captcha.NewChallengeStore(nil, nil)
 	require.NoError(t, store.MarkChallenged(context.Background(), "ip:203.0.113.50", time.Minute))
 	require.NoError(t, store.MarkChallenged(context.Background(), "user:user_1", time.Minute))
 

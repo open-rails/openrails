@@ -40,6 +40,7 @@ sql:
       - "internal/migrate/postgres/0041_default_payment_method.up.sql"
       - "internal/migrate/postgres/0042_catalog_ownership.up.sql"
       - "internal/migrate/postgres/0043_notification_email_lease.up.sql"
+      - "internal/migrate/postgres/0044_rate_windows.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

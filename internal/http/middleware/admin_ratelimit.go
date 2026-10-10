@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
@@ -101,20 +102,22 @@ type adminMemoryRateLimits struct {
 }
 
 // AdminOperationLimiter enforces operation-specific, per-human-admin limits.
-// Redis is authoritative across replicas; the bounded in-process store keeps a
-// single-node deployment protected when Redis is absent or briefly unavailable.
+// Every replica counts the same windows and lockouts: in Redis, else in
+// PostgreSQL. The bounded in-process store counts only what neither can.
 type AdminOperationLimiter struct {
-	rdb    *redis.Client
-	memory *adminMemoryRateLimits
-	now    func() time.Time
-	sink   AdminRateLimitEventSink
+	rdb     *redis.Client
+	windows *ratelimit.Windows
+	memory  *adminMemoryRateLimits
+	now     func() time.Time
+	sink    AdminRateLimitEventSink
 }
 
 // NewAdminOperationLimiter builds the shared limiter used by both merchant
 // action middleware and the root-only unlock endpoint.
-func NewAdminOperationLimiter(rdb *redis.Client) *AdminOperationLimiter {
+func NewAdminOperationLimiter(rdb *redis.Client, windows *ratelimit.Windows) *AdminOperationLimiter {
 	return &AdminOperationLimiter{
-		rdb: rdb,
+		rdb:     rdb,
+		windows: windows,
 		memory: &adminMemoryRateLimits{
 			counters: make(map[string]adminMemoryCounter),
 			locks:    make(map[string]time.Time),
@@ -211,6 +214,11 @@ func (l *AdminOperationLimiter) Unlock(ctx context.Context, userID, actorID stri
 			return fmt.Errorf("admin rate limit unlock: %w", err)
 		}
 	}
+	if l.windows != nil {
+		if err := l.windows.Clear(ctx, adminRateLimitKeys(userID, now)...); err != nil {
+			return fmt.Errorf("admin rate limit unlock: %w", err)
+		}
+	}
 	l.unlockMemory(userID)
 	l.emit(ctx, AdminRateLimitEvent{Kind: "unlocked", UserID: userID, ActorID: actorID})
 	return nil
@@ -246,9 +254,49 @@ func (l *AdminOperationLimiter) evaluate(ctx context.Context, userID string, ope
 		log.WithError(err).WithFields(log.Fields{
 			"admin_user_id": userID,
 			"operation":     operation,
-		}).Warn("admin rate limit redis error; falling back to in-memory limiter")
+		}).Warn("admin rate limit Redis error; counting in PostgreSQL")
+	}
+	if l.windows != nil {
+		decision, err := l.evaluateWindows(ctx, userID, operation, windows, now, weight)
+		if err == nil {
+			return decision
+		}
+		log.WithError(err).WithFields(log.Fields{
+			"admin_user_id": userID,
+			"operation":     operation,
+		}).Error("admin rate limit PostgreSQL error; counting in this process only")
 	}
 	return l.evaluateMemory(userID, operation, windows, now, weight)
+}
+
+// evaluateWindows is evaluateRedis on the PostgreSQL windows. Each step is
+// atomic; between the lockout check and the counts another replica's request
+// may count first, as it may arrive first.
+func (l *AdminOperationLimiter) evaluateWindows(ctx context.Context, userID string, operation AdminOperation, windows []adminRateLimitWindow, now time.Time, weight int64) (adminRateLimitDecision, error) {
+	lock := adminRateLimitLockKey(userID)
+	if until, locked, err := l.windows.Live(ctx, lock); err != nil || locked {
+		return adminRateLimitDecision{wasLocked: locked, retryAfter: until.Sub(now)}, err
+	}
+	decision := adminRateLimitDecision{allowed: true, counts: make(map[string]int64, len(windows))}
+	breached := false
+	for _, window := range windows {
+		count, _, err := l.windows.Hit(ctx, adminRateLimitCounterKey(userID, operation, window, now), weight, nextAdminRateLimitWindow(now, window.duration))
+		if err != nil {
+			return adminRateLimitDecision{}, err
+		}
+		decision.counts[window.name] = count
+		if crossed(count, weight, adminRateLimitAlertThreshold(window.limit)) {
+			decision.thresholds = append(decision.thresholds, window.name)
+		}
+		breached = breached || count > window.limit
+	}
+	if breached {
+		if err := l.windows.Mark(ctx, lock, now.Add(adminLockoutDuration)); err != nil {
+			return adminRateLimitDecision{}, err
+		}
+		decision.allowed, decision.retryAfter = false, adminLockoutDuration
+	}
+	return decision, nil
 }
 
 func (l *AdminOperationLimiter) emit(ctx context.Context, event AdminRateLimitEvent) {
@@ -461,11 +509,16 @@ func (l *AdminOperationLimiter) evaluateRedis(ctx context.Context, userID string
 }
 
 func (l *AdminOperationLimiter) unlockRedis(ctx context.Context, userID string, now time.Time) error {
+	return l.rdb.Del(ctx, adminRateLimitKeys(userID, now)...).Err()
+}
+
+// adminRateLimitKeys are userID's lockout and current counters.
+func adminRateLimitKeys(userID string, now time.Time) []string {
 	keys := []string{adminRateLimitLockKey(userID)}
 	for operation, windows := range adminRateLimitPolicies {
 		for _, window := range windows {
 			keys = append(keys, adminRateLimitCounterKey(userID, operation, window, now))
 		}
 	}
-	return l.rdb.Del(ctx, keys...).Err()
+	return keys
 }

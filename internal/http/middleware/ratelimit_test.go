@@ -93,7 +93,7 @@ func engine(deps RateLimitDeps, next http.Handler) http.Handler {
 }
 
 func newDeps(limits config.RateLimitsConfig, cfg *config.CaptchaConfig, v captcha.Verifier) RateLimitDeps {
-	return RateLimitDeps{Limits: &limits, Captcha: cfg, Store: NewRateLimitStore(), ChallengeStore: captcha.NewChallengeStore(nil), Verifier: v}
+	return RateLimitDeps{Limits: &limits, Captcha: cfg, Store: NewRateLimitStore(), ChallengeStore: captcha.NewChallengeStore(nil, nil), Verifier: v}
 }
 
 func TestClassifyBucket(t *testing.T) {
@@ -146,7 +146,7 @@ func TestRateLimitSubjects(t *testing.T) {
 				}
 				return billingauth.UserContext{}, billingauth.ErrUnauthenticated
 			})
-			h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, tc.resolver))
+			h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, nil, tc.resolver))
 			for _, c := range tc.calls {
 				c.do(t, h)
 			}
@@ -154,14 +154,14 @@ func TestRateLimitSubjects(t *testing.T) {
 	}
 
 	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
-	h := RateLimitHTTP(&limits, nil, nil, nil, nil)(okHandler())
+	h := RateLimitHTTP(&limits, nil, nil, nil, nil, nil)(okHandler())
 	first := call{path: "/v1/me/checkout-sessions", ip: a, want: 200}.do(t, h)
 	require.Equal(t, "1", first.Header().Get("X-RateLimit-Limit"))
 	require.Equal(t, "0", first.Header().Get("X-RateLimit-Remaining"))
 	require.NotEmpty(t, first.Header().Get("X-RateLimit-Reset"))
 	blocked := call{path: "/v1/me/checkout-sessions", ip: a, want: 429, body: "Rate limit exceeded"}.do(t, h)
 	require.NotEmpty(t, blocked.Header().Get("Retry-After"))
-	require.Nil(t, RateLimitHTTP(nil, nil, nil, nil, nil)(nil), "no limits config mounts nothing")
+	require.Nil(t, RateLimitHTTP(nil, nil, nil, nil, nil, nil)(nil), "no limits config mounts nothing")
 }
 
 // Oversized payloads are shed before counting: declared lengths with 413, and

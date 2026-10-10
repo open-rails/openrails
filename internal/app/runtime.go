@@ -48,6 +48,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/productaccess"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -256,6 +257,9 @@ type Runtime struct {
 	// CaptchaStore is the process's one captcha challenge store, shared by the
 	// card-abuse guard and every HTTP surface so a solve clears it everywhere.
 	CaptchaStore *captcha.ChallengeStore
+	// RateWindows are the rate-limit windows, admin lockouts and captcha
+	// challenges in PostgreSQL that replicas share without Redis.
+	RateWindows *ratelimit.Windows
 	// CardFailureLedger is the PostgreSQL card-testing ledger (SEC-30),
 	// enforced on every replica.
 	CardFailureLedger *abuse.FailureLedger

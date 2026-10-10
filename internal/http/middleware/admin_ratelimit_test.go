@@ -21,7 +21,7 @@ import (
 const adminUser = "11111111-1111-1111-1111-111111111111"
 
 func testAdminLimiter(now *time.Time) (*AdminOperationLimiter, *[]AdminRateLimitEvent) {
-	l := NewAdminOperationLimiter(nil)
+	l := NewAdminOperationLimiter(nil, nil)
 	l.now = func() time.Time { return *now }
 	var events []AdminRateLimitEvent
 	l.sink = func(_ context.Context, e AdminRateLimitEvent) { events = append(events, e) }

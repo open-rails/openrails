@@ -223,7 +223,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil), Permissions: Permissions{AdminRead: "staff:read", AdminWrite: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil, nil), Permissions: Permissions{AdminRead: "staff:read", AdminWrite: "staff:write"}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.

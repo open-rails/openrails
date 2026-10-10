@@ -117,7 +117,8 @@ live gateway. See [operations.md](operations.md).
 
 **Rate limiting is on by default**: a nil `RateLimits` gets the built-in limits
 on checkout, card and subscription writes and webhooks (tight on checkout to
-deter card testing; shared across replicas with `Deps.Redis`). Other routes are
+deter card testing; every replica counts the same limits, in Redis with
+`Deps.Redis`, else in PostgreSQL). Other routes are
 not limited: a per-address ceiling belongs to your proxy. Override the limits,
 or set `RateLimitsDisabled` if your own gateway fronts billing. See
 [rate-limiting.md](rate-limiting.md).

@@ -2,8 +2,9 @@
 
 OpenRails rate-limits on a fixed 1-minute window, per *bucket* (endpoint category) and per
 *subject* (dimension). Every request is counted against each applicable subject and blocked when
-**any** trips — headers reflect the strictest. Counters live in Redis when configured; a Redis
-error falls back to a per-process in-memory counter for that check. One net/http middleware
+**any** trips — headers reflect the strictest. Counters live in Redis when configured, else in
+PostgreSQL (`rate_windows`), so every replica counts the same window; a Redis error counts that
+check in PostgreSQL. Admin lockouts and captcha challenges are kept the same way. One net/http middleware
 (`RateLimitHTTP`, `internal/http/middleware/ratelimit_neutral.go`) serves both surfaces —
 embedded `/billing/v1/...` paths are normalized to `/v1/...` before classification.
 

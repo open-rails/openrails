@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -131,6 +132,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 type CleanupResult struct {
 	CheckoutAttemptsExpired int64
 	CheckoutSessions        int64
+	RateWindows             int64
 	NotificationsSeen       int64
 	NotificationsAll        int64
 	WebhookEvents           int64
@@ -228,6 +230,22 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			break
 		}
 		result.CheckoutSessions += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+	}
+
+	// Expired rate-limit windows, lockouts and captcha challenges: indexed,
+	// bounded deletes like the sessions above.
+	windows := ratelimit.NewWindows(w.DB)
+	for range cleanupCheckoutSessionMaxBatches {
+		n, err := windows.Prune(ctx, cleanupDeleteBatch)
+		if err != nil {
+			logger.WithError(err).Error("Cleanup: delete rate windows failed")
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete rate windows: %w", err))
+			break
+		}
+		result.RateWindows += n
 		if n < cleanupDeleteBatch {
 			break
 		}

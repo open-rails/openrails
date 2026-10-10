@@ -23,6 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/merchanttarget"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
@@ -240,7 +241,7 @@ func New(deps Dependencies) (*Server, error) {
 		resourceServer:     deps.ResourceServer,
 		consoleIssuer:      deps.ConsoleIssuer,
 		captchaStore:       deps.Runtime.CaptchaStore,
-		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Redis),
+		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Redis, deps.Runtime.RateWindows),
 		consoleAssets:      deps.ConsoleAssets,
 		adminConsole:       deps.AdminConsole,
 		browserTierRoutes:  middleware.NewBrowserTierRoutes(),
@@ -311,7 +312,7 @@ func New(deps Dependencies) (*Server, error) {
 		return merchanttarget.Resolve(ctx, r, s.runtime.Merchants, s.runtime.ConfiguredMerchant(), "")
 	})
 
-	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies())
+	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.rateWindows(), s.captchaStore, s.trustedProxies())
 	s.publicHandler = s.wrapPublicHandler(mux.Handler())
 	s.nativeRoutes = &router.Table{}
 	for _, entry := range mux.Entries {
@@ -328,6 +329,15 @@ func New(deps Dependencies) (*Server, error) {
 
 	log.Info("Billing service initialized successfully")
 	return s, nil
+}
+
+// rateWindows are the runtime's PostgreSQL rate windows, nil-safe like
+// trustedProxies.
+func (s *Server) rateWindows() *ratelimit.Windows {
+	if s == nil || s.runtime == nil {
+		return nil
+	}
+	return s.runtime.RateWindows
 }
 
 // trustedProxies returns the #746 client-IP resolver, nil-safe against a
@@ -348,7 +358,7 @@ func (s *Server) wrapPublicHandler(mux http.Handler) http.Handler {
 func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool) http.Handler {
 	limiter := s.sharedRateLimit
 	if limiter == nil {
-		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.captchaStore, s.trustedProxies())
+		limiter = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.rdb, s.rateWindows(), s.captchaStore, s.trustedProxies())
 	}
 	return middleware.ChainHTTP(next,
 		middleware.RecoverHTTP(),

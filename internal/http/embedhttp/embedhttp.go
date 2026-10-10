@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/internal/http/routesurface"
+	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	"github.com/open-rails/openrails/internal/scim"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
@@ -57,7 +58,7 @@ type Assembler struct {
 	Runtime      *app.Runtime
 	CaptchaStore *captcha.ChallengeStore
 	// RDB is the Redis/Garnet client backing the rate-limit counters + captcha
-	// challenge store. nil falls back to per-process in-memory rate-limit windows.
+	// challenge store. nil counts them in the runtime's PostgreSQL windows.
 	RDB          *redis.Client
 	AdminLimiter *middleware.AdminOperationLimiter
 	// Auth is the mount's Routes.Auth: the merchant tier's staff gate, and
@@ -75,7 +76,7 @@ func FromApp(a *app.App) *Assembler {
 		Runtime:      a.Runtime,
 		CaptchaStore: a.Runtime.CaptchaStore,
 		RDB:          a.RedisClient,
-		AdminLimiter: middleware.NewAdminOperationLimiter(a.RedisClient),
+		AdminLimiter: middleware.NewAdminOperationLimiter(a.RedisClient, a.Runtime.RateWindows),
 	}
 }
 
@@ -150,18 +151,20 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	var rateLimits *config.RateLimitsConfig
 	var captchaCfg *config.CaptchaConfig
 	var resolver *iputil.TrustedProxies
+	var windows *ratelimit.Windows
 	if s.Cfg != nil {
 		rateLimits = s.Cfg.RateLimits
 		captchaCfg = s.Cfg.Captcha
 	}
 	if s.Runtime != nil {
 		resolver = s.Runtime.TrustedProxies
+		windows = s.Runtime.RateWindows
 	}
 	for i := range mux.Entries {
 		entry := &mux.Entries[i]
 		entry.Browser = browserRoutes[entry.Method+" "+entry.Path]
 	}
-	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, s.CaptchaStore, resolver)
+	limiter := middleware.RateLimitHTTP(rateLimits, captchaCfg, s.RDB, windows, s.CaptchaStore, resolver)
 	mux.Wrap(func(entry router.Entry) http.Handler {
 		return middleware.ChainHTTP(entry.Handler,
 			middleware.WithRoutePath(entry.Path),

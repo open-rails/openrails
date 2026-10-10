@@ -46,7 +46,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				"checkout":           {RequestsPerMinute: 2},
 			}
 			calls := 0
-			h := RateLimitHTTP(&limits, captchaOn, rdb, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			h := RateLimitHTTP(&limits, captchaOn, rdb, nil, nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls++
 				w.WriteHeader(http.StatusOK)
 			}))
@@ -90,7 +90,7 @@ func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
 	auth := billingauth.AuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{UserID: r.Header.Get("X-Test-User")}, nil
 	})
-	h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, nil))
+	h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, nil, nil))
 	userA, userB, userC := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	merchantA, merchantB := billing.MerchantID(uuid.New()), billing.MerchantID(uuid.New())
 	for _, c := range []call{

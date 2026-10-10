@@ -321,7 +321,7 @@ func RegisterUserRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 // /v1.
 func RegisterStaffRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	if opts.AdminLimiter == nil && rt != nil {
-		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient)
+		opts.AdminLimiter = middleware.NewAdminOperationLimiter(rt.RedisClient, rt.RateWindows)
 	}
 	newEnv(rt, opts).mount(rr, "/v1", opts.Permissions.mounts)
 }

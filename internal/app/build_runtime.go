@@ -290,7 +290,8 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// Card-abuse guard (#371): the captcha accelerator over the ledger below.
 	// It needs Redis and a captcha to solve; nil (safe no-op) otherwise, and
 	// the ledger's blocks are the whole policy.
-	captchaStore := captcha.NewChallengeStore(redisClient)
+	rateWindows := ratelimit.NewWindows(database)
+	captchaStore := captcha.NewChallengeStore(redisClient, rateWindows)
 	var cardAbuseGuard *abuse.CardAbuseGuard
 	if redisClient != nil && config.CaptchaEnabled(cfg.Captcha) {
 		cardAbuseGuard = abuse.NewCardAbuseGuard(
@@ -355,6 +356,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		Idempotency:            serviceInstances.Idempotency,
 		CardAbuseGuard:         cardAbuseGuard,
 		CaptchaStore:           captchaStore,
+		RateWindows:            rateWindows,
 		CardFailureLedger:      cardFailureLedger,
 		MoneyService:           serviceInstances.MoneyService,
 		MetricsService:         serviceInstances.MetricsService,
