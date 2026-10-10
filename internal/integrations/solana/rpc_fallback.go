@@ -549,7 +549,7 @@ func (c *RPCFallbackClient) LatestBlockhash(ctx context.Context) (RecentBlockhas
 		if err != nil {
 			return err
 		}
-		out = RecentBlockhash{Hash: resp.Value.Blockhash, LastValidBlockHeight: resp.Value.LastValidBlockHeight, Slot: resp.Context.Slot}
+		out = RecentBlockhash{Hash: resp.Value.Blockhash, LastValidBlockHeight: resp.Value.LastValidBlockHeight}
 		return nil
 	})
 	return out, err

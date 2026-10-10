@@ -7,7 +7,6 @@ import (
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
-	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
@@ -17,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
 	"github.com/open-rails/openrails/internal/failpoint"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -54,7 +52,7 @@ type solanaCranker interface {
 // memoLocalID (the durable pull-intent id; Nil = unstamped) is stamped on the
 // pull tx as its self-recognition memo. Fakes without it skip the write-ahead.
 type presubmitCranker interface {
-	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (string, error)
+	CrankWithPresubmit(ctx context.Context, merchantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error)
 }
 
 // membershipManager is the lifecycle surface the cranker drives (satisfied by
@@ -236,7 +234,7 @@ type crankOutcome struct {
 // record. An error means the pull is unresolved (operational failure, or a
 // landed pull whose local finalize failed; the recorded signature tells them
 // apart); nil means the period resolved (see crankKind).
-func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, memoLocalID uuid.UUID, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (crankOutcome, error) {
+func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, row *models.SolanaSubscription, memoLocalID uuid.UUID, presubmit func(signature string) error) (crankOutcome, error) {
 	merchantID := billing.MerchantID(row.MerchantID)
 
 	// Resolve the plan amount (token base units) + period + ghost-plan fingerprint

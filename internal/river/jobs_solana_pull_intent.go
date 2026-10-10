@@ -44,12 +44,11 @@ type SolanaPullPayload struct {
 // *solana.RPCClient).
 type SolanaTxReader interface {
 	GetTransaction(ctx context.Context, signature solanago.Signature) (*rpc.GetTransactionResult, error)
-	TransactionExpiredUnseen(ctx context.Context, signature solanago.Signature, terminal solanaint.ChainTerminal) (bool, error)
 }
 
 // SolanaPullIntentHandler drives the crank state machine through the intent
-// ledger. It records the signature and expiry before sending, repairs landed
-// pulls, and requires chain evidence before replacing an unresolved transaction.
+// ledger. It records the signature before sending, repairs landed pulls, and
+// only retries a recorded transaction after confirming that it reverted.
 type SolanaPullIntentHandler struct {
 	Core   *SolanaCrankWorker // DB/Config/Clock/Cranker/Lifecycle (no Intents)
 	Store  *intents.Store     // pre-submit signature write-ahead
@@ -80,24 +79,17 @@ func decodeSolanaPullPayload(intent gen.BillingProviderIntent) (SolanaPullPayloa
 	return p, nil
 }
 
-type solanaPullEvidence struct {
-	TransactionID        string `json:"transaction_id"`
-	LastValidBlockHeight uint64 `json:"last_valid_block_height"`
-	BlockhashSlot        uint64 `json:"blockhash_slot"`
-}
-
-func recordedPull(intent gen.BillingProviderIntent) (solanaPullEvidence, error) {
-	var evidence solanaPullEvidence
+func recordedSignature(intent gen.BillingProviderIntent) (string, error) {
 	if len(intent.ResultEvidence) == 0 {
-		return evidence, nil
+		return "", nil
+	}
+	var evidence struct {
+		TransactionID string `json:"transaction_id"`
 	}
 	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return evidence, fmt.Errorf("decode solana pull evidence: %w", err)
+		return "", fmt.Errorf("decode solana pull evidence: %w", err)
 	}
-	if evidence.TransactionID == "" && (evidence.LastValidBlockHeight != 0 || evidence.BlockhashSlot != 0) {
-		return evidence, errors.New("solana pull expiry has no transaction signature")
-	}
-	return evidence, nil
+	return evidence.TransactionID, nil
 }
 
 func (h *SolanaPullIntentHandler) loadRow(ctx context.Context, p SolanaPullPayload) (*models.SolanaSubscription, error) {
@@ -145,12 +137,12 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	// A previously-recorded signature means a tx WAS signed (and possibly
 	// landed). Resolve it via the chain BEFORE any re-pull: landed ⇒ renewal
 	// repair; read failure ⇒ never crank blind on top of an unresolved send.
-	previous, err := recordedPull(intent)
+	sig, err := recordedSignature(intent)
 	if err != nil {
 		return intents.Parked(err.Error())
 	}
-	if sig := previous.TransactionID; sig != "" {
-		result, verdict := h.checkSignature(ctx, previous)
+	if sig != "" {
+		result, verdict := h.checkSignature(ctx, sig)
 		switch verdict {
 		case sigVerdictUnknown:
 			return intents.Ambiguous("recorded pull signature unresolved; refusing to re-pull blind")
@@ -160,20 +152,17 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 			}
 			return h.repairFromSignature(ctx, repo, row, sig)
 		case sigVerdictNotLanded:
-			// Reverted, or expired and absent from fresh transaction history.
+			// The transaction reverted, so no payment was made.
 		}
 	}
 
 	var recorded string
-	presubmit := func(sig solanago.Signature, terminal solanaint.ChainTerminal) error {
-		recorded = sig.String()
+	presubmit := func(sig string) error {
+		recorded = sig
 		if h.Store == nil {
 			return errors.New("intent store unavailable for signature write-ahead")
 		}
-		return h.Store.RecordProgress(ctx, intent.ID, map[string]any{
-			"transaction_id": recorded, "last_valid_block_height": terminal.LastValidBlockHeight,
-			"blockhash_slot": terminal.BlockhashSlot,
-		})
+		return h.Store.RecordProgress(ctx, intent.ID, map[string]any{"transaction_id": sig})
 	}
 
 	// The intent id is the memo local-id: it exists durably before the send,
@@ -213,29 +202,27 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	}
 }
 
-// Verify resolves an ambiguous pull via chain READS on the recorded
-// signature: landed ⇒ renewal repair; verified not landed ⇒ the executor may
-// re-crank; no signature ⇒ nothing was ever
-// signed, plain retry.
+// Verify repairs successful pulls and retries reverted transactions. Missing
+// transactions stay unresolved: even after expiry, a missing historical read
+// does not prove that the payment never landed.
 func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	p, err := decodeSolanaPullPayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	evidence, err := recordedPull(intent)
+	sig, err := recordedSignature(intent)
 	if err != nil {
 		return intents.Parked(err.Error())
 	}
-	sig := evidence.TransactionID
 	if sig == "" {
 		return intents.Retryable("no signature recorded; nothing was submitted")
 	}
-	result, verdict := h.checkSignature(ctx, evidence)
+	result, verdict := h.checkSignature(ctx, sig)
 	switch verdict {
 	case sigVerdictUnknown:
 		return intents.Ambiguous("recorded pull signature still unresolved")
 	case sigVerdictNotLanded:
-		return intents.Retryable("recorded signature verified not landed; safe to re-pull")
+		return intents.Retryable("recorded transaction reverted; safe to re-pull")
 	}
 	if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 		return intents.Parked("recorded pull signature landed but " + err.Error())
@@ -275,25 +262,16 @@ const (
 // checkSignature reads the chain for the recorded signature. sigVerdictLanded
 // reports a confirmed, on-chain-successful transaction (result non-nil only
 // then, for the memo cross-check).
-func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, evidence solanaPullEvidence) (*rpc.GetTransactionResult, sigVerdict) {
+func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature string) (*rpc.GetTransactionResult, sigVerdict) {
 	if h.Chain == nil {
 		return nil, sigVerdictUnknown
 	}
-	sig, err := solanago.SignatureFromBase58(evidence.TransactionID)
+	sig, err := solanago.SignatureFromBase58(signature)
 	if err != nil {
 		return nil, sigVerdictUnknown
 	}
 	result, err := h.Chain.GetTransaction(ctx, sig)
 	if err != nil || result == nil {
-		if err != nil && !errors.Is(err, rpc.ErrNotFound) {
-			return nil, sigVerdictUnknown
-		}
-		expired, err := h.Chain.TransactionExpiredUnseen(ctx, sig, solanaint.ChainTerminal{
-			LastValidBlockHeight: evidence.LastValidBlockHeight, BlockhashSlot: evidence.BlockhashSlot,
-		})
-		if err == nil && expired {
-			return nil, sigVerdictNotLanded
-		}
 		return nil, sigVerdictUnknown
 	}
 	if result.Meta == nil {

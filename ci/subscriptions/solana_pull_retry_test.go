@@ -37,21 +37,11 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	s.fake.Fund(b.wallet.PublicKey(), s.mint, 0)
 	w.advance(monthHours*time.Hour + time.Hour)
 	crashes := 0
-	progress := make(chan error, 1)
 	remove := failpoint.Set(func(_ context.Context, site failpoint.Site) error {
 		if site.Point != failpoint.AfterAttempt || site.Subscription != sub.UUID() || crashes > 0 {
 			return nil
 		}
 		crashes++
-		var signature string
-		var expiry, slot uint64
-		err := w.pool.QueryRow(t.Context(), w.q(`SELECT result_evidence->>'transaction_id',
-			(result_evidence->>'last_valid_block_height')::bigint, (result_evidence->>'blockhash_slot')::bigint
-			FROM billing.provider_intents WHERE id=$1`), site.Operation).Scan(&signature, &expiry, &slot)
-		if err == nil && (signature == "" || expiry == 0 || slot == 0) {
-			err = errors.New("pull was sent without durable signature and expiry")
-		}
-		progress <- err
 		return errors.New("crash after the attempt is recorded")
 	})
 	defer remove()
@@ -64,7 +54,6 @@ func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	}
 	crank()
 	require.Equal(t, 1, crashes, "the first crank crashed after recording")
-	require.NoError(t, <-progress)
 	w.until(func() bool { return w.subscription(embedded, sub).Status == "past_due" }, "the retried pull fails the membership")
 
 	var rebills []attempt

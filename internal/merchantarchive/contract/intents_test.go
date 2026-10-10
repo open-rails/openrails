@@ -90,12 +90,6 @@ func TestRetainedIntentsNeedQualifiedEvidence(t *testing.T) {
 	checkRows(t, cases)
 }
 
-func TestSolanaExpiryEvidenceCanBeArchived(t *testing.T) {
-	if err := validateJSON("provider_intents.result_evidence", `{"transaction_id":"pull-signature","last_valid_block_height":123456789,"blockhash_slot":123456700}`); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestHostSettlementDedupeKeyNamesItsPayment(t *testing.T) {
 	// The first 16 digits pass Luhn, but this is the canonical UUID written by
 	// enqueue_payment_settlement_event; only the coordinate check confines it.

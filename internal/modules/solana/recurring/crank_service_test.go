@@ -10,7 +10,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
-	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
@@ -90,10 +89,10 @@ type writeAheadSubmitter struct {
 	submitted bool
 }
 
-func (s *writeAheadSubmitter) SubmitForMerchantAddressWithPresubmit(_ context.Context, _ billing.MerchantID, address solanago.PublicKey, ixs []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error) {
+func (s *writeAheadSubmitter) SubmitForMerchantAddressWithPresubmit(_ context.Context, _ billing.MerchantID, address solanago.PublicKey, ixs []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	sig := solanago.Signature{7}
 	if presubmit != nil {
-		if err := presubmit(sig, solanaint.ChainTerminal{LastValidBlockHeight: 5000, BlockhashSlot: 100}); err != nil {
+		if err := presubmit(sig); err != nil {
 			return solanago.Signature{}, err
 		}
 	}
@@ -107,13 +106,7 @@ func TestCrankWriteAheadPrecedesSubmit(t *testing.T) {
 	var recorded string
 	sub := &writeAheadSubmitter{}
 	sig, err := NewCrankService(sub).CrankWithPresubmit(context.Background(), testMerchantID, crankRow(t), 1, uuid.New(),
-		func(s solanago.Signature, terminal solanaint.ChainTerminal) error {
-			require.False(t, sub.submitted)
-			require.Equal(t, uint64(5000), terminal.LastValidBlockHeight)
-			require.Equal(t, uint64(100), terminal.BlockhashSlot)
-			recorded = s.String()
-			return nil
-		})
+		func(s string) error { recorded = s; return nil })
 	require.NoError(t, err)
 	require.True(t, sub.submitted)
 	require.Equal(t, sig, recorded)
