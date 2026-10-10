@@ -17,8 +17,8 @@ import (
 )
 
 // Two purchases of one timed pass admitted before either is paid pay for
-// consecutive windows, never the same one twice (tracker 1137): settlement
-// stacks each window after what an earlier settlement granted.
+// consecutive windows, never the same one twice: settlement stacks each
+// window after what an earlier settlement granted.
 func TestConcurrentTimedPassesStack(t *testing.T) {
 	t.Parallel()
 	p := newSolanaPay(t)
@@ -53,8 +53,8 @@ func TestConcurrentTimedPassesStack(t *testing.T) {
 }
 
 // A recurring product granting an entitlement another recurring product
-// already grants is refused unless both share a tier group (tracker 1137):
-// otherwise one customer could hold both and pay twice for that benefit.
+// already grants is refused unless both share a tier group: otherwise one
+// customer could hold both and pay twice for that benefit.
 func TestCatalogRefusesOverlappingRecurringBenefits(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

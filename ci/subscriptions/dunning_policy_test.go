@@ -112,8 +112,8 @@ func TestProviderDunningAccessSuspend(t *testing.T) {
 	}
 }
 
-// A dunning case runs under the policy it opened with (#1102): editing the
-// merchant's policy mid-case changes the next case, never this one.
+// A dunning case runs under the policy it opened with: editing the merchant's
+// policy mid-case changes the next case, never this one.
 func TestDunningCaseKeepsItsPolicy(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -44,8 +44,8 @@ func (w *world) rows(table string) int {
 }
 
 // The baseline report reads an NMI account's history and writes nothing: a
-// verification, a one-off sale, and NMI's scheduled rebills, one refused
-// for insufficient funds (#1114).
+// verification, a one-off sale, and NMI's scheduled rebills, one refused for
+// insufficient funds.
 func TestNMIDeclineReport(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

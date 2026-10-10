@@ -18,10 +18,9 @@ import (
 )
 
 // Ledger repairs and stalled workers are findings in the one queue, once per
-// incident, and a stall resolves itself when its work progresses again. A
-// stall names the job kind, never the job's error text, which can name another
-// merchant's records. The console's bell counts open findings through the
-// metrics query; the merchant inbox routes are gone.
+// incident; a stall resolves when its work progresses and names only its job
+// kind, never its error text, which can name another merchant's records. The
+// console's bell counts them via the metrics query; the inbox routes are gone.
 func TestOperationalProblemsAreFindings(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -18,7 +18,7 @@ import (
 
 // A period statement is paid only once the invoices that bill its usage are:
 // threshold invoices billed mid-period, and its own remainder. It follows
-// each payment as it lands, whichever way the money arrives (#1147).
+// each payment as it lands, whichever way the money arrives.
 func TestPeriodStatementFollowsItsInvoices(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -39,11 +39,9 @@ func (w *world) decide(sub billing.SubscriptionID, set string, args ...any) {
 	require.NoError(w.t, err)
 }
 
-// Convergence detects and asks; it never decides a period or a retry
-// (#1089 §8). An overdue renewal and a dunning window closed with nothing
-// scheduled become unverified with their period and retry untouched; a row
-// that moved between detection and repair is left as the other writer left
-// it; the unverified backlog is reported and clears once the rows resolve.
+// Convergence detects and asks, never deciding a period or a retry: overdue
+// rows become unverified with period and retry untouched, a row another writer
+// moved meanwhile is left as is, and the reported backlog clears as rows resolve.
 func TestConvergeDetectsWithoutDeciding(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

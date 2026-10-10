@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #1105: a request holds one pool connection and never waits for a second,
-// so checkout traffic well past the pool's size completes instead of
+// A request holds one pool connection and never waits for a second, so
+// checkout traffic well past the pool's size completes instead of
 // deadlocking: each request reads the checkout options (custodians and PSPs),
 // then creates and pays its session.
 func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {

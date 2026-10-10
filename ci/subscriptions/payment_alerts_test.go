@@ -195,7 +195,7 @@ func (cleanupPass) Kind() string { return "openrails.cleanup_expired_data" }
 // A PSP whose provider charges normally arrive by webhook goes a day with
 // none while pulls still find its charges: one finding for that PSP, none for
 // the one still delivering or the one that never did; it resolves when a
-// webhook arrives again (#1112).
+// webhook arrives again.
 func TestWebhookSilenceAlerts(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

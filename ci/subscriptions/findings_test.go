@@ -17,12 +17,10 @@ const duplicateCharge = "consistency.duplicate.provider_charge"
 
 var cadences = []int{1, 24, 7 * 24, monthHours, 90 * 24, 365 * 24}
 
-// Duplicate-charge findings follow each subscription's own periods, at every
-// cadence: consecutive periods are never duplicates (the soak's hourly
-// memberships were flagged by calendar month); two captured charges for one
-// period are exactly one CRITICAL finding targeting the later charge; a
-// decline and its successful retry are one charge; a price change starts a
-// new coverage; a finding the scan no longer reports closes.
+// Duplicate-charge findings follow each subscription's own periods at every
+// cadence: two captures of one period are one CRITICAL finding on the later
+// one; consecutive periods, a declined-then-retried charge and a price change
+// are not duplicates; a finding the scan no longer reports closes.
 func TestDuplicateChargeFindings(t *testing.T) {
 	t.Parallel()
 	for _, hours := range cadences {

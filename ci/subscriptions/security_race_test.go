@@ -72,10 +72,10 @@ func (w *world) refundGate(rail string) *gate {
 	return w.nmi.hold(newGate(func(r *http.Request) bool { return strings.HasSuffix(r.URL.Path, "/refund") }, false))
 }
 
-// SEC: double spend on one checkout. While the first pay's charge is in
-// flight at the provider, the same session is paid again on another replica
-// and on the same one. The provider sees one charge and exactly one
-// membership is created.
+// Double spend on one checkout. While the first pay's charge is in flight at
+// the provider, the same session is paid again on another replica and on the
+// same one. The provider sees one charge and exactly one membership is
+// created.
 func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -126,9 +126,9 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 	}
 }
 
-// SEC: concurrent refunds. Merchant refunds of one payment racing across
-// replicas and topologies, under distinct idempotency keys, never return
-// more than was paid, at the provider or in the ledger.
+// Concurrent refunds. Merchant refunds of one payment racing across replicas
+// and topologies, under distinct idempotency keys, never return more than was
+// paid, at the provider or in the ledger.
 func TestSecurityConcurrentRefundsNeverExceedPayment(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -194,8 +194,8 @@ func TestSecurityConcurrentRefundsNeverExceedPayment(t *testing.T) {
 	}
 }
 
-// SEC: card testing. One customer submitting card after card is throttled
-// per customer and per client address before the gateway sees most of them;
+// Card testing. One customer submitting card after card is throttled per
+// customer and per client address before the gateway sees most of them;
 // throttled requests never reach the provider.
 func TestSecurityCardTestingIsThrottled(t *testing.T) {
 	t.Parallel()

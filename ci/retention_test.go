@@ -251,9 +251,9 @@ func TestPartitionedReadsPruneToTheirMonths(t *testing.T) {
 		`SELECT state FROM billing.admission_operations WHERE merchant_id = $1 AND request_id = 'r' AND admitted_at = $2`, w.merchant, now))
 }
 
-// The partition key is part of every unique key, so the application keeps the
-// two identities the keys used to: a request id is admitted once, and a usage
-// coordinate is recorded once within the ingest window.
+// The partition key is part of every unique key, so the application enforces
+// the identities: a request id is admitted once, and a usage coordinate is
+// recorded once within the ingest window.
 func TestPartitionedIdentitiesAndWriteBounds(t *testing.T) {
 	w, client := newRetentionWorld(t)
 	ctx := t.Context()

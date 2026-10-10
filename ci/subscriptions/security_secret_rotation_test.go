@@ -29,11 +29,9 @@ func declarePrevious(rail, old string, expires time.Time) func(map[string]openra
 	}
 }
 
-// SEC-29: a rotated-out webhook signing secret verifies only until its
-// overlap expires. After that, a notice signed with the old secret, as a
-// leaked secret would sign a forged "paid" notice, is refused and changes
-// nothing; the current secret keeps working. A previous secret declared with
-// no expiry is refused outright.
+// A rotated-out webhook secret verifies only until its overlap expires; then a
+// notice it signs (as a leaked secret would forge "paid") is refused and
+// changes nothing. A previous secret declared without expiry is refused.
 func TestSecurityRotatedWebhookSecretExpires(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -102,8 +100,8 @@ func TestSecurityRotatedWebhookSecretExpires(t *testing.T) {
 	}
 }
 
-// SEC-33: an unknown provider account and a bad signature for a real one get
-// the same answer, so webhook routes cannot enumerate the accounts served.
+// An unknown provider account and a bad signature for a real one get the
+// same answer, so webhook routes cannot enumerate the accounts served.
 func TestSecurityWebhookResponsesRevealNoAccounts(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

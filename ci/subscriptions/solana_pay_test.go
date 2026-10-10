@@ -33,8 +33,8 @@ import (
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
-// #1086: Solana Pay state lives in PostgreSQL. Every replica sees a checkout's
-// one reference, a signature credits at most one checkout once, and money that
+// Solana Pay state lives in PostgreSQL. Every replica sees a checkout's one
+// reference, a signature credits at most one checkout once, and money that
 // does not settle a checkout is recorded for review instead of being lost.
 
 type solanaPay struct {

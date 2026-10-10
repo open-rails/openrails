@@ -71,12 +71,9 @@ func (w *world) ownCard(tp topology, id billing.SubscriptionID) (own, paidBy str
 	return own, paidBy
 }
 
-// A customer names one default card per currency. A subscription bought with
-// it follows it; a subscription with its own card does not. Changing the
-// default moves every subscription that follows it, with its recurring
-// agreement, citing one recurring verification of the new card; renewals
-// charge each subscription's effective card under its agreement. Clearing a
-// subscription's own card makes it follow the default again.
+// A subscription without its own card follows the customer's per-currency
+// default: changing the default moves every follower with its agreement, citing
+// one recurring verification of the new card, and renewals charge that card.
 func TestDefaultCardMovesFollowingSubscriptions(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

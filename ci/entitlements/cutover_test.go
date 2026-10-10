@@ -22,11 +22,9 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 )
 
-// The cutover to product access runs only as its preflight listed and an
-// operator approved: a host's binary runs the preflight, which lists exactly
-// whose access changes; New refuses to boot while a change is unapproved,
-// including one that appeared after the approval, and then converts per-key
-// windows to the products that grant them.
+// The product-access cutover runs only as an operator approved its preflight:
+// New refuses to boot while any change, including one that appeared after the
+// approval, is unapproved; then it converts per-key windows to their products.
 func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 	ctx := t.Context()
 	pool, schema := cutoverSchema(t, os.Getenv("OPENRAILS_E2E_DSN"))

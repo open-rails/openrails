@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// acuNotice is NMI's Account Updater notice about one vault (#1115).
+// acuNotice is NMI's Account Updater notice about one vault.
 func acuNotice(kind, vault string) obj {
 	return nmiEvent("acu.summary."+kind, obj{"customer_vault_id": vault})
 }
@@ -82,7 +82,7 @@ func (c *customer) notificationCount(kind string) int {
 // An expired card sends an NMI-owned and an engine membership to wait for a
 // new card. NMI's Account Updater reissues both cards: the stored cards take
 // the new details from the vault, and both memberships collect at the next
-// due pass (#1115).
+// due pass.
 func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -114,7 +114,7 @@ func TestNMIAccountUpdaterRecoversBothOwners(t *testing.T) {
 // NMI cannot update a card and asks for the customer: the member is asked
 // once per period, however often NMI says so, and the card keeps billing. A
 // closed account closes the card and ends its agreements; the membership
-// waits for another card and is never canceled (#1115, #1168).
+// waits for another card and is never canceled.
 func TestNMIAccountUpdaterContactCustomer(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

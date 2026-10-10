@@ -24,12 +24,10 @@ import (
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
 
-// A host that cannot qualify a hold's provider cost (no provable lifecycle, a
-// provider that reports no billing, evidence OpenRails rejects) refuses it with
-// an observation carrying no evidence. The refused hold takes no evidence,
-// growth or release; the list shows every stuck hold with its reason, whoever
-// refused it; and an operator's close, settled or written off, is its only
-// exit, with or without a qualification.
+// A host refuses a cost it cannot qualify with an evidence-free observation.
+// The refused hold then takes no evidence, growth or release; the list shows
+// every stuck hold with its reason; an operator's close, settled or written
+// off, is its only exit.
 func TestProviderBillingRefusal(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "refuse-"+uuid.NewString()[:8])

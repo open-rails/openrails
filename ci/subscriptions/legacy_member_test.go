@@ -36,12 +36,10 @@ func errorCode(body map[string]any) string {
 	return ""
 }
 
-// Cancel at period end or immediately, by the merchant (either Client) or
-// the member (/v1/me), with the destructive switch armed or not. Armed: the
-// NMI schedule is deleted exactly once. Disarmed: a typed refusal changes
-// nothing and raises one operator finding; after arming the same cancel works.
-// An account deletion is irrevocable: it cancels locally while disarmed and
-// its held delete runs once armed.
+// Cancels by merchant or member, at period end or now: armed, the NMI schedule
+// is deleted exactly once; disarmed, a typed refusal raises one finding and
+// changes nothing. An account deletion cancels locally even disarmed, and its
+// held delete runs once armed.
 func TestLegacyNMICancel(t *testing.T) {
 	t.Parallel()
 	rows := []struct {

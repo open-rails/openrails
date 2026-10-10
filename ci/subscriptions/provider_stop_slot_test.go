@@ -55,11 +55,10 @@ func requireSlotHeld(t *testing.T, paid *sessionPaid) {
 	require.NotNil(t, paid.FailureMessage)
 }
 
-// A canceled membership whose NMI schedule may still bill holds the
-// customer's product slot until the delete is verified: buying the product
-// again is refused without a charge (tracker 1137's reproduction charged
-// twice). The schedule's charge after the cancel opens a standing finding and
-// is refunded in full. Once the delete succeeds the customer can buy again.
+// A canceled membership whose NMI schedule may still bill holds the product
+// slot until the delete is verified: rebuying is refused, a charge after the
+// cancel opens a finding and is refunded in full, and a verified delete frees
+// the slot.
 func TestPendingProviderStopHoldsSlot(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -12,8 +12,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #1109: a card whose security code does not match is refused at
-// verification, and the buyer is told which field to fix.
+// A card whose security code does not match is refused at verification, and
+// the buyer is told which field to fix.
 func TestHostedNewCardSecurityCodeMismatch(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -28,7 +28,7 @@ func TestHostedNewCardSecurityCodeMismatch(t *testing.T) {
 	require.Empty(t, h.methods())
 }
 
-// #1109: a decline of NMI's own scheduled charge follows the same table as
+// A decline of NMI's own scheduled charge follows the same table as
 // OpenRails' rebills. Do-not-honor is retried on the dunning schedule, an
 // expired card waits for a new one, a stolen card ends the schedule.
 func TestNMIScheduleDeclinePolicy(t *testing.T) {

@@ -15,13 +15,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// SEC (secaudit round 2, D1): an operation that moves money or grants access
-// needs a recent sign-in on every route that serves it. A staff token whose
-// sign-in is stale, as a stolen one's is, reaches none of them (merchant
-// chosen by header): the import door, the catalog or the admin API. The
-// same staff signed in recently passes the gate. Reads and the host's
-// in-process client need no step-up, and a grant with no end is a staff write
-// like any other.
+// A stale staff sign-in, as a stolen token's is, reaches no route that moves
+// money or grants access (import, catalog, admin API); a recent one passes.
+// Reads and the host's in-process client need no step-up.
 func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

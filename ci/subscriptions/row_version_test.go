@@ -14,8 +14,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// A full-row write from a stale image is refused (#1102): the retry schedule
-// another writer set meanwhile, here by raw SQL, survives.
+// A full-row write from a stale image is refused: the retry schedule another
+// writer set meanwhile, here by raw SQL, survives.
 func TestStaleSubscriptionImageNeverReverts(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

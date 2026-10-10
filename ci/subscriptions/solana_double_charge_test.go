@@ -15,7 +15,7 @@ import (
 
 // A Solana Pay attempt whose quote expired unpaid reads processing, not
 // expired, while its reference still credits a transfer: the buyer is never
-// told to pay again for money that may already be on its way (tracker 1137).
+// told to pay again for money that may already be on its way.
 func TestSolanaPayAttemptProcessingUntilReferenceCloses(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
@@ -36,8 +36,7 @@ func TestSolanaPayAttemptProcessingUntilReferenceCloses(t *testing.T) {
 
 // A Solana subscribe awaiting its wallet holds the customer's slot: card
 // enrollment of the same plan is refused before any charge, and a first pull
-// that lands for a slot another membership took is queued for refund
-// (tracker 1137).
+// that lands for a slot another membership took is queued for refund.
 func TestSolanaSubscribeHoldsSlotBeforeFirstPull(t *testing.T) {
 	s := openSolanaShop(t)
 	t.Run("card enrollment waits", func(t *testing.T) {

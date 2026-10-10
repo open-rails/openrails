@@ -16,11 +16,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// Two real invoice workers arrive at finalization before either INSERT can
-// complete. The payer lock must serialize the period lookup as well as the
-// write; the uniqueness constraint alone leaves one pass failing its merchant.
-// Replicas a second apart close different periods over the same items: the
-// later pass finds them invoiced and writes nothing.
+// Two invoice workers finalizing at once both succeed: the payer lock
+// serializes the period lookup and the write, which the uniqueness constraint
+// alone does not. A replica a second later finds the items invoiced and writes
+// nothing.
 func TestInvoiceReplicasFinalizeOnePeriodWithoutError(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {

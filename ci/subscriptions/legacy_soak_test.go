@@ -13,11 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
-// Soak: refunding an NMI-billed legacy payment with revoke_access while
-// provider deletes are disarmed is refused before anything moves (NMI would
-// keep charging a member without access). Armed, the refund ends the
-// membership, deletes the schedule once, and no later converge, pull or
-// stale NMI notice restores the access.
+// With provider deletes disarmed, a revoke_access refund of an NMI-billed
+// payment is refused (NMI would keep charging a member without access); armed,
+// it ends the membership, deletes the schedule once, and nothing restores the
+// access later.
 func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -65,9 +64,9 @@ func TestLegacyNMIRefundRevokeEndsMembership(t *testing.T) {
 	}
 }
 
-// Soak: an imported book grants access by itself — active, mid-dunning in
-// grace and canceled-with-runway members are entitled right after
-// ImportBilling returns, with no operator Converge.
+// An imported book grants access by itself: active, mid-dunning in grace and
+// canceled-with-runway members are entitled right after ImportBilling
+// returns, with no operator Converge.
 func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -105,8 +104,8 @@ func TestLegacyNMIImportDerivesAccess(t *testing.T) {
 	}
 }
 
-// Soak: a schedule NMI deleted without a notification is mirrored as soon as
-// the host asks for a provider refresh through its Client, embedded or remote.
+// A schedule NMI deleted without a notification is mirrored as soon as the
+// host asks for a provider refresh through its Client, embedded or remote.
 func TestLegacyNMIRefreshPSPs(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -114,8 +113,8 @@ func TestLegacyNMIRefreshPSPs(t *testing.T) {
 			t.Parallel()
 			w := newWorld(t)
 			w.armDestructive()
-			// A second member keeps the NMI roster non-empty: an empty roster
-			// never proves absence (#842).
+			// A second member keeps the NMI roster non-empty: an empty roster never
+			// proves absence.
 			l := w.mirrorBook(tp, w.bookTier("monthly", 999, 30), 2)[0]
 			w.nmi.DeleteSchedule(l.railSub)
 			w.advance(time.Hour)

@@ -60,11 +60,9 @@ func (w *world) postWebhook(target webhookTarget, header string, body []byte) (i
 	return res.StatusCode, string(raw)
 }
 
-// SEC: webhook authenticity. A provider renewal notice extends a provider-owned
-// membership only when it is signed with this merchant's secret for this
-// merchant's endpoint, fresh and unmodified. A second merchant on the same
-// deployment, holding its own valid secret, cannot move another merchant's
-// memberships by naming their provider ids. Responses never echo secrets.
+// A provider renewal notice extends a membership only when fresh, unmodified
+// and signed with this merchant's secret for its endpoint: another merchant's
+// valid secret cannot move it. Responses never echo secrets.
 func TestSecurityWebhookAuthenticity(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {

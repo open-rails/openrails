@@ -22,11 +22,10 @@ import (
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
-// A Solana subscription activates only from its first payment: the bundle its
-// checkout prepared and the merchant co-signed, landed on-chain, signed by the
-// checkout's wallet, pulling the full first period into the merchant's account
-// within the checkout's validity. Any other signature is refused and grants
-// nothing: no subscription, no payment, no entitlement.
+// A Solana subscription activates only from its first payment: the prepared,
+// merchant co-signed bundle, signed by the checkout's wallet and landed within
+// the checkout's validity, pulling the full first period to the merchant. Any
+// other signature grants nothing.
 
 const solanaPlanAmount = 23_000_000
 
@@ -279,9 +278,9 @@ func TestSolanaSubscriptionActivatesOnlyOnItsFirstPayment(t *testing.T) {
 	})
 
 	t.Run("a victim's wallet named without its signature is refused", func(t *testing.T) {
-		// The audit's proof of concept: the victim subscribed on-chain by itself
-		// (nothing pulled, nothing recorded); the attacker names that wallet and
-		// confirms with a made-up signature.
+		// The attack: the victim subscribed on-chain by itself (nothing pulled,
+		// nothing recorded); the attacker names that wallet and confirms with a
+		// made-up signature.
 		victim := s.buyer(t, true)
 		plan, bump, _ := subscriptions.DerivePlanPDA(s.merchant.PublicKey(), 4242)
 		sub, _, _ := subscriptions.DeriveSubscriptionPDA(plan, victim.wallet.PublicKey())

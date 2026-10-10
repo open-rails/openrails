@@ -27,12 +27,10 @@ func (f *nmiFake) billingIDs(vault string) []string {
 	return ids
 }
 
-// An in-place card replacement verifies the new card as a recurring
-// credential-on-file agreement before the method uses it: the card and the
-// subscription's mandate change together, the replaced card is retired at
-// NMI, and the next merchant-initiated renewal cites the new card's agreement.
-// A card the issuer refuses to verify is not adopted: typed decline, and the
-// previous card and mandate keep billing.
+// An in-place card replacement first verifies the new card as a recurring
+// agreement: card and mandate change together, the old card is retired at NMI,
+// and the next renewal cites the new agreement. A card that fails verification
+// is not adopted and the previous card keeps billing.
 func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {

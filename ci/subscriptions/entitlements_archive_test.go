@@ -24,11 +24,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchantarchive/contract"
 )
 
-// A version 1 archive held per-key entitlement windows. Restore converts them
-// to product access, as the cutover migration converts a database: keys the
-// product still grants restore as access to the product. A conversion that
-// would change a customer's access needs the cutover's approval, which a
-// restore cannot take, so that archive is refused whole.
+// A version 1 archive's per-key entitlement windows restore as product access,
+// as the cutover converts a database; an archive whose conversion would change
+// a customer's access needs the cutover's approval and is refused whole.
 func TestLegacyArchiveConvertsToProductAccess(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

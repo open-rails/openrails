@@ -25,7 +25,7 @@ type nmiHistoryPass struct{}
 
 func (nmiHistoryPass) Kind() string { return "openrails.nmi_history" }
 
-// readNMIHistory runs one pass of the NMI history job (#1120).
+// readNMIHistory runs one pass of the NMI history job.
 func (w *world) readNMIHistory() {
 	w.t.Helper()
 	res, err := w.jobs.Insert(w.t.Context(), nmiHistoryPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
@@ -94,7 +94,7 @@ func monthOf(t time.Time) time.Time {
 // NMI's own history is kept monthly per PSP: the first read backfills 25
 // months, a daily read replaces the months it covers, and a failed read keeps
 // what was stored. The metrics split it like the decline report, which reads
-// the same numbers (#1120).
+// the same numbers.
 func TestNMIDeclineHistory(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

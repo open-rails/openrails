@@ -13,7 +13,7 @@ import (
 
 // The same soft decline on an engine and an NMI-owned renewal, the NMI one
 // seen 30 hours late through the Query API: both retry on the same days,
-// counted from the decline (#1113).
+// counted from the decline.
 func TestDunningScheduleParity(t *testing.T) {
 	t.Parallel()
 	want := []time.Duration{2 * day, 5 * day, 9 * day, 13 * day}

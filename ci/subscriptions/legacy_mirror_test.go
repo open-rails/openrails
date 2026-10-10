@@ -189,11 +189,10 @@ func TestLegacyNMIMirrorPull(t *testing.T) {
 	}
 }
 
-// A declined renewal recorded from NMI's webhook survives a provider pull.
-// NMI's bulk report names no schedule, so the pull never sees the decline,
-// while the schedule's next date has already moved on: it is no payment.
-// The paid-through instant sits at 18:00, so NMI's next date (midnight) lies
-// within half a daily period of it and reads as the same boundary (#1081).
+// A declined renewal recorded from NMI's webhook survives a provider pull: the
+// bulk report names no schedule, and the schedule's moved next date is no
+// payment. Paid-through sits at 18:00 so NMI's next date (midnight) lies
+// within half a daily period and reads as the same boundary.
 func TestLegacyNMIMirrorPullKeepsDecline(t *testing.T) {
 	t.Parallel()
 	for i, cadence := range mirrorCadences[:2] {

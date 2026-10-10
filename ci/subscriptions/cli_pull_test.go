@@ -19,7 +19,7 @@ import (
 
 // armedAtWorldClock dates the destructive arming and this deployment's first
 // pull on the world's clock, so provider evidence dated after them by that
-// clock counts as observed here (#835).
+// clock counts as observed here.
 func (w *world) armedAtWorldClock() {
 	w.t.Helper()
 	_, err := w.pool.Exec(w.t.Context(), w.q(`UPDATE billing.merchant_destructive_policy SET enforce_armed_at = $1, first_pull_completed_at = $1`), w.clock.Now())
@@ -57,11 +57,9 @@ func (w *world) cliPull(provider string, overwrite bool) {
 	require.NoError(w.t, err, "CLI pull")
 }
 
-// The operator's CLI pull finds an NMI member whose renewal NMI declined for
-// good and parks it; the worker's verifier reads that schedule from NMI,
-// cancels the membership and deletes the NMI schedule exactly once (#1102).
-// A pull alone never cancels a live NMI schedule: NMI's bulk report carries
-// no schedule id, so only the per-schedule read attributes the decline.
+// The CLI pull parks an NMI member whose renewal NMI declined for good; the
+// verifier's per-schedule read cancels it and deletes the schedule once. A pull
+// alone never cancels: NMI's bulk report carries no schedule id.
 func TestCLIPullNMIDeclineEndsOnce(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

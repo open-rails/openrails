@@ -69,12 +69,10 @@ func (w *world) requirePreview(c *customer, sub billing.SubscriptionID, target b
 	require.True(t, w.clock.Now().Add(time.Duration(newCycle)*time.Hour).Equal(*preview.NextChargeDate), "new period is the new cadence")
 }
 
-// Upgrades credit the old plan's unused value against its own current
-// period at sub-second precision, whatever the new plan's cadence (#1067).
-// Preview (embedded and remote Client) equals the durable charge, which
-// equals the provider's sale exactly, on engine-owned NMI memberships (a
-// provider-billed NMI subscription refuses tier changes; see
-// TestLegacyNMITierChangeRefused).
+// Upgrades credit the old plan's unused value against its own current period
+// at sub-second precision, whatever the new plan's cadence. Preview (embedded
+// and remote Client) equals the durable charge, which equals the provider's
+// sale exactly, on engine-owned NMI memberships.
 func TestUpgradeProrationAcrossCadences(t *testing.T) {
 	t.Parallel()
 	const h = time.Hour
@@ -125,8 +123,7 @@ func TestUpgradeProrationAcrossCadences(t *testing.T) {
 	require.Empty(t, w.nmi.Unexpected())
 }
 
-// Hourly memberships are engine-owned; their quotes carry sub-hour credit
-// (the old whole-hour count credited nothing below 60 minutes).
+// Hourly memberships are engine-owned; their quotes carry sub-hour credit.
 func TestUpgradeProrationHourlyQuotes(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

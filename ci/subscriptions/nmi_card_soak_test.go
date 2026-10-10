@@ -43,11 +43,9 @@ func (w *world) storedCard(methodID string) storedCard {
 	return c
 }
 
-// A card saved at NMI is verified as the storing transaction of its
-// card-on-file agreement (type=validate, no funds, no recurring billing). An
-// engine membership moving onto it verifies its own recurring agreement
-// first, and the next renewal is a merchant-initiated charge of the new card
-// referencing that verification through the subscription's mandate.
+// A card saved at NMI is verified (type=validate) as the storing transaction
+// of its card-on-file agreement; a membership moving onto it verifies its own
+// recurring agreement, which the next merchant-initiated renewal references.
 func TestNMISavedCardRecurringAgreement(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {

@@ -57,18 +57,16 @@ func verificationReads(before, after map[string]int) map[string]int {
 	return out
 }
 
-// A legacy book of 1,000 NMI schedules whose paid periods lapsed before the
-// export lands unverified: NMI has since renewed most, ended some and
-// billed nothing for a few. Each import commit wakes the verifier, which
-// reads the account in bulk — a roster read and a few transaction pages, not
-// one read per member — and resolves every row from NMI's own records; the
-// kill switch holds the ends until the operator arms it. OpenRails charges
-// nothing and access holds throughout; the few NMI never billed stay
-// unverified, visible in the backlog finding.
+// A legacy book of 1,000 NMI schedules lapsed before the export lands
+// unverified; NMI has since renewed most, ended some and billed nothing for a few.
+// Each import commit wakes the verifier, which reads the account in bulk (not
+// per member) and resolves every row from NMI's records; the kill switch holds
+// the ends until armed. OpenRails charges nothing, access holds, and the rows
+// NMI never billed stay unverified in the backlog finding.
 func TestLegacyNMIImportVerifiesInBulk(t *testing.T) {
 	t.Parallel()
-	// Isolate the independent import verifier's read budget from scheduled
-	// refresh, which now legitimately reads even with destruction disarmed.
+	// Isolate the import verifier's read budget from scheduled refresh, which
+	// reads even with destruction disarmed.
 	w := newWorld(t)
 	require.NoError(t, w.jobs.Stop(t.Context()))
 	// 50 members holding 20 memberships each: 1,000 NMI schedules.
@@ -242,9 +240,9 @@ func (w *world) pullWithin(d time.Duration) {
 	w.settle()
 }
 
-// A renewal NMI voided paid nothing (#1102): the verifier never renews a
-// period on it. The member stays unverified, access held, for review, while
-// the same read renews a member whose renewal stands.
+// A renewal NMI voided paid nothing: the verifier never renews a period on
+// it. The member stays unverified, access held, for review, while the same
+// read renews a member whose renewal stands.
 func TestNMIVoidedRenewalIsNoPayment(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -27,7 +27,7 @@ type rebillWatchPass struct{}
 
 func (rebillWatchPass) Kind() string { return "openrails.rebill_watch" }
 
-// watchRebills runs the missed-rebill watch once (#1112).
+// watchRebills runs the missed-rebill watch once.
 func (w *world) watchRebills() {
 	w.t.Helper()
 	res, err := w.jobs.Insert(w.t.Context(), rebillWatchPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
@@ -51,7 +51,7 @@ func (w *world) missReason(sub billing.SubscriptionID, due time.Time) string {
 
 // NMI passes a schedule's date without charging: after the deadline the
 // Query API proves no attempt, the cycle is a missed rebill, and OpenRails
-// charges it once. NMI's next charge bills only the next period (#1113).
+// charges it once. NMI's next charge bills only the next period.
 func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -94,9 +94,9 @@ func TestNMIScheduleSkippedRebillIsCollected(t *testing.T) {
 	require.Len(t, completed(w.payments(embedded, l.c.id)), 3)
 }
 
-// The guards between a skipped NMI period and OpenRails' charge (#1113):
-// without proof from NMI's records, with provider writes off, or when NMI's
-// schedule no longer shows the next period at charge time, nothing is charged.
+// The guards between a skipped NMI period and OpenRails' charge: without
+// proof from NMI's records, with provider writes off, or when NMI's schedule
+// no longer shows the next period at charge time, nothing is charged.
 func TestNMISkippedRebillGuards(t *testing.T) {
 	t.Parallel()
 	skipped := func(t *testing.T, w *world, skip func(*legacy)) (*legacy, time.Time) {
@@ -203,7 +203,7 @@ func TestNMISkippedRebillGuards(t *testing.T) {
 // NMI attempted the cycle and its webhook never came, but left no charge to
 // record: the merchant voided it, NMI charged days before the schedule's date,
 // or the merchant charged the card from NMI's dashboard. The watch records the
-// miss with what NMI holds and OpenRails never charges the period (#1113).
+// miss with what NMI holds and OpenRails never charges the period.
 func TestNMIAttemptedRebillIsNeverCollected(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {

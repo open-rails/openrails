@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// #1094: every CCBill post applies one lifecycle event to the locked row.
-// Only a payment extends or restores a paid period.
+// Every CCBill post applies one lifecycle event to the locked row. Only a
+// payment extends or restores a paid period.
 
 // sendCCBill posts one CCBill event without asserting, for use off the test
 // goroutine.

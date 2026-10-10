@@ -17,12 +17,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// A refused provider operation keeps its hold until an operator closes it: the
-// list finds the stuck holds, a settled close charges the attested cost at
-// pass-through (above the hold as owed), a written_off one releases the hold
-// uncharged. Closes replay, conflict on a changed term, refuse pending
-// evidence, commit with a host transaction, and the database admits them only
-// for a refused hold whose refused qualification then stays refused.
+// A refused operation keeps its hold until an operator closes it: settled
+// charges the attested cost at pass-through (any excess owed), written_off
+// releases it. Closes replay, conflict on a changed term, refuse pending
+// evidence, and the database admits them only for a refused hold.
 func TestProviderBillingResolution(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "resolve-"+uuid.NewString()[:8])

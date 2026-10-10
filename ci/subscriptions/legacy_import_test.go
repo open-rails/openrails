@@ -158,13 +158,10 @@ func (w *world) nmiCharges(vault string) []string {
 	return ids
 }
 
-// A realistic legacy book lands in one ImportBilling call: every status the
-// legacy system held, daily/monthly/calendar-monthly/yearly cadences, a
-// customer with two memberships on one multi-card vault, an orphan card
-// reference. Refunds in the book never become charges. Re-import changes
-// nothing. The first enforcing pull finds the NMI-only schedule and raises no
-// false drift. Unresolved imported money keeps recovery and local cancellation
-// held; OpenRails never writes to NMI.
+// A realistic legacy book lands in one ImportBilling call: refunds never
+// become charges, re-import changes nothing, the first enforcing pull raises
+// no false drift, unresolved imported money holds recovery and local
+// cancellation, and OpenRails never writes to NMI.
 func TestLegacyNMIBookImport(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {

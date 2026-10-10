@@ -39,7 +39,7 @@ func (w *world) undoRun(run uuid.UUID) map[string]any {
 
 // Undoing a converge run never rewrites a subscription that moved after it:
 // the restore would make a later lifecycle (here a verified cancel whose NMI
-// delete is queued) live again and a paid period due again (tracker 1137).
+// delete is queued) live again and a paid period due again.
 func TestUndoRunKeepsLaterLifecycle(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -65,7 +65,7 @@ func TestUndoRunKeepsLaterLifecycle(t *testing.T) {
 
 // Under mode=limited the due pass never ends a membership locally: one whose
 // wait for a new card outlived its window is held with a finding, as the
-// documented mode table says (tracker 1137).
+// documented mode table says.
 func TestLimitedModeHoldsAwaitingMethodExpiry(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

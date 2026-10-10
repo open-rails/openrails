@@ -412,10 +412,10 @@ func TestLegacyNMITierChangeCustomSchedule(t *testing.T) {
 	}
 }
 
-// Recovery of a v0.178.0 operation: admitted in amount mode, stuck because
-// the schedule is on a named plan whose amount NMI will not change. Each
-// retry re-reads the schedule; once it is seen on a named plan the target
-// price's linked plan is used and the operation completes, charging once.
+// An operation admitted in amount mode against a named-plan schedule, whose
+// amount NMI will not change, recovers: each retry re-reads the schedule, and
+// once it sees the named plan it uses the target price's linked plan and
+// completes, charging once.
 func TestLegacyNMITierChangeStuckNamedPlanRecovers(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

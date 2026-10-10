@@ -181,7 +181,7 @@ func TestBillingArchiveClassifiesLifecycleColumns(t *testing.T) {
 	require.Positive(t, refusal.Error.Metadata.Count, "a refusal names live rows, never an unclassified schema: %s", body)
 }
 
-// #1099: idempotency claims are not moved by the archive, but a request still
+// Idempotency claims are not moved by the archive, but a request still
 // running under a live claim holds the export back; settled and lapsed claims
 // never do.
 func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
@@ -217,9 +217,9 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 	require.NotEqual(t, "idempotency_keys", table, "a lapsed claim does not block the export")
 }
 
-// A membership refused before declines became payment attempts (#1111) left a
-// failed payments row under its payment id. The archive keeps accepting that
-// record; any other payment under a refused enrollment is refused.
+// The archive accepts a refused membership's failed payments row under its
+// payment id (an older decline record); any other payment under a refused
+// enrollment is refused.
 func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -245,7 +245,7 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	}
 	require.NotEqual(t, "provider_intents", refusedTable())
 
-	// The decline record the checkout wrote before #1111.
+	// An older decline record: a failed payments row.
 	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.payments (merchant_id, id, customer_id, price_id, psp_id, channel, rail, transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
 		SELECT merchant_id, (payload->'terms'->>'payment_id')::uuid, (payload->'terms'->>'customer_id')::uuid, (payload->'terms'->>'price_id')::uuid,
 		       psp_id, 'rail', rail, rail || '_sub_declined:' || id, (payload->'terms'->>'amount')::bigint, (payload->'terms'->>'recurring_amount')::bigint,

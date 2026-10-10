@@ -15,12 +15,10 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A provider operation's whole lifecycle runs over its seven routes, each
-// answering the one operation: the host opens (201, then 200 on a replay),
-// increments, observes or refuses, and releases; staff list the stuck holds,
-// read one with its qualification, and close it. A refused open hold raises
-// life.provider_operation.refused, which clears when the hold closes. The
-// retired routes are gone.
+// A provider operation's lifecycle runs over its seven routes: the host opens
+// (201, then 200 on replay), increments, observes or refuses and releases;
+// staff list, read and close stuck holds, and a refused hold's finding clears
+// on close. The retired routes are gone.
 func TestProviderOperationRoutes(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// attempt is one payment_attempts row (#1110).
+// attempt is one payment_attempts row.
 type attempt struct {
 	Kind, Owner, CardEntry, Category          string
 	Reason, CVV, TransactionID, Target, Last4 *string
@@ -48,7 +48,7 @@ func str(s *string) string {
 }
 
 // A buyer mistypes the security code, then fixes it: every answer is one
-// attempt, all in one checkout that ends approved (#1110).
+// attempt, all in one checkout that ends approved.
 func TestNewCardAttemptsFatFinger(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

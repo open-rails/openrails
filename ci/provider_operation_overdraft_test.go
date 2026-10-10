@@ -14,11 +14,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// A prepaid customer runs into debt down to the host's floor: overdraft_amount
-// widens one call's capacity, a hold may exceed the balance, settlement spends
-// the balance and posts the rest as owed, the floor counts that debt, and the
-// next funding repays it. A customer never funded gets a balance account when
-// an overdraft covers its first hold.
+// A prepaid customer runs into debt down to the host's floor: a hold may
+// exceed the balance, settlement posts the rest as owed, the floor counts that
+// debt and the next funding repays it. An unfunded customer gets a balance
+// account when an overdraft covers its first hold.
 func TestOperationAuthorizationOverdraft(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "overdraft-"+uuid.NewString()[:8])

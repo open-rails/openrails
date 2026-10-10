@@ -17,8 +17,8 @@ import (
 
 // An NMI sale whose answer was lost is not provably unexecuted from an empty
 // order search: --not-executed is refused and the original order recovers its
-// receipt once NMI shows it, so the buyer is charged once (tracker 1137). Only
-// a definitive decline under the sale's order proves nothing was charged.
+// receipt once NMI shows it, so the buyer is charged once. Only a definitive
+// decline under the sale's order proves nothing was charged.
 func TestNMISaleNonExecutionNeedsProviderEvidence(t *testing.T) {
 	t.Parallel()
 	for _, declined := range []bool{false, true} {

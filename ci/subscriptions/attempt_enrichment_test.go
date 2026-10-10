@@ -16,7 +16,7 @@ type enrichmentPass struct{}
 
 func (enrichmentPass) Kind() string { return "openrails.attempt_enrichment" }
 
-// enrichAttempts runs the NMI attempt enrichment pass once (#1114).
+// enrichAttempts runs the NMI attempt enrichment pass once.
 func (w *world) enrichAttempts() {
 	w.t.Helper()
 	res, err := w.jobs.Insert(w.t.Context(), enrichmentPass{}, &river.InsertOpts{Queue: openrails.QueueBilling})
@@ -24,7 +24,7 @@ func (w *world) enrichAttempts() {
 	w.waitJob(res.Job.ID)
 }
 
-// enriched is one attempt's card and issuer columns (#1114).
+// enriched is one attempt's card and issuer columns.
 type enriched struct {
 	Kind                                          string
 	BIN, Brand, Last4, AVS, IssuerCode, TokenType *string
@@ -48,7 +48,7 @@ func (w *world) enrichedAttempts(customerID string) []enriched {
 }
 
 // NMI's transaction report fills every NMI attempt once: the card's BIN and
-// brand, AVS, and the issuer's raw answer (#1114).
+// brand, AVS, and the issuer's raw answer.
 func TestNMIAttemptEnrichment(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -83,7 +83,7 @@ func TestNMIAttemptEnrichment(t *testing.T) {
 	require.Equal(t, rows, w.enrichedAttempts(e.c.id), "a rerun changes nothing")
 }
 
-// A card NMI charges through a network token is recorded as one (#1114).
+// A card NMI charges through a network token is recorded as one.
 func TestNMIAttemptNetworkToken(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

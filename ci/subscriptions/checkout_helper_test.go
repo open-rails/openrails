@@ -290,8 +290,7 @@ func (w *world) latestAttemptStatus(customerID string) string {
 // The engine's own checkout entry, for inputs no checkout session sends: a
 // wallet-connected Solana subscribe, a one-off Solana transaction request, a
 // signature relayed from the buyer's wallet, an asserted entitlement. No
-// production route reaches them since the merchant checkout-attempt routes
-// were removed; these scenarios keep them covered until they are deleted.
+// production route reaches them; these scenarios keep them covered.
 
 func (w *world) inMerchant(run func(ctx context.Context, svc *checkout.CheckoutAttemptService) error) error {
 	rt := engine.Graph(w.rt).Runtime

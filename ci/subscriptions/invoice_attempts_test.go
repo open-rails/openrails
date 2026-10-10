@@ -23,7 +23,7 @@ func (invoicePass) Kind() string { return "openrails.invoice" }
 
 // A payer in arrears pays the invoice with a card the issuer declines, then
 // with one it approves: each answer is an invoice attempt, and the decline
-// never becomes a payment (#1111).
+// never becomes a payment.
 func TestInvoiceCollectionAttempts(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

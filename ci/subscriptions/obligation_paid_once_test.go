@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A paid period admits no second attempt, whatever writer tries: the
-// database refuses a later attempt for a period whose attempt succeeded
-// (tracker 1137). The attempt number never makes a second charge legal.
+// A paid period admits no second attempt, whatever writer tries: the database
+// refuses a later attempt for a period whose attempt succeeded. The attempt
+// number never makes a second charge legal.
 func TestPaidPeriodAdmitsNoSecondAttempt(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

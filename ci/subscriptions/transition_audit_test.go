@@ -35,8 +35,8 @@ func (w *world) transitions(sub string) []auditRow {
 	return out
 }
 
-// Every lifecycle decision is audited with its name, and a renewal that
-// moves the paid period is recorded even when the status stays (#1102).
+// Every lifecycle decision is audited with its name, and a renewal that moves
+// the paid period is recorded even when the status stays.
 func TestLifecycleDecisionsAreAudited(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -63,8 +63,7 @@ func TestLifecycleDecisionsAreAudited(t *testing.T) {
 // A subscription's lifecycle audit is permanent, and every subscription has
 // one from its first insert. Deleting the subscription, directly or through
 // the merchant purge's per-table statement, is refused by the audit's foreign
-// key (restrict_violation, which the purge reports as retained history). It
-// used to cascade into the audit and fail inside its immutability trigger.
+// key (restrict_violation, which the purge reports as retained history).
 func TestSubscriptionWithLifecycleAuditIsNeverDeleted(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

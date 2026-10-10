@@ -61,9 +61,9 @@ func TestEngineCadenceAccessEndsWithTheAllowance(t *testing.T) {
 }
 
 // A renewal with no outcome because collection is stopped keeps access by
-// default (Paul, 2026-09-25). The operator sees life.renewal.held with the
-// count and the oldest held age; once collection resumes the held renewal is
-// charged exactly once, access continues and the finding resolves.
+// default. The operator sees life.renewal.held with the count and the oldest
+// held age; once collection resumes the held renewal is charged exactly once,
+// access continues and the finding resolves.
 func TestHeldRenewalKeepsAccess(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -127,7 +127,7 @@ func TestEngineCadenceRenewalAuthenticationIsBounded(t *testing.T) {
 	})
 }
 
-// Paul's decline policy: below 96h the first renewal decline is terminal; from
+// The decline policy: below 96h the first renewal decline is terminal; from
 // 96h the cadence's retry tier runs (+1d for weekly, +2d from 28 days).
 func TestEngineCadenceFirstDecline(t *testing.T) {
 	t.Parallel()

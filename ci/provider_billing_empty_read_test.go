@@ -15,11 +15,9 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// A provider that bills a resource reports it, at zero if it charged nothing. A read with no
-// record over the whole provider-confirmed lifetime (RunPod never reports a CPU pod) refuses
-// the qualification and keeps the hold for an operator; it never settles at zero. A read
-// that does not cover the lifetime yet stays pending, and records of zero still settle at
-// zero.
+// A read with no billing record over the provider-confirmed lifetime refuses
+// the qualification and keeps the hold for an operator; it never settles at
+// zero. A read short of the lifetime stays pending; zero records settle at zero.
 func TestProviderBillingEmptyReadNeverSettlesAtZero(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "empty-read-"+uuid.NewString()[:8])

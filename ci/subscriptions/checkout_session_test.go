@@ -27,10 +27,9 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// Hosted checkout (#1124): several apps share one merchant and one billing
-// database; one of them also serves the payment page. A signed-in customer
-// mints a session on an app, and its id alone reads and pays it on the
-// payment host.
+// Hosted checkout: several apps share one merchant and one billing database;
+// one of them also serves the payment page. A signed-in customer mints a
+// session on an app, and its id alone reads and pays it on the payment host.
 
 const (
 	hostedAppOrigin   = "https://host-two.example"
@@ -516,9 +515,9 @@ func TestHostedCheckoutSingleSite(t *testing.T) {
 	require.Equal(t, http.StatusUnauthorized, res.StatusCode)
 }
 
-// A PSP whose card_entry is server (#1129) takes the card on OpenRails through
-// the shared page too: the page posts it with the session id, OpenRails vaults
-// it once and charges, and a replay charges nothing more.
+// A PSP whose card_entry is server takes the card on OpenRails through the
+// shared page too: the page posts it with the session id, OpenRails vaults it
+// once and charges, and a replay charges nothing more.
 func TestHostedCheckoutServerCardEntry(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)

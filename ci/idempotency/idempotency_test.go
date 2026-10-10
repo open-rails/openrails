@@ -432,11 +432,9 @@ func (e *env) applied(event string) int {
 	return n
 }
 
-// Two replicas' dedup services see one delivery storm for one event: its
-// effects run once and every duplicate answers the owner's outcome. A
-// retryable failure releases the event to the next redelivery on any replica;
-// a crash after the effects committed is recognised from webhook_events once
-// the dead claim lapses.
+// Across two replicas one event's effects run once and every duplicate gets
+// the owner's outcome; a retryable failure frees the event for any replica,
+// and a crash after the effects committed is recognised from webhook_events.
 func TestWebhookDedupeAcrossReplicas(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)
@@ -630,7 +628,7 @@ func TestWebhookDuplicatesLeaveRenewalsAlone(t *testing.T) {
 	require.Equal(t, 1, e.applied("evt_hot"))
 }
 
-// #1105: a request holding its pinned connection runs pool work on that same
+// A request holding its pinned connection runs pool work on that same
 // connection, even on a one-connection pool; and a pool with nothing free
 // answers ErrPoolExhausted within a bound instead of waiting forever.
 func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
@@ -665,10 +663,10 @@ func TestPoolWorkReusesThePinAndNeverHangs(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// #1105 review: a transaction open on the request's connection is never
-// joined silently. A statement through the request's DB inside a pool
-// transaction, and a nested DB transaction, are refused with
-// ErrPinInTransaction; the outer transaction alone decides what commits.
+// A transaction open on the request's connection is never joined silently: a
+// statement through the request's DB inside a pool transaction, and a nested
+// DB transaction, are refused with ErrPinInTransaction; the outer transaction
+// alone decides what commits.
 func TestPinnedTransactionIsNeverJoined(t *testing.T) {
 	t.Parallel()
 	e := newEnv(t)

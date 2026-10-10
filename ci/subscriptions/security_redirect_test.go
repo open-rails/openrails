@@ -8,9 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SEC-33: checkout return URLs are an open-redirect vector (a phishing page
-// reached through the merchant's own checkout). A session's return URL must
-// name an exact allowed host origin, minted through the embedded and the
+// Checkout return URLs are an open-redirect vector: a session's return URL
+// must name an exact allowed host origin, minted through the embedded and the
 // remote Client.
 func TestSecurityCheckoutReturnURLsStayOnHost(t *testing.T) {
 	t.Parallel()

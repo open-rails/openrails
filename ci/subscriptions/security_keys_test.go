@@ -12,10 +12,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// SEC-33: tier-change idempotency keys belong to one customer. Another
-// customer who guesses or observes a key cannot pre-claim it and turn the
-// victim's upgrade into a conflict; each customer's change runs once under the
-// same key.
+// Tier-change idempotency keys belong to one customer. Another customer who
+// guesses or observes a key cannot pre-claim it and turn the victim's upgrade
+// into a conflict; each customer's change runs once under the same key.
 func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 	t.Parallel()
 	forEachRail(t, func(t *testing.T, rail string) {
@@ -34,8 +33,8 @@ func TestSecurityTierChangeKeysAreCustomerScoped(t *testing.T) {
 	})
 }
 
-// SEC-33: a customer probing another customer's payment-method or
-// subscription ids gets the same answer as for an id that does not exist.
+// A customer probing another customer's payment-method or subscription ids
+// gets the same answer as for an id that does not exist.
 func TestSecurityForeignIDsLookMissing(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

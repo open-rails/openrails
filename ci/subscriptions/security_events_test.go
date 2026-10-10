@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// SEC-33: the provider's notice of a refund OpenRails issued can arrive before
+// The provider's notice of a refund OpenRails issued can arrive before
 // OpenRails finishes recording it. The refund is counted once, and the notice
 // never applies a second decision: a partial refund with revoke_access=false
 // keeps the membership and its access.
@@ -57,8 +57,8 @@ func TestSecurityRefundNoticeDuringOwnRefundCountsOnce(t *testing.T) {
 	})
 }
 
-// SEC-33: an NMI chargeback of a one-time purchase revokes what it bought and
-// records the reversal once, as a Stripe dispute of a one-off does.
+// An NMI chargeback of a one-time purchase revokes what it bought and records
+// the reversal once, as a Stripe dispute of a one-off does.
 func TestSecurityNMIChargebackRevokesOneTimePurchase(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -91,9 +91,9 @@ func stripeDisputeEvent(kind, id, status string, p billing.Payment) obj {
 		"amount": p.Amount / 10_000, "currency": "usd", "status": status, "reason": "fraudulent"})
 }
 
-// SEC-33: Stripe dispute notices arrive out of order. A dispute already won
-// never reverses when its "created" notice arrives late, and winning a
-// dispute restores only the cancellation that dispute caused.
+// Stripe dispute notices arrive out of order. A dispute already won never
+// reverses when its "created" notice arrives late, and winning a dispute
+// restores only the cancellation that dispute caused.
 func TestSecurityStripeDisputeOrdering(t *testing.T) {
 	t.Parallel()
 	t.Run("created_after_won/membership", func(t *testing.T) {
@@ -154,9 +154,9 @@ func TestSecurityStripeDisputeOrdering(t *testing.T) {
 	})
 }
 
-// SEC-33: CCBill signs nothing, so its posted dates are bounded. A renewal
-// buys at most one billing cycle (plus CCBill's 72h grace) past the paid
-// period, and a reactivation, which carries no payment, never extends it.
+// CCBill signs nothing, so its posted dates are bounded. A renewal buys at
+// most one billing cycle (plus CCBill's 72h grace) past the paid period, and a
+// reactivation, which carries no payment, never extends it.
 func TestSecurityCCBillPeriodEndsAreBounded(t *testing.T) {
 	t.Parallel()
 	t.Run("renewal", func(t *testing.T) {

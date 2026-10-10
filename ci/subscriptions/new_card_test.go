@@ -14,9 +14,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A hosted checkout (#1085): the customer's one "Subscribe" click on the
-// payment page sends a fresh Collect.js token, and OpenRails saves the card,
-// quotes the price and enrolls it in one pay.
+// A hosted checkout: the customer's one "Subscribe" click on the payment page
+// sends a fresh Collect.js token, and OpenRails saves the card, quotes the
+// price and enrolls it in one pay.
 type hostedPay struct {
 	w     *world
 	c     *customer
@@ -171,7 +171,7 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 }
 
 // A purchase the merchant prepares for its customer is handed over as a
-// checkout session (D1): the customer pays it on the page with a new card.
+// checkout session: the customer pays it on the page with a new card.
 func TestMerchantHandsOverACheckoutSession(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -187,7 +187,7 @@ func TestMerchantHandsOverACheckoutSession(t *testing.T) {
 	require.Len(t, w.nmi.ledger(""), 1)
 }
 
-// One-time new-card sales are unchanged.
+// A one-time sale on a new card grants its access without a subscription.
 func TestHostedNewCardOneTimeSale(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

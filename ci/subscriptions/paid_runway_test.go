@@ -13,8 +13,8 @@ import (
 )
 
 // Buying a product again while a canceled subscription to it is still paid
-// charges nothing (tracker 1137): a resumable one is resumed instead, any
-// other is bought again once its paid period ends.
+// charges nothing: a resumable one is resumed instead, any other is bought
+// again once its paid period ends.
 func TestBuyingAgainDuringPaidRunway(t *testing.T) {
 	t.Parallel()
 	t.Run("engine_resumes", func(t *testing.T) {

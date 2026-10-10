@@ -52,11 +52,10 @@ func freshAddresses() func(int) string {
 	return func(i int) string { return fmt.Sprintf("%s%x::1", prefix, i+1) }
 }
 
-// SEC: card-testing attack mode belongs to the merchant under attack. A wave
-// of declines at one merchant puts a captcha in front of that merchant's card
+// Card-testing attack mode belongs to the merchant under attack. A wave of
+// declines at one merchant puts a captcha in front of that merchant's card
 // routes only. Another merchant on the same Redis keeps its card routes and
-// its admin API, and no merchant's server-to-server API ever meets a
-// captcha, the attacked merchant's included.
+// its admin API, and no merchant's server-to-server API ever meets a captcha.
 func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	t.Parallel()
 	addr := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_ADDR"))
@@ -94,13 +93,10 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	require.Equal(t, http.StatusCreated, status, "another merchant's card routes are untouched: %s", body)
 }
 
-// SEC: without a captcha (the embedded default: Redis on, no captcha keys),
-// attack mode never refuses a buyer with no recent decline. A wave of declines
-// from fresh accounts and addresses blocks only the subjects that just
-// declined, before the gateway sees them; a fresh buyer still saves a card and
-// an earlier buyer still confirms a checkout with a saved one. Requests the
-// provider never saw, and declines from a few accounts and addresses, never
-// make an attack.
+// Without a captcha, attack mode refuses only subjects that just declined,
+// before the gateway: fresh buyers still save cards and earlier buyers still
+// pay with saved ones. Requests the provider never saw, or declines from a few
+// accounts and addresses, never make an attack.
 func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 	t.Parallel()
 	addr := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_ADDR"))

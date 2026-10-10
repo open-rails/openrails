@@ -210,10 +210,10 @@ func TestReplicasStalledExecutorSendsNothing(t *testing.T) {
 	}
 }
 
-// An executor whose lease would lapse during the provider call sends nothing
-// (#1102): the charge needs its lease to outlast the longest call, so no other
-// executor can claim the row while the request is in flight. The renewal is
-// charged once, after the lease lapses, by the executor that claims it.
+// An executor whose lease would lapse during the provider call sends nothing:
+// the charge needs its lease to outlast the longest call, so no other executor
+// can claim the row while the request is in flight. The renewal is charged
+// once, after the lease lapses, by the executor that claims it.
 func TestReplicasShortLeaseSendsNothing(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {

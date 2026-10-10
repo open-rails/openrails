@@ -13,8 +13,7 @@ import (
 )
 
 // TestSchemaSnapshot keeps api/schema.txt equal to the schema the migrations
-// install on a real PostgreSQL, so a change to a table, column, constraint,
-// index, trigger or function is deliberate: regenerate with
+// install, so every schema change is deliberate: regenerate with
 // go run ./scripts/contracts -write and review the diff.
 func TestSchemaSnapshot(t *testing.T) {
 	dsn := strings.TrimSpace(os.Getenv(schemasnapshot.DSNEnv))

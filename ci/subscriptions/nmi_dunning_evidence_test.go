@@ -39,11 +39,9 @@ func TestNMIStaleRosterDateInsidePaidPeriod(t *testing.T) {
 	require.Zero(t, len(w.nmi.Attempts()))
 }
 
-// A decline first seen after its grace would have ended (the webhook was
-// lost) still enters dunning: the lapsed row is parked, read at once, and the
-// read finds the decline. Grace runs from discovery; retries run from the
-// decline (#1113), so the overdue first retry runs at the next due pass and
-// recovers the period.
+// A decline first seen after its grace would have ended still enters dunning:
+// the parked row is read at once and finds it. Grace runs from discovery and
+// retries from the decline, so the overdue first retry recovers the period.
 func TestNMIDeclineDiscoveredLateIsDunned(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

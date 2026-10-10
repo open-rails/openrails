@@ -80,11 +80,9 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	require.Len(t, w.nmi.ledger(""), 2)
 }
 
-// A refresh's coverage ends at its start less the provider window delay, and
-// the scheduler reshuffles each cycle's merchants over its stagger, so an
-// account's next refresh finishes after a full interval has passed. A book
-// refreshed on schedule is not stale: its customer pays while that refresh is
-// still due. Only a whole missed cycle holds the book.
+// A book refreshed on schedule is never stale, though staggered refresh
+// coverage lags a full interval: its customer pays while the next refresh is
+// due. Only a whole missed cycle holds the book.
 func TestRefreshedBookStaysPayableUntilACycleIsMissed(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -18,9 +18,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
-// SEC: checkout money is the catalog's. Hosts forward browser-chosen price
-// ids and saved-card ids; a price that does not grant the requested access,
-// an archived price, a price with a negative amount, or confirmation fields
+// Checkout money is the catalog's. Hosts forward browser-chosen price ids and
+// saved-card ids; a price that does not grant the requested access, an
+// archived price, a price with a negative amount, or confirmation fields
 // naming another amount or currency never change what is charged.
 func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 	t.Parallel()
@@ -74,9 +74,9 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 	}
 }
 
-// SEC: one permanent product, one charge. A second checkout for the same
-// product racing the first's in-flight charge, on another replica, is
-// refused, and a completed purchase cannot be bought again.
+// One permanent product, one charge. A second checkout for the same product
+// racing the first's in-flight charge, on another replica, is refused, and a
+// completed purchase cannot be bought again.
 func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {

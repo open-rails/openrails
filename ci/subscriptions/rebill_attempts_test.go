@@ -14,7 +14,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// cycleAttempt is one rebill attempt with its cycle (#1111).
+// cycleAttempt is one rebill attempt with its cycle.
 type cycleAttempt struct {
 	Kind, Owner, Source, ObservedVia, Category string
 	Reason, TransactionID                      *string
@@ -41,7 +41,7 @@ func (w *world) cycleAttempts(sub billing.SubscriptionID) []cycleAttempt {
 }
 
 // An engine renewal declines twice and is collected on the second retry: one
-// cycle, its first attempt the rebill, then two dunning retries (#1111).
+// cycle, its first attempt the rebill, then two dunning retries.
 func TestEngineRebillAttempts(t *testing.T) {
 	t.Parallel()
 	for _, rail := range rails {
@@ -103,7 +103,7 @@ func TestEngineRebillCustomerRetry(t *testing.T) {
 
 // NMI declines its own scheduled charge and OpenRails' retry collects it: the
 // NMI charge is the cycle's rebill, observed through the webhook, and the
-// retry is OpenRails' dunning (#1111).
+// retry is OpenRails' dunning.
 func TestNMIScheduleRebillAttempts(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

@@ -102,10 +102,9 @@ func (l *legacy) renewAtNMI(paid, notify bool) {
 }
 
 // OpenRails charges an NMI-owned membership only to retry NMI's own decline
-// (NMI never retries, so OpenRails dunning is its only retry): never in the
-// due pass, never from convergence or LIFE after missing news, never after a
-// crash mid-convergence, never from a second replica. The one dunning row
-// recovers the declined period with exactly one charge.
+// (NMI never retries): never from the due pass, convergence, LIFE, a crash
+// mid-convergence or a second replica. The dunning row recovers the declined
+// period with exactly one charge.
 func TestLegacyNMIZeroEngineCharges(t *testing.T) {
 	t.Parallel()
 	type row struct {

@@ -29,10 +29,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// stripeCheckoutFake is the public provider seam used by the webhook slice.
-// It records the checkout metadata that production sends to Stripe and returns
-// a deterministic hosted-session id; the test then delivers those facts back
-// through the public webhook route.
+// stripeCheckoutFake records the checkout metadata sent to Stripe and returns
+// a deterministic hosted-session id for the test to deliver back as webhooks.
 type stripeCheckoutFake struct {
 	t             *testing.T
 	checkoutCalls atomic.Int32
@@ -129,11 +127,9 @@ func postSignedStripeWebhook(t *testing.T, handler http.Handler, account, secret
 	return res.Code, res.Body.String()
 }
 
-// TestStripeWebhookReplayAndReorderingConverges exercises only public seams:
-// a checkout session pays through Stripe's hosted page over a host supplied
-// transport, then the mounted net/http webhook route receives completion,
-// replay, and a stale provider-closure event. The final public checkout read
-// must remain succeeded and the purchase must remain idempotent.
+// TestStripeWebhookReplayAndReorderingConverges pays a checkout through
+// Stripe's hosted page, then delivers completion, a replay and a stale expiry
+// to the webhook route: the checkout stays succeeded and pays once.
 func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	f := newFixture(t)
 	fake := &stripeCheckoutFake{t: t}

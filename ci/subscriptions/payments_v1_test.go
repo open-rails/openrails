@@ -18,10 +18,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// Money received outside OpenRails pays an open order (decision 16): a manual
-// payment idempotent by transaction id, the order paid and fulfilled, and
-// staff find it by price and status. An order with a recurring line is
-// refused: its renewals need the customer's card.
+// Money received outside OpenRails pays an open order: a manual payment
+// idempotent by transaction id, the order paid and fulfilled, and staff find
+// it by price and status. An order with a recurring line is refused: its
+// renewals need the customer's card.
 func TestRecordedOrderPayment(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
@@ -132,9 +132,9 @@ func TestPaymentListsPageByCursor(t *testing.T) {
 	require.Nil(t, rest["next_cursor"])
 }
 
-// A card a custodian holds names no PSP (D20): the schema refuses one that
-// does, and each charge routes through the one live PSP of the card's rail
-// that reaches its custodian, none when no PSP or two do.
+// A card a custodian holds names no PSP: the schema refuses one that does,
+// and each charge routes through the one live PSP of the card's rail that
+// reaches its custodian, none when no PSP or two do.
 func TestCustodianCardRoutesPerCharge(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

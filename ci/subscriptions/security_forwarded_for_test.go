@@ -10,10 +10,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SEC: behind a proxy that appends its own X-Forwarded-For line (HAProxy's
-// option forwardfor), every line counts, in order, and the resolver walks them
-// right to left as the proxy chain wrote them. A client that sends its own
-// line naming a CCBill address does not pass CCBill's source allowlist.
+// Behind a proxy that appends its own X-Forwarded-For line (HAProxy's option
+// forwardfor), every line counts, in order, and the resolver walks them right
+// to left as the proxy chain wrote them. A client that sends its own line
+// naming a CCBill address does not pass CCBill's source allowlist.
 func TestSecurityForwardedForReadsEveryLine(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

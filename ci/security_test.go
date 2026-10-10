@@ -19,9 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 )
 
-// SEC-25: a refunded purchase stays refunded. After the provider reports a
-// full refund, a replayed or late completion event for the same checkout
-// (a new event id) must not grant the purchase again.
+// A refunded purchase stays refunded: a replayed or late completion event for
+// the same checkout (a new event id) does not grant it again.
 func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	f := newFixture(t)
 	fake := &stripeCheckoutFake{t: t}

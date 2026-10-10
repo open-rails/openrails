@@ -37,13 +37,11 @@ func (f *fleet) refusedSaves() int {
 
 var refusedCard = card{Brand: "visa", Last4: "0119", Decline: "vault"}
 
-// SEC-30: card testing is counted in PostgreSQL, so the blocks hold across
-// replicas with no Redis and no captcha. Per customer and per client address,
-// six refused cards within fifteen minutes block further attempts on every
-// replica, before the gateway sees them; the block covers checkout through
-// the embedded and remote Client too, and lifts when the window passes. Ten
-// in a day block for the day. A merchant-wide wave of refusals is attack mode:
-// any subject with a recent refusal is blocked, clean customers are not.
+// Card testing is counted in PostgreSQL, so blocks hold across replicas with
+// no Redis or captcha: six refusals in fifteen minutes (or ten in a day) per
+// customer or client address block attempts before the gateway, checkout
+// included, until the window passes. In attack mode any subject with a recent
+// refusal is blocked; clean customers are not.
 func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 	t.Parallel()
 	t.Run("customer", func(t *testing.T) {
@@ -107,12 +105,10 @@ func TestSecurityCardTestingLedgerAcrossReplicas(t *testing.T) {
 	})
 }
 
-// SEC: a checkout counts each pay's client address, as the site's trusted
-// proxy forwards it, as the customer routes do. One address testing cards
-// through many accounts is blocked; a card-testing wave from many accounts and
-// addresses is attack mode, where a tester's next card is refused before the
-// gateway while a clean buyer still pays. A forwarded address that is not an
-// IP address is refused.
+// A checkout counts each pay's client address as the trusted proxy forwards
+// it: one address testing cards through many accounts is blocked; in attack
+// mode a tester's next card is refused before the gateway while a clean buyer
+// pays. A forwarded address that is not an IP is refused.
 func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	t.Parallel()
 	declined := card{Brand: "visa", Last4: "0002", Decline: "202"}

@@ -21,7 +21,7 @@ func (solanaCrankPass) Kind() string { return "openrails.solana_crank" }
 
 // A refused recurring pull is one attempt: a crank that crashes after
 // recording it and before failing the membership is retried, and the retry
-// records nothing new (#1119).
+// records nothing new.
 func TestSolanaRefusedPullRecordedOnce(t *testing.T) {
 	s := openSolanaShop(t)
 	w := s.w

@@ -14,9 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/collection"
 )
 
-// A charge names its payment method (#1087). A customer with a saved card
-// whose pay names neither a saved method nor a new card token is refused and
-// nothing is charged.
+// A charge names its payment method. A customer with a saved card whose pay
+// names neither a saved method nor a new card token is refused and nothing is
+// charged.
 func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -36,12 +36,9 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 	require.False(t, c.entitled("content:post"))
 }
 
-// A renewal charges only a card that pays it under its recurring agreement.
-// With its own card gone the subscription follows the customer's default,
-// which here is on another rail and cannot pay it: only the member can fix
-// it. The membership waits for a card on the dunning clock, the customer is
-// asked for one, access follows the dunning access policy, and the wait ends
-// when the dunning window does. It is never held as a system stop.
+// A renewal never charges a card that cannot pay it under its agreement: with
+// the default on another rail, the membership waits for a card on the dunning
+// clock and the customer is asked; it is never held as a system stop.
 func TestRenewalNeverChargesACardThatCannotPayIt(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)

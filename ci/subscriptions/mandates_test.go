@@ -49,11 +49,9 @@ func (w *world) subscriptionMandate(tp topology, customer billing.CustomerID, su
 	return live[0]
 }
 
-// A saved card and a subscription on it each hold their agreement: the card's
-// verification stores it for reuse, the enrollment charge stores the
-// subscription's recurring agreement. A renewal is a merchant-initiated
-// charge that sends that mandate's reference, and its attempt records the
-// mandate and what it sent. Another customer sees none of them.
+// A saved card and its subscription each store their agreement; a renewal is
+// a merchant-initiated charge sending its mandate's reference, which its
+// attempt records. Another customer sees none of them.
 func TestRenewalSendsItsMandateReferences(t *testing.T) {
 	t.Parallel()
 	for _, tp := range []topology{embedded, remote} {
