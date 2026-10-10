@@ -25,5 +25,5 @@ Chart version `X.Y.Z` runs image `vX.Y.Z`.
 | `podDisruptionBudget`, `topologySpreadConstraints`, `affinity` | Scheduling. |
 
 The chart owns `host`, `port` and `private_port` (`ports.http`, `metrics.port`).
-Pods run as UID 1001 with a read-only root filesystem, no service links and no
-ServiceAccount token unless Vault's kubernetes auth needs it.
+Pods run as UID 1001 with a read-only root filesystem and no ServiceAccount
+token unless Vault's kubernetes auth needs it.

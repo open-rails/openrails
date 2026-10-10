@@ -29,8 +29,6 @@ spec:
     spec:
       serviceAccountName: {{ include "openrails.serviceAccountName" . }}
       automountServiceAccountToken: {{ include "openrails.automountToken" . }}
-      # Not needed by OpenRails; off to keep the pod's env clean.
-      enableServiceLinks: false
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
