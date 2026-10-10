@@ -527,7 +527,7 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 	}
 	r.riverStarted = true
 	log.Info("Starting River background workers")
-	if err := r.RiverClient.Start(ctx); err != nil {
+	if err := r.RiverClient.Start(cancelOnly(ctx)); err != nil {
 		r.riverStarted = false
 		joinLoops()
 		return nil, err
@@ -537,6 +537,14 @@ func (r *Runtime) StartWorkers(ctx context.Context, fleet *river.Client[pgx.Tx])
 		r.workerConsumerRunning.Store(false)
 		joinLoops()
 	}, nil
+}
+
+// cancelOnly is ctx that ends only by cancellation: River's notifier spins
+// on a context that ended by deadline, so River never sees one.
+func cancelOnly(ctx context.Context) context.Context {
+	run, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	context.AfterFunc(ctx, cancel)
+	return run
 }
 
 // GetBillingPeriodicJobs returns billing's periodic jobs for external River client setup.
