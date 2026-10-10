@@ -2,7 +2,6 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { createBillingClient } from "./client/client"
-import { BillingUiProvider } from "./provider"
 import {
   canAuthenticatePayment,
   cardRetryAfter,
@@ -155,11 +154,9 @@ describe("PSP flows", () => {
     })
     const onSaved = vi.fn()
     render(
-      <BillingUiProvider>
-        <BillingProvider client={createBillingClient({ fetch })}>
-          <SavePaymentMethod psp={stripe} onSaved={onSaved} />
-        </BillingProvider>
-      </BillingUiProvider>
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <SavePaymentMethod psp={stripe} onSaved={onSaved} />
+      </BillingProvider>
     )
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
     expect(
@@ -192,15 +189,13 @@ describe("PSP flows", () => {
     })
     const onSaved = vi.fn()
     render(
-      <BillingUiProvider>
-        <BillingProvider client={createBillingClient({ fetch })}>
-          <SavePaymentMethod
-            psp={{ ...nmi, flow: "card", config: null }}
-            onSaved={onSaved}
-            defaultCountry="US"
-          />
-        </BillingProvider>
-      </BillingUiProvider>
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <SavePaymentMethod
+          psp={{ ...nmi, flow: "card", config: null }}
+          onSaved={onSaved}
+          defaultCountry="US"
+        />
+      </BillingProvider>
     )
     const save = screen.getByRole("button", { name: "Save card" })
     expect(save).toBeDisabled()
@@ -252,11 +247,9 @@ describe("PSP flows", () => {
 
   it("says so when a PSP cannot save cards in the page", () => {
     render(
-      <BillingUiProvider>
-        <BillingProvider client={createBillingClient({ fetch: vi.fn() })}>
-          <SavePaymentMethod psp={ccbill} onSaved={vi.fn()} />
-        </BillingProvider>
-      </BillingUiProvider>
+      <BillingProvider client={createBillingClient({ fetch: vi.fn() })}>
+        <SavePaymentMethod psp={ccbill} onSaved={vi.fn()} />
+      </BillingProvider>
     )
     expect(screen.getByRole("alert")).toHaveTextContent("unavailable")
   })

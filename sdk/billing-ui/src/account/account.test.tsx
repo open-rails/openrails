@@ -16,8 +16,7 @@ import { es } from "../locales/es"
 import { ja } from "../locales/ja"
 import { ko } from "../locales/ko"
 import { zh } from "../locales/zh"
-import { BillingUiProvider, type BillingUiProviderProps } from "../provider"
-import { BillingProvider } from "../react/provider"
+import { BillingProvider, type BillingProviderProps } from "../react/provider"
 import {
   apiError,
   fakeBilling,
@@ -36,13 +35,11 @@ import { SubscriptionsPanel } from "./subscriptions-panel"
 function mount(
   ui: ReactNode,
   server: FakeBilling,
-  props: Partial<BillingUiProviderProps> = {}
+  props: Partial<BillingProviderProps> = {}
 ) {
   const client = createBillingClient({ fetch: server.fetch })
   return render(
-    <BillingUiProvider locale="en-US" {...props}>
-      <BillingProvider client={client}>{ui}</BillingProvider>
-    </BillingUiProvider>
+    <BillingProvider locale="en-US" {...props} client={client}>{ui}</BillingProvider>
   )
 }
 
@@ -221,11 +218,9 @@ describe("SubscriptionsPanel", () => {
     const onChange = vi.fn()
     const client = createBillingClient({ fetch: server.fetch })
     render(
-      <BillingUiProvider locale="en-US">
-        <BillingProvider client={client} onChange={onChange}>
-          <SubscriptionsPanel />
-        </BillingProvider>
-      </BillingUiProvider>
+      <BillingProvider locale="en-US" client={client} onChange={onChange}>
+        <SubscriptionsPanel />
+      </BillingProvider>
     )
     const row = await screen.findByTestId("subscription-row")
     fireEvent.click(

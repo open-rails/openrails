@@ -9,7 +9,7 @@ the root README's [Sell Your Content](../../README.md#sell-your-content).
 |---|---|
 | `main.go` | AuthKit, the OpenRails client (`newBilling`) and the mounted routes |
 | `content.go` | the app's API: `/api/courses` lists the courses with prices and what the user owns (one product read and one entitlement read per page); `/api/courses/:course` answers a holder its video's signed URL and anyone else `402` with where to buy it; `/media/*path` serves signed, unexpired URLs |
-| `web/` | the React app: the store, each course's player, and buy pages that sell with billing-ui's `<Offers>` |
+| `web/` | the React app, under one `BillingProvider`: the store (a billing-ui `<BuyButton>` per price), each course's player, and buy pages that sell with `<Offers>`; the app never handles a checkout session |
 | `media/` | the courses' sample videos |
 | `catalog.yaml`, `merchant.example.yaml` | the catalog and the merchant |
 

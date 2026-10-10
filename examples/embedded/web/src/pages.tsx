@@ -4,12 +4,10 @@ import { SignInDialog } from "@openrails/auth-ui"
 import { createAuthClient } from "@openrails/auth-ui/client"
 import { useAuth } from "@openrails/auth-ui/react"
 import { createBillingClient, formatAmount } from "@openrails/billing-ui/client"
-import { BillingProvider } from "@openrails/billing-ui/react"
-import { BillingUiProvider, CheckoutModal, Offers } from "@openrails/billing-ui"
-import "@openrails/billing-ui/styles.css"
+import { BuyButton, Offers } from "@openrails/billing-ui"
 
 export const auth = createAuthClient() // AuthKit's browser client, at /api/v1: authFetch attaches the signed-in user's token
-const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
+export const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
 // A course as the app's API lists it: the host's own, priced by OpenRails.
 type Course = {
@@ -21,9 +19,11 @@ type Course = {
 }
 
 // StorePage lists the courses a page at a time: Watch for those the user
-// owns, a button per price for the rest.
+// owns, a BuyButton per price for the rest.
 export function StorePage() {
   const navigate = useNavigate()
+  const { signedIn } = useAuth()
+  const [signingIn, setSigningIn] = useState(false)
   const [cursor, setCursor] = useState("0")
   const [pages, setPages] = useState<{ data: Course[]; next_cursor: string | null }[]>([])
   useEffect(() => {
@@ -38,7 +38,7 @@ export function StorePage() {
   }, [cursor])
   const next = pages.at(-1)?.next_cursor
   return (
-    <BillingUiProvider appearance={{ theme: "auto" }}>
+    <>
       {pages.flatMap((page) => page.data).map((course) => (
         <section key={course.slug}>
           <h2>{course.title}</h2>
@@ -46,11 +46,13 @@ export function StorePage() {
             <Link to={`/courses/${course.slug}`}>Watch</Link>
           ) : (
             course.prices.map((price) => (
-              <Buy
+              <BuyButton
                 key={price.key}
                 product={course.product_key}
                 price={price.key}
                 label={`${formatAmount(price.amount, price.currency, billing.currencies[price.currency])} ${price.terms}`}
+                signedIn={signedIn}
+                onSignInRequired={() => setSigningIn(true)}
                 onPaid={() => navigate(`/courses/${course.slug}`)}
               />
             ))
@@ -59,31 +61,7 @@ export function StorePage() {
       ))}
       {next && <button onClick={() => setCursor(next)}>Load more</button>}
       <Link to="/members/qa">Members-only Q&A</Link>
-    </BillingUiProvider>
-  )
-}
-
-function Buy({ product, price, label, onPaid }: { product: string; price: string; label: string; onPaid: () => void }) {
-  const { signedIn } = useAuth()
-  const [signingIn, setSigningIn] = useState(false)
-  const [session, setSession] = useState<string>()
-  async function start() {
-    if (!signedIn) return setSigningIn(true) // anyone sees the prices; buying needs an account
-    // OpenRails prices the offer from the catalog; card entry happens in the processor's iframe.
-    setSession((await billing.createCheckoutSession({ productKey: product, priceKey: price })).id)
-  }
-  return (
-    <>
-      <button onClick={start}>{label}</button>
       <SignInDialog open={signingIn} onOpenChange={setSigningIn} />
-      {session && (
-        <CheckoutModal
-          open
-          onOpenChange={(open) => !open && setSession(undefined)}
-          source={billing.checkoutSource(session)}
-          onComplete={(result) => result.status === "succeeded" && onPaid()}
-        />
-      )}
     </>
   )
 }
@@ -142,11 +120,9 @@ function BuyPage({ api, back }: { api: string; back: string }) {
   }, [api, back, navigate])
   if (!entitlement) return null
   return (
-    <BillingUiProvider appearance={{ theme: "auto" }}>
-      <BillingProvider client={billing}>
-        <Offers entitlement={entitlement} signedIn={signedIn} onSignInRequired={() => setSigningIn(true)} onPaid={() => navigate(back)} />
-      </BillingProvider>
+    <>
+      <Offers entitlement={entitlement} signedIn={signedIn} onSignInRequired={() => setSigningIn(true)} onPaid={() => navigate(back)} />
       <SignInDialog open={signingIn} onOpenChange={setSigningIn} />
-    </BillingUiProvider>
+    </>
   )
 }

@@ -10,7 +10,7 @@ export const MessagesContext = createContext<Translator>(
   createTranslator(defaultMessages)
 )
 
-/** English defaults when rendered outside a `BillingUiProvider`. */
+/** English defaults when rendered outside a `BillingProvider`. */
 export function useMessages(): Translator {
   return useContext(MessagesContext)
 }

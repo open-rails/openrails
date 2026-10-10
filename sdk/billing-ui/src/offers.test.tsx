@@ -5,7 +5,6 @@ import { describe, expect, it, vi } from "vitest"
 import { createBillingClient } from "./client/client"
 import type { Product } from "./client/types"
 import { Offers } from "./offers"
-import { BillingUiProvider } from "./provider"
 import { BillingProvider } from "./react/provider"
 import {
   apiError,
@@ -70,11 +69,9 @@ const catalog = () => [
 
 function mount(ui: ReactNode, server: FakeBilling) {
   return render(
-    <BillingUiProvider locale="en-US">
-      <BillingProvider client={createBillingClient({ fetch: server.fetch })}>
-        {ui}
-      </BillingProvider>
-    </BillingUiProvider>
+    <BillingProvider locale="en-US" client={createBillingClient({ fetch: server.fetch })}>
+      {ui}
+    </BillingProvider>
   )
 }
 
@@ -143,12 +140,13 @@ describe("Offers", () => {
       )
     )
     expect(server.calls).toContain("POST /me/checkout-sessions")
-    expect(server.calls).toContain("GET /me/checkout-sessions/ocs_price_rent")
+    expect(server.calls).toContain("GET /me/checkout-sessions/ocs_rent")
     const mint = server.fetch.mock.calls.find(
       ([, init]) => init?.method === "POST"
     )!
     expect(JSON.parse(String(mint[1]!.body))).toMatchObject({
-      price_id: "price_rent",
+      product_key: "course-101",
+      price_key: "rent",
     })
   })
 

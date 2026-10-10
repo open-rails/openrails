@@ -4,7 +4,7 @@
 import { createRoot } from "react-dom/client"
 
 import {
-  BillingUiProvider,
+  BillingProvider,
   Checkout,
   CheckoutFrame,
   type CheckoutFrameTheme,
@@ -26,7 +26,7 @@ async function main() {
   })
   Object.assign(window, { checkoutSession: session })
   createRoot(document.getElementById("root")!).render(
-    <BillingUiProvider appearance={{ theme: "light" }} locale="en-US">
+    <BillingProvider appearance={{ theme: "light" }} locale="en-US">
       <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
         {inline || !session.url ? (
           <Checkout
@@ -42,7 +42,7 @@ async function main() {
           />
         )}
       </main>
-    </BillingUiProvider>
+    </BillingProvider>
   )
 }
 

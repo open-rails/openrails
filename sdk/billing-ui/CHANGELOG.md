@@ -1,10 +1,24 @@
 # Changelog
 
+## One provider
+
+- `BillingProvider` takes what `BillingUiProvider` took (`appearance`,
+  `messages`, `t`, `locale`, `navigate`) beside `client` and `onChange`, and
+  `BillingUiProvider` is gone. The main entry exports it; `./react` exports the
+  same component for hook-only apps, without the stylesheet. `client` is
+  optional: leave it out where no customer signs in, such as `CheckoutPage`.
+- A checkout inside a provider with a client saves a new card to the customer
+  first, so its source must be the customer's:
+  `client.checkoutSource(id, { customerBase: "/billing/v1/me" })`.
+
 ## Offers sell an entitlement
 
+- `<BuyButton product price onPaid onSignInRequired>` buys one price, labelled
+  from the catalog unless given `label`. The app never touches a checkout
+  session: when orders take a new card (#1168) it creates an order instead.
 - `<Offers entitlement onPaid onSignInRequired>` lists every product on sale
-  granting the entitlement, a button per price, each opening `CheckoutModal`;
-  `products` feeds it from the host's server instead.
+  granting the entitlement, a `BuyButton` per price; `products` feeds it from
+  the host's server instead.
 - `listProducts({ entitlement, keys })` and `useProducts({ entitlement, keys })`
   filter the public catalog. One of them is required: OpenRails no longer
   lists the whole catalog publicly.

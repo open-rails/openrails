@@ -1,10 +1,14 @@
 // @openrails/billing-ui — styled OpenRails checkout and account billing.
 // `Checkout`/`CheckoutModal` are the purchase flow; the account panels manage
-// what was bought (they need `BillingProvider` from `./react`). The entry
-// installs its isolated stylesheet once in browser environments.
+// what was bought. `BillingProvider` (also in `./react`, without styles) gives
+// them the client, appearance and words. The entry installs its isolated
+// stylesheet once in browser environments.
 import "./styles.css"
 
-export { BillingUiProvider, type BillingUiProviderProps } from "./provider"
+export {
+  BillingProvider,
+  type BillingProviderProps,
+} from "./react/provider"
 export { BillingUiRoot } from "./scope"
 export type { Navigate } from "./scope-context"
 export {
@@ -67,6 +71,7 @@ export {
 
 export { Checkout, type CheckoutLayout, type CheckoutProps } from "./checkout"
 export { CheckoutModal, type CheckoutModalProps } from "./modal"
+export { BuyButton, type BuyButtonProps } from "./buy-button"
 export { Offers, type OffersProps } from "./offers"
 export { CheckoutPage, type CheckoutPageProps } from "./checkout-page"
 export { CheckoutFrame, type CheckoutFrameProps } from "./checkout-frame"

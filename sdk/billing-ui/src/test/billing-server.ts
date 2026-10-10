@@ -364,7 +364,7 @@ export function fakeBilling(
       }
       if (key === "POST /me/checkout-sessions")
         return json(201, {
-          id: `ocs_${body.price_id}`,
+          id: `ocs_${body.price_id ?? body.price_key}`,
           url: null,
           expires_at: "2036-09-01T00:30:00Z",
         })

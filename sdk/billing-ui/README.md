@@ -6,8 +6,8 @@ billing (subscriptions, saved cards, payment history).
 | Import                            | Contents                                                                           |
 | --------------------------------- | ---------------------------------------------------------------------------------- |
 | `@openrails/billing-ui/client`    | Framework-free typed client for `/billing/v1/me/*` and the catalog, `BillingError` |
-| `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks                                               |
-| `@openrails/billing-ui`           | Styled checkout and account components, `BillingUiProvider`, i18n                  |
+| `@openrails/billing-ui/react`     | `BillingProvider` and headless hooks, without styles                               |
+| `@openrails/billing-ui`           | `BillingProvider`, styled checkout and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
 
 The checkout owns the browser payment flow. OpenRails holds the checkout
@@ -92,15 +92,16 @@ Stripe Elements needs the buyer's billing client (`<Checkout>` inside a
 
 The payment host serves `<CheckoutPage>` from one HTML entry at `PageURL`,
 behind its adapter's `CheckoutFramePolicy` (only the sites in
-`Config.Checkout.EmbedOrigins` may frame it):
+`Config.Checkout.EmbedOrigins` may frame it). No customer signs in there, so
+its `BillingProvider` has no client:
 
 ```tsx
-import { BillingUiProvider, CheckoutPage } from "@openrails/billing-ui"
+import { BillingProvider, CheckoutPage } from "@openrails/billing-ui"
 
 createRoot(root).render(
-  <BillingUiProvider>
+  <BillingProvider>
     <CheckoutPage appearance={{ variables: brand }} />
-  </BillingUiProvider>
+  </BillingProvider>
 )
 ```
 
@@ -112,25 +113,33 @@ cannot navigate the top window, so the app does); app to page
 
 ## Account billing
 
+One `BillingProvider`, usually at the app's root, gives every component the
+client, the appearance and the words. `@openrails/billing-ui/react` exports the
+same provider for an app that uses only the hooks; it loads no stylesheet.
+
 ```tsx
 import { createBillingClient } from "@openrails/billing-ui/client"
-import { BillingProvider } from "@openrails/billing-ui/react"
-import { AccountBilling, BillingUiProvider } from "@openrails/billing-ui"
+import { AccountBilling, BillingProvider } from "@openrails/billing-ui"
 import { de } from "@openrails/billing-ui/locales/de"
 
 // auth-ui's authFetch attaches the bearer and retries once after a refresh;
 // `getToken: () => token` works for any other auth.
 const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
-<BillingUiProvider appearance={{ theme: "auto" }} messages={de} locale="de" navigate={navigate}>
-  <BillingProvider client={billing} onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}>
-    <AccountBilling
-      plansHref="/plans"
-      defaultCurrency="USD" // offers "Make default"
-      sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // signs a Solana cancel
-    />
-  </BillingProvider>
-</BillingUiProvider>
+<BillingProvider
+  client={billing}
+  appearance={{ theme: "auto" }}
+  messages={de}
+  locale="de"
+  navigate={navigate}
+  onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}
+>
+  <AccountBilling
+    plansHref="/plans"
+    defaultCurrency="USD" // offers "Make default"
+    sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // signs a Solana cancel
+  />
+</BillingProvider>
 ```
 
 The panels read OpenRails' public configuration (`GET /config`) themselves,
@@ -140,20 +149,31 @@ card PSPs are temporarily unavailable; amounts use its currency registry over
 the pinned copy. `useConfig()` and `useCurrencyScales()` read the same copy
 for host components.
 
-## Offers
+## Buying
 
-`<Offers>` sells an entitlement: every product on sale granting it, one
-button per price ("$4.99", "Rent for 3 days, $1.99", "$10.00 every 30 days"),
-each opening `CheckoutModal`. It needs a `BillingProvider`. Signing in is the
-host's: with `signedIn={false}`, or when OpenRails answers 401, it calls
-`onSignInRequired` instead of checking out.
+`<BuyButton>` buys one price, `<Offers>` everything on sale that grants an
+entitlement: a `BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
+"$10.00 every 30 days"). Both need a `BillingProvider` with a client. The
+purchase is theirs from start to payment, so the app never handles a checkout
+session: today a button opens one in `CheckoutModal`; when orders take a new
+card (#1168) it will create an order instead, and apps won't change. Signing
+in is the host's: with `signedIn={false}`, or when OpenRails answers 401, they
+call `onSignInRequired` instead. `onPaid` follows a successful payment only.
 
 ```tsx
+<BuyButton
+  product="course-101"
+  price="rent" // labelled from the catalog unless you pass label
+  signedIn={signedIn}
+  onSignInRequired={() => openSignIn()}
+  onPaid={() => navigate("/courses/css-101")} // your gate now admits them
+/>
+
 <Offers
   entitlement="course:101" // or products={...} from your server's Client.ListOffers
   signedIn={signedIn}
   onSignInRequired={() => openSignIn()}
-  onPaid={() => navigate("/courses/css-101")} // your gate now admits them
+  onPaid={() => navigate("/courses/css-101")}
 />
 ```
 
@@ -211,8 +231,10 @@ provider:
   Card rails (`collect_js`, `card`, `stripe_elements`) render one panel: saved cards,
   an inline new card and one Pay/Subscribe button, which is the customer's
   confirmation of the displayed terms. No provider chooser with one rail.
-- Inside a `BillingProvider`, a new card is always saved to the account first
-  and the source is paid with `payment_method_id`; `requires_action` results
+- Inside a `BillingProvider` with a client, a new card is always saved to the
+  account first and the source is paid with `payment_method_id`, so pay
+  through the customer surface: `client.checkoutSource(id, { customerBase:
+  "/billing/v1/me" })`; `requires_action` results
   carrying an `operation` run 3-D Secure in the page. A `failed` result stays
   on the panel with `failure.message` next to its `field`, so the buyer can
   pick another card; the host gives each new attempt a new idempotency key.
