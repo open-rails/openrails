@@ -27,11 +27,11 @@ type merchantAddressSubmitter interface {
 // signature via the caller's hook before submission, so a crash mid-submit is
 // resolvable by a chain read. Optional; fakes skip the write-ahead.
 type presubmitSubmitter interface {
-	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error)
 }
 
 type presubmitMerchantAddressSubmitter interface {
-	SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
+	SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error)
 }
 
 // NewCrankService builds a CrankService over a per-merchant Submitter.
@@ -45,11 +45,11 @@ func (s *CrankService) Crank(ctx context.Context, tenantID billing.MerchantID, s
 	return s.CrankWithPresubmit(ctx, tenantID, sub, amountBaseUnits, uuid.Nil, nil)
 }
 
-// CrankWithPresubmit is Crank with a signature write-ahead: presubmit(sig) runs
+// CrankWithPresubmit is Crank with a signature and expiry write-ahead. The hook runs
 // after signing, before submission; nil = plain Crank. A non-Nil memoLocalID
 // (the durable pull-intent id) stamps an SPL Memo before the transfer: a
 // discovery hint, never money truth.
-func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error) {
+func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (string, error) {
 	if sub == nil {
 		return "", fmt.Errorf("recurring: nil subscription")
 	}
@@ -116,19 +116,15 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 		memoIx := solanaint.NewMemoInstruction(solanaint.PurchaseMemo(memoLocalID))
 		instructions = []solanago.Instruction{memoIx, ix}
 	}
-	var sigPresubmit func(solanago.Signature) error
-	if presubmit != nil {
-		sigPresubmit = func(sig solanago.Signature) error { return presubmit(sig.String()) }
-	}
 	var sig solanago.Signature
 	switch submitter := s.submitter.(type) {
 	case presubmitMerchantAddressSubmitter:
-		sig, err = submitter.SubmitForMerchantAddressWithPresubmit(ctx, tenantID, merchant, instructions, sigPresubmit)
+		sig, err = submitter.SubmitForMerchantAddressWithPresubmit(ctx, tenantID, merchant, instructions, presubmit)
 	case merchantAddressSubmitter:
 		sig, err = submitter.SubmitForMerchantAddress(ctx, tenantID, merchant, instructions)
 	default:
 		if ps, ok := s.submitter.(presubmitSubmitter); ok {
-			sig, err = ps.SubmitWithPresubmit(ctx, tenantID, instructions, sigPresubmit)
+			sig, err = ps.SubmitWithPresubmit(ctx, tenantID, instructions, presubmit)
 		} else {
 			sig, err = s.submitter.Submit(ctx, tenantID, instructions)
 		}

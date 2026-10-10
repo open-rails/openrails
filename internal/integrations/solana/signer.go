@@ -62,7 +62,7 @@ func BuildSignSubmit(
 }
 
 // BuildSignSubmitPresubmit is BuildSignSubmit with a hook run after signing and
-// before submission: the caller durably records the signature so a crash
+// before submission: the caller durably records the signature and expiry so a crash
 // mid-submit resolves by a chain read, not a blind re-send. A presubmit error
 // aborts the submit (nothing was sent).
 func BuildSignSubmitPresubmit(
@@ -71,7 +71,7 @@ func BuildSignSubmitPresubmit(
 	signer Signer,
 	rpc blockhashProvider,
 	instructions []solanago.Instruction,
-	presubmit func(solanago.Signature) error,
+	presubmit func(solanago.Signature, ChainTerminal) error,
 ) (solanago.Signature, error) {
 	if signer == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
@@ -99,7 +99,7 @@ func BuildSignSubmitWithPayerPresubmit(
 	payer solanago.PublicKey,
 	instructions []solanago.Instruction,
 	signMessage func([]byte) (solanago.Signature, error),
-	presubmit func(solanago.Signature) error,
+	presubmit func(solanago.Signature, ChainTerminal) error,
 ) (solanago.Signature, error) {
 	if signMessage == nil {
 		return solanago.Signature{}, fmt.Errorf("solana: signer is required")
@@ -134,7 +134,7 @@ func BuildSignSubmitWithPayerPresubmit(
 	// Durable write-ahead of the signature: once persisted, a crash at any
 	// later point resolves by reading the chain for it.
 	if presubmit != nil {
-		if err := presubmit(sig); err != nil {
+		if err := presubmit(sig, blockhash.Terminal()); err != nil {
 			return solanago.Signature{}, fmt.Errorf("solana: presubmit persistence failed (transaction NOT sent): %w", err)
 		}
 	}

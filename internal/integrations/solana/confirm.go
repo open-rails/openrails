@@ -51,17 +51,59 @@ func (o *TransactionOutcome) OnChainError() error {
 // being landable: the blockhash's last valid block height. Zero = unknown.
 type ChainTerminal struct {
 	LastValidBlockHeight uint64
+	BlockhashSlot        uint64
 }
 
 // RecentBlockhash is a blockhash together with the chain terminal it carries.
 type RecentBlockhash struct {
 	Hash                 solanago.Hash
 	LastValidBlockHeight uint64
+	Slot                 uint64
 }
 
 // Terminal is the ChainTerminal for a transaction built on this blockhash.
 func (b RecentBlockhash) Terminal() ChainTerminal {
-	return ChainTerminal{LastValidBlockHeight: b.LastValidBlockHeight}
+	return ChainTerminal{LastValidBlockHeight: b.LastValidBlockHeight, BlockhashSlot: b.Slot}
+}
+
+// TransactionExpiredUnseen proves expiry before checking transaction history.
+// A missing transaction alone is not enough: a lagging RPC may not have seen it.
+func (c *RPCClient) TransactionExpiredUnseen(ctx context.Context, sig solanago.Signature, terminal ChainTerminal) (bool, error) {
+	if terminal.LastValidBlockHeight == 0 || terminal.BlockhashSlot == 0 {
+		return false, nil
+	}
+	var expired bool
+	err := c.fallback.withFallback(ctx, "TransactionExpiredUnseen", func(client *rpc.Client) error {
+		expired = false
+		// Epoch info supplies height and slot from the same finalized bank.
+		info, err := client.GetEpochInfo(ctx, rpc.CommitmentFinalized)
+		if err != nil {
+			return err
+		}
+		if info == nil || info.AbsoluteSlot == 0 || info.BlockHeight <= terminal.LastValidBlockHeight {
+			return nil
+		}
+		statuses, err := client.GetSignatureStatuses(ctx, true, sig)
+		if err != nil {
+			return err
+		}
+		// A load-balanced endpoint can route this read to an older node.
+		if statuses == nil || statuses.Context.Slot < info.AbsoluteSlot || len(statuses.Value) != 1 {
+			return nil
+		}
+		if statuses.Value[0] != nil {
+			return nil
+		}
+		// Check retention after the lookup so pruned history is not treated
+		// as proof that the transaction never executed.
+		first, err := client.GetFirstAvailableBlock(ctx)
+		if err != nil {
+			return err
+		}
+		expired = first <= terminal.BlockhashSlot
+		return nil
+	})
+	return expired, err
 }
 
 // ErrTransactionExpired: the cluster's block height passed the transaction's

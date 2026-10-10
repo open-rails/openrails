@@ -17,6 +17,7 @@ import (
 	"github.com/gagliardetto/solana-go/rpc"
 	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -148,6 +149,53 @@ func TestWatchTransactionEndsOnlyOnChainTerminalOrCaller(t *testing.T) {
 
 type staticSecret string
 
+func TestTransactionExpiredUnseenRequiresFreshHistoryAfterExpiry(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		terminal    uint64
+		height      uint64
+		status      any
+		wantExpired bool
+		wantErr     bool
+		firstBlock  uint64
+	}{
+		{"legacy evidence has no expiry", 0, 11, unseenStatus(), false, false, 0},
+		{"last valid height is still valid", 10, 10, unseenStatus(), false, false, 0},
+		{"expired and absent", 10, 11, unseenStatus(), true, false, 50},
+		{"pruned history", 10, 11, unseenStatus(), false, false, 51},
+		{"lagging history", 10, 11, map[string]any{"context": map[string]any{"slot": 99}, "value": []any{nil}}, false, false, 0},
+		{"landed after initial lookup", 10, 11, signatureStatus("confirmed", nil), false, false, 0},
+		{"processed is still unresolved", 10, 11, signatureStatus("processed", nil), false, false, 0},
+		{"missing history response", 10, 11, nil, false, true, 0},
+		{"RPC failure", 10, 11, rpcFault{Code: -32602, Message: "history unavailable"}, false, true, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stub, url := newRPCStub(t, func(method string, _ int, params []json.RawMessage) any {
+				switch method {
+				case "getEpochInfo":
+					assert.JSONEq(t, `{"commitment":"finalized"}`, string(params[0]))
+					return map[string]any{"absoluteSlot": 100, "blockHeight": tc.height}
+				case "getSignatureStatuses":
+					assert.JSONEq(t, `{"searchTransactionHistory":true}`, string(params[1]))
+					return tc.status
+				case "getFirstAvailableBlock":
+					return tc.firstBlock
+				default:
+					t.Errorf("unexpected RPC method %s", method)
+					return nil
+				}
+			})
+			client := NewRPCClientWithConfig(RPCClientConfig{Endpoint: url, Network: "devnet", LoopbackFixture: true})
+			expired, err := client.TransactionExpiredUnseen(t.Context(), solanago.Signature{1}, ChainTerminal{LastValidBlockHeight: tc.terminal, BlockhashSlot: 50})
+			require.Equal(t, tc.wantExpired, expired)
+			require.Equal(t, tc.wantErr, err != nil, "%v", err)
+			if tc.terminal == 0 || tc.height <= tc.terminal {
+				require.Zero(t, stub.count("getSignatureStatuses"))
+			}
+		})
+	}
+}
+
 func (s staticSecret) GetSecret(context.Context, billing.MerchantID, string) (string, error) {
 	return string(s), nil
 }
@@ -191,8 +239,10 @@ func TestBuildSignSubmitPersistsBeforeSendAndSurfacesRevert(t *testing.T) {
 		})
 		c := NewRPCClientWithConfig(RPCClientConfig{Endpoint: url, Network: "devnet", LoopbackFixture: true})
 		var persisted []solanago.Signature
-		sig, err := BuildSignSubmitPresubmit(context.Background(), mid, signer, c, []solanago.Instruction{ix}, func(s solanago.Signature) error {
+		sig, err := BuildSignSubmitPresubmit(context.Background(), mid, signer, c, []solanago.Instruction{ix}, func(s solanago.Signature, terminal ChainTerminal) error {
 			require.Zero(t, stub.count("sendTransaction"), "persisted before submit")
+			require.Equal(t, uint64(5000), terminal.LastValidBlockHeight)
+			require.Equal(t, uint64(1), terminal.BlockhashSlot)
 			persisted = append(persisted, s)
 			return presubmitErr
 		})

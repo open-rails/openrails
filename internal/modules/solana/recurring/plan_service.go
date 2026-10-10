@@ -84,9 +84,9 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID billing.MerchantI
 	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, rpc, instructions)
 }
 
-// SubmitWithPresubmit persists the signed tx signature via presubmit before
+// SubmitWithPresubmit persists the signed tx signature and expiry before
 // submission.
-func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error) {
 	rpc, err := s.rpcFor(ctx, tenantID)
 	if err != nil {
 		return solanago.Signature{}, err
@@ -99,7 +99,7 @@ func (s *signerSubmitter) SubmitForMerchantAddress(ctx context.Context, tenantID
 }
 
 // SubmitForMerchantAddressWithPresubmit: see SubmitWithPresubmit.
-func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
+func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction, presubmit func(solanago.Signature, solanaint.ChainTerminal) error) (solanago.Signature, error) {
 	if signer, ok := s.signer.(publicKeySigner); ok {
 		rpc, err := s.rpcFor(ctx, tenantID)
 		if err != nil {

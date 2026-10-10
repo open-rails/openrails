@@ -110,6 +110,14 @@ func (r *MerchantChainReader) GetTransaction(ctx context.Context, signature sola
 	return client.GetTransaction(ctx, signature)
 }
 
+func (r *MerchantChainReader) TransactionExpiredUnseen(ctx context.Context, signature solanago.Signature, terminal solanarpc.ChainTerminal) (bool, error) {
+	client, err := r.client(ctx)
+	if err != nil {
+		return false, err
+	}
+	return client.TransactionExpiredUnseen(ctx, signature, terminal)
+}
+
 func (r *MerchantChainReader) GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error) {
 	client, err := r.client(ctx)
 	if err != nil {
