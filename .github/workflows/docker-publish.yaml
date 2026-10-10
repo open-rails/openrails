@@ -182,11 +182,13 @@ jobs:
           # normal server mode so /health/ready can prove the full image posture.
           # The server refuses an unset provider write mode; the smoke never
           # writes to a provider. Enabling the console proves it is embedded; the
-          # console needs a sign-in method, so the server serves its own.
+          # console needs a staff route group and a sign-in method, so the server
+          # turns on the admin group and serves its own sign-in.
           cid="$(docker run -d --network host \
             -e TEST_MODE=sandbox \
             -e PROVIDER_WRITE_MODE=readonly \
             -e ADMIN_CONSOLE_ENABLED=true \
+            -e ROUTE_GROUPS_ADMIN=true \
             -e LOCAL_SIGN_IN=true \
             -e PORT=3053 \
             -e AUTH_REQUEST_ORIGIN=http://127.0.0.1:3053 \
