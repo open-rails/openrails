@@ -13,7 +13,7 @@ type MetricsQuery struct {
 	Filters  map[string][]string `json:"filters"`
 	Order    []MetricsOrder      `json:"order"`
 	Limit    *int                `json:"limit"`
-	// Compare adds the same query over the previous period: "previous".
+	// Compare adds the same query over the previous period: "previous_period".
 	Compare string `json:"compare"`
 }
 

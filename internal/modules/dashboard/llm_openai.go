@@ -12,17 +12,15 @@ import (
 )
 
 const (
-	// openaiBaseURL includes the version segment — the OpenAI-compatible
-	// ecosystem convention (OPENAI_BASE_URL), so llm.base_url plugs straight
-	// into Groq/Together/Ollama/vLLM docs values (e.g. http://localhost:11434/v1).
+	// openaiBaseURL includes the version segment, the OpenAI-compatible
+	// convention, so llm.base_url takes values like http://localhost:11434/v1.
 	openaiBaseURL   = "https://api.openai.com/v1"
 	openaiMaxTokens = anthropicMaxTokens
 )
 
-// OpenAILLM calls the OpenAI Chat Completions API over plain HTTP (no SDK dep
-// — one endpoint, one request shape; #761). A custom baseURL serves any
-// OpenAI-compatible endpoint. Credentials come from deployment config; this
-// package never reads the environment.
+// OpenAILLM calls the OpenAI Chat Completions API over plain HTTP (no SDK
+// dep). A custom baseURL serves any OpenAI-compatible endpoint. Credentials
+// come from deployment config; this package never reads the environment.
 type OpenAILLM struct {
 	apiKey  string
 	model   string
@@ -44,10 +42,9 @@ func NewOpenAILLM(apiKey, model, baseURL string) *OpenAILLM {
 	}
 }
 
-// openaiRequest is the /chat/completions body. MaxCompletionTokens, not the
-// legacy max_tokens: reasoning-capable models reject max_tokens outright.
-// No temperature — parity with the Anthropic client (provider default), and
-// current OpenAI reasoning models reject non-default values anyway.
+// openaiRequest is the /chat/completions body. It sends max_completion_tokens
+// and no temperature: reasoning models reject max_tokens and non-default
+// temperatures.
 type openaiRequest struct {
 	Model               string          `json:"model"`
 	MaxCompletionTokens int             `json:"max_completion_tokens"`

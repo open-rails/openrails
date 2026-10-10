@@ -16,19 +16,13 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Phase 2 (#779, flag-gated behind llm.catalog_drafting_enabled — see
-// service.go's DraftingConfigured): the copilot's ONLY write-shaped output is
-// a DRAFT of the exact payload the human console already produces (a #777
-// wizard plan or a create-price catalog diff). Neither tool below ever calls
-// a mutating service method — CreatePrice/RepriceAllPriorVersions are never
-// referenced here. The draft is handed to the console to open, pre-filled,
-// in the corresponding review step; the human's confirm click is the only
-// path that actually calls those APIs, which enforce every constraint anew.
+// Drafting tools never call a mutating service method: they return the payload
+// the console would build (a price-change wizard plan or a create-price diff).
+// Only a person's confirm calls the APIs, which enforce every constraint anew.
 
-// noticeWindowDaysDoctrine is the copilot's fallback effective-date proposal
-// for an increase and matches subscriptions.DefaultPriceIncreaseNoticeDays.
-// The console validates the proposal against the loaded merchant setting, and
-// the reprice API enforces that setting before mutation.
+// noticeWindowDaysDoctrine is the fallback effective-date proposal for an
+// increase, matching subscriptions.DefaultPriceIncreaseNoticeDays. The
+// price-migration API enforces the merchant's setting before mutation.
 const noticeWindowDaysDoctrine = 30
 
 func priceDirection(newAmount, currentAmount int64) string {
@@ -42,9 +36,8 @@ func priceDirection(newAmount, currentAmount int64) string {
 	}
 }
 
-// defaultMigrationMode mirrors price-wizard-logic.ts's defaultMigrationMode:
-// increases default to grandfather (zero-risk, today's behavior with no new
-// action); decreases default to migrate-now (never grandfather a decrease).
+// defaultMigrationMode mirrors price-wizard-logic.ts: increases grandfather,
+// decreases migrate now (a decrease is never grandfathered).
 func defaultMigrationMode(direction string) string {
 	if direction == "decrease" {
 		return "migrate"
@@ -61,8 +54,7 @@ func defaultEffectiveDate(direction string, now time.Time) time.Time {
 }
 
 // buildPriceChangeReviewText mirrors price-wizard-logic.ts's buildReviewText
-// phrasing exactly (independently implemented server-side; the console's own
-// TS copy renders the same words when a human edits the draft further).
+// word for word.
 func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64, affected int, mode string, effectiveAt, now time.Time) string {
 	lead := fmt.Sprintf("New subscribers pay %s immediately.", moneyutil.FormatAmount(newAmount, currency))
 	if affected == 0 {
@@ -82,12 +74,8 @@ func buildPriceChangeReviewText(currency string, currentAmount, newAmount int64,
 		lead, subj, moneyutil.FormatAmount(currentAmount, currency), effectiveAt.Format("Jan 2, 2006"), moneyutil.FormatAmount(newAmount, currency))
 }
 
-// crossConstraintRefusal mirrors subscriptions.validateRepriceConstraints'
-// three checks EXACTLY (same order, same sentinel codes), independently
-// implemented read-only here — the copilot never imports the reprice
-// service's mutating methods, only its own reads (GetCurrentByKey etc.) to
-// pre-flight the same business rule the API would enforce if this ever
-// became a real reprice call.
+// crossConstraintRefusal refuses, read-only, a target that is archived, on
+// another product, or in another currency.
 func crossConstraintRefusal(from, to *models.Price) *billing.CatalogDraftRefusal {
 	if to.Archived {
 		return &billing.CatalogDraftRefusal{
@@ -112,8 +100,6 @@ func crossConstraintRefusal(from, to *models.Price) *billing.CatalogDraftRefusal
 	}
 	return nil
 }
-
-// -- Tool: draft_price_change --------------------------------------------------
 
 const toolDraftPriceChange = "draft_price_change"
 
@@ -182,10 +168,8 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 		}
 		refusal := crossConstraintRefusal(current, to)
 		if refusal == nil {
-			// Same product+currency: this is NOT #778 territory — it is an
-			// ordinary same-key version bump under a different name, which
-			// this tool does not support ambiguously. Ask for a plain
-			// draft_price_change on price_key instead.
+			// Same product and currency: a same-key version bump under another
+			// name, which this tool refuses as ambiguous.
 			refusal = &billing.CatalogDraftRefusal{
 				Code:       "same_product_migration",
 				Reason:     "migrate_to_price_key resolves to the same product/currency — this tool only bumps price_key's OWN version; there is no separate 'move to a same-product key' operation",
@@ -260,8 +244,6 @@ func (s *Service) runDraftPriceChange(ctx context.Context, raw json.RawMessage) 
 	content := fmt.Sprintf("draft ready: %s\nnext: requires human confirm via the price-change wizard — nothing has been changed yet.", reviewText)
 	return content, &billing.CatalogDraft{Kind: billing.CatalogDraftPriceChange, PriceChange: draft}, nil
 }
-
-// -- Tool: draft_catalog_diff ---------------------------------------------------
 
 const toolDraftCatalogDiff = "draft_catalog_diff"
 

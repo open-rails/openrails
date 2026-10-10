@@ -1,9 +1,6 @@
-// Ask panel (#756): free-form Q&A over the metrics API. The server-side LLM
-// runs compiler-validated queries as tools; the answer renders WITH the
-// verbatim result of every executed query as evidence tables — numbers on
-// screen come from the API responses, never from prose. One-shot: a new
-// question replaces the previous answer. Each evidence query can be saved as
-// a dashboard widget through the normal #755 preview/save flow.
+// Ask panel: one-shot metrics Q&A. The server's LLM runs compiler-validated
+// queries; on-screen numbers come from each query's verbatim result, never
+// from prose. Each evidence query can be saved as a widget.
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   Add01Icon,

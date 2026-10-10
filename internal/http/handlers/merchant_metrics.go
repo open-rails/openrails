@@ -19,9 +19,8 @@ func MerchantMetricsSchema(r *httprequest.Request) {
 	r.JSON(http.StatusOK, metrics.Schema())
 }
 
-// MerchantMetricsQuery handles POST /v1/admin/metrics/query: the composable
-// analytics endpoint (#733). Validation errors come back ALL AT ONCE with
-// corrective context (did-you-mean + valid lists).
+// MerchantMetricsQuery handles POST /v1/admin/metrics/query. Validation errors
+// come back all at once with corrective context (did-you-mean + valid lists).
 func MerchantMetricsQuery(r *httprequest.Request) {
 	svc := r.State.MetricsService
 	if svc == nil {
@@ -46,13 +45,10 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }
 
-// MerchantMetricsAsk handles POST /v1/admin/metrics/ask (#756): a free-form
-// question answered by an LLM that runs compiler-validated metrics queries as
-// tools on the caller's merchant-scoped context. UNLIKE widget generation
-// (#741, schema-only), the model sees aggregate query RESULTS — so this is
-// registered only with the separate llm.ask_enabled consent and
-// protected by the shared route abuse limiter. The response carries the model's answer plus the
-// VERBATIM result of every executed query as evidence.
+// MerchantMetricsAsk handles POST /v1/admin/metrics/ask: an LLM answers by
+// running compiler-validated queries in the caller's merchant context. Unlike
+// widget generation it sees aggregate results, so the route mounts only with
+// llm.ask_enabled. The response carries every executed query's verbatim result.
 func MerchantMetricsAsk(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if !svc.AskConfigured() {

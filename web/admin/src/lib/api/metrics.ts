@@ -1,7 +1,5 @@
-// #733 metrics API + #741 dashboard API — types mirror the Go handlers.
+// Metrics and dashboard API; types mirror the Go handlers.
 import { api } from "./client"
-
-// --- metrics query -----------------------------------------------------------
 
 export interface MetricsRange {
   from?: string
@@ -45,8 +43,6 @@ export interface MetricsResult {
   compare_rows?: MetricsCell[][]
 }
 
-// --- dashboard ---------------------------------------------------------------
-
 export type WidgetViz = "stat" | "line" | "area" | "bar" | "donut" | "table"
 
 export const WIDGET_VIZ: WidgetViz[] = [
@@ -86,8 +82,6 @@ export interface GeneratedWidget {
   viz: WidgetViz
 }
 
-// --- endpoints -----------------------------------------------------------------
-
 export const metricsQuery = (query: MetricsQuery, signal?: AbortSignal) =>
   api<MetricsResult>("/admin/metrics/query", {
     method: "POST",
@@ -101,15 +95,13 @@ export const getDashboard = (signal?: AbortSignal) =>
 export const putDashboard = (widgets: Widget[]) =>
   api<Dashboard>("/admin/dashboard", { method: "PUT", body: { widgets } })
 
-// generateWidget: NL prompt → validated {query,title,viz}. baseQuery (an
-// existing widget's query) makes the prompt a refinement of it (#755).
+// generateWidget: prompt → validated {query,title,viz}; baseQuery makes the
+// prompt refine that query.
 export const generateWidget = (prompt: string, baseQuery?: MetricsQuery) =>
   api<GeneratedWidget>("/admin/dashboard/widgets/generate", {
     method: "POST",
     body: baseQuery ? { prompt, base_query: baseQuery } : { prompt },
   })
-
-// --- metrics ask (#756) --------------------------------------------------------
 
 // AskEvidence is one executed tool query: the query plus its VERBATIM result
 // (a MetricsResult) — on-screen numbers come from here, never from prose.

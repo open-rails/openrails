@@ -1,10 +1,8 @@
 package middleware
 
-// This file holds the rate-limit + captcha engine (issue #282). It is the
-// single source of truth for OpenRails' rate-limiting and captcha enforcement;
-// since #670 one net/http middleware (RateLimitHTTP) serves the standalone and
-// embedded surfaces alike. The engine returns a RateLimitDecision WITHOUT
-// writing the response; the middleware writes the canonical internal/api envelope.
+// The rate-limit and captcha engine. EvaluateRateLimit returns a decision
+// without writing the response; RateLimitHTTP, the one middleware for the
+// standalone and embedded surfaces, writes the internal/api envelope.
 
 import (
 	"context"
@@ -45,20 +43,16 @@ const (
 	RateLimitScopeUser = "user"
 )
 
-// BucketMaxContentLength is the per-bucket Content-Length ceiling used for early
-// payload-size throttling. A request whose declared Content-Length exceeds the
-// ceiling is rejected with 413 before any rate-limit counting or body read,
-// cheaply shedding oversized-payload load. Buckets absent from the map (e.g.
-// "webhook", which enforces tighter per-rail caps in the handler) are not
-// checked here.
+// BucketMaxContentLength caps each bucket's request body; a larger declared
+// Content-Length gets 413 before any counting or body read. Unlisted buckets
+// (e.g. "webhook", capped per rail in the handler) are not checked here.
 var BucketMaxContentLength = map[string]int64{
 	"checkout":        64 << 10, // 64 KiB
 	"subscriptions":   64 << 10, // 64 KiB
 	"payment-methods": 64 << 10, // 64 KiB
 }
 
-// RateLimitSubject is one rate-limit/captcha subject (an IP or a user). Both
-// surfaces build these from their own identity source and pass them to the engine.
+// RateLimitSubject is one rate-limit/captcha subject: an IP or a user.
 type RateLimitSubject struct {
 	Scope string
 	Value string
@@ -93,8 +87,7 @@ func NewRateLimitStore() *RateLimitStore {
 	return &RateLimitStore{counters: make(map[string]*inMemoryCounter)}
 }
 
-// RateLimitOutcome is the verdict the engine returns; the caller maps it to a
-// framework-specific response.
+// RateLimitOutcome is the engine's verdict; the caller writes the response.
 type RateLimitOutcome int
 
 const (
@@ -111,10 +104,9 @@ const (
 	RateLimitCaptchaInvalid
 )
 
-// RateLimitDecision is the engine verdict. Headers holds every response header to
-// set (X-RateLimit-*, Retry-After, X-Captcha-Required); the caller writes the
-// status + body for the outcome. SubjectKeys is pinned on the downstream context
-// on the allow path (the abuse tracker, #371, reads the SAME subjects).
+// RateLimitDecision is the engine verdict. Headers holds every response header
+// to set; the caller writes the status and body. On allow, SubjectKeys is
+// pinned on the context so the abuse tracker reads the same subjects.
 type RateLimitDecision struct {
 	Outcome        RateLimitOutcome
 	Bucket         string
@@ -134,11 +126,9 @@ type RateLimitDeps struct {
 	Verifier       captcha.Verifier
 }
 
-// EvaluateRateLimit runs the full rate-limit + captcha decision for a request. It
-// may wrap r.Body (oversized-payload shedding via http.MaxBytesReader, which needs
-// w) and read the captcha token header, but it NEVER writes the response — the
-// caller applies the decision. subjects are framework-derived (gin keys vs request
-// context) and passed in so the engine stays gin-free.
+// EvaluateRateLimit decides rate limit and captcha for a request. It may wrap
+// r.Body (http.MaxBytesReader needs w) and read the captcha token header, but
+// never writes the response.
 func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLimitSubject, deps RateLimitDeps) RateLimitDecision {
 	limit, bucket := resolveRateLimitPolicy(deps.Limits, r)
 	if limit == nil {
@@ -186,7 +176,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	captchaEnforced := captcha.ShouldApply(deps.Captcha, bucket)
 	if captchaEnforced && deps.ChallengeStore != nil {
 		challenged := false
-		// Card-testing attack mode (#371): while the request's merchant is under
+		// Card-testing attack mode: while the request's merchant is under
 		// attack, every request to its captcha buckets must solve a captcha. The
 		// flag lives on its own subject so an individual solve never clears it.
 		if attack, err := cardAttackMode(r, deps.ChallengeStore); err != nil {
@@ -279,22 +269,15 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 	return decision
 }
 
-// evaluateCaptchaVerify is the gin-free analogue of the old verifyCaptchaChallenge:
-// it reads the captcha token, verifies it, and on success clears the challenge +
-// resets the affected rate-limit buckets. It returns a decision (RateLimitAllow on
-// success) instead of writing a response.
+// evaluateCaptchaVerify verifies the captcha token and, on success, clears the
+// challenge and resets the affected rate-limit buckets.
 func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP string, keys []string) RateLimitDecision {
 	token := strings.TrimSpace(r.Header.Get(captcha.TokenHeader))
 	if token == "" {
 		return RateLimitDecision{Outcome: RateLimitCaptchaRequired, Headers: map[string]string{"X-Captcha-Required": "true"}}
 	}
-	// or#865: a `deps.Verifier == nil` leg used to sit here. It could not fire in
-	// any configuration — this function is only reached when captcha enforcement
-	// is on (captcha.ShouldApply ⇒ cfg.IsEnabled()), and captcha.NewVerifier
-	// returns nil only when that same flag is off. A branch that cannot fail is
-	// worse than none: it reads as protection and stops anyone looking. The
-	// coupling it silently depended on is now asserted where it CAN fail —
-	// TestEnabledCaptchaAlwaysHasVerifier in captcha_wiring_test.go.
+	// Verifier is non-nil whenever captcha enforcement is on;
+	// TestEnabledCaptchaAlwaysHasVerifier asserts it.
 	result, err := deps.Verifier.Verify(r.Context(), captcha.VerifyRequest{Token: token, RemoteIP: clientIP, Bucket: bucket})
 	if err != nil {
 		log.WithError(err).WithField("bucket", bucket).Warn("captcha verification failed")
@@ -317,21 +300,13 @@ func evaluateCaptchaVerify(r *http.Request, deps RateLimitDeps, bucket, clientIP
 	return RateLimitDecision{Outcome: RateLimitAllow}
 }
 
-// RateLimitHTTP is the gin-free net/http rate-limit + captcha middleware (issue
-// #282; the ONLY rate-limit middleware since #670) — same buckets, same
-// payload-size shedding, same X-RateLimit-* headers, same captcha challenge flow,
-// same 429/Retry-After — and is what lets the EMBEDDED surface enforce OpenRails'
-// own rate-limiting and captcha without the host fronting it with a gateway.
+// RateLimitHTTP is the net/http rate-limit and captcha middleware; it lets the
+// embedded surface enforce limits without a fronting gateway.
 //
-// Identity for the user-scoped subject is read from the request context
-// (billingauth.FromContext), so mount billingauth.Optional BEFORE this so an
-// authenticated caller is limited per-user, not only per-IP.
-//
-// resolver is the #746 proxy-aware client-IP resolver: the IP-scoped subject
-// key is the resolved client, not the raw socket peer, so a deployment behind
-// a configured trusted proxy still limits per real client instead of
-// collapsing every request onto the load balancer's one address. A nil/empty
-// resolver falls back to the socket peer (equivalent to no proxy trust).
+// The user subject comes from billingauth.FromContext, so mount
+// billingauth.Optional before it. resolver picks the client IP behind trusted
+// proxies, so each real client is limited rather than the load balancer; nil
+// or empty uses the socket peer.
 func RateLimitHTTP(limits *config.RateLimitsConfig, captchaCfg *config.CaptchaConfig, rdb *redis.Client, challengeStore *captcha.ChallengeStore, resolver *iputil.TrustedProxies) HTTPMiddleware {
 	if limits == nil {
 		return func(next http.Handler) http.Handler { return next }
@@ -362,9 +337,7 @@ func applyRateLimitDecisionHTTP(w http.ResponseWriter, r *http.Request, next htt
 	for k, v := range decision.Headers {
 		w.Header().Set(k, v)
 	}
-	// Error outcomes emit the canonical internal/api envelope — identical to the
-	// retired gin middleware's writers, so the standalone flip (#670) changed no
-	// response bodies (and the embedded surface now matches too).
+	// Error outcomes emit the canonical internal/api envelope.
 	switch decision.Outcome {
 	case RateLimitTooLarge:
 		apiErr := api.Coded(billing.CodeRequestBodyTooLarge, "request payload too large")
@@ -410,9 +383,8 @@ func captchaSiteKey(cfg *config.CaptchaConfig) string {
 	return cfg.SiteKey
 }
 
-// rateLimitSubjectsHTTP derives the ip:/user: subjects from a plain request,
-// reading identity from the request context (billingauth) and the client IP
-// via resolver (#746: a nil/empty resolver trusts nothing, i.e. the socket peer).
+// rateLimitSubjectsHTTP derives the ip: and user: subjects from the context's
+// identity and the resolver's client IP (nil resolver: the socket peer).
 func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []RateLimitSubject {
 	if r == nil {
 		return nil
@@ -430,11 +402,9 @@ func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []R
 	return subjects
 }
 
-// RateLimitSubjectKeysHTTP is the gin-free analogue of RateLimitSubjectKeys (issue
-// #282): it derives the same ip:/user: subject keys from a plain *http.Request. The
-// embedded captcha-status handler uses it to report whether a subject is currently
-// challenged; resolver MUST be the same one RateLimitHTTP was built with, or the
-// keys diverge.
+// RateLimitSubjectKeysHTTP returns the subject keys RateLimitHTTP enforces, for
+// the captcha-status handler. resolver must be the one RateLimitHTTP was built
+// with, or the keys diverge.
 func RateLimitSubjectKeysHTTP(r *http.Request, resolver *iputil.TrustedProxies) []string {
 	return SubjectKeys(rateLimitSubjectsHTTP(r, resolver))
 }
@@ -457,9 +427,9 @@ func WithSubjectKeys(ctx context.Context, keys []string) context.Context {
 	return context.WithValue(ctx, subjectKeysCtxKey{}, keys)
 }
 
-// SubjectKeysFromContext returns the rate-limit subject keys (ip:.. / user:..) the
-// rate-limit middleware computed for this request, or nil. Handlers use it to
-// mark/inspect the SAME captcha subjects the middleware enforces (#371).
+// SubjectKeysFromContext returns the subject keys the rate-limit middleware
+// computed for this request, or nil, so handlers mark the same captcha
+// subjects it enforces.
 func SubjectKeysFromContext(ctx context.Context) []string {
 	if ctx == nil {
 		return nil
@@ -746,9 +716,8 @@ func isCheckoutPath(path string) bool {
 }
 
 // cardAttackMode reports whether the request's merchant is under a card-testing
-// attack (#371). A merchant not yet known here (a delegated token names it
-// later) leaves the request to its subjects' challenges and the durable
-// failure ledger.
+// attack. A merchant not yet known here (a delegated token names it later)
+// leaves the request to its subjects' challenges and the durable failure ledger.
 func cardAttackMode(r *http.Request, store *captcha.ChallengeStore) (bool, error) {
 	id, ok := merchant.FromContext(r.Context())
 	if !ok || id.IsZero() {
@@ -762,13 +731,13 @@ func effectiveLimit(limit *config.RateLimit) int {
 		return 0
 	}
 	if limit.RequestsPerMinute <= 0 {
-		return 60 // Default to 60 requests per minute
+		return 60
 	}
 	return limit.RequestsPerMinute
 }
 
-// Checkout session limits (#1124), per session id per minute: the id is
-// the credential, so it is limited whatever address presents it. Polling reads
+// Checkout session limits per session id per minute: the id is the
+// credential, so it is limited whatever address presents it. Polling reads
 // every three seconds; a pay is a buyer's click.
 const (
 	CheckoutSessionReadsPerMinute = 120

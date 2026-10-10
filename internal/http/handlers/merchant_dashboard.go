@@ -13,7 +13,7 @@ import (
 )
 
 // GetMerchantDashboard handles GET /v1/admin/dashboard: the saved widget
-// layout, or the seeded default template when the merchant has none (#741).
+// layout, or the seeded default template when the merchant has none.
 func GetMerchantDashboard(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if svc == nil {
@@ -61,11 +61,10 @@ func PutMerchantDashboard(r *httprequest.Request) {
 }
 
 // GenerateDashboardWidget handles POST /v1/admin/dashboard/widgets/generate:
-// prompt → VALIDATED {query, title, viz} via the server-side LLM (#741). The
-// LLM sees only the metrics schema, never data. The route is registered only
-// on deployments with an LLM key; the console keys on /admin/config.json.
-// Optional base_query (an existing widget's query, validated like any client
-// query) makes the prompt a REFINEMENT of that query instead of a fresh start.
+// a prompt becomes a validated {query, title, viz}. The LLM sees only the
+// metrics schema, never data, and the route mounts only with an LLM. An
+// optional base_query (validated like any client query) is refined rather
+// than replaced.
 func GenerateDashboardWidget(r *httprequest.Request) {
 	svc := r.State.DashboardService
 	if !svc.NLConfigured() {

@@ -17,7 +17,7 @@ type LLMMessage struct {
 	Content string
 }
 
-// ToolDef declares one tool for a tool-use turn (#756 ask loop).
+// ToolDef declares one tool for a tool-use turn.
 type ToolDef struct {
 	Name        string
 	Description string
@@ -55,10 +55,9 @@ type ToolTurn struct {
 	StopReason string
 }
 
-// LLM is the provider seam for the dashboard module's model calls: text
-// completion (widget generation, #741) and tool-use turns (metrics Q&A, #756).
-// Production implementations: AnthropicLLM and OpenAILLM (#761); tests inject
-// deterministic stubs via Service.SetLLM.
+// LLM is the provider seam for model calls: text completion (widget
+// generation) and tool-use turns (Q&A). AnthropicLLM and OpenAILLM implement
+// it; tests inject stubs via Service.SetLLM.
 type LLM interface {
 	Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error)
 	CompleteTools(ctx context.Context, system string, tools []ToolDef, msgs []ToolMessage, maxTokens int) (*ToolTurn, error)

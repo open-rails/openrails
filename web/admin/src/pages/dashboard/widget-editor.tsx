@@ -1,11 +1,8 @@
-// Add/edit widget dialog (#755, NL-first): a natural-language prompt is THE
-// way to create and refine widget queries — the LLM writes the query, the
-// dialog previews it live through the real /metrics/query endpoint, and the
-// only human knobs are the viz-type toggle and the title. Editing an existing
-// widget seeds the current query and sends it as base_query so instructions
-// like "make it weekly" refine instead of starting over; direct title/viz
-// edits never touch the LLM. With no LLM configured, creation shows a pointed
-// empty-state (existing widgets stay directly editable).
+// Add/edit widget dialog. A prompt is the way to create and refine a query:
+// the LLM writes it, the dialog previews it live through the metrics query
+// endpoint, and the person picks only viz and title. Editing sends the current
+// query as base_query so the prompt refines it; title/viz edits never touch
+// the LLM. Without an LLM, creation shows an empty state.
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Loading02Icon, SparklesIcon } from "@hugeicons/core-free-icons"
 import * as React from "react"
@@ -43,10 +40,6 @@ import { adminQueries } from "@/lib/queries"
 import { WidgetVizView } from "./widget-viz"
 import { cn } from "@/lib/utils"
 
-// The reader here runs a merchant, not the deployment: config keys and doc paths
-// are not theirs to act on. Say what is unavailable, who can change it, and what
-// still works — the last part matters because editing existing widgets never
-// touches the LLM.
 // The wire values are chart-library names. These are what the shapes are called
 // when you are choosing one.
 const VIZ_LABELS: Record<WidgetViz, string> = {
@@ -62,6 +55,8 @@ function vizLabel(viz: WidgetViz): string {
   return VIZ_LABELS[viz] ?? viz
 }
 
+// A merchant reads this: no config keys or doc paths; say who can turn it on
+// and what still works.
 const KEYLESS_MESSAGE =
   "Ask whoever runs this deployment to turn it on. You can still rename existing widgets and change how they are shown."
 
@@ -74,9 +69,9 @@ export function WidgetEditor({
 }: {
   onOpenChange: (open: boolean) => void
   initial: Widget | null
-  // seed pre-fills a NEW widget draft (#756 ask evidence → add-as-widget):
-  // the query previews immediately and the prompt refines it, but saving
-  // still ADDS a widget (initial stays null).
+  // seed pre-fills a new widget from Ask evidence: the query previews at once
+  // and the prompt refines it, but saving still adds a widget (initial stays
+  // null).
   seed?: { title: string; viz: WidgetViz; query: MetricsQuery } | null
   nlEnabled: boolean
   onSave: (data: { title: string; viz: WidgetViz; query: MetricsQuery }) => void

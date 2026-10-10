@@ -16,8 +16,7 @@ import (
 // generateMaxAttempts = first candidate + 2 corrective retries.
 const generateMaxAttempts = 3
 
-// ErrLLMNotConfigured: the deployment has no LLM credentials — the endpoint
-// answers 501 and the console hides the NL box (fail-closed feature gate).
+// ErrLLMNotConfigured is Generate's error when the deployment has no LLM.
 var ErrLLMNotConfigured = errors.New("dashboard: llm not configured")
 
 // GenerateInvalidError: the LLM never produced a valid query within the retry
@@ -38,15 +37,11 @@ func (e *GenerateInvalidError) Error() string {
 // the metrics compiler. The UI previews it live before the merchant saves.
 type GenerateResult = billing.GeneratedWidget
 
-// Generate turns a natural-language prompt into a validated widget. The LLM
-// only ever sees the metrics /schema document and the prompt — never merchant
-// data — and its output is validated by the same compiler that gates client
-// queries; on errors, the compiler's corrective messages are fed back verbatim
-// (max 2 retries). It never executes queries.
-//
-// base, when non-nil, is an existing (already validated) widget query the
-// prompt refines — it rides into the user turn as "current query to modify"
-// so instructions like "make it weekly" edit rather than start over.
+// Generate turns a prompt into a widget validated by the same compiler that
+// gates client queries, feeding corrective errors back for up to two retries.
+// The LLM sees only the metrics schema and the prompt, never merchant data,
+// and nothing is executed. A non-nil base is an existing query the prompt
+// refines ("make it weekly") rather than replaces.
 func (s *Service) Generate(ctx context.Context, prompt string, base *metrics.Query) (*GenerateResult, error) {
 	if s.llm == nil {
 		return nil, ErrLLMNotConfigured
@@ -144,8 +139,8 @@ func stripFences(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// generateSystemPrompt builds the LLM context: the metrics /schema document IS
-// the query documentation (#733 one-source-of-truth), plus the output contract.
+// generateSystemPrompt is the metrics schema document, which is the query
+// documentation, plus the output contract.
 func generateSystemPrompt(now time.Time) string {
 	schemaJSON, _ := json.Marshal(metrics.Schema())
 	return fmt.Sprintf(`You translate a merchant's natural-language request into ONE analytics query for the OpenRails metrics API, plus a short widget title and a visualization type.

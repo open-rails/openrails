@@ -16,9 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Ask-loop caps (#756): every cost axis is bounded — tool calls (queries per
-// question), response tokens per model turn, model turns, and the total bytes
-// of query results fed into the model's context.
+// Ask-loop caps bound every cost axis: tool calls, response tokens per turn,
+// model turns, and result bytes fed to the model.
 const (
 	askToolName = "run_metrics_query"
 	// askMaxToolCalls caps tool-call ATTEMPTS per question (invalid calls
@@ -36,8 +35,8 @@ const (
 	askContextMaxBytes = 192 << 10
 )
 
-// ErrAskNotConfigured: no LLM key or no llm.ask_enabled consent — the endpoint
-// answers 501 with a pointed message.
+// ErrAskNotConfigured is Ask's error without an LLM or the llm.ask_enabled
+// consent.
 var ErrAskNotConfigured = errors.New("dashboard: metrics ask not configured")
 
 // AskNoAnswerError: the model never produced a text answer within the loop
@@ -48,20 +47,16 @@ func (e *AskNoAnswerError) Error() string {
 	return fmt.Sprintf("dashboard: model produced no answer within the tool budget (%d tool calls)", e.ToolCalls)
 }
 
-// AskEvidence is one executed tool call: the query plus its VERBATIM result
-// (the embedded metrics.Result flattens to grain/range/columns/rows/...). The
-// UI renders these as tables — on-screen numbers come from here, never from
-// the model's prose.
+// AskEvidence is one executed query with its verbatim result. The UI's
+// numbers come from evidence, never from the model's prose.
 type AskEvidence = billing.MetricsEvidence
 
 // AskResult is the POST /v1/admin/metrics/ask response.
 type AskResult = billing.MetricsAnswer
 
-// Ask answers a natural-language metrics question by letting the model run
-// compiler-validated #733 queries as tools (executed through the normal
-// metrics service on the caller's merchant-scoped context) and answering
-// from the results. Unlike Generate, the model DOES see aggregate query
-// results — hence the separate llm.ask_enabled consent.
+// Ask answers a metrics question by letting the model run compiler-validated
+// queries as tools in the caller's merchant context. Unlike Generate, the
+// model sees aggregate results, hence the separate llm.ask_enabled consent.
 func (s *Service) Ask(ctx context.Context, question string) (*AskResult, error) {
 	if !s.AskConfigured() {
 		return nil, ErrAskNotConfigured
@@ -175,11 +170,9 @@ func askToolPayload(res *metrics.Result) string {
 	return string(b)
 }
 
-// askToolInputSchema is the JSON Schema for run_metrics_query's arguments —
-// the #733 query body. Vocabulary (measure/dimension/filter names) lives in
-// the metrics schema document riding in the system prompt; this only pins the
-// SHAPE. The same definition is published for external agents in
-// docs/metrics-for-llms.md.
+// askToolInputSchema pins the shape of run_metrics_query's arguments; the
+// vocabulary lives in the schema document in the system prompt. It is also
+// published in docs/metrics-for-llms.md.
 const askToolInputSchema = `{
   "type": "object",
   "properties": {
@@ -212,9 +205,8 @@ func askToolDef() ToolDef {
 	}
 }
 
-// askSystemPrompt builds the Q&A context: the metrics /schema document (the
-// one source of truth, #733) plus the answering rules — including the honesty
-// path: what the schema cannot answer is named as missing, never improvised.
+// askSystemPrompt is the metrics schema document plus the answering rules:
+// what the schema cannot answer is named as missing, never improvised.
 func askSystemPrompt(now time.Time) string {
 	schemaJSON, _ := json.Marshal(metrics.Schema())
 	return fmt.Sprintf(`You answer a merchant's questions about their billing and revenue data by querying the OpenRails metrics API with the %s tool, then answering from the results.

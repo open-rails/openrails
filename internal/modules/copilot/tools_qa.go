@@ -30,8 +30,8 @@ func (s *Service) activeSubscriberCount(ctx context.Context, priceID uuid.UUID) 
 	return int(total), nil
 }
 
-// catalogRow is one LEAN projection row (AXI: key, amount, status, inline
-// aggregates — never the full price row).
+// catalogRow is a lean projection with inline aggregates, never the full
+// price row.
 type catalogRow struct {
 	ProductKey    string
 	ProductName   string
@@ -44,10 +44,8 @@ type catalogRow struct {
 	Grandfathered int
 }
 
-// catalogRows lists every ACTIVE product's ACTIVE (current) prices with
-// inline active-subscriber + grandfathered counts — the content-first live
-// summary that opens both the system prompt and the list_catalog tool
-// result. productKeyFilter, when set, scopes to one product.
+// catalogRows lists every active product's current prices with active and
+// grandfathered subscriber counts; productKeyFilter scopes it to one product.
 func (s *Service) catalogRows(ctx context.Context, productKeyFilter string) ([]catalogRow, error) {
 	if s.products == nil || s.prices == nil {
 		return nil, fmt.Errorf("catalog service unavailable")
@@ -113,8 +111,6 @@ func renderCatalogRows(rows []catalogRow) string {
 
 func itoa(n int) string { return fmt.Sprintf("%d", n) }
 
-// -- Tool: list_catalog -------------------------------------------------------
-
 const toolListCatalog = "list_catalog"
 
 func toolDefListCatalog() dashboard.ToolDef {
@@ -146,8 +142,6 @@ func (s *Service) runListCatalog(ctx context.Context, raw json.RawMessage) (stri
 	}
 	return renderCatalogRows(rows), nil
 }
-
-// -- Tool: get_price -----------------------------------------------------------
 
 const toolGetPrice = "get_price"
 
@@ -218,8 +212,6 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 	return strings.Join(lines, "\n"), nil
 }
 
-// -- Tool: price_history -------------------------------------------------------
-
 const toolPriceHistory = "price_history"
 
 func toolDefPriceHistory() dashboard.ToolDef {
@@ -279,8 +271,6 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 	return renderTable([]string{"effective_at", "amount", "status", "active_subscribers"}, table, "no history"), nil
 }
 
-// -- Tool: list_reprice_batches -------------------------------------------------
-
 const toolListRepriceBatches = "list_reprice_batches"
 
 func toolDefListRepriceBatches() dashboard.ToolDef {
@@ -325,8 +315,7 @@ func (s *Service) runListRepriceBatches(ctx context.Context, raw json.RawMessage
 		fmt.Sprintf("0 pending migrations for price key %q.", key)), nil
 }
 
-// strictDecode fails loudly on unknown fields (AXI + house DisallowUnknownField
-// posture, extended to tool args).
+// strictDecode refuses unknown fields in tool arguments.
 func strictDecode(raw json.RawMessage, v any) error {
 	dec := json.NewDecoder(strings.NewReader(string(raw)))
 	dec.DisallowUnknownFields()

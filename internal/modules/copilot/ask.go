@@ -9,21 +9,18 @@ import (
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
 
-// Ask-loop caps, same doctrine as #756's dashboard.Service.Ask: every cost
-// axis is bounded so a cheap model can be trusted with the loop. One more
-// tool call than metrics' Ask allows, since a catalog question often chains
-// list_catalog -> price_history/list_reprice_batches -> (optionally) a draft
-// call.
+// Ask-loop caps bound every cost axis so a cheap model can run the loop. One
+// more tool call than dashboard's Ask: a catalog question often chains
+// list_catalog, price_history or list_reprice_batches, then a draft.
 const (
 	askMaxToolCalls = 6
 	askMaxTokens    = 2048
 	askMaxTurns     = askMaxToolCalls + 2
 )
 
-// Ask answers a natural-language catalog question by letting the model run
-// read-only lookups (Phase 1) and, when armed, drafting tools (Phase 2) as
-// tool calls. The model never sees anything beyond aggregate catalog/
-// subscriber-count data and never triggers a mutation — see tools_draft.go.
+// Ask answers a catalog question with read-only lookups and, when armed,
+// drafting tools. The model sees only aggregate catalog and subscriber-count
+// data and never triggers a mutation.
 func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAnswer, error) {
 	if !s.Configured() {
 		return nil, ErrNotConfigured
@@ -61,9 +58,8 @@ func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAns
 	return nil, &NoAnswerError{ToolCalls: attempts}
 }
 
-// toolDefs is the tool list the model sees this turn — drafting tools are
-// APPENDED only when armed (flag off = absent from the list entirely, never
-// present-but-erroring).
+// toolDefs appends drafting tools only when armed: off means absent, never
+// present-but-erroring.
 func (s *Service) toolDefs() []dashboard.ToolDef {
 	defs := []dashboard.ToolDef{
 		toolDefListCatalog(), toolDefGetPrice(), toolDefPriceHistory(), toolDefListRepriceBatches(),
@@ -82,10 +78,8 @@ func toolNames(defs []dashboard.ToolDef) []string {
 	return names
 }
 
-// runTool dispatches one tool call, enforcing the shared budget and
-// translating each tool's (content, error) — or (content, draft, error) for
-// drafting tools — into the wire ToolResult, collecting Q&A results into
-// evidence and drafts into drafts as a side effect.
+// runTool dispatches one tool call against the shared budget, collecting Q&A
+// results into evidence and drafts into drafts.
 func (s *Service) runTool(ctx context.Context, call dashboard.ToolCall, evidence *[]billing.CatalogEvidence, drafts *[]billing.CatalogDraft, attempts *int) dashboard.ToolResult {
 	errResult := func(msg string) dashboard.ToolResult {
 		return dashboard.ToolResult{ToolUseID: call.ID, Content: msg, IsError: true}

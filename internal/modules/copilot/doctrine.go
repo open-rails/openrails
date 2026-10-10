@@ -8,11 +8,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// doctrinePrompt is the copilot's house doctrine, assembled from the
-// 2026-07-07 tracker rulings (#774/#773/#777/#778). Kept tight per the
-// design spec — the AXI tool results (inline aggregates, explicit empty
-// states, next-step hints) carry most of the intelligence; this only needs
-// to teach the model the vocabulary and the boundaries.
+// doctrinePrompt teaches the model the vocabulary and boundaries; the tool
+// results (inline aggregates, explicit empty states, next-step hints) carry
+// the rest.
 var doctrinePrompt = `Catalog doctrine (how OpenRails prices work — assume the merchant does not know these terms):
 
 - A price KEY is a durable, human name (e.g. "premium-monthly") that points at the CURRENT version of a price. The underlying row is immutable and identified by its financial substance; editing the amount under the SAME key creates a NEW version, archives the old one, and re-points the key. Existing subscribers stay PINNED to the archived row automatically — this is "grandfathering", and it is the ZERO-ACTION default. Nothing else needs to happen for "existing users keep $10, new users pay $12".
@@ -24,14 +22,12 @@ var doctrinePrompt = `Catalog doctrine (how OpenRails prices work — assume the
 - Money in every tool argument and result is an integer count of the currency's native units. Native units per 1 currency unit: ` + moneyutil.DescribeNativeScales() + `. State amounts to the user in whole currency units.
 - Never fabricate a number. Every count, amount, or date in your answer must come from a tool result.`
 
-// draftingDoctrine is appended only when Phase 2 is armed.
+// draftingDoctrine is appended only when drafting is armed.
 const draftingDoctrine = `
 Drafting: you may PROPOSE a price change or a new price via the draft_* tools, but you can NEVER apply one — every draft_* tool result is a proposal the merchant must review and confirm by hand in the console. Say so plainly whenever you hand back a draft. If a request would need cross-product migration, call draft_price_change with migrate_to_price_key set so the refusal and workaround come back typed — do not attempt to talk the merchant out of it yourself; relay the tool's reason and workaround verbatim.`
 
-// systemPrompt assembles the AXI content-first context pack: the LIVE
-// catalog summary FIRST (content, not schema docs), then the doctrine, then
-// the answering rules. now is used both for the date line and for any
-// tool that needs "today" (draft_price_change's default effective date).
+// systemPrompt puts the live catalog summary first, then the doctrine, then
+// the answering rules.
 func (s *Service) systemPrompt(ctx context.Context, now time.Time) string {
 	rows, err := s.catalogRows(ctx, "")
 	summary := "catalog summary unavailable"

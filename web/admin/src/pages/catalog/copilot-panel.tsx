@@ -1,9 +1,7 @@
-// Catalog copilot (#779): free-form Q&A over the catalog/pricing/reprice
-// data, mirroring the dashboard's #756 Ask panel exactly (one-shot question,
-// answer + evidence). The ONLY additional surface is drafts (Phase 2,
-// flag-gated): the model never mutates anything — a draft only opens,
-// pre-filled, in the normal #777 wizard (price change) or a plain
-// create-price call (new tier) for a human to explicitly confirm.
+// Catalog copilot: one-shot Q&A over catalog, pricing and migration data, like
+// the dashboard's Ask panel, plus drafts when drafting is enabled. The model
+// never mutates anything: a draft opens, pre-filled, in the price-change
+// wizard or as a create-price call for a person to confirm.
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
   BubbleChatQuestionIcon,
@@ -194,10 +192,8 @@ function DraftCard({ draft }: { draft: CatalogDraft }) {
   return null
 }
 
-// PriceChangeDraftCard: "Review in wizard" fetches the live Price +
-// product name, then opens the SAME #777 wizard used everywhere else,
-// pre-filled at Step 3 — the human reviews and clicks Confirm exactly as
-// they would for a hand-typed change.
+// PriceChangeDraftCard loads the live price, then opens the price-change
+// wizard pre-filled at step 3; a person confirms as for a typed change.
 function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
   const loadDraft = useMutation(adminMutations.loadCatalogPriceDraft())
 
@@ -257,9 +253,8 @@ function PriceChangeDraftCard({ draft }: { draft: PriceChangeDraft }) {
   )
 }
 
-// NewPriceDraftCard: "Create this price" calls the SAME createPrice the
-// New Price form uses — a plain, explicit human confirm, never triggered by
-// the tool layer itself.
+// NewPriceDraftCard creates the price only on a person's click, with the same
+// createPrice the New Price form uses.
 function NewPriceDraftCard({ draft }: { draft: NewPriceDraft }) {
   const queryClient = useQueryClient()
   const createDraftPrice = useMutation(

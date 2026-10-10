@@ -1,7 +1,6 @@
-// Package copilot provides merchant-scoped catalog Q&A and optional drafting.
-// The model can query catalog summaries but cannot mutate them. Draft tools
-// return typed proposals for the console's human-reviewed mutation flow, where
-// the API enforces authorization and catalog constraints again.
+// Package copilot answers merchant-scoped catalog questions and, when armed,
+// drafts typed proposals for the console's human-reviewed mutation flow. The
+// model never mutates the catalog.
 package copilot
 
 import (
@@ -17,17 +16,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// ProductReader is the read-only product surface the copilot needs — the
-// exact method set catalog.ProductService already exports (no adapter: the
-// production wiring passes the real service directly).
+// ProductReader is the read-only product surface; catalog.ProductService
+// satisfies it.
 type ProductReader interface {
 	GetActive(ctx context.Context) ([]*models.Product, error)
 	GetByKey(ctx context.Context, key string) (*models.Product, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
 }
 
-// PriceReader is the read-only price/key surface — catalog.PriceService's
-// existing method set.
+// PriceReader is the read-only price surface; catalog.PriceService satisfies it.
 type PriceReader interface {
 	GetActiveByProductID(ctx context.Context, productID uuid.UUID) ([]*models.Price, error)
 	GetCurrentByProductKey(ctx context.Context, merchantID uuid.UUID, productKey, key string) (*models.Price, error)
@@ -62,8 +59,8 @@ type Deps struct {
 	Clock    clockwork.Clock
 }
 
-// Service answers catalog Q&A (#779 Phase 1) and, when armed, drafts price
-// changes / catalog diffs (Phase 2) for human review in the #777 wizard.
+// Service answers catalog questions and, when armed, drafts price changes and
+// new prices for human review in the console.
 type Service struct {
 	products ProductReader
 	prices   PriceReader

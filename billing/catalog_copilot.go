@@ -65,8 +65,8 @@ type NewPriceDraft struct {
 }
 
 // CatalogDraftRefusal is why a requested change was not drafted, and what to
-// do instead. Code is cross_product, cross_currency, inactive_price or
-// same_product_migration.
+// do instead. Code is cross_product, cross_currency, inactive_price,
+// same_product_migration or customer_amount_price.
 type CatalogDraftRefusal struct {
 	Code       string `json:"code"`
 	Reason     string `json:"reason"`

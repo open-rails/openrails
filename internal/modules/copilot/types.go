@@ -5,9 +5,8 @@ import (
 	"fmt"
 )
 
-// ErrNotConfigured: no LLM key or no llm.catalog_copilot_enabled consent —
-// the endpoint answers 501 with a pointed message (mirrors #756's
-// ErrAskNotConfigured).
+// ErrNotConfigured is Ask's error without an LLM or the
+// llm.catalog_copilot_enabled consent.
 var ErrNotConfigured = errors.New("copilot: catalog copilot not configured")
 
 // NoAnswerError: the model never produced a text answer within the loop

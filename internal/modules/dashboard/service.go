@@ -15,15 +15,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// MetricsExecutor executes validated metrics plans (the #733 service; an
-// interface so ask-loop unit tests inject canned results).
+// MetricsExecutor executes validated metrics plans; ask-loop tests inject
+// canned results.
 type MetricsExecutor interface {
 	Execute(ctx context.Context, plan *metrics.Plan) (*metrics.Result, error)
 }
 
-// Service persists per-merchant dashboards, drives NL widget generation and
-// the #756 metrics Q&A loop. All reads/writes ride the request's pinned
-// merchant connection.
+// Service persists per-merchant dashboards and drives widget generation and
+// metrics Q&A, every read and write scoped to the context's merchant.
 type Service struct {
 	db         *db.DB
 	metrics    MetricsExecutor
