@@ -75,6 +75,8 @@ var pendingNumericMoney = map[string]string{
 	"internal/db/models/payment.go:Payment.ListAmount list_amount":                                                           notHTTPStorageRow,
 	"internal/db/models/product_catalog.go:Price.Amount amount":                                                              notHTTPStorageRow,
 	"internal/db/models/product_catalog.go:Price.TrialUnitAmount trial_unit_amount":                                          notHTTPStorageRow,
+	"internal/db/models/solana_subscription.go:SolanaTierChangeReceipt.AmountDueNow amount_due_now":                          notHTTPStoredMetadata,
+	"internal/db/models/solana_subscription.go:SolanaTierChangeReceipt.NextChargeAmount next_charge_amount":                  notHTTPStoredMetadata,
 	"internal/db/models/usage_event.go:UsageEvent.Amount amount":                                                             notHTTPStorageRow,
 	"internal/db/models/usage_event.go:UsageEvent.ForgivenAmount forgiven_amount":                                            notHTTPStorageRow,
 	"internal/http/handlers/admin_catalog.go:PaginatedResponse.Limit limit":                                                  notMoneyPageSize,

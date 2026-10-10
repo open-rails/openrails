@@ -1,10 +1,36 @@
 package models
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// SolanaTierChangeReceipt preserves the committed result for confirmation retries.
+type SolanaTierChangeReceipt struct {
+	Signature        string    `json:"signature"`
+	PriceID          uuid.UUID `json:"price_id"`
+	SubscriptionID   uuid.UUID `json:"subscription_id"`
+	AmountDueNow     int64     `json:"amount_due_now"`
+	Currency         string    `json:"currency"`
+	NextChargeAmount int64     `json:"next_charge_amount"`
+	NextChargeDate   time.Time `json:"next_charge_date"`
+	IsUpgrade        bool      `json:"is_upgrade"`
+}
+
+func (s *Subscription) SolanaTierChangeReceipt() (*SolanaTierChangeReceipt, error) {
+	if len(s.Metadata) == 0 {
+		return nil, nil
+	}
+	var metadata struct {
+		Receipt *SolanaTierChangeReceipt `json:"solana_tier_change_receipt"`
+	}
+	if err := json.Unmarshal(s.Metadata, &metadata); err != nil {
+		return nil, err
+	}
+	return metadata.Receipt, nil
+}
 
 // SolanaSubscription statuses: the on-chain record lifecycle.
 const (

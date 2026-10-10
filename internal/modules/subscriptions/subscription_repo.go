@@ -2,6 +2,7 @@ package subscriptions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -207,6 +208,39 @@ func (r *SubscriptionRepo) UpdateAt(ctx context.Context, s *models.Subscription,
 	}
 	s.RowVersion++
 	return nil
+}
+
+func (r *SubscriptionRepo) LockTierChangeTx(ctx context.Context, txDB *db.DB, id uuid.UUID) (*models.Subscription, error) {
+	return NewSubscriptionRepo(txDB).GetByIDForUpdate(ctx, id)
+}
+
+// SaveSolanaTierChangeTx records the confirmation result in the caller's transaction.
+func (r *SubscriptionRepo) SaveSolanaTierChangeTx(ctx context.Context, txDB *db.DB, id uuid.UUID, receipt *models.SolanaTierChangeReceipt) error {
+	repo := NewSubscriptionRepo(txDB)
+	// Re-read after cancellation so its lifecycle fields and revision are retained.
+	sub, err := repo.GetByIDForUpdate(ctx, id)
+	if err != nil {
+		return err
+	}
+	metadata := make(map[string]json.RawMessage)
+	if len(sub.Metadata) != 0 {
+		if err := json.Unmarshal(sub.Metadata, &metadata); err != nil {
+			return err
+		}
+	}
+	if metadata == nil {
+		metadata = make(map[string]json.RawMessage)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	metadata["solana_tier_change_receipt"] = encoded
+	sub.Metadata, err = json.Marshal(metadata)
+	if err != nil {
+		return err
+	}
+	return repo.UpdateAt(ctx, sub, sub.UpdatedAt)
 }
 
 var (

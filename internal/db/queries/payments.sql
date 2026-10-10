@@ -197,6 +197,19 @@ WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.subscription_id 
 ORDER BY purch.purchased_at DESC
 LIMIT 1;
 
+-- name: GetSolanaPeriodPaidAmount :one
+SELECT COALESCE(sum(p.amount), 0)::bigint AS amount
+FROM billing.payments p
+WHERE p.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND p.psp_id = sqlc.arg(psp_id)::uuid
+  AND p.subscription_id = sqlc.arg(subscription_id)::uuid
+  AND p.currency = sqlc.arg(currency)::text
+  AND p.metadata ->> 'period_start' = sqlc.arg(period_start)::text
+  AND p.channel = 'rail' AND p.rail = 'solana' AND p.money_movement = 'rail'
+  AND p.status = 'succeeded' AND p.amount > 0
+  AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+  AND p.deleted_at IS NULL;
+
 -- name: MarkPaymentFailed :exec
 UPDATE billing.payments SET status = 'failed' WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;

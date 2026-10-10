@@ -267,7 +267,12 @@ func (s *CheckoutService) previewSubscriptionChange(ctx context.Context, req *Su
 	if err := s.validateTierChangePreviewTarget(ctx, sub, c.currentPrice, c.price, user, "upgrade"); err != nil {
 		return nil, err
 	}
-	quote, err := QuoteModelBUpgrade(providerUpgradeOf(sub, c.currentPrice, c.price), s.now())
+	var quote ModelBUpgradeQuote
+	if sub.Rail == models.RailSolana {
+		quote, err = QuoteSolanaUpgrade(ctx, s.SubscriptionService.Database(), sub, c.currentPrice, c.price, s.now())
+	} else {
+		quote, err = QuoteModelBUpgrade(providerUpgradeOf(sub, c.currentPrice, c.price), s.now())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +342,14 @@ func (s *CheckoutService) resolveChange(ctx context.Context, req *SubscriptionCh
 		if err := RequireSameCurrency(PriceAmountOf(c.currentPrice), PriceAmountOf(c.price)); err != nil {
 			return nil, err
 		}
-		c.upgrade = c.product.TierRank >= c.currentProduct.TierRank
+		if sub.Rail == models.RailSolana {
+			c.upgrade, err = SolanaTierChange(sub, c.currentProduct, c.product, c.currentPrice, c.price)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			c.upgrade = c.product.TierRank >= c.currentProduct.TierRank
+		}
 	}
 	if c.quantity, err = changeQuantity(req, sub, c.price); err != nil {
 		return nil, err

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
+	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
@@ -16,11 +17,13 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	solanasubscriptions "github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -49,10 +52,7 @@ type solanaResolvedPlanTerms struct {
 	createdAt  int64
 }
 
-// resolveSolanaTierChange authorizes ownership and resolves everything the
-// prepare/confirm endpoints share. A refusal is an *api.APIError or a checkout
-// refusal; writeChangeTierError answers either.
-func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, newPriceIDStr string) (*resolvedTierChange, error) {
+func authorizeSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID) (*models.Subscription, error) {
 	if r.State.SubscriptionService == nil || r.State.PriceService == nil || r.State.ProductService == nil {
 		return nil, api.Coded(billing.CodeServiceUnavailable, "subscriptions are not configured")
 	}
@@ -75,6 +75,11 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if oldSub.Rail != models.RailSolana {
 		return nil, api.Coded(billing.CodeSubscriptionChangeUnsupportedOnRail, "subscription is not a Solana subscription")
 	}
+	return oldSub, nil
+}
+
+func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription, newPriceIDStr string, quoteUpgrade bool) (*resolvedTierChange, error) {
+	subscriptionID := oldSub.ID
 
 	// Load the OLD on-chain row (subscriber/merchant identifiers for the atomic tx).
 	oldRow, err := solanasubs.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(r.Request.Context(), subscriptionID)
@@ -127,25 +132,19 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 		isUpgrade: isUpgrade,
 	}
 
-	if isUpgrade {
-		// Model-B prorated first charge in micros (the new price less the old
-		// plan's unused part), then base units at the mint's on-chain decimals,
-		// $1 peg (depeg failsafe inside).
-		quote, err := checkout.QuoteModelBUpgrade(checkout.ModelBUpgrade{
-			Old: checkout.PriceAmountOf(oldPrice), New: checkout.PriceAmountOf(newPrice),
-			PeriodStart: oldSub.CurrentPeriodStartsAt, PeriodEnd: oldSub.CurrentPeriodEndsAt,
-			NewCycleHours: newPrice.RecurringCycleHours(),
-		}, nowOrDefault(r))
+	if isUpgrade && quoteUpgrade {
+		ctx := db.WithPSPID(r.Request.Context(), oldSub.PspID)
+		quote, err := checkout.QuoteSolanaUpgrade(ctx, r.State.DB, oldSub, oldPrice, newPrice, nowOrDefault(r))
 		if err != nil {
 			return nil, err
 		}
 		firstChargeMicros := quote.ChargeNow
-		decimals, err := solanamodule.RequireTokenDecimals(r.Request.Context(), r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
+		decimals, err := solanamodule.RequireTokenDecimals(ctx, r.State.RailConfigs, newTerms.mintSymbol, r.State.SolanaMintDecimals)
 		if err != nil {
 			return nil, solanaFailure(err, "resolve token decimals")
 		}
 		firstChargeBaseUnits, err := solanamodule.FiatMicrosToStablecoinBaseUnits(
-			r.Request.Context(), moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
+			ctx, moneyutil.Micros(firstChargeMicros), newTerms.mintSymbol, decimals, r.State.SolanaPriceProvider,
 		)
 		if err != nil {
 			return nil, solanaFailure(err, "convert the first charge")
@@ -225,41 +224,42 @@ func nowOrDefault(r *httprequest.Request) time.Time {
 // switch and answers succeeded with the new subscription. Nothing is mirrored
 // before the chain confirms it.
 func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID, signature string) {
-	if r.State.SolanaPrepareTierChangeService == nil || r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil || r.State.DB == nil {
+	if r.State.SolanaPrepareTierChangeService == nil || r.State.SolanaRPCResolver == nil || r.State.SubscriptionLifecycleService == nil || r.State.PaymentService == nil || r.State.DB == nil {
 		r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
-	resolved, err := resolveSolanaTierChange(r, subscriptionID, priceID)
+	oldSub, err := authorizeSolanaTierChange(r, subscriptionID)
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
 	}
-	ctx := r.Request.Context()
+	if signature != "" {
+		target, err := billing.ParsePriceID(priceID)
+		if err != nil || target.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "invalid price_id").WithParam("price_id"))
+			return
+		}
+		result, err := recurring.ReplayTierChange(oldSub, target.UUID(), signature)
+		if err != nil {
+			r.APIError(solanaClientError(err))
+			return
+		}
+		if result != nil {
+			r.SuccessJSON(solanaTierChangeResponse(result.Receipt))
+			return
+		}
+	}
+	resolved, err := resolveSolanaTierChange(r, oldSub, priceID, signature == "")
+	if err != nil {
+		writeChangeTierError(r, err)
+		return
+	}
+	ctx := db.WithPSPID(r.Request.Context(), resolved.oldSub.PspID)
 	merchantID, err := merchant.Require(ctx)
 	if err != nil {
 		r.ErrorCode(billing.CodeInternalError, "no merchant resolved on request")
 		return
 	}
-	// Confirm derives the new subscription account from the same canonical
-	// terms rather than trusting one the client names.
-	prep, err := r.State.SolanaPrepareTierChangeService.Prepare(ctx, recurring.PrepareTierChangeInput{
-		MerchantID:           merchantID,
-		SubscriberWallet:     resolved.oldRow.SubscriberWallet,
-		MintSymbol:           resolved.newTerms.mintSymbol,
-		OldPlanPDA:           resolved.oldRow.PlanPDA,
-		OldSubscriptionPDA:   resolved.oldRow.SubscriptionPDA,
-		NewPlanID:            resolved.newTerms.planID,
-		NewAmountBaseUnits:   resolved.newTerms.amount,
-		NewPeriodHours:       resolved.newTerms.period,
-		NewPlanCreatedAt:     resolved.newTerms.createdAt,
-		IsUpgrade:            resolved.isUpgrade,
-		FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
-	})
-	if err != nil {
-		r.APIError(solanaClientError(err))
-		return
-	}
-
 	out := billing.SubscriptionChange{
 		Effective:        "period_end",
 		PriceID:          billing.PriceID(resolved.newPrice.ID),
@@ -279,10 +279,50 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		out.NextChargeDate = &next
 	}
 	if signature == "" {
+		prep, err := r.State.SolanaPrepareTierChangeService.Prepare(ctx, recurring.PrepareTierChangeInput{
+			MerchantID:           merchantID,
+			SubscriberWallet:     resolved.oldRow.SubscriberWallet,
+			MintSymbol:           resolved.newTerms.mintSymbol,
+			OldPlanPDA:           resolved.oldRow.PlanPDA,
+			OldSubscriptionPDA:   resolved.oldRow.SubscriptionPDA,
+			NewPlanID:            resolved.newTerms.planID,
+			NewAmountBaseUnits:   resolved.newTerms.amount,
+			NewPeriodHours:       resolved.newTerms.period,
+			NewPlanCreatedAt:     resolved.newTerms.createdAt,
+			IsUpgrade:            resolved.isUpgrade,
+			FirstChargeBaseUnits: resolved.firstChargeBaseUnits,
+			FirstChargeMicros:    resolved.firstChargeMicros,
+			Currency:             resolved.newPrice.Currency,
+		})
+		if err != nil {
+			r.APIError(solanaClientError(err))
+			return
+		}
 		old := billing.SubscriptionID(subscriptionID)
 		out.Status, out.SubscriptionID = "requires_action", &old
 		out.NextAction = &billing.NextAction{Type: "solana_sign_transactions", Transactions: []string{prep.Transaction}}
 		r.SuccessJSON(out)
+		return
+	}
+	// Derive the account without preparing or signing another payment.
+	merchantKey, err := solanago.PublicKeyFromBase58(resolved.oldRow.MerchantAddress)
+	if err != nil {
+		r.InternalError("load Solana merchant address", err)
+		return
+	}
+	subscriberKey, err := solanago.PublicKeyFromBase58(resolved.oldRow.SubscriberWallet)
+	if err != nil {
+		r.InternalError("load Solana subscriber address", err)
+		return
+	}
+	planPDA, _, err := solanasubscriptions.DerivePlanPDA(merchantKey, resolved.newTerms.planID)
+	if err != nil {
+		r.InternalError("derive Solana plan account", err)
+		return
+	}
+	newPDA, _, err := solanasubscriptions.DeriveSubscriptionPDA(planPDA, subscriberKey)
+	if err != nil {
+		r.InternalError("derive Solana subscription account", err)
 		return
 	}
 
@@ -299,6 +339,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		r.State.SolanaRPCResolver.ChainReader(),
 		r.State.SubscriptionLifecycleService,
 		solanasubs.NewSolanaSubscriptionRepo(r.State.DB),
+		subscriptions.NewSubscriptionRepo(r.State.DB),
 		r.State.DB,
 		network,
 		tokens,
@@ -308,7 +349,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		OldSubscriptionID:  subscriptionID,
 		UserID:             resolved.oldSub.CustomerID.String(),
 		NewPriceID:         resolved.newPrice.ID,
-		NewSubscriptionPDA: prep.NewSubscriptionPDA,
+		NewSubscriptionPDA: newPDA.String(),
 		NewPlanID:          resolved.newTerms.planID,
 		NewMintSymbol:      resolved.newTerms.mintSymbol,
 		NewAmountBaseUnits: resolved.newTerms.amount,
@@ -317,16 +358,25 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		NewFiatAmount:      resolved.newPrice.Amount,
 		NewCurrency:        resolved.newPrice.Currency,
 		IsUpgrade:          resolved.isUpgrade,
-		// The confirm re-quotes the proration and cannot reproduce the amount
-		// the prepare quoted, so the landed, merchant-co-signed pull is the
-		// charge.
-		OldPeriodEndsAt: resolved.oldSub.CurrentPeriodEndsAt,
+		OldPeriodEndsAt:    resolved.oldSub.CurrentPeriodEndsAt,
 	})
 	if err != nil {
 		r.APIError(solanaClientError(err))
 		return
 	}
-	next := billing.SubscriptionID(result.NewSubscription.ID)
-	out.Status, out.SubscriptionID = "succeeded", &next
-	r.SuccessJSON(out)
+	r.SuccessJSON(solanaTierChangeResponse(result.Receipt))
+}
+
+func solanaTierChangeResponse(receipt *models.SolanaTierChangeReceipt) billing.SubscriptionChange {
+	id := billing.SubscriptionID(receipt.SubscriptionID)
+	out := billing.SubscriptionChange{
+		Status: "succeeded", Effective: "period_end", PriceID: billing.PriceID(receipt.PriceID),
+		Rail: string(models.RailSolana), SubscriptionID: &id, Currency: receipt.Currency,
+		AmountDueNow: receipt.AmountDueNow, NextChargeAmount: receipt.NextChargeAmount,
+		NextChargeDate: &receipt.NextChargeDate,
+	}
+	if receipt.IsUpgrade {
+		out.Effective = "now"
+	}
+	return out
 }

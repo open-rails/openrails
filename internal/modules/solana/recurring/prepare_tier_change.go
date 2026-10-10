@@ -9,7 +9,10 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
+
+const tierChangeQuotePrefix = "openrails:tier-change:1:"
 
 // tierChangeRPC reads the SubscriptionAuthority, the subscriber's balance and a
 // recent blockhash.
@@ -67,6 +70,9 @@ type PrepareTierChangeInput struct {
 	// FirstChargeBaseUnits is the prorated first pull for an upgrade
 	// (new_full - old_unused, in token base units). Ignored for downgrades.
 	FirstChargeBaseUnits uint64
+	// FirstChargeMicros and Currency bind the fiat quote to that token pull.
+	FirstChargeMicros int64
+	Currency          string
 
 	// Reference, when set, tags the tx with a Solana Pay reference
 	// (referenceTagInstruction) so a checkout attempt can drive the tier change.
@@ -97,6 +103,11 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 	}
 	if in.IsUpgrade && in.FirstChargeBaseUnits == 0 {
 		return nil, fmt.Errorf("recurring: upgrade requires a non-zero prorated first charge")
+	}
+	if in.IsUpgrade {
+		if _, ok := moneyutil.LookupCurrency(in.Currency); !ok || in.FirstChargeMicros < 0 {
+			return nil, fmt.Errorf("recurring: invalid first-charge quote")
+		}
 	}
 
 	mintStr, err := ResolveRecurringMintFromTokens(in.MintSymbol, s.tokens)
@@ -223,7 +234,10 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		Delegator:             subscriber,
 	})
 
-	ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew, transferNew}, subscriber, in.Reference)
+	// The merchant signs the fiat quote and token pull in the same message.
+	// Confirmation must not reconstruct the quote using a later clock or rate.
+	quote := solanaint.NewMemoInstruction(fmt.Sprintf("%s%s:%d", tierChangeQuotePrefix, moneyutil.NormalizeCurrency(in.Currency), in.FirstChargeMicros))
+	ixs, err := withReference([]solanago.Instruction{cancelOld, subscribeNew, transferNew, quote}, subscriber, in.Reference)
 	if err != nil {
 		return nil, err
 	}
