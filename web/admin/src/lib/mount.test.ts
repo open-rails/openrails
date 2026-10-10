@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// The console follows the <base href> the server rewrites to its mount
-// (#1127): router basename, bootstrap URL and alert links all derive from it.
+// The console follows the <base href> the server rewrites to its mount: router
+// basename, bootstrap URL and alert links all derive from it.
 import { afterEach, expect, it } from "vitest"
 
 import { bootstrapURL, normalizeLink, routerBasename } from "@/lib/mount"

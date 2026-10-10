@@ -14,8 +14,7 @@ export function defineConsoleExtension(extension: ConsoleExtension) {
 }
 
 // useConsole is the signed-in user, their merchants and the selected one; with
-// an extension id, config is that extension's AdminConsoleConfig.Extensions
-// entry.
+// an extension id, config is that extension's AdminConsole.Extensions entry.
 export function useConsole(extensionId?: string): ConsoleHandle {
   return consoleRuntime().useConsole(extensionId)
 }

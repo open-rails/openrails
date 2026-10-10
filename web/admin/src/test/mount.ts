@@ -1,7 +1,6 @@
-// Test-only jsdom scaffolding for the workflows that need a live DOM: the
-// browser APIs Base UI expects, an act-wrapped mount, and label-addressed
-// controls. Kept out of harness.ts so node-environment tests never load
-// react-dom/client.
+// jsdom scaffolding for workflow tests: the browser APIs Base UI expects, an
+// act-wrapped mount and label-addressed controls. Apart from harness.ts so
+// node-environment tests never load react-dom/client.
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { notifyManager } from "@tanstack/react-query"

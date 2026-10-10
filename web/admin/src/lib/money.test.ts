@@ -1,5 +1,5 @@
 // Every console path that parses, submits or displays money. Amounts are
-// int64 minor units on the wire: a Number cannot hold them, so nothing here
+// int64 native units on the wire: a Number cannot hold them, so nothing here
 // may round-trip through one.
 import { afterEach, describe, expect, it, vi } from "vitest"
 

@@ -1,17 +1,7 @@
-// The OpenRails mark and wordmark as one lockup.
-//
-// The mark is a vernier reading: two rules of equal length, the lower displaced
-// by 4 units against a 12 unit length on a 24 grid. The offset is the whole
-// idea, so it is never adjusted to "look balanced" - a vernier that aligns is
-// not reading anything. It stays true four ways: micros (a vernier reads below
-// the labelled unit), double entry (a pair, never one), rails plural (offset,
-// not parallel), and settlement (a displacement in progress).
-//
-// The wordmark is outlined from Instrument Sans Variable at wght 620 rather
-// than set as live text, so the lockup keeps its exact spacing and cannot shift
-// while the webfont loads. "Rails" is the same colour at 55 percent, so a
-// single currentColor drives the whole lockup and it inherits whatever surface
-// it sits on, including a host application's.
+// The OpenRails mark and wordmark as one lockup. The mark's two rules are
+// deliberately offset (a vernier reading): never align them. The wordmark is
+// outlined, not live text, so it cannot shift while a font loads; one
+// currentColor ("Rails" at 0.55 opacity) lets it inherit any surface.
 
 export function LogoLockup({ className }: { className?: string }) {
   return (

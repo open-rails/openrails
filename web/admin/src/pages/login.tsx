@@ -7,11 +7,9 @@ import { Button } from "@/components/ui/button"
 import { useAuth } from "@/lib/auth"
 import { ISSUER_REDIRECT_KEY, useIdentity } from "@/lib/identity"
 
-// Sign-in is AuthKit's own form (password, provider sign-in, second factors,
-// recovery) or, when staff sign in at a trusted issuer, a redirect there.
-// A tab re-authorizes at the issuer on its own once, silently (prompt=none:
-// the issuer's session answers without UI); after that, or when the issuer
-// needs the user, the button does.
+// Sign-in is AuthKit's own form or, with a trusted issuer, a redirect there.
+// A tab re-authorizes at the issuer silently (prompt=none) once; after that,
+// or when the issuer needs the user, the button does.
 export function LoginPage() {
   const { ready, signedIn } = useAuth()
   const { issuer } = useIdentity()

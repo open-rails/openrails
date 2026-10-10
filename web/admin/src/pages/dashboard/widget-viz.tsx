@@ -1,6 +1,6 @@
-// Viz renderers: stat tile (section-cards pattern w/ compare delta),
-// line/area/bar (shadcn chart on recharts 3, var(--chart-N) tokens), donut,
-// table. Input is the raw #733 tabular result — no client-side re-querying.
+// Viz renderers: stat tile with compare delta, line/area/bar (shadcn chart on
+// recharts), donut, table. Input is the raw tabular metrics result; nothing
+// re-queries client-side.
 import type { ComponentProps } from "react"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { AnalyticsDownIcon, AnalyticsUpIcon } from "@hugeicons/core-free-icons"
@@ -87,8 +87,6 @@ function Empty({ label }: { label: string }) {
     </div>
   )
 }
-
-// --- stat ----------------------------------------------------------------------
 
 function StatViz({
   result,
@@ -201,8 +199,6 @@ export function MetricTooltip({
     />
   )
 }
-
-// --- time series -----------------------------------------------------------------
 
 function TimeSeriesViz({
   viz,
@@ -321,8 +317,6 @@ function TimeSeriesChart({
   )
 }
 
-// --- donut -------------------------------------------------------------------------
-
 function DonutViz({
   result,
   currency,
@@ -382,10 +376,8 @@ function DonutViz({
   )
 }
 
-// --- table --------------------------------------------------------------------------
-
-// humanizeColumn turns raw result column names (first_failure_reason) into labels
-// (Rail account).
+// humanizeColumn turns a result column name (first_failure_reason) into a
+// label (First failure reason).
 function humanizeColumn(name: string): string {
   const words = name.replaceAll("_", " ").trim()
   return words.charAt(0).toUpperCase() + words.slice(1)

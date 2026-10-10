@@ -73,9 +73,8 @@ function decimalFromUnits(value: bigint, decimals: number): string {
 }
 
 // formatUnits formats native units at an explicit scale without passing
-// through a JS number: Intl formats decimal strings exactly (ECMA-402 2023).
-// An engine without that support formats only amounts it can hold exactly and
-// refuses the rest.
+// through a JS number; an engine without exact decimal-string Intl refuses
+// the amounts it cannot hold.
 export function formatUnits(
   amount: MoneyAmount,
   currency: string,

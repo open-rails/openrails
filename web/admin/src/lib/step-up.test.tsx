@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
-// OpenRails refuses an owner write whose sign-in is stale (403
-// step_up_required). The console answers with AuthKit's own step-up dialog
-// (auth-ui) and runs the write again on the fresh session; cancelling leaves
-// OpenRails' refusal. The real api client, auth-ui client and dialog run
-// against the stubbed server.
+// A write refused with 403 step_up_required opens AuthKit's step-up dialog
+// (auth-ui) and runs again on the fresh session; cancelling keeps the refusal.
+// The real api client, auth-ui client and dialog run against a stubbed server.
 import { afterEach, beforeEach, expect, it } from "vitest"
 
 import { api, ApiError } from "@/lib/api/client"

@@ -26,24 +26,17 @@ import type {
 } from "@/lib/api/generated/wire"
 import { adminQueries } from "@/lib/queries"
 
-// or#812 — the frontend contract for catalog psp_links.
-//
-// The catalog is DECLARATIVE: OpenRails definitions are pushed to a provider by
-// the provider adapter, and the reconciliation job that reads back is
-// alert-only. So this surface DISPLAYS a price's psp_links and their
-// provider-side state; it never edits them. The write path is the catalog
-// (manifest / create-price `providers`), not a per-link form.
-//
-// Two questions get answered side by side, and they are different questions:
-//   - Link state (`price.providers`, the psp_links projection): does OpenRails
-//     hold a link entry for this PSP, and does the remote object still match?
-//   - Checkout readiness (or#288 routing dry run): would a real checkout
-//     actually land here right now? A price can be perfectly linked and still
-//     be unroutable because the PSP is unarmed or its credentials are missing.
+// The catalog is declarative: the provider adapter pushes prices and the
+// read-back reconciliation is alert-only, so this surface displays a price's
+// psp_links and never edits them. It answers two different questions:
+//   - Link state (`price.providers`): does OpenRails hold a link for this PSP,
+//     and does the remote object still match?
+//   - Checkout readiness (the routing preview): would a real checkout land
+//     here now? A linked price can still be unroutable (PSP unarmed,
+//     credentials missing).
 
-// SKIP_LABELS is the or#288 skip vocabulary, verbatim keys, rendered for
-// operators. Keep the keys in lockstep with
-// internal/db/models/checkout_session.go.
+// SKIP_LABELS renders the routing skip vocabulary for operators. Keep the keys
+// in lockstep with internal/db/models/checkout_attempt.go.
 const SKIP_LABELS: Record<PSPRoutingSkip, string> = {
   unknown_selector: "That name matches no provider you have set up.",
   ambiguous_selector:
@@ -94,8 +87,8 @@ function linkStatusClass(status: PSPLinkState["status"]) {
   return WARN_BADGE
 }
 
-// syncStatusClass: "unknown" is deliberately NEUTRAL, not a warning — it means
-// nobody has looked yet, which is the honest default until Verify runs.
+// syncStatusClass leaves "unknown" neutral, not a warning: nobody has checked
+// yet.
 function syncStatusClass(sync?: string) {
   switch (sync) {
     case "in_sync":
@@ -277,9 +270,8 @@ export function PSPLinksCard({
   )
 }
 
-// CheckoutReadinessCard answers the operator's real question — "can someone buy
-// this right now, and if not, why?" — with the or#288 dry run, so the console
-// and the routed checkout can never disagree.
+// CheckoutReadinessCard answers "can someone buy this right now, and if not,
+// why?" with the routing preview, so the console and checkout never disagree.
 export function CheckoutReadinessCard({ price }: { price: Price }) {
   const {
     data: decision,

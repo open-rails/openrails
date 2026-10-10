@@ -1,9 +1,6 @@
-// A mutation's callbacks run after its request returns. If the operator
-// switched merchants in the meantime, cache keys built inside those callbacks
-// would name the merchant selected now instead of the one the write was made
-// under: the initiating merchant keeps showing stale money and an untouched
-// merchant's cache is invalidated. These tests switch the stored merchant while
-// the request is in flight and pin the resulting invalidations to merchant A.
+// A mutation's callbacks run after its request returns, when the operator may
+// have switched merchants. These tests switch merchants mid-flight and pin the
+// invalidations to the merchant the write was made under (A).
 import { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 

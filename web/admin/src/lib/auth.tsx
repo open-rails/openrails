@@ -1,8 +1,6 @@
 // The console's operator. auth-ui owns the browser session (sign-in, refresh,
-// step-up); the console adds the merchants the user may act on and the one
-// its requests are made as. OpenRails lists no user's merchants: a host's
-// extension does (merchants), else the mount serves one merchant, else the
-// user opens one by name.
+// step-up); the console adds the merchants the user may act on (OpenRails
+// lists none: see loadMerchants) and the one its requests are made as.
 import * as React from "react"
 import { useQuery } from "@tanstack/react-query"
 

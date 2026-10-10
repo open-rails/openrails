@@ -91,9 +91,8 @@ export function DataTable<TData>({
               table.getRowModel().rows.map((row) => (
                 <TableRow
                   key={row.id}
-                  // A clickable row is a shortcut, not a control: it takes
-                  // Enter as well as a click, and it keeps its hands off
-                  // whatever the cells put inside it.
+                  // A clickable row takes Enter as well as a click, and ignores
+                  // both on interactive content inside its cells.
                   tabIndex={onRowClick ? 0 : undefined}
                   role={onRowClick ? "link" : undefined}
                   onClick={

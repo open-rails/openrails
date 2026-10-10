@@ -11,12 +11,9 @@ import { newMerchantPath, useExtensions } from "@/extensions/registry"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
-// NoMerchants is the console with no merchant selected. Where staff open a
-// merchant by name (no host directory, no merchant the mount serves) it asks
-// for one; access is the admin API's to decide. Otherwise the user belongs to
-// no merchant: a host extension that creates merchants (newMerchantPath)
-// offers its page, and its EmptyState renders below. Inside the shell (a host
-// with its own user pages) it is the merchant pages' content.
+// NoMerchants is the console with no merchant selected: staff open one by name
+// (no host directory or mount merchant; the admin API decides access), else a
+// host's newMerchantPath is offered. inShell renders it inside a host shell.
 export function NoMerchants({ inShell = false }: { inShell?: boolean }) {
   const { me, logout, opensByName, selectMerchant } = useAuth()
   const navigate = useNavigate()

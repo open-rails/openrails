@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// The subscription-change key lifetime, proved on the mounted dialog against the real
-// API client (#513): one reviewed change is one durable operation, and only a
+// The subscription-change key lifetime on the mounted dialog against the real
+// API client: one reviewed change is one durable operation, and only a
 // definitive refusal may start a new one.
 import { QueryClientProvider } from "@tanstack/react-query"
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"

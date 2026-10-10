@@ -1,6 +1,5 @@
 // A table row that behaves like the link inside it: the whole row is a target,
-// which is how anyone actually clicks a list. The link in the primary cell
-// stays, because that is what keyboard and assistive navigation follow.
+// and the primary cell's link stays for keyboard and assistive navigation.
 import * as React from "react"
 import { useNavigate } from "react-router-dom"
 

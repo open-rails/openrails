@@ -2,9 +2,7 @@ import * as React from "react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 
-// Fact renders one labeled stat tile — shared across detail pages
-// (subscriptions, payments, catalog prices) so the "grid of facts" layout
-// reads identically everywhere.
+// Fact renders one labeled stat tile for a detail page's grid of facts.
 export function Fact({
   label,
   children,

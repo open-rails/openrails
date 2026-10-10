@@ -30,7 +30,7 @@ import { queryClient } from "@/lib/query-client"
 
 const StepUpHost = React.lazy(() => import("@/lib/step-up-host"))
 
-// The refresh token stays with the tab, as the session always has.
+// The refresh token lives in sessionStorage: it stays with the tab.
 const REFRESH_KEY = "openrails.admin.refresh"
 
 export type ConsoleClient =

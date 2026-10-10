@@ -1,6 +1,4 @@
-// Pure logic for the #777 price-change wizard — kept isolated from React so
-// it's trivially unit-testable (web/admin has no test runner today; this
-// module is where that debt would be paid down first).
+// Pure logic for the price-change wizard, kept apart from React for unit tests.
 import { formatNativeAmount } from "@/lib/format"
 
 export type PriceDirection = "increase" | "decrease" | "unchanged"
@@ -18,26 +16,20 @@ export function detectDirection(
 
 export type MigrationMode = "grandfather" | "migrate"
 
-// DEFAULT_NOTICE_WINDOW_DAYS is only a fallback for the brief window before
-// the merchant's configured value (GET /v1/admin/configuration,
-// reprice_notice_window_days) has loaded — it mirrors the server's own
-// default (subscriptions.DefaultPriceIncreaseNoticeDays) so the UI never
-// under-gates while loading. The server also enforces it: a migration skips a
-// subscription whose increase is inside the window unless acknowledged
-// (price_increase_notice_too_short). This gate is fail-fast UX.
+// DEFAULT_NOTICE_WINDOW_DAYS is the fallback until the merchant's
+// reprice_notice_window_days loads; it mirrors
+// subscriptions.DefaultPriceIncreaseNoticeDays so the UI never under-gates.
+// The server enforces the window too (price_increase_notice_too_short).
 export const DEFAULT_NOTICE_WINDOW_DAYS = 30
 
-// defaultMigrationMode is the direction-aware Step 2 default: increases
-// default to grandfather (zero-risk — #774's existing behavior, no new
-// action); decreases default to migrate-now (you never grandfather a
-// decrease — #773's design ruling).
+// defaultMigrationMode is the direction-aware Step 2 default: an increase
+// grandfathers (no new action), a decrease migrates now (never grandfathered).
 export function defaultMigrationMode(direction: PriceDirection): MigrationMode {
   return direction === "decrease" ? "migrate" : "grandfather"
 }
 
-// minEffectiveDate returns the earliest allowed migration date, or null when
-// there is no minimum (decreases may move everyone at next renewal starting
-// now — notice is optional goodwill, not a requirement).
+// minEffectiveDate is the earliest allowed migration date, or null when there
+// is no minimum (a decrease needs no notice).
 export function minEffectiveDate(
   direction: PriceDirection,
   now: Date,
@@ -84,10 +76,9 @@ const dateLabel = (iso: string) =>
     year: "numeric",
   })
 
-// buildReviewText renders Step 3's "plan in words" exactly per the #777 spec
-// phrasing: "New subscribers pay $12 immediately. 1,204 existing subscribers
-// keep $10 until Sep 1, then move to $12 at their next renewal. Notices go
-// out on confirm."
+// buildReviewText renders Step 3's plan in words, e.g. "New subscribers pay $12
+// immediately. 1,204 existing subscribers keep $10 until Sep 1, then move to
+// $12 at their next renewal. Notices go out on confirm."
 export function buildReviewText(params: {
   newAmount: string
   currentAmount: string
@@ -111,9 +102,8 @@ export function buildReviewText(params: {
     return `${lead} ${subj} keep ${oldLabel} forever (grandfathered).`
   }
 
-  // The engine emits a reprice_scheduled notification per affected
-  // subscriber at SCHEDULE time regardless of how far out effective_at is
-  // (#773) — always say so, not just for the delayed-migration phrasing.
+  // The engine notifies each affected subscriber at schedule time, however
+  // far out effective_at is: always say so.
   const effective = new Date(plan.effectiveAt)
   const immediate = effective.getTime() <= now.getTime()
   if (immediate) {

@@ -35,7 +35,7 @@ import { dunningSummary } from "./dunning"
 const PAGE = 50
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
-// Dunning is past_due and awaiting_method (#664 doctrine: park, don't cancel).
+// Dunning is past_due and awaiting_method: parked, not canceled.
 const statusTabs = [
   { value: "", label: "All" },
   { value: "active", label: "Active" },
@@ -132,8 +132,8 @@ export function SubscriptionsPage() {
     setParams(p)
   }
 
-  // No free-text search on the subscriptions API — resolve the term to a
-  // customer first, then filter by their user id.
+  // The subscriptions API has no free-text search: resolve the term to a
+  // customer, then filter by its id.
   const searchCustomer = async () => {
     const term = input.trim()
     if (!term) return

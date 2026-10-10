@@ -144,8 +144,8 @@ export function PaymentsPage() {
     setParams(p)
   }
 
-  // No free-text search on the payments API — resolve the term to a customer
-  // first, then filter by their user id.
+  // The payments API has no free-text search: resolve the term to a customer,
+  // then filter by its id.
   const searchCustomer = async () => {
     const term = input.trim()
     if (!term) return

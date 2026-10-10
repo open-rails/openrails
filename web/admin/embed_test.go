@@ -15,10 +15,9 @@ import (
 	admin "github.com/open-rails/openrails/web/admin"
 )
 
-// One console build serves any mount path (#1127): index.html references its
-// assets relative to the <base href> the handler rewrites, and each resolves
-// under the mount. Skips without a build; scripts/check.sh gates it after
-// building the console.
+// One console build serves any mount path: index.html references its assets
+// relative to the <base href> the handler rewrites. Skips without a build;
+// scripts/check.sh builds the console first.
 func TestBuiltConsoleServesAtAnyPath(t *testing.T) {
 	assets := admin.FS()
 	if assets == nil {

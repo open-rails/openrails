@@ -1,8 +1,7 @@
-// Payments → Health (#1117): the metrics queries behind each panel, the shaping
-// of their results, and the list URL every tile and cell opens. The metric
-// filters and the list filters use the same names, so a drill-down carries the
-// panel's filters unchanged; only the PSP is named differently (the metrics
-// group by its key, the lists take its id).
+// Payments → Health: the metrics queries behind each panel, the shaping of
+// their results, and the list URL every tile and cell opens. Metric and list
+// filters share names, so a drill-down carries them unchanged; only the PSP
+// differs (metrics group by its key, lists take its id).
 import type {
   MetricsCell,
   MetricsQuery,
@@ -52,8 +51,6 @@ function scoped(scope: Scope, extra: Filters = {}): Filters | undefined {
   if (scope.psp) out.psp = [scope.psp.id]
   return Object.keys(out).length ? out : undefined
 }
-
-// --- tiles ----------------------------------------------------------------------
 
 export interface Tile {
   id: string
@@ -181,8 +178,6 @@ export function formatChange(v: TileValue): string {
   return `${sign}${v.change.toLocaleString()} vs previous period`
 }
 
-// --- trends -----------------------------------------------------------------------
-
 export const trendQueries = (scope: Scope) => {
   const weekly = (measure: string, filters: Filters = {}): MetricsQuery => ({
     measures: [measure],
@@ -196,8 +191,6 @@ export const trendQueries = (scope: Scope) => {
     rebill: weekly("rebill_first_failure_rate"),
   }
 }
-
-// --- reasons ------------------------------------------------------------------------
 
 export const reasonsQuery = (scope: Scope): MetricsQuery => ({
   measures: ["failed_attempts"],
@@ -271,8 +264,6 @@ export function reasonGroups(result: MetricsResult | undefined): ReasonGroup[] {
     .sort((a, b) => b.count - a.count)
 }
 
-// --- AVS / CVV on new cards -----------------------------------------------------------
-
 export const checkQueries = (scope: Scope) => {
   const by = (dim: string): MetricsQuery => ({
     measures: ["attempts", "attempt_failure_rate"],
@@ -305,8 +296,6 @@ export function checkRows(result: MetricsResult | undefined): CheckRow[] {
     }))
     .sort((a, b) => b.attempts - a.attempts)
 }
-
-// --- dunning recovery curve -------------------------------------------------------------
 
 export const RECOVERY_ATTEMPTS = ["1", "2", "3", "4", "5+"]
 export const RECOVERY_DAYS = [1, 3, 7, 14, 30]
@@ -381,8 +370,6 @@ export function recoveryCurves(
   return out.sort((a, b) => a.owner.localeCompare(b.owner))
 }
 
-// --- missed rebills and webhook coverage ---------------------------------------------------
-
 export const missedQuery = (scope: Scope): MetricsQuery => ({
   measures: ["rebills_missed"],
   by: ["miss_reason", "psp"],
@@ -456,8 +443,6 @@ export function coverageRows(result: MetricsResult | undefined): CoverageRow[] {
     .sort((a, b) => a.psp.localeCompare(b.psp))
 }
 
-// --- drill-down -----------------------------------------------------------------------------
-
 // listURL opens the attempt or cycle list with the panel's filters, the page's
 // scope and the query's resolved range.
 export function listURL(
@@ -479,8 +464,6 @@ export function listURL(
   }
   return `/payments/${list}?${p.toString()}`
 }
-
-// --- NMI history (#1120) ---------------------------------------------------------------------
 
 // NMI's own transaction history, read daily per NMI PSP and kept 25 months. It
 // has no owner, so only the PSP scopes it.

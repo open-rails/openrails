@@ -1,5 +1,5 @@
-// Payments → Health (#1117): decline and rebill-failure health from the
-// metrics API. Every tile and cell opens the matching attempt or cycle list.
+// Payments → Health: decline and rebill-failure health from the metrics API.
+// Every tile and cell opens the matching attempt or cycle list.
 import { useMerchantConfig } from "@/lib/capabilities"
 import * as React from "react"
 import { Link, useSearchParams } from "react-router-dom"
@@ -207,8 +207,6 @@ function Empty({ label = "Nothing in this range." }: { label?: string }) {
   return <p className="text-sm text-muted-foreground">{label}</p>
 }
 
-// --- tiles --------------------------------------------------------------------------
-
 function Tiles({ scope }: { scope: Scope }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
@@ -261,8 +259,6 @@ function TileCard({ tile, scope }: { tile: Tile; scope: Scope }) {
   )
 }
 
-// --- trends -----------------------------------------------------------------------------
-
 function Trend({
   title,
   query,
@@ -283,8 +279,6 @@ function Trend({
     </Panel>
   )
 }
-
-// --- reasons ------------------------------------------------------------------------------
 
 function Reasons({ scope }: { scope: Scope }) {
   const { data, isPending } = useQuery(metrics(reasonsQuery(scope)))
@@ -383,8 +377,6 @@ function Reasons({ scope }: { scope: Scope }) {
   )
 }
 
-// --- AVS / CVV ------------------------------------------------------------------------------
-
 function Checks({ scope }: { scope: Scope }) {
   const queries = checkQueries(scope)
   return (
@@ -477,8 +469,6 @@ function CheckTable({
     </Panel>
   )
 }
-
-// --- recovery ---------------------------------------------------------------------------------
 
 function Recovery({ scope }: { scope: Scope }) {
   const q = recoveryQueries(scope)
@@ -575,8 +565,6 @@ function CurveTable({
     </Table>
   )
 }
-
-// --- missed and coverage ------------------------------------------------------------------------
 
 function Missed({
   scope,
@@ -688,8 +676,6 @@ function Coverage({
     </Panel>
   )
 }
-
-// --- NMI history (#1120) -------------------------------------------------------------------------
 
 function NMIHistory({ scope }: { scope: Scope }) {
   const q = nmiHistoryQueries(scope)

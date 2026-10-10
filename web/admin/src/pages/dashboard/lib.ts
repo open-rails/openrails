@@ -1,6 +1,5 @@
 // Result-shaping helpers for dashboard widgets: unit-aware formatting,
-// time-series pivoting, and count-widget deep links (#733 contract: every
-// count tile links to the matching admin list).
+// time-series pivoting, and deep links (every count tile links to its list).
 import type {
   MetricsCell,
   MetricsColumn,
@@ -273,8 +272,7 @@ export function chartColor(i: number): string {
   return `var(--chart-${(i % 5) + 1})`
 }
 
-// Decline and rebill-failure measures (#1116) and NMI's history (#1120) open
-// Payments → Health.
+// Decline, rebill-failure and NMI history measures open Payments → Health.
 const HEALTH_MEASURES = new Set([
   "attempts",
   "approved_attempts",
@@ -302,9 +300,9 @@ const HEALTH_MEASURES = new Set([
   "nmi_history_refusal_rate",
 ])
 
-// deepLinkFor maps a widget to the admin page carrying the same filter (#733
-// count→list contract): decline measures in any viz open the health page,
-// count stats open their list. Null = no sensible link.
+// deepLinkFor maps a widget to the admin page carrying the same filter: health
+// measures in any viz open the health page, count stats open their list. Null
+// = no sensible link.
 export function deepLinkFor(
   query: MetricsQuery,
   viz: string = "stat"

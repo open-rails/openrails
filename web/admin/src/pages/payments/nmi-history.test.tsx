@@ -1,9 +1,7 @@
-// Payments → Health, NMI history (#1120): the queries the section sends, how
-// it shapes NMI's monthly history, and where it marks OpenRails' own start.
-// The fixtures are the #1120 e2e scenario's numbers in the metrics
-// API's wire shape: one-off sales refused 1 in 3 for insufficient funds, NMI's
-// scheduled rebills refused 1 in 2 for do-not-honor, and a card verification
-// in the month OpenRails began recording.
+// Payments → Health, NMI history: the queries it sends, how it shapes NMI's
+// monthly history and marks OpenRails' own start. Fixtures mirror the e2e
+// scenario: one-offs refused 1 in 3, NMI rebills 1 in 2, and a card
+// verification in OpenRails' first recorded month.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { MetricsQuery, MetricsResult } from "@/lib/api/metrics"

@@ -2,9 +2,8 @@ import type { Price } from "@/lib/api/generated/wire"
 import { formatHours } from "@/lib/duration"
 import { formatNativeAmount } from "@/lib/format"
 
-// priceIntervalLabel renders a price's renewal cadence — shared between the
-// catalog list and the #777 price-change wizard so "currency + interval
-// locked" always reads identically in both places.
+// priceIntervalLabel renders a price's renewal cadence, shared by the catalog
+// list and the price-change wizard.
 export function priceIntervalLabel(
   price: Pick<Price, "billing_interval_hours" | "access_duration_hours">
 ): string {
