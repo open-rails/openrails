@@ -28,19 +28,8 @@ export async function getJSON<T>(send: CheckoutFetch, path: string, signal?: Abo
   return (await res.json()) as T
 }
 
-// The fields the page reads; billing-ui's wire types replace these once
-// orders and their checkout are in its generated types.
-export interface Merchant {
-  display_name: string
-  logo_url: string | null
-  support_url: string | null
-}
-
-export interface PublicConfig {
-  currencies: { code: string; decimals: number }[]
-  merchant: Merchant | null
-}
-
+// The order fields the page reads; billing-ui's wire types replace these
+// once orders and their checkout are in its generated types.
 export interface OrderLine {
   id: string
   description: string

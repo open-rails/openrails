@@ -6,6 +6,7 @@ on:
     branches: [master]
     paths:
       - sdk/billing-ui/**
+      - web/checkout/**
       - examples/**
       - "**/*.go"
       - "**/*.sql"
@@ -66,6 +67,47 @@ jobs:
         with:
           name: billing-ui-playwright
           path: sdk/billing-ui/test-results/
+          retention-days: 7
+
+  # The hosted checkout page in Chromium against this commit's standalone
+  # server (server/ci/checkoutpage), NMI being nmimock.
+  checkout-page:
+    name: checkout page
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: web/checkout
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: web/checkout/package.json
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            sdk/billing-ui/pnpm-lock.yaml
+            web/checkout/pnpm-lock.yaml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: server/go.mod
+          cache-dependency-path: |
+            go.sum
+            server/go.sum
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - run: pnpm exec playwright install --with-deps chromium
+      - name: Hosted checkout in a browser
+        run: pnpm test:e2e
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: checkout-page-playwright
+          path: web/checkout/test-results/
           retention-days: 7
 
   # The embedded example's gate and buy pages, over HTTP and in Chromium,

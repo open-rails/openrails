@@ -34,6 +34,7 @@ export type {
   CurrencyScales,
   PaymentConfig,
   PublicConfig,
+  PublicMerchant,
   CheckoutSessionLink,
   Invoice,
   ListPage,

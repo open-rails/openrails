@@ -528,6 +528,14 @@ export type CaptchaConfig = z.infer<typeof captchaConfigSchema>
  * merchant's payment setup (null when the request resolves no merchant) and
  * the captcha (null when the deployment challenges nobody).
  */
+/** The merchant as its customers see it; logo and support are https. */
+export const publicMerchantSchema = z.object({
+  display_name: z.string(),
+  logo_url: z.string().nullish(),
+  support_url: z.string().nullish(),
+})
+export type PublicMerchant = z.infer<typeof publicMerchantSchema>
+
 export const publicConfigSchema = z.object({
   capabilities: z.object({
     route_groups: z.record(z.string(), z.boolean()),
@@ -538,6 +546,7 @@ export const publicConfigSchema = z.object({
     .nullish()
     .transform((v) => v ?? []),
   payment: paymentConfigSchema.nullish(),
+  merchant: publicMerchantSchema.nullish(),
   captcha: captchaConfigSchema.nullish(),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>

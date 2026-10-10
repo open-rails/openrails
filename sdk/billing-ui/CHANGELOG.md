@@ -1,5 +1,11 @@
 # Changelog
 
+## The merchant in the public configuration
+
+- `getConfig()` returns `merchant` (`PublicMerchant`: `display_name`, and
+  `logo_url` and `support_url` when they are https), null when the request
+  resolves no merchant.
+
 ## Apps buy through BuyButton and Offers
 
 - `Checkout` and `CheckoutModal` (and their props), the fixture sources and

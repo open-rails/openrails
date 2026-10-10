@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { formatAmount } from "@openrails/billing-ui"
+import { createBillingClient, formatAmount } from "@openrails/billing-ui"
+import { isBillingError, type PublicConfig } from "@openrails/billing-ui/client"
 
-import { CheckoutError, checkoutFetch, getJSON, type Order, type PublicConfig } from "./api"
+import { CheckoutError, checkoutFetch, getJSON, type Order } from "./api"
 
 type State =
   | { kind: "loading" }
@@ -15,24 +16,26 @@ const settled = (status: string) => status === "complete" || status === "process
 
 export function App({ orderId, secret }: { orderId: string; secret: string | null }) {
   const send = useMemo(() => (secret ? checkoutFetch(secret) : null), [secret])
+  // billing-ui's client: the page's every call carries the secret.
+  const billing = useMemo(() => (send ? createBillingClient({ baseUrl: "/v1", fetch: send }) : null), [send])
   const [state, setState] = useState<State>(() => (secret ? { kind: "loading" } : { kind: "ended", reason: "not_found" }))
 
   useEffect(() => {
-    if (!send) return
+    if (!send || !billing) return
     const abort = new AbortController()
     Promise.all([
-      getJSON<PublicConfig>(send, "/config", abort.signal),
+      billing.getConfig(abort.signal),
       getJSON<Order>(send, `/me/orders/${orderId}`, abort.signal),
     ]).then(
       ([config, order]) => setState({ kind: "ready", config, order }),
       (err: unknown) => {
         if (abort.signal.aborted) return
-        const code = err instanceof CheckoutError ? err.code : ""
+        const code = err instanceof CheckoutError || isBillingError(err) ? err.code : ""
         setState({ kind: "ended", reason: code === "checkout_expired" ? "expired" : code === "checkout_not_found" ? "not_found" : "unavailable" })
       }
     )
     return () => abort.abort()
-  }, [send, orderId])
+  }, [send, billing, orderId])
 
   useEffect(() => {
     if (state.kind === "ready" && settled(state.order.status) && state.order.checkout) {
