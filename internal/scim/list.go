@@ -3,6 +3,7 @@ package scim
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -109,11 +110,12 @@ func (s *Server) list(ctx context.Context, mid billing.MerchantID, f filter, sta
 		return err
 	}
 	out.TotalResults = total
-	if count == 0 || int64(start) > total {
+	offset := start - 1
+	if count < 1 || count > MaxResults || offset < 0 || offset > math.MaxInt32 || int64(start) > total {
 		return nil
 	}
 	rows, err := q.ListProvisionedContacts(ctx, gen.ListProvisionedContactsParams{
-		MerchantID: mid.UUID(), CustomerID: f.customerID, UserName: f.userName, Email: f.email, RowOffset: int32(start - 1), RowLimit: int32(count),
+		MerchantID: mid.UUID(), CustomerID: f.customerID, UserName: f.userName, Email: f.email, RowOffset: int32(offset), RowLimit: int32(count),
 	})
 	if err != nil {
 		return err

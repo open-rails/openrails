@@ -106,14 +106,16 @@ func (s *Server) bulkOperation(ctx context.Context, mid billing.MerchantID, item
 		}
 		return lower(raw), nil
 	}
-	resource, id, ok := strings.Cut(strings.TrimPrefix(path, "/"), "/")
+	resource, id, _ := strings.Cut(strings.TrimPrefix(path, "/"), "/")
 	if !strings.EqualFold(resource, "Users") {
 		return failure(op, errorf(http.StatusBadRequest, "invalidPath", "a Bulk operation's path is /Users or /Users/{id}"))
 	}
 	if ref, isRef := strings.CutPrefix(id, "bulkId:"); isRef {
-		if id, ok = created[ref]; !ok {
+		resolved, ok := created[ref]
+		if !ok {
 			return failure(op, errorf(http.StatusConflict, "invalidValue", "bulkId %s names no User created before it", ref))
 		}
+		id = resolved
 	}
 	switch op.Method {
 	case http.MethodPost:

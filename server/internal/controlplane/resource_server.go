@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -367,10 +368,13 @@ func contactClaims(r *http.Request, cl verify.Claims) identity.Claims {
 	if claims.PreferredUsername != "" {
 		out.Username = claims.PreferredUsername
 	}
-	var seconds float64
-	if json.Unmarshal(claims.UpdatedAt, &seconds) == nil && seconds > 0 {
-		at := time.Unix(int64(seconds), 0).UTC()
-		out.UpdatedAt = &at
+	// updated_at is whole seconds since the epoch (OIDC).
+	var updated json.Number
+	if json.Unmarshal(claims.UpdatedAt, &updated) == nil {
+		if seconds, err := strconv.ParseInt(updated.String(), 10, 64); err == nil && seconds > 0 {
+			at := time.Unix(seconds, 0).UTC()
+			out.UpdatedAt = &at
+		}
 	}
 	return out
 }

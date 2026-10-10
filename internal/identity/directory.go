@@ -120,6 +120,9 @@ func (k Kept) Search(ctx context.Context, merchantID billing.MerchantID, query s
 	if query == "" || limit < 1 {
 		return nil, nil
 	}
+	if limit > maxSearch {
+		limit = maxSearch
+	}
 	rows, err := k.DB.Gen(ctx).SearchCustomerContacts(ctx, gen.SearchCustomerContactsParams{
 		MerchantID: merchantID.UUID(), Pattern: "%" + likeEscaper.Replace(query) + "%", Query: query, RowLimit: int32(limit),
 	})
@@ -134,6 +137,9 @@ func (k Kept) Search(ctx context.Context, merchantID billing.MerchantID, query s
 	}
 	return out, nil
 }
+
+// maxSearch bounds one search of the kept copy.
+const maxSearch = 1000
 
 var likeEscaper = strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
 
