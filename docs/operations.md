@@ -1372,9 +1372,12 @@ provider incident returning a short page — never 850 customers all leaving.
 
 ## Per-merchant API hosts + browser CORS
 
-Public multi-merchant deployments (one engine serving several merchants) give
-each merchant its own canonical API hostname, used for Host→merchant
-resolution on the public routes. Browser CORS is a **separate, fixed,
+Every merchant a standalone server serves needs its own canonical API
+hostname, a single merchant's too: the public routes (catalog, checkout)
+resolve their merchant only from the Host, and a Host no merchant answers to
+is `404 merchant_not_found`. A DPoP proof names `auth.request_origin`, so
+customers' browsers calling `/v1/me` must reach the server at that origin; a
+proof for a merchant's API host on another origin is refused. Browser CORS is a **separate, fixed,
 engine-wide policy**, not a per-merchant setting.
 
 - **Configuring a merchant's host**: the operator binds it (the merchant

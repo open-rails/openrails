@@ -82,8 +82,8 @@ export const OPENRAILS_ERROR_SETS: Readonly<Record<string, readonly string[]>> =
   "request": ["invalid_param", "invalid_query", "invalid_request_body", "request_body_too_large", "unknown_field", "unsupported_media_type"],
   "tier:checkout_session": ["captcha_invalid", "captcha_required", "database_busy", "internal_error", "rate_limit_exceeded"],
   "tier:customer": ["access_token_invalid", "access_token_issuer_unknown", "access_token_merchant_not_bound", "authentication_required", "authentication_unavailable", "captcha_invalid", "captcha_required", "credential_expired", "credential_revoked", "database_busy", "host_merchant_mismatch", "insufficient_scope", "internal_error", "invoker_scoped_principal", "merchant_binding_mismatch", "merchant_directory_unavailable", "merchant_not_found", "merchant_selector_invalid", "merchant_unresolved", "permission_required", "rate_limit_exceeded", "sender_proof_required", "step_up_required", "use_dpop_nonce"],
-  "tier:public": ["captcha_invalid", "captcha_required", "database_busy", "internal_error", "rate_limit_exceeded"],
-  "tier:session_id": ["captcha_invalid", "captcha_required", "database_busy", "internal_error", "rate_limit_exceeded"],
+  "tier:public": ["captcha_invalid", "captcha_required", "database_busy", "internal_error", "merchant_not_found", "rate_limit_exceeded"],
+  "tier:session_id": ["captcha_invalid", "captcha_required", "database_busy", "internal_error", "merchant_not_found", "rate_limit_exceeded"],
 }
 
 export type OpenRailsRouteKey = `${(typeof OPENRAILS_ROUTES)[number]["method"]} ${(typeof OPENRAILS_ROUTES)[number]["path"]}`

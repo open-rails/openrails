@@ -360,8 +360,10 @@ with that merchant's own signing secret, and updates
 subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
-**Per-merchant API hosts.** A multi-merchant deployment can give each
-merchant a canonical hostname: the operator declares it (`api_host` in the
+**Per-merchant API hosts.** The public routes (the catalog, checkout) know
+their merchant only from the request's Host, so every merchant needs a
+canonical hostname, a single-merchant server's too; a Host no merchant answers
+to is `404 merchant_not_found`. The operator declares it (`api_host` in the
 merchant manifest, or the server's `SetMerchantAPIHost`), and a hosted
 product lets a merchant claim one it proves with a DNS TXT record
 (`ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`). `GET /v1/admin/api-host`

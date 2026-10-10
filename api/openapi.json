@@ -22574,6 +22574,7 @@
       "captcha_required",
       "database_busy",
       "internal_error",
+      "merchant_not_found",
       "rate_limit_exceeded"
     ],
     "tier:session_id": [
@@ -22581,6 +22582,7 @@
       "captcha_required",
       "database_busy",
       "internal_error",
+      "merchant_not_found",
       "rate_limit_exceeded"
     ]
   },

@@ -335,6 +335,8 @@ func TierErrors(tier Tier) []string {
 	common := []string{billing.CodeInternalError, billing.CodeRateLimitExceeded, "captcha_required", "captcha_invalid", "database_busy"}
 	var own []string
 	switch tier {
+	case AuthPublic, AuthSessionID:
+		own = []string{billing.CodeMerchantNotFound} // the Host names no merchant
 	case AuthCustomer:
 		own = append([]string{
 			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
