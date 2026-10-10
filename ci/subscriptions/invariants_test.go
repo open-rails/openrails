@@ -47,12 +47,15 @@ func (w *world) checkMoneyInvariants() {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	provider := map[string]bool{}
+	// A Stripe charge is recorded by its own id or, as hosted Checkout
+	// records it, by its PaymentIntent's.
+	provider, intentOf, intents := map[string]bool{}, map[string]string{}, map[string]bool{}
 	for _, e := range w.nmi.ledger("") {
 		provider[e.ID] = e.Refunded < e.Amount
 	}
 	for _, e := range w.stripe.ledger("") {
 		provider[e.Charge] = e.Refunded < e.Amount
+		intentOf[e.Charge], intents[e.ID] = e.ID, true
 	}
 
 	local := map[string]bool{}
@@ -71,7 +74,7 @@ func (w *world) checkMoneyInvariants() {
 			return
 		}
 		local[id] = true
-		if (rail == "nmi" || rail == "stripe") && !hasKey(provider, id) {
+		if (rail == "nmi" || rail == "stripe") && !hasKey(provider, id) && !intents[id] {
 			phantom = append(phantom, rail+":"+id)
 		}
 	}
@@ -86,7 +89,7 @@ func (w *world) checkMoneyInvariants() {
 	var unrecorded []string
 	if unresolved == 0 {
 		for id, live := range provider {
-			if live && !local[id] {
+			if live && !local[id] && !local[intentOf[id]] {
 				unrecorded = append(unrecorded, id)
 			}
 		}

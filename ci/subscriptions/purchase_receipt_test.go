@@ -3,13 +3,8 @@
 package subscriptions_test
 
 import (
-	"fmt"
-	"io"
 	"net/http"
-	"net/url"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -26,52 +21,10 @@ import (
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// hostedCheckout is Stripe hosted Checkout in front of the world's Stripe
-// fake: it opens Checkout Sessions and reports them paid.
-type hostedCheckout struct {
-	http.RoundTripper
-	mu       sync.Mutex
-	sessions []url.Values
-}
-
-func (h *hostedCheckout) RoundTrip(r *http.Request) (*http.Response, error) {
-	if r.Method != http.MethodPost || r.URL.Path != "/v1/checkout/sessions" {
-		return h.RoundTripper.RoundTrip(r)
-	}
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
-		return nil, err
-	}
-	form, err := url.ParseQuery(string(raw))
-	if err != nil {
-		return nil, err
-	}
-	h.mu.Lock()
-	h.sessions = append(h.sessions, form)
-	id := fmt.Sprintf("cs_test_receipt_%d", len(h.sessions))
-	h.mu.Unlock()
-	body := fmt.Sprintf(`{"id":%q,"object":"checkout.session","url":"https://checkout.stripe.test/%s"}`, id, id)
-	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
-}
-
-// completed is Stripe reporting the n-th session paid.
-func (h *hostedCheckout) completed(n int) obj {
-	h.mu.Lock()
-	form := h.sessions[n-1]
-	h.mu.Unlock()
-	amount, _ := strconv.ParseInt(form.Get("line_items[0][price_data][unit_amount]"), 10, 64)
-	metadata := map[string]string{}
-	for _, key := range []string{"user_id", "internal_price_id", "checkout_attempt_id"} {
-		metadata[key] = form.Get("metadata[" + key + "]")
-	}
-	return stripeEvent("checkout.session.completed", obj{"object": "checkout.session", "id": fmt.Sprintf("cs_test_receipt_%d", n),
-		"mode": "payment", "status": "complete", "payment_status": "paid", "payment_intent": fmt.Sprintf("pi_receipt_%d", n),
-		"amount_total": amount, "currency": form.Get("line_items[0][price_data][currency]"), "customer": form.Get("customer"), "metadata": metadata})
-}
-
 // receiptWorld is a world whose customers' receipts go over SMTP to the
-// addresses the host's directory holds.
-func receiptWorld(t *testing.T, hosted *hostedCheckout) (*world, *smtptest.Server, *openrailstest.UserInfo) {
+// addresses the host's directory holds. hosted sells Stripe through hosted
+// Checkout, whose events Stripe sends to the world's webhook route.
+func receiptWorld(t *testing.T, hosted bool) (*world, *smtptest.Server, *openrailstest.UserInfo) {
 	t.Helper()
 	srv := smtptest.Start(t, smtptest.Options{Username: "apikey", Password: "SG.e2e-key"})
 	directory := &openrailstest.UserInfo{}
@@ -79,18 +32,15 @@ func receiptWorld(t *testing.T, hosted *hostedCheckout) (*world, *smtptest.Serve
 		c.SMTP = &openrails.SMTPConfig{Host: srv.Host, Port: srv.Port, Username: "apikey", Password: "SG.e2e-key",
 			From: openrails.EmailAddress{Name: "Merchant Billing", Address: "noreply@deploy.test"}}
 	})
-	if hosted != nil {
+	if hosted {
 		// Without a publishable key, Stripe sells through hosted Checkout.
 		w.declare = func(psps map[string]openrails.PSPConfig) { delete(psps["stripe"].Settings, "publishable_key") }
 	}
-	w.deps = func(d *openrails.Deps) {
-		d.UserInfo = directory
-		if hosted != nil {
-			hosted.RoundTripper = d.StripeTransport
-			d.StripeTransport = hosted
-		}
-	}
+	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
+	if hosted {
+		w.stripe.SendWebhooksTo(w.server.URL+mountPrefix+"/v1/webhooks/stripe/"+stripeAcct, whsecStripe)
+	}
 	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{Profile: &billing.MerchantProfile{DisplayName: "Host Shop"}}))
 	return w, srv, directory
 }
@@ -131,9 +81,7 @@ func (c *customer) receipts() []map[string]any {
 // delivering the completion again, or under another event, sends nothing.
 func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 	t.Parallel()
-	hosted := &hostedCheckout{}
-	w, srv, directory := receiptWorld(t, hosted)
-	w.waive("evidenced", "hosted Checkout charges at Stripe, outside the fake's ledger; its completion is the evidence")
+	w, srv, directory := receiptWorld(t, true)
 	ctx := t.Context()
 	client := w.client[embedded]
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "api-credit-" + uuid.NewString()[:8], DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
@@ -149,9 +97,13 @@ func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 	require.Equal(t, http.StatusOK, status, "%v", out)
 	require.Equal(t, "requires_action", out["status"], "%v", out)
 	require.Empty(t, srv.Messages(), "nothing is paid yet")
+	checkout := w.stripe.CheckoutSessions()
+	require.Len(t, checkout, 1)
+	require.Equal(t, checkout[0]["url"], out["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
 
-	paid := hosted.completed(1)
-	require.Equal(t, http.StatusOK, w.deliver("stripe", paid))
+	paid, err := w.stripe.CompleteCheckoutSession(ctx, checkout[0]["id"].(string))
+	require.NoError(t, err)
+	w.settle()
 	grants, err := client.ListCreditGrants(ctx, c.customerID(), billing.CreditGrantListParams{})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 1)
@@ -166,10 +118,10 @@ func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 		require.NotContains(t, body, "12990000")
 	}
 
-	require.Equal(t, http.StatusOK, w.deliver("stripe", paid), "Stripe redelivers the event")
-	again := hosted.completed(1)
-	again["type"] = "checkout.session.async_payment_succeeded"
-	require.Equal(t, http.StatusOK, w.deliver("stripe", again), "another event reports the same payment")
+	require.NoError(t, w.stripe.Redeliver(ctx, paid), "Stripe redelivers the event")
+	_, err = w.stripe.SendEvent(ctx, "checkout.session.async_payment_succeeded", w.stripe.CheckoutSessions()[0])
+	require.NoError(t, err, "another event reports the same payment")
+	w.settle()
 	w.mailSettled()
 	require.Len(t, srv.Messages(), 1, "one purchase, one receipt")
 	receipts := c.receipts()
@@ -187,7 +139,7 @@ func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 // replaying the payment sends no other.
 func TestOrderReceiptArrivesBySMTP(t *testing.T) {
 	t.Parallel()
-	w, srv, directory := receiptWorld(t, nil)
+	w, srv, directory := receiptWorld(t, false)
 	life := w.lifetime("orders:receipt", 25_000_000)
 	c := w.newCustomer()
 	const to = "orders@host.test"

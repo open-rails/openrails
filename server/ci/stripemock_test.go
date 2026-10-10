@@ -21,9 +21,10 @@ import (
 )
 
 // A host's own suite wires OpenRails to the public Stripe fake as its package
-// comment shows: a customer buys credit through Stripe's hosted Checkout,
-// Stripe's signed checkout.session.completed reaches the host's webhook
-// route, and the credit lands once however often Stripe sends it.
+// comment shows: a customer deposits credit of their chosen amount through
+// Stripe's hosted Checkout, Stripe's signed checkout.session.completed
+// reaches the host's webhook route, and the credit lands once however often
+// Stripe sends it.
 func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	f := newFixture(t)
 	ctx := t.Context()
@@ -43,7 +44,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 
 	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "credit-" + uuid.NewString()[:8], DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
 	require.NoError(t, err)
-	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "pack", Currency: "USD", UnitAmount: 12_990_000})
+	price, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "deposit", Currency: "USD", CustomerAmount: &catalog.CustomerAmount{MinAmount: 1_000_000, MaxAmount: 500_000_000}})
 	require.NoError(t, err)
 
 	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
@@ -63,7 +64,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 		return out
 	}
 
-	session := do(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID, "success_url": "https://e2e.test/done"}, http.StatusCreated)["id"].(string)
+	session := do(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID, "amount": "12990000", "success_url": "https://e2e.test/done"}, http.StatusCreated)["id"].(string)
 	var option any
 	for _, raw := range do(http.MethodGet, "/checkout-sessions/"+session, nil, http.StatusOK)["options"].([]any) {
 		if o := raw.(map[string]any); o["rail"] == "stripe" {
@@ -85,7 +86,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	grants, err := client.ListCreditGrants(ctx, cid, billing.CreditGrantListParams{})
 	require.NoError(t, err)
 	require.Len(t, grants.Items, 1, "one deposit, one lot")
-	require.EqualValues(t, 12_990_000, grants.Items[0].Amount)
+	require.EqualValues(t, 12_990_000, grants.Items[0].Amount, "the chosen amount is the credit")
 	balance, err := client.GetBalance(ctx, cid, "USD")
 	require.NoError(t, err)
 	require.EqualValues(t, 12_990_000, balance.BalanceAmount)
