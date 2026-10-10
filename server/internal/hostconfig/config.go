@@ -45,6 +45,9 @@ type Config struct {
 	// at a trusted issuer.
 	AdminConsole  *billing.ConsoleMount
 	ConsoleIssuer *ConsoleIssuer
+	// HostedCheckoutURL is the hosted checkout host's origin
+	// (hosted_checkout.url); empty serves none.
+	HostedCheckoutURL string
 }
 
 type contextKey struct{}
@@ -91,6 +94,7 @@ type fileConfig struct {
 	Captcha            *billing.CaptchaConfig    `koanf:"captcha"`
 	Vault              *billing.VaultConfig      `koanf:"vault"`
 	AdminConsole       *adminConsoleFile         `koanf:"admin_console"`
+	HostedCheckout     *hostedCheckoutFile       `koanf:"hosted_checkout"`
 	LLM                *billing.LLMConfig        `koanf:"llm"`
 	RouteGroups        billing.RouteGroups       `koanf:"route_groups"`
 
@@ -223,6 +227,19 @@ func (a *adminConsoleFile) issuer() *ConsoleIssuer {
 	return a.Issuer
 }
 
+// hostedCheckoutFile is the hosted_checkout section: the origin the server
+// serves the checkout page on, apart from its API's.
+type hostedCheckoutFile struct {
+	URL string `koanf:"url"`
+}
+
+func (h *hostedCheckoutFile) url() string {
+	if h == nil {
+		return ""
+	}
+	return strings.TrimSpace(h.URL)
+}
+
 // config is the loaded file as the server's configuration.
 func (f *fileConfig) config() (*Config, error) {
 	posture, err := billing.ParseCredentialPosture(f.TestMode)
@@ -272,6 +289,7 @@ func (f *fileConfig) config() (*Config, error) {
 		RouteGroups:              f.RouteGroups,
 		AdminConsole:             f.AdminConsole.mount(),
 		ConsoleIssuer:            f.AdminConsole.issuer(),
+		HostedCheckoutURL:        f.HostedCheckout.url(),
 	}, nil
 }
 

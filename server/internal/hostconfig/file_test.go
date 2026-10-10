@@ -48,6 +48,7 @@ func TestFileReachesConfig(t *testing.T) {
 	f.EmailSMTP.Host = "smtp.example"
 	f.Redis.Addr = "redis:6379"
 	f.AdminConsole.Issuer = &ConsoleIssuer{}
+	f.HostedCheckout.URL = "https://checkout.example"
 	cfg, err := f.config()
 	require.NoError(t, err)
 	for _, v := range []reflect.Value{reflect.ValueOf(cfg).Elem(), reflect.ValueOf(cfg.Config).Elem()} {

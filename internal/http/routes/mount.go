@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httphandlers "github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -86,6 +87,9 @@ type Env struct {
 	providers routesurface.ProviderRoutes
 	// scim is the assembly's SCIM server, built once.
 	scim *scim.Server
+	// checkout scopes customer routes to the order a checkout URL's secret
+	// opened (the hosted checkout host).
+	checkout bool
 }
 
 // scimServer is the assembly's SCIM server, acting for the merchant its
@@ -203,7 +207,11 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthCheckoutSession:
 		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime), e.checkoutViewer(route)}, conn...)
 	case AuthCustomer:
-		mw = append(e.customerGates(route), conn...)
+		mw = e.customerGates(route)
+		if e.checkout {
+			mw = append(mw, checkoutScope(route))
+		}
+		mw = append(mw, conn...)
 	case AuthSignedIn:
 		mw = append(e.signedInGates(route), conn...)
 	case AuthMerchant:
@@ -384,6 +392,37 @@ const SCIMRoot = "/v1/app/scim/v2"
 // SelfRoutePrefix is the customer surface's path: one stable /me, whatever
 // credential the mount's Auth accepts.
 const SelfRoutePrefix = "/me"
+
+// RegisterCheckoutRoutes mounts, on a router rooted at the hosted checkout
+// host's root, the routes a checkout URL's secret opens. The host's own
+// middleware (hostedcheckout.ResolveHTTP) admits the secret and pins its
+// merchant; customer routes act as the order's customer
+// (hostedcheckout.Authenticator), for that order alone.
+func RegisterCheckoutRoutes(rr router.Router, rt *app.Runtime, opts Options) {
+	opts.Auth, opts.ResolveMerchant = hostedcheckout.Authenticator{}, CredentialOnly
+	env := newEnv(rt, opts)
+	env.Customers, env.checkout = opts.Auth, true
+	env.mount(rr, "", func(r Route) bool { return r.Checkout != "" })
+}
+
+// checkoutScope refuses what the checkout's secret does not open: another
+// order, or saved cards the checkout does not offer.
+func checkoutScope(route Route) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			c, ok := hostedcheckout.FromContext(r.Request.Context())
+			switch {
+			case !ok:
+				r.AbortCode("checkout_not_found", "")
+			case route.Checkout == CheckoutOrder && r.Param("id") != c.OrderID.String(),
+				route.Checkout == CheckoutSavedCards && !c.SavedPaymentMethods:
+				r.AbortCode(billing.CodeResourceNotFound, "")
+			default:
+				next(r)
+			}
+		}
+	}
+}
 
 // CustomerMount is one customer surface: the Authenticator that says who
 // its customers are and the merchant they buy from. Without a Merchant, a

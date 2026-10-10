@@ -12,6 +12,7 @@ import (
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
@@ -94,6 +95,9 @@ func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID, en
 	if err != nil {
 		r.InternalError("failed to read payment methods", err)
 		return
+	}
+	if _, ok := hostedcheckout.FromContext(r.Request.Context()); ok {
+		out = hostedcheckout.SavedCards(out)
 	}
 	r.SuccessJSON(billing.ListPage[billing.PaymentMethod]{Items: out, Next: methods.Next})
 }

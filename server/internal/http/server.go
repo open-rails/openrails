@@ -53,6 +53,10 @@ type Dependencies struct {
 	RouteGroups config.RouteGroups
 	// AdminConsole serves the merchant admin console; nil serves none.
 	AdminConsole *config.ConsoleMount
+	// CheckoutOrigin serves the hosted checkout there (by Host), from
+	// CheckoutAssets; empty serves none.
+	CheckoutOrigin string
+	CheckoutAssets fs.FS
 }
 
 type Server struct {
@@ -110,6 +114,10 @@ type Server struct {
 	nativeRoutes    *router.Table
 	nativeBrowser   map[string]bool
 	sharedRateLimit middleware.HTTPMiddleware
+	// checkoutHost and checkoutHandler are the hosted checkout's host and
+	// surface; the public handler sends that host's requests there.
+	checkoutHost    string
+	checkoutHandler http.Handler
 }
 
 // recordRoute appends a registered pattern to the server's route table.
@@ -315,7 +323,10 @@ func New(deps Dependencies) (*Server, error) {
 	})
 
 	s.sharedRateLimit = middleware.RateLimitHTTP(s.cfg.RateLimits, s.cfg.Captcha, s.abuseState(), s.captchaStore, s.trustedProxies())
-	s.publicHandler = s.wrapPublicHandler(mux.Handler())
+	if err := s.buildCheckout(deps.CheckoutOrigin, deps.CheckoutAssets); err != nil {
+		return nil, err
+	}
+	s.publicHandler = s.dispatchCheckout(s.wrapPublicHandler(mux.Handler()))
 	s.nativeRoutes = &router.Table{}
 	for _, entry := range mux.Entries {
 		switch entry.Path {

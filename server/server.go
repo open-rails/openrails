@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"sync"
@@ -127,6 +128,10 @@ type Config struct {
 	// ConsoleIssuer signs staff in to the console at one of ResourceServer's
 	// trusted issuers instead of the server's own accounts.
 	ConsoleIssuer *ConsoleIssuer
+	// HostedCheckoutURL is the origin (https://checkout.example.com) the
+	// server serves its hosted checkout on, by Host; merchant orders then
+	// take a checkout. It must be an origin of its own. Empty serves none.
+	HostedCheckoutURL string
 
 	// Addr is where Run and Serve listen; empty is ":3053".
 	Addr string
@@ -156,6 +161,10 @@ type Deps struct {
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond MerchantCreation.FreeAllowance.
 	HasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)
+	// CheckoutAssets is a host-built hosted checkout page (web/checkout's
+	// Vite build, rooted at index.html). Nil uses the build embedded in this
+	// module, when the binary was built with one.
+	CheckoutAssets fs.FS
 }
 
 // Server is a standalone OpenRails server.
@@ -190,6 +199,10 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	}
 	if cfg.Engine.Catalog != nil {
 		return nil, errors.New("server: Engine.Catalog declares one embedded merchant's catalog; a standalone server's merchants manage theirs through the API")
+	}
+	origin, err := checkoutOrigin(cfg)
+	if err != nil {
+		return nil, err
 	}
 	if deps.Engine.UserInfo != nil {
 		return nil, errors.New("server: Engine.UserInfo reads one embedded host's directory; a standalone server's merchants provision their users over SCIM")
@@ -262,6 +275,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
 		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer,
 		ResourceServer: cfg.ResourceServer, Issuer: cfg.Auth.Issuer,
+		CheckoutOrigin: origin, CheckoutAssets: checkoutAssets(deps.CheckoutAssets),
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}

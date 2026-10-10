@@ -33,6 +33,8 @@ export type OpenRailsErrorCode =
   | "catalog_revision_conflict"
   | "checkout_attempt_closed"
   | "checkout_attempt_expired"
+  | "checkout_expired"
+  | "checkout_not_found"
   | "checkout_offer_unavailable"
   | "checkout_payment_in_progress"
   | "checkout_request_invalid"
@@ -67,6 +69,7 @@ export type OpenRailsErrorCode =
   | "host_event_not_found"
   | "host_merchant_mismatch"
   | "host_principal_invalid"
+  | "hosted_checkout_unavailable"
   | "idempotency_key_in_progress"
   | "idempotency_key_in_use"
   | "idempotency_key_required"
@@ -252,6 +255,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
   checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },
   checkout_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout attempt expired before it was paid." },
+  checkout_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout URL expired; the merchant creates a new order." },
+  checkout_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout URL is unknown or no longer valid." },
   checkout_offer_unavailable: { status: 422, type: "invalid_request_error", meaning: "The purchase is not available." },
   checkout_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this checkout session is already being processed." },
   checkout_request_invalid: { status: 422, type: "invalid_request_error", meaning: "The checkout request is invalid." },
@@ -286,6 +291,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   host_event_not_found: { status: 404, type: "invalid_request_error", meaning: "The host event does not exist." },
   host_merchant_mismatch: { status: 403, type: "authorization_error", meaning: "The credential's merchant is not the one this host serves." },
   host_principal_invalid: { status: 401, type: "authentication_error", meaning: "The in-process host principal is bound to no merchant." },
+  hosted_checkout_unavailable: { status: 400, type: "invalid_request_error", meaning: "This deployment serves no hosted checkout, or the order cannot take one." },
   idempotency_key_in_progress: { status: 409, type: "invalid_request_error", meaning: "A request with this Idempotency-Key is still running; retry it later." },
   idempotency_key_in_use: { status: 409, type: "invalid_request_error", meaning: "The request first sent with this Idempotency-Key is still running; retry once it finishes." },
   idempotency_key_required: { status: 400, type: "invalid_request_error", meaning: "The operation needs an Idempotency-Key header." },

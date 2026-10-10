@@ -758,6 +758,8 @@
       "type OfferListParams struct {\n\tPageRequest\n\tEntitlements []string\n\tKeys         []string\n}",
       "type OpenProviderOperationParams struct {\n\tOperationID             string     `json:\"operation_id\"`\n\tCustomerID              CustomerID `json:\"customer_id\"`\n\tRecordOwner             string     `json:\"record_owner\"`\n\tCurrency                string     `json:\"currency\"`\n\tAmount                  int64      `json:\"amount,string\"`\n\tClaimReference          string     `json:\"claim_reference\"`\n\tAuthorizationBody       []byte     `json:\"authorization_body\"`\n\tAuthorizationBodySHA256 SHA256     `json:\"authorization_body_sha256\"`\n\tOverdraftAmount         int64      `json:\"overdraft_amount,omitempty,string\"`\n}",
       "type Order struct {\n\tID         OrderID     `json:\"id\"`\n\tCustomerID CustomerID  `json:\"customer_id\"`\n\tOrigin     OrderOrigin `json:\"origin\"`\n\tStatus     OrderStatus `json:\"status\"`\n\n\tNumber   *string     `json:\"number\"`\n\tCurrency string      `json:\"currency\"`\n\tTotal    int64       `json:\"total,string\"`\n\tLines    []OrderLine `json:\"lines\"`\n\n\tNextAction *NextAction `json:\"next_action\"`\n\n\tLastPaymentError *PaymentFailure `json:\"last_payment_error\"`\n\n\tPaymentOptions  []OrderPaymentOption `json:\"payment_options\"`\n\tPaymentMethodID *PaymentMethodID     `json:\"payment_method_id\"`\n\tPaymentID       *PaymentID           `json:\"payment_id\"`\n\tExpiresAt       time.Time            `json:\"expires_at\"`\n\tPaidAt          *time.Time           `json:\"paid_at\"`\n\tCanceledAt      *time.Time           `json:\"canceled_at\"`\n\tExpiredAt       *time.Time           `json:\"expired_at\"`\n\tCreatedAt       time.Time            `json:\"created_at\"`\n}",
+      "type OrderCheckout struct {\n\tURL                 *string   `json:\"url\"`\n\tExpiresAt           time.Time `json:\"expires_at\"`\n\tSuccessURL          string    `json:\"success_url\"`\n\tCancelURL           *string   `json:\"cancel_url\"`\n\tSavedPaymentMethods bool      `json:\"saved_payment_methods\"`\n}",
+      "type OrderCheckoutParams struct {\n\tSuccessURL string `json:\"success_url\"`\n\n\tCancelURL *string `json:\"cancel_url,omitempty\"`\n\n\tExpiresAt *time.Time `json:\"expires_at,omitempty\"`\n\n\tSavedPaymentMethods bool `json:\"saved_payment_methods,omitempty\"`\n}",
       "type OrderHostEvent struct {\n\tOrderID    OrderID     `json:\"order_id\"`\n\tCustomerID CustomerID  `json:\"customer_id\"`\n\tStatus     OrderStatus `json:\"status\"`\n\tTotal      int64       `json:\"total,string\"`\n\tCurrency   string      `json:\"currency\"`\n\tNumber     *string     `json:\"number\"`\n\tPaymentID  *PaymentID  `json:\"payment_id\"`\n}",
       "type OrderID uuid.UUID",
       "type OrderLine struct {\n\tID          OrderLineID `json:\"id\"`\n\tPriceID     PriceID     `json:\"price_id\"`\n\tProductID   ProductID   `json:\"product_id\"`\n\tDescription string      `json:\"description\"`\n\n\tQuantity   *int              `json:\"quantity\"`\n\tUnitAmount int64             `json:\"unit_amount,string\"`\n\tAmount     int64             `json:\"amount,string\"`\n\tOwnership  catalog.Ownership `json:\"ownership\"`\n\n\tBillingIntervalHours *int             `json:\"billing_interval_hours\"`\n\tAccessDurationHours  *int             `json:\"access_duration_hours\"`\n\tSubscriptionID       *SubscriptionID  `json:\"subscription_id\"`\n\tProductAccessID      *ProductAccessID `json:\"product_access_id\"`\n}",
@@ -856,7 +858,8 @@
       "type ProvisioningToken struct {\n\tID         ProvisioningTokenID `json:\"id\"`\n\tName       string              `json:\"name\"`\n\tDeclared   bool                `json:\"declared\"`\n\tCreatedAt  time.Time           `json:\"created_at\"`\n\tLastUsedAt *time.Time          `json:\"last_used_at\"`\n}",
       "type ProvisioningTokenID uuid.UUID",
       "type ProvisioningTokenListParams struct {\n\tIDs []ProvisioningTokenID\n}",
-      "type PublicConfig struct {\n\tCapabilities Capabilities `json:\"capabilities\"`\n\n\tCurrencies []CurrencyUnits `json:\"currencies\"`\n\n\tRails []RailDefinition `json:\"rails\"`\n\n\tPayment *PaymentConfig `json:\"payment\"`\n\n\tCaptcha *CaptchaConfig `json:\"captcha\"`\n}",
+      "type PublicConfig struct {\n\tCapabilities Capabilities `json:\"capabilities\"`\n\n\tCurrencies []CurrencyUnits `json:\"currencies\"`\n\n\tRails []RailDefinition `json:\"rails\"`\n\n\tPayment *PaymentConfig `json:\"payment\"`\n\n\tMerchant *PublicMerchant `json:\"merchant\"`\n\n\tCaptcha *CaptchaConfig `json:\"captcha\"`\n}",
+      "type PublicMerchant struct {\n\tDisplayName string  `json:\"display_name\"`\n\tLogoURL     *string `json:\"logo_url\"`\n\tSupportURL  *string `json:\"support_url\"`\n}",
       "type PurchaseAction string",
       "type Rail string",
       "type RailDefinition struct {\n\tRail           Rail     `json:\"rail\"`\n\tDisplayName    string   `json:\"display_name\"`\n\tCredentialKeys []string `json:\"credential_keys\"`\n\tSettingKeys    []string `json:\"setting_keys\"`\n}",
@@ -1155,6 +1158,7 @@
       "func (s *Server) GetMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error)",
       "func (s *Server) Handler() http.Handler",
       "func (s *Server) HasRootPermission(ctx context.Context, r *http.Request, permission string) (bool, error)",
+      "func (s *Server) HostedCheckout() (host string, handler http.Handler)",
       "func (s *Server) InviteMerchantTeamMember(ctx context.Context, by Actor, id billing.MerchantID, req billing.InviteTeamMemberParams) (*billing.TeamInviteResult, error)",
       "func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageRequest) (*billing.ListPage[billing.MerchantID], error)",
       "func (s *Server) ListFederatedGrants(ctx context.Context, id billing.MerchantID) ([]billing.FederatedGrant, error)",
@@ -1198,9 +1202,9 @@
       "type AdminConsole = config.ConsoleMount",
       "type AuthConfig = hostconfig.AuthConfig",
       "type AuthRateLimit = hostconfig.AuthRateLimit",
-      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
+      "type Config struct {\n\tEngine openrails.Config\n\n\tAuth AuthConfig\n\n\tRegistration iam.RegistrationMode\n\n\tLocalSignIn bool\n\n\tPasswordlessLogin            bool\n\tPasswordlessAutoRegistration bool\n\n\tFrontendBaseURL string\n\n\tTrustedProxies    []string\n\tCloudflareProxies []string\n\n\tAuthRateLimits map[string]AuthRateLimit\n\n\tMerchantCreation *MerchantCreationConfig\n\n\tResourceServer *ResourceServerConfig\n\n\tRouteGroups openrails.RouteGroups\n\n\tAdminConsole *AdminConsole\n\n\tConsoleIssuer *ConsoleIssuer\n\n\tHostedCheckoutURL string\n\n\tAddr string\n\n\tPrivateAddr string\n\n\tDrainDelay time.Duration\n\n\tShutdownTimeout time.Duration\n}",
       "type ConsoleIssuer = hostconfig.ConsoleIssuer",
-      "type Deps struct {\n\tEngine openrails.Deps\n\n\tSMS authkit.SMSSender\n\n\tAuthEmail authkit.EmailSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n}",
+      "type Deps struct {\n\tEngine openrails.Deps\n\n\tSMS authkit.SMSSender\n\n\tAuthEmail authkit.EmailSender\n\n\tHasVaultedPaymentMethod func(ctx context.Context, userID string) (bool, error)\n\n\tCheckoutAssets fs.FS\n}",
       "type FormerNamesConfig = config.FormerNamesConfig",
       "type FormerNamesMode = config.FormerNamesMode",
       "type MerchantCreationConfig = hostconfig.MerchantCreationConfig",
@@ -1236,6 +1240,9 @@
       "type TrustedIssuerConfig struct {\n\tName string\n\n\tIssuer string\n\n\tJWKSURI string\n\tKeys    []iam.RemoteApplicationKey\n\n\tMerchants []string\n\n\tPermissions []string\n\n\tAllowedOrigins []string\n\n\tGroupRoles map[string]string\n}"
     ],
     "web/admin": [
+      "func FS() fs.FS"
+    ],
+    "web/checkout": [
       "func FS() fs.FS"
     ]
   },
@@ -1969,6 +1976,9 @@
       "time": "time"
     },
     "billing/notifications.go": {
+      "time": "time"
+    },
+    "billing/order_checkout.go": {
       "time": "time"
     },
     "billing/orders.go": {
@@ -4810,6 +4820,15 @@
       "errors": "errors",
       "merchants": "github.com/open-rails/openrails/internal/merchants"
     },
+    "server/hosted_checkout.go": {
+      "checkoutpage": "github.com/open-rails/openrails/web/checkout",
+      "fmt": "fmt",
+      "fs": "io/fs",
+      "http": "net/http",
+      "net": "net",
+      "strings": "strings",
+      "url": "net/url"
+    },
     "server/internal/hostconfig/config.go": {
       "billing": "github.com/open-rails/openrails/internal/config",
       "context": "context",
@@ -4849,6 +4868,7 @@
       "engine": "github.com/open-rails/openrails/internal/engine",
       "errors": "errors",
       "fmt": "fmt",
+      "fs": "io/fs",
       "hostconfig": "github.com/open-rails/openrails/server/internal/hostconfig",
       "http": "net/http",
       "httpserver": "github.com/open-rails/openrails/server/internal/http",
@@ -4864,6 +4884,10 @@
       "time": "time"
     },
     "web/admin/embed.go": {
+      "embed": "embed",
+      "fs": "io/fs"
+    },
+    "web/checkout/embed.go": {
       "embed": "embed",
       "fs": "io/fs"
     }

@@ -43,8 +43,8 @@ var checkoutRoutes = []Route{
 
 	// Captcha discovery: whether this caller must solve one, and the script
 	// that does. The assembly builds both from its captcha configuration.
-	{Method: GET, Path: "/v1/captcha/status", Group: Checkout, Auth: AuthPublic, NoConn: true,
+	{Method: GET, Path: "/v1/captcha/status", Group: Checkout, Auth: AuthPublic, Checkout: CheckoutPublic, NoConn: true,
 		Responses: []Reply{{200, billing.CaptchaStatus{}}}, Bind: external(func(x *External) http.Handler { return x.CaptchaStatus })},
-	{Method: GET, Path: "/v1/captcha/client.js", Group: Checkout, Auth: AuthPublic, NoConn: true,
+	{Method: GET, Path: "/v1/captcha/client.js", Group: Checkout, Auth: AuthPublic, Checkout: CheckoutPublic, NoConn: true,
 		Responses: []Reply{{200, Stream{"application/javascript"}}}, Bind: external(func(x *External) http.Handler { return x.CaptchaScript })},
 }

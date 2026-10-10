@@ -19760,6 +19760,16 @@
               }
             ]
           },
+          "merchant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicMerchant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "captcha": {
             "oneOf": [
               {
@@ -19776,7 +19786,41 @@
           "currencies",
           "rails",
           "payment",
+          "merchant",
           "captcha"
+        ]
+      },
+      "PublicMerchant": {
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "logo_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "support_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "display_name",
+          "logo_url",
+          "support_url"
         ]
       },
       "Quantity": {
@@ -22165,6 +22209,16 @@
       "type": "invalid_request_error",
       "meaning": "The checkout attempt expired before it was paid."
     },
+    "checkout_expired": {
+      "status": 410,
+      "type": "invalid_request_error",
+      "meaning": "The checkout URL expired; the merchant creates a new order."
+    },
+    "checkout_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "The checkout URL is unknown or no longer valid."
+    },
     "checkout_offer_unavailable": {
       "status": 422,
       "type": "invalid_request_error",
@@ -22334,6 +22388,11 @@
       "status": 401,
       "type": "authentication_error",
       "meaning": "The in-process host principal is bound to no merchant."
+    },
+    "hosted_checkout_unavailable": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "This deployment serves no hosted checkout, or the order cannot take one."
     },
     "idempotency_key_in_progress": {
       "status": 409,

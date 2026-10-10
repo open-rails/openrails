@@ -38,6 +38,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
 | `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
 | `checkout_attempt_expired` | 410 | `invalid_request_error` | The checkout attempt expired before it was paid. |
+| `checkout_expired` | 410 | `invalid_request_error` | The checkout URL expired; the merchant creates a new order. |
+| `checkout_not_found` | 404 | `invalid_request_error` | The checkout URL is unknown or no longer valid. |
 | `checkout_offer_unavailable` | 422 | `invalid_request_error` | The purchase is not available. |
 | `checkout_payment_in_progress` | 409 | `invalid_request_error` | A payment on this checkout session is already being processed. |
 | `checkout_request_invalid` | 422 | `invalid_request_error` | The checkout request is invalid. |
@@ -72,6 +74,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `host_event_not_found` | 404 | `invalid_request_error` | The host event does not exist. |
 | `host_merchant_mismatch` | 403 | `authorization_error` | The credential's merchant is not the one this host serves. |
 | `host_principal_invalid` | 401 | `authentication_error` | The in-process host principal is bound to no merchant. |
+| `hosted_checkout_unavailable` | 400 | `invalid_request_error` | This deployment serves no hosted checkout, or the order cannot take one. |
 | `idempotency_key_in_progress` | 409 | `invalid_request_error` | A request with this Idempotency-Key is still running; retry it later. |
 | `idempotency_key_in_use` | 409 | `invalid_request_error` | The request first sent with this Idempotency-Key is still running; retry once it finishes. |
 | `idempotency_key_required` | 400 | `invalid_request_error` | The operation needs an Idempotency-Key header. |

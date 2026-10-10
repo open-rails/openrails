@@ -1989,7 +1989,14 @@ export type PublicConfig = {
   currencies: CurrencyUnits[]
   rails: RailDefinition[]
   payment: PaymentConfig | null
+  merchant: PublicMerchant | null
   captcha: CaptchaConfig | null
+}
+
+export type PublicMerchant = {
+  display_name: string
+  logo_url: string | null
+  support_url: string | null
 }
 
 export type Quantity = {

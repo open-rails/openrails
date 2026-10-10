@@ -200,6 +200,13 @@ admin_console:
   #   # name: Example        # sign-in button; default the trusted issuer's name
   #   # scope: openid profile email offline_access openrails:merchant  # when the issuer needs offline_access
 
+# The hosted checkout: merchant orders created with `checkout` get a short-lived
+# URL on this origin, where the customer pays. It must be an origin of its own
+# (not public_billing_base_url's, the console's or AuthKit's); the server
+# serves it by Host.
+# hosted_checkout:
+#   url: https://checkout.example.com
+
 # Server-side LLM for the dashboard natural-language widget generator (#741)
 # and metrics Q&A (#756). FAIL-CLOSED: no api_key = the generate/ask endpoints
 # answer 501 and the console hides the NL box; the dashboard works without it.
