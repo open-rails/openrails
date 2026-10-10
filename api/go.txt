@@ -160,7 +160,7 @@ pkg openrails, method (InvoiceSweepArgs) Kind() string
 pkg openrails, method (NMIPSP) PSPConfig() PSPConfig
 pkg openrails, method (SolanaPSP) PSPConfig() PSPConfig
 pkg openrails, method (StripePSP) PSPConfig() PSPConfig
-pkg openrails, type Auth = billingauth.Auth
+pkg openrails, type Authenticator = billingauth.Authenticator
 pkg openrails, type CCBillPSP struct
 pkg openrails, type CCBillPSP struct, AccountID string `psp:"account_id"`
 pkg openrails, type CCBillPSP struct, Archived bool `psp:"archived"`
@@ -377,10 +377,11 @@ pkg openrails, type RouteGroups struct, Programmatic bool
 pkg openrails, type Routes = config.Routes
 pkg openrails, type Routes struct
 pkg openrails, type Routes struct, AdminConsole bool
-pkg openrails, type Routes struct, Auth billingauth.Auth
+pkg openrails, type Routes struct, Auth billingauth.Authenticator
 pkg openrails, type Routes struct, Permissions config.Permissions
 pkg openrails, type Routes struct, Prefix string
 pkg openrails, type Routes struct, RouteGroups config.RouteGroups
+pkg openrails, type Routes struct, Scope billingauth.Scope
 pkg openrails, type SMTPConfig = config.SMTPConfig
 pkg openrails, type SMTPConfig struct
 pkg openrails, type SMTPConfig struct, From config.EmailAddress
@@ -388,6 +389,7 @@ pkg openrails, type SMTPConfig struct, Host string
 pkg openrails, type SMTPConfig struct, Password string
 pkg openrails, type SMTPConfig struct, Port int
 pkg openrails, type SMTPConfig struct, Username string
+pkg openrails, type Scope = billingauth.Scope
 pkg openrails, type SolanaPSP struct
 pkg openrails, type SolanaPSP struct, Archived bool `psp:"archived"`
 pkg openrails, type SolanaPSP struct, PrivateKey string `psp:"secrets.private_key"`
@@ -3390,21 +3392,11 @@ pkg openrails/catalog, type TierMode string
 pkg openrails/catalog, type TieredPrice struct
 pkg openrails/catalog, type TieredPrice struct, Mode TierMode `json:"mode,omitempty"`
 pkg openrails/catalog, type TieredPrice struct, Tiers []RateTier `json:"tiers,omitempty"`
-pkg openrails/openrailstest, func CheckAuth(testing.TB, openrails.Auth, AuthCases)
+pkg openrails/openrailstest, func CheckAuth(testing.TB, openrails.Routes, authtest.Cases)
 pkg openrails/openrailstest, method (*UserInfo) Delete(string)
 pkg openrails/openrailstest, method (*UserInfo) Get(context.Context, []string) (map[string]userinfo.User, error)
 pkg openrails/openrailstest, method (*UserInfo) Put(userinfo.User)
 pkg openrails/openrailstest, method (*UserInfo) Search(context.Context, string, int) ([]userinfo.User, error)
-pkg openrails/openrailstest, type AuthCases struct
-pkg openrails/openrailstest, type AuthCases struct, Customer func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, Holders map[string]func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, Machine func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, OtherMerchantStaff func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, Permissions openrails.Permissions
-pkg openrails/openrailstest, type AuthCases struct, Programmatic bool
-pkg openrails/openrailstest, type AuthCases struct, Refused map[string]func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, Staff func() *http.Request
-pkg openrails/openrailstest, type AuthCases struct, StaleStaff func() *http.Request
 pkg openrails/openrailstest, type UserInfo struct
 pkg openrails/openrailstest/nmimock, const InsufficientFunds untyped string = "202"
 pkg openrails/openrailstest/nmimock, func New(Options) *Mock

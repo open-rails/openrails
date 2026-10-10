@@ -54,9 +54,9 @@ milestone order, each verifiable before the next:
    the sandbox probe passes.
 3. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);
    push at boot. Verify: catalog list routes return the products.
-4. **Mount routes.** Implement `openrails.Auth` over the host's auth (the README's
-   AuthKit adapter, or four plain middleware methods) and pass it as `Auth` in
-   an `openrails.Routes` with the route groups you want; mount with
+4. **Mount routes.** Pass the host's auth as `Auth` in an `openrails.Routes`
+   (AuthKit's `ak.Authenticator()`, or the README's `Authenticate` adapter over
+   the host's sessions), with `Scope` and the route groups you want; mount with
    `openrailshttp.Mount` (or the Gin/Fiber adapter) under a prefix. Verify with
    `openrailstest.CheckAuth` in a test, then that an authenticated request to
    `GET <prefix>/v1/me/subscriptions` answers for the signed-in customer only.

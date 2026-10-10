@@ -1,11 +1,15 @@
 package openrailstest_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
+
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/openrailstest"
 )
@@ -20,7 +24,16 @@ const (
 	write perm = "root:customers:update"
 )
 
-var permissions = openrails.Permissions{AdminRead: read, AdminUpdate: write}
+const (
+	customerID = "11111111-1111-4111-8111-111111111111"
+	staffID    = "22222222-2222-4222-8222-222222222222"
+	staleID    = "33333333-3333-4333-8333-333333333333"
+)
+
+func routesWith(a openrails.Authenticator) openrails.Routes {
+	return openrails.Routes{Auth: a, Scope: authtest.Scope, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
+		Permissions: openrails.Permissions{AdminRead: read, AdminUpdate: write}}
+}
 
 func request(token string) func() *http.Request {
 	return func() *http.Request {
@@ -40,92 +53,87 @@ type recorder struct {
 
 func (r *recorder) Errorf(format string, args ...any) { r.failures = append(r.failures, format) }
 func (r *recorder) Fatal(args ...any)                 { r.failures = append(r.failures, "fatal") }
+func (r *recorder) Fatalf(format string, args ...any) { r.failures = append(r.failures, format) }
 func (r *recorder) Helper()                           {}
 
-func TestCheckAuthPassesAConformingAuth(t *testing.T) {
-	fake := &authtest.Fake{}
-	staff := fake.Person("22222222-2222-4222-8222-222222222222", read.String(), write.String())
-	stale := fake.Issue(authtest.Grant{Identity: authtest.User("33333333-3333-4333-8333-333333333333"), Permissions: []string{read.String(), write.String()}, Stale: true})
-	openrailstest.CheckAuth(t, fake, openrailstest.AuthCases{
-		Permissions: permissions,
-		Customer:    request(fake.Person("11111111-1111-4111-8111-111111111111")),
-		Staff:       request(staff),
+func cases(fake *authtest.Fake) helpersauthtest.Cases {
+	staff := fake.Person(staffID, read.String(), write.String())
+	return helpersauthtest.Cases{
+		Staff: request(staff),
+		User:  request(fake.Person(customerID)),
 		Holders: map[string]func() *http.Request{
 			read.String():  request(fake.Person("44444444-4444-4444-8444-444444444444", read.String())),
 			write.String(): request(fake.Person("55555555-5555-4555-8555-555555555555", write.String())),
 		},
-		Refused:    map[string]func() *http.Request{"forged": request("test_forged"), "malformed": request("not-a-token")},
-		StaleStaff: request(stale),
-		Machine:    request(fake.Machine("key_1", read.String(), write.String())),
-	})
-	// The programmatic routes take an application with no permission at all.
-	openrailstest.CheckAuth(t, fake, openrailstest.AuthCases{
-		Programmatic: true,
-		Customer:     request(fake.Person("11111111-1111-4111-8111-111111111111")),
-		Staff:        request(fake.Person("22222222-2222-4222-8222-222222222222", read.String())),
-		Machine:      request(fake.Machine("svc_1")),
-	})
+		Stale:       request(fake.Issue(authtest.Grant{Identity: authtest.User(staleID), Permissions: []string{read.String(), write.String()}, Stale: true})),
+		Application: request(fake.Machine("key_1", read.String(), write.String())),
+		Refused:     map[string]func() *http.Request{"forged": request("test_forged"), "malformed": request("not-a-token")},
+		Revoke:      func() { fake.Revoke(staff) },
+	}
 }
 
-// A person passed as the backend fails, and so does staff an Auth reports as
-// an application: the programmatic routes admit by subject kind alone.
-func TestCheckAuthCatchesASubjectKindMixUp(t *testing.T) {
+func TestCheckAuthPassesAConformingAuthenticator(t *testing.T) {
 	fake := &authtest.Fake{}
-	for name, cases := range map[string]openrailstest.AuthCases{
-		"a person as the application": {
-			Programmatic: true,
-			Customer:     request(fake.Person("11111111-1111-4111-8111-111111111111")),
-			Staff:        request(fake.Person("22222222-2222-4222-8222-222222222222", read.String())),
-			Machine:      request(fake.Person("33333333-3333-4333-8333-333333333333")),
-		},
-		"staff as an application": {
-			Permissions: openrails.Permissions{AdminRead: read},
-			Customer:    request(fake.Person("11111111-1111-4111-8111-111111111111")),
-			Staff:       request(fake.Machine("svc_2", read.String())),
-		},
+	openrailstest.CheckAuth(t, routesWith(fake), cases(fake))
+}
+
+// The checks fail an Authenticator that breaks the contract the gates rely
+// on, or the mount's own Scope and Permissions.
+func TestCheckAuthCatchesABrokenAuthenticator(t *testing.T) {
+	fake := &authtest.Fake{}
+	for name, tc := range map[string]struct {
+		routes openrails.Routes
+		cases  func(helpersauthtest.Cases) helpersauthtest.Cases
+	}{
+		"a pass-through Authenticator":  {routesWith(authtest.PassThrough{}), nil},
+		"a Can ignoring the permission": {routesWith(anyPermission{fake}), nil},
+		"a person as the application": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+			c.Application = request(fake.Person("66666666-6666-4666-8666-666666666666", read.String(), write.String()))
+			return c
+		}},
+		"no application with Programmatic": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+			c.Application = nil
+			return c
+		}},
+		"an opaque staff subject": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+			c.Staff = request(fake.Person("staff-1", read.String(), write.String()))
+			return c
+		}},
+		"another scope than the mount's": {routesWith(fake), func(c helpersauthtest.Cases) helpersauthtest.Cases {
+			c.Scope = billingauth.Scope{Authority: "test", ID: "other"}
+			return c
+		}},
 	} {
+		c := cases(fake)
+		if tc.cases != nil {
+			c = tc.cases(c)
+		}
 		r := &recorder{TB: t}
-		openrailstest.CheckAuth(r, fake, cases)
+		openrailstest.CheckAuth(r, tc.routes, c)
 		if len(r.failures) == 0 {
-			t.Fatalf("%s passed", name)
+			t.Errorf("%s passed", name)
 		}
 	}
 }
 
-func TestCheckAuthCatchesAPassThroughAuth(t *testing.T) {
-	r := &recorder{TB: t}
-	openrailstest.CheckAuth(r, authtest.PassThrough{}, openrailstest.AuthCases{
-		Permissions: permissions,
-		Customer:    request("anyone"),
-		Staff:       request("anyone"),
-		Refused:     map[string]func() *http.Request{"forged": request("forged")},
-	})
-	if len(r.failures) < 4 {
-		t.Fatalf("a pass-through Auth drew %d failures: %v", len(r.failures), r.failures)
-	}
-}
-
-// An Auth that admits staff for any permission they hold, not the one asked,
-// fails the holders' check.
-func TestCheckAuthCatchesAnAuthIgnoringThePermission(t *testing.T) {
-	fake := &authtest.Fake{}
-	r := &recorder{TB: t}
-	openrailstest.CheckAuth(r, anyPermission{fake}, openrailstest.AuthCases{
-		Permissions: permissions,
-		Customer:    request(fake.Person("11111111-1111-4111-8111-111111111111")),
-		Staff:       request(fake.Person("22222222-2222-4222-8222-222222222222", read.String(), write.String())),
-		Holders: map[string]func() *http.Request{
-			read.String(): request(fake.Person("44444444-4444-4444-8444-444444444444", read.String())),
-		},
-	})
-	if len(r.failures) == 0 {
-		t.Fatal("an Auth ignoring the permission passed")
-	}
-}
-
-// anyPermission admits whoever holds any permission at all.
+// anyPermission grants whoever holds any permission at all.
 type anyPermission struct{ *authtest.Fake }
 
-func (a anyPermission) RequirePermission(string) func(http.Handler) http.Handler {
-	return a.Fake.RequirePermission(read.String())
+func (a anyPermission) Authenticate(r *http.Request) (billingauth.Verified, error) {
+	v, err := a.Fake.Authenticate(r)
+	if err != nil {
+		return nil, err
+	}
+	return anyGrant{v.(authtest.Verified)}, nil
+}
+
+type anyGrant struct{ authtest.Verified }
+
+func (v anyGrant) Can(ctx context.Context, scope billingauth.Scope, _ string) (bool, error) {
+	for _, p := range v.Grant.Permissions {
+		if ok, err := v.Verified.Can(ctx, scope, p); ok || err != nil {
+			return ok, err
+		}
+	}
+	return false, nil
 }

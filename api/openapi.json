@@ -21882,6 +21882,7 @@
       "application_required",
       "authentication_required",
       "authentication_unavailable",
+      "authorization_unavailable",
       "captcha_invalid",
       "captcha_required",
       "credential_expired",
@@ -21935,7 +21936,6 @@
       "permission_required",
       "rate_limit_exceeded",
       "sender_proof_required",
-      "step_up_required",
       "use_dpop_nonce"
     ],
     "tier:merchant": [
@@ -21982,7 +21982,10 @@
       "captcha_required",
       "database_busy",
       "internal_error",
+      "merchant_binding_mismatch",
+      "merchant_directory_unavailable",
       "merchant_not_found",
+      "merchant_selector_invalid",
       "rate_limit_exceeded"
     ],
     "tier:session_id": [
@@ -21990,7 +21993,10 @@
       "captcha_required",
       "database_busy",
       "internal_error",
+      "merchant_binding_mismatch",
+      "merchant_directory_unavailable",
       "merchant_not_found",
+      "merchant_selector_invalid",
       "rate_limit_exceeded"
     ],
     "tier:signed_in": [
@@ -21999,6 +22005,7 @@
       "access_token_merchant_not_bound",
       "authentication_required",
       "authentication_unavailable",
+      "authorization_unavailable",
       "captcha_invalid",
       "captcha_required",
       "credential_expired",
@@ -22945,9 +22952,9 @@
       "meaning": "The wallet transaction could not be prepared or confirmed; the message says why."
     },
     "step_up_required": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The operation needs a recent sign-in; metadata carries the challenge."
+      "status": 401,
+      "type": "authentication_error",
+      "meaning": "The operation needs a recent sign-in (RFC 9470: WWW-Authenticate insufficient_user_authentication with max_age); metadata carries the provider's challenge."
     },
     "step_up_unavailable": {
       "status": 403,

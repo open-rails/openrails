@@ -150,7 +150,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 		t.Cleanup(func() { _ = client.Close(context.Background()) })
 		return client
 	}
-	routes := openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions, AdminConsole: true}
+	routes := openrails.Routes{Auth: deny, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions, AdminConsole: true}
 	_, err := boot(fstest.MapFS{}).Routes(routes)
 	require.ErrorContains(t, err, "needs a console build")
 	_, err = boot(fstest.MapFS{"index.html": {Data: []byte("<!doctype html>")}}).Routes(routes)
@@ -176,6 +176,6 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	require.Equal(t, "/billing/v1", bootstrap.APIBaseURL)
 
 	off := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions}))
+	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions}))
 	require.Equal(t, http.StatusNotFound, get(off, "/billing/admin/").Code, "not selected, not mounted")
 }

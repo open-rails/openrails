@@ -4,202 +4,84 @@ package openrailstest
 import (
 	"fmt"
 	"net/http"
-	"net/http/httptest"
-	"sort"
+	"slices"
 	"testing"
 
-	"github.com/open-rails/openrails/internal/billingauth"
-
 	"github.com/google/uuid"
+	auth "github.com/open-rails/helpers/auth"
+	"github.com/open-rails/helpers/auth/authtest"
 
 	"github.com/open-rails/openrails"
 )
 
-// AuthCases are the requests CheckAuth drives through an Auth. Each is a
-// function returning a fresh request, since a credential's proof (DPoP) may
-// be spent once.
-type AuthCases struct {
-	// Permissions are the host's mount (Routes.Permissions).
-	Permissions openrails.Permissions
-	// Programmatic is the host's Routes.Programmatic: Machine is then
-	// required, since the subject kind Auth reports is all that admits it.
-	Programmatic bool
-	// Customer is a signed-in user who is not staff.
-	Customer func() *http.Request
-	// Staff is a person holding every one of Permissions on the mounted
-	// merchant, signed in recently.
-	Staff func() *http.Request
-	// Holders are people each holding only one permission, keyed by it (its
-	// String()): CheckAuth checks it admits them and every other permission
-	// refuses them. Nil skips the case.
-	Holders map[string]func() *http.Request
-	// Refused are credentials Required must refuse, by name: an expired
-	// token, a forged one, a banned or deleted user's, a signed-out session.
-	Refused map[string]func() *http.Request
-	// OtherMerchantStaff holds every permission only on another merchant;
-	// nil skips the case.
-	OtherMerchantStaff func() *http.Request
-	// StaleStaff holds every permission but signed in too long ago to move
-	// money; nil skips the case.
-	StaleStaff func() *http.Request
-	// Machine is your backend's application credential; required with
-	// Programmatic, else nil skips the case. Required must admit it, and its
-	// Identity must name an application, never a user in person: the
-	// programmatic routes take it for that alone.
-	Machine func() *http.Request
-}
-
-// CheckAuth fails t when a's middleware admits what it must refuse:
-// anonymous and refused credentials, a customer or another merchant's staff
-// on a permission, one permission's holder on another, a stale sign-in on an
-// operation that moves money. It fails when a person reads as an application
-// or an application as a person: the programmatic routes admit by that alone.
-// It also fails when a refuses the customer, staff or machine it must admit,
-// so a check cannot pass vacuously.
-func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases) {
+// CheckAuth fails t when routes.Auth breaks the contract OpenRails' gates
+// rely on: helpers' authtest.Check with routes' Scope and Permissions, which
+// it fills into c (a Scope or Permissions c sets must be the same), and
+// OpenRails' own rule that a person's subject is a canonical UUID, as its
+// customers are. With RouteGroups.Programmatic, c.Application is required.
+// A mount with no staff group gives no Scope or Permissions: c names its
+// own.
+func CheckAuth(t testing.TB, routes openrails.Routes, c authtest.Cases) {
 	t.Helper()
-	perms := map[string]bool{}
-	for _, perm := range []fmt.Stringer{c.Permissions.AdminRead, c.Permissions.AdminUpdate, c.Permissions.Catalog, c.Permissions.MerchantConfig, c.Permissions.Metrics} {
-		if perm != nil && perm.String() != "" {
-			perms[perm.String()] = true
-		}
-	}
-	if a == nil || len(perms) == 0 && !c.Programmatic || c.Customer == nil || c.Staff == nil || c.Programmatic && c.Machine == nil {
-		t.Fatal("openrailstest: CheckAuth needs an Auth, Permissions or Programmatic, Customer and Staff requests, and a Machine with Programmatic")
+	if routes.Auth == nil {
+		t.Fatal("openrailstest: CheckAuth needs Routes.Auth")
 		return
 	}
-	required := chain(a.Required())
-	anonymous := func() *http.Request {
-		r := c.Customer()
-		r.Header.Del("Authorization")
-		r.Header.Del("Cookie")
-		r.Header.Del("DPoP")
-		return r
+	if perms := permissions(routes.Permissions); len(perms) > 0 {
+		switch {
+		case c.Scope != (auth.Scope{}) && c.Scope != routes.Scope:
+			t.Fatalf("openrailstest: Cases.Scope %+v is not Routes.Scope %+v", c.Scope, routes.Scope)
+			return
+		case len(c.Permissions) > 0 && !sameSet(c.Permissions, perms):
+			t.Fatalf("openrailstest: Cases.Permissions %q are not Routes.Permissions %q", c.Permissions, perms)
+			return
+		}
+		c.Scope, c.Permissions = routes.Scope, perms
 	}
-	refuses(t, "Required admitted an anonymous request", required, anonymous)
-	for name, req := range c.Refused {
-		refuses(t, fmt.Sprintf("Required admitted the %s credential", name), required, req)
+	if routes.RouteGroups.Programmatic && c.Application == nil {
+		t.Fatal("openrailstest: RouteGroups.Programmatic takes your backend's application: Cases.Application is required")
+		return
 	}
-	if who, ok := admits(t, "Required refused the customer", a, required, c.Customer); ok {
-		if who.SubjectKind != openrails.SubjectUser {
-			t.Errorf("openrailstest: the customer's Identity is SubjectKind %q; a customer is a user", who.SubjectKind)
-		}
-		if who.Invoker != (openrails.Invoker{Issuer: who.Issuer, ID: who.Subject}) {
-			t.Errorf("openrailstest: the customer's Identity Invoker is %+v; a subject acting itself is its own invoker", who.Invoker)
-		}
-		if who.Issuer == "" || who.Credential.Kind == "" {
-			t.Errorf("openrailstest: the customer's Identity names no Issuer or Credential kind")
-		}
-		if id, err := uuid.Parse(who.Subject); err != nil || id == uuid.Nil || id.String() != who.Subject {
-			t.Errorf("openrailstest: the customer's Identity Subject %q is not a canonical UUID", who.Subject)
-		}
-	}
-	person := func(name string, req func() *http.Request) {
-		if who, ok := admits(t, "Required refused "+name, a, required, req); ok && who.SubjectKind != openrails.SubjectUser {
-			t.Errorf("openrailstest: %s's Identity is SubjectKind %q; a person is a user, or the programmatic routes would take them", name, who.SubjectKind)
-		}
-	}
-	person("the staff member", c.Staff)
-	for own, holder := range c.Holders {
-		person("the holder of "+own, holder)
-	}
-	if c.Machine != nil {
-		if who, ok := admits(t, "Required refused the machine credential", a, required, c.Machine); ok {
-			if who.SubjectKind != openrails.SubjectApplication {
-				t.Errorf("openrailstest: the machine credential's Identity is SubjectKind %q; your backend is an application", who.SubjectKind)
-			}
-			if billingauth.Interactive(who) {
-				t.Errorf("openrailstest: the machine credential's Identity reads as a user in person (%+v): it would buy as a customer", who.Credential)
-			}
-		}
-	}
-
-	for _, perm := range sortedKeys(perms) {
-		permission := chain(a.RequirePermission(perm))
-		sensitive := chain(a.RequirePermission(perm), a.Sensitive())
-		refuses(t, "RequirePermission("+perm+") admitted an anonymous request", permission, anonymous)
-		for name, req := range c.Refused {
-			refuses(t, fmt.Sprintf("RequirePermission(%s) admitted the %s credential", perm, name), permission, req)
-		}
-		refuses(t, "RequirePermission admitted the customer, who does not hold "+perm, permission, c.Customer)
-		admits(t, "RequirePermission refused the staff member holding "+perm, a, permission, c.Staff)
-		admits(t, "Sensitive refused the staff member holding "+perm+", recently signed in", a, sensitive, c.Staff)
-		if c.OtherMerchantStaff != nil {
-			refuses(t, "RequirePermission("+perm+") admitted another merchant's staff", permission, c.OtherMerchantStaff)
-		}
-		if c.StaleStaff != nil {
-			refuses(t, "Sensitive admitted a stale sign-in holding "+perm, sensitive, c.StaleStaff)
-		}
-		if c.Machine != nil {
-			if who, ok := admitted(a, permission, c.Machine); ok && who.SubjectKind != openrails.SubjectApplication {
-				t.Errorf("openrailstest: RequirePermission(%s) admitted the machine credential as SubjectKind %q", perm, who.SubjectKind)
-			}
-		}
-	}
-	for own, holder := range c.Holders {
-		if !perms[own] {
-			t.Errorf("openrailstest: Holders names %s, which Permissions does not", own)
+	for _, person := range []struct {
+		name string
+		req  func() *http.Request
+	}{{"Staff", c.Staff}, {"User", c.User}} {
+		if person.req == nil {
 			continue
 		}
-		admits(t, fmt.Sprintf("RequirePermission(%s) refused its holder", own), a, chain(a.RequirePermission(own)), holder)
-		for _, perm := range sortedKeys(perms) {
-			if perm != own {
-				refuses(t, fmt.Sprintf("RequirePermission(%s) admitted a holder of only %s", perm, own), chain(a.RequirePermission(perm)), holder)
-			}
+		v, err := routes.Auth.Authenticate(person.req())
+		if err != nil || v == nil {
+			continue // authtest.Check reports it
+		}
+		if subject := v.Identity().Subject; !canonicalUUID(subject) {
+			t.Errorf("openrailstest: %s's Identity Subject %q is not a canonical UUID; OpenRails' customers are", person.name, subject)
 		}
 	}
+	authtest.Check(t, routes.Auth, c)
 }
 
-func sortedKeys(set map[string]bool) []string {
-	out := make([]string, 0, len(set))
-	for k := range set {
-		out = append(out, k)
+// permissions are each staff group's permission, once each.
+func permissions(p openrails.Permissions) []string {
+	var out []string
+	for _, perm := range []fmt.Stringer{p.AdminRead, p.AdminUpdate, p.Catalog, p.MerchantConfig, p.Metrics} {
+		if perm == nil {
+			continue
+		}
+		if s := perm.String(); s != "" && !slices.Contains(out, s) {
+			out = append(out, s)
+		}
 	}
-	sort.Strings(out)
 	return out
 }
 
-func chain(mw ...func(http.Handler) http.Handler) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		for i := len(mw) - 1; i >= 0; i-- {
-			if mw[i] == nil {
-				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusInternalServerError) })
-			}
-			next = mw[i](next)
-		}
-		return next
-	}
+func sameSet(a, b []string) bool {
+	a, b = slices.Clone(a), slices.Clone(b)
+	slices.Sort(a)
+	slices.Sort(b)
+	return slices.Equal(slices.Compact(a), slices.Compact(b))
 }
 
-// admitted runs req through mw and reports the Identity it admitted.
-func admitted(a openrails.Auth, mw func(http.Handler) http.Handler, req func() *http.Request) (openrails.Identity, bool) {
-	var who openrails.Identity
-	var reached, ok bool
-	mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		reached = true
-		who, ok = a.Identity(r.Context())
-	})).ServeHTTP(httptest.NewRecorder(), req())
-	return who, reached && ok
-}
-
-func admits(t testing.TB, msg string, a openrails.Auth, mw func(http.Handler) http.Handler, req func() *http.Request) (openrails.Identity, bool) {
-	t.Helper()
-	who, ok := admitted(a, mw, req)
-	if !ok {
-		t.Errorf("openrailstest: %s (or Identity found no one after it)", msg)
-	}
-	return who, ok
-}
-
-func refuses(t testing.TB, msg string, mw func(http.Handler) http.Handler, req func() *http.Request) {
-	t.Helper()
-	reached := false
-	w := httptest.NewRecorder()
-	mw(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached = true })).ServeHTTP(w, req())
-	switch {
-	case reached:
-		t.Errorf("openrailstest: %s", msg)
-	case w.Code < 400:
-		t.Errorf("openrailstest: a refusal answered %d, not an error status (%s)", w.Code, msg)
-	}
+func canonicalUUID(s string) bool {
+	id, err := uuid.Parse(s)
+	return err == nil && id != uuid.Nil && id.String() == s
 }

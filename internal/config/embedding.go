@@ -7,16 +7,20 @@ import (
 )
 
 // Routes is the HTTP surface the adapters mount on the root router, and the
-// Auth that guards it. The public, customer (/v1/me) and webhook routes are
-// always mounted; every other route group is off until RouteGroups turns it
-// on.
+// host's auth that says who its requests are. The public, customer (/v1/me)
+// and webhook routes are always mounted; every other route group is off
+// until RouteGroups turns it on.
 type Routes struct {
-	// Auth is the host's auth middleware. OpenRails stacks it on its own
-	// routes: Required on /v1/me and the programmatic routes (and to show a
-	// checkout session's buyer their saved cards); RequirePermission with the
-	// route's group permission on the staff routes, and Sensitive for a user
-	// in person on one that moves money or removes access. Required.
-	Auth billingauth.Auth
+	// Auth says who a request is; OpenRails decides what each route admits
+	// and answers refusals itself. It asks Authenticate once per request,
+	// then the Verified's Can for a staff route's permission in Scope and,
+	// for a person on a route that moves money or removes access,
+	// CheckRecentSignIn. Required.
+	Auth billingauth.Authenticator
+	// Scope is where callers hold Permissions, such as AuthKit's
+	// ak.Scope(ctx, iam.RootGroup()). Required with any staff group on, and
+	// refused without one.
+	Scope billingauth.Scope
 	// Prefix is where the API is mounted: "/billing" serves /billing/v1/*.
 	// Empty is the root.
 	Prefix string
@@ -56,8 +60,8 @@ type RouteGroups struct {
 	Metrics bool
 	// Programmatic is the routes the host's backend calls over HTTP at
 	// /v1/app: usage, admissions, provider operations, host events and SCIM
-	// provisioning. They take the application Auth admits (its Identity's
-	// SubjectKind) and refuse a person; no permission is involved. SCIM also
+	// provisioning. They take any application Auth says a request is (its
+	// Identity's SubjectKind) and refuse a person; no permission is involved. SCIM also
 	// takes the merchant's provisioning token, and is not mounted with
 	// Deps.UserInfo, which reads the directory instead. Embedded, the Client
 	// calls the same operations in process without it.
@@ -65,8 +69,9 @@ type RouteGroups struct {
 }
 
 // Permissions are Routes.Permissions: the host's permissions, such as
-// AuthKit's iam.Perm, that OpenRails passes to Auth.RequirePermission, one
-// per staff group that is on. Mount reads each String() once.
+// AuthKit's iam.Perm, one per staff group that is on, which callers hold in
+// Routes.Scope. Mount reads each String() once, and refuses one the Auth
+// does not know when it can say (auth.PermissionCatalog).
 type Permissions struct {
 	// AdminRead is what the admin group's callers hold.
 	AdminRead fmt.Stringer

@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strings"
+
+	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -19,7 +22,7 @@ import (
 // mounted open.
 func ValidateRoutes(sel config.Routes) error {
 	if httproutes.IsNilAuth(sel.Auth) {
-		return fmt.Errorf("openrails: Routes.Auth is required: the customer routes ask it who is signed in")
+		return fmt.Errorf("openrails: Routes.Auth is required: it says who each request is")
 	}
 	_, err := RoutePermissions(sel)
 	return err
@@ -27,8 +30,9 @@ func ValidateRoutes(sel config.Routes) error {
 
 // RoutePermissions is sel's staff route groups as the routes check them:
 // each group that is on, with its permission. It refuses a group on without
-// its permission, a permission for a group that is off, and any group without
-// Routes.Auth: nothing is ever mounted open.
+// its permission, a permission for a group that is off or the Auth does not
+// know, a staff group without Routes.Scope or a Scope without one, and any
+// group without Routes.Auth: nothing is ever mounted open.
 func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 	b, p := sel.RouteGroups, sel.Permissions
 	perms := httproutes.Permissions{
@@ -61,8 +65,22 @@ func RoutePermissions(sel config.Routes) (httproutes.Permissions, error) {
 	if err := perms.Validate(); err != nil {
 		return perms, err
 	}
-	if (perms != (httproutes.Permissions{}) || b.Programmatic) && httproutes.IsNilAuth(sel.Auth) {
-		return perms, fmt.Errorf("openrails: RouteGroups need Routes.Auth (it gates every staff and programmatic route)")
+	staff := perms != (httproutes.Permissions{})
+	if (staff || b.Programmatic) && httproutes.IsNilAuth(sel.Auth) {
+		return perms, fmt.Errorf("openrails: RouteGroups need Routes.Auth (it says who each staff and programmatic request is)")
+	}
+	switch {
+	case staff && (strings.TrimSpace(sel.Scope.Authority) == "" || strings.TrimSpace(sel.Scope.ID) == ""):
+		return perms, fmt.Errorf("openrails: a staff route group is on without Routes.Scope (where callers hold Permissions), or with its Authority or ID empty")
+	case !staff && sel.Scope != (billingauth.Scope{}):
+		return perms, fmt.Errorf("openrails: Routes.Scope is given, but no staff route group is on")
+	}
+	if catalog, ok := sel.Auth.(auth.PermissionCatalog); ok {
+		for _, perm := range []string{perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics} {
+			if perm != "" && !catalog.KnownPermission(perm) {
+				return perms, fmt.Errorf("openrails: Routes.Auth does not know the permission %q (Routes.Permissions)", perm)
+			}
+		}
 	}
 	return perms, nil
 }
@@ -88,7 +106,7 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	}
 	perms, _ := RoutePermissions(sel)
 	asm := FromApp(a)
-	asm.Auth = sel.Auth
+	asm.Auth, asm.Scope = sel.Auth, sel.Scope
 	providers, err := ConfiguredProviderRoutes(context.Background(), a.Runtime)
 	if err != nil {
 		return nil, err

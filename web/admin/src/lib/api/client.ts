@@ -118,8 +118,8 @@ export function bindSession(client: ConsoleTransport) {
   session = client
 }
 
-// bindStepUp routes writes through auth-ui's step-up dialog: a 403
-// step_up_required re-authenticates and the write is retried.
+// bindStepUp routes writes through auth-ui's step-up dialog: a 401
+// step_up_required (RFC 9470) re-authenticates and the write is retried.
 export function bindStepUp(guard: Guard | null) {
   stepUp = guard ?? unguarded
 }
@@ -152,11 +152,11 @@ export class ApiError extends Error {
   }
 
   get stepUpRequired() {
-    return this.status === 403 && this.code === "step_up_required"
+    return this.code === "step_up_required"
   }
 
   get isPermissionDenied() {
-    return this.status === 403 && !this.stepUpRequired
+    return this.status === 403
   }
 }
 
@@ -218,10 +218,11 @@ async function send<T>(
       signal: opts.signal,
     }
   )
-  // auth-ui already refreshed a stale bearer; this one is refused for good.
+  // auth-ui already refreshed a stale bearer; this one is refused for good,
+  // unless it asks for a fresher sign-in, which the step-up dialog answers.
   if (res.status === 401) {
     const error = await parseError(res)
-    void session.signOut()
+    if (!error.stepUpRequired) void session.signOut()
     throw error
   }
   if (!res.ok) throw await parseError(res)
@@ -258,7 +259,7 @@ export async function apiResponse<T>(
       })
     )
   } catch (error) {
-    // Canceled, or no dialog to answer it: the console sees OpenRails' 403.
+    // Canceled, or no dialog to answer it: the console sees OpenRails' 401.
     if (refusal && isAuthKitError(error)) throw refusal
     throw error
   }

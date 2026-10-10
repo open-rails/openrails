@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
@@ -23,13 +22,17 @@ import (
 
 // Options is what an assembly supplies to mount catalog routes.
 type Options struct {
-	// Auth is the host's middleware for the merchant tier and, on checkout
-	// sessions, who presents one.
-	Auth billingauth.Auth
-	// AuthBindsMerchant: Auth's own middleware resolves the merchant a
-	// request acts on (the standalone server's, the in-process host's).
-	// Otherwise a merchant route acts on the configured merchant.
-	AuthBindsMerchant bool
+	// Auth is the mount's Authenticator: who a request on a staff or
+	// programmatic route is and, on checkout sessions, who presents one.
+	Auth billingauth.Authenticator
+	// Scope is where a merchant's staff hold Permissions; every staff route
+	// needs it.
+	Scope ScopeFunc
+	// ResolveMerchant finds the merchant an authenticated request acts on
+	// when its credential names none (the standalone server's sessions);
+	// CredentialOnly finds none. Nil serves the configured merchant, pinned
+	// before the request is authenticated.
+	ResolveMerchant MerchantResolver
 
 	// ProviderRoutes controls provider-specific public routes. Nil preserves the
 	// broad standalone surface; embedded single-merchant mounts pass an explicit
@@ -41,8 +44,8 @@ type Options struct {
 	// untrusted token claim or source IP.
 	AdminLimiter *middleware.AdminOperationLimiter
 
-	// Permissions are what Auth.RequirePermission checks on each staff route;
-	// a staff route without one is not mounted.
+	// Permissions are what a caller holds in Scope for each staff route; a
+	// staff route without one is not mounted.
 	Permissions Permissions
 
 	// Capabilities is what the assembly mounts, as GET /v1/config reports
@@ -73,14 +76,12 @@ type Env struct {
 	Runtime *app.Runtime
 	// Customers gates customer routes at CustomerMerchant, else at the
 	// merchant each request selects (SelectedMerchant), else at the
-	// configured one (unless AuthBindsMerchant).
-	Customers        billingauth.Auth
+	// configured one (unless ResolveMerchant).
+	Customers        billingauth.Authenticator
 	CustomerMerchant billingauth.Target
 	SelectedMerchant bool
 	// Viewers says who presents a checkout session.
-	Viewers billingauth.Auth
-	// permissions caches Auth.RequirePermission by permission for staffCan.
-	permissions *sync.Map
+	Viewers billingauth.Authenticator
 	// providers is ProviderRoutes resolved.
 	providers routesurface.ProviderRoutes
 	// scim is the assembly's SCIM server, built once.
@@ -106,7 +107,7 @@ func (e *Env) scimServer() *scim.Server {
 }
 
 func newEnv(rt *app.Runtime, opts Options) *Env {
-	env := &Env{Options: opts, Runtime: rt, Viewers: opts.Auth, providers: routesurface.AllProviderRoutes(), permissions: &sync.Map{}}
+	env := &Env{Options: opts, Runtime: rt, Viewers: opts.Auth, providers: routesurface.AllProviderRoutes()}
 	if opts.ProviderRoutes != nil {
 		env.providers = *opts.ProviderRoutes
 	}
@@ -375,20 +376,21 @@ const SCIMRoot = "/v1/app/scim/v2"
 // credential the mount's Auth accepts.
 const SelfRoutePrefix = "/me"
 
-// CustomerMount is one customer surface: the Auth that admits its
-// customers and the merchant they buy from. Without a Merchant, a server's
-// surface (SelectedMerchant) serves the merchant each request selects, and
-// otherwise the Auth binds the merchant itself or the configured one serves.
+// CustomerMount is one customer surface: the Authenticator that says who
+// its customers are and the merchant they buy from. Without a Merchant, a
+// server's surface (SelectedMerchant) serves the merchant each request
+// selects; with ResolveMerchant, the merchant the credential names;
+// otherwise the configured one.
 type CustomerMount struct {
-	Auth              billingauth.Auth
-	AuthBindsMerchant bool
-	Merchant          billingauth.Target
-	SelectedMerchant  bool
-	Providers         routesurface.ProviderRoutes
+	Auth             billingauth.Authenticator
+	ResolveMerchant  MerchantResolver
+	Merchant         billingauth.Target
+	SelectedMerchant bool
+	Providers        routesurface.ProviderRoutes
 }
 
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
-	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, AuthBindsMerchant: m.AuthBindsMerchant})
+	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant})
 	env.Customers, env.CustomerMerchant, env.SelectedMerchant = m.Auth, m.Merchant, m.SelectedMerchant
 	return env
 }

@@ -408,7 +408,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   service_unavailable: { status: 503, type: "api_error", meaning: "A dependency is temporarily unavailable; retry." },
   solana_rpc_unavailable: { status: 502, type: "api_error", meaning: "The Solana RPC endpoints did not answer; retry." },
   solana_transaction_refused: { status: 400, type: "invalid_request_error", meaning: "The wallet transaction could not be prepared or confirmed; the message says why." },
-  step_up_required: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in; metadata carries the challenge." },
+  step_up_required: { status: 401, type: "authentication_error", meaning: "The operation needs a recent sign-in (RFC 9470: WWW-Authenticate insufficient_user_authentication with max_age); metadata carries the provider's challenge." },
   step_up_unavailable: { status: 403, type: "authorization_error", meaning: "The operation needs a recent sign-in and this credential cannot prove one." },
   stored_credential_required: { status: 409, type: "invalid_request_error", meaning: "The card has no active agreement for a merchant-initiated charge; the customer makes this change." },
   subscription_change_already_scheduled: { status: 409, type: "invalid_request_error", meaning: "A different period-end change is already scheduled." },

@@ -149,7 +149,7 @@ func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConf
 	}, deps)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
-	routes := openrails.Routes{Auth: v, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
+	routes := openrails.Routes{Auth: v, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
 	if slug != w.slug {
 		return w.serve(slug, rt, routes)
 	}

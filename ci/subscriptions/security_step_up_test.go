@@ -74,7 +74,7 @@ func TestSecurityStaleSignInReachesNoOwnerOperation(t *testing.T) {
 		{http.MethodPatch, "/v1/admin/customers/settings", map[string]any{"items": []any{map[string]any{"customer_id": member.id, "trust_levels": []any{map[string]any{"currency": "USD", "trust_level": "gold"}}}}}},
 	} {
 		status, body := call(stale, op.method, op.path, op.body)
-		require.Equal(t, http.StatusForbidden, status, "%s %s: %v", op.method, op.path, body)
+		require.Equal(t, http.StatusUnauthorized, status, "%s %s: %v", op.method, op.path, body)
 		require.True(t, stepUp(body), "%s %s: %v", op.method, op.path, body)
 		require.Equal(t, []any{"password"}, body["error"].(map[string]any)["metadata"].(map[string]any)["step_up_methods"],
 			"the provider's challenge reaches the client: %v", body)

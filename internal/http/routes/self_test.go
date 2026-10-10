@@ -36,7 +36,7 @@ func passedGates(code int) bool {
 	return !slices.Contains([]int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusMethodNotAllowed}, code)
 }
 
-func customerSurface(a billingauth.Auth) http.Handler {
+func customerSurface(a billingauth.Authenticator) http.Handler {
 	mux := http.NewServeMux()
 	rt := &app.Runtime{}
 	rt.SetConfiguredMerchant(merchantA)

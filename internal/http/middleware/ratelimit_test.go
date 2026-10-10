@@ -140,7 +140,7 @@ func TestRateLimitSubjects(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1}}
-			auth := billingauth.AuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
+			auth := billingauth.SessionAuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
 				if u := r.Header.Get("X-Test-User"); u != "" {
 					return billingauth.UserContext{UserID: u}, nil
 				}

@@ -420,7 +420,7 @@ func (c *ControlPlane) Core() *authkit.Client {
 // UserAuthenticator authenticates the control plane's own user tokens in
 // process (#739), for the standalone user routes and embedding hosts. Nil
 // without a control plane.
-func (c *ControlPlane) UserAuthenticator() billingauth.Authenticator {
+func (c *ControlPlane) UserAuthenticator() billingauth.SessionAuthenticator {
 	if c == nil || c.users == nil {
 		return nil
 	}

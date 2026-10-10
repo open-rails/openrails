@@ -30,12 +30,14 @@ func staffPermissionsFor(groups config.RouteGroups) httproutes.Permissions {
 }
 
 func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
+	auth := s.staffAuth()
 	opts := httproutes.Options{
-		Auth:              s.staffAuth(),
-		AuthBindsMerchant: true,
-		AdminLimiter:      s.adminLimiter,
-		Capabilities:      s.capabilities(),
-		Permissions:       s.permissions,
+		Auth:            auth,
+		Scope:           auth.Scope,
+		ResolveMerchant: auth.ResolveMerchant,
+		AdminLimiter:    s.adminLimiter,
+		Capabilities:    s.capabilities(),
+		Permissions:     s.permissions,
 	}
 	httproutes.RegisterStaffRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, opts)
 	if s.groups.Programmatic {

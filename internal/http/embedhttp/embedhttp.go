@@ -61,9 +61,10 @@ type Assembler struct {
 	// challenge store. nil counts them in the runtime's PostgreSQL windows.
 	RDB          *redis.Client
 	AdminLimiter *middleware.AdminOperationLimiter
-	// Auth is the mount's Routes.Auth: the merchant tier's staff gate, and
-	// who presents a checkout session.
-	Auth billingauth.Auth
+	// Auth is the mount's Routes.Auth: who a staff, programmatic or
+	// checkout-session request is. Scope is Routes.Scope.
+	Auth  billingauth.Authenticator
+	Scope billingauth.Scope
 }
 
 // FromApp builds an Assembler from the application graph.
@@ -129,6 +130,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Permissions != (httproutes.Permissions{}) {
 		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
 			Auth:         s.Auth,
+			Scope:        httproutes.FixedScope(s.Scope),
 			AdminLimiter: s.AdminLimiter,
 			Permissions:  opts.Permissions,
 			Capabilities: &capabilities,

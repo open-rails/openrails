@@ -28,9 +28,9 @@ var dynamicCodeFiles = map[string]bool{
 	"internal/http/handlers/orders.go":              true,
 	"internal/http/handlers/provider_operations.go": true,
 	"internal/http/router/merchant_selectors.go":    true,
-	// The route gate and the test Auth refuse with the code their callers chose.
-	"internal/http/routes/gate.go":              true,
-	"internal/billingauth/authtest/authtest.go": true,
+	// The route gate refuses with the code its step and the provider's error
+	// choose.
+	"internal/http/routes/gate.go": true,
 }
 
 var httpStatus = map[string]int{

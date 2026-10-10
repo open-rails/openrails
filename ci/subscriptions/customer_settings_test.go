@@ -128,7 +128,7 @@ func TestCustomerSettingsStepUp(t *testing.T) {
 	} {
 		body := item
 		status, refused := w.merchantJSON(stale, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
-		require.Equal(t, http.StatusForbidden, status, "%v: %v", item, refused)
+		require.Equal(t, http.StatusUnauthorized, status, "%v: %v", item, refused)
 		require.Equal(t, "step_up_required", refused["error"].(map[string]any)["code"], "%v: %v", item, refused)
 		status, answered := w.merchantJSON(fresh, http.MethodPatch, "/v1/admin/customers/"+c.id, body)
 		require.Equal(t, http.StatusOK, status, "%v: %v", item, answered)

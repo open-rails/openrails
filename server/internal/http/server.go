@@ -35,7 +35,7 @@ type Dependencies struct {
 	Redis   *redis.Client
 	// Authenticator is the framework-neutral auth boundary; billingauth.Optional
 	// wraps it as the best-effort global middleware (#282/#670).
-	Authenticator billingauth.Authenticator
+	Authenticator billingauth.SessionAuthenticator
 	// ControlPlane is the standalone server's control plane over its own
 	// AuthKit. Required: the server selectively mounts the intentional AuthKit
 	// route groups (never DefaultAPI in locked-down mode).
@@ -65,7 +65,7 @@ type Server struct {
 	rdb      *redis.Client
 	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
 	// there is no gin auth provider any more; every surface uses this directly).
-	authenticator billingauth.Authenticator
+	authenticator billingauth.SessionAuthenticator
 	controlPlane  *controlplane.ControlPlane
 	issuer        string
 	// resourceServer and consoleIssuer are Dependencies'.
@@ -404,18 +404,22 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 	)
 }
 
-// staffAuth is the standalone server's Auth for the admin API: its API
-// keys, trusted issuers' access tokens and control-plane user sessions.
+// staffAuth is the standalone server's Authenticator for the admin API and
+// the programmatic routes: its API keys, trusted issuers' access tokens and
+// control-plane users' sessions (AuthKit's Authenticator).
 func (s *Server) staffAuth() *httproutes.StandaloneAuth {
-	auth := &httproutes.StandaloneAuth{Issuer: s.issuer, Authenticator: s.authenticator}
+	auth := &httproutes.StandaloneAuth{Issuer: s.issuer}
 	if s.controlPlane != nil {
-		auth.ResourceTokenResolver, auth.AdminPermissionChecker, auth.ServiceCredentialResolver = s.controlPlane, s.controlPlane, s.controlPlane
+		auth.ResourceTokenResolver, auth.ServiceCredentialResolver, auth.Directory = s.controlPlane, s.controlPlane, s.controlPlane
+		if core := s.controlPlane.Core(); core != nil {
+			auth.Sessions = core.Authenticator()
+		}
 	}
 	return auth
 }
 
-// customerAuth is the standalone server's Auth for /v1/me: trusted issuers'
-// openrails:self access tokens.
+// customerAuth is the standalone server's Authenticator for /v1/me: trusted
+// issuers' openrails:self access tokens.
 func (s *Server) customerAuth() httproutes.StandaloneCustomers {
 	if s.customerResolver != nil {
 		return httproutes.StandaloneCustomers{Resolver: s.customerResolver}

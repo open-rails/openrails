@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -53,7 +54,8 @@ const (
 	// sales, the metrics queries and the dashboard, behind the host's Metrics.
 	Metrics Group = "metrics"
 	// Access is what the signed-in caller may use of the staff groups:
-	// any identity the host's Auth admits, mounted with any staff group.
+	// any person or application the host's auth says it is, mounted with any
+	// staff group.
 	Access Group = "access"
 	// App is the host backend's programmatic routes (/v1/app), mounted with
 	// Routes.Programmatic: an application's credential, never a person's.
@@ -74,17 +76,17 @@ const (
 	AuthCheckoutSession Tier = "checkout_session"
 	// AuthSessionID: the id in the path is the credential.
 	AuthSessionID Tier = "session_id"
-	// AuthCustomer: the mount's Auth.Required, then the customer gate.
+	// AuthCustomer: a person acting for itself, as the customer.
 	AuthCustomer Tier = "customer"
-	// AuthMerchant: the mount's Auth.RequirePermission for the route's group
-	// permission, on the request's merchant;
-	// Auth.Sensitive too for a user in person on a Sensitive route.
+	// AuthMerchant: a person or an application holding the route's group
+	// permission in the request's merchant's scope (Can); a person also
+	// signed in recently (CheckRecentSignIn) on a Sensitive route.
 	AuthMerchant Tier = "merchant"
-	// AuthSignedIn: the mount's Auth.Required, a person or an application,
-	// at the request's merchant; no permission.
+	// AuthSignedIn: a person or an application at the request's merchant; no
+	// permission.
 	AuthSignedIn Tier = "signed_in"
-	// AuthApplication: the mount's Auth.Required, then an application at the
-	// request's merchant; a person is refused whatever it holds.
+	// AuthApplication: an application at the request's merchant; a person is
+	// refused whatever it holds.
 	AuthApplication Tier = "application"
 	// AuthProvider: the payment provider's own signature on the payload.
 	AuthProvider Tier = "provider_signature"
@@ -256,8 +258,8 @@ type Route struct {
 	Name string
 	// Level is an admin route's: read or write.
 	Level Level
-	// Sensitive: the route moves money or removes access; the host's
-	// Sensitive stacks on it for a user in person.
+	// Sensitive: the route moves money or removes access; a person needs a
+	// recent sign-in for it.
 	Sensitive bool
 	// Limit meters the operation per human administrator, after authorization.
 	Limit middleware.AdminOperation
@@ -368,49 +370,40 @@ var selectorErrors = []string{
 // TierErrors lists the codes a tier answers before any handler runs.
 func TierErrors(tier Tier) []string {
 	common := []string{billing.CodeInternalError, billing.CodeRateLimitExceeded, "captcha_required", "captcha_invalid", "database_busy"}
+	// authenticated are the codes of asking who a request is: the host's
+	// answer, or one of OpenRails' own Authenticators'.
+	authenticated := []string{
+		billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
+		billing.CodePermissionRequired, billing.CodeAuthenticationUnavailable, billing.CodeAccessTokenInvalid,
+		billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired,
+		billing.CodeInsufficientScope, billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch,
+	}
+	staff := []string{
+		billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved, billing.CodeServiceCredentialResourceScopeDenied,
+		billing.CodeHostPrincipalInvalid, billing.CodeMerchantContextMismatch, billing.CodeAuthorizationUnavailable,
+	}
 	var own []string
 	switch tier {
 	case AuthPublic, AuthSessionID:
 		own = []string{billing.CodeMerchantNotFound} // the Host names no merchant
 	case AuthCustomer:
-		own = append([]string{
-			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked, billing.CodeSenderProofRequired,
-			billing.CodePermissionRequired, billing.CodeStepUpRequired, billing.CodeAuthenticationUnavailable,
-			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired,
-			billing.CodeInsufficientScope, billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeInvokerScopedPrincipal,
-		}, selectorErrors...)
+		own = append([]string{billing.CodeInvokerScopedPrincipal}, authenticated...)
 	case AuthMerchant:
-		own = append([]string{
-			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
-			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
-			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
-			billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch, billing.CodeStepUpRequired,
-			billing.CodeStepUpUnavailable, billing.CodeAuthenticationUnavailable, billing.CodeAuthorizationUnavailable,
-			billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown, billing.CodeAccessTokenMerchantNotBound,
-			billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
-		}, selectorErrors...)
+		own = append(append([]string{billing.CodeStepUpRequired, billing.CodeStepUpUnavailable}, staff...), authenticated...)
 	case AuthSignedIn:
-		own = append([]string{
-			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
-			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
-			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
-			billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch,
-			billing.CodeAuthenticationUnavailable, billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown,
-			billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
-		}, selectorErrors...)
+		own = append(slices.Clone(staff), authenticated...)
 	case AuthApplication:
-		own = append([]string{
-			billing.CodeAuthenticationRequired, billing.CodeCredentialExpired, billing.CodeCredentialRevoked,
-			billing.CodeSenderProofRequired, billing.CodeServiceCredentialInvalid, billing.CodeServiceCredentialMerchantUnresolved,
-			billing.CodeServiceCredentialResourceScopeDenied, billing.CodeHostPrincipalInvalid, billing.CodePermissionRequired,
-			billing.CodeApplicationRequired, billing.CodeMerchantUnresolved, billing.CodeHostMerchantMismatch, billing.CodeMerchantContextMismatch,
-			billing.CodeAuthenticationUnavailable, billing.CodeAccessTokenInvalid, billing.CodeAccessTokenIssuerUnknown,
-			billing.CodeAccessTokenMerchantNotBound, billing.CodeDPoPNonceRequired, billing.CodeInsufficientScope,
-		}, selectorErrors...)
+		own = append(append([]string{billing.CodeApplicationRequired}, staff...), authenticated...)
+	default:
+		return sortedCodes(common)
 	}
-	out := append(common, own...)
+	return sortedCodes(append(append(common, own...), selectorErrors...))
+}
+
+func sortedCodes(codes []string) []string {
+	out := slices.Clone(codes)
 	sort.Strings(out)
-	return out
+	return slices.Compact(out)
 }
 
 // ErrorSets names the shared code sets a route answers besides its own

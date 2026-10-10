@@ -190,7 +190,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `service_unavailable` | 503 | `api_error` | A dependency is temporarily unavailable; retry. |
 | `solana_rpc_unavailable` | 502 | `api_error` | The Solana RPC endpoints did not answer; retry. |
 | `solana_transaction_refused` | 400 | `invalid_request_error` | The wallet transaction could not be prepared or confirmed; the message says why. |
-| `step_up_required` | 403 | `authorization_error` | The operation needs a recent sign-in; metadata carries the challenge. |
+| `step_up_required` | 401 | `authentication_error` | The operation needs a recent sign-in (RFC 9470: WWW-Authenticate insufficient_user_authentication with max_age); metadata carries the provider's challenge. |
 | `step_up_unavailable` | 403 | `authorization_error` | The operation needs a recent sign-in and this credential cannot prove one. |
 | `stored_credential_required` | 409 | `invalid_request_error` | The card has no active agreement for a merchant-initiated charge; the customer makes this change. |
 | `subscription_change_already_scheduled` | 409 | `invalid_request_error` | A different period-end change is already scheduled. |

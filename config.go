@@ -95,13 +95,15 @@ type (
 	// the admin customer read, lists and search ask it.
 	UserInfo = config.UserInfo
 
-	// Auth is Routes.Auth: helpers/auth's Auth, the host's auth as net/http
-	// middleware (Required, RequirePermission, Sensitive and Identity), which
-	// *authkit.Client implements. OpenRails stacks it on its own routes by tier.
-	Auth = billingauth.Auth
-	// Identity is who Auth admitted (helpers/auth's Identity): the Subject
-	// whose authority and money is used, the Invoker acting for it when that
-	// is someone else, and the Credential it was proven with.
+	// Authenticator is Routes.Auth: helpers/auth's Authenticator, which says
+	// who a request is (AuthKit's ak.Authenticator()). OpenRails builds its
+	// gates from the Verified it returns.
+	Authenticator = billingauth.Authenticator
+	// Scope is Routes.Scope: where callers hold Permissions (helpers/auth).
+	Scope = billingauth.Scope
+	// Identity is who the Authenticator says a request is (helpers/auth):
+	// the Subject whose authority and money is used, the Invoker acting for
+	// it when that is someone else, and the Credential it was proven with.
 	Identity = billingauth.Identity
 	// SubjectKind is Identity.SubjectKind: SubjectUser or SubjectApplication.
 	SubjectKind = billingauth.SubjectKind

@@ -128,9 +128,14 @@ func run(ctx context.Context) error {
 		return err
 	}
 	// Billing. Public, customer (/me) and webhook routes are always mounted.
+	staff, err := ak.Scope(ctx, iam.RootGroup()) // where the roles above are held
+	if err != nil {
+		return err
+	}
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:        ak,         // AuthKit guards each route: OpenRails asks it, by route
-		Prefix:      "/billing", // the API is served at /billing/v1/*
+		Auth:        ak.Authenticator(), // says who a request is; OpenRails decides what to admit
+		Scope:       staff,              // where callers hold Permissions
+		Prefix:      "/billing",         // the API is served at /billing/v1/*
 		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true},
 		Permissions: openrails.Permissions{
 			AdminRead:      customersRead,

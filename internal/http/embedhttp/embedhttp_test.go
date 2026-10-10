@@ -9,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/app"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -48,18 +49,23 @@ func TestRoutesValidation(t *testing.T) {
 		{"no Auth: the customer routes need it", config.Routes{}, "Routes.Auth is required"},
 		{"a typed nil Auth", config.Routes{Auth: (*authtest.Fake)(nil)}, "Routes.Auth is required"},
 		{"public, customer and webhooks", config.Routes{Auth: auth}, ""},
-		{"admin reads", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
-		{"admin reads and updates", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read, AdminUpdate: update}}, ""},
-		{"admin on without its read", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminUpdate: update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
-		{"a typed nil permission is none", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: (*authtest.Perm)(nil)}}, "without Permissions.AdminRead"},
+		{"admin reads", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
+		{"admin reads and updates", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read, AdminUpdate: update}}, ""},
+		{"admin on without its read", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminUpdate: update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		{"a typed nil permission is none", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: (*authtest.Perm)(nil)}}, "without Permissions.AdminRead"},
 		{"admin permissions with admin off", config.Routes{Auth: auth, Permissions: config.Permissions{AdminRead: read}}, "Permissions.AdminRead is given, but RouteGroups.Admin is off"},
-		{"an update with admin off", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog, AdminUpdate: update}}, "Permissions.AdminUpdate is given"},
-		{"the catalog alone", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog}}, ""},
-		{"the catalog without its permission", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Catalog: true}}, "RouteGroups.Catalog is on without Permissions.Catalog"},
-		{"merchant configuration alone", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{MerchantConfig: true}, Permissions: config.Permissions{MerchantConfig: admin}}, ""},
-		{"metrics alone", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Metrics: true}, Permissions: config.Permissions{Metrics: metrics}}, ""},
+		{"an update with admin off", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog, AdminUpdate: update}}, "Permissions.AdminUpdate is given"},
+		{"the catalog alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Catalog: true}, Permissions: config.Permissions{Catalog: catalog}}, ""},
+		{"the catalog without its permission", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Catalog: true}}, "RouteGroups.Catalog is on without Permissions.Catalog"},
+		{"merchant configuration alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{MerchantConfig: true}, Permissions: config.Permissions{MerchantConfig: admin}}, ""},
+		{"metrics alone", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Metrics: true}, Permissions: config.Permissions{Metrics: metrics}}, ""},
 		{"metrics given, off", config.Routes{Auth: auth, Permissions: config.Permissions{Metrics: metrics}}, "RouteGroups.Metrics is off"},
 		{"programmatic needs no permission", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Programmatic: true}}, ""},
+		{"a staff group without Scope", config.Routes{Auth: auth, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, "without Routes.Scope"},
+		{"a Scope without its ID", config.Routes{Auth: auth, Scope: billingauth.Scope{Authority: "test"}, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, "without Routes.Scope"},
+		{"a Scope without a staff group", config.Routes{Auth: auth, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Programmatic: true}}, "Routes.Scope is given, but no staff route group is on"},
+		{"a permission the Auth does not know", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: authtest.Perm("misspelled")}}, `does not know the permission "misspelled"`},
+		{"permissions the Auth knows", config.Routes{Auth: catalogued{auth}, Scope: authtest.Scope, RouteGroups: config.RouteGroups{Admin: true}, Permissions: config.Permissions{AdminRead: read}}, ""},
 	} {
 		err := ValidateRoutes(tc.sel)
 		if tc.err == "" {
@@ -69,6 +75,11 @@ func TestRoutesValidation(t *testing.T) {
 		}
 	}
 }
+
+// catalogued knows the permissions r, u, c, a and m.
+type catalogued struct{ *authtest.Fake }
+
+func (catalogued) KnownPermission(p string) bool { return strings.Contains("rucam", p) && len(p) == 1 }
 
 // The combined handler refuses to mount the admin API without its Auth,
 // and only the configuration and checkout routes join the permissive-CORS

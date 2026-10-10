@@ -87,7 +87,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 
 func TestFeatureRateLimitsUseNormalSubjects(t *testing.T) {
 	limits := config.RateLimitsConfig{"metrics-ask": {RequestsPerMinute: 2}}
-	auth := billingauth.AuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
+	auth := billingauth.SessionAuthenticatorFunc(func(_ context.Context, r *http.Request) (billingauth.UserContext, error) {
 		return billingauth.UserContext{UserID: r.Header.Get("X-Test-User")}, nil
 	})
 	h := ChainHTTP(okHandler(), HTTPMiddleware(billingauth.Optional(auth)), RateLimitHTTP(&limits, nil, nil, nil, nil, nil))

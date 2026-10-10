@@ -17,9 +17,9 @@ import (
 // SEC: the standalone server asks AuthKit for a recent sign-in (Sensitive)
 // before an owner moves money or grants access, and offers the same check
 // (CheckRecentSignIn) to a hosted product's credential changes. A live owner
-// session whose sign-in is stale, as a stolen token's is, gets 403
-// step_up_required with AuthKit's step-up methods; a recent sign-in, and the
-// owner's API key, pass. Reads need no step-up.
+// session whose sign-in is stale, as a stolen token's is, gets 401
+// step_up_required (RFC 9470) with AuthKit's step-up methods; a recent
+// sign-in, and the owner's API key, pass. Reads need no step-up.
 func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())
@@ -44,8 +44,9 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		{http.MethodPost, "/v1/admin/billing-import", map[string]any{}},
 	} {
 		w := call(t, handler, stale, op.method, op.path, shop, op.body)
-		require.Equal(t, http.StatusForbidden, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
+		require.Equal(t, http.StatusUnauthorized, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
 		require.Contains(t, w.Body.String(), `"code":"step_up_required"`, "%s %s", op.method, op.path)
+		require.Equal(t, `Bearer error="insufficient_user_authentication", max_age="900"`, w.Header().Get("WWW-Authenticate"))
 		require.Contains(t, w.Body.String(), `"step_up_methods":[`, "AuthKit's challenge reaches the client: %s", w.Body.String())
 
 		w = call(t, handler, fresh, op.method, op.path, shop, op.body)

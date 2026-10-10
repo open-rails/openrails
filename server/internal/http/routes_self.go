@@ -17,7 +17,7 @@ func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
 	// Browser tier: self-service patterns get the static permissive CORS policy.
 	httproutes.RegisterCustomerRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.CustomerMount{Auth: s.customerAuth(), AuthBindsMerchant: true, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
+		s.runtime, httproutes.CustomerMount{Auth: s.customerAuth(), ResolveMerchant: httproutes.CredentialOnly, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("self-service API routes registered on public handler")

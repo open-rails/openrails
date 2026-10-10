@@ -3,6 +3,7 @@ package routes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -16,8 +17,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -30,7 +33,6 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
 // openTiers are the tiers no Auth runs on: their credential is the request
@@ -48,8 +50,8 @@ var openRoutes = []string{
 	"POST /v1/webhooks/{rail}/{account_id}",
 }
 
-// sensitiveRoutes are the routes that also ask Auth.Sensitive of a user in
-// person: those that move money or remove access. A change is reviewed.
+// sensitiveRoutes are the routes that also ask a person for a recent sign-in:
+// those that move money or remove access. A change is reviewed.
 var sensitiveRoutes = []string{
 	"DELETE /v1/admin/alert-webhooks/{id}",
 	"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
@@ -150,39 +152,72 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 // staffPermissions gives each group a permission naming it.
 var staffPermissions = Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write", Catalog: "staff:catalog", MerchantConfig: "staff:admin", Metrics: "staff:metrics"}
 
-// recordingAuth records which middleware ran, in order, and admits who.
+// testScope is where recordingAuth's subjects hold their permissions.
+var testScope = FixedScope(authtest.Scope)
+
+// recordingAuth says every request is who, records each call the gate
+// makes, and grants what allowed names (every permission when nil) in
+// authtest.Scope.
 type recordingAuth struct {
-	mu    sync.Mutex
-	calls []string
-	who   billingauth.Identity
+	mu      sync.Mutex
+	calls   []string
+	who     billingauth.Identity
+	allowed map[string]bool
+	// authErr, canErr and signInErr are the answers of Authenticate, Can and
+	// CheckRecentSignIn; noSignIn drops CheckRecentSignIn.
+	authErr, canErr, signInErr error
+	noSignIn                   bool
 }
 
-type admittedKey struct{}
+func (a *recordingAuth) record(call string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.calls = append(a.calls, call)
+}
 
-func (a *recordingAuth) record(name string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			a.mu.Lock()
-			a.calls = append(a.calls, name)
-			a.mu.Unlock()
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), admittedKey{}, true)))
-		})
-	}
-}
-func (a *recordingAuth) Required() func(http.Handler) http.Handler { return a.record("Required") }
-func (a *recordingAuth) RequirePermission(p string) func(http.Handler) http.Handler {
-	return a.record("RequirePermission:" + p)
-}
-func (a *recordingAuth) Sensitive() func(http.Handler) http.Handler { return a.record("Sensitive") }
-func (a *recordingAuth) Identity(ctx context.Context) (billingauth.Identity, bool) {
-	return a.who, ctx.Value(admittedKey{}) != nil
-}
 func (a *recordingAuth) take() []string {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := a.calls
 	a.calls = nil
 	return out
+}
+
+func (a *recordingAuth) Authenticate(*http.Request) (billingauth.Verified, error) {
+	a.record("Authenticate")
+	if a.authErr != nil {
+		return nil, a.authErr
+	}
+	if a.noSignIn {
+		return identityOnly{recorded{a}}, nil
+	}
+	return recorded{a}, nil
+}
+
+type recorded struct{ a *recordingAuth }
+
+func (v recorded) Identity() billingauth.Identity { return v.a.who }
+
+func (v recorded) Can(_ context.Context, scope billingauth.Scope, perm string) (bool, error) {
+	v.a.record("Can:" + perm)
+	if v.a.canErr != nil {
+		return false, v.a.canErr
+	}
+	return scope == authtest.Scope && (v.a.allowed == nil || v.a.allowed[perm]), nil
+}
+
+func (v recorded) CheckRecentSignIn(context.Context) error {
+	v.a.record("CheckRecentSignIn")
+	return v.a.signInErr
+}
+
+// identityOnly holds permissions but cannot prove a sign-in.
+type identityOnly struct{ r recorded }
+
+func (v identityOnly) Identity() billingauth.Identity { return v.r.Identity() }
+
+func (v identityOnly) Can(ctx context.Context, scope billingauth.Scope, perm string) (bool, error) {
+	return v.r.Can(ctx, scope, perm)
 }
 
 // gatedRuntime is a database-free runtime bound to merchantA.
@@ -193,14 +228,14 @@ func gatedRuntime(t *testing.T) *app.Runtime {
 	return rt
 }
 
-// everyGatedSurface mounts every group an embedded host can publish, gated
-// by a.
-func everyGatedSurface(t *testing.T, a billingauth.Auth) (*router.Table, *app.Runtime) {
+// everyGatedSurface mounts every group an embedded host can publish, its
+// subjects saying who they are through a.
+func everyGatedSurface(t *testing.T, a billingauth.Authenticator) (*router.Table, *app.Runtime) {
 	rt := gatedRuntime(t)
 	providers := routesurface.AllProviderRoutes()
 	table := &router.Table{}
 	RegisterUserRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, ProviderRoutes: &providers})
-	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Permissions: staffPermissions})
+	RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a, Scope: testScope, Permissions: staffPermissions})
 	RegisterAppRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: a})
 	RegisterCustomerRoutes(router.NewMux(table, "/v1/me", rt), rt, CustomerMount{Auth: a, Providers: providers})
 	RegisterWebhookRoutes(router.NewMux(table, "/v1/webhooks", rt), rt)
@@ -222,11 +257,12 @@ func serveSafely(h http.Handler, r *http.Request) (code int) {
 	return rec.Code
 }
 
-// Mount stacks exactly the tier's middleware on each route, in AuthKit's
-// order: Required on a customer route; RequirePermission for the route's
-// guard and, for one that moves money or removes access by a user in person,
-// Sensitive on a staff route; nothing on an open route.
-func TestMountComposesTierMiddleware(t *testing.T) {
+// Each tier asks the host's auth exactly what it needs, once: who the
+// request is on every gated route; a staff route's permission in the
+// mount's Scope; a person's recent sign-in on a route that moves money or
+// removes access, never an application's; the access read each mounted
+// group's permission; nothing on an open route.
+func TestGatesAskTheVerified(t *testing.T) {
 	for _, who := range []billingauth.Identity{authtest.User(userA), authtest.Application(userA)} {
 		rec := &recordingAuth{who: who}
 		table, _ := everyGatedSurface(t, rec)
@@ -243,17 +279,16 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			var want []string
 			switch r.Auth {
 			case AuthCustomer, AuthApplication, AuthProvisioning:
-				want = []string{"Required"}
+				want = []string{"Authenticate"}
 			case AuthSignedIn:
-				// The access read asks each mounted group's permission.
-				want = []string{"Required"}
+				want = []string{"Authenticate"}
 				for _, perm := range []string{staffPermissions.AdminRead, staffPermissions.AdminUpdate, staffPermissions.Catalog, staffPermissions.MerchantConfig, staffPermissions.Metrics} {
-					want = append(want, "RequirePermission:"+perm)
+					want = append(want, "Can:"+perm)
 				}
 			case AuthMerchant:
-				want = []string{"RequirePermission:" + staffPermissions.For(r)}
-				if Sensitive(r) && billingauth.Interactive(who) {
-					want = append(want, "Sensitive")
+				want = []string{"Authenticate", "Can:" + staffPermissions.For(r)}
+				if Sensitive(r) && who.SubjectKind == billingauth.SubjectUser {
+					want = append(want, "CheckRecentSignIn")
 					sensitive++
 				}
 			}
@@ -264,15 +299,15 @@ func TestMountComposesTierMiddleware(t *testing.T) {
 			checked++
 		}
 		require.NotZero(t, checked)
-		if billingauth.Interactive(who) {
+		if who.SubjectKind == billingauth.SubjectUser {
 			require.NotZero(t, sensitive)
 		}
 	}
 }
 
-// A pass-through Auth, whose middleware checks nothing and admits no identity,
-// gets no route past OpenRails' own check: every gated route is refused
-// before its handler.
+// An Authenticator that admits a request without saying who it is gets no
+// route past OpenRails' own check: every gated route is refused before its
+// handler.
 func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 	table, _ := everyGatedSurface(t, authtest.PassThrough{})
 	h := table.Handler()
@@ -285,11 +320,8 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 		req := httptest.NewRequest(r.Method, filled(r.Path), strings.NewReader("{}"))
 		req.Header.Set("Authorization", "Bearer forged")
 		code := serveSafely(h, req)
-		if r.CatalogUpdate() || code == http.StatusNotFound {
-			// Unmounted for this configuration (a feature it lacks).
-			if code == http.StatusNotFound {
-				continue
-			}
+		if code == http.StatusNotFound {
+			continue // unmounted for this configuration
 		}
 		require.Equal(t, http.StatusUnauthorized, code, r.Key())
 		gated++
@@ -301,7 +333,7 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 // it, by any path, it answers 401 and does not run.
 func TestHandlersRecheckTheirVerdict(t *testing.T) {
 	rt := gatedRuntime(t)
-	env := newEnv(rt, Options{Auth: authtest.Deny{}, Permissions: staffPermissions})
+	env := newEnv(rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: staffPermissions})
 	env.Customers = authtest.Deny{}
 	for _, r := range Catalog() {
 		if r.Auth != AuthCustomer && r.Auth != AuthMerchant {
@@ -340,12 +372,11 @@ func TestHandlersRecheckTheirVerdict(t *testing.T) {
 func TestCustomerGate(t *testing.T) {
 	rt := gatedRuntime(t)
 	run := func(who billingauth.Identity, header map[string]string) (int, customerscope.Scope) {
-		a := &recordingAuth{who: who}
 		table := &router.Table{}
 		var seen customerscope.Scope
 		mux := router.NewMux(table, "/v1/me", rt)
 		env := newEnv(rt, Options{})
-		env.Customers = a
+		env.Customers = &recordingAuth{who: who}
 		route, _ := Lookup(GET, "/v1/me")
 		mux.Handle(GET, "", func(r *httprequest.Request) {
 			seen, _ = r.CustomerScope()
@@ -389,132 +420,177 @@ func TestCustomerGate(t *testing.T) {
 	}
 }
 
-// The staff gate refuses what the host's middleware admitted without an
-// identity and anything at another merchant.
+// refusal is what a gate answered.
+type refusal struct {
+	status    int
+	code      string
+	challenge string
+	metadata  map[string]any
+	staff     billingauth.Staff
+}
+
+// runRoute serves key behind its gates, with a and the test scope.
+func runRoute(t *testing.T, rt *app.Runtime, a billingauth.Authenticator, key string, header map[string]string) refusal {
+	t.Helper()
+	method, path, _ := strings.Cut(key, " ")
+	route, ok := Lookup(method, path)
+	require.True(t, ok, key)
+	env := newEnv(rt, Options{Auth: a, Scope: testScope, Permissions: staffPermissions})
+	table := &router.Table{}
+	var out refusal
+	router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) {
+		out.staff, _ = r.Staff()
+		r.NoContent()
+	}, env.gates(route)...)
+	req := httptest.NewRequest(route.Method, filled(route.Path), strings.NewReader("{}"))
+	req.Header.Set("Authorization", "Bearer any")
+	for k, v := range header {
+		req.Header.Set(k, v)
+	}
+	rec := httptest.NewRecorder()
+	table.Handler().ServeHTTP(rec, req)
+	out.status, out.challenge = rec.Code, rec.Header().Get("WWW-Authenticate")
+	var body struct {
+		Error struct {
+			Code     string         `json:"code"`
+			Metadata map[string]any `json:"metadata"`
+		} `json:"error"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &body)
+	out.code, out.metadata = body.Error.Code, body.Error.Metadata
+	return out
+}
+
+const refund = "POST /v1/admin/payments/{id}/refunds"
+
+// The staff gate admits a person or an application holding the route's
+// permission in the mount's scope, at the mount's merchant; a person on an
+// operation that moves money also proves a recent sign-in, whatever
+// credential it presents. An application passes on its permission alone.
 func TestStaffGate(t *testing.T) {
 	rt := gatedRuntime(t)
-	run := func(a billingauth.Auth, key string, header map[string]string) (int, billingauth.Staff) {
-		method, path, _ := strings.Cut(key, " ")
-		route, ok := Lookup(method, path)
-		require.True(t, ok, key)
-		env := newEnv(rt, Options{Auth: a, Permissions: staffPermissions})
-		table := &router.Table{}
-		var seen billingauth.Staff
-		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) {
-			seen, _ = r.Staff()
-			r.NoContent()
-		}, env.gates(route)...)
-		req := httptest.NewRequest(route.Method, filled(route.Path), strings.NewReader("{}"))
-		for k, v := range header {
-			req.Header.Set(k, v)
-		}
-		return serveSafely(table.Handler(), req), seen
-	}
 	person := authtest.User(userA)
 	service := authtest.Application("svc_1")
 	personalKey := person
 	personalKey.Credential = billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "pk_1"}
 
-	code, staff := run(&recordingAuth{who: person}, "POST /v1/admin/payments/{id}/refunds", nil)
-	require.Equal(t, http.StatusNoContent, code)
-	require.Equal(t, billingauth.Staff{Identity: person, Route: "POST /v1/admin/payments/{id}/refunds", Merchant: merchantA}, staff)
+	got := runRoute(t, rt, &recordingAuth{who: person}, refund, nil)
+	require.Equal(t, http.StatusNoContent, got.status, got.code)
+	require.Equal(t, billingauth.Staff{Identity: person, Route: refund, Merchant: merchantA}, got.staff)
 
 	// A checkout session is an ordinary staff write: whoever creates it, its
 	// customer pays it, and a saved card needs that customer's own proof.
 	for _, who := range []billingauth.Identity{person, service, personalKey} {
-		code, staff = run(&recordingAuth{who: who}, "POST /v1/admin/checkout-sessions", nil)
-		require.Equal(t, http.StatusNoContent, code, who.Credential.Kind)
-		require.Equal(t, "POST /v1/admin/checkout-sessions", staff.Route)
+		got = runRoute(t, rt, &recordingAuth{who: who}, "POST /v1/admin/checkout-sessions", nil)
+		require.Equal(t, http.StatusNoContent, got.status, who.Credential.Kind)
+		require.Equal(t, "POST /v1/admin/checkout-sessions", got.staff.Route)
 	}
 
+	stepUp := &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute, Metadata: map[string]any{"step_up_methods": []any{"password"}}}
+	revoked := errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
 	for name, tc := range map[string]struct {
-		auth   billingauth.Auth
-		header map[string]string
-		status int
+		auth      billingauth.Authenticator
+		header    map[string]string
+		status    int
+		code      string
+		challenge string
 	}{
-		"admitted without an identity":   {authtest.PassThrough{}, nil, http.StatusUnauthorized},
-		"an unknown subject kind":        {&recordingAuth{who: withKind(person, "")}, nil, http.StatusForbidden},
-		"no invoker":                     {&recordingAuth{who: withInvoker(person, billingauth.Invoker{})}, nil, http.StatusUnauthorized},
-		"another merchant's selector":    {&recordingAuth{who: person}, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, http.StatusConflict},
-		"a refusing RequirePermission":   {&refusingPermission{recordingAuth{who: person}}, nil, http.StatusForbidden},
-		"a panicking Identity":           {panickingIdentity{}, nil, http.StatusUnauthorized},
-		"a refusing Sensitive (step-up)": {&staleAuth{recordingAuth{who: person}}, nil, http.StatusForbidden},
+		"no credential":                       {authtest.Deny{}, map[string]string{"Authorization": ""}, 401, "authentication_required", "Bearer"},
+		"a refused credential":                {authtest.Deny{}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
+		"an expired credential":               {&recordingAuth{authErr: errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)}, nil, 401, "credential_expired", `Bearer error="invalid_token"`},
+		"a revoked credential":                {&recordingAuth{authErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
+		"a missing sender proof":              {&recordingAuth{authErr: errors.Join(auth.ErrUnauthenticated, auth.ErrSenderProofRequired)}, nil, 401, "sender_proof_required", `DPoP error="invalid_dpop_proof"`},
+		"a provider's own challenge":          {&recordingAuth{authErr: &auth.Challenge{Err: auth.ErrSenderProofRequired, Header: http.Header{"Www-Authenticate": {`DPoP error="use_dpop_nonce"`}}}}, nil, 401, "sender_proof_required", `DPoP error="use_dpop_nonce"`},
+		"a credential refused here":           {&recordingAuth{authErr: auth.ErrForbidden}, nil, 403, "permission_required", ""},
+		"auth unavailable":                    {&recordingAuth{authErr: auth.ErrUnavailable}, nil, 503, "authentication_unavailable", ""},
+		"an unclassified error":               {&recordingAuth{authErr: errors.New("boom")}, nil, 503, "authentication_unavailable", ""},
+		"a panicking Authenticate":            {panicking{}, nil, 503, "authentication_unavailable", ""},
+		"a panicking Identity":                {panicking{identity: true}, nil, 503, "authentication_unavailable", ""},
+		"neither a Verified nor an error":     {nothing{}, nil, 503, "authentication_unavailable", ""},
+		"an unknown subject kind":             {&recordingAuth{who: withKind(person, "")}, nil, 403, "permission_required", ""},
+		"no invoker":                          {&recordingAuth{who: withInvoker(person, billingauth.Invoker{})}, nil, 401, "authentication_required", `Bearer error="invalid_token"`},
+		"another merchant's selector":         {&recordingAuth{who: person}, map[string]string{merchant.SelectorHeader: "id:" + merchantB.String()}, 409, "merchant_binding_mismatch", ""},
+		"a permission not held":               {&recordingAuth{who: person, allowed: map[string]bool{}}, nil, 403, "permission_required", ""},
+		"a Can whose sign-in was revoked":     {&recordingAuth{who: person, canErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
+		"a Can that could not run":            {&recordingAuth{who: person, canErr: errors.New("db")}, nil, 503, "authorization_unavailable", ""},
+		"a Can that refuses with an error":    {&recordingAuth{who: person, canErr: auth.ErrForbidden}, nil, 503, "authorization_unavailable", ""},
+		"a stale sign-in":                     {&recordingAuth{who: person, signInErr: stepUp}, nil, 401, "step_up_required", `Bearer error="insufficient_user_authentication", max_age="900"`},
+		"no sign-in of its own":               {&recordingAuth{who: person, signInErr: auth.ErrForbidden}, nil, 403, "step_up_unavailable", ""},
+		"a person who cannot prove a sign-in": {&recordingAuth{who: person, noSignIn: true}, nil, 403, "step_up_unavailable", ""},
+		"a person's API key":                  {&recordingAuth{who: personalKey, noSignIn: true}, nil, 403, "step_up_unavailable", ""},
+		"a sign-in revoked since":             {&recordingAuth{who: person, signInErr: revoked}, nil, 401, "credential_revoked", `Bearer error="invalid_token"`},
+		"a sign-in check that could not run":  {&recordingAuth{who: person, signInErr: auth.ErrUnavailable}, nil, 503, "authentication_unavailable", ""},
 	} {
-		code, _ := run(tc.auth, "POST /v1/admin/payments/{id}/refunds", tc.header)
-		require.Equal(t, tc.status, code, name)
+		got := runRoute(t, rt, tc.auth, refund, tc.header)
+		require.Equal(t, tc.status, got.status, "%s: %s", name, got.code)
+		require.Equal(t, tc.code, got.code, name)
+		require.Equal(t, tc.challenge, got.challenge, name)
 	}
+	got = runRoute(t, rt, &recordingAuth{who: person, signInErr: stepUp}, refund, nil)
+	require.Equal(t, map[string]any{"step_up_methods": []any{"password"}}, got.metadata, "the provider's challenge reaches its client")
+	got = runRoute(t, rt, &recordingAuth{who: service, signInErr: stepUp, noSignIn: true}, refund, nil)
+	require.Equal(t, http.StatusNoContent, got.status, "an application has no sign-in to renew")
+	got = runRoute(t, rt, &recordingAuth{who: person, signInErr: stepUp}, "GET /v1/admin/payments", nil)
+	require.Equal(t, http.StatusNoContent, got.status, "a read asks no sign-in")
+
 	// A programmatic route takes only an application: a person is refused,
 	// whatever their roles grant or their credential is.
 	for _, who := range []billingauth.Identity{person, personalKey} {
-		code, _ = run(&recordingAuth{who: who}, "GET /v1/app/host-events", nil)
-		require.Equal(t, http.StatusForbidden, code, who.Credential.Kind)
+		got = runRoute(t, rt, &recordingAuth{who: who}, "GET /v1/app/host-events", nil)
+		require.Equal(t, http.StatusForbidden, got.status, who.Credential.Kind)
+		require.Equal(t, "application_required", got.code)
 	}
-	code, staff = run(&recordingAuth{who: service}, "GET /v1/app/host-events", nil)
-	require.Equal(t, http.StatusNoContent, code)
-	require.Equal(t, "GET /v1/app/host-events", staff.Route)
-	code, _ = run(&refusingPermission{recordingAuth{who: service}}, "GET /v1/app/host-events", nil)
-	require.Equal(t, http.StatusNoContent, code, "no permission is involved")
+	got = runRoute(t, rt, &recordingAuth{who: service, allowed: map[string]bool{}}, "GET /v1/app/host-events", nil)
+	require.Equal(t, http.StatusNoContent, got.status, "no permission is involved")
+	require.Equal(t, "GET /v1/app/host-events", got.staff.Route)
 	// Its writes run once per Idempotency-Key.
-	code, _ = run(&recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
-	require.Equal(t, http.StatusBadRequest, code, "a programmatic write without an Idempotency-Key")
-	code, _ = run(&staleAuth{recordingAuth{who: service}}, "POST /v1/admin/payments/{id}/refunds", nil)
-	require.Equal(t, http.StatusNoContent, code, "automation has no sign-in to renew")
-	code, _ = run(&staleAuth{recordingAuth{who: personalKey}}, "POST /v1/admin/payments/{id}/refunds", nil)
-	require.Equal(t, http.StatusNoContent, code, "a user's API key automates the account")
+	got = runRoute(t, rt, &recordingAuth{who: service}, "POST /v1/app/host-events/acknowledge", nil)
+	require.Equal(t, http.StatusBadRequest, got.status, "a programmatic write without an Idempotency-Key")
+
 	unbound := gatedRuntime(t)
 	unbound.SetConfiguredMerchant(billing.MerchantID{})
-	env := newEnv(unbound, Options{Auth: &recordingAuth{who: person}, Permissions: staffPermissions})
-	route, _ := Lookup(GET, "/v1/admin/payments")
-	table := &router.Table{}
-	router.NewMux(table, "", unbound).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, env.gates(route)...)
-	require.Equal(t, http.StatusForbidden, serveSafely(table.Handler(), httptest.NewRequest(GET, "/v1/admin/payments", nil)), "no configured merchant, no admin API")
+	got = runRoute(t, unbound, &recordingAuth{who: person}, "GET /v1/admin/payments", nil)
+	require.Equal(t, http.StatusForbidden, got.status, "no configured merchant, no admin API")
 }
 
-type refusingPermission struct{ recordingAuth }
+// panicking is a broken provider.
+type panicking struct{ identity bool }
 
-func (*refusingPermission) RequirePermission(string) func(http.Handler) http.Handler {
-	fake := &authtest.Fake{}
-	token := fake.Person(userA)
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			r = r.Clone(r.Context())
-			r.Header.Set("Authorization", "Bearer "+token)
-			fake.RequirePermission("anything")(next).ServeHTTP(w, r)
-		})
+func (p panicking) Authenticate(*http.Request) (billingauth.Verified, error) {
+	if p.identity {
+		return p, nil
 	}
-}
-
-type staleAuth struct{ recordingAuth }
-
-func (*staleAuth) Sensitive() func(http.Handler) http.Handler {
-	return (&authtest.Fake{}).Sensitive()
-}
-
-type panickingIdentity struct{ authtest.PassThrough }
-
-func (panickingIdentity) Identity(context.Context) (billingauth.Identity, bool) {
 	panic("broken provider")
 }
 
-// Mount refuses a route the Auth gives no middleware for: nothing is
-// mounted open.
+func (panicking) Identity() billingauth.Identity { panic("broken provider") }
+
+// nothing answers neither a Verified nor an error.
+type nothing struct{}
+
+func (nothing) Authenticate(*http.Request) (billingauth.Verified, error) { return nil, nil }
+
+// Mount refuses a route it cannot gate: nothing is mounted open.
 func TestMountFailsClosed(t *testing.T) {
 	rt := gatedRuntime(t)
 	for name, mount := range map[string]func(){
 		"admin without Auth": func() {
-			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Permissions: staffPermissions})
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Scope: testScope, Permissions: staffPermissions})
 		},
 		"admin with a typed nil Auth": func() {
-			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: (*authtest.Fake)(nil), Permissions: staffPermissions})
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: (*authtest.Fake)(nil), Scope: testScope, Permissions: staffPermissions})
+		},
+		"admin without Scope": func() {
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Permissions: staffPermissions})
 		},
 		"a blank permission": func() {
-			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{MerchantConfig: " "}})
+			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: " "}})
 		},
 		"customers without Auth": func() {
 			RegisterCustomerRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
 		},
-		"a nil RequirePermission": func() {
-			RegisterStaffRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{Auth: nilPermission{}, Permissions: staffPermissions})
+		"programmatic without Auth": func() {
+			RegisterAppRoutes(router.NewMux(&router.Table{}, "/v1", rt), rt, Options{})
 		},
 	} {
 		require.PanicsWithError(t, mountErrorFor(t, mount), mount, name)
@@ -524,10 +600,6 @@ func TestMountFailsClosed(t *testing.T) {
 	RegisterStaffRoutes(router.NewMux(none, "/v1", rt), rt, Options{Auth: authtest.Deny{}})
 	require.Empty(t, none.Entries)
 }
-
-type nilPermission struct{ authtest.Deny }
-
-func (nilPermission) RequirePermission(string) func(http.Handler) http.Handler { return nil }
 
 func mountErrorFor(t *testing.T, mount func()) (msg string) {
 	t.Helper()
@@ -542,11 +614,12 @@ func mountErrorFor(t *testing.T, mount func()) (msg string) {
 }
 
 // The checkout viewer shows saved cards only to the session's own customer:
-// a presented credential the Auth admits binds that customer; a refused or
-// absent one leaves the capability alone.
+// a presented credential the Authenticator admits as a person in person
+// binds that customer; a refused or absent one, or an application, leaves
+// the capability alone.
 func TestCheckoutViewer(t *testing.T) {
 	route, _ := Lookup(GET, "/v1/checkout-sessions/{id}")
-	run := func(a billingauth.Auth, authorization string) (bool, customerscope.Scope) {
+	run := func(a billingauth.Authenticator, authorization string) (bool, customerscope.Scope) {
 		env := newEnv(gatedRuntime(t), Options{Auth: a})
 		var scope customerscope.Scope
 		var bound, reached bool
@@ -573,6 +646,8 @@ func TestCheckoutViewer(t *testing.T) {
 	}
 	bound, _ = run(nil, "Bearer "+fake.Person(userB))
 	require.False(t, bound, "a mount without Auth shows no saved cards")
+	bound, _ = run(panicking{}, "Bearer any")
+	require.False(t, bound, "a panicking provider shows no saved cards")
 }
 
 // Only the route gate makes a customer scope or binds a verdict.
@@ -615,7 +690,7 @@ func TestBindersHaveOneSite(t *testing.T) {
 			}
 			name := pkg.Name + "." + sel.Sel.Name
 			switch name {
-			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff", "billingauth.BindMerchant":
+			case "customerscope.Bind", "billingauth.BindIdentity", "billingauth.BindStaff", "billingauth.BindMerchant", "billingauth.BindVerified":
 				rel, _ := filepath.Rel(root, path)
 				calls[name] = append(calls[name], filepath.ToSlash(rel))
 			}
@@ -629,6 +704,7 @@ func TestBindersHaveOneSite(t *testing.T) {
 		"billingauth.BindIdentity": {gate},
 		"billingauth.BindStaff":    {gate},
 		"billingauth.BindMerchant": {gate},
+		"billingauth.BindVerified": {gate},
 	}, calls)
 }
 
@@ -642,20 +718,18 @@ func withInvoker(id billingauth.Identity, invoker billingauth.Invoker) billingau
 	return id
 }
 
-var _ = merchanttarget.FromContext
-
 // The access read answers, for any signed-in caller, each mounted group the
 // caller holds: none, read or update for customer support, and whether the
 // catalog, merchant config and metrics are theirs.
 func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 	rt := gatedRuntime(t)
 	read := func(perms Permissions, allowed ...string) billing.AdminAccess {
-		gate := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}, allowed: map[string]bool{}}
+		gate := &recordingAuth{who: authtest.User(userA), allowed: map[string]bool{}}
 		for _, perm := range allowed {
 			gate.allowed[perm] = true
 		}
 		table := &router.Table{}
-		RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: gate, Permissions: perms})
+		RegisterStaffRoutes(router.NewMux(table, "/v1", rt), rt, Options{Auth: gate, Scope: testScope, Permissions: perms})
 		rec := do(table.Handler(), http.MethodGet, "/v1/admin/access", nil)
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		var access billing.AdminAccess
