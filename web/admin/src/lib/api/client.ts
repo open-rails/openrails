@@ -158,6 +158,16 @@ export class ApiError extends Error {
   get isPermissionDenied() {
     return this.status === 403
   }
+
+  // The object changed since the revision the request named.
+  get revisionMismatch() {
+    return this.status === 409 && this.code === "revision_mismatch"
+  }
+
+  // The merchant's configuration is read from a file: no edit applies.
+  get merchantConfigReadOnly() {
+    return this.status === 409 && this.code === "merchant_config_read_only"
+  }
 }
 
 async function parseError(res: Response): Promise<ApiError> {

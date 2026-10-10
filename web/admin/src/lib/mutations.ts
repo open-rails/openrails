@@ -4,8 +4,13 @@ import {
   selectedMerchant,
 } from "@/lib/api/client"
 import type {
+  CreateAlertWebhookParams,
+  CreatePSPParams,
   CreatePriceParams,
   Meter,
+  UpdateAlertWebhookParams,
+  UpdateMerchantConfigurationParams,
+  UpdatePSPParams,
   UpdateProductParams,
 } from "@/lib/api/generated/wire"
 import {
@@ -23,8 +28,6 @@ import {
   createPrice,
   createProduct,
   createWebhook,
-  rotateWebhookURL,
-  archivePSP,
   createPSP,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
@@ -34,7 +37,6 @@ import {
   listCustomers,
   listPayments,
   listSubscriptions,
-  applyMerchantSettings,
   putUsageMeterRateCard,
   putCustomerUsageRateOverride,
   updatePSP,
@@ -49,8 +51,10 @@ import {
   resumeSubscription,
   revokeProductAccess,
   updateCustomer,
+  updateMerchantConfiguration,
   updatePrice,
   updateProduct,
+  updateWebhook,
   type DefaultUsageRateCardRequest,
   type CustomerUsageRateOverrideRequest,
   type PaymentFilters,
@@ -58,9 +62,6 @@ import {
   type ProductRequest,
   type UsageMeterRequest,
   type SubscriptionFilters,
-  type CreatePSPRequest,
-  type UpdatePSPRequest,
-  type WebhookRequest,
 } from "@/lib/api/endpoints"
 import {
   askMetrics,
@@ -73,8 +74,8 @@ import type {
   ChangeSubscriptionParams,
   Customer,
 } from "@/lib/api/generated/wire"
-import type { MerchantSettings, AdminSubscription } from "@/lib/api/types"
-import { merchantQueryKeys } from "@/lib/queries"
+import type { AdminSubscription } from "@/lib/api/types"
+import { adminQueries, merchantQueryKeys } from "@/lib/queries"
 
 const EXPORT_PAGE = 200
 
@@ -669,19 +670,17 @@ export const adminMutations = {
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
-  updateMerchantSettings: (queryClient: QueryClient) => {
+  // Merchant-config edits: a refused revision means the form is stale, so
+  // reload either way; merchant_config_read_only rereads the capabilities so
+  // the console turns read-only.
+  updateMerchantConfiguration: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.settings(), "update"],
-      mutationFn: ({
-        revision,
-        settings,
-      }: {
-        revision: string
-        settings: MerchantSettings
-      }) => applyMerchantSettings(revision, settings),
-      // A refused revision means the form is stale: reload either way.
+      mutationFn: (update: UpdateMerchantConfigurationParams) =>
+        updateMerchantConfiguration(update),
       onSettled: invalidateExactOnSuccess(queryClient, keys.settings()),
+      onError: readOnlyNow(queryClient),
     })
   },
   createPSP: (queryClient: QueryClient) => {
@@ -691,17 +690,20 @@ export const adminMutations = {
       mutationKey: [...keys.settings(), "psps", "create"],
       retry: false,
       gcTime: 0,
-      mutationFn: (psp: CreatePSPRequest) => {
+      mutationFn: (psp: CreatePSPParams) => {
         if (selectedMerchant() !== merchant)
           throw new Error("Merchant changed; reopen this form before saving")
         return createPSP(psp)
       },
-      onSuccess: invalidateExactOnSuccess(queryClient, [
+      onSettled: invalidateExactOnSuccess(queryClient, [
         ...keys.settings(),
         "psps",
       ]),
+      onError: readOnlyNow(queryClient),
     })
   },
+  // Rotation, settings and archiving: one PATCH at the revision the caller
+  // read. A refused revision reloads the list.
   updatePSP: (queryClient: QueryClient) => {
     const merchant = selectedMerchant()
     const keys = merchantQueryKeys()
@@ -709,27 +711,16 @@ export const adminMutations = {
       mutationKey: [...keys.settings(), "psps", "update"],
       retry: false,
       gcTime: 0,
-      mutationFn: ({ id, psp }: { id: string; psp: UpdatePSPRequest }) => {
+      mutationFn: ({ id, psp }: { id: string; psp: UpdatePSPParams }) => {
         if (selectedMerchant() !== merchant)
           throw new Error("Merchant changed; reopen this form before saving")
         return updatePSP(id, psp)
       },
-      onSuccess: invalidateExactOnSuccess(queryClient, [
+      onSettled: invalidateExactOnSuccess(queryClient, [
         ...keys.settings(),
         "psps",
       ]),
-    })
-  },
-  archivePSP: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    return mutationOptions({
-      mutationKey: [...keys.settings(), "psps", "archive"],
-      mutationFn: ({ id, allowLast }: { id: string; allowLast?: boolean }) =>
-        archivePSP(id, allowLast),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.settings(),
-        "psps",
-      ]),
+      onError: readOnlyNow(queryClient),
     })
   },
   setCreditLimit: () => {
@@ -777,27 +768,30 @@ export const adminMutations = {
       },
     })
   },
+  // Alert webhooks live in the merchant's configuration, so a change moves
+  // its revision too.
   createWebhook: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.alerts(), "webhooks", "create"],
-      mutationFn: (webhook: WebhookRequest) => createWebhook(webhook),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.alerts(),
-        "webhooks",
-      ]),
+      mutationFn: (webhook: CreateAlertWebhookParams) => createWebhook(webhook),
+      onSuccess: webhooksChanged(queryClient, keys),
+      onError: readOnlyNow(queryClient),
     })
   },
-  rotateWebhookURL: (queryClient: QueryClient) => {
+  updateWebhook: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
-      mutationKey: [...keys.alerts(), "webhooks", "rotate"],
-      mutationFn: ({ id, url }: { id: string; url: string }) =>
-        rotateWebhookURL(id, url),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.alerts(),
-        "webhooks",
-      ]),
+      mutationKey: [...keys.alerts(), "webhooks", "update"],
+      mutationFn: ({
+        id,
+        webhook,
+      }: {
+        id: string
+        webhook: UpdateAlertWebhookParams
+      }) => updateWebhook(id, webhook),
+      onSuccess: webhooksChanged(queryClient, keys),
+      onError: readOnlyNow(queryClient),
     })
   },
   deleteWebhook: (queryClient: QueryClient) => {
@@ -805,10 +799,23 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...keys.alerts(), "webhooks", "delete"],
       mutationFn: (id: string) => deleteWebhook(id),
-      onSuccess: invalidateExactOnSuccess(queryClient, [
-        ...keys.alerts(),
-        "webhooks",
-      ]),
+      onSuccess: webhooksChanged(queryClient, keys),
+      onError: readOnlyNow(queryClient),
     })
   },
 }
+
+const readOnlyNow = (queryClient: QueryClient) => (err: Error) => {
+  if (err instanceof ApiError && err.merchantConfigReadOnly)
+    void queryClient.invalidateQueries({
+      queryKey: adminQueries.config().queryKey,
+    })
+}
+
+const webhooksChanged =
+  (queryClient: QueryClient, keys: ReturnType<typeof merchantQueryKeys>) =>
+  () =>
+    Promise.all([
+      invalidateExact(queryClient, [...keys.alerts(), "webhooks"]),
+      invalidateExact(queryClient, keys.settings()),
+    ])

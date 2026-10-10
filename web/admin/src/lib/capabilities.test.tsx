@@ -10,6 +10,7 @@ import {
   useCatalogWrites,
   useDashboardLayout,
   useMerchantConfig,
+  useMerchantConfigEdits,
   useMetrics,
 } from "@/lib/capabilities"
 import { adminQueries } from "@/lib/queries"
@@ -51,6 +52,24 @@ const holding = (access: AdminAccess | null) => {
   return render(<Probe />, queries)
 }
 
+function EditsProbe() {
+  return <span>{useMerchantConfigEdits() ? "edits" : "read-only"}</span>
+}
+
+// configured mounts the public configuration with features.
+const configured = (features: Record<string, boolean> | null) => {
+  const queries = client()
+  if (features)
+    queries.setQueryData(adminQueries.config().queryKey, {
+      capabilities: { route_groups: { merchant_config: true }, features },
+      currencies: [],
+      rails: [],
+      payment: null,
+      captcha: null,
+    })
+  return render(<EditsProbe />, queries)
+}
+
 const none: AdminAccess = {
   admin: "none",
   catalog: false,
@@ -78,6 +97,13 @@ describe("the console's areas", () => {
   it("show no access to a caller holding nothing", () => {
     expect(hasAnyArea(none)).toBe(false)
     expect(hasAnyArea({ ...none, metrics: true })).toBe(true)
+  })
+
+  it("offer configuration edits only where the configuration is editable", () => {
+    expect(configured({ merchant_config_edits: true })).toContain(">edits<")
+    expect(configured({ merchant_config_edits: false })).toContain("read-only")
+    expect(configured({})).toContain("read-only")
+    expect(configured(null)).toContain("read-only")
   })
 
   it("leave the settings tabs they own when not held", () => {

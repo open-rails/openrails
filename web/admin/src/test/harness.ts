@@ -220,7 +220,8 @@ const CACHE_KEYS = (): Record<string, QueryKey> => ({
   catalog: queryKeys.catalog(), drift: queryKeys.catalogDrift(),
   meters: queryKeys.usageMeters(), meter: queryKeys.usageMeter("tokens"),
   settings: queryKeys.settings(), psps: [...queryKeys.settings(), "psps"],
-  alerts: queryKeys.alerts(), ops: queryKeys.ops(),
+  alerts: queryKeys.alerts(), webhooks: [...queryKeys.alerts(), "webhooks"],
+  ops: queryKeys.ops(),
   dashboard: queryKeys.dashboard(), notifications: queryKeys.notifications(),
 })
 

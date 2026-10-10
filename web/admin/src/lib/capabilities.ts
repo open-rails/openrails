@@ -38,6 +38,14 @@ export function useCatalogArea(): boolean {
   return useAccess()?.catalog ?? false
 }
 
+// useMerchantConfigEdits reports whether that configuration can change here:
+// Vault holds it. Read from a file it is read-only and its edit routes are not
+// mounted, so the console offers no edits.
+export function useMerchantConfigEdits(): boolean {
+  const { data } = useQuery(adminQueries.config())
+  return data?.capabilities.features?.merchant_config_edits ?? false
+}
+
 // useCatalogWrites reports whether the caller may edit the catalog: the
 // catalog area is theirs.
 export function useCatalogWrites(): boolean {

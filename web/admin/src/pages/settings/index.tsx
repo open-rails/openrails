@@ -35,7 +35,12 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import type { PSP, RailDefinition } from "@/lib/api/types"
+import type {
+  MerchantConfigurationState,
+  PSP,
+  PSPCredential,
+  RailDefinition,
+} from "@/lib/api/generated/wire"
 import {
   amountFromInput,
   currencyScale,
@@ -45,8 +50,7 @@ import {
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import { adminMutations } from "@/lib/mutations"
 import { useAuth } from "@/lib/auth"
-import { toastApiError } from "@/lib/toast"
-import { PSPPublicationAttempts } from "@/lib/psp-publication"
+import { toastApiError, toastStaleEdit } from "@/lib/toast"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
 import { adminQueries } from "@/lib/queries"
 import {
@@ -54,9 +58,17 @@ import {
   useAdminArea,
   useAdminUpdates,
   useMerchantConfig,
+  useMerchantConfigEdits,
 } from "@/lib/capabilities"
 import { extensionSettingsTabs, useExtensions } from "@/extensions/registry"
 import type { ConsoleSettingsTab } from "@/extensions/types"
+import { useConfigurationEdit } from "./configuration-edit"
+import {
+  EditActions,
+  ReadOnlyNotice,
+  SettingDetail,
+  SettingEditField,
+} from "./setting-fields"
 import { NotificationsTab } from "./notifications"
 
 const LINE_TAB =
@@ -169,70 +181,52 @@ function HostedTab({ tab }: { tab: ConsoleSettingsTab }) {
   return <loaded.Component />
 }
 
-function MerchantSettingsTab() {
-  const { data, isPending: loading } = useQuery(
-    adminQueries.merchantConfiguration("Load settings")
-  )
-  if (loading || !data)
-    return <p className="text-sm text-muted-foreground">Loading…</p>
+export function MerchantSettingsTab() {
+  const { data } = useQuery(adminQueries.merchantConfiguration("Load settings"))
+  const edits = useMerchantConfigEdits()
+  if (!data) return <p className="text-sm text-muted-foreground">Loading…</p>
   return (
     <div className="grid gap-10">
-      <MerchantProfileForm
-        revision={data.revision}
-        initial={data.settings.profile}
-      />
-      <RepriceNoticeWindowForm
-        revision={data.revision}
-        initial={data.settings.reprice_notice_window_days}
-      />
+      <ReadOnlyNotice />
+      <MerchantProfileForm configuration={data} edits={edits} />
+      <RepriceNoticeWindowForm configuration={data} edits={edits} />
     </div>
   )
 }
 
 function MerchantProfileForm({
-  revision,
-  initial,
+  configuration,
+  edits,
 }: {
-  revision: string
-  initial?: {
-    display_name?: string
-    from_email?: string
-    support_url?: string
-    logo_url?: string
-  }
+  configuration: MerchantConfigurationState
+  edits: boolean
 }) {
-  const [editing, setEditing] = React.useState(false)
-  const queryClient = useQueryClient()
-  const updateSettings = useMutation(
-    adminMutations.updateMerchantSettings(queryClient)
-  )
+  // The merchant's one name is the configuration's display_name.
+  const profile = configuration.settings.profile
+  const current = () => ({
+    displayName: configuration.display_name,
+    fromEmail: profile?.from_email ?? "",
+    supportURL: profile?.support_url ?? "",
+    logoURL: profile?.logo_url ?? "",
+  })
+  const edit = useConfigurationEdit(configuration)
   const form = useForm({
-    defaultValues: {
-      displayName: initial?.display_name ?? "",
-      fromEmail: initial?.from_email ?? "",
-      supportURL: initial?.support_url ?? "",
-      logoURL: initial?.logo_url ?? "",
-    },
-    onSubmit: async ({ value }) => {
-      try {
-        await updateSettings.mutateAsync({
-          revision,
+    defaultValues: current(),
+    onSubmit: ({ value }) =>
+      edit.save(
+        {
+          display_name: value.displayName.trim(),
           settings: {
             profile: {
-              display_name: value.displayName || undefined,
               from_email: value.fromEmail || undefined,
               support_url: value.supportURL || undefined,
               logo_url: value.logoURL || undefined,
             },
           },
-        })
-        form.reset(value)
-        toast.success("Profile saved")
-        setEditing(false)
-      } catch (err) {
-        toastApiError(err, "Save profile")
-      }
-    },
+        },
+        "Profile saved",
+        "Save profile"
+      ),
   })
 
   return (
@@ -244,46 +238,27 @@ function MerchantProfileForm({
             Customer-facing merchant details used on invoices and emails.
           </p>
         </div>
-        {editing ? (
-          <form.Subscribe selector={(state) => state.isSubmitting}>
-            {(isSubmitting) => (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    form.reset()
-                    setEditing(false)
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  form="merchant-profile-form"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            )}
-          </form.Subscribe>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setEditing(true)}
-          >
-            Edit
-          </Button>
-        )}
+        <form.Subscribe
+          selector={(state) => [state.canSubmit, state.isSubmitting]}
+        >
+          {([canSubmit, isSubmitting]) => (
+            <EditActions
+              edits={edits}
+              editing={edit.editing}
+              form="merchant-profile-form"
+              saving={isSubmitting}
+              canSave={canSubmit}
+              onEdit={() => {
+                form.reset(current())
+                edit.open()
+              }}
+              onCancel={edit.close}
+            />
+          )}
+        </form.Subscribe>
       </div>
 
-      {editing ? (
+      {edit.editing ? (
         <form
           id="merchant-profile-form"
           onSubmit={(event) => {
@@ -293,16 +268,26 @@ function MerchantProfileForm({
           }}
           className="grid gap-4"
         >
-          <form.Field name="displayName">
+          <form.Field
+            name="displayName"
+            validators={{
+              onChange: ({ value }) =>
+                value.trim() ? undefined : "Enter the merchant's name",
+            }}
+          >
             {(field) => (
               <SettingEditField label="Display name" id="s-name">
-                <Input
-                  id="s-name"
-                  value={field.state.value}
-                  onBlur={field.handleBlur}
-                  onChange={(event) => field.handleChange(event.target.value)}
-                  autoComplete="organization"
-                />
+                <div className="grid gap-1.5">
+                  <Input
+                    id="s-name"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                    autoComplete="organization"
+                    aria-invalid={field.state.meta.errors.length > 0}
+                  />
+                  <FormFieldErrors errors={field.state.meta.errors} />
+                </div>
               </SettingEditField>
             )}
           </form.Field>
@@ -350,53 +335,40 @@ function MerchantProfileForm({
           </form.Field>
         </form>
       ) : (
-        <form.Subscribe selector={(state) => state.values}>
-          {(profile) => (
-            <dl className="grid gap-4">
-              <SettingDetail label="Display name" value={profile.displayName} />
-              <SettingDetail label="From email" value={profile.fromEmail} />
-              <SettingDetail label="Support URL" value={profile.supportURL} />
-              <SettingDetail label="Logo URL" value={profile.logoURL} />
-            </dl>
-          )}
-        </form.Subscribe>
+        <dl className="grid gap-4">
+          <SettingDetail
+            label="Display name"
+            value={configuration.display_name}
+          />
+          <SettingDetail label="From email" value={profile?.from_email} />
+          <SettingDetail label="Support URL" value={profile?.support_url} />
+          <SettingDetail label="Logo URL" value={profile?.logo_url} />
+        </dl>
       )}
     </section>
   )
 }
 
-// RepriceNoticeWindowForm (#781): the merchant-configurable minimum advance
-// notice (days) a subscription price INCREASE must give existing
-// subscribers. The catalog price-change wizard reads this same value
-// (GET /v1/admin/configuration) for its own date-picker gate; the API
-// enforces it regardless of what the console shows.
+// RepriceNoticeWindowForm (#781): the minimum advance notice (days) a
+// subscription price increase must give existing subscribers. The price-change
+// wizard reads the same value; the API enforces it regardless.
 function RepriceNoticeWindowForm({
-  revision,
-  initial,
+  configuration,
+  edits,
 }: {
-  revision: string
-  initial?: number
+  configuration: MerchantConfigurationState
+  edits: boolean
 }) {
-  const [editing, setEditing] = React.useState(false)
-  const queryClient = useQueryClient()
-  const updateSettings = useMutation(
-    adminMutations.updateMerchantSettings(queryClient)
-  )
+  const days = configuration.settings.reprice_notice_window_days ?? 30
+  const edit = useConfigurationEdit(configuration)
   const form = useForm({
-    defaultValues: { days: String(initial ?? 30) },
-    onSubmit: async ({ value }) => {
-      try {
-        await updateSettings.mutateAsync({
-          revision,
-          settings: { reprice_notice_window_days: Number(value.days) },
-        })
-        form.reset(value)
-        toast.success("Notice window saved")
-        setEditing(false)
-      } catch (err) {
-        toastApiError(err, "Save notice window")
-      }
-    },
+    defaultValues: { days: String(days) },
+    onSubmit: ({ value }) =>
+      edit.save(
+        { settings: { reprice_notice_window_days: Number(value.days) } },
+        "Notice window saved",
+        "Save notice window"
+      ),
   })
 
   return (
@@ -408,48 +380,27 @@ function RepriceNoticeWindowForm({
             Set how much notice customers receive before a price increase.
           </p>
         </div>
-        {editing ? (
-          <form.Subscribe
-            selector={(state) => [state.canSubmit, state.isSubmitting]}
-          >
-            {([canSubmit, isSubmitting]) => (
-              <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={isSubmitting}
-                  onClick={() => {
-                    form.reset()
-                    setEditing(false)
-                  }}
-                >
-                  Cancel
-                </Button>
-                <Button
-                  type="submit"
-                  size="sm"
-                  form="notice-window-form"
-                  disabled={!canSubmit || isSubmitting}
-                >
-                  {isSubmitting ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            )}
-          </form.Subscribe>
-        ) : (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setEditing(true)}
-          >
-            Edit
-          </Button>
-        )}
+        <form.Subscribe
+          selector={(state) => [state.canSubmit, state.isSubmitting]}
+        >
+          {([canSubmit, isSubmitting]) => (
+            <EditActions
+              edits={edits}
+              editing={edit.editing}
+              form="notice-window-form"
+              saving={isSubmitting}
+              canSave={canSubmit}
+              onEdit={() => {
+                form.reset({ days: String(days) })
+                edit.open()
+              }}
+              onCancel={edit.close}
+            />
+          )}
+        </form.Subscribe>
       </div>
 
-      {editing ? (
+      {edit.editing ? (
         <form
           id="notice-window-form"
           onSubmit={(event) => {
@@ -492,31 +443,29 @@ function RepriceNoticeWindowForm({
           </form.Field>
         </form>
       ) : (
-        <form.Subscribe selector={(state) => state.values.days}>
-          {(days) => (
-            <dl>
-              <SettingDetail
-                label="Notice period"
-                value={`${days} ${Number(days) === 1 ? "day" : "days"}`}
-              />
-            </dl>
-          )}
-        </form.Subscribe>
+        <dl>
+          <SettingDetail
+            label="Notice period"
+            value={`${days} ${days === 1 ? "day" : "days"}`}
+          />
+        </dl>
       )}
     </section>
   )
 }
 
-function PSPsTab() {
+export function PSPsTab() {
   const psps = useQuery(adminQueries.psps())
   const rails = useQuery(adminQueries.rails())
+  const edits = useMerchantConfigEdits()
   if (psps.isPending || rails.isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
 
   const railDefinitions = rails.data ?? []
 
   return (
-    <div>
+    <div className="grid gap-6">
+      <ReadOnlyNotice />
       <section className="grid gap-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="grid gap-1">
@@ -526,10 +475,12 @@ function PSPsTab() {
               rail.
             </p>
           </div>
-          <PSPDialog
-            key={selectedMerchant() ?? ""}
-            railDefinitions={railDefinitions}
-          />
+          {edits && (
+            <PSPDialog
+              key={selectedMerchant() ?? ""}
+              railDefinitions={railDefinitions}
+            />
+          )}
         </div>
         {!psps.data?.data?.length ? (
           <p className="py-2 text-sm text-muted-foreground">
@@ -547,9 +498,11 @@ function PSPsTab() {
                   Credentials
                 </TableHead>
                 <TableHead className="text-muted-foreground">State</TableHead>
-                <TableHead className="text-right text-muted-foreground">
-                  Action
-                </TableHead>
+                {edits && (
+                  <TableHead className="text-right text-muted-foreground">
+                    Action
+                  </TableHead>
+                )}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -558,6 +511,7 @@ function PSPsTab() {
                   key={psp.id}
                   psp={psp}
                   railDefinitions={railDefinitions}
+                  edits={edits}
                 />
               ))}
             </TableBody>
@@ -568,38 +522,53 @@ function PSPsTab() {
   )
 }
 
-// credentialTitle carries or#812's rotation_version alongside the validation
-// stamp — a credential's version floor is what every node cuts over to.
-function credentialTitle(c: {
-  configured: boolean
-  validated_at: string | null
-  rotation_version: number
-}) {
-  const parts: string[] = []
-  if (c.validated_at) parts.push(`Validated ${formatDate(c.validated_at)}`)
-  if (c.rotation_version) parts.push(`rotation v${c.rotation_version}`)
-  if (parts.length) return parts.join(" ·")
+// Credentials are write-only: a PSP shows whether each is set, never a value.
+function credentialTitle(c: PSPCredential) {
+  if (c.validated_at) return `Validated ${formatDate(c.validated_at)}`
   return c.configured ? "Configured" : "Not configured"
 }
 
 function PSPRow({
   psp,
   railDefinitions,
+  edits,
 }: {
   psp: PSP
   railDefinitions: RailDefinition[]
+  edits: boolean
 }) {
   const queryClient = useQueryClient()
-  const archivePSP = useMutation(adminMutations.archivePSP(queryClient))
+  const updatePSP = useMutation(adminMutations.updatePSP(queryClient))
   const [confirmLastOpen, setConfirmLastOpen] = React.useState(false)
   const definition = railDefinitions.find((d) => d.rail === psp.rail)
   const railName = definition?.display_name ?? psp.rail
+  const credentials = psp.credentials ?? {}
   // Archive exactly this PSP (#655). It never contacts the provider, so a
   // terminated account archives too. The rail's last active PSP needs an
   // explicit confirmation.
   const archive = async (allowLast: boolean) => {
-    await archivePSP.mutateAsync({ id: psp.id, allowLast })
-    toast.success("PSP archived")
+    try {
+      await updatePSP.mutateAsync({
+        id: psp.id,
+        psp: {
+          archived: true,
+          expected_revision: psp.revision,
+          ...(allowLast ? { allow_last: true } : {}),
+        },
+      })
+      toast.success("PSP archived")
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "psp_last_active") {
+        if (!allowLast) setConfirmLastOpen(true)
+        else toastApiError(err, "Archive PSP")
+        return
+      }
+      if (err instanceof ApiError && err.revisionMismatch) {
+        toastStaleEdit(`PSP ${psp.key}`)
+        return
+      }
+      toastApiError(err, "Archive PSP")
+    }
   }
   return (
     <TableRow className={psp.archived ? "opacity-60" : undefined}>
@@ -613,9 +582,9 @@ function PSPRow({
       </TableCell>
       <TableCell className="py-3 capitalize">{psp.environment}</TableCell>
       <TableCell className="py-3">
-        {Object.keys(psp.credentials).length > 0 ? (
+        {Object.keys(credentials).length > 0 ? (
           <span className="flex flex-wrap gap-1">
-            {Object.entries(psp.credentials).map(([name, credential]) => (
+            {Object.entries(credentials).map(([name, credential]) => (
               <Badge
                 key={name}
                 variant="secondary"
@@ -625,11 +594,6 @@ function PSPRow({
                 title={credentialTitle(credential)}
               >
                 {name}
-                {!!credential.rotation_version && (
-                  <span className="ml-1 opacity-60">
-                    v{credential.rotation_version}
-                  </span>
-                )}
               </Badge>
             ))}
           </span>
@@ -653,70 +617,46 @@ function PSPRow({
           </Badge>
         )}
       </TableCell>
-      <TableCell className="py-3 text-right">
-        {!psp.archived && (
-          <div className="flex justify-end gap-2">
-            <RotateCredentialsDialog
-              key={`${selectedMerchant() ?? ""}:${psp.id}`}
-              psp={psp}
-              credentialKeys={
-                definition?.credential_keys ?? Object.keys(psp.credentials)
-              }
-            />
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={archivePSP.isPending}
-              onClick={async () => {
-                try {
-                  await archive(false)
-                } catch (err) {
-                  if (
-                    err instanceof ApiError &&
-                    err.code === "psp_last_active"
-                  ) {
-                    setConfirmLastOpen(true)
-                    return
-                  }
-                  toastApiError(err, "Archive PSP")
+      {edits && (
+        <TableCell className="py-3 text-right">
+          {!psp.archived && (
+            <div className="flex justify-end gap-2">
+              <RotateCredentialsDialog
+                key={`${selectedMerchant() ?? ""}:${psp.id}`}
+                psp={psp}
+                credentialKeys={
+                  definition?.credential_keys ?? Object.keys(credentials)
                 }
-              }}
-            >
-              Archive
-            </Button>
-            <TypedConfirmDialog
-              open={confirmLastOpen}
-              onOpenChange={setConfirmLastOpen}
-              title={`Archive the last active ${railName} PSP?`}
-              description="New checkout on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one."
-              confirmationWord="ARCHIVE"
-              actionLabel="Archive PSP"
-              onConfirm={async () => {
-                try {
-                  await archive(true)
-                } catch (err) {
-                  toastApiError(err, "Archive PSP")
-                }
-              }}
-            />
-          </div>
-        )}
-      </TableCell>
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={updatePSP.isPending}
+                onClick={() => archive(false)}
+              >
+                Archive
+              </Button>
+              <TypedConfirmDialog
+                open={confirmLastOpen}
+                onOpenChange={setConfirmLastOpen}
+                title={`Archive the last active ${railName} PSP?`}
+                description="New checkout on this rail is refused until another PSP is armed. Existing subscriptions, refunds and webhooks keep using this one."
+                confirmationWord="ARCHIVE"
+                actionLabel="Archive PSP"
+                onConfirm={() => archive(true)}
+              />
+            </div>
+          )}
+        </TableCell>
+      )}
     </TableRow>
   )
 }
 
-// RotateCredentialsDialog is the or#812 rotation flow. Three properties the
-// operator needs stated, because all three are real server behaviour:
-//
-//  1. The NEW credential is live-probed BEFORE anything is written. A failed
-//     probe fails the whole rotation — no secret is stored, no version floor
-//     moves, and the OLD credential keeps serving unchanged.
-//  2. A committed rotation is deployment-wide, not just this node: it raises the
-//     credential's version floor on the shared PSP row, and every node refuses
-//     to answer a credential read from a cache entry below that floor.
-//  3. Secret fields clear on success or dismissal. Unconfirmed submissions
-//     retain their operation identity for a deliberate retry.
+// RotateCredentialsDialog writes new credentials; the current ones are never
+// shown. The provider checks the new ones before anything is stored, so a
+// rejected credential changes nothing. The edit names the revision read when
+// the dialog opened, and secret fields clear whenever it closes.
 export function RotateCredentialsDialog({
   psp,
   credentialKeys,
@@ -726,10 +666,10 @@ export function RotateCredentialsDialog({
 }) {
   const [open, setOpen] = React.useState(false)
   const [merchant] = React.useState(() => selectedMerchant() ?? "")
-  const attempts = React.useRef(new PSPPublicationAttempts())
-  const reviewedRevision = React.useRef(0)
+  const revision = React.useRef(psp.revision)
   const queryClient = useQueryClient()
   const updatePSP = useMutation(adminMutations.updatePSP(queryClient))
+  const credentials = psp.credentials ?? {}
   const form = useForm({
     defaultValues: { credentials: {} as Record<string, string> },
     onSubmit: async ({ value }) => {
@@ -737,26 +677,21 @@ export function RotateCredentialsDialog({
         Object.entries(value.credentials).filter(([, item]) => item.trim())
       )
       try {
-        const request = await attempts.current.prepare([merchant, psp.id], {
-          expected_revision: reviewedRevision.current,
-          credentials: supplied,
-        })
         if ((selectedMerchant() ?? "") !== merchant)
           throw new Error("Merchant changed; reopen this form")
-        await updatePSP.mutateAsync({ id: psp.id, psp: request })
-        attempts.current.complete(request.operation_id)
-        form.reset()
-        toast.success(
-          `Credentials validated and rotated. Every node serves the new ${psp.key} credential from its next read.`
-        )
-        setOpen(false)
+        await updatePSP.mutateAsync({
+          id: psp.id,
+          psp: { expected_revision: revision.current, credentials: supplied },
+        })
+        toast.success(`${psp.key} credentials validated and rotated`)
+        close(false)
       } catch (err) {
-        toastApiError(
-          err,
-          err instanceof ApiError && err.status === 409
-            ? "The PSP changed. Close this form and review its current state before changing your submission."
-            : "Rotation outcome unconfirmed. Retry the same credentials to recover this submission."
-        )
+        if (err instanceof ApiError && err.revisionMismatch) {
+          toastStaleEdit(`PSP ${psp.key}`)
+          close(false)
+          return
+        }
+        toastApiError(err, "Rotate credentials")
       } finally {
         updatePSP.reset()
       }
@@ -764,9 +699,8 @@ export function RotateCredentialsDialog({
   })
 
   const close = (next: boolean) => {
-    // Never leave plaintext in state behind a closed dialog.
     if (!next) form.reset()
-    if (next) reviewedRevision.current = psp.revision
+    if (next) revision.current = psp.revision
     setOpen(next)
   }
 
@@ -785,10 +719,9 @@ export function RotateCredentialsDialog({
             Rotate {psp.key} credentials · {psp.account_id}
           </DialogTitle>
           <DialogDescription>
-            The new credential is validated against the live provider before it
-            is stored. If that check fails, nothing is written and the current
-            credential keeps serving. Leave a field blank to keep the credential
-            it holds now.
+            Current credentials are never shown. A new one is validated against
+            the live provider before it is stored; if that check fails, nothing
+            is written. Leave a field blank to keep the credential it holds now.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -803,7 +736,7 @@ export function RotateCredentialsDialog({
             {(field) => (
               <div className="grid gap-3">
                 {credentialKeys.map((name) => {
-                  const current = psp.credentials[name]
+                  const current = credentials[name]
                   return (
                     <Field key={name} label={name} id={`rot-${psp.id}-${name}`}>
                       <Input
@@ -821,13 +754,11 @@ export function RotateCredentialsDialog({
                           })
                         }
                       />
-                      <p className="text-xs text-muted-foreground">
-                        {current?.rotation_version
-                          ? `current rotation v${current.rotation_version}`
-                          : "no rotation recorded"}
-                        {current?.validated_at &&
-                          ` · last validated ${formatDate(current.validated_at)}`}
-                      </p>
+                      {current?.validated_at && (
+                        <p className="text-xs text-muted-foreground">
+                          Last validated {formatDate(current.validated_at)}
+                        </p>
+                      )}
                     </Field>
                   )
                 })}
@@ -846,12 +777,12 @@ export function RotateCredentialsDialog({
                 [state.values.credentials, state.isSubmitting] as const
               }
             >
-              {([credentials, isSubmitting]) => (
+              {([values, isSubmitting]) => (
                 <Button
                   type="submit"
                   disabled={
                     isSubmitting ||
-                    !Object.values(credentials).some((value) => value.trim())
+                    !Object.values(values).some((value) => value.trim())
                   }
                 >
                   {isSubmitting ? "Validating…" : "Validate & rotate"}
@@ -923,7 +854,6 @@ function credentialLabel(name: string): string {
 function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
   const [open, setOpen] = React.useState(false)
   const [merchant] = React.useState(() => selectedMerchant() ?? "")
-  const attempts = React.useRef(new PSPPublicationAttempts())
   const queryClient = useQueryClient()
   const createPSP = useMutation(adminMutations.createPSP(queryClient))
   const form = useForm({
@@ -938,26 +868,19 @@ function PSPDialog({ railDefinitions }: { railDefinitions: RailDefinition[] }) {
         Object.entries(value.credentials).filter(([, item]) => item !== "")
       )
       try {
-        const request = await attempts.current.prepare([merchant, value.rail], {
+        if ((selectedMerchant() ?? "") !== merchant)
+          throw new Error("Merchant changed; reopen this form")
+        await createPSP.mutateAsync({
           key: value.key.trim().toLowerCase(),
-          rail: value.rail,
+          rail: value.rail as PSP["rail"],
           account_id: value.accountID.trim(),
           ...(Object.keys(credentials).length ? { credentials } : {}),
         })
-        if ((selectedMerchant() ?? "") !== merchant)
-          throw new Error("Merchant changed; reopen this form")
-        await createPSP.mutateAsync(request)
-        attempts.current.complete(request.operation_id)
         form.reset()
         toast.success("PSP added")
         setOpen(false)
       } catch (err) {
-        toastApiError(
-          err,
-          err instanceof ApiError && err.status === 409
-            ? "This account or key is already in use. Review the PSP list before submitting a new change."
-            : "Save outcome unconfirmed. Retry the same submission to recover its result."
-        )
+        toastApiError(err, "Add PSP")
       } finally {
         createPSP.reset()
       }
@@ -1441,40 +1364,6 @@ function Field({
         <p className="text-[13px] text-muted-foreground">{hint}</p>
       ) : null}
       {children}
-    </div>
-  )
-}
-
-function SettingDetail({ label, value }: { label: string; value?: string }) {
-  return (
-    <div className="grid gap-1.5 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-6">
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd
-        className={
-          value
-            ? "min-w-0 text-sm break-words"
-            : "text-sm text-muted-foreground"
-        }
-      >
-        {value || "Not set"}
-      </dd>
-    </div>
-  )
-}
-
-function SettingEditField({
-  label,
-  id,
-  children,
-}: {
-  label: string
-  id: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:gap-6">
-      <Label htmlFor={id}>{label}</Label>
-      <div className="min-w-0">{children}</div>
     </div>
   )
 }

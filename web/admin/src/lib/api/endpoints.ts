@@ -7,13 +7,18 @@ import {
 } from "./client"
 import type {
   AdminAccess,
+  AlertWebhook,
   Allowance,
   CatalogApplicationReceipt,
+  CreateAlertWebhookParams,
+  CreatePSPParams,
   PSPRefresh,
   CreatePriceParams,
   Customer,
   ListPage,
+  MerchantConfigurationState,
   Meter,
+  PSP,
   Payment,
   PaymentAttempt,
   PaymentMethod,
@@ -25,7 +30,10 @@ import type {
   RatePrice,
   Renewal,
   RefundPaymentParams,
+  UpdateAlertWebhookParams,
   UpdateCustomerParams,
+  UpdateMerchantConfigurationParams,
+  UpdatePSPParams,
   UpdatePriceParams,
   UpdateProductParams,
 } from "./generated/wire"
@@ -33,10 +41,6 @@ import type {
   AdminSubscription,
   CustomerEntitlement,
   Finding,
-  MerchantConfiguration,
-  MerchantSettings,
-  MerchantWebhook,
-  PSP,
   PSPRoutingPreview,
   RawProductAccessGrant,
   PriceMigration,
@@ -45,7 +49,6 @@ import type {
   ChangeSubscriptionParams,
   SubscriptionChange,
   SubscriptionChangePreview,
-  WebhookFormat,
 } from "./types"
 
 // --- Customers ---
@@ -621,17 +624,16 @@ export const resolveFinding = (
 // --- Settings ---
 
 export const getMerchantConfiguration = (signal?: AbortSignal) =>
-  api<MerchantConfiguration>("/admin/configuration", { signal })
+  api<MerchantConfigurationState>("/admin/configuration", { signal })
 
-// Changes only the settings it names, against the revision the form read.
-export const applyMerchantSettings = (
-  revision: string,
-  settings: MerchantSettings
+// Merges the fields it names. expected_revision is the revision the form
+// read; a configuration changed since is refused with revision_mismatch.
+export const updateMerchantConfiguration = (
+  body: UpdateMerchantConfigurationParams
 ) =>
-  api<{ revision: string; replayed: boolean }>("/admin/configuration", {
+  api<MerchantConfigurationState>("/admin/configuration", {
     method: "PATCH",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
-    body: { expected_revision: revision, settings },
+    body,
   })
 
 // A merchant has a handful of PSPs: one page holds them all.
@@ -643,29 +645,14 @@ export const listRails = async (signal?: AbortSignal) =>
   (await getConfig(signal)).rails
 
 // Credentials are write-only and checked with the provider before anything
-// is stored. operation_id makes a retried submission return the first result.
-export interface CreatePSPRequest {
-  operation_id: string
-  key: string
-  rail: string
-  account_id: string
-  settings?: Record<string, string>
-  credentials?: Record<string, string>
-}
-
-export const createPSP = (body: CreatePSPRequest) =>
+// is stored.
+export const createPSP = (body: CreatePSPParams) =>
   api<PSP>("/admin/psps", { method: "POST", body })
 
-// expected_revision is the PSP revision the form read; a PSP changed since
-// is refused.
-export interface UpdatePSPRequest {
-  operation_id: string
-  expected_revision: number
-  settings?: Record<string, string>
-  credentials?: Record<string, string>
-}
-
-export const updatePSP = (id: string, body: UpdatePSPRequest) =>
+// Changes settings, rotates credentials (omitted ones keep their values) or
+// archives the PSP: the rail's last active PSP needs allow_last
+// (409 psp_last_active). expected_revision refuses a PSP changed since.
+export const updatePSP = (id: string, body: UpdatePSPParams) =>
   api<PSP>(`/admin/psps/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body,
@@ -682,15 +669,6 @@ export const previewPSPRouting = (
     method: "POST",
     body,
     signal,
-  })
-
-// archivePSP (#655) archives exactly this PSP without contacting the
-// provider. The rail's last active PSP is refused (409 psp_last_active)
-// unless allowLast.
-export const archivePSP = (id: string, allowLast = false) =>
-  api<PSP>(`/admin/psps/${encodeURIComponent(id)}`, {
-    method: "PATCH",
-    body: allowLast ? { archived: true, allow_last: true } : { archived: true },
   })
 
 // The public configuration: what the deployment serves, the currency
@@ -713,24 +691,15 @@ export const updateCustomer = (customerId: string, params: UpdateCustomerParams)
 
 // --- Alerting: webhooks (#736) ---
 
-export interface WebhookRequest {
-  name: string
-  url: string
-  format: WebhookFormat
-  enabled?: boolean
-}
-
 export const listWebhooks = (signal?: AbortSignal) =>
-  api<ListPage<MerchantWebhook>>("/admin/alert-webhooks", { signal })
+  api<ListPage<AlertWebhook>>("/admin/alert-webhooks", { signal })
 
-export const createWebhook = (body: WebhookRequest) =>
-  api<MerchantWebhook>("/admin/alert-webhooks", { method: "POST", body })
+export const createWebhook = (body: CreateAlertWebhookParams) =>
+  api<AlertWebhook>("/admin/alert-webhooks", { method: "POST", body })
 
-export const rotateWebhookURL = (id: string, url: string) =>
-  api<MerchantWebhook>(`/admin/alert-webhooks/${id}`, {
-    method: "PATCH",
-    body: { url },
-  })
+// Omitted fields keep their values; the URL is write-only.
+export const updateWebhook = (id: string, body: UpdateAlertWebhookParams) =>
+  api<AlertWebhook>(`/admin/alert-webhooks/${id}`, { method: "PATCH", body })
 
 export const deleteWebhook = (id: string) =>
   api<void>(`/admin/alert-webhooks/${id}`, { method: "DELETE" })

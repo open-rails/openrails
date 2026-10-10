@@ -1,8 +1,5 @@
 import { HugeiconsIcon } from "@hugeicons/react"
-import {
-  Add01Icon,
-  Delete02Icon,
-} from "@hugeicons/core-free-icons"
+import { Add01Icon, Delete02Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { toast } from "sonner"
 import { useForm } from "@tanstack/react-form"
@@ -38,15 +35,25 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Switch } from "@/components/ui/switch"
 import { DIALOG_FORM } from "@/lib/dialog-width"
 import type {
-  MerchantConfiguration,
-  MerchantWebhook,
-  WebhookFormat,
-} from "@/lib/api/types"
+  AlertWebhook,
+  MerchantConfigurationState,
+} from "@/lib/api/generated/wire"
+import { useMerchantConfigEdits } from "@/lib/capabilities"
 import { toastApiError } from "@/lib/toast"
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
+import { useConfigurationEdit } from "./configuration-edit"
+import {
+  EditActions,
+  ReadOnlyNotice,
+  SettingDetail,
+  SettingEditField,
+} from "./setting-fields"
+
+type WebhookFormat = AlertWebhook["format"]
 
 // --- Page ------------------------------------------------------------------
 
@@ -55,17 +62,26 @@ export function NotificationsTab() {
     adminQueries.merchantConfiguration("Load settings")
   )
   const webhooksQuery = useQuery(adminQueries.webhooks())
+  const edits = useMerchantConfigEdits()
 
   const hooks = webhooksQuery.data?.data ?? []
 
   return (
     <div className="flex flex-col gap-10">
-      <NotificationEmailSection
-        key={configurationQuery.data?.settings.alert_email ?? "∅"}
-        configuration={configurationQuery.data}
-        loading={configurationQuery.isPending}
+      <ReadOnlyNotice />
+      {configurationQuery.data ? (
+        <NotificationEmailSection
+          configuration={configurationQuery.data}
+          edits={edits}
+        />
+      ) : (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      )}
+      <WebhooksSection
+        webhooks={hooks}
+        loading={webhooksQuery.isPending}
+        edits={edits}
       />
-      <WebhooksSection webhooks={hooks} loading={webhooksQuery.isPending} />
     </div>
   )
 }
@@ -74,34 +90,22 @@ export function NotificationsTab() {
 
 function NotificationEmailSection({
   configuration,
-  loading,
+  edits,
 }: {
-  configuration?: MerchantConfiguration
-  loading: boolean
+  configuration: MerchantConfigurationState
+  edits: boolean
 }) {
-  const initial = configuration?.settings.alert_email ?? ""
-  const queryClient = useQueryClient()
-  const updateSettings = useMutation(
-    adminMutations.updateMerchantSettings(queryClient)
-  )
+  const email = configuration.settings.alert_email ?? ""
+  const edit = useConfigurationEdit(configuration)
   const form = useForm({
-    defaultValues: { email: initial },
-    onSubmit: async ({ value }) => {
-      try {
-        if (!configuration) return
-        // An empty address clears the email channel.
-        await updateSettings.mutateAsync({
-          revision: configuration.revision,
-          settings: { alert_email: value.email.trim() },
-        })
-        form.reset(value)
-        toast.success(
-          value.email.trim() ? "Alert email saved" : "Alert email cleared"
-        )
-      } catch (err) {
-        toastApiError(err, "Save alert email")
-      }
-    },
+    defaultValues: { email },
+    // An empty address clears the email channel.
+    onSubmit: ({ value }) =>
+      edit.save(
+        { settings: { alert_email: value.email.trim() } },
+        value.email.trim() ? "Alert email saved" : "Alert email cleared",
+        "Save alert email"
+      ),
   })
 
   return (
@@ -113,52 +117,51 @@ function NotificationEmailSection({
             Send email alerts to this address.
           </p>
         </div>
-        <form.Subscribe
-          selector={(state) => [
-            state.canSubmit,
-            state.isSubmitting,
-            state.isDefaultValue,
-          ]}
-        >
-          {([canSubmit, isSubmitting, isDefaultValue]) => (
-            <Button
-              type="submit"
-              size="sm"
+        <form.Subscribe selector={(state) => state.isSubmitting}>
+          {(isSubmitting) => (
+            <EditActions
+              edits={edits}
+              editing={edit.editing}
               form="alert-email-form"
-              disabled={loading || !canSubmit || isSubmitting || isDefaultValue}
-            >
-              {isSubmitting ? "Saving…" : "Save"}
-            </Button>
+              saving={isSubmitting}
+              onEdit={() => {
+                form.reset({ email })
+                edit.open()
+              }}
+              onCancel={edit.close}
+            />
           )}
         </form.Subscribe>
       </div>
-      <form
-        id="alert-email-form"
-        onSubmit={(event) => {
-          event.preventDefault()
-          event.stopPropagation()
-          void form.handleSubmit()
-        }}
-      >
-        <form.Field name="email">
-          {(field) => (
-            <div className="grid gap-2 md:grid-cols-[11rem_minmax(0,1fr)] md:items-center md:gap-6">
-              <Label htmlFor="alert-email">Alert email</Label>
-              <div className="grid min-w-0 gap-1.5">
+      {edit.editing ? (
+        <form
+          id="alert-email-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            event.stopPropagation()
+            void form.handleSubmit()
+          }}
+        >
+          <form.Field name="email">
+            {(field) => (
+              <SettingEditField label="Alert email" id="alert-email">
                 <Input
                   id="alert-email"
                   type="email"
                   placeholder="alerts@example.com"
                   value={field.state.value}
-                  disabled={loading}
                   onBlur={field.handleBlur}
                   onChange={(event) => field.handleChange(event.target.value)}
                 />
-              </div>
-            </div>
-          )}
-        </form.Field>
-      </form>
+              </SettingEditField>
+            )}
+          </form.Field>
+        </form>
+      ) : (
+        <dl>
+          <SettingDetail label="Alert email" value={email} />
+        </dl>
+      )}
     </section>
   )
 }
@@ -174,9 +177,11 @@ const WEBHOOK_FORMATS: { value: WebhookFormat; label: string }[] = [
 function WebhooksSection({
   webhooks,
   loading,
+  edits,
 }: {
-  webhooks: MerchantWebhook[]
+  webhooks: AlertWebhook[]
   loading: boolean
+  edits: boolean
 }) {
   return (
     <section className="grid gap-5">
@@ -187,7 +192,7 @@ function WebhooksSection({
             Send alerts to Discord, Slack, or your own endpoint.
           </p>
         </div>
-        <WebhookDialog />
+        {edits && <WebhookDialog />}
       </div>
       {loading ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
@@ -202,14 +207,16 @@ function WebhooksSection({
               <TableHead className="text-muted-foreground">Name</TableHead>
               <TableHead className="text-muted-foreground">Format</TableHead>
               <TableHead className="text-muted-foreground">URL</TableHead>
-              <TableHead className="text-right text-muted-foreground">
-                Action
-              </TableHead>
+              {edits && (
+                <TableHead className="text-right text-muted-foreground">
+                  Action
+                </TableHead>
+              )}
             </TableRow>
           </TableHeader>
           <TableBody>
             {webhooks.map((w) => (
-              <WebhookRow key={w.id} webhook={w} />
+              <WebhookRow key={w.id} webhook={w} edits={edits} />
             ))}
           </TableBody>
         </Table>
@@ -218,15 +225,25 @@ function WebhooksSection({
   )
 }
 
-function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
+function WebhookRow({
+  webhook,
+  edits,
+}: {
+  webhook: AlertWebhook
+  edits: boolean
+}) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const removeWebhook = useMutation(adminMutations.deleteWebhook(queryClient))
+  const name = webhook.name ?? webhook.destination_host
   return (
-    <TableRow className={webhook.enabled === false ? "opacity-60" : undefined}>
-      <TableCell className="py-3 font-medium">{webhook.name ?? webhook.destination_host}</TableCell>
+    <TableRow className={webhook.enabled ? undefined : "opacity-60"}>
+      <TableCell className="py-3 font-medium">{name}</TableCell>
       <TableCell className="py-3">
-        <Badge variant="secondary">{webhook.format}</Badge>
+        <span className="flex flex-wrap gap-1">
+          <Badge variant="secondary">{webhook.format}</Badge>
+          {!webhook.enabled && <Badge variant="outline">disabled</Badge>}
+        </span>
       </TableCell>
       <TableCell
         className="max-w-[22rem] truncate py-3 text-xs text-muted-foreground"
@@ -234,79 +251,90 @@ function WebhookRow({ webhook }: { webhook: MerchantWebhook }) {
       >
         {webhook.destination_host}
       </TableCell>
-      <TableCell className="py-3 text-right">
-        <div className="flex justify-end gap-1">
-          <WebhookDialog webhook={webhook} />
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="Delete webhook"
-            onClick={() => setConfirmOpen(true)}
-          >
-            <HugeiconsIcon
-              icon={Delete02Icon}
-              className="size-4 text-muted-foreground"
+      {edits && (
+        <TableCell className="py-3 text-right">
+          <div className="flex justify-end gap-1">
+            <WebhookDialog webhook={webhook} />
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="Delete webhook"
+              onClick={() => setConfirmOpen(true)}
+            >
+              <HugeiconsIcon
+                icon={Delete02Icon}
+                className="size-4 text-muted-foreground"
+              />
+            </Button>
+            <TypedConfirmDialog
+              open={confirmOpen}
+              onOpenChange={setConfirmOpen}
+              title={`Delete "${name}"?`}
+              description="Operational notifications will stop delivering to this webhook. This cannot be undone."
+              confirmationWord="DELETE"
+              actionLabel="Delete webhook"
+              onConfirm={async () => {
+                try {
+                  await removeWebhook.mutateAsync(webhook.id)
+                  toast.success("Webhook deleted")
+                } catch (err) {
+                  toastApiError(err, "Delete webhook")
+                }
+              }}
             />
-          </Button>
-          <TypedConfirmDialog
-            open={confirmOpen}
-            onOpenChange={setConfirmOpen}
-            title={`Delete "${webhook.name ?? webhook.destination_host}"?`}
-            description="Operational notifications will stop delivering to this webhook. This cannot be undone."
-            confirmationWord="DELETE"
-            actionLabel="Delete webhook"
-            onConfirm={async () => {
-              try {
-                await removeWebhook.mutateAsync(webhook.id)
-                toast.success("Webhook deleted")
-              } catch (err) {
-                toastApiError(err, "Delete webhook")
-              }
-            }}
-          />
-        </div>
-      </TableCell>
+          </div>
+        </TableCell>
+      )}
     </TableRow>
   )
 }
 
-function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
+// WebhookDialog adds a webhook or edits one. The URL carries the receiver's
+// secret, so it is write-only: an edit leaves it blank to keep it.
+function WebhookDialog({ webhook }: { webhook?: AlertWebhook }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const addWebhook = useMutation(adminMutations.createWebhook(queryClient))
-  const rotateWebhook = useMutation(
-    adminMutations.rotateWebhookURL(queryClient)
-  )
+  const updateWebhook = useMutation(adminMutations.updateWebhook(queryClient))
+  const initial = () => ({
+    name: webhook?.name ?? "",
+    url: "",
+    format: webhook?.format ?? ("generic" as WebhookFormat),
+    enabled: webhook?.enabled ?? true,
+  })
   const form = useForm({
-    defaultValues: {
-      name: webhook?.name ?? "",
-      url: "",
-      format: webhook?.format ?? ("generic" as WebhookFormat),
-    },
+    defaultValues: initial(),
     onSubmit: async ({ value }) => {
+      const url = value.url.trim()
       try {
         if (webhook)
-          await rotateWebhook.mutateAsync({
+          await updateWebhook.mutateAsync({
             id: webhook.id,
-            url: value.url.trim(),
+            webhook: {
+              name: value.name.trim() || null,
+              format: value.format,
+              enabled: value.enabled,
+              ...(url ? { url } : {}),
+            },
           })
         else
           await addWebhook.mutateAsync({
             name: value.name.trim(),
-            url: value.url.trim(),
+            url,
             format: value.format,
           })
-        toast.success(webhook ? "Webhook URL replaced" : "Webhook added")
+        toast.success(webhook ? "Webhook saved" : "Webhook added")
         handleOpen(false)
       } catch (err) {
-        toastApiError(err, webhook ? "Replace webhook URL" : "Add webhook")
+        toastApiError(err, webhook ? "Save webhook" : "Add webhook")
       }
     },
   })
 
   const handleOpen = (next: boolean) => {
+    if (next) form.reset(initial())
+    else form.reset()
     setOpen(next)
-    if (!next) form.reset()
   }
 
   return (
@@ -315,7 +343,7 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
         render={
           <Button size="sm" variant="outline">
             {!webhook && <HugeiconsIcon icon={Add01Icon} className="size-4" />}{" "}
-            {webhook ? "Replace URL" : "Add webhook"}
+            {webhook ? "Edit" : "Add webhook"}
           </Button>
         }
       />
@@ -323,12 +351,12 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
         <DialogHeader>
           <DialogTitle>
             {webhook
-              ? `Replace URL for ${webhook.name || webhook.destination_host}`
+              ? `Edit ${webhook.name ?? webhook.destination_host}`
               : "Add webhook"}
           </DialogTitle>
           <DialogDescription>
             {webhook
-              ? "Paste a replacement URL. Existing operational notifications keep their connection."
+              ? "The current URL is never shown. Paste a new one to replace it, or leave it blank to keep it."
               : "Paste a webhook address from Discord, Slack, or your own alert receiver."}
           </DialogDescription>
         </DialogHeader>
@@ -353,7 +381,6 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
                   <Label htmlFor="wh-name">Name</Label>
                   <Input
                     id="wh-name"
-                    disabled={Boolean(webhook)}
                     placeholder="e.g. #billing-alerts"
                     value={field.state.value}
                     onBlur={field.handleBlur}
@@ -369,7 +396,6 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
                 <div className="grid gap-1.5">
                   <Label htmlFor="wh-format">Format</Label>
                   <Select
-                    disabled={Boolean(webhook)}
                     value={field.state.value}
                     onValueChange={(value) =>
                       field.handleChange(value as WebhookFormat)
@@ -393,7 +419,8 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
               name="url"
               validators={{
                 onChange: ({ value }) => {
-                  if (!value.trim()) return "Enter a webhook URL"
+                  if (!value.trim())
+                    return webhook ? undefined : "Enter a webhook URL"
                   try {
                     new URL(value)
                     return undefined
@@ -409,8 +436,13 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
                   <Input
                     id="wh-url"
                     type="url"
+                    autoComplete="off"
                     className="text-xs"
-                    placeholder="https://discord.com/api/webhooks/…"
+                    placeholder={
+                      webhook
+                        ? "unchanged"
+                        : "https://discord.com/api/webhooks/…"
+                    }
                     value={field.state.value}
                     onBlur={field.handleBlur}
                     onChange={(event) => field.handleChange(event.target.value)}
@@ -420,6 +452,20 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
                 </div>
               )}
             </form.Field>
+            {webhook && (
+              <form.Field name="enabled">
+                {(field) => (
+                  <div className="flex items-center gap-2">
+                    <Switch
+                      id="wh-enabled"
+                      checked={field.state.value}
+                      onCheckedChange={field.handleChange}
+                    />
+                    <Label htmlFor="wh-enabled">Enabled</Label>
+                  </div>
+                )}
+              </form.Field>
+            )}
           </div>
           <DialogFooter>
             <form.Subscribe
@@ -427,26 +473,22 @@ function WebhookDialog({ webhook }: { webhook?: MerchantWebhook }) {
                 [
                   state.values.name,
                   state.values.url,
+                  state.isDirty,
                   state.canSubmit,
                   state.isSubmitting,
                 ] as const
               }
             >
-              {([name, url, canSubmit, isSubmitting]) => (
+              {([name, url, isDirty, canSubmit, isSubmitting]) => (
                 <Button
                   type="submit"
                   disabled={
-                    (!webhook && !name.trim()) ||
-                    !url.trim() ||
+                    (webhook ? !isDirty : !name.trim() || !url.trim()) ||
                     !canSubmit ||
                     isSubmitting
                   }
                 >
-                  {isSubmitting
-                    ? "Saving…"
-                    : webhook
-                      ? "Replace URL"
-                      : "Add webhook"}
+                  {isSubmitting ? "Saving…" : webhook ? "Save" : "Add webhook"}
                 </Button>
               )}
             </form.Subscribe>

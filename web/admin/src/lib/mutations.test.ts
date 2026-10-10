@@ -91,14 +91,20 @@ const cases: Case[] = [
     "PUT /admin/catalog/rate-overrides/cus_1/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
   ["removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),
     "DELETE /admin/catalog/rate-overrides/cus_1/tokens", [...meterTree, ...customerTree, "dashboard"]],
-  ["applies a settings change without dropping the PSP list", (c, g) => g(M.updateMerchantSettings(c), { revision: "rev_1", settings: { profile: { display_name: "Acme" } } }),
-    "PATCH /admin/configuration", ["settings"]],
-  ["adds a PSP", (c, g) => g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }),
-    "POST /admin/psps", ["psps"], { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }],
-  ["rotates PSP credentials", (c, g) => g(M.updatePSP(c), { id: "psp_1", psp: { operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 } }),
-    "PATCH /admin/psps/psp_1", ["psps"], { operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9", expected_revision: 0 }],
-  ["archives one PSP by id", (c, g) => g(M.archivePSP(c), { id: "psp_1", allowLast: true }),
-    "PATCH /admin/psps/psp_1", ["psps"], { archived: true, allow_last: true }],
+  ["edits the configuration at the revision it read, keeping the PSP list", (c, g) => g(M.updateMerchantConfiguration(c), { expected_revision: 4, display_name: "Acme" }),
+    "PATCH /admin/configuration", ["settings"], { expected_revision: 4, display_name: "Acme" }],
+  ["adds a PSP", (c, g) => g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1" }),
+    "POST /admin/psps", ["psps"], { key: "mobius", rail: "nmi", account_id: "gw_1" }],
+  ["rotates PSP credentials", (c, g) => g(M.updatePSP(c), { id: "psp_1", psp: { expected_revision: 3, credentials: { security_key: "sk" } } }),
+    "PATCH /admin/psps/psp_1", ["psps"], { expected_revision: 3, credentials: { security_key: "sk" } }],
+  ["archives one PSP by update", (c, g) => g(M.updatePSP(c), { id: "psp_1", psp: { archived: true, expected_revision: 3, allow_last: true } }),
+    "PATCH /admin/psps/psp_1", ["psps"], { archived: true, expected_revision: 3, allow_last: true }],
+  ["adds an alert webhook, moving the configuration's revision", (c, g) => g(M.createWebhook(c), { name: "ops", url: "https://hooks.example/a", format: "slack" }),
+    "POST /admin/alert-webhooks", ["settings", "webhooks"], { name: "ops", url: "https://hooks.example/a", format: "slack" }],
+  ["edits an alert webhook", (c, g) => g(M.updateWebhook(c), { id: "awh_1", webhook: { enabled: false } }),
+    "PATCH /admin/alert-webhooks/awh_1", ["settings", "webhooks"], { enabled: false }],
+  ["deletes an alert webhook", (c, g) => g(M.deleteWebhook(c), "awh_1"),
+    "DELETE /admin/alert-webhooks/awh_1", ["settings", "webhooks"]],
   ["sets a customer credit limit at the int64 boundary", (_c, g) => g(M.setCreditLimit(), creditLimit),
     "PATCH /admin/customers/cus_1", [], { credit_limits: [{ currency: "USD", amount: MAX_INT64 }] }],
 ]
@@ -120,7 +126,11 @@ it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   selectMerchant("merchant-a")
   // A PSP write refuses to dispatch once the merchant changed; the switch
   // comes after the scoped request instead.
-  const pspWrite = { "adds a PSP": "POST /admin/psps", "rotates PSP credentials": "PATCH /admin/psps/psp_1" }[_name]
+  const pspWrite = {
+    "adds a PSP": "POST /admin/psps",
+    "rotates PSP credentials": "PATCH /admin/psps/psp_1",
+    "archives one PSP by update": "PATCH /admin/psps/psp_1",
+  }[_name]
   if (pspWrite) {
     routes[pspWrite] = () => {
       selectMerchant("merchant-b")

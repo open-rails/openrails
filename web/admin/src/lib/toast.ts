@@ -31,3 +31,11 @@ export function toastApiError(err: unknown, action: string) {
     description: err instanceof Error ? err.message : String(err),
   })
 }
+
+// toastStaleEdit answers an edit refused with revision_mismatch: the caller
+// closes the form and the reload shows what changed.
+export function toastStaleEdit(what: string) {
+  toast.error(`${what} changed since you opened it`, {
+    description: "Reloaded. Review the current version and edit again.",
+  })
+}

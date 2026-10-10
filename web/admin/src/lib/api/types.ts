@@ -198,70 +198,13 @@ export interface FindingsGauges {
 
 // --- Settings / providers ---
 
-// GET /admin/configuration: the merchant's non-secret configuration and
-// the revision an application must name.
-export interface MerchantConfiguration {
-  revision: string
-  display_name: string
-  api_host: string
-  settings: MerchantSettings
-}
-
-export interface MerchantSettings {
-  profile?: {
-    display_name?: string
-    logo_url?: string
-    from_email?: string
-    support_url?: string
-  }
-  collection_threshold?: string
-  monthly_floor?: string
-  billing_period_boundary?: string
-  // Destination for operator alert emails (#736), top-level per the as-built
-  // engine (service_admission.go). Unset ⇒ the email channel is inactive
-  // (fail-soft to in_app + webhooks).
-  alert_email?: string
-  // Minimum advance-notice window (days) a subscription price INCREASE's
-  // effective_at must give existing subscribers (#781). Unset ⇒ the server's
-  // DefaultPriceIncreaseNoticeDays (30). Decreases are exempt.
-  reprice_notice_window_days?: number
-}
-
-// PSP is one merchant account on a rail (GET /admin/psps). Credential
-// values are never returned.
-export interface PSP {
-  id: string // psp_...
-  key: string
-  rail: Rail
-  environment: string
-  account_id: string
-  archived: boolean
-  archived_at: string | null
-  // An archived PSP with none is drained.
-  open_obligations: number
-  settings: Record<string, unknown>
-  // rotation_version (or#812) is the cross-node cutover watermark: how many
-  // times the credential was rotated through the API.
-  credentials: Record<
-    string,
-    {
-      configured: boolean
-      validated_at: string | null
-      rotation_version: number
-    }
-  >
-  revision: number
-  created_at: string
-  updated_at: string
-}
-
-// RailDefinition is a rail a PSP can be armed on (GET /config rails).
-export interface RailDefinition {
-  rail: Rail
-  display_name: string
-  credential_keys: string[]
-  setting_keys: string[]
-}
+export type {
+  AlertWebhook,
+  MerchantConfigurationState,
+  MerchantSettings,
+  PSP,
+  RailDefinition,
+} from "./generated/wire"
 
 // --- Auth (AuthKit authhttp) ---
 
@@ -325,15 +268,3 @@ export interface Me {
 // --- Alerting (#736) ---
 
 export type AlertSeverity = "warning" | "critical"
-export type WebhookFormat = "generic" | "discord" | "slack"
-
-export interface MerchantWebhook {
-  id: string
-  name: string
-  destination_host: string
-  format: WebhookFormat
-  enabled: boolean
-  created_at: string
-  updated_at?: string
-}
-
