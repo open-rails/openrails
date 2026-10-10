@@ -56,9 +56,10 @@ export interface SubscriptionsState {
     sendTransaction?: SendSolanaTransaction
   ) => ActionResult
   resume: (subscriptionId: string) => ActionResult
+  /** `null` makes the subscription follow the default card. */
   setPaymentMethod: (
     subscriptionId: string,
-    paymentMethodId: string
+    paymentMethodId: string | null
   ) => ActionResult
   /**
    * Resolves to the change, whose `status` may still be `processing` or
@@ -167,7 +168,7 @@ export function useSubscriptions(
   )
 
   const setPaymentMethod = useCallback(
-    (id: string, paymentMethodId: string) =>
+    (id: string, paymentMethodId: string | null) =>
       act(
         id,
         "payment_method",
@@ -259,7 +260,7 @@ export function useProducts(options: { limit?: number } = {}): ProductsState {
   }
 }
 
-export type PaymentMethodAction = "remove" | "collection"
+export type PaymentMethodAction = "remove" | "default"
 
 export interface PaymentMethodsState {
   methods: PaymentMethod[] | null
@@ -271,7 +272,8 @@ export interface PaymentMethodsState {
   add: (card: NewCard) => ActionResult
   remove: (paymentMethodId: string) => ActionResult
   /** Makes the card the one that collects one currency's invoices. */
-  setCollection: (paymentMethodId: string, currency: string) => ActionResult
+  /** Makes the card the default for the currency. */
+  setDefault: (paymentMethodId: string, currency: string) => ActionResult
 }
 
 export function usePaymentMethods(): PaymentMethodsState {
@@ -320,11 +322,11 @@ export function usePaymentMethods(): PaymentMethodsState {
     [client, mark, notify, replace]
   )
 
-  const setCollection = useCallback(
+  const setDefault = useCallback(
     async (id: string, currency: string): ActionResult => {
-      mark(id, "collection")
+      mark(id, "default")
       try {
-        await client.setCollectionPaymentMethod({
+        await client.setDefaultPaymentMethod({
           currency,
           paymentMethodId: id,
         })
@@ -332,17 +334,17 @@ export function usePaymentMethods(): PaymentMethodsState {
         replace((page) => ({
           ...page,
           data: page.data.map((m) => {
-            const others = (m.collection_currencies ?? []).filter(
+            const others = (m.default_currencies ?? []).filter(
               (c) => c !== code
             )
             return {
               ...m,
-              collection_currencies: m.id === id ? [...others, code] : others,
+              default_currencies: m.id === id ? [...others, code] : others,
             }
           }),
         }))
         notify({
-          type: "payment_method.collection_changed",
+          type: "payment_method.default_changed",
           paymentMethodId: id,
         })
         return null
@@ -364,7 +366,7 @@ export function usePaymentMethods(): PaymentMethodsState {
     adding,
     add,
     remove,
-    setCollection,
+    setDefault,
   }
 }
 

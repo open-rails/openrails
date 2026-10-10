@@ -26,7 +26,7 @@ export const ja: BillingUiMessageBundle = {
     expired: "期限切れ",
     expiring_soon: "まもなく期限切れ",
     needs_attention: "要確認",
-    collection: "請求書",
+    default: "デフォルト",
   },
   interval: {
     every: {
@@ -77,6 +77,7 @@ export const ja: BillingUiMessageBundle = {
     none: "切り替えるには、支払い方法から別のカードを追加してください。",
     confirm: "このカードを使う",
     current: "現在",
+    useDefault: "デフォルトのカード（{card}）",
     done: "支払いカードを更新しました。",
   },
   cancel: {
@@ -118,9 +119,9 @@ export const ja: BillingUiMessageBundle = {
     fallbackBrand: "カード",
     expires: "有効期限 {date}",
     usedBy: "{names}で使用中",
-    collectsFor: "{currencies}の請求書を支払う",
-    useForInvoices: "請求書に使う",
-    usedForInvoices: "請求書のカードを更新しました。",
+    defaultFor: "{currencies}のデフォルト",
+    makeDefault: "デフォルトにする",
+    defaultUpdated: "デフォルトのカードを更新しました。",
     remove: "削除",
     removeLabel: "{label}を削除",
     removeTitle: "{label}を削除しますか？",

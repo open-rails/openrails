@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/google/uuid"
-
 	"github.com/open-rails/openrails/billing"
 
 	identity "github.com/open-rails/openrails/internal/billingidentity"
@@ -16,8 +14,6 @@ import (
 
 var (
 	ErrInvoiceNotRetryable             = money.ErrInvoiceNotRetryable
-	ErrCollectionPaymentMethodRequired = money.ErrCollectionPaymentMethodRequired
-	ErrCollectionPaymentMethodInvalid  = money.ErrCollectionPaymentMethodInvalid
 	ErrInvoiceRetryInProgress          = money.ErrInvoiceRetryInProgress
 	ErrInvoiceRetryOutcomeUnknown      = money.ErrInvoiceRetryOutcomeUnknown
 	ErrInvoiceRetryIdempotencyConflict = money.ErrInvoiceRetryIdempotencyConflict
@@ -107,20 +103,6 @@ func (s *Service) GetUsage(ctx context.Context, customer identity.CustomerID, pa
 		return nil, err
 	}
 	return out, nil
-}
-
-// SetInvoiceCollectionPaymentMethod selects the payer-owned saved method used
-// for automatic invoice collection in one billing currency.
-func (s *Service) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer identity.CustomerID, currency string, paymentMethodID uuid.UUID) error {
-	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	return s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return s.moneyService().SetInvoiceCollectionPaymentMethod(ctx, payer, currency, paymentMethodID)
-	})
 }
 
 // SetCreditAccountSettings upserts an payer's spend policy (issue #237/#235

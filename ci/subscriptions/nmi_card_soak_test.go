@@ -70,7 +70,7 @@ func TestNMISavedCardRecurringAgreement(t *testing.T) {
 
 			id, err := billing.ParsePaymentMethodID(method)
 			require.NoError(t, err)
-			_, err = w.client[tp].SetSubscriptionPaymentMethod(t.Context(), e.sub, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: id})
+			_, err = w.client[tp].SetSubscriptionPaymentMethod(t.Context(), e.sub, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &id})
 			require.NoError(t, err)
 			verifications = w.nmi.Validations(saved.vault)
 			require.Len(t, verifications, 2, "the move verifies the subscription's recurring agreement on the card")

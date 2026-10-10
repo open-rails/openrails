@@ -62,9 +62,9 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				refused(t, status, body, fmt.Sprintf("%s %s %v", tc.method, tc.path, tc.body))
 			}
 			// A foreign card is as ineligible as a missing one.
-			status, body := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": aliceCard, "currency": "USD"})
+			status, body := mallory.call(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": aliceCard})
 			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
-			_, missing := mallory.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString(), "currency": "USD"})
+			_, missing := mallory.call(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString()})
 			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
 			if rail == "nmi" {
 				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"payment_token": w.nmi.Tokenize(mastercard)})

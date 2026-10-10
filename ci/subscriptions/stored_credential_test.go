@@ -179,7 +179,7 @@ func TestReplacedCardDropsUnscheduledAgreement(t *testing.T) {
 	_, old := w.agreements(method)
 	require.Equal(t, saved.TransactionID, old, "saving the card stored it for reuse")
 	require.Equal(t, []string{"customer", "used", old}, credentialFields(w.nmi.LastSale()), "the customer's payment uses it")
-	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": method, "currency": "USD"})
+	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	replaced := w.collectionMandate(c, "USD")
 	require.Equal(t, old, str(replaced.InitialTransactionID), "the collection mandate cites the card's lineage")
 
@@ -291,7 +291,7 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	// The customer is billed in arrears, on this card.
 	_, err := w.client[embedded].UpdateCustomer(t.Context(), e.c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}})
 	require.NoError(t, err)
-	e.c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": e.method, "currency": "USD"})
+	e.c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": e.method})
 	pm := w.methodRow(e.method, "rail_method_ref")
 	recurring, _ := w.agreements(e.method)
 	require.NotEmpty(t, recurring)
@@ -322,7 +322,7 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	require.Equal(t, sent, e.providerAttempts())
 	require.Equal(t, agreementRequired, *w.invoice(invoice).LastCollectionFailureCode, "invoice collection waits for the customer")
 	require.Empty(t, w.stripe.unexpected())
-	status, body := e.c.call(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": e.method, "currency": "USD"})
+	status, body := e.c.call(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": e.method})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 
 	e.toFreshPeriodEnd()

@@ -16,8 +16,8 @@ import (
 // currency it holds money, settings or debt in, and the card that collects
 // each currency's invoices.
 type CustomerMoney struct {
-	Balances   []billing.Balance
-	Collection []billing.CollectionPaymentMethod
+	Balances []billing.Balance
+	Defaults []billing.DefaultPaymentMethod
 }
 
 // CustomersMoney reads the named customers' money: the ledger counters and
@@ -32,7 +32,7 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 	}
 	out := make(map[uuid.UUID]*CustomerMoney, len(customers))
 	for _, id := range customers {
-		out[id] = &CustomerMoney{Balances: []billing.Balance{}, Collection: []billing.CollectionPaymentMethod{}}
+		out[id] = &CustomerMoney{Balances: []billing.Balance{}, Defaults: []billing.DefaultPaymentMethod{}}
 	}
 	if len(customers) == 0 {
 		return out, nil
@@ -71,9 +71,9 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 		mode := map[key]string{}
 		for _, row := range settings {
 			mode[key{row.CustomerID, row.Currency}] = row.BillingMode
-			if row.CollectionPaymentMethodID != nil {
+			if row.DefaultPaymentMethodID != nil {
 				m := out[row.CustomerID]
-				m.Collection = append(m.Collection, billing.CollectionPaymentMethod{Currency: row.Currency, PaymentMethodID: billing.PaymentMethodID(*row.CollectionPaymentMethodID)})
+				m.Defaults = append(m.Defaults, billing.DefaultPaymentMethod{Currency: row.Currency, PaymentMethodID: billing.PaymentMethodID(*row.DefaultPaymentMethodID)})
 			}
 		}
 		for _, c := range currencies {

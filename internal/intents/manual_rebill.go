@@ -183,7 +183,11 @@ func (h *ManualRebillHandler) validateAndFence(ctx context.Context, in gen.Billi
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || !(sub.Status == models.StatusPastDue || (p.Initiator == charge.InitiatorCustomer && sub.Status == models.StatusAwaitingMethod)) || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || string(sub.Rail) != p.Rail || sub.RailSubscriptionID != p.RailSubscriptionID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) || failures != p.FailureCount {
+		charged, err := subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub)
+		if err != nil {
+			return err
+		}
+		if sub.CollectionPolicy != models.CollectionPolicyNMISchedule || !(sub.Status == models.StatusPastDue || (p.Initiator == charge.InitiatorCustomer && sub.Status == models.StatusAwaitingMethod)) || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || string(sub.Rail) != p.Rail || sub.RailSubscriptionID != p.RailSubscriptionID || charged == nil || *charged != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.Renewal.PeriodStart) || failures != p.FailureCount {
 			return errRebillSuperseded
 		}
 		paid, err := rebillPaymentAlreadyObserved(ctx, d, in.MerchantID, p)

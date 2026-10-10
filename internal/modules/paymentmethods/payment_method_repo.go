@@ -170,13 +170,19 @@ func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context
 		ids = append(ids, m.ID)
 	}
 	q := r.db.Gen(ctx)
-	subRows, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: queryMerchant.UUID(), PaymentMethodIds: ids})
+	paid, err := q.ListSubscriptionsPaidByMethods(ctx, gen.ListSubscriptionsPaidByMethodsParams{MerchantID: queryMerchant.UUID(), PaymentMethodIds: ids})
 	if err != nil {
 		return err
 	}
-	subs, err := models.SubscriptionsFromGen(subRows)
-	if err != nil {
-		return err
+	subs := make([]*models.Subscription, 0, len(paid))
+	paidBy := make(map[uuid.UUID]uuid.UUID, len(paid))
+	for _, row := range paid {
+		sub, err := models.SubscriptionFromGen(row.BillingSubscription)
+		if err != nil {
+			return err
+		}
+		subs = append(subs, sub)
+		paidBy[sub.ID] = row.PaidBy
 	}
 
 	productIDs := make([]uuid.UUID, 0, len(subs))
@@ -205,9 +211,7 @@ func (r *PaymentMethodRepo) attachPaymentMethodSubscriptions(ctx context.Context
 	byPM := map[uuid.UUID][]*models.Subscription{}
 	for _, s := range subs {
 		s.Product = products[s.ProductID]
-		if s.PaymentMethodID != nil {
-			byPM[*s.PaymentMethodID] = append(byPM[*s.PaymentMethodID], s)
-		}
+		byPM[paidBy[s.ID]] = append(byPM[paidBy[s.ID]], s)
 	}
 	for _, m := range methods {
 		m.Subscriptions = byPM[m.ID]

@@ -1,8 +1,8 @@
 import { Badge } from "@/components/ui/badge"
 
-// Currency names come from the collection policy on the server. Subscription
-// defaults and the order of saved methods never imply a collection default.
-export function CollectionDefaultBadges({
+// The currencies the card is the customer's default for: it pays their
+// invoices there and every subscription without a card of its own.
+export function DefaultCardBadges({
   currencies = [],
 }: {
   currencies?: string[]
@@ -11,7 +11,7 @@ export function CollectionDefaultBadges({
     <>
       {currencies.map((currency) => (
         <Badge key={currency} variant="secondary" className="mt-1 mr-1">
-          Collection default · {currency}
+          Default · {currency}
         </Badge>
       ))}
     </>

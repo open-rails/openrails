@@ -167,8 +167,12 @@ func (w *RebillWatchWorker) probeNMI(ctx context.Context, sub *models.Subscripti
 		return "", nil, false, errors.New("NMI shows a charge in the cycle that no attempt records")
 	}
 	scope := nmi.CycleScope{ScheduleID: sub.RailSubscriptionID, OrderIDs: []string{sub.ID.String()}}
-	if sub.PaymentMethodID != nil {
-		method, err := w.DB.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *sub.PaymentMethodID})
+	charged, err := subscriptions.PaymentMethodOf(ctx, w.DB.Gen(ctx), sub)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if charged != nil {
+		method, err := w.DB.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *charged})
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return "", nil, false, fmt.Errorf("payment method: %w", err)
 		}

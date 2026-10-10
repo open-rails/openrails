@@ -78,8 +78,11 @@ type Subscription struct {
 	Rail               Rail   `json:"rail"`                 // Rail: nmi, ccbill, solana
 	RailSubscriptionID string `json:"rail_subscription_id"` // Subscription ID from rail
 	// PspID is the PSP that owns this subscription (#641).
-	PspID           uuid.UUID  `json:"psp_id"`
-	PaymentMethodID *uuid.UUID `json:"payment_method_id"` // Reference to stored payment method
+	PspID uuid.UUID `json:"psp_id"`
+	// PaymentMethodID is the subscription's own card. nil on a card
+	// subscription follows the customer's default for its currency
+	// (subscriptions.PaymentMethodOf).
+	PaymentMethodID *uuid.UUID `json:"payment_method_id"`
 
 	// Manual rebill attempt fields for NMI
 	LastRetryAt   *time.Time `json:"last_retry_at"`  // Date of last rebill attempt

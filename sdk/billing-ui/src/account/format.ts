@@ -120,7 +120,7 @@ const TONE: Record<string, StatusTone> = {
   active: "success",
   succeeded: "success",
   paid: "success",
-  collection: "neutral",
+  default: "neutral",
   pending: "warning",
   past_due: "warning",
   awaiting_method: "warning",

@@ -1655,7 +1655,7 @@ func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListSta
 const listSubscriptionVaultRefs = `-- name: ListSubscriptionVaultRefs :many
 SELECT s.id, pm.rail_customer_ref
 FROM billing.subscriptions s
-JOIN billing.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = s.payment_method_id
+JOIN billing.payment_methods pm ON pm.merchant_id = s.merchant_id AND pm.id = billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy)
 WHERE s.merchant_id = $1::uuid AND s.id = ANY($2::uuid[]) AND s.deleted_at IS NULL
 `
 
@@ -2442,7 +2442,8 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
 
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
-       subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id, subscriptions.payment_method_id,
+       subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
+       charged.id AS payment_method_id,
        subscriptions.current_period_starts_at, subscriptions.current_period_ends_at,
        subscriptions.started_at, subscriptions.ended_at, subscriptions.canceled_at, subscriptions.cancel_type,
        subscriptions.deletion_scheduled_at, subscriptions.tier_group, subscriptions.last_retry_at,
@@ -2458,6 +2459,8 @@ FROM billing.subscriptions subscriptions
 LEFT JOIN billing.prices price ON price.merchant_id = subscriptions.merchant_id AND price.id = subscriptions.price_id
 LEFT JOIN billing.scheduled_changes scheduled ON scheduled.merchant_id = subscriptions.merchant_id
   AND scheduled.subscription_id = subscriptions.id AND scheduled.status = 'scheduled'
+LEFT JOIN billing.payment_methods charged ON charged.merchant_id = subscriptions.merchant_id
+  AND charged.id = billing.subscription_payment_method_id(subscriptions.merchant_id, subscriptions.customer_id, subscriptions.payment_method_id, subscriptions.price_id, subscriptions.rail, subscriptions.collection_policy)
 WHERE subscriptions.merchant_id = $1::uuid AND subscriptions.rail = ANY ($2::text[])
   AND subscriptions.deleted_at IS NULL
   AND subscriptions.psp_id = $3::uuid

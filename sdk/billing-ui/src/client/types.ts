@@ -171,6 +171,9 @@ export const subscriptionSchema = z.object({
   /** Seats of a per-seat price; null otherwise. */
   quantity: z.number().nullish(),
   psp_id: z.string().nullish(),
+  /** `engine | nmi_schedule | provider` */
+  collection_policy: z.string().nullish(),
+  /** The subscription's own card; null follows the default card. */
   payment_method_id: z.string().nullish(),
   started_at: time.nullish(),
   ended_at: time.nullish(),
@@ -253,7 +256,7 @@ export const paymentMethodSchema = z.object({
     )
     .nullish(),
   /** Currencies whose invoices this card collects. */
-  collection_currencies: z.array(z.string()).nullish(),
+  default_currencies: z.array(z.string()).nullish(),
   created_at: time.nullish(),
 })
 export type PaymentMethod = z.infer<typeof paymentMethodSchema>
@@ -333,13 +336,13 @@ export const balanceSchema = z.object({
 export type Balance = z.infer<typeof balanceSchema>
 
 /**
- * The signed-in customer's summary (`GET /me`): money per currency, the card
- * that pays each currency's invoices, and how many notices are unread.
+ * The signed-in customer's summary (`GET /me`): money per currency, the
+ * default card of each currency, and how many notices are unread.
  */
 export const accountSchema = z.object({
   id: z.string(),
   balances: z.array(balanceSchema),
-  collection_payment_methods: z.array(
+  default_payment_methods: z.array(
     z.object({ currency: z.string(), payment_method_id: z.string() })
   ),
   unread_notifications: z.number(),

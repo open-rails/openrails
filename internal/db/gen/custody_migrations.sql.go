@@ -14,9 +14,9 @@ import (
 
 const countInFlightChargeIntentsForPaymentMethod = `-- name: CountInFlightChargeIntentsForPaymentMethod :one
 SELECT count(*)::bigint FROM billing.provider_intents ri
-JOIN billing.subscriptions s ON s.id = ri.subscription_id
+JOIN billing.subscriptions s ON s.merchant_id = ri.merchant_id AND s.id = ri.subscription_id
 WHERE s.merchant_id = $1::uuid AND ri.merchant_id = $1::uuid
-  AND s.payment_method_id = $2::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = $2::uuid
   AND s.deleted_at IS NULL
   AND ri.status = ANY (ARRAY['in_flight'::text, 'unknown_needs_verify'::text])
 `

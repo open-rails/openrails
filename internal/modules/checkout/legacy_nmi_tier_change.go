@@ -53,7 +53,7 @@ func providerNMITierAdmissible(sub *models.Subscription, current, target *models
 	if oldCycle == nil || *oldCycle != *newCycle {
 		return errTierChangeCadence
 	}
-	if sub.PaymentMethodID == nil {
+	if sub.PaymentMethodID == nil && !subscriptions.FollowsDefault(sub) {
 		return ErrPaymentMethodStale
 	}
 	return nil
@@ -196,7 +196,14 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if _, err = moneyutil.NativeToRailMinorExact(newPrice.Currency, newPrice.Amount); err != nil {
 		return nil, err
 	}
-	methodRow, err := database.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
+	charged, err := subscriptions.PaymentMethodOf(ctx, database.Gen(ctx), sub)
+	if err != nil {
+		return nil, err
+	}
+	if charged == nil {
+		return nil, ErrPaymentMethodStale
+	}
+	methodRow, err := database.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: *charged})
 	if err != nil {
 		return nil, err
 	}

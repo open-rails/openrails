@@ -54,7 +54,7 @@ func (s *Service) customers(ctx context.Context, mid billing.MerchantID, rows []
 		m := money[row.ID]
 		out[i] = billing.Customer{
 			ID: billing.CustomerID(row.ID), CreatedAt: row.CreatedAt.UTC(), LastSeenAt: row.LastSeenAt.UTC(),
-			Settings: settings[row.ID], Balances: m.Balances, CollectionPaymentMethods: m.Collection,
+			Settings: settings[row.ID], Balances: m.Balances, DefaultPaymentMethods: m.Defaults,
 		}
 		if contact, ok := found[row.ID]; ok {
 			out[i].Contact = customerContact(contact)
@@ -195,5 +195,5 @@ func (s *Service) GetCustomerAccount(ctx context.Context, customer identity.Cust
 		return nil, err
 	}
 	m := money[customer.UUID()]
-	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, CollectionPaymentMethods: m.Collection, UnreadNotifications: unread}, nil
+	return &billing.CustomerAccount{ID: billing.CustomerID(customer), Balances: m.Balances, DefaultPaymentMethods: m.Defaults, UnreadNotifications: unread}, nil
 }

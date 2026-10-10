@@ -214,7 +214,8 @@ WHERE c.kind = lower($2::text)
                 OR pm.account_updater_checked_at < $5::timestamptz - w.lookahead)
            AND EXISTS (
                  SELECT 1 FROM billing.subscriptions s
-                  WHERE s.merchant_id = pm.merchant_id AND s.payment_method_id = pm.id
+                  WHERE s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+                    AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
                     AND s.deleted_at IS NULL
                     AND s.status IN ('active', 'past_due')
                     AND s.current_period_ends_at IS NOT NULL
@@ -278,8 +279,8 @@ WHERE pm.merchant_id = $1
        OR pm.account_updater_checked_at < $4::timestamptz)
   AND EXISTS (
         SELECT 1 FROM billing.subscriptions s
-         WHERE s.payment_method_id = pm.id
-           AND s.merchant_id = pm.merchant_id
+         WHERE s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+           AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
            AND s.deleted_at IS NULL
            AND s.status IN ('active', 'past_due', 'awaiting_method')
            AND s.current_period_ends_at IS NOT NULL

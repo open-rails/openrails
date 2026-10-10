@@ -169,7 +169,7 @@ export const aPaymentMethod = (id: string, overrides: Partial<PaymentMethod> = {
   id, customer_id: "cus_1", rail: "nmi", psp_id: "psp_1", status: "active", replaced_by: null,
   card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
   billing_details: null, contact_cardholder_at: null, reusable: true, mandates: [],
-  subscriptions: [], collection_currencies: [], created_at: WHEN,
+  subscriptions: [], default_currencies: [], created_at: WHEN,
   health: { expiry_status: "valid", last_charged_at: null, last_charge_outcome: null, active: true },
   ...overrides,
 })

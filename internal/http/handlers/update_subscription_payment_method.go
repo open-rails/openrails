@@ -58,12 +58,16 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	if !r.BindJSON(&req) {
 		return
 	}
-
-	if req.PaymentMethodID.IsZero() {
-		r.ErrorCode(billing.CodeInvalidParam, "Invalid payment_method_id format")
-		return
+	// null clears the subscription's own card: it follows the default.
+	var methodID *uuid.UUID
+	if req.PaymentMethodID != nil {
+		if req.PaymentMethodID.IsZero() {
+			r.ErrorCode(billing.CodeInvalidParam, "Invalid payment_method_id format")
+			return
+		}
+		id := req.PaymentMethodID.UUID()
+		methodID = &id
 	}
-	paymentMethodID := req.PaymentMethodID.UUID()
 
 	ctx, cancel := r.Budget(15 * time.Second)
 	defer cancel()
@@ -84,34 +88,15 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		r.ErrorCode(billing.CodeResourceNotFound, "Subscription not found")
 		return
 	}
+	origin, originReason := intents.OriginUser, "user payment-method swap"
+	if !enforceOwnership {
+		origin, originReason = intents.OriginAdmin, "admin payment-method swap"
+	}
+	verify := recurringVerifier(r, subscription.MerchantID, origin)
 
 	if subscription.CollectionPolicy == models.CollectionPolicyEngine {
-		origin := intents.OriginUser
-		if !enforceOwnership {
-			origin = intents.OriginAdmin
-		}
-		verify := func(ctx context.Context, vault, billingID, order string) (string, error) {
-			if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: r.State.Config, DB: r.State.DB}, subscription.MerchantID, origin); blocked {
-				return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
-			}
-			client, _, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, r.State.CollectionResolver, subscription)
-			if err != nil || !ok {
-				return "", fmt.Errorf("resolve the subscription's NMI account: %w", err)
-			}
-			ref, err := client.VerifyStoredCredential(ctx, vault, billingID, order, true)
-			var refusal *nmi.CustomerVaultError
-			if errors.As(err, &refusal) && !nmi.UncertainResponseCode(refusal.ResponseCode) {
-				return "", &paymentmethods.PaymentMethodError{Err: err, LocalizationID: nmidirect.FailureCode(refusal), Rail: "nmi"}
-			}
-			return ref, err
-		}
-		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, paymentMethodID, verify); err != nil {
-			var refused *paymentmethods.PaymentMethodError
-			if errors.As(err, &refused) {
-				writePaymentMethodError(r, refused)
-				return
-			}
-			writeRefusal(r, err, "Failed to select payment method")
+		if err := r.State.SubscriptionLifecycleService.UpdateEnginePaymentMethod(ctx, subscription.ID, subscription.CustomerID, methodID, verify); err != nil {
+			writeMoveRefusal(r, err, "Failed to select payment method")
 			return
 		}
 		writeUpdatedSubscription(r, authenticatedUserID, enforceOwnership, subscription.ID)
@@ -126,6 +111,19 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		r.ErrorCode(billing.CodeInvalidParam, "Cannot update payment method for canceled subscriptions")
 		return
 	}
+
+	// The card the schedule moves to: the named one, or the default it then
+	// follows. Onto the card it already bills, nothing reaches the provider.
+	move, err := r.State.SubscriptionLifecycleService.PlanNMIScheduleMove(ctx, subscription.ID, methodID)
+	if err != nil {
+		writeMoveRefusal(r, err, "Failed to update payment method")
+		return
+	}
+	if move == nil {
+		writeUpdatedSubscription(r, authenticatedUserID, enforceOwnership, subscription.ID)
+		return
+	}
+	paymentMethodID := move.Target
 
 	paymentMethod, err := r.State.PaymentMethodService.ValidatePaymentMethodOperation(ctx, paymentMethodID, targetUserID)
 	if err != nil {
@@ -174,15 +172,17 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		return
 	}
 
+	// The schedule's recurring agreement moves to the card: a card without a
+	// recurring lineage on this account is verified first, customer present.
+	if err := r.State.SubscriptionLifecycleService.VerifyNMIScheduleMove(ctx, subscription, move, verify); err != nil {
+		writeMoveRefusal(r, err, "Failed to update payment method")
+		return
+	}
+
 	// #674: the swap goes through the durable nmi_payment_source_update intent
 	// (write-through) — a lost provider response can never leave local and NMI
 	// silently billing different cards; the intent ledger converges them.
-	origin, originReason := intents.OriginUser, "user payment-method swap"
-	if !enforceOwnership {
-		origin, originReason = intents.OriginAdmin, "admin payment-method swap"
-	}
-	oldPaymentMethodID := subscription.PaymentMethodID
-	out, err := r.State.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, subscription, paymentMethod, origin, originReason)
+	out, err := r.State.PaymentSourceUpdateIntents.ExecutePaymentSourceUpdate(ctx, subscription, paymentMethod, move.Swap, origin, originReason)
 	if err != nil {
 		switch {
 		case errors.Is(err, subscriptions.ErrPaymentMethodProviderAccountMismatch):
@@ -198,7 +198,7 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 	}
 	switch {
 	case out.Done:
-		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": oldPaymentMethodID, "new_payment_method_id": paymentMethodID, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
+		log.WithFields(log.Fields{"subscription_id": subscription.ID, "rail_subscription": subscription.RailSubscriptionID, "old_payment_method_id": move.Swap.Old, "new_payment_method_id": paymentMethodID, "follows_default": move.Swap.Follow, "user_id": targetUserID}).Info("Subscription payment method updated successfully")
 		writeUpdatedSubscription(r, authenticatedUserID, enforceOwnership, subscription.ID)
 	case out.Terminal && out.Code == intents.EvidenceCodePSPMismatch:
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Info("Payment-source update refused: provider-account mismatch at execution")
@@ -214,6 +214,42 @@ func updateSubscriptionPaymentMethod(r *httprequest.Request, authenticatedUserID
 		log.WithFields(log.Fields{"subscription_id": subscription.ID, "payment_method_id": paymentMethodID, "reason": out.Reason}).Warn("Payment-source update unresolved inline; intent ledger will converge")
 		r.ErrorCode(billing.CodeResourceConflict, intents.ErrPaymentSourceUpdateProcessing.Error())
 	}
+}
+
+// recurringVerifier runs the $0 recurring verification a move needs on an
+// NMI card, customer present (or staff for them), through the account that
+// will charge it. It moves no funds; the merchant's write posture gates it.
+func recurringVerifier(r *httprequest.Request, merchantID uuid.UUID, origin intents.Origin) subscriptions.RecurringVerifier {
+	return func(ctx context.Context, psp uuid.UUID, vault, billingID, order string) (string, error) {
+		if blocked, reason := intents.GateExecution(ctx, writeposture.View{Config: r.State.Config, DB: r.State.DB}, merchantID, origin); blocked {
+			return "", apperr.New(http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "the recurring verification cannot be sent: "+reason)
+		}
+		client, ok, err := r.State.CollectionResolver.ResolveNMIClient(ctx, merchantID, &psp)
+		if err != nil || !ok {
+			return "", fmt.Errorf("resolve the card's NMI account: %w", err)
+		}
+		ref, err := client.VerifyStoredCredential(ctx, vault, billingID, order, true)
+		var refusal *nmi.CustomerVaultError
+		if errors.As(err, &refusal) && !nmi.UncertainResponseCode(refusal.ResponseCode) {
+			return "", &paymentmethods.PaymentMethodError{Err: err, LocalizationID: nmidirect.FailureCode(refusal), Rail: "nmi"}
+		}
+		return ref, err
+	}
+}
+
+// writeMoveRefusal answers a refused card move: a declined verification, or
+// a typed refusal.
+func writeMoveRefusal(r *httprequest.Request, err error, internalMessage string) {
+	var refused *paymentmethods.PaymentMethodError
+	if errors.As(err, &refused) {
+		writePaymentMethodError(r, refused)
+		return
+	}
+	if db.IsNotFound(err) {
+		r.ErrorCode(billing.CodeResourceNotFound, "Not found")
+		return
+	}
+	writeRefusal(r, err, internalMessage)
 }
 
 // writeUpdatedSubscription answers the subscription after its payment method

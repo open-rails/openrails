@@ -48,7 +48,9 @@ var (
 // changeTarget is a resolved change: the subscription as read, its current
 // price and product, and the price, product and seats it moves to.
 type changeTarget struct {
-	sub            *models.Subscription
+	sub *models.Subscription
+	// charged is the card the subscription charges: its own, or its default.
+	charged        *uuid.UUID
 	currentPrice   *models.Price
 	currentProduct *models.Product
 	price          *models.Price
@@ -296,6 +298,9 @@ func (s *CheckoutService) resolveChange(ctx context.Context, req *SubscriptionCh
 		return nil, err
 	}
 	c := &changeTarget{sub: sub, requested: req.Quantity, staff: staffChange(req)}
+	if c.charged, err = subscriptions.PaymentMethodOf(ctx, s.SubscriptionService.Database().Gen(ctx), sub); err != nil {
+		return nil, err
+	}
 	if c.pending, err = subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), sub.ID); err != nil {
 		return nil, err
 	}

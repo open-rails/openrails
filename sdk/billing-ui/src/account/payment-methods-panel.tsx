@@ -39,8 +39,11 @@ import { BillingStatusBadge } from "./status-badge"
 export interface PaymentMethodsPanelProps {
   /** Return target after off-page card verification; see `SavePaymentMethod`. */
   cardSetupReturnURL?: (setupId: string) => string
-  /** Offers to make a card the one that collects this currency's invoices. */
-  collectionCurrency?: string
+  /**
+   * Offers to make a card the default for this currency: it pays the
+   * currency's invoices and every subscription in it without its own card.
+   */
+  defaultCurrency?: string
   /** Billing country to preselect when adding a card. */
   defaultCountry?: string
   appearance?: CheckoutAppearance
@@ -63,7 +66,7 @@ function removeMessage(error: BillingError, m: Translator): string {
  */
 export function PaymentMethodsPanel({
   cardSetupReturnURL,
-  collectionCurrency,
+  defaultCurrency,
   defaultCountry,
   appearance,
   className,
@@ -92,7 +95,7 @@ export function PaymentMethodsPanel({
   const [pspId, setPspId] = React.useState<string>()
   const psp = savable.find((item) => item.psp_id === pspId) ?? savable[0]
   const [notice, announce] = useNotice()
-  const currency = collectionCurrency?.toUpperCase()
+  const currency = defaultCurrency?.toUpperCase()
 
   const confirmRemove = async () => {
     if (!removing) return
@@ -106,12 +109,12 @@ export function PaymentMethodsPanel({
     announce(t("paymentMethods.removed"))
   }
 
-  const collectWith = async (method: PaymentMethod) => {
+  const makeDefault = async (method: PaymentMethod) => {
     if (!currency) return
     setRowError(null)
-    const error = await state.setCollection(method.id, currency)
+    const error = await state.setDefault(method.id, currency)
     if (error) setRowError({ id: method.id, message: m.error(error) })
-    else announce(t("paymentMethods.usedForInvoices"))
+    else announce(t("paymentMethods.defaultUpdated"))
   }
 
   let body: React.ReactNode
@@ -136,7 +139,7 @@ export function PaymentMethodsPanel({
             .map((s) => s.display_name)
             .filter(Boolean)
           const health = method.health?.expiry_status
-          const collects = method.collection_currencies ?? []
+          const defaults = method.default_currencies ?? []
           const pending = state.pending[method.id]
           const meta = [
             users.length > 0 &&
@@ -163,11 +166,11 @@ export function PaymentMethodsPanel({
                   ) : method.health?.active === false ? (
                     <BillingStatusBadge status="needs_attention" />
                   ) : null}
-                  {collects.length > 0 ? (
+                  {defaults.length > 0 ? (
                     <BillingStatusBadge
-                      status="collection"
-                      label={t("paymentMethods.collectsFor", {
-                        currencies: collects.join(", "),
+                      status="default"
+                      label={t("paymentMethods.defaultFor", {
+                        currencies: defaults.join(", "),
                       })}
                     />
                   ) : null}
@@ -184,16 +187,16 @@ export function PaymentMethodsPanel({
                 ) : null}
               </div>
               <div className="ml-auto flex items-center gap-1">
-                {currency && !collects.includes(currency) ? (
+                {currency && !defaults.includes(currency) ? (
                   <Button
                     variant="ghost"
                     size="sm"
                     className="text-muted-foreground"
                     disabled={!!pending}
-                    onClick={() => void collectWith(method)}
+                    onClick={() => void makeDefault(method)}
                   >
-                    {pending === "collection" ? <Spinner /> : null}
-                    {t("paymentMethods.useForInvoices")}
+                    {pending === "default" ? <Spinner /> : null}
+                    {t("paymentMethods.makeDefault")}
                   </Button>
                 ) : null}
                 <Button

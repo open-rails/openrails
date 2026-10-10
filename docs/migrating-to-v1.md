@@ -234,7 +234,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListPayments(ctx, PaymentFilter)` | `client.ListPayments(` with `billing.PaymentListParams`; no status filter |
 | `Payment` with `Object`, `Refunded`, `Captured`, string ids | `billing.Payment` with `Kind`, a typed `Status`, `Channel`, `PSPID`, `Card`, `Failure`, and `Refunds` as a slice |
 | `ListPaymentMethods(ctx, customerID string, PageOptions)` | `client.ListPaymentMethods(` with a `billing.CustomerID` and `billing.PageRequest` |
-| `SetDefaultPaymentMethod` | Removed: a charge names its card; invoices use the per-currency collection card |
+| `SetDefaultPaymentMethod` | Removed: a charge names its card; the customer sets a default card per currency on `/v1/me` |
 | `ListMerchantInvoices`, `GetMerchantInvoice`, `ListInvoicePaymentAttempts`, `RecordInvoicePayment` | `client.ListInvoices(`, `client.GetInvoice(`, `client.ListPayments(` and `client.ListPaymentAttempts(` with `InvoiceID`, `client.CreatePayment(` with `InvoiceID` |
 | `EnsureCustomerInvoiceProfile`, `GetCustomerInvoiceProfile` | `client.UpdateCustomer(` with `InvoiceProfile`; `client.GetCustomer(`. No profile already means net 0, charged automatically |
 | `HasSettledPayment` | `client.ListOrders(` with `PriceID` and `Status: billing.OrderPaid` |
@@ -279,7 +279,6 @@ fields (`400 unknown_field`), and every error code is in
   A browser buys through a checkout session (below).
 - `GET /v1/me/status`, `/v1/me/tier`, `/v1/me/products`: read
   `/v1/me/entitlements` and `/v1/me/subscriptions`.
-- Default card: `PUT /v1/me/default-payment-method` and its merchant twin.
 - PSP cutover and engine takeover routes.
 - `GET|PUT /v1/merchant/settings`, `GET /v1/solana/config`,
   `GET /v1/merchant/checkout-options`.
@@ -325,9 +324,10 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/admin/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `POST /v1/admin/metrics/query` |
 | `/v1/admin/users/{user_id}/…` | `/v1/admin/customers/{customer_id}/product-access` and the checks beneath it |
 | `POST /v1/admin/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/admin/customers/{customer_id}/entitlements/check`, `POST /v1/admin/tiers/lookup` |
-| `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and collection cards; subscriptions, payments, cards, entitlements and product access are their own lists |
+| `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
 | `GET /v1/admin/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
+| `PUT /v1/me/default-payment-method` with `currency` | `PUT /v1/me/default-payment-methods/{currency}`; a subscription's `payment_method_id` is its own card, `null` follows the default |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
@@ -447,7 +447,6 @@ calendar ([data retention](operations.md#data-retention)):
 | `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
 | Offset pages from `listPaymentMethods`, `listPayments`, `listInvoices`, `listSubscriptions` | Cursor pages: pass `cursor`, read `next_cursor` |
-| `setDefaultPaymentMethod`, `usePaymentMethods().setDefault`, `defaultCurrency` | `setCollectionPaymentMethod`, `setCollection`, `collectionCurrency` |
 | `NewCard` with `provider`, `name_on_card` and address fields | `NewCard` with `psp_id` and `billing_details` |
 | `PayRequest` with flat `name_on_card`, `zip`, `country`, `last_four`, … | `PayRequest` with `billing_details` |
 | `SavedPaymentMethod` with `brand`, `last_four`, `default` | `SavedPaymentMethod` with `card` |

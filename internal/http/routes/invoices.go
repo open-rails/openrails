@@ -9,7 +9,7 @@ import (
 var (
 	invoiceErrors       = codes("invalid_param", "resource_not_found")
 	invoiceActionErrors = codes("invalid_param", "invoice_action_not_allowed", "resource_not_found")
-	invoiceChargeErrors = codes("card_declined", "collection_payment_method_invalid", "collection_payment_method_required", "idempotency_key_reused", "invalid_param",
+	invoiceChargeErrors = codes("card_declined", "default_payment_method_invalid", "default_payment_method_required", "idempotency_key_reused", "invalid_param",
 		"invoice_not_retryable", "invoice_retry_idempotency_conflict", "invoice_retry_in_progress", "invoice_retry_outcome_unknown", "payment_method_required",
 		"payment_provider_rejected", "resource_not_found", "service_unavailable")
 )

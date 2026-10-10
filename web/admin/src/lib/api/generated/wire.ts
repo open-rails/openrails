@@ -503,11 +503,6 @@ export type CloseProviderOperationParams = {
   note?: string
 }
 
-export type CollectionPaymentMethod = {
-  currency: string
-  payment_method_id: string
-}
-
 export type CreateAlertWebhookParams = {
   name?: string
   url?: string
@@ -697,13 +692,13 @@ export type Customer = {
   last_seen_at: string
   settings: CustomerSettings
   balances: Balance[]
-  collection_payment_methods: CollectionPaymentMethod[]
+  default_payment_methods: DefaultPaymentMethod[]
 }
 
 export type CustomerAccount = {
   id: string
   balances: Balance[]
-  collection_payment_methods: CollectionPaymentMethod[]
+  default_payment_methods: DefaultPaymentMethod[]
   unread_notifications: number
 }
 
@@ -826,6 +821,11 @@ export type DeclaredTransaction = {
   amount?: string
   currency?: string
   occurred_at?: string
+}
+
+export type DefaultPaymentMethod = {
+  currency: string
+  payment_method_id: string
 }
 
 export type DelinquencyHostEvent = {
@@ -1649,7 +1649,7 @@ export type PaymentMethod = {
   reusable: boolean
   mandates: Mandate[]
   subscriptions: PaymentMethodSubscription[]
-  collection_currencies: string[]
+  default_currencies: string[]
   created_at: string
 }
 
@@ -2167,6 +2167,10 @@ export type SetDashboardParams = {
   widgets?: DashboardWidget[]
 }
 
+export type SetDefaultPaymentMethodParams = {
+  payment_method_id?: string
+}
+
 export type SetMeterParams = {
   event_type?: string
   value_property?: string
@@ -2192,7 +2196,7 @@ export type SetSpendDelegationsParams = {
 }
 
 export type SetSubscriptionPaymentMethodParams = {
-  payment_method_id?: string
+  payment_method_id?: string | null
 }
 
 export type SolanaPayGetResponse = {

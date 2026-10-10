@@ -53,7 +53,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	auth := map[string]string{"Authorization": "Bearer " + token}
 	for _, route := range []string{
 		"GET /v1/me", "GET /v1/me/balance/transactions", "GET /v1/me/spend-limits",
-		"PUT /v1/me/collection-payment-method", "POST /v1/me/subscriptions/sub_1/cancel", "POST /v1/me/subscriptions/sub_1/resume",
+		"PUT /v1/me/default-payment-methods/USD", "POST /v1/me/subscriptions/sub_1/cancel", "POST /v1/me/subscriptions/sub_1/resume",
 		"PUT /v1/me/subscriptions/sub_1/payment-method", "POST /v1/me/subscriptions/sub_1/change",
 	} {
 		method, path, _ := strings.Cut(route, " ")
@@ -88,7 +88,7 @@ func TestCustomerRouteInventories(t *testing.T) {
 	}
 	require.Subset(t, collect(func(r router.Router) { RegisterCustomerRoutes(r, nil, mount(all)) }), []string{
 		"POST /me/checkout-sessions", "POST /me/billing-portal", "GET /me/spend-limits",
-		"POST /me/subscriptions/{id}/change", "POST /me/subscriptions/{id}/cancel", "PUT /me/collection-payment-method",
+		"POST /me/subscriptions/{id}/change", "POST /me/subscriptions/{id}/cancel", "PUT /me/default-payment-methods/{currency}",
 	})
 
 	for _, tc := range []struct {

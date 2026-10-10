@@ -120,7 +120,7 @@ func customerPaymentError(r *httprequest.Request, err error) {
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "customer_payment_unsupported", "customer-present payment is unsupported for this rail or method"))
 	case errors.Is(err, money.ErrInvoiceNotRetryable), errors.Is(err, intents.ErrRebillNotRetryable):
 		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, "payment_not_retryable", "resource is not payable now"))
-	case errors.Is(err, money.ErrCollectionPaymentMethodInvalid), errors.Is(err, money.ErrCollectionPaymentMethodRequired), errors.Is(err, charge.ErrAgreementRequired):
+	case errors.Is(err, money.ErrDefaultPaymentMethodInvalid), errors.Is(err, money.ErrDefaultPaymentMethodRequired), errors.Is(err, charge.ErrAgreementRequired):
 		r.APIError(api.NewAPIError(http.StatusBadRequest, api.ErrorTypeInvalidRequest, "invalid_payment_method", "payment method is not eligible"))
 	default:
 		r.InternalError("customer payment failed", err)

@@ -898,13 +898,16 @@ func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx 
 		if err != nil {
 			return 0, err
 		}
-		rows, err := s.DB.Gen(ctx).ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: mid.UUID(), PaymentMethodIds: []uuid.UUID{pm.ID}})
+		rows, err := s.DB.Gen(ctx).ListSubscriptionsPaidByMethods(ctx, gen.ListSubscriptionsPaidByMethodsParams{MerchantID: mid.UUID(), PaymentMethodIds: []uuid.UUID{pm.ID}})
 		if err != nil {
 			return 0, err
 		}
-		subs, err = models.SubscriptionsFromGen(rows)
-		if err != nil {
-			return 0, err
+		for _, row := range rows {
+			sub, err := models.SubscriptionFromGen(row.BillingSubscription)
+			if err != nil {
+				return 0, err
+			}
+			subs = append(subs, sub)
 		}
 	} else {
 		if s.SubscriptionService == nil {
@@ -916,15 +919,16 @@ func (s *RailPaymentMethodService) countLiveSubscriptionsUsingPaymentMethod(ctx 
 		}
 		subs = make([]*models.Subscription, 0, len(fallback))
 		for i := range fallback {
-			subs = append(subs, &fallback[i])
+			// Its own card, or the card it charges (PaymentMethod).
+			own := fallback[i].PaymentMethodID != nil && *fallback[i].PaymentMethodID == pm.ID
+			if own || (fallback[i].PaymentMethod != nil && fallback[i].PaymentMethod.ID == pm.ID) {
+				subs = append(subs, &fallback[i])
+			}
 		}
 	}
 
 	liveCount := 0
 	for _, sub := range subs {
-		if sub == nil || sub.PaymentMethodID == nil || *sub.PaymentMethodID != pm.ID {
-			continue
-		}
 		switch sub.Status {
 		case models.StatusActive, models.StatusPending, models.StatusPastDue:
 			liveCount++

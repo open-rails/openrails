@@ -294,7 +294,7 @@ export const adminMutations = {
     const customerKey = customerId ? keys.customer(customerId) : undefined
     return mutationOptions({
       mutationKey: [...subscriptionsKey, subscriptionId, "payment-method"],
-      mutationFn: (paymentMethodId: string) =>
+      mutationFn: (paymentMethodId: string | null) =>
         changeSubscriptionPaymentMethod(subscriptionId, paymentMethodId),
       onSuccess: () =>
         Promise.all([

@@ -14,11 +14,12 @@ import (
 )
 
 func deletionMethodUnused(ctx context.Context, q *gen.Queries, mid, id uuid.UUID, accepted int64) error {
-	subscriptions, err := q.ListSubscriptionsByPaymentMethodIDs(ctx, gen.ListSubscriptionsByPaymentMethodIDsParams{MerchantID: mid, PaymentMethodIds: []uuid.UUID{id}})
+	paid, err := q.ListSubscriptionsPaidByMethods(ctx, gen.ListSubscriptionsPaidByMethodsParams{MerchantID: mid, PaymentMethodIds: []uuid.UUID{id}})
 	if err != nil {
 		return err
 	}
-	for _, s := range subscriptions {
+	for _, row := range paid {
+		s := row.BillingSubscription
 		if string(s.Status) == string(models.StatusActive) || string(s.Status) == string(models.StatusPending) || string(s.Status) == string(models.StatusPastDue) {
 			return paymentmethods.ErrPaymentMethodInUse
 		}

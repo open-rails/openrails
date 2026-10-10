@@ -110,7 +110,7 @@ unbounded-many ListChargeableOpenInvoices                  # or#837 scan of all 
 
 # Unbounded fan-out: the caller's list is bounded, each element's row set is not.
 unbounded-many ListMigratableSubscriptionsByPriceIDs     # or#837 fan-out per price: a price migration's cohort
-unbounded-many ListSubscriptionsByPaymentMethodIDs       # or#837 fan-out per payment method
+unbounded-many ListDefaultPaymentMethodsByCustomers       # fan-out per customer: one row per currency
 unbounded-many ListLatestChargeByPaymentMethodIDs        # or#837 fan-out per payment method
 unbounded-many ListPaymentMethodsByRails                 # or#837 every payment method on a rail
 unbounded-many ListRecordedSubscriptionCharges           # or#837 fan-out per subscription inside the bulk-verify window

@@ -19,9 +19,10 @@ type Customer struct {
 	Settings   CustomerSettings `json:"settings"`
 	// Balances are the currencies the customer holds money, settings or debt in.
 	Balances []Balance `json:"balances"`
-	// CollectionPaymentMethods are the cards that pay each currency's
-	// invoices; a currency without one is absent.
-	CollectionPaymentMethods []CollectionPaymentMethod `json:"collection_payment_methods"`
+	// DefaultPaymentMethods are the customer's default card per currency:
+	// it pays the currency's invoices and every subscription in it without
+	// its own card. A currency without one is absent.
+	DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
 }
 
 // CustomerContact is how to reach a customer, as the merchant's directory
@@ -41,13 +42,13 @@ type CustomerContact struct {
 }
 
 // CustomerAccount is the signed-in customer's own summary (GET /v1/me): per
-// currency its balance and the card that pays its invoices, and how many of
-// its notices are unread.
+// currency its balance and its default card, and how many of its notices are
+// unread.
 type CustomerAccount struct {
-	ID                       CustomerID                `json:"id"`
-	Balances                 []Balance                 `json:"balances"`
-	CollectionPaymentMethods []CollectionPaymentMethod `json:"collection_payment_methods"`
-	UnreadNotifications      int64                     `json:"unread_notifications"`
+	ID                    CustomerID             `json:"id"`
+	Balances              []Balance              `json:"balances"`
+	DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
+	UnreadNotifications   int64                  `json:"unread_notifications"`
 }
 
 // CustomerListParams lists customers, newest first. Search instead lists the

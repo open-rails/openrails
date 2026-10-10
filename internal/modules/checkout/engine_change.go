@@ -55,12 +55,12 @@ var (
 // engineUpgradeQuote prices an engine upgrade to target at quantity seats at
 // now and freezes the successor membership terms. The preview and the charge
 // share it.
-func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
+func engineUpgradeQuote(sub *models.Subscription, charged *uuid.UUID, current, target *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
 	var terms subscriptions.InitialMembershipTerms
 	if sub.Status != models.StatusActive || (sub.CurrentPeriodEndsAt != nil && !sub.CurrentPeriodEndsAt.After(now)) {
 		return terms, errTierChangeRenewalDue
 	}
-	if sub.PaymentMethodID == nil {
+	if charged == nil {
 		return terms, ErrPaymentMethodStale
 	}
 	upgrade, err := modelBUpgradeOf(sub, current, target, quantity)
@@ -78,7 +78,7 @@ func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price,
 	}
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: uuidutil.NewV7(), PaymentID: uuidutil.NewV7(),
-		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: target.ID, PaymentMethodID: *sub.PaymentMethodID,
+		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: target.ID, PaymentMethodID: *charged,
 		ProductName: product.DisplayName, Quantity: subscriptions.CloneQuantity(quantity), Amount: quote.ChargeNow, RecurringAmount: upgrade.New.Micros, Currency: target.Currency, AccessDurationHours: target.AccessDurationHours,
 		AcceptedAt: quote.PeriodStart, PeriodStart: quote.PeriodStart, PeriodEnd: quote.PeriodEnd,
 		Replaces: &subscriptions.ReplacedMembership{SubscriptionID: sub.ID, PriceID: sub.PriceID, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(), Credit: quote.Credit},
@@ -89,7 +89,7 @@ func engineUpgradeQuote(sub *models.Subscription, current, target *models.Price,
 // seatIncreaseQuote prices more seats on the current price for the rest of the
 // period at now and freezes the terms. Amount zero (the period is ending) adds
 // them free.
-func seatIncreaseQuote(sub *models.Subscription, current *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
+func seatIncreaseQuote(sub *models.Subscription, charged *uuid.UUID, current *models.Price, product *models.Product, quantity *int, now time.Time) (subscriptions.InitialMembershipTerms, error) {
 	var terms subscriptions.InitialMembershipTerms
 	if sub.Status != models.StatusActive || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(now) {
 		return terms, errTierChangeRenewalDue
@@ -97,7 +97,7 @@ func seatIncreaseQuote(sub *models.Subscription, current *models.Price, product 
 	if sub.CurrentPeriodStartsAt == nil || !sub.CurrentPeriodEndsAt.After(*sub.CurrentPeriodStartsAt) {
 		return terms, ErrTierChangePeriodUnknown
 	}
-	if sub.PaymentMethodID == nil {
+	if charged == nil {
 		return terms, ErrPaymentMethodStale
 	}
 	if sub.Quantity == nil || quantity == nil || *quantity <= *sub.Quantity {
@@ -117,7 +117,7 @@ func seatIncreaseQuote(sub *models.Subscription, current *models.Price, product 
 	}
 	terms = subscriptions.InitialMembershipTerms{
 		CollectionPolicy: models.CollectionPolicyEngine, SubscriptionID: sub.ID,
-		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: current.ID, PaymentMethodID: *sub.PaymentMethodID,
+		CustomerID: sub.CustomerID, PSPID: sub.PspID, ProductID: product.ID, PriceID: current.ID, PaymentMethodID: *charged,
 		ProductName: product.DisplayName, Quantity: subscriptions.CloneQuantity(quantity), Amount: charge, RecurringAmount: recurring, Currency: current.Currency, AccessDurationHours: sub.AccessDurationHoursSnapshot,
 		AcceptedAt: now, PeriodStart: now, PeriodEnd: sub.CurrentPeriodEndsAt.UTC(),
 		Adds: &subscriptions.AddedSeats{FromQuantity: *sub.Quantity},
@@ -130,7 +130,7 @@ func seatIncreaseQuote(sub *models.Subscription, current *models.Price, product 
 }
 
 func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {
-	terms, err := engineUpgradeQuote(c.sub, c.currentPrice, c.price, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
+	terms, err := engineUpgradeQuote(c.sub, c.charged, c.currentPrice, c.price, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +140,7 @@ func (s *CheckoutService) processEngineUpgrade(ctx context.Context, req *Subscri
 // addEngineSeats charges more seats now. Seats that cost nothing (the period
 // is ending) are added without a charge.
 func (s *CheckoutService) addEngineSeats(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {
-	terms, err := seatIncreaseQuote(c.sub, c.currentPrice, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
+	terms, err := seatIncreaseQuote(c.sub, c.charged, c.currentPrice, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
 	}
@@ -437,7 +437,7 @@ func previewEngineCancel(resp *TierChangePreviewResponse, c *changeTarget) (*Tie
 
 // previewEngineUpgrade quotes exactly what processEngineUpgrade charges.
 func (s *CheckoutService) previewEngineUpgrade(resp *TierChangePreviewResponse, c *changeTarget) (*TierChangePreviewResponse, error) {
-	terms, err := engineUpgradeQuote(c.sub, c.currentPrice, c.price, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
+	terms, err := engineUpgradeQuote(c.sub, c.charged, c.currentPrice, c.price, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
 	}
@@ -449,7 +449,7 @@ func (s *CheckoutService) previewEngineUpgrade(resp *TierChangePreviewResponse, 
 
 // previewEngineSeats quotes exactly what addEngineSeats charges.
 func (s *CheckoutService) previewEngineSeats(resp *TierChangePreviewResponse, c *changeTarget) (*TierChangePreviewResponse, error) {
-	terms, err := seatIncreaseQuote(c.sub, c.currentPrice, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
+	terms, err := seatIncreaseQuote(c.sub, c.charged, c.currentPrice, c.product, c.quantity, s.now().UTC().Truncate(time.Microsecond))
 	if err != nil {
 		return nil, err
 	}

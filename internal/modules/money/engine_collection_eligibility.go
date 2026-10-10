@@ -18,10 +18,9 @@ import (
 
 var ErrCustomerSessionRequired = errors.New("verified customer session required")
 
-// ErrSubscriptionPaymentMethodMissing refuses a renewal whose stored method is
-// gone. Renewals charge only the method chosen at subscribe time (or replaced
-// by the customer); they never fall back to the customer's current default.
-var ErrSubscriptionPaymentMethodMissing = errors.New("subscription has no stored payment method; renewals never fall back to the default card")
+// ErrSubscriptionPaymentMethodMissing refuses a renewal with no card to
+// charge: none of its own, and no customer default for its currency.
+var ErrSubscriptionPaymentMethodMissing = errors.New("subscription has no card of its own and its customer no default for its currency")
 
 // ErrEngineMethodUnusable is a renewal refusal only the member can fix: the
 // stored method is gone, parked, being deleted, no longer qualified, or on an
@@ -48,11 +47,16 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 		}
 		return method, instrument, binding, err
 	}
-	if sub.PaymentMethodID == nil {
+	q := d.Gen(ctx)
+	// The card it charges: its own, else the default it follows.
+	charged, err := subscriptions.PaymentMethodOf(ctx, q, sub)
+	if err != nil {
+		return readFailure(err)
+	}
+	if charged == nil {
 		return unusable(ErrSubscriptionPaymentMethodMissing)
 	}
-	q := d.Gen(ctx)
-	observed, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *sub.PaymentMethodID})
+	observed, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: sub.MerchantID, ID: *charged})
 	if err != nil {
 		return readFailure(err)
 	}
@@ -68,7 +72,7 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 			return readFailure(err)
 		}
 	}
-	method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: sub.MerchantID, ID: *sub.PaymentMethodID})
+	method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: sub.MerchantID, ID: *charged})
 	if err != nil {
 		return readFailure(err)
 	}

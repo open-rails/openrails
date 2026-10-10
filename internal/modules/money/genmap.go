@@ -119,15 +119,15 @@ func balanceTransactionFromTransfer(r gen.BillingLedgerTransfer) billing.Balance
 
 func settingsFromGen(r gen.BillingMoneySetting) *models.MoneyAccount {
 	return &models.MoneyAccount{
-		MerchantID:              r.MerchantID,
-		CustomerID:              r.CustomerID,
-		Currency:                r.Currency,
-		BillingMode:             r.BillingMode,
-		CollectionPaymentMethod: r.CollectionPaymentMethodID,
-		CreditLimitAmount:       r.CreditLimitAmount,
-		TrustLevel:              r.Tier,
-		CreatedAt:               r.CreatedAt,
-		UpdatedAt:               r.UpdatedAt,
+		MerchantID:           r.MerchantID,
+		CustomerID:           r.CustomerID,
+		Currency:             r.Currency,
+		BillingMode:          r.BillingMode,
+		DefaultPaymentMethod: r.DefaultPaymentMethodID,
+		CreditLimitAmount:    r.CreditLimitAmount,
+		TrustLevel:           r.Tier,
+		CreatedAt:            r.CreatedAt,
+		UpdatedAt:            r.UpdatedAt,
 	}
 }
 

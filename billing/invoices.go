@@ -189,8 +189,6 @@ const (
 	CodeInvoiceRetryInProgress          = "invoice_retry_in_progress"
 	CodeInvoiceRetryOutcomeUnknown      = "invoice_retry_outcome_unknown"
 	CodeInvoiceRetryIdempotencyConflict = "invoice_retry_idempotency_conflict"
-	CodeCollectionPaymentMethodRequired = "collection_payment_method_required"
-	CodeCollectionPaymentMethodInvalid  = "collection_payment_method_invalid"
 )
 
 // InvoiceProfile is a customer's invoice terms and document fields, copied

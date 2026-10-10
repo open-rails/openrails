@@ -222,7 +222,7 @@ reference: [api/routes.md](api/routes.md).
 
 | Task | Route | Console page |
 |---|---|---|
-| Look up a customer (settings, balances, arrears, collection cards) | `GET /v1/admin/customers/{customer_id}` | Customers → search |
+| Look up a customer (settings, balances, arrears, default cards) | `GET /v1/admin/customers/{customer_id}` | Customers → search |
 | Find overdue invoices | `GET /v1/admin/invoices?overdue=true` (each says whether it is `delinquent`) | Invoices → Overdue only |
 | Follow failed renewals | `GET /v1/admin/subscriptions?dunning=true` (each with its `dunning`) | Subscriptions → Dunning |
 | Grant a product free / revoke a window | `POST /v1/admin/product-access` (a batch), `DELETE /v1/admin/customers/{customer_id}/product-access/{id}` | Customers → profile |

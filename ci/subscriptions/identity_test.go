@@ -274,6 +274,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"PATCH /v1/me/payment-methods/{id}":                          {"/payment-methods/" + aCard, map[string]any{"exp_month": 12, "exp_year": 2039, "reusable": false}},
 		"POST /v1/me/payment-methods/{id}/verify":                    {"/payment-methods/" + aCard + "/verify", nil},
 		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
+		"PUT /v1/me/default-payment-methods/{currency}":              {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},
 		"GET /v1/me/payment-method-setups/{id}":                      {"/payment-method-setups/" + setup, nil},
 		"POST /v1/me/payment-method-setups/{id}/confirm":             {"/payment-method-setups/" + setup + "/confirm", map[string]any{}},
 		"GET /v1/me/checkout-sessions/{id}":                          {"/checkout-sessions/" + session.id, nil},

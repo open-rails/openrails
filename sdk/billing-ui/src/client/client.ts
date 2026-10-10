@@ -372,9 +372,10 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       )
     },
 
+    /** Gives the subscription its own card; `null` makes it follow the default. */
     setSubscriptionPaymentMethod(
       subscriptionId: string,
-      paymentMethodId: string
+      paymentMethodId: string | null
     ): Promise<Subscription> {
       return json(
         subscriptionSchema,
@@ -517,18 +518,23 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return res.status === 202 ? "pending" : "removed"
     },
 
-    /** Makes the card the one that collects one currency's invoices. */
-    async setCollectionPaymentMethod(input: {
+    /**
+     * Makes the card the default for one currency: it pays the currency's
+     * invoices and every subscription in it without its own card.
+     */
+    async setDefaultPaymentMethod(input: {
       currency: string
       paymentMethodId: string
     }): Promise<void> {
-      await send("/me/collection-payment-method", {
-        method: "PUT",
-        body: {
-          currency: input.currency.toUpperCase(),
-          payment_method_id: input.paymentMethodId,
-        } satisfies wire.CollectionPaymentMethod,
-      })
+      await send(
+        `/me/default-payment-methods/${id(input.currency.toUpperCase())}`,
+        {
+          method: "PUT",
+          body: {
+            payment_method_id: input.paymentMethodId,
+          } satisfies wire.SetDefaultPaymentMethodParams,
+        }
+      )
     },
 
     /** Charges and refunds, newest first. `rail` filters by rail. */

@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // recordScheduleAttempts records a provider schedule's own charges as rebill
@@ -53,12 +54,16 @@ func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Sub
 		if answer.Rail == "" {
 			answer = decline.Evidence{Code: strings.TrimSpace(t.DeclineCode), Text: t.DeclineReason}
 		}
+		charged, err := subscriptions.PaymentMethodOf(ctx, q, sub)
+		if err != nil {
+			return err
+		}
 		a := attempts.Attempt{
 			MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: string(sub.Rail),
 			Kind: attempts.Rebill, Owner: owner, ProviderSchedule: true, ObservedVia: via,
 			Approved: t.Success, Answer: answer,
 			TransactionID: t.TransactionID, Amount: amount, Currency: currency, At: t.OccurredAt,
-			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due, Quantity: sub.Quantity}, PaymentMethodID: sub.PaymentMethodID,
+			Cycle: &attempts.Cycle{SubscriptionID: sub.ID, DueAt: due, Quantity: sub.Quantity}, PaymentMethodID: charged,
 		}
 		if owner == attempts.OwnerNMISchedule {
 			a.TokenType = charge.TokenTypePSPToken

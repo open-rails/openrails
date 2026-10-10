@@ -146,11 +146,6 @@ export type CheckoutSessionSavedMethod = {
   card: CardDetails | null
 }
 
-export type CollectionPaymentMethod = {
-  currency: string
-  payment_method_id: string
-}
-
 export type CreateOrderParams = {
   lines?: OrderLineParams[]
   expected_total?: string
@@ -180,7 +175,7 @@ export type CurrencyUnits = {
 export type CustomerAccount = {
   id: string
   balances: Balance[]
-  collection_payment_methods: CollectionPaymentMethod[]
+  default_payment_methods: DefaultPaymentMethod[]
   unread_notifications: number
 }
 
@@ -206,6 +201,11 @@ export type CustomerEntitlement = {
 
 export type CustomerNotificationLookup = {
   notifications: Record<string, Notification | null> | null
+}
+
+export type DefaultPaymentMethod = {
+  currency: string
+  payment_method_id: string
 }
 
 export type DriftField = {
@@ -540,7 +540,7 @@ export type PaymentMethod = {
   reusable: boolean
   mandates: Mandate[]
   subscriptions: PaymentMethodSubscription[]
-  collection_currencies: string[]
+  default_currencies: string[]
   created_at: string
 }
 
@@ -703,8 +703,12 @@ export type ScheduledChange = {
   product?: ProductSummary
 }
 
-export type SetSubscriptionPaymentMethodParams = {
+export type SetDefaultPaymentMethodParams = {
   payment_method_id?: string
+}
+
+export type SetSubscriptionPaymentMethodParams = {
+  payment_method_id?: string | null
 }
 
 export type SolanaPayGetResponse = {

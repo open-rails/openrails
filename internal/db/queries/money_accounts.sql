@@ -97,9 +97,9 @@ UPDATE billing.money_settings
 SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
--- name: SetMoneyAccountCollectionPaymentMethod :execrows
+-- name: SetMoneyAccountDefaultPaymentMethod :execrows
 UPDATE billing.money_settings
-SET collection_payment_method_id = sqlc.arg(payment_method_id),
+SET default_payment_method_id = sqlc.arg(payment_method_id),
     updated_at = sqlc.arg(now)
 WHERE merchant_id = $1
   AND customer_id = $2
@@ -181,3 +181,10 @@ WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id = ANY(sqlc.arg(custome
   AND (credit_limit_amount <> 0 OR tier IS NOT NULL)
 ORDER BY customer_id, currency
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListDefaultPaymentMethodsByCustomers :many
+-- Each customer's default card per currency.
+SELECT customer_id, currency, default_payment_method_id::uuid AS default_payment_method_id
+FROM billing.money_settings
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = ANY(sqlc.arg(customer_ids)::uuid[])
+  AND default_payment_method_id IS NOT NULL;

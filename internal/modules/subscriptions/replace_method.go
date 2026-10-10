@@ -42,7 +42,11 @@ func WakeForReplacedMethod(ctx context.Context, d *db.DB, merchantID, paymentMet
 		}
 		waiting := sub.Status == models.StatusAwaitingMethod || (sub.Status == models.StatusPastDue && (sub.NextRetryAt == nil || sub.NextRetryAt.After(now)))
 		collects := sub.CollectionPolicy == models.CollectionPolicyEngine || sub.CollectionPolicy == models.CollectionPolicyNMISchedule
-		if !collects || sub.PaymentMethodID == nil || *sub.PaymentMethodID != paymentMethodID || !waiting {
+		charged, err := PaymentMethodOf(ctx, d.Gen(ctx), sub)
+		if err != nil {
+			return err
+		}
+		if !collects || charged == nil || *charged != paymentMethodID || !waiting {
 			continue
 		}
 		if err := ReplaceMethod(sub, now); err != nil {

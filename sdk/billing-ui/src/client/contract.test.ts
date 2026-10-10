@@ -40,7 +40,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.confirmPaymentAuthentication("op_1"),
     () => client.removePaymentMethod("pm_1"),
     () =>
-      client.setCollectionPaymentMethod({
+      client.setDefaultPaymentMethod({
         currency: "USD",
         paymentMethodId: "pm_1",
       }),

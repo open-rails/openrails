@@ -52,12 +52,13 @@ type PaymentMethod struct {
 	// Mandates are the live agreements on the card. One that requires
 	// reconsent waits for POST /v1/me/payment-methods/{id}/verify.
 	Mandates []Mandate `json:"mandates"`
-	// Subscriptions are the subscriptions the card pays.
+	// Subscriptions are the subscriptions the card pays: as their own card,
+	// or as the default they follow.
 	Subscriptions []PaymentMethodSubscription `json:"subscriptions"`
-	// CollectionCurrencies are the currencies whose invoices the card
-	// collects (PUT /me/collection-payment-method).
-	CollectionCurrencies []string  `json:"collection_currencies"`
-	CreatedAt            time.Time `json:"created_at"`
+	// DefaultCurrencies are the currencies the card is the customer's default
+	// for (PUT /me/default-payment-methods/{currency}).
+	DefaultCurrencies []string  `json:"default_currencies"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 // PaymentMethodSubscription is a subscription a card pays.
@@ -155,9 +156,25 @@ type UpdatePaymentMethodParams struct {
 	Reusable       *bool           `json:"reusable,omitempty"`
 }
 
-// CollectionPaymentMethod is the card that collects a customer's invoices in
-// one currency.
-type CollectionPaymentMethod struct {
+// Default payment method codes.
+const (
+	// CodeDefaultPaymentMethodRequired: the customer has no default card for
+	// the currency (400).
+	CodeDefaultPaymentMethodRequired = "default_payment_method_required"
+	// CodeDefaultPaymentMethodInvalid: the card cannot be the customer's
+	// default for the currency (400).
+	CodeDefaultPaymentMethodInvalid = "default_payment_method_invalid"
+)
+
+// SetDefaultPaymentMethodParams makes a saved card the customer's default for
+// one currency: it collects their invoices there and pays every card
+// subscription in it without a card of its own.
+type SetDefaultPaymentMethodParams struct {
+	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+}
+
+// DefaultPaymentMethod is the customer's default card for one currency.
+type DefaultPaymentMethod struct {
 	Currency        string          `json:"currency"`
 	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
 }

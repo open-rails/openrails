@@ -259,7 +259,11 @@ func (h *SubscriptionCollectionHandler) validateAndFence(ctx context.Context, in
 		if sub.RetryAttempts != nil {
 			failures = *sub.RetryAttempts
 		}
-		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || sub.PaymentMethodID == nil || *sub.PaymentMethodID != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) || sub.CanceledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
+		charged, err := subscriptions.PaymentMethodOf(ctx, q, sub)
+		if err != nil {
+			return err
+		}
+		if sub.CollectionPolicy != models.CollectionPolicyEngine || string(sub.Rail) != in.Rail || sub.RailSubscriptionID != "" || sub.CustomerID != p.Renewal.CustomerID || sub.PspID != p.Instrument.PSPID || charged == nil || *charged != p.PaymentMethodID || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.Equal(p.PreviousPeriodEnd) || sub.PriceID != p.Renewal.FromPriceID || sub.ProductID != p.Renewal.FromProductID || (sub.Status != models.StatusActive && sub.Status != models.StatusPastDue && sub.Status != models.StatusAwaitingMethod) || sub.CanceledAt != nil || sub.DeletionScheduledAt != nil || failures != p.FailureCount {
 			return errEngineObligationChanged
 		}
 		if p.Instrument.CustodianID != nil {

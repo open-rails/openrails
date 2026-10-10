@@ -157,8 +157,14 @@ func (s *MoneyService) admitSubscriptionCollection(ctx context.Context, subscrip
 		} else if payer != uuid.Nil {
 			return intents.ErrRebillNotRetryable
 		}
-		if requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID) {
-			return intents.ErrRebillUnsupported
+		if requestedMethod != nil {
+			charged, err := subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub)
+			if err != nil {
+				return err
+			}
+			if charged == nil || *requestedMethod != *charged {
+				return intents.ErrRebillUnsupported
+			}
 		}
 		method, instrument, binding, err := s.engineCollectionMethod(ctx, d, sub)
 		if err != nil {

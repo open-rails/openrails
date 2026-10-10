@@ -26,14 +26,13 @@ import (
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
-	log "github.com/sirupsen/logrus"
 )
 
 var (
 	ErrCustomerPaymentUnsupported      = errors.New("customer-present payment is not supported for this rail")
 	ErrInvoiceNotRetryable             = errors.New("invoice is not retryable")
-	ErrCollectionPaymentMethodRequired = errors.New("collection payment method required")
-	ErrCollectionPaymentMethodInvalid  = errors.New("collection payment method invalid")
+	ErrDefaultPaymentMethodRequired    = errors.New("no default payment method for the currency")
+	ErrDefaultPaymentMethodInvalid     = errors.New("the default payment method cannot pay this invoice")
 	ErrInvoiceRetryInProgress          = errors.New("invoice collection is in progress")
 	ErrInvoiceRetryOutcomeUnknown      = errors.New("invoice collection outcome is unknown; resolve the operation before another attempt")
 	ErrInvoiceRetryIdempotencyConflict = errors.New("invoice retry idempotency conflict")
@@ -54,14 +53,9 @@ type InvoiceCollectionRetryResult struct {
 	Operation gen.BillingProviderIntent
 }
 
-// collectionPaymentMethodID selects the explicit invoice collection method.
-func collectionPaymentMethodID(settings *models.MoneyAccount) *uuid.UUID {
-	return settings.CollectionPaymentMethod
-}
-
-// CollectionPaymentMethodCurrencies projects the current collection policy for
-// one customer, with explicit currencies instead of a misleading universal default.
-func (s *MoneyService) CollectionPaymentMethodCurrencies(ctx context.Context, payer identity.CustomerID) (map[uuid.UUID][]string, error) {
+// DefaultPaymentMethodCurrencies is, per card of one customer, the currencies
+// it is their default for.
+func (s *MoneyService) DefaultPaymentMethodCurrencies(ctx context.Context, payer identity.CustomerID) (map[uuid.UUID][]string, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
@@ -78,109 +72,11 @@ func (s *MoneyService) CollectionPaymentMethodCurrencies(ctx context.Context, pa
 	}
 	out := make(map[uuid.UUID][]string)
 	for _, row := range rows {
-		if id := collectionPaymentMethodID(settingsFromGen(row)); id != nil {
+		if id := row.DefaultPaymentMethodID; id != nil {
 			out[*id] = append(out[*id], row.Currency)
 		}
 	}
 	return out, nil
-}
-
-// SetInvoiceCollectionPaymentMethod selects the payer-owned saved method used
-// for automatic invoice collection in one billing currency.
-func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, payer identity.CustomerID, currency string, paymentMethodID uuid.UUID) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	if paymentMethodID == uuid.Nil {
-		return fmt.Errorf("payment_method_id required")
-	}
-	currency = normalizeCurrency(currency)
-	if err := RequireBillingCurrency(currency); err != nil {
-		return err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	now := s.now()
-	return s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := gen.New(tx)
-		method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: tid.UUID(), ID: paymentMethodID})
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return ErrCollectionPaymentMethodInvalid
-			}
-			return fmt.Errorf("load collection payment method: %w", err)
-		}
-		if method.MerchantID != tid.UUID() || method.CustomerID != payer.UUID() {
-			return ErrCollectionPaymentMethodInvalid
-		}
-		if !paymentmethods.Chargeable(method) {
-			return fmt.Errorf("%w: payment method cannot be charged", ErrCollectionPaymentMethodInvalid)
-		}
-		descriptor, ok := rails.Lookup(models.Rail(method.Rail))
-		if !ok {
-			return fmt.Errorf("%w: unknown rail %q", ErrCollectionPaymentMethodInvalid, method.Rail)
-		}
-		if !descriptor.SupportsChargeSavedMethod {
-			return fmt.Errorf("%w: rail %q does not support invoice collection", ErrCollectionPaymentMethodInvalid, method.Rail)
-		}
-		psp, err := charge.RoutePSP(ctx, q, method)
-		if err != nil {
-			return fmt.Errorf("%w: %w", ErrCollectionPaymentMethodInvalid, err)
-		}
-		// The default carries the customer's consent to collection in this
-		// currency: its unscheduled mandate cites the card's own lineage on
-		// the account that charges it.
-		lineage, err := mandates.Citable(ctx, q, tid.UUID(), payer.UUID(), method.ID, psp, method.Rail, charge.AgreementUnscheduled)
-		if err != nil {
-			return err
-		}
-		if lineage == nil {
-			return fmt.Errorf("%w: automatic collection: %w", ErrCollectionPaymentMethodInvalid, charge.ErrAgreementRequired)
-		}
-		if err := s.ensureSettingsRowTx(ctx, q, tid.UUID(), payer.UUID(), currency, BillingModePrepaid, now); err != nil {
-			return fmt.Errorf("ensure money account settings: %w", err)
-		}
-		n, err := q.SetMoneyAccountCollectionPaymentMethod(ctx, gen.SetMoneyAccountCollectionPaymentMethodParams{
-			MerchantID:      tid.UUID(),
-			CustomerID:      payer.UUID(),
-			Currency:        currency,
-			PaymentMethodID: &paymentMethodID,
-			Now:             now,
-		})
-		if err != nil {
-			return fmt.Errorf("set collection payment method: %w", err)
-		}
-		if n != 1 {
-			return fmt.Errorf("set collection payment method: settings row not found")
-		}
-		if _, err := mandates.Replace(ctx, q, mandates.Agreement{MerchantID: tid.UUID(), CustomerID: payer.UUID(), PaymentMethodID: method.ID, PSPID: psp, Rail: method.Rail,
-			Kind: charge.AgreementUnscheduled, Currency: currency, Lineage: lineage, AcceptedAt: now}, now); err != nil {
-			return err
-		}
-		// or#828 bucket-2 resume. Designating a collection payment method is
-		// exactly the action the "update your payment method" notice asked for,
-		// so every invoice of theirs that STOPPED for want of a working
-		// instrument becomes due again now. Without this the bucket-2 stop is
-		// still a state nothing resolves — the customer does what we asked and
-		// nothing happens.
-		resumed, err := q.ResumeStoppedInvoiceCollection(ctx, gen.ResumeStoppedInvoiceCollectionParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), Currency: currency, Now: now,
-		})
-		if err != nil {
-			return fmt.Errorf("resume stopped invoice collection: %w", err)
-		}
-		if resumed > 0 {
-			log.WithContext(ctx).WithFields(log.Fields{
-				"customer_id": payer.UUID(), "currency": currency, "invoices": resumed,
-			}).Info("collection payment method set; stopped invoice collection resumed")
-		}
-		return nil
-	})
 }
 
 // ChargeOutstanding collects open/past-due invoice receivables due for
@@ -589,8 +485,8 @@ func (s *MoneyService) enqueueInvoiceCollection(ctx context.Context, payer ident
 }
 
 // collectionMethodFor resolves the payer-owned saved method the attempt is
-// charged through: the explicitly bound one (manual retry) or the account's
-// collection method. or#893: the account that vaulted the instrument takes
+// charged through: the explicitly bound one (manual retry) or the customer's
+// default for the invoice's currency. or#893: the account that vaulted the instrument takes
 // the money. The row is read under a shared lock so the instrument the
 // operation freezes cannot be remapped before the operation commits.
 func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, merchantID, payerID uuid.UUID, invoice *models.Invoice, opts invoiceCollectionEnqueue) (*gen.BillingPaymentMethod, error) {
@@ -599,17 +495,17 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 		settingsRow, err := q.GetMoneyAccountSettings(ctx, gen.GetMoneyAccountSettingsParams{MerchantID: merchantID, CustomerID: payerID, Currency: invoice.Currency})
 		if errors.Is(err, pgx.ErrNoRows) {
 			if opts.manual {
-				return nil, ErrCollectionPaymentMethodRequired
+				return nil, ErrDefaultPaymentMethodRequired
 			}
 			return nil, nil
 		}
 		if err != nil {
 			return nil, fmt.Errorf("load invoice collection settings: %w", err)
 		}
-		id = collectionPaymentMethodID(settingsFromGen(settingsRow))
+		id = settingsRow.DefaultPaymentMethodID
 		if id == nil {
 			if opts.manual {
-				return nil, ErrCollectionPaymentMethodRequired
+				return nil, ErrDefaultPaymentMethodRequired
 			}
 			return nil, nil
 		}
@@ -617,15 +513,15 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	method, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: merchantID, ID: *id})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrCollectionPaymentMethodInvalid
+			return nil, ErrDefaultPaymentMethodInvalid
 		}
 		return nil, fmt.Errorf("load collection payment method: %w", err)
 	}
 	if method.MerchantID != merchantID || method.CustomerID != payerID || !paymentmethods.Chargeable(method) {
-		return nil, ErrCollectionPaymentMethodInvalid
+		return nil, ErrDefaultPaymentMethodInvalid
 	}
 	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {
-		return nil, ErrCollectionPaymentMethodInvalid
+		return nil, ErrDefaultPaymentMethodInvalid
 	}
 	if opts.initiator == charge.InitiatorCustomer && (!rails.IsNMI(models.Rail(method.Rail)) || (method.Custodian != models.CustodianPSP && method.Custodian != models.CustodianHyperSwitch)) {
 		return nil, ErrCustomerPaymentUnsupported
@@ -633,7 +529,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 	if opts.initiator == charge.InitiatorMerchant {
 		if err := requireCollectionAgreement(ctx, q, method, invoice.Currency); err != nil {
 			if opts.manual && errors.Is(err, charge.ErrAgreementRequired) {
-				return nil, fmt.Errorf("%w: %w", ErrCollectionPaymentMethodInvalid, err)
+				return nil, fmt.Errorf("%w: %w", ErrDefaultPaymentMethodInvalid, err)
 			}
 			return nil, err
 		}

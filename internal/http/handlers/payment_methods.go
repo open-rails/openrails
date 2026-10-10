@@ -23,7 +23,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
-	billingservice "github.com/open-rails/openrails/internal/service"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -398,18 +398,16 @@ func respondPaymentMethodDeleteError(r *httprequest.Request, pm *models.PaymentM
 	}
 }
 
-// SetCollectionPaymentMethod (PUT /me/collection-payment-method) makes one of
-// the caller's cards collect its invoices in one currency.
-func SetCollectionPaymentMethod(r *httprequest.Request) {
+// SetDefaultPaymentMethod (PUT /me/default-payment-methods/{currency}) makes
+// one of the caller's cards their default for a currency: it collects their
+// invoices there and pays every card subscription in it without a card of its
+// own, which move onto it.
+func SetDefaultPaymentMethod(r *httprequest.Request) {
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return
 	}
-	var req billing.CollectionPaymentMethod
-	if !r.BindJSON(&req) {
-		return
-	}
-	currency, ok := serviceRequiredCurrency(r, req.Currency)
+	currency, ok := serviceRequiredCurrency(r, r.Param("currency"))
 	if !ok {
 		return
 	}
@@ -417,24 +415,30 @@ func SetCollectionPaymentMethod(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidParam, err.Error()).WithParam("currency"))
 		return
 	}
+	var req billing.SetDefaultPaymentMethodParams
+	if !r.BindJSON(&req) {
+		return
+	}
 	if req.PaymentMethodID.IsZero() {
 		r.APIError(api.Coded(billing.CodeInvalidParam, "payment_method_id is required").WithParam("payment_method_id"))
 		return
 	}
-	svc, err := billingservice.New(r.State)
+	ctx, cancel := r.Budget(30 * time.Second)
+	defer cancel()
+	mid, err := merchant.Require(ctx)
 	if err != nil {
-		r.InternalError("billing service unavailable", err)
+		r.InternalError("merchant scope", err)
 		return
 	}
-	if err := svc.SetInvoiceCollectionPaymentMethod(r.Request.Context(), payer, currency, req.PaymentMethodID.UUID()); err != nil {
-		if errors.Is(err, money.ErrCollectionPaymentMethodInvalid) {
-			r.ErrorCode(billing.CodeCollectionPaymentMethodInvalid, "")
-			return
-		}
-		r.InternalError("failed to set collection payment method", err)
+	change := subscriptions.DefaultPaymentMethodChange{
+		Customer: payer.UUID(), Currency: currency, PaymentMethodID: req.PaymentMethodID.UUID(),
+		Verify: recurringVerifier(r, mid.UUID(), intents.OriginUser), Swaps: r.State.PaymentSourceUpdateIntents,
+	}
+	if err := r.State.SubscriptionLifecycleService.SetDefaultPaymentMethod(ctx, change); err != nil {
+		writeMoveRefusal(r, err, "failed to set the default payment method")
 		return
 	}
-	r.SuccessJSON(billing.CollectionPaymentMethod{Currency: currency, PaymentMethodID: req.PaymentMethodID})
+	r.SuccessJSON(billing.DefaultPaymentMethod{Currency: currency, PaymentMethodID: req.PaymentMethodID})
 }
 
 func writePaymentMethod(r *httprequest.Request, status int, customer identity.CustomerID, pm *models.PaymentMethod) {
@@ -447,7 +451,8 @@ func writePaymentMethod(r *httprequest.Request, status int, customer identity.Cu
 }
 
 // paymentMethodsView builds the wire methods of one customer: each card's
-// derived health, the subscriptions it pays and the currencies it collects.
+// derived health, the subscriptions it pays and the currencies it is the
+// default for.
 func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, methods []*models.PaymentMethod) ([]billing.PaymentMethod, error) {
 	out := make([]billing.PaymentMethod, 0, len(methods))
 	if len(methods) == 0 {
@@ -458,7 +463,7 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 	if err != nil {
 		return nil, err
 	}
-	collects, err := money.NewMoneyService(r.State.DB, r.Clock).CollectionPaymentMethodCurrencies(ctx, customer)
+	defaults, err := money.NewMoneyService(r.State.DB, r.Clock).DefaultPaymentMethodCurrencies(ctx, customer)
 	if err != nil {
 		return nil, err
 	}
@@ -484,7 +489,7 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 		if c, ok := charges[pm.ID]; ok {
 			charge = &c
 		}
-		view := PaymentMethodToAPI(pm, charge, collects[pm.ID], now)
+		view := PaymentMethodToAPI(pm, charge, defaults[pm.ID], now)
 		view.Mandates = []billing.Mandate{}
 		for _, m := range agreements[pm.ID] {
 			view.Mandates = append(view.Mandates, m)
@@ -496,7 +501,7 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 }
 
 // PaymentMethodToAPI is a stored card on the wire.
-func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge, collects []string, now time.Time) billing.PaymentMethod {
+func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCharge, defaults []string, now time.Time) billing.PaymentMethod {
 	subs := make([]billing.PaymentMethodSubscription, 0, len(pm.Subscriptions))
 	for _, s := range pm.Subscriptions {
 		item := billing.PaymentMethodSubscription{ID: billing.SubscriptionID(s.ID), CreatedAt: s.CreatedAt}
@@ -505,22 +510,22 @@ func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		}
 		subs = append(subs, item)
 	}
-	if collects == nil {
-		collects = []string{}
+	if defaults == nil {
+		defaults = []string{}
 	}
 	out := billing.PaymentMethod{
-		ID:                   billing.PaymentMethodID(pm.ID),
-		CustomerID:           billing.CustomerID(pm.CustomerID),
-		Rail:                 string(pm.Rail),
-		Status:               billing.PaymentMethodStatus(pm.Status),
-		Card:                 pm.Card.Details(),
-		BillingDetails:       billingDetailsFromMetadata(pm.Metadata),
-		Health:               paymentMethodHealth(pm.Card, charge, now),
-		ContactCardholderAt:  pm.ContactCardholderAt,
-		Mandates:             []billing.Mandate{},
-		Subscriptions:        subs,
-		CollectionCurrencies: collects,
-		CreatedAt:            pm.CreatedAt,
+		ID:                  billing.PaymentMethodID(pm.ID),
+		CustomerID:          billing.CustomerID(pm.CustomerID),
+		Rail:                string(pm.Rail),
+		Status:              billing.PaymentMethodStatus(pm.Status),
+		Card:                pm.Card.Details(),
+		BillingDetails:      billingDetailsFromMetadata(pm.Metadata),
+		Health:              paymentMethodHealth(pm.Card, charge, now),
+		ContactCardholderAt: pm.ContactCardholderAt,
+		Mandates:            []billing.Mandate{},
+		Subscriptions:       subs,
+		DefaultCurrencies:   defaults,
+		CreatedAt:           pm.CreatedAt,
 	}
 	if pm.Status != string(billing.PaymentMethodActive) {
 		out.Health.Active = false

@@ -71,7 +71,7 @@ A customer acting on its own account.
 | GET | `/v1/me/payment-operations/{id}/authentication` | customer | — | — | 200 `StripeEngineAuthentication` |  |
 | POST | `/v1/me/payment-operations/{id}/authentication/confirm` | customer | — | — | 200 `PaymentOperation` |  |
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
-| PUT | `/v1/me/collection-payment-method` | customer | — | `CollectionPaymentMethod` | 200 `CollectionPaymentMethod` |  |
+| PUT | `/v1/me/default-payment-methods/{currency}` | customer | — | `SetDefaultPaymentMethodParams` | 200 `DefaultPaymentMethod` |  |
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |
 | POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` |  |
 | PUT | `/v1/me/payment-methods/{id}` | customer | — | `ReplacePaymentMethodCardParams` | 200 `PaymentMethod`<br>202 — | `Idempotency-Key` |

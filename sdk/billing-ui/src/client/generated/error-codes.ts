@@ -39,8 +39,6 @@ export type OpenRailsErrorCode =
   | "checkout_session_expired"
   | "checkout_session_not_found"
   | "checkout_session_unavailable"
-  | "collection_payment_method_invalid"
-  | "collection_payment_method_required"
   | "credential_custody_transition_required"
   | "credential_expired"
   | "credential_identity_mismatch"
@@ -62,6 +60,8 @@ export type OpenRailsErrorCode =
   | "customer_session_required"
   | "dashboard_invalid"
   | "database_busy"
+  | "default_payment_method_invalid"
+  | "default_payment_method_required"
   | "default_rate_card_not_found"
   | "default_rate_card_required"
   | "delegated_principal_invalid"
@@ -262,8 +262,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   checkout_session_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout session expired." },
   checkout_session_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout session does not exist." },
   checkout_session_unavailable: { status: 403, type: "authorization_error", meaning: "The checkout session is not available to this caller." },
-  collection_payment_method_invalid: { status: 400, type: "invalid_request_error", meaning: "The collection payment method cannot pay this invoice." },
-  collection_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "Collection needs a payment method for the invoice's currency." },
   credential_custody_transition_required: { status: 409, type: "invalid_request_error", meaning: "Credential custody differs from the published backend." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_identity_mismatch: { status: 401, type: "authentication_error", meaning: "The credential changed identity during the request." },
@@ -285,6 +283,8 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
   dashboard_invalid: { status: 400, type: "invalid_request_error", meaning: "The dashboard is invalid; metadata.errors lists why." },
   database_busy: { status: 503, type: "api_error", meaning: "No database connection is available; retry shortly." },
+  default_payment_method_invalid: { status: 400, type: "invalid_request_error", meaning: "The card cannot be the customer's default for the currency." },
+  default_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "The customer has no default card for the currency." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
   default_rate_card_required: { status: 409, type: "invalid_request_error", meaning: "The meter needs a default rate card." },
   delegated_principal_invalid: { status: 401, type: "authentication_error", meaning: "The host's delegated principal names no usable merchant or subject." },

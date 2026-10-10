@@ -79,12 +79,13 @@ func (c *Client) ResumeSubscription(ctx context.Context, id billing.Subscription
 	return c.subscriptionAction(ctx, http.MethodPost, id, "/resume", nil, requestOptions...)
 }
 
-// SetSubscriptionPaymentMethod charges a subscription's renewals to
-// another of the customer's saved payment methods and returns the
+// SetSubscriptionPaymentMethod gives a subscription its own card, another of
+// the customer's saved cards, or with a nil PaymentMethodID makes it follow
+// the customer's default card for its currency, and returns the
 // subscription.
 func (c *Client) SetSubscriptionPaymentMethod(ctx context.Context, id billing.SubscriptionID, params billing.SetSubscriptionPaymentMethodParams, requestOptions ...RequestOption) (*billing.Subscription, error) {
-	if params.PaymentMethodID.IsZero() {
-		return nil, invalidErr("payment_method_id is required")
+	if params.PaymentMethodID != nil && params.PaymentMethodID.IsZero() {
+		return nil, invalidErr("payment_method_id is invalid")
 	}
 	return c.subscriptionAction(ctx, http.MethodPut, id, "/payment-method", params, requestOptions...)
 }

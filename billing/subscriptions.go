@@ -75,7 +75,9 @@ type Subscription struct {
 	CancelMode            string           `json:"cancel_mode"`
 	Price                 *Price           `json:"price,omitempty"`
 	Product               *ProductSummary  `json:"product,omitempty"`
-	// Card is display data for the card behind PaymentMethodID, when it is one.
+	// Card is display data for the card the subscription charges: its own
+	// (PaymentMethodID), or, when PaymentMethodID is null on a card
+	// subscription, the customer's default card for its currency.
 	Card *CardDetails `json:"card,omitempty"`
 	// CancelPortalURL is where the customer cancels when CancelMode is
 	// external_portal (rails that keep cancellation on their own site).
@@ -153,8 +155,11 @@ type CancelSubscriptionParams struct {
 	AccountDeletion bool `json:"account_deletion,omitempty"`
 }
 
+// SetSubscriptionPaymentMethodParams gives a subscription its own card, another
+// of the customer's saved cards; null clears it so the subscription follows
+// the customer's default card for its currency.
 type SetSubscriptionPaymentMethodParams struct {
-	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
 }
 
 // CodeCustomerActionRequired: only the customer can take this action, through

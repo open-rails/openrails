@@ -285,10 +285,41 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
--- name: ListSubscriptionsByPaymentMethodIDs :many
-SELECT * FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.payment_method_id = ANY(sqlc.arg(payment_method_ids)::uuid[])
-  AND sub.deleted_at IS NULL;
+-- name: ListSubscriptionsPaidByMethods :many
+-- The subscriptions the cards pay: as their own card, or as the customer's
+-- default they follow.
+SELECT sqlc.embed(sub), pm.id AS paid_by
+FROM billing.payment_methods pm
+JOIN billing.subscriptions sub ON sub.merchant_id = pm.merchant_id AND sub.customer_id = pm.customer_id
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = ANY(sqlc.arg(payment_method_ids)::uuid[])
+  AND sub.deleted_at IS NULL
+  AND billing.subscription_payment_method_id(sub.merchant_id, sub.customer_id, sub.payment_method_id, sub.price_id, sub.rail, sub.collection_policy) = pm.id;
+
+-- name: ResolveSubscriptionPaymentMethodID :one
+-- The card a subscription with these facts charges: its own, else the default
+-- it follows.
+SELECT pm.id AS payment_method_id
+FROM (SELECT 1) one
+LEFT JOIN billing.payment_methods pm ON pm.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND pm.id = billing.subscription_payment_method_id(sqlc.arg(merchant_id)::uuid, sqlc.arg(customer_id)::uuid,
+      sqlc.narg(own_payment_method_id)::uuid, sqlc.narg(price_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(collection_policy)::text);
+
+-- name: ListSubscriptionsFollowingDefault :many
+-- A customer's card subscriptions in one currency that follow their default
+-- card and still use it: live ones, and canceled ones whose recurring
+-- agreement a resume would charge under. Locked for the move, in id order.
+SELECT s.* FROM billing.subscriptions s
+JOIN billing.prices p ON p.merchant_id = s.merchant_id AND p.id = s.price_id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(customer_id)::uuid
+  AND p.currency = sqlc.arg(currency)::text
+  AND s.payment_method_id IS NULL AND s.rail IN ('nmi', 'stripe') AND s.collection_policy IN ('engine', 'nmi_schedule')
+  AND s.deleted_at IS NULL
+  AND (s.status IN ('active', 'past_due', 'awaiting_method')
+       OR EXISTS (SELECT 1 FROM billing.mandates m
+                  WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id
+                    AND m.kind = 'recurring' AND m.status IN ('active', 'requires_reconsent')))
+ORDER BY s.id
+FOR UPDATE OF s;
 
 -- name: MarkCanceledSubscriptionsSuperseded :execrows
 -- Preserve canceled subscriptions for refund/chargeback correlation while
@@ -415,22 +446,25 @@ WHERE merchant_id=sqlc.arg(merchant_id)::uuid AND id=sqlc.arg(id)::uuid;
 -- The delinquent memberships OpenRails collects that a replaced card retries
 -- at the next due pass, and those awaiting a card
 -- (subscriptions.WakeForReplacedMethod).
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-  AND collection_policy IN ('engine', 'nmi_schedule')
-  AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > sqlc.arg(now)::timestamptz)))
-  AND deleted_at IS NULL
-ORDER BY id;
+SELECT s.id FROM billing.payment_methods pm
+JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.arg(payment_method_id)::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
+  AND s.collection_policy IN ('engine', 'nmi_schedule')
+  AND (s.status = 'awaiting_method' OR (s.status = 'past_due' AND (s.next_retry_at IS NULL OR s.next_retry_at > sqlc.arg(now)::timestamptz)))
+  AND s.deleted_at IS NULL
+ORDER BY s.id;
 
 -- name: ListLiveSubscriptionsOnMethod :many
--- #1115: the memberships a stored card pays for.
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid
-  AND payment_method_id = sqlc.arg(payment_method_id)::uuid
-  AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
-  AND deleted_at IS NULL
-ORDER BY id;
+-- #1115: the memberships a stored card pays for, as their own card or as the
+-- default they follow.
+SELECT s.id FROM billing.payment_methods pm
+JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.arg(payment_method_id)::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
+  AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified')
+  AND s.deleted_at IS NULL
+ORDER BY s.id;
 
 -- Declared import: seed-time forensics land on the new row only.
 -- name: StampImportedSubscriptionEvidence :exec

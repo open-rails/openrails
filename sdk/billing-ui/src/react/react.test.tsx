@@ -237,7 +237,7 @@ describe("plan change", () => {
 })
 
 describe("usePaymentMethods", () => {
-  it("adds, sets a currency's collection card and removes", async () => {
+  it("adds, sets a currency's default card and removes", async () => {
     const server = fakeBilling({ methods: [paymentMethod()] })
     const onChange = vi.fn()
     const { result } = setup(() => usePaymentMethods(), server, { onChange })
@@ -253,11 +253,10 @@ describe("usePaymentMethods", () => {
     await waitFor(() => expect(result.current.methods).toHaveLength(2))
 
     await act(async () => {
-      await result.current.setCollection("pm_2", "usd")
+      await result.current.setDefault("pm_2", "usd")
     })
     expect(
-      result.current.methods!.find((m) => m.id === "pm_2")
-        ?.collection_currencies
+      result.current.methods!.find((m) => m.id === "pm_2")?.default_currencies
     ).toEqual(["USD"])
 
     server.fail["DELETE /me/payment-methods/pm_1"] = apiError(
@@ -278,7 +277,7 @@ describe("usePaymentMethods", () => {
     )
     expect(onChange.mock.calls.map(([c]) => c.type)).toEqual([
       "payment_method.added",
-      "payment_method.collection_changed",
+      "payment_method.default_changed",
       "payment_method.removed",
     ])
   })

@@ -1,5 +1,5 @@
 {
-  "collection_policy": "provider",
+  "collection_policy": "nmi_schedule",
   "dunning": null,
   "payments": [
     {

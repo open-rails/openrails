@@ -123,7 +123,7 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 	out := PaymentMethodToAPI(&models.PaymentMethod{Rail: "nmi", Card: models.Card{Brand: "visa", Last4: "4242", ExpMonth: 12, ExpYear: 2099}}, nil, nil, time.Now())
 	require.Equal(t, []any{"visa", "4242", 12, 2099}, []any{*out.Card.Brand, *out.Card.Last4, *out.Card.ExpMonth, *out.Card.ExpYear})
 	require.Nil(t, out.PSPID, "a method with no PSP names none")
-	require.Equal(t, []string{}, out.CollectionCurrencies)
+	require.Equal(t, []string{}, out.DefaultCurrencies)
 }
 
 // #589: a method is active unless its card expired or its last charge failed;

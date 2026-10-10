@@ -289,7 +289,11 @@ func (s *SubscriptionLifecycleService) CreateMembershipTx(ctx context.Context, t
 				}
 				return sub, nil, nil
 			}
-			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || !SameQuantity(sub.Quantity, terms.Quantity) || sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil {
+			charged, err := PaymentMethodOf(ctx, txDB.Gen(ctx), sub)
+			if err != nil {
+				return nil, nil, err
+			}
+			if prior.DeletedAt != nil || sub.PriceID != terms.PriceID || sub.ProductID != terms.ProductID || !SameQuantity(sub.Quantity, terms.Quantity) || charged == nil || *charged != terms.PaymentMethodID || sub.CurrentPeriodStartsAt != nil || sub.CurrentPeriodEndsAt != nil {
 				return nil, nil, errors.New("pending membership contradicts accepted first paid period")
 			}
 		}
@@ -523,7 +527,9 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 		if terms := params.Prepared; terms != nil {
 			subscription.ID, subscription.PspID, subscription.Quantity = terms.SubscriptionID, terms.PSPID, CloneQuantity(terms.Quantity)
 			subscription.CollectionPolicy = terms.CollectionPolicy
-			subscription.PaymentMethodID = &terms.PaymentMethodID
+			if subscription.PaymentMethodID, err = ownCardAtPurchase(ctx, dbb, subscription, terms.PaymentMethodID); err != nil {
+				return nil, nil, err
+			}
 			metadata, err := json.Marshal(params.PaymentMetadata)
 			if err != nil {
 				return nil, nil, fmt.Errorf("accepted membership metadata: %w", err)
@@ -1089,7 +1095,14 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 
 		if subscription.CollectionPolicy == models.CollectionPolicyEngine {
 			q := txdb.Gen(ctx)
-			method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
+			charged, err := PaymentMethodOf(ctx, q, subscription)
+			if err != nil {
+				return err
+			}
+			if charged == nil {
+				return fmt.Errorf("resume engine: %w", ErrDefaultPaymentMethodRequired)
+			}
+			method, err := q.GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: subscription.MerchantID, ID: *charged})
 			if err != nil {
 				return err
 			}
@@ -1103,7 +1116,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 					return err
 				}
 			}
-			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *subscription.PaymentMethodID})
+			method, err = q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: subscription.MerchantID, ID: *charged})
 			if err != nil {
 				return err
 			}
@@ -2160,10 +2173,14 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 		// A decline that says the card was reissued reads the holder once
 		// first: an updater may already hold the new card, and the member is
 		// asked only if it does not (#1168).
-		readCard := needsPaymentMethodUpdate && subscription.PaymentMethodID != nil &&
+		charged, err := PaymentMethodOf(ctx, db.Gen(ctx), subscription)
+		if err != nil {
+			return err
+		}
+		readCard := needsPaymentMethodUpdate && charged != nil &&
 			decline.HolderMayHoldNewCard(billing.DeclineReason(normalize.FromPtr(params.FailureReason)))
 		if readCard {
-			args := paymentmethods.CardRefreshArgs{MerchantID: subscription.MerchantID, PaymentMethodID: *subscription.PaymentMethodID}
+			args := paymentmethods.CardRefreshArgs{MerchantID: subscription.MerchantID, PaymentMethodID: *charged}
 			opts := args.InsertOpts()
 			if err := s.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
 				return fmt.Errorf("queue declined card read: %w", err)

@@ -55,19 +55,19 @@ session identity embedded). There is **no `:user_id` anywhere** — a browser cr
 can only ever act on itself. In embedded mode, prepend the mount prefix to every path.
 
 ```
-GET  /v1/me                               balances, collection cards, unread notices
+GET  /v1/me                               balances, default cards, unread notices
 GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
 GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
 GET  /v1/me/spend-limits?currency=USD     the spend windows THIS invoker is gated on, with live used/reserved/remaining/resets_at
 GET  /v1/me/invoices[/{id}]               itemized statements (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements                  active entitlements
-PUT  /v1/me/collection-payment-method     body {"currency","payment_method_id"}: invoice collection method
+PUT  /v1/me/default-payment-methods/{currency}  body {"payment_method_id"}: the card that pays a currency
 GET  /v1/me/subscriptions[/{id}]          own subscriptions (cursor page): typed ids, price/product, scheduled change, card, access
 POST /v1/me/subscriptions/{id}/cancel      body {"reason": "..."} → the Subscription (next_action when the wallet must sign)
 POST /v1/me/subscriptions/{id}/resume      undo a scheduled cancel → the Subscription
 POST /v1/me/subscriptions/{id}/change body {"price_id":"price_...", "quantity": 3} → a SubscriptionChange (plan or seats)
-PUT  /v1/me/subscriptions/{id}/payment-method  swap the saved card → the Subscription
+PUT  /v1/me/subscriptions/{id}/payment-method  its own saved card, or null to follow the default → the Subscription
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}

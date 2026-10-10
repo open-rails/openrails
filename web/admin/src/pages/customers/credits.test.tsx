@@ -1,5 +1,5 @@
 // Customer support surfaces that move money or show a balance: credit grants
-// and revocations, and the collection defaults a saved method carries.
+// and revocations, and the currencies a saved card is the default for.
 import type { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -9,7 +9,7 @@ import {
   aPaymentMethod, calls, client, cursorPages, exec, MAX_INT64, render, selectMerchant, server,
   type Recorded, type Reply,
 } from "@/test/harness"
-import { CollectionDefaultBadges } from "./collection-default-badges"
+import { DefaultCardBadges } from "./default-card-badges"
 import { CustomerCreditSupportSection } from "./credits"
 
 const state = vi.hoisted(() => ({ merchant: "alpha" }))
@@ -153,18 +153,18 @@ describe("credit support rendering", () => {
   })
 })
 
-describe("collection defaults", () => {
-  const badges = (currencies?: string[]) => render(<CollectionDefaultBadges currencies={currencies} />)
+describe("default cards", () => {
+  const badges = (currencies?: string[]) => render(<DefaultCardBadges currencies={currencies} />)
 
   it("labels each default with its currency and drops a cleared one", () => {
-    expect(badges(["EUR", "USD"])).toContain("Collection default · EUR")
-    expect(badges(["EUR", "USD"])).toContain("Collection default · USD")
-    expect(badges([])).not.toContain("Collection default")
-    expect(badges()).not.toContain("Collection default")
+    expect(badges(["EUR", "USD"])).toContain("Default · EUR")
+    expect(badges(["EUR", "USD"])).toContain("Default · USD")
+    expect(badges([])).not.toContain("Default ·")
+    expect(badges()).not.toContain("Default ·")
   })
 
   it("refreshes the customer's page and saved-method views together", async () => {
-    const method = aPaymentMethod("pm_a", { collection_currencies: ["USD"] })
+    const method = aPaymentMethod("pm_a", { default_currencies: ["USD"] })
     let methods = [method, aPaymentMethod("pm_b")]
     // One method per page: both views walk the cursor.
     routes["/admin/customers/cus_a/payment-methods"] = (request) => cursorPages(methods, 1)(request)
@@ -175,12 +175,12 @@ describe("collection defaults", () => {
     await load()
 
     // The same customer subtree the Refresh payment methods action invalidates.
-    methods = [{ ...method, collection_currencies: [] }, aPaymentMethod("pm_b")]
+    methods = [{ ...method, default_currencies: [] }, aPaymentMethod("pm_b")]
     await queries.invalidateQueries({ queryKey: queryKeys.customer("cus_a") })
     await load()
 
-    expect(queries.getQueryData(page.queryKey)!.data[0].collection_currencies).toEqual([])
-    expect(queries.getQueryData(saved.queryKey)!.map((m) => [m.id, m.collection_currencies])).toEqual([["pm_a", []], ["pm_b", []]])
+    expect(queries.getQueryData(page.queryKey)!.data[0].default_currencies).toEqual([])
+    expect(queries.getQueryData(saved.queryKey)!.map((m) => [m.id, m.default_currencies])).toEqual([["pm_a", []], ["pm_b", []]])
     expect(requests.filter((r) => r.path.endsWith("/payment-methods")).map((r) => r.query).sort()).toEqual([
       "limit=100", "limit=100", "limit=100&cursor=1", "limit=100&cursor=1", "limit=20", "limit=20",
     ])

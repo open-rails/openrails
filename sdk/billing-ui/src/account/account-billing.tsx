@@ -15,8 +15,11 @@ import {
 
 export interface AccountBillingProps {
   cardSetupReturnURL?: PaymentMethodsPanelProps["cardSetupReturnURL"]
-  /** Offers to make a card the one that collects this currency's invoices. */
-  collectionCurrency?: string
+  /**
+   * Offers to make a card the default for this currency: it pays the
+   * currency's invoices and every subscription in it without its own card.
+   */
+  defaultCurrency?: string
   /** Billing country to preselect when adding a card. */
   defaultCountry?: string
   sendSolanaTransaction?: SendSolanaTransaction
@@ -30,7 +33,7 @@ export interface AccountBillingProps {
 /** Subscriptions, payment methods and history in one column. */
 export function AccountBilling({
   cardSetupReturnURL,
-  collectionCurrency,
+  defaultCurrency,
   defaultCountry,
   sendSolanaTransaction,
   plansHref,
@@ -53,7 +56,7 @@ export function AccountBilling({
       />
       <PaymentMethodsPanel
         cardSetupReturnURL={cardSetupReturnURL}
-        collectionCurrency={collectionCurrency}
+        defaultCurrency={defaultCurrency}
         defaultCountry={defaultCountry}
         appearance={appearance}
       />

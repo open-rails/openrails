@@ -1,9 +1,25 @@
 # Changelog
 
+## A default card per currency
+
+- `setDefaultPaymentMethod({currency, paymentMethodId})` (`PUT
+  /me/default-payment-methods/{currency}`) replaces
+  `setCollectionPaymentMethod`: the default card pays the currency's invoices
+  and every subscription in it without its own card. `usePaymentMethods()`
+  has `setDefault` for `setCollection`, `PaymentMethod.default_currencies`
+  replaces `collection_currencies`, and the `payment_method.default_changed`
+  change replaces `payment_method.collection_changed`.
+- `AccountBilling` and `PaymentMethodsPanel` take `defaultCurrency` (was
+  `collectionCurrency`) and offer "Make default".
+- `setSubscriptionPaymentMethod(id, null)` and `setPaymentMethod(id, null)`
+  make a subscription follow the default card; `Subscription.payment_method_id`
+  is its own card, null when it follows. The change-card dialog offers "Your
+  default card" and opens on any card subscription (`collection_policy`).
+
 ## The customer's summary
 
-- `getAccount()` reads `GET /me`: the balance per currency, the card that
-  pays each currency, and the unread notice count.
+- `getAccount()` reads `GET /me`: the balance per currency, the default card
+  of each currency, and the unread notice count.
 - `Invoice.delinquent`: overdue past grace; new usage in its currency is
   refused until it is paid.
 

@@ -44,7 +44,7 @@ func TestCustomerRead(t *testing.T) {
 	_, err = createCreditGrant(ctx, client, saver.cid(), billing.CreateCreditGrantParams{Currency: "USD", Amount: 5_000_000, Source: "e2e", SourceID: uuid.NewString()})
 	require.NoError(t, err)
 	card := saver.saveCard("stripe", visa)
-	saver.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": card, "currency": "USD"})
+	saver.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": card})
 	cardID, err := billing.ParsePaymentMethodID(card)
 	require.NoError(t, err)
 
@@ -54,12 +54,12 @@ func TestCustomerRead(t *testing.T) {
 		require.Equal(t, debtor.cid(), got.ID)
 		require.Equal(t, []billing.CreditLimit{limit}, got.Settings.CreditLimits)
 		require.Equal(t, []billing.Balance{{CustomerID: debtor.cid(), Currency: "USD", BillingMode: billing.BillingModeArrears, OwedAmount: owed}}, got.Balances)
-		require.Empty(t, got.CollectionPaymentMethods)
+		require.Empty(t, got.DefaultPaymentMethods)
 
 		got, err = w.client[tp].GetCustomer(ctx, saver.cid())
 		require.NoError(t, err)
 		require.Equal(t, []billing.Balance{{CustomerID: saver.cid(), Currency: "USD", BillingMode: billing.BillingModePrepaid, BalanceAmount: 5_000_000, AvailableAmount: 5_000_000}}, got.Balances)
-		require.Equal(t, []billing.CollectionPaymentMethod{{Currency: "USD", PaymentMethodID: cardID}}, got.CollectionPaymentMethods)
+		require.Equal(t, []billing.DefaultPaymentMethod{{Currency: "USD", PaymentMethodID: cardID}}, got.DefaultPaymentMethods)
 
 		page, err := w.client[tp].ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{saver.cid()}})
 		require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestCustomerRead(t *testing.T) {
 	me := saver.must(http.MethodGet, "", "", nil)
 	require.Equal(t, saver.id, me["id"])
 	require.Equal(t, "5000000", me["balances"].([]any)[0].(map[string]any)["balance_amount"])
-	require.Equal(t, card, me["collection_payment_methods"].([]any)[0].(map[string]any)["payment_method_id"])
+	require.Equal(t, card, me["default_payment_methods"].([]any)[0].(map[string]any)["payment_method_id"])
 	require.EqualValues(t, 0, me["unread_notifications"])
 }
 

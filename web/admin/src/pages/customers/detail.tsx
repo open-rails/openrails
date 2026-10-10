@@ -56,7 +56,7 @@ import { parseHours } from "@/lib/duration"
 import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
-import { CollectionDefaultBadges } from "./collection-default-badges"
+import { DefaultCardBadges } from "./default-card-badges"
 import { CustomerUsageRatesSection } from "./usage-rates"
 import { CustomerCreditSupportSection } from "./credits"
 import { CursorPager } from "@/components/cursor-pager"
@@ -325,9 +325,7 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
                 <p className="text-xs text-muted-foreground">
                   {pm.rail} · exp {formatCardExpiry(pm.card)}
                 </p>
-                <CollectionDefaultBadges
-                  currencies={pm.collection_currencies ?? []}
-                />
+                <DefaultCardBadges currencies={pm.default_currencies ?? []} />
                 {pm.health.expiry_status &&
                   pm.health.expiry_status !== "valid" && (
                     <Badge

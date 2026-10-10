@@ -274,7 +274,7 @@ func sameLineage(m gen.BillingMandate, l *charge.Mandate) bool {
 
 // Stored records what an approved customer-present charge in the unscheduled
 // sequence established on a card: its card_on_file consent (always save), and,
-// when the card is the customer's collection default in currency and no
+// when the card is the customer's default in currency and no
 // collection mandate is live there, that agreement too. A charge that cited a
 // lineage records only what has none yet.
 type Stored struct {
@@ -315,7 +315,7 @@ func RecordStored(ctx context.Context, q *gen.Queries, s Stored) error {
 	if err != nil {
 		return err
 	}
-	if settings.CollectionPaymentMethodID == nil || *settings.CollectionPaymentMethodID != s.PaymentMethodID {
+	if settings.DefaultPaymentMethodID == nil || *settings.DefaultPaymentMethodID != s.PaymentMethodID {
 		return nil
 	}
 	collection := onFile

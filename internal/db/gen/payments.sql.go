@@ -1318,7 +1318,8 @@ FROM billing.payments p
 LEFT JOIN billing.subscriptions sub ON sub.id = p.subscription_id
   AND sub.merchant_id = p.merchant_id AND sub.psp_id = p.psp_id
   AND sub.deleted_at IS NULL AND sub.rail::text = p.rail::text
-LEFT JOIN billing.payment_methods pm ON pm.id = sub.payment_method_id
+LEFT JOIN billing.payment_methods pm ON pm.merchant_id = sub.merchant_id
+  AND pm.id = billing.subscription_payment_method_id(sub.merchant_id, sub.customer_id, sub.payment_method_id, sub.price_id, sub.rail, sub.collection_policy)
 LEFT JOIN LATERAL (
   SELECT cpm.id FROM billing.payment_methods cpm
   WHERE p.subscription_id IS NULL

@@ -633,7 +633,7 @@ func (q *Queries) InsertPendingInvoiceItem(ctx context.Context, arg InsertPendin
 const listChargeableOpenInvoices = `-- name: ListChargeableOpenInvoices :many
 SELECT i.id, i.merchant_id, i.customer_id, i.currency, i.amount_due,
        i.collection_failure_count, i.collection_failed_at,
-       s.collection_payment_method_id::uuid AS collection_payment_method_id
+       s.default_payment_method_id::uuid AS default_payment_method_id
 FROM billing.invoices i
 JOIN billing.money_settings s
   ON s.merchant_id = i.merchant_id
@@ -643,7 +643,7 @@ WHERE i.merchant_id = $1
   AND i.status = 'open'
   AND i.amount_due > 0
   AND i.collection_method = 'charge_automatically'
-  AND s.collection_payment_method_id IS NOT NULL
+  AND s.default_payment_method_id IS NOT NULL
   AND i.collection_intent_id IS NULL
   AND (i.due_at IS NULL OR i.due_at <= $2::timestamptz)
   AND (
@@ -661,14 +661,14 @@ type ListChargeableOpenInvoicesParams struct {
 }
 
 type ListChargeableOpenInvoicesRow struct {
-	ID                        uuid.UUID
-	MerchantID                uuid.UUID
-	CustomerID                uuid.UUID
-	Currency                  string
-	AmountDue                 int64
-	CollectionFailureCount    int32
-	CollectionFailedAt        *time.Time
-	CollectionPaymentMethodID uuid.UUID
+	ID                     uuid.UUID
+	MerchantID             uuid.UUID
+	CustomerID             uuid.UUID
+	Currency               string
+	AmountDue              int64
+	CollectionFailureCount int32
+	CollectionFailedAt     *time.Time
+	DefaultPaymentMethodID uuid.UUID
 }
 
 func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListChargeableOpenInvoicesParams) ([]ListChargeableOpenInvoicesRow, error) {
@@ -688,7 +688,7 @@ func (q *Queries) ListChargeableOpenInvoices(ctx context.Context, arg ListCharge
 			&i.AmountDue,
 			&i.CollectionFailureCount,
 			&i.CollectionFailedAt,
-			&i.CollectionPaymentMethodID,
+			&i.DefaultPaymentMethodID,
 		); err != nil {
 			return nil, err
 		}

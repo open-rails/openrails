@@ -106,7 +106,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
 
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -132,7 +132,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.Tier,
 		&i.Currency,
 		&i.CreditLimitAmount,
-		&i.CollectionPaymentMethodID,
+		&i.DefaultPaymentMethodID,
 	)
 	return i, err
 }
@@ -364,7 +364,7 @@ func (q *Queries) ListCustomersMoneyAccounts(ctx context.Context, arg ListCustom
 }
 
 const listCustomersMoneySettings = `-- name: ListCustomersMoneySettings :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
 ORDER BY customer_id, currency
 LIMIT $3::int
@@ -395,7 +395,7 @@ func (q *Queries) ListCustomersMoneySettings(ctx context.Context, arg ListCustom
 			&i.Tier,
 			&i.Currency,
 			&i.CreditLimitAmount,
-			&i.CollectionPaymentMethodID,
+			&i.DefaultPaymentMethodID,
 		); err != nil {
 			return nil, err
 		}
@@ -407,8 +407,47 @@ func (q *Queries) ListCustomersMoneySettings(ctx context.Context, arg ListCustom
 	return items, nil
 }
 
+const listDefaultPaymentMethodsByCustomers = `-- name: ListDefaultPaymentMethodsByCustomers :many
+SELECT customer_id, currency, default_payment_method_id::uuid AS default_payment_method_id
+FROM billing.money_settings
+WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
+  AND default_payment_method_id IS NOT NULL
+`
+
+type ListDefaultPaymentMethodsByCustomersParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+}
+
+type ListDefaultPaymentMethodsByCustomersRow struct {
+	CustomerID             uuid.UUID
+	Currency               string
+	DefaultPaymentMethodID uuid.UUID
+}
+
+// Each customer's default card per currency.
+func (q *Queries) ListDefaultPaymentMethodsByCustomers(ctx context.Context, arg ListDefaultPaymentMethodsByCustomersParams) ([]ListDefaultPaymentMethodsByCustomersRow, error) {
+	rows, err := q.db.Query(ctx, listDefaultPaymentMethodsByCustomers, arg.MerchantID, arg.CustomerIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDefaultPaymentMethodsByCustomersRow
+	for rows.Next() {
+		var i ListDefaultPaymentMethodsByCustomersRow
+		if err := rows.Scan(&i.CustomerID, &i.Currency, &i.DefaultPaymentMethodID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -436,7 +475,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 			&i.Tier,
 			&i.Currency,
 			&i.CreditLimitAmount,
-			&i.CollectionPaymentMethodID,
+			&i.DefaultPaymentMethodID,
 		); err != nil {
 			return nil, err
 		}
@@ -449,7 +488,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, collection_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -472,40 +511,9 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.Tier,
 		&i.Currency,
 		&i.CreditLimitAmount,
-		&i.CollectionPaymentMethodID,
+		&i.DefaultPaymentMethodID,
 	)
 	return i, err
-}
-
-const setMoneyAccountCollectionPaymentMethod = `-- name: SetMoneyAccountCollectionPaymentMethod :execrows
-UPDATE billing.money_settings
-SET collection_payment_method_id = $3,
-    updated_at = $4
-WHERE merchant_id = $1
-  AND customer_id = $2
-  AND currency = $5
-`
-
-type SetMoneyAccountCollectionPaymentMethodParams struct {
-	MerchantID      uuid.UUID
-	CustomerID      uuid.UUID
-	PaymentMethodID *uuid.UUID
-	Now             time.Time
-	Currency        string
-}
-
-func (q *Queries) SetMoneyAccountCollectionPaymentMethod(ctx context.Context, arg SetMoneyAccountCollectionPaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setMoneyAccountCollectionPaymentMethod,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.PaymentMethodID,
-		arg.Now,
-		arg.Currency,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec
@@ -534,6 +542,37 @@ func (q *Queries) SetMoneyAccountCreditLimit(ctx context.Context, arg SetMoneyAc
 		arg.Currency,
 	)
 	return err
+}
+
+const setMoneyAccountDefaultPaymentMethod = `-- name: SetMoneyAccountDefaultPaymentMethod :execrows
+UPDATE billing.money_settings
+SET default_payment_method_id = $3,
+    updated_at = $4
+WHERE merchant_id = $1
+  AND customer_id = $2
+  AND currency = $5
+`
+
+type SetMoneyAccountDefaultPaymentMethodParams struct {
+	MerchantID      uuid.UUID
+	CustomerID      uuid.UUID
+	PaymentMethodID *uuid.UUID
+	Now             time.Time
+	Currency        string
+}
+
+func (q *Queries) SetMoneyAccountDefaultPaymentMethod(ctx context.Context, arg SetMoneyAccountDefaultPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setMoneyAccountDefaultPaymentMethod,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.PaymentMethodID,
+		arg.Now,
+		arg.Currency,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const setMoneyAccountTier = `-- name: SetMoneyAccountTier :exec

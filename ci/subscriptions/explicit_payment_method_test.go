@@ -36,18 +36,19 @@ func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 	require.False(t, c.entitled("content:post"))
 }
 
-// Renewals charge the subscription's stored method, never another of the
-// customer's cards, not even the one that collects their invoices. With the stored method gone only the member can fix it:
-// the membership waits for a new card on the dunning clock, the customer is
+// A renewal charges only a card that pays it under its recurring agreement.
+// With its own card gone the subscription follows the customer's default,
+// which here is on another rail and cannot pay it: only the member can fix
+// it. The membership waits for a card on the dunning clock, the customer is
 // asked for one, access follows the dunning access policy, and the wait ends
 // when the dunning window does. It is never held as a system stop.
-func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
+func TestRenewalNeverChargesACardThatCannotPayIt(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	w.armDestructive()
 	e := enroll(t, w, "nmi", embedded)
 	other := e.c.saveCard("stripe", mastercard)
-	e.c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": other, "currency": "USD"})
+	e.c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": other})
 	subID := strings.TrimPrefix(e.sub.String(), "sub_")
 	// The FK's ON DELETE SET NULL outcome of a removed stored method.
 	_, err := w.pool.Exec(t.Context(), w.q(`UPDATE billing.subscriptions SET payment_method_id = NULL WHERE id = $1::uuid`), subID)
@@ -56,7 +57,7 @@ func TestRenewalNeverFallsBackToAnotherCard(t *testing.T) {
 	end := e.periodEnd()
 	e.toFreshPeriodEnd()
 	w.runRenewals()
-	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the collection card")
+	require.Len(t, e.providerLedger(), charges, "nothing is charged, least of all the default card")
 	sub := w.subscription(embedded, e.sub)
 	require.Equal(t, billing.SubscriptionAwaitingMethod, sub.Status)
 	window, err := collection.Window(monthHours)

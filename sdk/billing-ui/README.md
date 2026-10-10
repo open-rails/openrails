@@ -125,7 +125,7 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
   <BillingProvider client={billing} onChange={() => queryClient.invalidateQueries({ queryKey: ["billing"] })}>
     <AccountBilling
       plansHref="/plans"
-      collectionCurrency="USD" // offers "Use for invoices"
+      defaultCurrency="USD" // offers "Make default"
       sendSolanaTransaction={(tx) => wallet.signAndSend(tx)} // signs a Solana cancel
     />
   </BillingProvider>
@@ -219,7 +219,7 @@ provider:
   subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
   `changeSubscription`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
-  `remove`, `setCollection`), `usePayments` (cursor pages), `useProducts` (the
+  `remove`, `setDefault`), `usePayments` (cursor pages), `useProducts` (the
   catalog).
   Actions resolve to `null` or a `BillingError`; they never throw.
   `changeSubscription` resolves to the `SubscriptionChange` instead of `null`. Cancel, resume

@@ -55,8 +55,8 @@ type MoneyAccount struct {
 	CustomerID uuid.UUID `json:"customer_id"`
 	Currency   string    `json:"currency"`
 
-	BillingMode             string     `json:"billing_mode"`
-	CollectionPaymentMethod *uuid.UUID `json:"collection_payment_method_id,omitempty"`
+	BillingMode          string     `json:"billing_mode"`
+	DefaultPaymentMethod *uuid.UUID `json:"default_payment_method_id,omitempty"`
 
 	// CreditLimitAmount is the admin-set arrears credit line (#489): under
 	// billing_mode=arrears the balance may go negative up to this amount; AdmitHold

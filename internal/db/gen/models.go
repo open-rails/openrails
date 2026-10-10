@@ -908,8 +908,9 @@ type BillingMoneySetting struct {
 	// System currency code (USD/EUR/JPY); the Go registry is the authority. Stablecoins and crypto tokens are payment assets, not account currencies.
 	Currency string
 	// Admin-set arrears credit line in the row currency internal precision. 0 = no arrears capacity; prepaid balance may still be spent.
-	CreditLimitAmount         int64
-	CollectionPaymentMethodID *uuid.UUID
+	CreditLimitAmount int64
+	// The customer's default card in this currency: it collects their invoices and pays every card subscription in the currency without a card of its own.
+	DefaultPaymentMethodID *uuid.UUID
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.
@@ -1706,10 +1707,11 @@ type BillingSubscription struct {
 	// Denormalized product ID for efficient user+product lookups without joining prices
 	ProductID uuid.UUID
 	// Local lifecycle, answering one question: will we attempt to rebill? pending = not started; active/past_due/awaiting_method = yes; unverified = the provider must tell us; canceled = never again, with cancel_type saying why. Provider vocabulary is mapped onto this set at the boundary.
-	Status                string
-	Rail                  string
-	CollectionPolicy      string
-	RailSubscriptionID    *string
+	Status             string
+	Rail               string
+	CollectionPolicy   string
+	RailSubscriptionID *string
+	// The subscription's own card. NULL on a card subscription (NMI, or Stripe collected by OpenRails) follows its customer's default card for the currency of its price.
 	PaymentMethodID       *uuid.UUID
 	CurrentPeriodStartsAt *time.Time
 	CurrentPeriodEndsAt   *time.Time

@@ -215,13 +215,29 @@ must act. `…/change/preview` answers the same numbers and changes nothing.
 ## Payment methods
 
 A payment method is `{id, customer_id, rail, psp_id, card, billing_details,
-health, subscriptions, collection_currencies, created_at}`. `card` is the one
+health, subscriptions, default_currencies, created_at}`. `card` is the one
 card shape of the API, `{brand, last4, exp_month, exp_year}`, each `null` when
 the provider did not report it. `psp_id` is `null` for a card a third-party
 custodian holds: each charge routes to the one live PSP of its rail that
-reaches the custodian. There is no default card: a charge names its card, and
-`collection_currencies` lists the currencies whose invoices the card collects
-(set with `PUT /v1/me/collection-payment-method`).
+reaches the custodian. `default_currencies` lists the currencies the card is
+the customer's default for, and `subscriptions` the subscriptions it pays.
+
+The default has two levels, as in Stripe. A customer's default card per
+currency (`PUT /v1/me/default-payment-methods/{currency}`) collects their
+invoices there and pays every card subscription in it without its own card.
+A subscription's `payment_method_id` is its own card, `null` when it follows
+the default; `card` shows the card that pays it. Changing the default moves
+every subscription that follows it, and
+`PUT /v1/me/subscriptions/{id}/payment-method` (staff:
+`Client.SetSubscriptionPaymentMethod`) sets or, with `null`, clears one's own
+card. A subscription bought with the default card follows it.
+
+Each move carries the subscription's recurring agreement to the card; a card
+with none on the subscription's account is verified first ($0, once per
+request; a decline is `402 card_declined` and changes nothing). NMI schedules
+follow through the durable schedule swap. A default that cannot pay a
+following subscription is `409 payment_method_psp_mismatch`; following a
+default not set is `400 default_payment_method_required`.
 
 - **Save** (`POST /v1/me/payment-methods`): `psp_id`, a `payment_token` from
   the PSP's card fields (or `card` for a PSP whose card entry is server), and

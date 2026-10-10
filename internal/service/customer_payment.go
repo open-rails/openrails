@@ -135,11 +135,15 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 			}
 		}
 	}
-	if !rails.IsNMI(sub.Rail) || sub.PaymentMethodID == nil {
+	charged, err := subscriptions.PaymentMethodOf(ctx, s.rt.DB.Gen(ctx), sub)
+	if err != nil {
+		return nil, err
+	}
+	if !rails.IsNMI(sub.Rail) || charged == nil {
 		out.BlockedReason = "customer_payment_unsupported"
 		return out, nil
 	}
-	method, err := s.rt.DB.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{ID: *sub.PaymentMethodID, MerchantID: mid.UUID()})
+	method, err := s.rt.DB.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{ID: *charged, MerchantID: mid.UUID()})
 	if err != nil {
 		return nil, err
 	}

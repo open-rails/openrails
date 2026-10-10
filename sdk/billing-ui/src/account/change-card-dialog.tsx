@@ -24,6 +24,9 @@ import { useScopeProps } from "#orck/scope-context"
 import { cardText, RESET } from "./format"
 import { ErrorState, ListSkeleton } from "./section"
 
+/** The choice that makes the subscription follow the default card. */
+const FOLLOW_DEFAULT = "default"
+
 /** Cards the subscription's PSP can charge; expired cards are left out. */
 function eligibleCards(
   s: Subscription,
@@ -42,8 +45,11 @@ export interface ChangeCardDialogProps {
   name: string
   onOpenChange: (open: boolean) => void
   pending: boolean
-  /** Resolves null on success; the dialog then closes. */
-  onConfirm: (paymentMethodId: string) => Promise<BillingError | null>
+  /**
+   * The subscription's own card, or null to follow the default card. Resolves
+   * null on success; the dialog then closes.
+   */
+  onConfirm: (paymentMethodId: string | null) => Promise<BillingError | null>
   appearance?: CheckoutAppearance
 }
 
@@ -96,24 +102,34 @@ function ChangeCardForm({
   name: string
   pending: boolean
   onCancel: () => void
-  onConfirm: (paymentMethodId: string) => Promise<BillingError | null>
+  onConfirm: (paymentMethodId: string | null) => Promise<BillingError | null>
 }) {
   const m = useMessages()
   const { t } = m
   const idPrefix = React.useId()
   const methods = usePaymentMethods()
-  const current = subscription.payment_method_id ?? ""
+  const current = subscription.payment_method_id ?? FOLLOW_DEFAULT
   const [selected, setSelected] = React.useState(current)
   const [error, setError] = React.useState<BillingError | null>(null)
   const cards = methods.methods
     ? eligibleCards(subscription, methods.methods)
     : null
-  const canSwitch = !!cards && cards.some((c) => c.id !== current)
+  const currency = subscription.price?.currency?.toUpperCase()
+  const defaultCard = currency
+    ? cards?.find((c) => (c.default_currencies ?? []).includes(currency))
+    : undefined
+  const choices = [
+    ...(defaultCard ? [{ id: FOLLOW_DEFAULT, card: defaultCard }] : []),
+    ...(cards ?? []).map((card) => ({ id: card.id, card })),
+  ]
+  const canSwitch = choices.some((c) => c.id !== current)
 
   const confirm = async () => {
     if (!selected || selected === current || pending) return
     setError(null)
-    const result = await onConfirm(selected)
+    const result = await onConfirm(
+      selected === FOLLOW_DEFAULT ? null : selected
+    )
     if (result) setError(result)
   }
 
@@ -133,11 +149,12 @@ function ChangeCardForm({
         aria-label={t("changeCard.title", { name })}
         className="grid gap-0"
       >
-        {cards.map((card) => {
-          const id = `${idPrefix}-${card.id}`
+        {choices.map(({ id: value, card }) => {
+          const id = `${idPrefix}-${value}`
+          const label = cardText(card.card, m)
           return (
             <Label
-              key={card.id}
+              key={value}
               htmlFor={id}
               data-testid="change-card-option"
               className={cn(
@@ -145,15 +162,17 @@ function ChangeCardForm({
                 pending && "cursor-default"
               )}
             >
-              <RadioGroupItem id={id} value={card.id} />
+              <RadioGroupItem id={id} value={value} />
               <CardBrandPlate
                 brand={card.card?.brand ?? undefined}
                 fallback={(card.card?.brand ?? "card").slice(0, 4)}
               />
               <span className="min-w-0 flex-1 truncate text-sm font-medium tabular-nums">
-                {cardText(card.card, m)}
+                {value === FOLLOW_DEFAULT
+                  ? t("changeCard.useDefault", { card: label })
+                  : label}
               </span>
-              {card.id === current ? (
+              {value === current ? (
                 <span className="shrink-0 text-xs text-muted-foreground">
                   {t("changeCard.current")}
                 </span>

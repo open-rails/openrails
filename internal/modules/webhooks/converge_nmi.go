@@ -284,12 +284,16 @@ func (s *NMIConvergeService) recordInitialDecline(ctx context.Context, rail stri
 	if probe.DeclineResponseCode != 0 {
 		code = strconv.Itoa(probe.DeclineResponseCode)
 	}
+	charged, err := subscriptions.PaymentMethodOf(ctx, s.DB.Gen(ctx), sub)
+	if err != nil {
+		return err
+	}
 	return attempts.Record(ctx, s.DB.Gen(ctx), attempts.Attempt{
 		MerchantID: sub.MerchantID, CustomerID: sub.CustomerID, PSPID: sub.PspID, Rail: rail,
 		Kind: attempts.Initial, Owner: attempts.OwnerOf(sub.CollectionPolicy), ObservedVia: attempts.ObservedFrom(ctx, "pull"),
 		Answer: decline.Evidence{Code: code, Text: strings.TrimSpace(probe.DeclineReason)}, TransactionID: probe.DeclineTransactionID,
 		Amount: amount, Currency: currency, At: at, Target: sub.PriceID.String(),
-		SubscriptionID: &sub.ID, PaymentMethodID: sub.PaymentMethodID, TokenType: charge.TokenTypePSPToken,
+		SubscriptionID: &sub.ID, PaymentMethodID: charged, TokenType: charge.TokenTypePSPToken,
 	})
 }
 

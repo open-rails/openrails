@@ -158,15 +158,14 @@ money path.
 
 ## Choosing a card
 
-There is no default card. A checkout or pay-now names its method
-(`payment_method_id` or a new card); naming neither is
-`payment_method_required` (400). A renewal charges the method stored on its
-subscription, chosen at subscribe time or replaced by the customer; if that
-method is gone the due pass refuses the renewal (a `life.due_pass.refused`
-finding) and never falls back to another card. Automatic invoice collection
-charges the card the customer chose per currency
-(`PUT /v1/me/collection-payment-method`), listed in that card's
-`collection_currencies`.
+A checkout or pay-now names its method (`payment_method_id` or a new card);
+naming neither is `payment_method_required` (400). Renewals and automatic
+invoice collection charge by a two-level default: a subscription's own card,
+else the customer's default card for its currency
+(`PUT /v1/me/default-payment-methods/{currency}`, listed in that card's
+`default_currencies`), which also collects their invoices there. A renewal
+with neither, or whose card carries no active recurring agreement, waits for
+the customer (`awaiting_method`); it never charges another card.
 
 Provider mirror: none is needed. OpenRails names the exact instrument on
 every charge (Stripe payment method id, NMI billing id), so Stripe's customer

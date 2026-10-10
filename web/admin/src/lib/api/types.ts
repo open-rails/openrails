@@ -35,6 +35,7 @@ export interface RawSubscription {
   current_period_ends_at: string | null
   rail: Rail
   rail_subscription_id: string | null
+  // The subscription's own card; null follows the customer's default card.
   payment_method_id: string | null // pm_...
   // The declined renewal being collected; null unless past_due or
   // awaiting_method.

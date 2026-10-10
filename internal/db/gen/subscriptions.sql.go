@@ -1463,12 +1463,13 @@ func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDu
 }
 
 const listLiveSubscriptionsOnMethod = `-- name: ListLiveSubscriptionsOnMethod :many
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = $1::uuid
-  AND payment_method_id = $2::uuid
-  AND status IN ('active', 'past_due', 'awaiting_method', 'unverified')
-  AND deleted_at IS NULL
-ORDER BY id
+SELECT s.id FROM billing.payment_methods pm
+JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+WHERE pm.merchant_id = $1::uuid AND pm.id = $2::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
+  AND s.status IN ('active', 'past_due', 'awaiting_method', 'unverified')
+  AND s.deleted_at IS NULL
+ORDER BY s.id
 `
 
 type ListLiveSubscriptionsOnMethodParams struct {
@@ -1476,7 +1477,8 @@ type ListLiveSubscriptionsOnMethodParams struct {
 	PaymentMethodID uuid.UUID
 }
 
-// #1115: the memberships a stored card pays for.
+// #1115: the memberships a stored card pays for, as their own card or as the
+// default they follow.
 func (q *Queries) ListLiveSubscriptionsOnMethod(ctx context.Context, arg ListLiveSubscriptionsOnMethodParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listLiveSubscriptionsOnMethod, arg.MerchantID, arg.PaymentMethodID)
 	if err != nil {
@@ -1715,19 +1717,32 @@ func (q *Queries) ListSubscriptionsByIDs(ctx context.Context, arg ListSubscripti
 	return items, nil
 }
 
-const listSubscriptionsByPaymentMethodIDs = `-- name: ListSubscriptionsByPaymentMethodIDs :many
-SELECT id, price_id, product_id, status, rail, collection_policy, rail_subscription_id, payment_method_id, current_period_starts_at, current_period_ends_at, started_at, ended_at, grace_ends_at, last_retry_at, retry_attempts, next_retry_at, canceled_at, cancel_type, cancel_feedback, gateway_response, created_at, updated_at, tier_group, deletion_scheduled_at, merchant_id, customer_id, psp_id, deleted_at, destructive_run_id, destructive_run_class, transient_retries, lifecycle_rev, row_version, dunning_policy, access_duration_hours_snapshot, quantity FROM billing.subscriptions sub
-WHERE sub.merchant_id = $1::uuid AND sub.payment_method_id = ANY($2::uuid[])
-  AND sub.deleted_at IS NULL
+const listSubscriptionsFollowingDefault = `-- name: ListSubscriptionsFollowingDefault :many
+SELECT s.id, s.price_id, s.product_id, s.status, s.rail, s.collection_policy, s.rail_subscription_id, s.payment_method_id, s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.grace_ends_at, s.last_retry_at, s.retry_attempts, s.next_retry_at, s.canceled_at, s.cancel_type, s.cancel_feedback, s.gateway_response, s.created_at, s.updated_at, s.tier_group, s.deletion_scheduled_at, s.merchant_id, s.customer_id, s.psp_id, s.deleted_at, s.destructive_run_id, s.destructive_run_class, s.transient_retries, s.lifecycle_rev, s.row_version, s.dunning_policy, s.access_duration_hours_snapshot, s.quantity FROM billing.subscriptions s
+JOIN billing.prices p ON p.merchant_id = s.merchant_id AND p.id = s.price_id
+WHERE s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
+  AND p.currency = $3::text
+  AND s.payment_method_id IS NULL AND s.rail IN ('nmi', 'stripe') AND s.collection_policy IN ('engine', 'nmi_schedule')
+  AND s.deleted_at IS NULL
+  AND (s.status IN ('active', 'past_due', 'awaiting_method')
+       OR EXISTS (SELECT 1 FROM billing.mandates m
+                  WHERE m.merchant_id = s.merchant_id AND m.subscription_id = s.id
+                    AND m.kind = 'recurring' AND m.status IN ('active', 'requires_reconsent')))
+ORDER BY s.id
+FOR UPDATE OF s
 `
 
-type ListSubscriptionsByPaymentMethodIDsParams struct {
-	MerchantID       uuid.UUID
-	PaymentMethodIds []uuid.UUID
+type ListSubscriptionsFollowingDefaultParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
 }
 
-func (q *Queries) ListSubscriptionsByPaymentMethodIDs(ctx context.Context, arg ListSubscriptionsByPaymentMethodIDsParams) ([]BillingSubscription, error) {
-	rows, err := q.db.Query(ctx, listSubscriptionsByPaymentMethodIDs, arg.MerchantID, arg.PaymentMethodIds)
+// A customer's card subscriptions in one currency that follow their default
+// card and still use it: live ones, and canceled ones whose recurring
+// agreement a resume would charge under. Locked for the move, in id order.
+func (q *Queries) ListSubscriptionsFollowingDefault(ctx context.Context, arg ListSubscriptionsFollowingDefaultParams) ([]BillingSubscription, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionsFollowingDefault, arg.MerchantID, arg.CustomerID, arg.Currency)
 	if err != nil {
 		return nil, err
 	}
@@ -1892,14 +1907,94 @@ func (q *Queries) ListSubscriptionsPage(ctx context.Context, arg ListSubscriptio
 	return items, nil
 }
 
+const listSubscriptionsPaidByMethods = `-- name: ListSubscriptionsPaidByMethods :many
+SELECT sub.id, sub.price_id, sub.product_id, sub.status, sub.rail, sub.collection_policy, sub.rail_subscription_id, sub.payment_method_id, sub.current_period_starts_at, sub.current_period_ends_at, sub.started_at, sub.ended_at, sub.grace_ends_at, sub.last_retry_at, sub.retry_attempts, sub.next_retry_at, sub.canceled_at, sub.cancel_type, sub.cancel_feedback, sub.gateway_response, sub.created_at, sub.updated_at, sub.tier_group, sub.deletion_scheduled_at, sub.merchant_id, sub.customer_id, sub.psp_id, sub.deleted_at, sub.destructive_run_id, sub.destructive_run_class, sub.transient_retries, sub.lifecycle_rev, sub.row_version, sub.dunning_policy, sub.access_duration_hours_snapshot, sub.quantity, pm.id AS paid_by
+FROM billing.payment_methods pm
+JOIN billing.subscriptions sub ON sub.merchant_id = pm.merchant_id AND sub.customer_id = pm.customer_id
+WHERE pm.merchant_id = $1::uuid AND pm.id = ANY($2::uuid[])
+  AND sub.deleted_at IS NULL
+  AND billing.subscription_payment_method_id(sub.merchant_id, sub.customer_id, sub.payment_method_id, sub.price_id, sub.rail, sub.collection_policy) = pm.id
+`
+
+type ListSubscriptionsPaidByMethodsParams struct {
+	MerchantID       uuid.UUID
+	PaymentMethodIds []uuid.UUID
+}
+
+type ListSubscriptionsPaidByMethodsRow struct {
+	BillingSubscription BillingSubscription
+	PaidBy              uuid.UUID
+}
+
+// The subscriptions the cards pay: as their own card, or as the customer's
+// default they follow.
+func (q *Queries) ListSubscriptionsPaidByMethods(ctx context.Context, arg ListSubscriptionsPaidByMethodsParams) ([]ListSubscriptionsPaidByMethodsRow, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionsPaidByMethods, arg.MerchantID, arg.PaymentMethodIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSubscriptionsPaidByMethodsRow
+	for rows.Next() {
+		var i ListSubscriptionsPaidByMethodsRow
+		if err := rows.Scan(
+			&i.BillingSubscription.ID,
+			&i.BillingSubscription.PriceID,
+			&i.BillingSubscription.ProductID,
+			&i.BillingSubscription.Status,
+			&i.BillingSubscription.Rail,
+			&i.BillingSubscription.CollectionPolicy,
+			&i.BillingSubscription.RailSubscriptionID,
+			&i.BillingSubscription.PaymentMethodID,
+			&i.BillingSubscription.CurrentPeriodStartsAt,
+			&i.BillingSubscription.CurrentPeriodEndsAt,
+			&i.BillingSubscription.StartedAt,
+			&i.BillingSubscription.EndedAt,
+			&i.BillingSubscription.GraceEndsAt,
+			&i.BillingSubscription.LastRetryAt,
+			&i.BillingSubscription.RetryAttempts,
+			&i.BillingSubscription.NextRetryAt,
+			&i.BillingSubscription.CanceledAt,
+			&i.BillingSubscription.CancelType,
+			&i.BillingSubscription.CancelFeedback,
+			&i.BillingSubscription.GatewayResponse,
+			&i.BillingSubscription.CreatedAt,
+			&i.BillingSubscription.UpdatedAt,
+			&i.BillingSubscription.TierGroup,
+			&i.BillingSubscription.DeletionScheduledAt,
+			&i.BillingSubscription.MerchantID,
+			&i.BillingSubscription.CustomerID,
+			&i.BillingSubscription.PspID,
+			&i.BillingSubscription.DeletedAt,
+			&i.BillingSubscription.DestructiveRunID,
+			&i.BillingSubscription.DestructiveRunClass,
+			&i.BillingSubscription.TransientRetries,
+			&i.BillingSubscription.LifecycleRev,
+			&i.BillingSubscription.RowVersion,
+			&i.BillingSubscription.DunningPolicy,
+			&i.BillingSubscription.AccessDurationHoursSnapshot,
+			&i.BillingSubscription.Quantity,
+			&i.PaidBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSubscriptionsToWake = `-- name: ListSubscriptionsToWake :many
-SELECT id FROM billing.subscriptions
-WHERE merchant_id = $1::uuid
-  AND payment_method_id = $2::uuid
-  AND collection_policy IN ('engine', 'nmi_schedule')
-  AND (status = 'awaiting_method' OR (status = 'past_due' AND (next_retry_at IS NULL OR next_retry_at > $3::timestamptz)))
-  AND deleted_at IS NULL
-ORDER BY id
+SELECT s.id FROM billing.payment_methods pm
+JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
+WHERE pm.merchant_id = $1::uuid AND pm.id = $2::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = pm.id
+  AND s.collection_policy IN ('engine', 'nmi_schedule')
+  AND (s.status = 'awaiting_method' OR (s.status = 'past_due' AND (s.next_retry_at IS NULL OR s.next_retry_at > $3::timestamptz)))
+  AND s.deleted_at IS NULL
+ORDER BY s.id
 `
 
 type ListSubscriptionsToWakeParams struct {
@@ -1987,6 +2082,39 @@ type MarkProviderStopPendingParams struct {
 func (q *Queries) MarkProviderStopPending(ctx context.Context, arg MarkProviderStopPendingParams) error {
 	_, err := q.db.Exec(ctx, markProviderStopPending, arg.At, arg.ID, arg.MerchantID)
 	return err
+}
+
+const resolveSubscriptionPaymentMethodID = `-- name: ResolveSubscriptionPaymentMethodID :one
+SELECT pm.id AS payment_method_id
+FROM (SELECT 1) one
+LEFT JOIN billing.payment_methods pm ON pm.merchant_id = $1::uuid
+  AND pm.id = billing.subscription_payment_method_id($1::uuid, $2::uuid,
+      $3::uuid, $4::uuid, $5::text, $6::text)
+`
+
+type ResolveSubscriptionPaymentMethodIDParams struct {
+	MerchantID         uuid.UUID
+	CustomerID         uuid.UUID
+	OwnPaymentMethodID *uuid.UUID
+	PriceID            *uuid.UUID
+	Rail               string
+	CollectionPolicy   string
+}
+
+// The card a subscription with these facts charges: its own, else the default
+// it follows.
+func (q *Queries) ResolveSubscriptionPaymentMethodID(ctx context.Context, arg ResolveSubscriptionPaymentMethodIDParams) (*uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, resolveSubscriptionPaymentMethodID,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.OwnPaymentMethodID,
+		arg.PriceID,
+		arg.Rail,
+		arg.CollectionPolicy,
+	)
+	var payment_method_id *uuid.UUID
+	err := row.Scan(&payment_method_id)
+	return payment_method_id, err
 }
 
 const setStripeSubscriptionPaymentMethod = `-- name: SetStripeSubscriptionPaymentMethod :execrows

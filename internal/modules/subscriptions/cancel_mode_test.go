@@ -36,7 +36,7 @@ func engineOwned(withMethod bool) subOpt {
 
 // Resumable is the single gate for the handler, worker and DTO: reversible
 // rail AND canceled AND paid period still open; engine subscriptions only
-// undo an ordinary user cancel that still has a card.
+// undo an ordinary user cancel with a card: its own, or the default it follows.
 func TestCancelModeAndResumable(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	future, past := now.Add(10*24*time.Hour), now.Add(-time.Hour)
@@ -60,7 +60,7 @@ func TestCancelModeAndResumable(t *testing.T) {
 		{"nmi delete executed", sub(models.RailNMI, models.StatusCanceled, endsAt(future)), CancelModeDestructive, false, true},
 		{"nmi delete pending, period over", sub(models.RailNMI, models.StatusCanceled, endsAt(past), pending), CancelModeDestructive, false, false},
 		{"engine user cancel", sub(models.RailNMI, models.StatusCanceled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeUser)), CancelModeReversible, true, true},
-		{"engine user cancel without card", sub(models.RailNMI, models.StatusCanceled, endsAt(future), engineOwned(false), cancelType(models.CancelTypeUser)), CancelModeReversible, false, true},
+		{"engine user cancel following the default", sub(models.RailNMI, models.StatusCanceled, endsAt(future), engineOwned(false), cancelType(models.CancelTypeUser)), CancelModeReversible, true, true},
 		{"engine merchant cancel", sub(models.RailStripe, models.StatusCanceled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeMerchant)), CancelModeReversible, false, true},
 		{"engine chargeback", sub(models.RailStripe, models.StatusCanceled, endsAt(future), engineOwned(true), cancelType(models.CancelTypeChargeback)), CancelModeReversible, false, true},
 		{"engine cancel type unknown", sub(models.RailStripe, models.StatusCanceled, endsAt(future), engineOwned(true)), CancelModeReversible, false, true},

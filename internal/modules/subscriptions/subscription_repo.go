@@ -247,17 +247,11 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 		return nil
 	}
 	priceIDs := make([]uuid.UUID, 0, len(subs))
-	pmIDs := make([]uuid.UUID, 0, len(subs))
 	seenPrice := map[uuid.UUID]bool{}
-	seenPM := map[uuid.UUID]bool{}
 	for _, s := range subs {
 		if s.PriceID != uuid.Nil && !seenPrice[s.PriceID] {
 			seenPrice[s.PriceID] = true
 			priceIDs = append(priceIDs, s.PriceID)
-		}
-		if s.PaymentMethodID != nil && !seenPM[*s.PaymentMethodID] {
-			seenPM[*s.PaymentMethodID] = true
-			pmIDs = append(pmIDs, *s.PaymentMethodID)
 		}
 	}
 
@@ -310,13 +304,26 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 	if err := r.db.LoadPricePSPBindings(ctx, bindingPrices, nil); err != nil {
 		return err
 	}
+	// PaymentMethod is the card each charges: its own, or the default it follows.
+	scope, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	charged, err := paymentMethodsOf(ctx, q, scope.UUID(), subs, prices)
+	if err != nil {
+		return err
+	}
+	pmIDs := make([]uuid.UUID, 0, len(charged))
+	seenPM := map[uuid.UUID]bool{}
+	for _, id := range charged {
+		if !seenPM[id] {
+			seenPM[id] = true
+			pmIDs = append(pmIDs, id)
+		}
+	}
 	pms := map[uuid.UUID]*models.PaymentMethod{}
 	if len(pmIDs) > 0 {
-		scopeMerchantID, scopeErr := merchant.Require(ctx)
-		if scopeErr != nil {
-			return scopeErr
-		}
-		rows, err := q.ListPaymentMethodsByIDs(ctx, gen.ListPaymentMethodsByIDsParams{MerchantID: scopeMerchantID.UUID(), Ids: pmIDs})
+		rows, err := q.ListPaymentMethodsByIDs(ctx, gen.ListPaymentMethodsByIDsParams{MerchantID: scope.UUID(), Ids: pmIDs})
 		if err != nil {
 			return err
 		}
@@ -330,8 +337,8 @@ func (r *SubscriptionRepo) attachSubscriptionRelations(ctx context.Context, subs
 	}
 	for _, s := range subs {
 		s.Price = prices[s.PriceID].ForPSP(s.PspID)
-		if s.PaymentMethodID != nil {
-			s.PaymentMethod = pms[*s.PaymentMethodID]
+		if id, ok := charged[s.ID]; ok {
+			s.PaymentMethod = pms[id]
 		}
 	}
 	return nil

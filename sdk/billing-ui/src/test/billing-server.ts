@@ -53,7 +53,7 @@ export function paymentMethod(overrides: Partial<Row> = {}): Row {
       active: true,
     },
     subscriptions: [],
-    collection_currencies: [],
+    default_currencies: [],
     created_at: "2026-09-01T00:00:00Z",
     ...overrides,
   } as Row
@@ -286,9 +286,21 @@ export function fakeBilling(
         (m = key.match(/^PUT \/me\/subscriptions\/([^/]+)\/payment-method$/))
       ) {
         const sub = findSub(decodeURIComponent(m[1]))
-        const pm = state.methods.find((x) => x.id === body?.payment_method_id)
-        if (!sub || !pm) return apiError(404, "resource_not_found")
-        Object.assign(sub, { payment_method_id: pm.id, card: pm.card })
+        // null follows the default card for the subscription's currency.
+        const own = body?.payment_method_id ?? null
+        const currency = String(
+          (sub?.price as Row | undefined)?.currency ?? "USD"
+        ).toUpperCase()
+        const pm = state.methods.find((x) =>
+          own === null
+            ? ((x.default_currencies as string[]) ?? []).includes(currency)
+            : x.id === own
+        )
+        if (!sub || !pm)
+          return own === null
+            ? apiError(400, "default_payment_method_required")
+            : apiError(404, "resource_not_found")
+        Object.assign(sub, { payment_method_id: own, card: pm.card })
         return json(200, sub)
       }
       if (key === "GET /me/payment-methods")
@@ -314,13 +326,13 @@ export function fakeBilling(
         state.methods = state.methods.filter((pm) => pm.id !== id)
         return new Response(null, { status: 204 })
       }
-      if (key === "PUT /me/collection-payment-method") {
-        const code = String(body.currency)
+      if ((m = key.match(/^PUT \/me\/default-payment-methods\/([^/]+)$/))) {
+        const code = decodeURIComponent(m[1])
         for (const pm of state.methods) {
-          const others = ((pm.collection_currencies as string[]) ?? []).filter(
+          const others = ((pm.default_currencies as string[]) ?? []).filter(
             (c) => c !== code
           )
-          pm.collection_currencies =
+          pm.default_currencies =
             pm.id === body.payment_method_id ? [...others, code] : others
         }
         return json(200, {

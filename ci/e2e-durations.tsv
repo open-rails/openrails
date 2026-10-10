@@ -89,7 +89,6 @@ ci/subscriptions	TestCheckoutOffersSolanaWhenConfigured	7.9
 ci/subscriptions	TestCheckoutOmitsSolanaWhenNotConfigured	6.7
 ci/subscriptions	TestCheckoutOrderRenewalAPIContract	6.6
 ci/subscriptions	TestCheckoutSessionPaysWithAStripeElementsCard	6.3
-ci/subscriptions	TestCollectionPaymentMethod	7.7
 ci/subscriptions	TestConvergeDetectsWithoutDeciding	10.3
 ci/subscriptions	TestCopiedStripeBookReadsAgedObligationBeforeFirstSubmission	9.2
 ci/subscriptions	TestCopiedStripeBookRecoversAgedLostReplyWithoutResend	13.7
@@ -273,7 +272,7 @@ ci/subscriptions	TestProviderOwnedRenewals	11.2
 ci/subscriptions	TestPublicConfigDegradesOnePSP	6.5
 ci/subscriptions	TestPurchasedCreditArchivePreservesDepositsAndReversals	76.4
 ci/subscriptions	TestRebillFailureSpikeAlerts	9.2
-ci/subscriptions	TestRenewalNeverFallsBackToAnotherCard	11.2
+ci/subscriptions	TestRenewalNeverChargesACardThatCannotPayIt	11.2
 ci/subscriptions	TestReplicasAdmissionRace	14.9
 ci/subscriptions	TestReplicasCancelRacesRenewal	37.7
 ci/subscriptions	TestReplicasCheckoutFrozenOwnerRefusedAtCommit	12.1

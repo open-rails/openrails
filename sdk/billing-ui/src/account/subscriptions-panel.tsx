@@ -160,7 +160,8 @@ export function SubscriptionsPanel({
             !scheduled &&
             !portal &&
             s.rail !== "solana" &&
-            !!s.payment_method_id
+            (s.collection_policy === "engine" ||
+              s.collection_policy === "nmi_schedule")
           const status = s.cancel_scheduled ? "cancel_scheduled" : s.status
           const footer = renderSubscriptionFooter?.(s)
           return (

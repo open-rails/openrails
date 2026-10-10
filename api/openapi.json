@@ -3816,10 +3816,12 @@
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "card_declined",
+          "default_payment_method_required",
           "invalid_param",
           "payment_method_not_psp_vaulted",
           "payment_method_psp_mismatch",
           "payment_method_same_vault",
+          "payment_method_stale",
           "payment_provider_rejected",
           "rebill_terms_committed",
           "resource_conflict",
@@ -4283,10 +4285,12 @@
         "x-openrails-errors": [
           "authentication_required",
           "card_declined",
+          "default_payment_method_required",
           "invalid_param",
           "payment_method_not_psp_vaulted",
           "payment_method_psp_mismatch",
           "payment_method_same_vault",
+          "payment_method_stale",
           "payment_provider_rejected",
           "rebill_terms_committed",
           "resource_conflict",
@@ -7521,8 +7525,8 @@
         "x-openrails-operation-limit": "off_channel",
         "x-openrails-errors": [
           "card_declined",
-          "collection_payment_method_invalid",
-          "collection_payment_method_required",
+          "default_payment_method_invalid",
+          "default_payment_method_required",
           "idempotency_key_reused",
           "invalid_param",
           "invoice_not_retryable",
@@ -9000,16 +9004,26 @@
         ]
       }
     },
-    "/v1/me/collection-payment-method": {
+    "/v1/me/default-payment-methods/{currency}": {
       "put": {
         "tags": [
           "customer"
+        ],
+        "parameters": [
+          {
+            "name": "currency",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CollectionPaymentMethod"
+                "$ref": "#/components/schemas/SetDefaultPaymentMethodParams"
               }
             }
           }
@@ -9020,7 +9034,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CollectionPaymentMethod"
+                  "$ref": "#/components/schemas/DefaultPaymentMethod"
                 }
               }
             }
@@ -9036,8 +9050,19 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
-          "collection_payment_method_invalid",
-          "invalid_param"
+          "authentication_required",
+          "card_declined",
+          "default_payment_method_invalid",
+          "invalid_param",
+          "payment_method_not_psp_vaulted",
+          "payment_method_psp_mismatch",
+          "payment_method_same_vault",
+          "payment_method_stale",
+          "payment_provider_rejected",
+          "rebill_terms_committed",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -13934,21 +13959,6 @@
           }
         }
       },
-      "CollectionPaymentMethod": {
-        "type": "object",
-        "properties": {
-          "currency": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "currency",
-          "payment_method_id"
-        ]
-      },
       "CreateAlertWebhookParams": {
         "type": "object",
         "properties": {
@@ -14666,10 +14676,10 @@
               "$ref": "#/components/schemas/Balance"
             }
           },
-          "collection_payment_methods": {
+          "default_payment_methods": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CollectionPaymentMethod"
+              "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
           }
         },
@@ -14680,7 +14690,7 @@
           "last_seen_at",
           "settings",
           "balances",
-          "collection_payment_methods"
+          "default_payment_methods"
         ]
       },
       "CustomerAccount": {
@@ -14695,10 +14705,10 @@
               "$ref": "#/components/schemas/Balance"
             }
           },
-          "collection_payment_methods": {
+          "default_payment_methods": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/CollectionPaymentMethod"
+              "$ref": "#/components/schemas/DefaultPaymentMethod"
             }
           },
           "unread_notifications": {
@@ -14708,7 +14718,7 @@
         "required": [
           "id",
           "balances",
-          "collection_payment_methods",
+          "default_payment_methods",
           "unread_notifications"
         ]
       },
@@ -15180,6 +15190,21 @@
             "format": "date-time"
           }
         }
+      },
+      "DefaultPaymentMethod": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "payment_method_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "currency",
+          "payment_method_id"
+        ]
       },
       "DelinquencyHostEvent": {
         "type": "object",
@@ -19288,7 +19313,7 @@
               "$ref": "#/components/schemas/PaymentMethodSubscription"
             }
           },
-          "collection_currencies": {
+          "default_currencies": {
             "type": "array",
             "items": {
               "type": "string"
@@ -19313,7 +19338,7 @@
           "reusable",
           "mandates",
           "subscriptions",
-          "collection_currencies",
+          "default_currencies",
           "created_at"
         ]
       },
@@ -21656,6 +21681,14 @@
           }
         }
       },
+      "SetDefaultPaymentMethodParams": {
+        "type": "object",
+        "properties": {
+          "payment_method_id": {
+            "type": "string"
+          }
+        }
+      },
       "SetMeterParams": {
         "type": "object",
         "properties": {
@@ -21736,7 +21769,14 @@
         "type": "object",
         "properties": {
           "payment_method_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         }
       },
@@ -23462,16 +23502,6 @@
       "type": "authorization_error",
       "meaning": "The checkout session is not available to this caller."
     },
-    "collection_payment_method_invalid": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The collection payment method cannot pay this invoice."
-    },
-    "collection_payment_method_required": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "Collection needs a payment method for the invoice's currency."
-    },
     "credential_custody_transition_required": {
       "status": 409,
       "type": "invalid_request_error",
@@ -23576,6 +23606,16 @@
       "status": 503,
       "type": "api_error",
       "meaning": "No database connection is available; retry shortly."
+    },
+    "default_payment_method_invalid": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The card cannot be the customer's default for the currency."
+    },
+    "default_payment_method_required": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The customer has no default card for the currency."
     },
     "default_rate_card_not_found": {
       "status": 404,

@@ -29,7 +29,7 @@ func TestInvoiceMonthlyCadenceSerializesReplicas(t *testing.T) {
 	require.NoError(t, answer.err)
 	require.Contains(t, []int{http.StatusOK, http.StatusAccepted}, answer.status, string(answer.body))
 	f.settle()
-	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"currency": "USD", "payment_method_id": method})
+	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	// Real refresh ran the ordinary monthly scan. Keep that durable baseline,
 	// refresh before the next bucket, then cross it only after the barrier is set.
 	var baseline time.Time

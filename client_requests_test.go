@@ -449,11 +449,11 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"subscription payment method": func() error {
-			_, err := c.SetSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: method})
+			_, err := c.SetSubscriptionPaymentMethod(ctx, billing.SubscriptionID{}, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &method})
 			return err
 		},
 		"payment method for subscription": func() error {
-			_, err := c.SetSubscriptionPaymentMethod(ctx, subscription, billing.SetSubscriptionPaymentMethodParams{})
+			_, err := c.SetSubscriptionPaymentMethod(ctx, subscription, billing.SetSubscriptionPaymentMethodParams{PaymentMethodID: &billing.PaymentMethodID{}})
 			return err
 		},
 		"change preview subscription": func() error {

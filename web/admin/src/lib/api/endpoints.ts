@@ -202,9 +202,10 @@ export const resumeSubscription = (id: string) =>
     method: "POST",
   })
 
+// null makes the subscription follow the customer's default card.
 export const changeSubscriptionPaymentMethod = (
   id: string,
-  paymentMethodId: string
+  paymentMethodId: string | null
 ) =>
   api<AdminSubscription>(`/admin/subscriptions/${id}/payment-method`, {
     method: "PUT",

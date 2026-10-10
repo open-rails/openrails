@@ -41,6 +41,7 @@ migration 0037_failed_usage.up.sql sha256:440a0bea4b34c76571c07a94918d935e1ce94c
 migration 0038_orders.up.sql sha256:f86c20901b76602ca48f6007250096be288b84bed1f3798991f4a328f4dd56cb
 migration 0039_seat_changes.up.sql sha256:01cdc00df32eafff33a059e754d9a576a0f8f184d3bb0ef2aba86a6c89ceded6
 migration 0040_card_versions.up.sql sha256:4654ccd95d380f54bb07ad921881eca379ac7dd7f0a0f33da4d5addaeee21672
+migration 0041_default_payment_method.up.sql sha256:4e6679394ea9c66dcb912de3d13386186d0ad5ab18aeb4190932dfef98fc4974
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1274,11 +1275,11 @@ table billing.money_settings
   column tier text
   column currency text NOT NULL
   column credit_limit_amount bigint NOT NULL DEFAULT 0
-  column collection_payment_method_id uuid
+  column default_payment_method_id uuid
   constraint money_settings_billing_mode_check CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text])))
   constraint money_settings_credit_limit_amount_nonneg_check CHECK ((credit_limit_amount >= 0))
   constraint money_settings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint money_settings_customer_id_collection_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, collection_payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (collection_payment_method_id)
+  constraint money_settings_customer_id_default_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, default_payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE SET NULL (default_payment_method_id)
   constraint money_settings_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint money_settings_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint money_settings_pkey PRIMARY KEY (merchant_id, customer_id, currency)
@@ -1728,6 +1729,7 @@ table billing.payment_methods
   index CREATE INDEX payment_methods_rail_rail_method_ref_idx ON billing.payment_methods USING btree (rail, rail_method_ref)
   index CREATE INDEX payment_methods_replaced_by_id_idx ON billing.payment_methods USING btree (merchant_id, replaced_by_id) WHERE (replaced_by_id IS NOT NULL)
   trigger CREATE TRIGGER guard_payment_method_status BEFORE UPDATE OF status, replaced_by_id ON billing.payment_methods FOR EACH ROW EXECUTE FUNCTION billing.guard_payment_method_status()
+  trigger CREATE TRIGGER release_inactive_default AFTER UPDATE OF status ON billing.payment_methods FOR EACH ROW EXECUTE FUNCTION billing.release_inactive_default()
 
 table billing.payments
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3754,6 +3756,21 @@ function billing.release_ended_ownership_claims()
   END;
   $function$
 
+function billing.release_inactive_default()
+  CREATE OR REPLACE FUNCTION billing.release_inactive_default()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF OLD.status = 'active' AND NEW.status <> 'active' THEN
+          UPDATE billing.money_settings SET default_payment_method_id = NULL, updated_at = now()
+          WHERE merchant_id = NEW.merchant_id AND customer_id = NEW.customer_id AND default_payment_method_id = NEW.id;
+      END IF;
+      RETURN NULL;
+  END;
+  $function$
+
 function billing.require_finished_billing_restore()
   CREATE OR REPLACE FUNCTION billing.require_finished_billing_restore()
    RETURNS trigger
@@ -3798,6 +3815,20 @@ function billing.step_entitlement_generation()
       END LOOP;
       RETURN NULL;
   END $function$
+
+function billing.subscription_payment_method_id(uuid,uuid,uuid,uuid,text,text)
+  CREATE OR REPLACE FUNCTION billing.subscription_payment_method_id(p_merchant uuid, p_customer uuid, p_own uuid, p_price uuid, p_rail text, p_policy text)
+   RETURNS uuid
+   LANGUAGE sql
+   STABLE PARALLEL SAFE
+  AS $function$
+  SELECT COALESCE(p_own, (
+      SELECT ms.default_payment_method_id
+      FROM billing.prices p
+      JOIN billing.money_settings ms ON ms.merchant_id = p.merchant_id AND ms.customer_id = p_customer AND ms.currency = p.currency
+      WHERE p.merchant_id = p_merchant AND p.id = p_price
+        AND p_rail IN ('nmi', 'stripe') AND p_policy IN ('engine', 'nmi_schedule')))
+  $function$
 
 function billing.subscriptions_lifecycle_single_writer()
   CREATE OR REPLACE FUNCTION billing.subscriptions_lifecycle_single_writer()

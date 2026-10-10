@@ -25,7 +25,7 @@ export const en = {
     expired: "Expired",
     expiring_soon: "Expires soon",
     needs_attention: "Needs attention",
-    collection: "Invoices",
+    default: "Default",
   },
   interval: {
     every: {
@@ -75,6 +75,7 @@ export const en = {
     none: "Add another card under Payment methods to switch.",
     confirm: "Use this card",
     current: "Current",
+    useDefault: "Your default card ({card})",
     done: "Payment card updated.",
   },
   cancel: {
@@ -118,9 +119,9 @@ export const en = {
     fallbackBrand: "Card",
     expires: "Expires {date}",
     usedBy: "Used by {names}",
-    collectsFor: "Pays {currencies} invoices",
-    useForInvoices: "Use for invoices",
-    usedForInvoices: "Invoice card updated.",
+    defaultFor: "Default for {currencies}",
+    makeDefault: "Make default",
+    defaultUpdated: "Default card updated.",
     remove: "Remove",
     removeLabel: "Remove {label}",
     removeTitle: "Remove {label}?",

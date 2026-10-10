@@ -63,7 +63,7 @@ func TestInvoiceRecoveryHoldIsTemporaryOnCustomerAndMerchantHTTP(t *testing.T) {
 	require.NoError(t, declined.err)
 	require.Equal(t, http.StatusPaymentRequired, declined.status, string(declined.body))
 	w.nmi.SetDecline(visa.Last4, "")
-	c.must(http.MethodPut, "/collection-payment-method", "", map[string]any{"payment_method_id": method, "currency": "USD"})
+	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
 	blockHistory()
 	w.advance(5 * 24 * time.Hour)
 	params := billing.RetryInvoiceCollectionParams{PaymentMethodID: pmid(method), IdempotencyKey: "merchant-recovery"}

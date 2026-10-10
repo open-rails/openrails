@@ -306,8 +306,8 @@ var invoiceRefusals = []struct {
 	{money.ErrInvoiceRetryOutcomeUnknown, billing.CodeInvoiceRetryOutcomeUnknown},
 	{money.ErrInvoiceRetryIdempotencyConflict, billing.CodeInvoiceRetryIdempotencyConflict},
 	{money.ErrPaymentExceedsDue, billing.CodePaymentExceedsDue},
-	{money.ErrCollectionPaymentMethodInvalid, billing.CodeCollectionPaymentMethodInvalid},
-	{money.ErrCollectionPaymentMethodRequired, billing.CodeCollectionPaymentMethodRequired},
+	{money.ErrDefaultPaymentMethodInvalid, billing.CodeDefaultPaymentMethodInvalid},
+	{money.ErrDefaultPaymentMethodRequired, billing.CodeDefaultPaymentMethodRequired},
 }
 
 func writeInvoiceError(r *httprequest.Request, err error) {

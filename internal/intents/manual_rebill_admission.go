@@ -137,13 +137,17 @@ func (h *ManualRebillHandler) enqueueRebill(ctx context.Context, subscriptionID,
 		if customer && terms.PeriodEnd.Sub(terms.PeriodStart)%(24*time.Hour) != 0 {
 			return ErrRebillUnsupported
 		}
-		if requestedMethod != nil && (sub.PaymentMethodID == nil || *requestedMethod != *sub.PaymentMethodID) {
+		charged, err := subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub)
+		if err != nil {
+			return err
+		}
+		if requestedMethod != nil && (charged == nil || *requestedMethod != *charged) {
 			return ErrRebillUnsupported
 		}
-		if sub.PaymentMethodID == nil {
+		if charged == nil {
 			return errors.New("rebill has no payment method")
 		}
-		methodRow, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *sub.PaymentMethodID})
+		methodRow, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: *charged})
 		if err != nil {
 			return err
 		}

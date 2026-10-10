@@ -678,7 +678,7 @@ Mounting gives your users these routes under `/billing`:
 | `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
 | `POST /billing/v1/me/subscriptions/{id}/change` | change plan or seats |
 | `POST /billing/v1/me/subscriptions/{id}/change/preview` | what that change would cost |
-| `PUT /billing/v1/me/subscriptions/{id}/payment-method` | move a subscription to another saved card |
+| `PUT /billing/v1/me/subscriptions/{id}/payment-method` | pay a subscription with another saved card, or with their default again |
 | `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
 | `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
@@ -688,7 +688,7 @@ Mounting gives your users these routes under `/billing`:
 | `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
 | `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
 | `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |
-| `PUT /billing/v1/me/collection-payment-method` | choose the card that pays one currency's invoices |
+| `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its invoices and every subscription without its own card |
 | `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
 | `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
 | `POST /billing/v1/me/billing-portal` | open Stripe's billing portal (when a Stripe PSP is declared) |

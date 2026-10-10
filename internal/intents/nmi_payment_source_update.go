@@ -58,6 +58,13 @@ type NMIPaymentSourceUpdatePayload struct {
 	NewPspID           uuid.UUID  `json:"new_psp_id"`
 	OldPaymentMethodID *uuid.UUID `json:"old_payment_method_id,omitempty"`
 	OldRailCustomerRef string     `json:"old_vault_id,omitempty"`
+	// Follow: once moved, the subscription follows its customer's default
+	// (the target) instead of having the target as its own card.
+	Follow bool `json:"follow,omitempty"`
+	// VerifiedTransactionID is a recurring verification on the target, the
+	// storing transaction the moved agreement cites when the card has no
+	// recurring lineage of its own.
+	VerifiedTransactionID string `json:"verified_transaction_id,omitempty"`
 }
 
 // EvidenceCodePSPMismatch is result_evidence["code"] of a swap the executor
@@ -135,8 +142,10 @@ func decodeNMIPaymentSourceUpdatePayload(intent gen.BillingProviderIntent) (NMIP
 }
 
 // CheckRelevance: the swap applies while the subscription still rebills and
-// still points at the intent's old (or already new) payment method. A row
-// moved to a THIRD method means a newer swap won — superseded, never re-fought.
+// still points at the intent's old (or already new) payment method; a swap
+// that follows the default also needs the target still to be the default. A
+// row moved to a THIRD method means a newer swap won — superseded, never
+// re-fought.
 func (h *NMIPaymentSourceUpdateHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
 	p, err := decodeNMIPaymentSourceUpdatePayload(intent)
 	if err != nil {
@@ -153,6 +162,21 @@ func (h *NMIPaymentSourceUpdateHandler) CheckRelevance(ctx context.Context, inte
 		return SupersededBy(fmt.Sprintf("subscription no longer rebilling (status=%s); payment-source update moot", sub.Status)), nil
 	}
 	cur := sub.PaymentMethodID
+	if p.Follow {
+		if cur != nil && (p.OldPaymentMethodID == nil || *cur != *p.OldPaymentMethodID) {
+			return SupersededBy(fmt.Sprintf("subscription now has its own payment method %s; a newer update won", cur)), nil
+		}
+		following := *sub
+		following.PaymentMethodID = nil
+		def, err := subscriptions.PaymentMethodOf(ctx, h.DB.Gen(ctx), &following)
+		if err != nil {
+			return Relevance{}, err
+		}
+		if def == nil || *def != p.NewPaymentMethodID {
+			return SupersededBy("the customer's default card changed; a newer update won"), nil
+		}
+		return StillRelevant(), nil
+	}
 	switch {
 	case cur == nil:
 		return StillRelevant(), nil
@@ -386,13 +410,12 @@ func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, 
 	return pin, refused, err
 }
 
-// finalize points the local subscription at the new payment method — only
-// ever called AFTER the provider side is confirmed. Idempotent; a subscription
-// row gone out-of-band leaves nothing to finalize.
-// A subscription waiting for a new card resumes dunning on it. Its recurring
-// mandate moves with it, citing the new card's recurring lineage; without one,
-// OpenRails' own recovery charges wait for a storing transaction (NMI keeps
-// billing its schedule).
+// finalize points the local subscription at the new payment method (its own
+// card, or none to follow the default) — only ever called AFTER the provider
+// side is confirmed. Idempotent; a subscription row gone out-of-band leaves
+// nothing to finalize. A subscription waiting for a new card resumes dunning
+// on it. Its recurring mandate moves with it, citing the new card's recurring
+// lineage, else the verification the swap carries.
 func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen.BillingProviderIntent, p NMIPaymentSourceUpdatePayload) error {
 	return h.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
@@ -404,7 +427,7 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 			}
 			return err
 		}
-		if sub.PaymentMethodID != nil && *sub.PaymentMethodID == p.NewPaymentMethodID {
+		if !p.Follow && sub.PaymentMethodID != nil && *sub.PaymentMethodID == p.NewPaymentMethodID {
 			return nil
 		}
 		now := h.now()
@@ -413,11 +436,17 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 		if err != nil {
 			return err
 		}
+		if lineage == nil && p.VerifiedTransactionID != "" {
+			lineage = &charge.Mandate{Kind: charge.AgreementRecurring, InitialTransactionID: p.VerifiedTransactionID}
+		}
 		if _, err := mandates.Replace(ctx, q, mandates.Agreement{MerchantID: intent.MerchantID, CustomerID: sub.CustomerID, PaymentMethodID: newID, PSPID: sub.PspID,
 			Rail: string(sub.Rail), Kind: charge.AgreementRecurring, SubscriptionID: &sub.ID, Lineage: lineage, AcceptedAt: now}, now); err != nil {
 			return err
 		}
 		sub.PaymentMethodID = &newID
+		if p.Follow {
+			sub.PaymentMethodID = nil
+		}
 		if err := subscriptions.ReplaceMethod(sub, now); err != nil {
 			return err
 		}
@@ -454,35 +483,14 @@ type PaymentSourceUpdateThrough struct {
 	DB     *db.DB
 }
 
-func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Context, sub *models.Subscription, newPM *models.PaymentMethod, origin Origin, originReason string) (PaymentSourceUpdateOutcome, error) {
+// ExecutePaymentSourceUpdate moves sub's NMI schedule onto newPM: it enqueues
+// the durable swap and executes it inline.
+func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Context, sub *models.Subscription, newPM *models.PaymentMethod, swap subscriptions.PaymentSourceSwap, origin Origin, originReason string) (PaymentSourceUpdateOutcome, error) {
 	if t == nil || t.Runner == nil || t.DB == nil {
 		return PaymentSourceUpdateOutcome{}, errors.New("payment-source update intent runner not wired")
 	}
 	if sub == nil || newPM == nil {
 		return PaymentSourceUpdateOutcome{}, errors.New("subscription and payment method are required")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return PaymentSourceUpdateOutcome{}, err
-	}
-	// Refuse zero identifiers before the row lock: an unattributed subscription
-	// or instrument cannot be compared to a provider account, and a zero id
-	// must never become a "not found" lookup or a durable intent.
-	if err := idguard.RequireMerchant("merchant_id", tid); err != nil {
-		return PaymentSourceUpdateOutcome{}, err
-	}
-	for _, check := range []struct {
-		field string
-		id    uuid.UUID
-	}{
-		{"subscription_id", sub.ID},
-		{"subscription.psp_id", sub.PspID},
-		{"payment_method_id", newPM.ID},
-		{"payment_method.psp_id", newPM.HoldingPSP()},
-	} {
-		if err := idguard.Require(check.field, check.id); err != nil {
-			return PaymentSourceUpdateOutcome{}, err
-		}
 	}
 	// The account boundary at the durable side-effect seam, whatever the HTTP
 	// caller already checked: the target is re-read under its shared row lock,
@@ -490,50 +498,116 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	// landing after this check is caught by the executor's pin). A target on
 	// another PSP never becomes an intent; cross-account migration is the
 	// report-only card re-entry plan (#657).
-	var target *models.PaymentMethod
-	err = t.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		row, lerr := gen.New(tx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{
-			MerchantID: tid.UUID(), ID: newPM.ID,
-		})
+	var params EnqueueParams
+	err := t.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		row, lerr := gen.New(tx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: sub.MerchantID, ID: newPM.ID})
 		if lerr != nil {
 			if errors.Is(lerr, pgx.ErrNoRows) {
 				return fmt.Errorf("payment method %s: %w", newPM.ID, paymentmethods.ErrPaymentMethodNotFound)
 			}
 			return lerr
 		}
-		target, lerr = models.PaymentMethodFromGen(row)
-		return lerr
+		var err error
+		params, err = t.swapParams(ctx, t.DB.NewWithPgxTx(tx), sub, row, swap, origin, originReason)
+		return err
 	})
 	if err != nil {
-		return PaymentSourceUpdateOutcome{}, fmt.Errorf("load target payment method: %w", err)
+		return PaymentSourceUpdateOutcome{}, err
+	}
+	row, err := t.Runner.EnqueueAndExecute(ctx, params)
+	if err != nil {
+		return PaymentSourceUpdateOutcome{}, err
+	}
+	return swapOutcome(row), nil
+}
+
+// EnqueueSwap records the swap of sub's schedule onto target, a card the
+// caller holds locked, in the caller's transaction (subscriptions.
+// PaymentSourceSwapper); ExecuteSwap runs it once that commits.
+func (t *PaymentSourceUpdateThrough) EnqueueSwap(ctx context.Context, tx pgx.Tx, sub *models.Subscription, target gen.BillingPaymentMethod, swap subscriptions.PaymentSourceSwap) (uuid.UUID, error) {
+	if t == nil || t.Runner == nil || t.DB == nil {
+		return uuid.Nil, errors.New("payment-source update intent runner not wired")
+	}
+	d := t.DB.NewWithPgxTx(tx)
+	params, err := t.swapParams(ctx, d, sub, target, swap, OriginUser, "default payment method change")
+	if err != nil {
+		return uuid.Nil, err
+	}
+	store := NewStore(d)
+	if gated, ok := t.Runner.Store.(*Store); ok {
+		store = gated.withTxDB(d)
+	}
+	row, err := store.Enqueue(ctx, params)
+	return row.ID, err
+}
+
+// ExecuteSwap runs a committed swap inline; what does not settle is the
+// executor's.
+func (t *PaymentSourceUpdateThrough) ExecuteSwap(ctx context.Context, intentID uuid.UUID) error {
+	_, err := t.Runner.ExecuteByID(ctx, intentID)
+	return err
+}
+
+// swapParams is the durable swap of sub's schedule onto target, validated
+// against the provider-account boundary.
+func (t *PaymentSourceUpdateThrough) swapParams(ctx context.Context, d *db.DB, sub *models.Subscription, row gen.BillingPaymentMethod, swap subscriptions.PaymentSourceSwap, origin Origin, originReason string) (EnqueueParams, error) {
+	tid, err := merchant.Require(ctx)
+	if err != nil {
+		return EnqueueParams{}, err
+	}
+	target, err := models.PaymentMethodFromGen(row)
+	if err != nil {
+		return EnqueueParams{}, err
+	}
+	// Refuse zero identifiers: an unattributed subscription or instrument
+	// cannot be compared to a provider account, and a zero id must never
+	// become a "not found" lookup or a durable intent.
+	if err := idguard.RequireMerchant("merchant_id", tid); err != nil {
+		return EnqueueParams{}, err
+	}
+	for _, check := range []struct {
+		field string
+		id    uuid.UUID
+	}{
+		{"subscription_id", sub.ID},
+		{"subscription.psp_id", sub.PspID},
+		{"payment_method_id", target.ID},
+		{"payment_method.psp_id", target.HoldingPSP()},
+	} {
+		if err := idguard.Require(check.field, check.id); err != nil {
+			return EnqueueParams{}, err
+		}
 	}
 	if err := subscriptions.ValidatePaymentMethodProviderAccount(target, sub); err != nil {
-		return PaymentSourceUpdateOutcome{}, err
+		return EnqueueParams{}, err
 	}
 	if err := subscriptions.ValidatePaymentMethodSourceCustody(target); err != nil {
-		return PaymentSourceUpdateOutcome{}, err
+		return EnqueueParams{}, err
 	}
 	newRailCustomerRef := strings.TrimSpace(target.RailCustomerRef)
 	if newRailCustomerRef == "" {
-		return PaymentSourceUpdateOutcome{}, errors.New("target payment method has no rail customer ref")
+		return EnqueueParams{}, errors.New("target payment method has no rail customer ref")
 	}
 
 	// Old side: forensics + the verifier's old-vault comparison anchor. A
 	// missing/unlinked old method degrades to "old unknown" (verify re-executes
 	// on any non-new vault).
-	var oldPMID *uuid.UUID
+	oldPMID := swap.Old
+	if oldPMID == nil {
+		if oldPMID, err = subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub); err != nil {
+			return EnqueueParams{}, err
+		}
+	}
 	var oldRailCustomerRef string
-	if sub.PaymentMethodID != nil {
-		id := *sub.PaymentMethodID
-		oldPMID = &id
-		old, err := paymentmethods.NewPaymentMethodRepo(t.DB).GetByID(ctx, id)
+	if oldPMID != nil {
+		old, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: tid.UUID(), ID: *oldPMID})
 		switch {
 		case err == nil:
-			oldRailCustomerRef = strings.TrimSpace(old.RailCustomerRef)
-		case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
+			oldRailCustomerRef = strings.TrimSpace(models.DerefStr(old.RailCustomerRef))
+		case errors.Is(err, pgx.ErrNoRows):
 			// linked row gone; old vault stays unknown
 		default:
-			return PaymentSourceUpdateOutcome{}, fmt.Errorf("load current payment method: %w", err)
+			return EnqueueParams{}, fmt.Errorf("load current payment method: %w", err)
 		}
 	}
 
@@ -541,43 +615,44 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	// vault cannot become the subscription's source (the swap would be a
 	// no-op at NMI reported as success).
 	if oldPMID != nil && *oldPMID != target.ID && oldRailCustomerRef == newRailCustomerRef {
-		return PaymentSourceUpdateOutcome{}, subscriptions.ErrPaymentMethodSameVault
+		return EnqueueParams{}, subscriptions.ErrPaymentMethodSameVault
 	}
 
 	subID := sub.ID
-	priorSwaps, err := t.DB.Gen(ctx).CountProviderIntents(ctx, gen.CountProviderIntentsParams{
+	priorSwaps, err := d.Gen(ctx).CountProviderIntents(ctx, gen.CountProviderIntentsParams{
 		MerchantID:     tid.UUID(),
 		Status:         ptr(StatusSucceeded),
 		IntentType:     ptr(TypeNMIPaymentSourceUpdate),
 		SubscriptionID: &subID,
 	})
 	if err != nil {
-		return PaymentSourceUpdateOutcome{}, fmt.Errorf("count prior payment-source updates: %w", err)
+		return EnqueueParams{}, fmt.Errorf("count prior payment-source updates: %w", err)
 	}
-
-	row, err := t.Runner.EnqueueAndExecute(ctx, EnqueueParams{
+	return EnqueueParams{
 		MerchantID:     tid.UUID(),
 		Provider:       strings.ToLower(string(sub.Rail)),
 		IntentType:     TypeNMIPaymentSourceUpdate,
 		SubscriptionID: &subID,
 		PspID:          sub.PspID,
 		Payload: NMIPaymentSourceUpdatePayload{
-			UserID:             sub.CustomerID.String(),
-			RailSubscriptionID: sub.RailSubscriptionID,
-			NewPaymentMethodID: target.ID,
-			NewRailCustomerRef: newRailCustomerRef,
-			NewPspID:           target.HoldingPSP(),
-			OldPaymentMethodID: oldPMID,
-			OldRailCustomerRef: oldRailCustomerRef,
+			UserID:                sub.CustomerID.String(),
+			RailSubscriptionID:    sub.RailSubscriptionID,
+			NewPaymentMethodID:    target.ID,
+			NewRailCustomerRef:    newRailCustomerRef,
+			NewPspID:              target.HoldingPSP(),
+			OldPaymentMethodID:    oldPMID,
+			OldRailCustomerRef:    oldRailCustomerRef,
+			Follow:                swap.Follow,
+			VerifiedTransactionID: swap.Verified,
 		},
 		IdempotencyKey: NMIPaymentSourceUpdateIdempotencyKey(sub.ID, newRailCustomerRef, priorSwaps),
 		NextAttemptAt:  time.Now().UTC(),
 		Origin:         origin,
 		OriginReason:   originReason,
-	})
-	if err != nil {
-		return PaymentSourceUpdateOutcome{}, err
-	}
+	}, nil
+}
+
+func swapOutcome(row gen.BillingProviderIntent) PaymentSourceUpdateOutcome {
 	out := PaymentSourceUpdateOutcome{}
 	if row.LastFailureReason != nil {
 		out.Reason = *row.LastFailureReason
@@ -589,7 +664,7 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 		out.Terminal = true
 		out.Code = EvidenceString(row, "code")
 	}
-	return out, nil
+	return out
 }
 
 func ptr[T any](v T) *T { return &v }

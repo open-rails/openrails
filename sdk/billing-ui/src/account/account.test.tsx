@@ -52,7 +52,7 @@ describe("AccountBilling", () => {
       methods: [
         paymentMethod({
           subscriptions: [{ id: "sub_1", display_name: "Pro" }],
-          collection_currencies: ["USD"],
+          default_currencies: ["USD"],
         }),
       ],
       payments: [
@@ -81,7 +81,7 @@ describe("AccountBilling", () => {
     const card = await screen.findByTestId("payment-method-row")
     expect(card).toHaveTextContent("Visa •••• 4242 · 12/30")
     expect(card).toHaveTextContent("Used by Pro")
-    expect(card).toHaveTextContent("Pays USD invoices")
+    expect(card).toHaveTextContent("Default for USD")
 
     const rows = await screen.findAllByTestId("payment-row")
     expect(rows[0]).toHaveTextContent("Pro")
@@ -255,6 +255,39 @@ describe("SubscriptionsPanel", () => {
       subscriptionId: "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
       paymentMethodId: "pm_2",
     })
+  })
+
+  it("moves a subscription back onto the default card", async () => {
+    const server = fakeBilling({
+      subscriptions: [subscription({ payment_method_id: "pm_2" })],
+      methods: [
+        paymentMethod({
+          id: "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+          default_currencies: ["USD"],
+        }),
+        paymentMethod({
+          id: "pm_2",
+          card: { brand: "mastercard", last4: "5454" },
+        }),
+      ],
+    })
+    mount(<SubscriptionsPanel />, server)
+    const row = await screen.findByTestId("subscription-row")
+    fireEvent.click(
+      within(row).getByRole("button", { name: "Change card for Pro" })
+    )
+    const dialog = await screen.findByRole("dialog")
+    fireEvent.click(
+      await within(dialog).findByText(/^Your default card \(Visa •••• 4242/)
+    )
+    fireEvent.click(within(dialog).getByRole("button", { name: "Use this card" }))
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    )
+    await waitFor(() => expect(row).toHaveTextContent("Visa •••• 4242"))
+    expect(server.calls).toContain(
+      "PUT /me/subscriptions/sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc/payment-method"
+    )
   })
 
   it("scopes no palette under the inherit theme", async () => {
@@ -447,7 +480,7 @@ describe("PaymentMethodsPanel", () => {
     const server = fakeBilling({
       methods: [paymentMethod(), paymentMethod({ id: "pm_2" })],
     })
-    mount(<AccountBilling collectionCurrency="usd" />, server)
+    mount(<AccountBilling defaultCurrency="usd" />, server)
     const rows = await screen.findAllByTestId("payment-method-row")
     server.fail["DELETE /me/payment-methods/pm_1"] = apiError(
       409,
@@ -464,11 +497,11 @@ describe("PaymentMethodsPanel", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
 
     fireEvent.click(
-      within(rows[1]).getByRole("button", { name: "Use for invoices" })
+      within(rows[1]).getByRole("button", { name: "Make default" })
     )
     await waitFor(() =>
       expect(screen.getAllByTestId("payment-method-row")[1]).toHaveTextContent(
-        "Pays USD invoices"
+        "Default for USD"
       )
     )
 

@@ -19,9 +19,9 @@ FOR UPDATE;
 -- (the executor finishes, the verifier resolves), so this is a "come back
 -- later", not a failure.
 SELECT count(*)::bigint FROM billing.provider_intents ri
-JOIN billing.subscriptions s ON s.id = ri.subscription_id
+JOIN billing.subscriptions s ON s.merchant_id = ri.merchant_id AND s.id = ri.subscription_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND s.payment_method_id = sqlc.arg(payment_method_id)::uuid
+  AND billing.subscription_payment_method_id(s.merchant_id, s.customer_id, s.payment_method_id, s.price_id, s.rail, s.collection_policy) = sqlc.arg(payment_method_id)::uuid
   AND s.deleted_at IS NULL
   AND ri.status = ANY (ARRAY['in_flight'::text, 'unknown_needs_verify'::text]);
 

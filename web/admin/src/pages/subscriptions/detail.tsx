@@ -112,6 +112,7 @@ export function SubscriptionDetailPage() {
             subscriptionId={sub.id}
             customerId={sub.customer_id}
             rail={sub.rail}
+            collectionPolicy={sub.collection_policy}
           />
           {cancellable && (
             <CancelDialog id={sub.id} customerId={sub.customer_id} />
@@ -361,14 +362,19 @@ function ResumeButton({ id, customerId }: { id: string; customerId?: string }) {
   )
 }
 
+// The choice that makes the subscription follow the customer's default card.
+const FOLLOW_DEFAULT = "default"
+
 function ChangePaymentMethodDialog({
   subscriptionId,
   customerId,
   rail,
+  collectionPolicy,
 }: {
   subscriptionId: string
   customerId?: string
   rail: string
+  collectionPolicy?: string
 }) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
@@ -386,7 +392,11 @@ function ChangePaymentMethodDialog({
     defaultValues: { paymentMethodId: "" },
     onSubmit: async ({ value }) => {
       try {
-        await changePaymentMethod.mutateAsync(value.paymentMethodId)
+        await changePaymentMethod.mutateAsync(
+          value.paymentMethodId === FOLLOW_DEFAULT
+            ? null
+            : value.paymentMethodId
+        )
         toast.success("Payment method updated")
         handleOpenChange(false)
       } catch (err) {
@@ -403,9 +413,11 @@ function ChangePaymentMethodDialog({
     }
   }
 
-  // Payment-method swap is an NMI-only operation today (see
-  // update_subscription_payment_method.go); other rails 400.
-  const supported = rail === "nmi"
+  // A card subscription OpenRails collects, or an NMI schedule; a provider
+  // that keeps the card (Stripe-owned, CCBill) or a wallet has none to change.
+  const supported =
+    rail !== "solana" &&
+    (collectionPolicy === "engine" || collectionPolicy === "nmi_schedule")
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger
@@ -428,8 +440,9 @@ function ChangePaymentMethodDialog({
         <DialogHeader>
           <DialogTitle>Change payment method</DialogTitle>
           <DialogDescription>
-            Points future renewals of this subscription at another stored
-            payment method (same rail).
+            Points future renewals of this subscription at another of the
+            customer&apos;s stored cards (same rail), or back at their default
+            card for its currency.
           </DialogDescription>
         </DialogHeader>
         <form
@@ -464,6 +477,9 @@ function ChangePaymentMethodDialog({
                     <SelectValue placeholder="Pick a stored payment method" />
                   </SelectTrigger>
                   <SelectContent>
+                    <SelectItem value={FOLLOW_DEFAULT}>
+                      The customer&apos;s default card
+                    </SelectItem>
                     {(pms ?? [])
                       .filter((pm) => pm.rail === rail)
                       .map((pm) => (

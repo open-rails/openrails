@@ -26,7 +26,7 @@ export const zh: BillingUiMessageBundle = {
     expired: "已过期",
     expiring_soon: "即将过期",
     needs_attention: "需要处理",
-    collection: "账单",
+    default: "默认",
   },
   interval: {
     every: {
@@ -76,6 +76,7 @@ export const zh: BillingUiMessageBundle = {
     none: "请先在付款方式中添加另一张卡片再切换。",
     confirm: "使用这张卡",
     current: "当前",
+    useDefault: "默认银行卡（{card}）",
     done: "付款卡已更新。",
   },
   cancel: {
@@ -114,9 +115,9 @@ export const zh: BillingUiMessageBundle = {
     fallbackBrand: "银行卡",
     expires: "有效期至 {date}",
     usedBy: "用于 {names}",
-    collectsFor: "支付 {currencies} 账单",
-    useForInvoices: "用于账单",
-    usedForInvoices: "账单银行卡已更新。",
+    defaultFor: "{currencies} 默认卡",
+    makeDefault: "设为默认",
+    defaultUpdated: "默认银行卡已更新。",
     remove: "移除",
     removeLabel: "移除 {label}",
     removeTitle: "移除 {label}？",

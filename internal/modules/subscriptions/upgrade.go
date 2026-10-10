@@ -52,7 +52,9 @@ func LockReplacedMembership(ctx context.Context, d *db.DB, terms InitialMembersh
 	if sub.Status != models.StatusActive || !r.PeriodEnd.After(terms.AcceptedAt) || sub.DeletionScheduledAt != nil {
 		return nil, ErrUpgradeRenewalDue
 	}
-	if sub.PaymentMethodID == nil || *sub.PaymentMethodID != terms.PaymentMethodID {
+	if charged, err := PaymentMethodOf(ctx, d.Gen(ctx), sub); err != nil {
+		return nil, err
+	} else if charged == nil || *charged != terms.PaymentMethodID {
 		return nil, ErrUpgradeReplacedChanged
 	}
 	if err := RefuseOwnedRebillTerms(ctx, d, sub); err != nil {

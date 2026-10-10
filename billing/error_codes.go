@@ -298,8 +298,8 @@ var errorCodes = []ErrorCode{
 	{CodeInvoiceRetryInProgress, 409, invalid, "A collection attempt on this invoice is unresolved."},
 	{CodeInvoiceRetryOutcomeUnknown, 409, invalid, "The last collection attempt's outcome is unknown."},
 	{CodeInvoiceRetryIdempotencyConflict, 409, invalid, "The idempotency key names a different collection attempt."},
-	{CodeCollectionPaymentMethodRequired, 400, invalid, "Collection needs a payment method for the invoice's currency."},
-	{CodeCollectionPaymentMethodInvalid, 400, invalid, "The collection payment method cannot pay this invoice."},
+	{CodeDefaultPaymentMethodRequired, 400, invalid, "The customer has no default card for the currency."},
+	{CodeDefaultPaymentMethodInvalid, 400, invalid, "The card cannot be the customer's default for the currency."},
 
 	// Credits, admission and provider obligations.
 	{"credit_grant_not_found", 404, invalid, "The credit grant does not exist."},

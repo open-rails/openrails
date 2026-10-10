@@ -12,7 +12,8 @@ export type BillingChange =
   | {
       type: "subscription.payment_method_changed"
       subscriptionId: string
-      paymentMethodId: string
+      /** null: the subscription follows the default card. */
+      paymentMethodId: string | null
     }
   | {
       type: "subscription.changed"
@@ -24,7 +25,7 @@ export type BillingChange =
       type:
         | "payment_method.added"
         | "payment_method.removed"
-        | "payment_method.collection_changed"
+        | "payment_method.default_changed"
       paymentMethodId: string
     }
 

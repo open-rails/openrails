@@ -183,7 +183,11 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if err != nil {
 				return err
 			}
-			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || !paymentmethods.Chargeable(method) {
+			charged, err := subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub)
+			if err != nil {
+				return err
+			}
+			if charged == nil || method.ID != *charged || method.CustomerID != engineCustomer || !paymentmethods.Chargeable(method) {
 				return errors.New("engine admission payment method changed")
 			}
 			if err := payload.Instrument.Matches(method); err != nil {
@@ -257,7 +261,11 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if decodeErr != nil {
 				return decodeErr
 			}
-			if accepted.Renewal.CustomerID != sub.CustomerID || sub.PaymentMethodID == nil || accepted.PaymentMethodID != *sub.PaymentMethodID || accepted.Instrument.PSPID != sub.PspID {
+			charged, err := subscriptions.PaymentMethodOf(ctx, d.Gen(ctx), sub)
+			if err != nil {
+				return err
+			}
+			if accepted.Renewal.CustomerID != sub.CustomerID || charged == nil || accepted.PaymentMethodID != *charged || accepted.Instrument.PSPID != sub.PspID {
 				return errors.New("engine admission contradicts locked subscription")
 			}
 		}

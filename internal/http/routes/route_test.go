@@ -40,13 +40,13 @@ var groupPaths = map[Group][]string{
 // pathParams are the names a path parameter takes: a resource's own id is
 // {id}, its customer {customer_id}; the rest name an identity the caller
 // chose, by what it is.
-var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "scope", "scope_key", "entitlement", "user_id", "rail", "account_id"}
+var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "scope", "scope_key", "entitlement", "user_id", "rail", "account_id", "currency"}
 
 var pathParam = regexp.MustCompile(`\{([a-z_]+)\}`)
 
 // documents are the request bodies not named ...Params: what the route
 // stores or runs, sent whole, and the Solana Pay transaction request.
-var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "CollectionPaymentMethod", "SolanaPayPostRequest"}
+var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "SolanaPayPostRequest"}
 
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.

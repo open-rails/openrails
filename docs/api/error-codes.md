@@ -44,8 +44,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `checkout_session_expired` | 410 | `invalid_request_error` | The checkout session expired. |
 | `checkout_session_not_found` | 404 | `invalid_request_error` | The checkout session does not exist. |
 | `checkout_session_unavailable` | 403 | `authorization_error` | The checkout session is not available to this caller. |
-| `collection_payment_method_invalid` | 400 | `invalid_request_error` | The collection payment method cannot pay this invoice. |
-| `collection_payment_method_required` | 400 | `invalid_request_error` | Collection needs a payment method for the invoice's currency. |
 | `credential_custody_transition_required` | 409 | `invalid_request_error` | Credential custody differs from the published backend. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_identity_mismatch` | 401 | `authentication_error` | The credential changed identity during the request. |
@@ -67,6 +65,8 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
 | `dashboard_invalid` | 400 | `invalid_request_error` | The dashboard is invalid; metadata.errors lists why. |
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |
+| `default_payment_method_invalid` | 400 | `invalid_request_error` | The card cannot be the customer's default for the currency. |
+| `default_payment_method_required` | 400 | `invalid_request_error` | The customer has no default card for the currency. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
 | `default_rate_card_required` | 409 | `invalid_request_error` | The meter needs a default rate card. |
 | `delegated_principal_invalid` | 401 | `authentication_error` | The host's delegated principal names no usable merchant or subject. |
