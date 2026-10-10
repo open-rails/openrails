@@ -1087,6 +1087,10 @@
       "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n}",
       "type LedgerEntry struct {\n\tTransactionID, OrderID, Vault string\n\tLast4                         string\n\tCents, RefundedCents          int64\n}"
     ],
+    "internal/stripemock": [
+      "type Card struct {\n\tBrand, Last4, Decline string\n}",
+      "type LedgerEntry struct {\n\tPaymentIntent, Charge, PaymentMethod string\n\tAmount, Refunded                     int64\n}"
+    ],
     "openrailstest": [
       "func (d *UserInfo) Delete(id string)",
       "func (d *UserInfo) Get(_ context.Context, ids []string) (map[string]userinfo.User, error)",
@@ -1113,6 +1117,27 @@
       "type Mock struct{}",
       "type Options struct {\n\tClock func() time.Time\n}",
       "type Sale struct {\n\tTransactionID, OrderID, Vault, Last4 string\n\n\tAmount, Currency string\n\n\tDeclined string\n\tAt       time.Time\n}"
+    ],
+    "openrailstest/stripemock": [
+      "func (s *Mock) Authenticate(paymentIntent string) bool",
+      "func (s *Mock) CheckoutSessions() []CheckoutSession",
+      "func (s *Mock) Close()",
+      "func (s *Mock) CompleteCheckoutSession(ctx context.Context, id string) (string, error)",
+      "func (s *Mock) CompleteSetup(setupIntent string, card Card) string",
+      "func (s *Mock) LastCheckoutSession() *CheckoutSession",
+      "func (s *Mock) Ledger(customer string) []LedgerEntry",
+      "func (s *Mock) Redeliver(ctx context.Context, id string) error",
+      "func (s *Mock) SendWebhooksTo(endpoint, secret string)",
+      "func (s *Mock) SetDecline(last4, decline string)",
+      "func (s *Mock) Transport() http.RoundTripper",
+      "func (s *Mock) URL() string",
+      "func (s *Mock) Unexpected() []string",
+      "func New(opts Options) *Mock",
+      "type Card = stripemock.Card",
+      "type CheckoutSession struct {\n\tID, URL string\n\n\tStatus, PaymentStatus string\n\n\tAmountTotal int64\n\tCurrency    string\n\n\tPaymentIntent string\n\tMetadata      map[string]string\n}",
+      "type LedgerEntry = stripemock.LedgerEntry",
+      "type Mock struct{}",
+      "type Options struct {\n\tClock func() time.Time\n}"
     ],
     "server": [
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
@@ -4586,6 +4611,27 @@
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
     },
+    "internal/stripemock/inspect.go": {
+      "fmt": "fmt",
+      "sort": "sort",
+      "strings": "strings"
+    },
+    "internal/stripemock/mock.go": {
+      "bytes": "bytes",
+      "errors": "errors",
+      "fmt": "fmt",
+      "http": "net/http",
+      "httptest": "net/http/httptest",
+      "io": "io",
+      "json": "encoding/json",
+      "regexp": "regexp",
+      "sort": "sort",
+      "strconv": "strconv",
+      "strings": "strings",
+      "sync": "sync",
+      "time": "time",
+      "url": "net/url"
+    },
     "merchant_archive.go": {
       "archivewire": "github.com/open-rails/openrails/internal/archivewire",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4618,6 +4664,12 @@
     },
     "openrailstest/nmimock/nmimock.go": {
       "nmimock": "github.com/open-rails/openrails/internal/nmimock",
+      "time": "time"
+    },
+    "openrailstest/stripemock/stripemock.go": {
+      "context": "context",
+      "http": "net/http",
+      "stripemock": "github.com/open-rails/openrails/internal/stripemock",
       "time": "time"
     },
     "openrailstest/userinfo.go": {

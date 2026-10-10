@@ -221,6 +221,18 @@ The live-key-under-sandbox boot refusal guarantees a sandbox deployment
 can never hold a credential that moves real money. Use Stripe's standard test
 cards. A production-style deployment can legitimately run sandbox rails.
 
+Your own end-to-end tests need no Stripe account: package
+`openrailstest/stripemock` is a fake Stripe on loopback. Set
+`Config.ProviderSandbox.StripeAPIURL` to its `URL()` under
+`TestMode: openrails.Sandbox` (or pass `Transport()` as `Deps.StripeTransport`),
+declare a Stripe PSP with any `sk_test_` key, and point `SendWebhooksTo` at
+your mounted `/v1/webhooks/stripe/{account_id}` with the PSP's signing secret.
+Without a publishable key a customer pays on hosted Checkout:
+`CompleteCheckoutSession(ctx, id)` is the customer paying there, and Stripe's
+signed `checkout.session.completed` reaches your route; `Redeliver` sends it
+again. `CompleteSetup` saves a card for Elements, `SetDecline` declines one,
+and `Ledger` reads what Stripe charged. The package comment has the wiring.
+
 ### Read-only safety gate
 
 Every outbound Stripe byte flows through one choke-point HTTP client. With

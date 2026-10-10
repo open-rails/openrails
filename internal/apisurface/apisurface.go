@@ -30,7 +30,7 @@ const (
 
 // Packages are the covered packages, relative to Module.
 var Packages = []string{
-	"", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "server", "web/admin",
+	"", "adapters/fiber", "adapters/gin", "adapters/http", "billing", "catalog", "openrailstest", "openrailstest/nmimock", "openrailstest/stripemock", "server", "web/admin",
 }
 
 // ServerModule is the directory of the module released in lockstep with the

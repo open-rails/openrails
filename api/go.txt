@@ -3434,6 +3434,44 @@ pkg openrails/openrailstest/nmimock, type Sale struct, Last4 string
 pkg openrails/openrailstest/nmimock, type Sale struct, OrderID string
 pkg openrails/openrailstest/nmimock, type Sale struct, TransactionID string
 pkg openrails/openrailstest/nmimock, type Sale struct, Vault string
+pkg openrails/openrailstest/stripemock, func New(Options) *Mock
+pkg openrails/openrailstest/stripemock, method (*Mock) Authenticate(string) bool
+pkg openrails/openrailstest/stripemock, method (*Mock) CheckoutSessions() []CheckoutSession
+pkg openrails/openrailstest/stripemock, method (*Mock) Close()
+pkg openrails/openrailstest/stripemock, method (*Mock) CompleteCheckoutSession(context.Context, string) (string, error)
+pkg openrails/openrailstest/stripemock, method (*Mock) CompleteSetup(string, Card) string
+pkg openrails/openrailstest/stripemock, method (*Mock) LastCheckoutSession() *CheckoutSession
+pkg openrails/openrailstest/stripemock, method (*Mock) Ledger(string) []LedgerEntry
+pkg openrails/openrailstest/stripemock, method (*Mock) Redeliver(context.Context, string) error
+pkg openrails/openrailstest/stripemock, method (*Mock) SendWebhooksTo(string, string)
+pkg openrails/openrailstest/stripemock, method (*Mock) SetDecline(string, string)
+pkg openrails/openrailstest/stripemock, method (*Mock) Transport() http.RoundTripper
+pkg openrails/openrailstest/stripemock, method (*Mock) URL() string
+pkg openrails/openrailstest/stripemock, method (*Mock) Unexpected() []string
+pkg openrails/openrailstest/stripemock, type Card = stripemock.Card
+pkg openrails/openrailstest/stripemock, type Card struct
+pkg openrails/openrailstest/stripemock, type Card struct, Brand string
+pkg openrails/openrailstest/stripemock, type Card struct, Decline string
+pkg openrails/openrailstest/stripemock, type Card struct, Last4 string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, AmountTotal int64
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, Currency string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, ID string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, Metadata map[string]string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, PaymentIntent string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, PaymentStatus string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, Status string
+pkg openrails/openrailstest/stripemock, type CheckoutSession struct, URL string
+pkg openrails/openrailstest/stripemock, type LedgerEntry = stripemock.LedgerEntry
+pkg openrails/openrailstest/stripemock, type LedgerEntry struct
+pkg openrails/openrailstest/stripemock, type LedgerEntry struct, Amount int64
+pkg openrails/openrailstest/stripemock, type LedgerEntry struct, Charge string
+pkg openrails/openrailstest/stripemock, type LedgerEntry struct, PaymentIntent string
+pkg openrails/openrailstest/stripemock, type LedgerEntry struct, PaymentMethod string
+pkg openrails/openrailstest/stripemock, type LedgerEntry struct, Refunded int64
+pkg openrails/openrailstest/stripemock, type Mock struct
+pkg openrails/openrailstest/stripemock, type Options struct
+pkg openrails/openrailstest/stripemock, type Options struct, Clock func() time.Time
 pkg openrails/server, const FormerNamesFinite config.FormerNamesMode = "finite"
 pkg openrails/server, const FormerNamesForever config.FormerNamesMode = "forever"
 pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immediate"

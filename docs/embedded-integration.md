@@ -518,8 +518,9 @@ Point each rail's webhook at the webhook routes on **your** server, under your m
 prefix (`/v1/webhooks/{rail}/{account_id}`; see [the API guide](api/endpoints.md#provider-webhooks)). OpenRails verifies rail
 signatures and updates subscriptions/entitlements; your app just reads the results.
 Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md). In your
-end-to-end tests, `openrailstest/nmimock` stands in for NMI on loopback (see
-[NMI sandbox testing](rails/nmi.md#sandbox-testing)).
+end-to-end tests, `openrailstest/nmimock` stands in for NMI and
+`openrailstest/stripemock` for Stripe on loopback (see [NMI](rails/nmi.md#sandbox-testing)
+and [Stripe](rails/stripe.md#sandbox-testing) sandbox testing).
 
 Customers' emails and names come from `Deps.UserInfo`, asked on every read. A
 host that keeps a pushed copy instead mounts `Routes.Provisioning` and points
