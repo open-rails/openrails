@@ -9,7 +9,7 @@ CREATE TABLE billing.fx_rates (
     as_of timestamp with time zone NOT NULL,
     fetched_at timestamp with time zone NOT NULL,
     CONSTRAINT fx_rates_pkey PRIMARY KEY (from_currency, to_currency),
-    CONSTRAINT fx_rates_currencies_check CHECK (from_currency ~ '^[A-Z]{3}$' AND to_currency ~ '^[A-Z]{3}$' AND from_currency <> to_currency),
+    CONSTRAINT fx_rates_currencies_check CHECK (from_currency ~ '^[A-Z0-9]{3,12}$' AND to_currency ~ '^[A-Z0-9]{3,12}$' AND from_currency <> to_currency),
     CONSTRAINT fx_rates_rate_check CHECK (rate > 0 AND rate < 'Infinity'::double precision)
 );
 COMMENT ON TABLE billing.fx_rates IS 'Global by design: the latest published rate of each currency pair, read once for the fleet and quoted by every replica. One row per pair, replaced in place.';

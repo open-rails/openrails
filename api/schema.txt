@@ -45,7 +45,7 @@ migration 0041_default_payment_method.up.sql sha256:4e6679394ea9c66dcb912de3d133
 migration 0042_catalog_ownership.up.sql sha256:96658abd37cb76d7e3b4f53882888a85c5507d85ffc568e86bb498174416ffc3
 migration 0043_notification_email_lease.up.sql sha256:f4dc938d0a787d8acacea8e6dca74bc199bd3f2eb847f032bfdea0b4cf36681d
 migration 0044_rate_windows.up.sql sha256:1656c9714e62a2a701e6faa8b608f29e91a7bcd258608a640fd1d17f8bd70e2c
-migration 0047_fx_rates.up.sql sha256:09aca9b130a6649c3418b2c98a476ce904c710631f73a841cbe119cf2aea9e0d
+migration 0047_fx_rates.up.sql sha256:ee2d349edc70458abfb37b11d5717ac0d6b66c899fb01f78f50d6e401bd2c7cb
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -763,7 +763,7 @@ table billing.fx_rates
   column rate double precision NOT NULL
   column as_of timestamp with time zone NOT NULL
   column fetched_at timestamp with time zone NOT NULL
-  constraint fx_rates_currencies_check CHECK (((from_currency ~ '^[A-Z]{3}$'::text) AND (to_currency ~ '^[A-Z]{3}$'::text) AND (from_currency <> to_currency)))
+  constraint fx_rates_currencies_check CHECK (((from_currency ~ '^[A-Z0-9]{3,12}$'::text) AND (to_currency ~ '^[A-Z0-9]{3,12}$'::text) AND (from_currency <> to_currency)))
   constraint fx_rates_pkey PRIMARY KEY (from_currency, to_currency)
   constraint fx_rates_rate_check CHECK (((rate > (0)::double precision) AND (rate < 'Infinity'::double precision)))
   index CREATE UNIQUE INDEX fx_rates_pkey ON billing.fx_rates USING btree (from_currency, to_currency)

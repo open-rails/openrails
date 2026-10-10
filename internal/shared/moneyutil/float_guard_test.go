@@ -53,14 +53,13 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 	// A float anywhere else in a guarded package FAILS.
 	allowed := map[string]string{
 		// --- FX: the rate is a float; the amount is a big.Rat -------------
-		"internal/integrations/fx/provider.go:Quote":         "Quote.Rate is the RATE itself — the one value MONEY-3 permits as a float",
-		"internal/integrations/fx/provider.go:ratFromRate":   "rate -> exact rational converter; the boundary where float stops",
-		"internal/integrations/fx/mock.go:MockProvider":      "test-double RATE table",
-		"internal/integrations/fx/mock.go:NewMockProvider":   "test-double RATE table",
-		"internal/integrations/fx/mock.go:SetRate":           "test-double RATE setter",
-		"internal/integrations/fx/exchange_api.go:fetchRate": "parses the provider's quoted RATE",
-		"internal/integrations/fx/exchange_api.go:Quote":     "identity RATE 1.0 for same-currency quotes",
-		"internal/integrations/fx/redis_cache.go:redisRate":  "cached RATE payload",
+		"internal/integrations/fx/provider.go:Quote":       "Quote.Rate is the RATE itself — the one value MONEY-3 permits as a float",
+		"internal/integrations/fx/provider.go:ratFromRate": "rate -> exact rational converter; the boundary where float stops",
+		"internal/integrations/fx/mock.go:MockProvider":    "test-double RATE table",
+		"internal/integrations/fx/mock.go:NewMockProvider": "test-double RATE table",
+		"internal/integrations/fx/mock.go:SetRate":         "test-double RATE setter",
+		"internal/integrations/fx/source.go:Table":         "a base currency's published RATES",
+		"internal/integrations/fx/source.go:read":          "parses the provider's quoted RATES",
 
 		// --- Solana: token price + FX rate are rates; amounts are big.Int --
 		"internal/modules/solana/types.go:PayResult":                         "TokenPriceUSD/FXRate are RATES; the token amount is uint64 base units",
