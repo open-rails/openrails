@@ -223,8 +223,8 @@ func TestNMIFetcher(t *testing.T) {
 		}
 	})
 
-	// #842: exhaustiveness authorizes cancelling everything absent; a 200 with
-	// zero rows is indistinguishable from someone else's gateway.
+	// Exhaustiveness authorizes cancelling everything absent; a 200 with zero
+	// rows is indistinguishable from someone else's gateway.
 	t.Run("an empty roster is never exhaustive", func(t *testing.T) {
 		require.False(t, (&nmiBulkFake{}).fetch(t, FetchParams{}).Coverage.SubscriptionsExhaustive)
 		full := &nmiBulkFake{subs: [][]string{{`{"id":"s1","next_billing_date":"2999-01-01"}`}}}
@@ -352,7 +352,7 @@ func TestStripeFetcher(t *testing.T) {
 		require.Equal(t, "sub_active1", snap.Subscriptions[0].RailSubscriptionID)
 	})
 
-	// or#842: only a non-empty, merchant-wide roster proves absence.
+	// Only a non-empty, merchant-wide roster proves absence.
 	t.Run("exhaustiveness needs a non-empty book-wide roster", func(t *testing.T) {
 		for _, c := range []struct {
 			pages    [][]string

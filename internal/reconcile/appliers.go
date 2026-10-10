@@ -20,12 +20,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// LocalWriter performs enforce mode's idempotent LOCAL MIRROR writes (#665:
-// provider-fact rows only — payments, refunds, vault metadata, subscription
-// materialization; subscription state transitions go through the decider's
-// DecisionApplier instead). No method ever calls a rail — that is the design
-// invariant that lets enforce run under mode=readonly. Every method reports
-// whether it changed anything, so a second enforce run is observably a no-op.
+// LocalWriter performs enforce mode's idempotent local mirror writes of
+// provider facts (payments, refunds, vault metadata, subscription
+// materialization); subscription transitions go through DecisionApplier. No
+// method calls a rail, so enforce can run under readonly. Each reports whether
+// it changed anything, so a second enforce run is observably a no-op.
 type LocalWriter interface {
 	BackfillPayment(ctx context.Context, a BackfillPaymentAction) (bool, error)
 	RecordRefund(ctx context.Context, a RecordRefundAction) (bool, error)
@@ -199,11 +198,11 @@ func (w *PGLocalWriter) GrantAccess(ctx context.Context, a GrantAccessAction) (b
 	return granted, err
 }
 
-// MaterializeSubscription creates the local subscription for a resolved PS-1
-// (bootstrap mode v1.1). Idempotent: when any local subscription already
-// carries the rail subscription id, the insert returns zero rows and
-// nothing else runs. Its product is granted through the normal
-// subscription-sourced path when the remote period is still running.
+// MaterializeSubscription creates the local subscription for a resolved
+// remote-only rail subscription. Idempotent: when a local subscription already
+// carries the rail subscription id, the insert returns no row and nothing else
+// runs. Its product is granted through the subscription-sourced path while the
+// remote period still runs.
 func (w *PGLocalWriter) MaterializeSubscription(ctx context.Context, a MaterializeSubscriptionAction) (MaterializeResult, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {

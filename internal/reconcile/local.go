@@ -20,9 +20,8 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// localRailNames maps a reconcile Provider onto the rail name(s)
-// used by local billing rows. NMI subscriptions historically carry either
-// the gateway rail "nmi".
+// localRailNames maps a reconcile Provider onto the rail names local billing
+// rows carry.
 func localRailNames(p Provider) []string {
 	switch p {
 	case ProviderNMI:
@@ -108,9 +107,8 @@ type LocalPaymentMethod struct {
 	Card          models.Card
 }
 
-// LocalPrice is the slice of billing.prices the PS-1 materializer consumes:
-// the normalized price bindings map remote plan ids onto
-// local prices.
+// LocalPrice is the slice of billing.prices the subscription materializer
+// consumes: price bindings map remote plan ids onto local prices.
 type LocalPrice struct {
 	ID               uuid.UUID
 	ProductID        uuid.UUID
@@ -133,13 +131,10 @@ type LocalState struct {
 }
 
 // LocalStateLoader loads the local rows the diff engine compares against a
-// provider snapshot. PaymentsByTransactionIDs is queried separately (bounded
-// by the snapshot's transaction set rather than a date window, so clock skew
-// between us and the rail can not fake a missing payment).
-//
-// or#893: pspID is REQUIRED. The mirror rows of one PSP are not the mirror
-// rows of its sibling on the same rail, and a nil-means-every-PSP read let one
-// account's roster judge another account's book.
+// provider snapshot. PaymentsByTransactionIDs is bounded by the snapshot's
+// transaction set, not a date window, so clock skew with the rail cannot fake
+// a missing payment. pspID is required: one PSP's mirror rows are not its
+// sibling's, and one account's roster must never judge another's book.
 type LocalStateLoader interface {
 	Load(ctx context.Context, provider Provider, pspID uuid.UUID) (*LocalState, error)
 	PaymentsByTransactionIDs(ctx context.Context, provider Provider, pspID uuid.UUID, transactionIDs []string) ([]LocalPayment, error)
@@ -251,9 +246,8 @@ func (l *PGLocalStateLoader) Load(ctx context.Context, provider Provider, pspID 
 			Currency:  row.Currency,
 			Archived:  row.Archived,
 		}
-		// Only an recurring price has a recurring cadence to match a remote
-		// provider plan against (#622). The window is in hours; the provider
-		// cadence is whole days (hours/24).
+		// Only a recurring price has a cadence to match a remote plan against.
+		// The window is in hours; the provider cadence is whole days.
 		if row.BillingIntervalHours != nil {
 			days := int(*row.BillingIntervalHours) / 24
 			p.BillingCycleDays = &days
@@ -333,8 +327,7 @@ func (l *PGLocalStateLoader) PaymentsByTransactionIDs(ctx context.Context, provi
 }
 
 // SolanaSubscriptionSourceFromDB adapts billing.solana_subscriptions into the
-// SolanaFetcher's subscription source (one-line phase-2 wiring promised by
-// the phase-1 design).
+// SolanaFetcher's subscription source.
 func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 	return func(ctx context.Context) ([]SolanaSubscriptionRef, error) {
 		scopeMerchantID, scopeErr := merchant.Require(ctx)
@@ -357,10 +350,9 @@ func SolanaSubscriptionSourceFromDB(d *db.DB) SolanaSubscriptionSource {
 	}
 }
 
-// SolanaPlanSourceFromDB lists OUR plan PDAs for the #714 enumeration: the
-// union of locally-known subscription rows and the catalog's
-// psp_links["solana"].plan_pda provider links (so a fresh DB can still enumerate
-// from catalog alone).
+// SolanaPlanSourceFromDB lists our plan PDAs for enumeration: locally-known
+// subscription rows plus the catalog's psp_links["solana"].plan_pda links, so
+// a fresh DB can still enumerate from the catalog alone.
 func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 	return func(ctx context.Context) ([]string, error) {
 		set := map[string]struct{}{}
@@ -403,13 +395,11 @@ func SolanaPlanSourceFromDB(d *db.DB) SolanaPlanSource {
 	}
 }
 
-// SolanaDueSubscriptionSourceFromDB adapts the existing ListDueSolanaSubscriptions
-// query into the #720 due-window source: subscription_pda values whose
-// next_pull_at is at/before `before`. That query already filters
-// server-side (status='active' AND next_pull_at<=$1), so this read is
-// due-proportional, not O(all subs) — unlike SolanaSubscriptionSourceFromDB
-// above, which stays exhaustive on purpose (narrowed probes and the #714
-// discovery de-dup set both need every locally-known ref).
+// SolanaDueSubscriptionSourceFromDB is the due-window source: subscription_pda
+// values whose next_pull_at is at or before `before`, filtered server-side so
+// the read is due-proportional. SolanaSubscriptionSourceFromDB stays
+// exhaustive on purpose: narrowed probes and the discovery de-dup set need
+// every locally-known ref.
 func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 	return func(ctx context.Context, before time.Time) (map[string]struct{}, error) {
 		scopeMerchantID, scopeErr := merchant.Require(ctx)
@@ -431,9 +421,9 @@ func SolanaDueSubscriptionSourceFromDB(d *db.DB) SolanaDueSubscriptionSource {
 	}
 }
 
-// SolanaLocalRecordResolverFromDB resolves #713 memo local-ids against the two
-// record kinds the stamp names: checkout attempts (one-off local-id = session
-// id) and rail intents (pull local-id = #674 intent id). (nil, nil) = no local
+// SolanaLocalRecordResolverFromDB resolves memo local-ids against the two
+// record kinds the stamp names: checkout attempts (one-off local-id = attempt
+// id) and rail intents (pull local-id = intent id). (nil, nil) = no local
 // record; backend errors surface so the run retries instead of parking noise.
 func SolanaLocalRecordResolverFromDB(d *db.DB) SolanaLocalRecordResolver {
 	return func(ctx context.Context, localID uuid.UUID) (*SolanaLocalRecord, error) {
@@ -497,13 +487,11 @@ func solanaStateStr(state map[string]any, key string) string {
 }
 
 func solanaStateU64(state map[string]any, key string) uint64 {
-	// or#863: NO float64 case. The canonical JSONB shape for a base-unit amount
-	// is a decimal string (session_service writes strconv.FormatUint), and a
-	// token amount that arrived as a JSON number has already been through a
-	// float64 — it cannot be trusted to equal the on-chain transfer it is about
-	// to be compared against. An unreadable amount yields 0, which parks the
-	// settlement ("carries no bound solana token quote to verify against")
-	// rather than approving a transfer against a rounded expectation.
+	// No float64 case: a base-unit amount is stored as a decimal string, and
+	// one that arrived as a JSON number has been through a float64 and cannot
+	// be trusted to equal the on-chain transfer. An unreadable amount yields 0,
+	// which parks the settlement rather than approving against a rounded
+	// expectation.
 	switch v := state[key].(type) {
 	case string:
 		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {

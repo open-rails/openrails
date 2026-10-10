@@ -10,10 +10,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses — read-only
-// by construction; none of the mutation paths are reachable from here.
-// Subscriptions and the vault roster read the v5 JSON API; the transaction
-// search stays on query.php (#663: v5 payments has no list/search).
+// nmiQueryClient is the slice of *nmi.NMIClient the fetcher uses, read-only by
+// construction. Subscriptions and the vault read the v5 JSON API; transaction
+// search stays on query.php (v5 payments has no list/search).
 type nmiQueryClient interface {
 	ListSubscriptionsPage(ctx context.Context, cursor string, perPage int) (nmi.SubscriptionPage, error)
 	GetSubscription(ctx context.Context, subscriptionID string) (nmi.V5Subscription, bool, error)
@@ -22,26 +21,20 @@ type nmiQueryClient interface {
 	SearchTransactions(ctx context.Context, filter nmi.QueryFilter) (string, error)
 }
 
-// NMIFetcher pulls NMI state:
-// GET /v5/subscriptions (all live recurring subscriptions),
-// query.php report_type=transaction (date-ranged search, declines included),
-// GET /v5/customers (stored payment methods).
+// NMIFetcher pulls NMI state: GET /v5/subscriptions (live recurring
+// schedules), query.php report_type=transaction (date-ranged, declines
+// included) and GET /v5/customers (stored payment methods).
 //
-// Provider quirks (verified against the live sandbox 2026-06-11):
-//   - NMI deletes canceled subscriptions entirely (v5 GET answers 404), so
-//     every listed subscription is live. Status is therefore inferred:
-//     next_billing_date today-or-later => active; in the past => past_due
-//     (NMI stopped advancing the charge date); unparseable => unknown.
-//     RawStatus is left empty to record that NMI declared no status.
-//   - The v5 subscription resource carries no email/name; identity fields are
-//     joined from the customer roster via customer_vault_id (the vault pull
-//     runs first for exactly this reason).
-//   - Transactions do not carry the NMI subscription_id. Recurring rebills
-//     inherit the subscription's order_id/ponumber (which OpenRails sets to a
-//     local identifier at signup), preserved in Raw for phase-2 correlation.
-//   - Declines surface as action_type=sale with success=0 (and condition
-//     "failed"); response_text carries the decline reason.
-//   - Chargebacks are NOT exposed by either read API => Chargebacks=false.
+// Quirks:
+//   - NMI deletes canceled subscriptions (v5 GET answers 404), so every listed
+//     one is live; status is inferred from next_billing_date (today or later
+//     active, past past_due, unparseable unknown) and RawStatus stays empty.
+//   - v5 subscriptions carry no email/name: identity joins from the vault by
+//     customer_vault_id, so the vault pull runs first.
+//   - Transactions carry no subscription_id; rebills inherit the schedule's
+//     order_id/ponumber (a local identifier set at signup), kept in Raw.
+//   - Declines are action_type=sale with success=0; response_text is the reason.
+//   - Neither API exposes chargebacks (Chargebacks=false).
 type NMIFetcher struct {
 	Client nmiQueryClient
 }
@@ -88,13 +81,11 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 		return nil, fmt.Errorf("nmi subscription roster: %w", err)
 	}
 	snap.Subscriptions = subs
-	// #842: "exhaustive" is an ABSENCE PROOF — it authorizes cancelling every
-	// local subscription missing from this list. A successful-but-empty
-	// GET /v5/subscriptions is indistinguishable from a complete roster of an
-	// empty gateway: a misdeclared account_id, a credential rotated onto a
-	// sibling sub-account, or an incident returning an empty first page with
-	// has_more=false all look exactly like "this merchant has no subscribers".
-	// So a roster only proves absence when it actually returned rows.
+	// "Exhaustive" is an absence proof: it authorizes cancelling every local
+	// subscription missing from this list. An empty GET /v5/subscriptions is
+	// indistinguishable from an empty gateway (misdeclared account_id,
+	// credential rotated onto a sibling account, incident), so a roster proves
+	// absence only when it returned rows.
 	if params.SubscriptionID == "" && len(subs) > 0 {
 		snap.Coverage.SubscriptionsExhaustive = true
 	}
@@ -111,8 +102,6 @@ func (f *NMIFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteSnap
 
 	return snap, nil
 }
-
-// --- GET /v5/subscriptions ---
 
 // nmiCustomerIdentity is the email/name joined onto subscriptions by vault id.
 type nmiCustomerIdentity struct {
@@ -217,8 +206,6 @@ func parseNMIV5Date(raw string) (time.Time, error) {
 	}
 	return time.Time{}, fmt.Errorf("unrecognized v5 date %q", raw)
 }
-
-// --- report_type=transaction ---
 
 // fetchTransactions runs a date-ranged transaction search. No condition or
 // action_type filter is sent, so NMI returns transactions in EVERY condition
@@ -371,8 +358,6 @@ func normalizeNMIAction(actionType string) (TransactionType, bool) {
 		return "", false
 	}
 }
-
-// --- GET /v5/customers ---
 
 func (f *NMIFetcher) fetchPaymentMethods(ctx context.Context, params FetchParams) ([]RemotePaymentMethod, map[string]nmiCustomerIdentity, error) {
 	if err := ctx.Err(); err != nil {

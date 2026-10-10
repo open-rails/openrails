@@ -1,14 +1,6 @@
-// Package destructive is the operator control plane for OpenRails' destructive
-// convergence: mass local cancellation, entitlement revocation, and the
-// irreversible provider-side deletes they queue.
-//
-// #836: before this, an operator watching a mass cancellation at 3am could not
-// stop it without a deploy. `provider_write_mode: readonly` is config/env only
-// — no SIGHUP, no config watch — River's QueuePause is unwired, and the #679
-// volume breaker holds provider deletes but never the LOCAL cancel + revoke
-// that actually takes a customer's access away. The Gate is the missing brake:
-// a DB-backed flag, read at the top of every destructive plane, flippable with
-// one UPDATE on any node, default SAFE.
+// Package destructive is the brake on destructive convergence (mass local
+// cancellation, entitlement revocation, the provider deletes they queue): a
+// DB-backed switch read at the top of every destructive plane, default safe.
 package destructive
 
 import (
@@ -29,9 +21,9 @@ type Verdict struct {
 	// Allowed: destructive actions (local cancel + revoke, destructive provider
 	// intents) may execute for this merchant.
 	Allowed bool
-	// EnforceArmed (#835): this merchant's provider pull may run in ENFORCE
-	// mode. False means the pull runs advisory — findings only, zero mutations
-	// — until an operator reviews the first pull and arms the merchant.
+	// EnforceArmed: this merchant's provider pull may run in enforce mode.
+	// False means advisory (findings only, no mutations) until an operator
+	// reviews the first pull and arms the merchant.
 	EnforceArmed bool
 	// Reason explains a false Allowed / EnforceArmed, for the operator log.
 	Reason string
@@ -95,9 +87,8 @@ func (g *Gate) CheckMerchant(ctx context.Context, merchantID uuid.UUID) Verdict 
 	return v
 }
 
-// RecordFirstPull stamps that a merchant has been surveyed by a completed pull
-// (#835), so an operator can see its findings are ready to review. Best-effort:
-// never fails a pass. ctx must be merchant-scoped.
+// RecordFirstPull stamps that a completed pull surveyed a merchant, so its
+// findings are ready to review. Best-effort. ctx must be merchant-scoped.
 func (g *Gate) RecordFirstPull(ctx context.Context, merchantID uuid.UUID, now time.Time) error {
 	if g == nil || g.DB == nil {
 		return nil
@@ -107,14 +98,10 @@ func (g *Gate) RecordFirstPull(ctx context.Context, merchantID uuid.UUID, now ti
 	})
 }
 
-// EvidenceFloor is the #835 staleness floor for a merchant: the instant this
-// deployment first completed a pull for it. A destructive decision may not rest
-// on evidence older than this — nothing older was ever corroborated by an
-// observation we made.
-//
-// Zero on a nil gate, an unreadable policy, or a merchant that has never been
-// pulled. Zero is NOT permissive: the decider then trusts only the evidence the
-// current pass observed. ctx must be merchant-scoped.
+// EvidenceFloor is the instant this deployment first completed a pull for a
+// merchant: a destructive decision may not rest on evidence older than this.
+// Zero (nil gate, unreadable policy, never pulled) is not permissive: the
+// decider then trusts only this pass's evidence. ctx must be merchant-scoped.
 func (g *Gate) EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time {
 	if g == nil || g.DB == nil {
 		return time.Time{}
@@ -126,8 +113,7 @@ func (g *Gate) EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Tim
 	return row.FirstPullCompletedAt.UTC()
 }
 
-// Arm is the #835 operator flip: bless a merchant for enforcing pulls. ctx must
-// be merchant-scoped.
+// Arm blesses a merchant for enforcing pulls. ctx must be merchant-scoped.
 func (g *Gate) Arm(ctx context.Context, merchantID uuid.UUID, now time.Time, by, reason string) error {
 	if g == nil || g.DB == nil {
 		return fmt.Errorf("destructive gate not wired")

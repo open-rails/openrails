@@ -46,37 +46,30 @@ type SolanaSubscriptionRef struct {
 }
 
 // SolanaSubscriptionSource lists the locally-known solana subscriptions whose
-// on-chain accounts the fetcher should read. A function type so phase-2
-// wiring is a one-line closure over the repo.
+// on-chain accounts the fetcher should read.
 type SolanaSubscriptionSource func(ctx context.Context) ([]SolanaSubscriptionRef, error)
 
-// SolanaPlanSource lists OUR plan PDAs (locally-known subscriptions plus the
-// catalog's rails["solana"].plan_pda links) for the #714 permissionless-
-// subscriber enumeration. Nil disables that scan.
+// SolanaPlanSource lists our plan PDAs (locally-known subscriptions plus the
+// catalog's solana plan_pda links) for the permissionless-subscriber
+// enumeration. Nil disables that scan.
 type SolanaPlanSource func(ctx context.Context) ([]string, error)
 
-// SolanaDueSubscriptionSource returns the set of locally-known subscription
-// PDAs whose local next_pull_at is at/before `before` (#720 due-window). The
-// caller is expected to answer this from billing.solana_subscriptions
-// server-side (see ListDueSolanaSubscriptions) so the read itself stays
-// due-proportional rather than O(all subs). Deliberately separate from
-// Source: Source stays exhaustive (narrowed per-subscription/customer
-// probes and the #714 discovery de-dup "known" set both need every
-// locally-known ref regardless of due state), only the routine bulk fetch
-// consults Due. Nil disables due-window filtering entirely: every
-// locally-known ref is read every tick (pre-#720 behavior; the safe default
-// for callers/tests with no local period tracking to filter on).
+// SolanaDueSubscriptionSource returns the locally-known subscription PDAs
+// whose next_pull_at is at or before `before`, answered server-side so the
+// read stays due-proportional. Only the routine bulk fetch consults it; Source
+// stays exhaustive because narrowed probes and the discovery de-dup set need
+// every known ref. Nil disables due-window filtering (every ref every tick).
 type SolanaDueSubscriptionSource func(ctx context.Context, before time.Time) (map[string]struct{}, error)
 
-// SolanaLocalRecord kinds — the two record types #713 stamps a memo for.
+// SolanaLocalRecord kinds: the two record types a memo is stamped for.
 const (
 	SolanaLocalKindCheckoutAttempt = "checkout_attempt"
 	SolanaLocalKindPullIntent      = "pull_intent"
 )
 
-// SolanaLocalRecord is what a #713 memo local-id resolves to locally. The
-// expected* fields are the checkout attempt's bound quote — what the wallet
-// scan verifies the on-chain transfer against (mismatch parks the finding).
+// SolanaLocalRecord is what a memo local-id resolves to locally. The
+// expected* fields are the checkout attempt's bound quote, which the wallet
+// scan verifies the on-chain transfer against (a mismatch parks the finding).
 type SolanaLocalRecord struct {
 	Kind string // SolanaLocalKindCheckoutAttempt | SolanaLocalKindPullIntent
 	Rail string
@@ -106,86 +99,65 @@ type solanaRPC interface {
 	GetProgramAccounts(ctx context.Context, program solanago.PublicKey, filters []solanaint.ProgramAccountFilter) ([]solanaint.ProgramAccount, error)
 }
 
-// SolanaFetcher reports the on-chain state of the merchant's Solana rail for
-// the cross-provider diff engine. Capabilities: subscriptions + transactions
-// only (no refunds, chargebacks, or vault on-chain). Three lanes:
+// SolanaFetcher reports the on-chain state of the merchant's Solana rail:
+// subscriptions and transactions only (no refunds, chargebacks or vault).
+// Three lanes:
 //
-//  1. Locally-known subscription PDAs (Source): account decode + per-PDA
-//     signature classification (#715). #720: the routine bulk fetch reads
-//     only the DUE-WINDOW cohort (Due, near/at/past local next_pull_at) —
-//     a cancel/resume has no billing effect before the period boundary, so a
-//     read outside that window learns nothing actionable. A narrowed
-//     per-subscription/customer probe always reads, bypassing Due.
-//  2. Per-plan enumeration (Plans, #714): `subscribe` is permissionless, so
-//     on-chain subscriptions can exist that no checkout created. Subscription
-//     accounts under OUR plans are enumerated via getProgramAccounts;
-//     discovered-not-local ones are marked in Raw and must never auto-create
-//     local billing state (PS-1 materialization is blocked for them). #720:
-//     this scan's cost is O(subscribers under the plan), so it demotes to a
-//     slow cadence (~24h/plan, planDiscoveryDue) instead of every tick.
-//  3. Merchant-wallet scan (#714): the declared wallet's signature history,
-//     windowed by Since/Until blockTime. ONLY transactions carrying a #713
-//     `openrails:` memo are considered — a transfer into the wallet is not
-//     evidence of a purchase, so unstamped/foreign-memo traffic produces zero
-//     findings by design. The memo is a DISCOVERY HINT, never money truth:
-//     money comes only from the transfer itself (pull instruction data, or
-//     SPL/SOL balance delta into the wallet); kind comes from tx shape (plain
-//     transfer = one-off, transfer_subscription = pull); the local-id must
-//     resolve consistently and uniquely (Resolve) — ANY mismatch or duplicate
-//     parks the finding for operator triage (verify-not-decline).
+//  1. Locally-known subscription PDAs (Source): account decode plus per-PDA
+//     signature classification. The routine bulk fetch reads only the
+//     due-window cohort (Due): a cancel/resume has no billing effect before
+//     the period boundary. A narrowed probe always reads.
+//  2. Per-plan enumeration (Plans): `subscribe` is permissionless, so
+//     subscriptions under our plans are enumerated via getProgramAccounts;
+//     discovered-not-local ones are marked in Raw and never auto-create
+//     billing state. Its cost scales with subscribers, so it runs on a slow
+//     per-plan cadence (planDiscoveryDue).
+//  3. Merchant-wallet scan: the wallet's signature history within
+//     Since/Until. Only transactions carrying an `openrails:` memo count, and
+//     the memo is a discovery hint, never money truth: money comes from the
+//     transfer (pull instruction data or the balance delta), kind from tx
+//     shape, and the local-id must resolve consistently and uniquely. Any
+//     mismatch or duplicate parks the finding (verify-not-decline).
 //
-// Normalization notes (#715):
-//   - Subscription status comes from decoding the SubscriptionDelegation
-//     account (expires_at_ts == 0 => active; a future expires_at_ts is the
-//     on-chain cancel-at-period-end, normalized active like Stripe's
-//     cancel_at_period_end; a past one => canceled). PDA absence => canceled
-//     (revoke closes the account). If the account bytes don't decode, status
-//     falls back to presence inference with a note in Raw; the raw bytes are
-//     preserved base64 either way.
-//   - Transactions are classified by the subscriptions-program instruction
-//     discriminator: pulls (transfer_subscription) => sale/decline with the
-//     real amount from the instruction data; subscribe/cancel/resume/revoke
-//     => lifecycle types. A tx that cannot be fetched or parsed falls back to
-//     success=>sale / failure=>decline with a note in Raw — never an error
-//     that kills the window (the wallet scan skips such txs instead, since
-//     without the tx there is no memo to recognize).
-//   - Amounts are mint base units; for mints the repo token registry declares
-//     as USD stablecoins with 6 decimals, base units ARE micro-dollars and are
-//     normalized to AmountCents (integer cents, matching the other fetchers)
-//     when exactly cent-representable. Everything else stays unnormalized
-//     (AmountCents 0) with the base units in Raw — never rounded.
-//   - Reads here are bulk point-in-time listings, not post-tx reads, so plain
-//     GetAccountData / getProgramAccounts (no *AtSlot/ReadUntilConsistent
-//     gating) is correct.
+// Normalization:
+//   - Status comes from the decoded SubscriptionDelegation account
+//     (expires_at_ts 0 => active; future => cancel-at-period-end, normalized
+//     active like Stripe; past => canceled). A missing PDA is canceled (revoke
+//     closes it). Undecodable bytes fall back to presence inference; the raw
+//     bytes stay in Raw either way.
+//   - Transactions classify by instruction discriminator: pulls => sale or
+//     decline with the instruction's amount; subscribe/cancel/resume/revoke =>
+//     lifecycle types. An unfetchable tx falls back to success=>sale /
+//     failure=>decline with a note, never an error that kills the window.
+//   - Amounts are mint base units, normalized to AmountCents only for
+//     registry USD stablecoins at exactly cent-representable values;
+//     otherwise AmountCents is 0 and base units stay in Raw. Never rounded.
+//   - These are bulk point-in-time reads, not post-tx reads, so plain reads
+//     (no *AtSlot / ReadUntilConsistent) are correct.
 type SolanaFetcher struct {
 	RPC    solanaRPC
 	Source SolanaSubscriptionSource
-	// Plans feeds the per-plan subscription enumeration (#714). Nil disables it.
-	// #720: this lane additionally demotes to a slow cadence — see
-	// planDiscoveryDue — even when non-nil.
+	// Plans feeds the per-plan subscription enumeration, which runs on a slow
+	// cadence (planDiscoveryDue). Nil disables it.
 	Plans SolanaPlanSource
-	// Due feeds the #720 due-window filter for the routine bulk fetch (see
-	// SolanaDueSubscriptionSource). Nil reads every locally-known ref every
-	// tick (pre-#720 default; narrowed single-subscription/customer probes
-	// always bypass it regardless).
+	// Due feeds the due-window filter for the routine bulk fetch. Nil reads
+	// every locally-known ref every tick; narrowed probes always bypass it.
 	Due SolanaDueSubscriptionSource
-	// DueWindowLead extends the due window this far BEFORE a subscription's
-	// local next_pull_at, so it becomes visible to reconcile in the SAME
-	// cycle it could next be pulled rather than the one after (default 4h —
-	// the routine ProviderRefresh reconcile cadence, river_register.go).
-	// Past-due refs (mid-dunning retries) stay in-window on every subsequent
-	// tick regardless, since Due already filters on next_pull_at<=before.
+	// DueWindowLead extends the due window this far before a subscription's
+	// local next_pull_at, so reconcile sees it in the cycle it could next be
+	// pulled (default 4h, above the provider refresh interval). Past-due refs
+	// stay in-window every tick.
 	DueWindowLead time.Duration
-	// Resolve resolves #713 memo local-ids against local records for the
-	// wallet scan. Nil parks every memo-recognized discovery (unverifiable).
+	// Resolve resolves memo local-ids against local records for the wallet
+	// scan. Nil parks every memo-recognized discovery (unverifiable).
 	Resolve SolanaLocalRecordResolver
-	// MerchantWallet is the declared psps.account_id (the
-	// receiving wallet) the #714 scan walks. FetchParams.AccountID overrides.
+	// MerchantWallet is the PSP's account_id (the receiving wallet) the
+	// wallet scan walks. FetchParams.AccountID overrides.
 	MerchantWallet string
 	// SignatureLimit bounds the per-subscription signature listing (default 50).
 	SignatureLimit int
 	// mintDecimalsCache memoizes on-chain mint decimals for this fetcher's
-	// lifetime (#817). Mint decimals are immutable, so caching cannot go stale.
+	// lifetime; mint decimals are immutable.
 	mintDecimalsCache map[string]int
 	// WalletScanPageSize / WalletScanCap bound the wallet signature walk
 	// (defaults 200 / 1000 signatures per window).
@@ -266,16 +238,13 @@ func (f *SolanaFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 
 	// Plan accounts are shared across subscribers; decode each once.
 	planCache := map[string]*subscriptions.PlanAccount{}
-	// #720: a narrowed fetch (operator asked for this one subscription/
-	// customer specifically) always reads, bypassing the due-window filter.
+	// A narrowed fetch (one subscription/customer) always reads, bypassing
+	// the due-window filter.
 	narrowed := params.SubscriptionID != "" || params.CustomerID != ""
 
-	// #720 due-window: bound the routine bulk fetch's chain reads to subs
-	// actually near/at/past their local next_pull_at — a cancel/resume has no
-	// billing effect before the period boundary, so reads outside this window
-	// learn nothing actionable. dueSet == nil means "no filtering" (Due not
-	// wired, or a narrowed probe): every ref is read, matching pre-#720
-	// behavior.
+	// Due window: bound the routine bulk fetch's chain reads to subs near, at
+	// or past their local next_pull_at. dueSet == nil means no filtering (Due
+	// not wired, or a narrowed probe).
 	var dueSet map[string]struct{}
 	if f.Due != nil && !narrowed {
 		dueSet, err = f.Due(ctx, now.Add(f.dueWindowLead()))
@@ -287,9 +256,9 @@ func (f *SolanaFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 	known := make(map[string]struct{}, len(refs))
 	emittedSigs := map[string]struct{}{}
 	for _, ref := range refs {
-		// Marked known BEFORE the due-window skip: a ref not read this tick is
-		// still locally-known, so the #714 discovery lane (below) must not
-		// re-surface it as discovered_not_local.
+		// Marked known before the due-window skip: a ref not read this tick is
+		// still locally-known, so the discovery lane must not re-surface it as
+		// discovered_not_local.
 		known[ref.SubscriptionPDA] = struct{}{}
 		if params.SubscriptionID != "" && ref.SubscriptionPDA != params.SubscriptionID {
 			continue
@@ -319,8 +288,8 @@ func (f *SolanaFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 		}
 	}
 
-	// Discovery scans (#714) are bulk lanes; a narrowed fetch (per-subscription
-	// or per-customer probe) skips them.
+	// Discovery scans are bulk lanes; a narrowed fetch (per-subscription or
+	// per-customer probe) skips them.
 	if !narrowed {
 		if f.Plans != nil {
 			discovered, err := f.enumeratePlanSubscriptions(ctx, known, planCache, now)
@@ -507,24 +476,14 @@ func (f *SolanaFetcher) planFor(ctx context.Context, planPDA string, cache map[s
 }
 
 // solanaDiscoveryCadence bounds how often the permissionless-subscriber
-// enumeration (getProgramAccounts per plan, #714 scan 2) runs for one plan.
-// Its response scales with subscriber count, so per the #720 scale law
-// it can never be a per-tick lane — it demotes to roughly once per this
-// interval instead.
+// enumeration (getProgramAccounts per plan) runs for one plan. Its response
+// scales with subscriber count, so it is never a per-tick lane.
 const solanaDiscoveryCadence = 24 * time.Hour
 
-// solanaDiscoverySlotWidth buckets solanaDiscoveryCadence into windows sized
-// to the routine reconcile tick (river_register.go's 4h ProviderRefresh
-// period), so each plan's turn lands on ~one tick per day.
-//
-// Why a deterministic hash-of-plan-id slot instead of a stored per-plan
-// watermark: MerchantFetcherBuilder rebuilds a fresh SolanaFetcher on every
-// tick (jobs_provider_refresh.go), so in-struct state would not survive
-// between calls, and this change's surface deliberately excludes
-// internal/db/gen (a shared, actively-churned generated package — see #720
-// notes), so a new watermark column/query is out of scope here. A hash slot
-// needs no persisted state at all, and spreads merchants/plans across the
-// day instead of one synchronized getProgramAccounts spike.
+// solanaDiscoverySlotWidth buckets solanaDiscoveryCadence into per-plan
+// windows, so each plan's turn comes once a day. A hash-of-plan-id slot needs
+// no stored state (MerchantFetcherBuilder builds a fresh fetcher every tick)
+// and spreads plans across the day instead of one getProgramAccounts spike.
 const solanaDiscoverySlotWidth = 4 * time.Hour
 
 // planDiscoveryDue reports whether planPDA's slow-cadence discovery pass
@@ -540,13 +499,11 @@ func planDiscoveryDue(planPDA string, now time.Time) bool {
 	return slot%slots == int64(h.Sum32()%uint32(slots))
 }
 
-// enumeratePlanSubscriptions (#714 scan 2): getProgramAccounts every
-// subscription account under OUR plans and normalize the ones the local
-// mirror does not know, marked discovered_not_local in Raw. Discovered
-// subscriptions surface as PS-1 findings for operator triage — never
-// auto-materialized (creating billing state from chain data alone is an
-// operator decision; enforced in makePS1). #720: demoted to a slow cadence —
-// see planDiscoveryDue — since the response scales with subscriber count.
+// enumeratePlanSubscriptions lists (getProgramAccounts) every subscription
+// account under our plans and normalizes the ones the local mirror does not
+// know, marked discovered_not_local in Raw. They surface as PS-1 findings for
+// operator triage and are never auto-materialized (makePS1 blocks them). Runs
+// on a slow cadence (planDiscoveryDue).
 func (f *SolanaFetcher) enumeratePlanSubscriptions(ctx context.Context, known map[string]struct{}, planCache map[string]*subscriptions.PlanAccount, now time.Time) ([]RemoteSubscription, error) {
 	plans, err := f.Plans(ctx)
 	if err != nil {
@@ -570,7 +527,7 @@ func (f *SolanaFetcher) enumeratePlanSubscriptions(ctx context.Context, known ma
 	var out []RemoteSubscription
 	for _, planPDA := range planPDAs {
 		if !planDiscoveryDue(planPDA, now) {
-			continue // #720: full enumeration is a slow lane; not this plan's turn this tick
+			continue // full enumeration is a slow lane; not this plan's turn this tick
 		}
 		pk, err := solanago.PublicKeyFromBase58(planPDA)
 		if err != nil {
@@ -704,7 +661,7 @@ func (f *SolanaFetcher) fetchSignatures(ctx context.Context, ref SolanaSubscript
 		default:
 			// A recognized program instruction that is not a subscription
 			// event (create/update plan, init authority) should not appear on
-			// a subscription PDA; keep the legacy mapping with the kind noted.
+			// a subscription PDA; map it to a sale with the kind noted.
 			txn.Type = TransactionTypeSale
 			if sig.HasError {
 				txn.Type = TransactionTypeDecline
@@ -796,8 +753,6 @@ func classifySolanaTx(tx *solanago.Transaction) (solanaTxClass, bool) {
 	return class, class.Kind != ""
 }
 
-// --- #714 merchant-wallet scan ---
-
 // wrappedSOLMint is the canonical wrapped-SOL mint; checkout attempts bind
 // native-SOL quotes as "" or this mint.
 const wrappedSOLMint = "So11111111111111111111111111111111111111112"
@@ -849,10 +804,10 @@ type walletScanCandidate struct {
 	failed    bool
 }
 
-// scanMerchantWallet (#714 scan 1): walk the declared merchant wallet's
-// signature history inside the Since/Until window and normalize ONLY the
-// transactions carrying a recognized #713 memo. Everything else — random
-// deposits, foreign memos — produces zero findings by design.
+// scanMerchantWallet walks the declared merchant wallet's signature history
+// inside the Since/Until window and normalizes only the transactions carrying
+// a recognized memo. Random deposits and foreign memos produce zero findings
+// by design.
 func (f *SolanaFetcher) scanMerchantWallet(ctx context.Context, params FetchParams, emitted map[string]struct{}) ([]RemoteTransaction, error) {
 	wallet := strings.TrimSpace(params.AccountID)
 	if wallet == "" {
@@ -1009,7 +964,7 @@ func (f *SolanaFetcher) buildWalletCandidate(ctx context.Context, sig solanaint.
 	}
 	switch {
 	case hasClass && class.Kind == subscriptions.KindTransferSubscription:
-		// Pull: money truth is the instruction's transferData (#715).
+		// Pull: money truth is the instruction's transferData.
 		c.kind = solanaDiscoveryKindPull
 		c.subPDA = class.SubscriptionPDA
 		txn.Type = TransactionTypeSale
@@ -1093,13 +1048,12 @@ func (f *SolanaFetcher) buildWalletCandidate(ctx context.Context, sig solanaint.
 	return c, drop, nil
 }
 
-// verifyWalletDiscovery applies the #713/#714 trust model to one candidate:
-// the memo is a discovery hint, never money truth — the local-id must resolve
-// consistently and uniquely against local records when they exist, and the
-// resolved record's bound expectations (recipient wallet, mint, base units)
-// must agree with the on-chain transfer. ANY disagreement parks the finding
-// for operator triage. drop=true only for a valueless memo claiming nothing
-// local (costless forgery must produce zero noise).
+// verifyWalletDiscovery applies the memo trust model to one candidate: the
+// memo is a discovery hint, never money truth. The local-id must resolve
+// consistently and uniquely, and the resolved record's bound expectations
+// (recipient wallet, mint, base units) must agree with the on-chain transfer;
+// any disagreement parks the finding. drop=true only for a valueless memo
+// claiming nothing local (a costless forgery must produce zero noise).
 func (f *SolanaFetcher) verifyWalletDiscovery(ctx context.Context, c *walletScanCandidate, wallet string) (bool, error) {
 	d := &solanaDiscovery{Verdict: "clean", Kind: c.kind, MemoLocalID: c.localID.String(), LocalKind: "none"}
 	c.disc = d
@@ -1320,9 +1274,8 @@ func distinctUUIDs(ids []uuid.UUID) []uuid.UUID {
 	return out
 }
 
-// mintDecimals reads a mint's ON-CHAIN base-unit precision (#817), memoized for
-// the fetcher's lifetime. Safe to cache: `decimals` is written once by
-// InitializeMint and is immutable thereafter.
+// mintDecimals reads a mint's on-chain base-unit precision, memoized for the
+// fetcher's lifetime: `decimals` is written once by InitializeMint.
 func (f *SolanaFetcher) mintDecimals(ctx context.Context, mint string) (int, bool) {
 	mint = strings.TrimSpace(mint)
 	if mint == "" || f.RPC == nil {
@@ -1356,10 +1309,9 @@ func isUSDStablecoinMint(mint string) bool {
 }
 
 // solanaFiatCents converts mint base units to integer cents (the fetchers'
-// shared AmountCents unit) when the mint is a registry USD stablecoin AND the
-// value is exactly cent-representable at the mint's ON-CHAIN decimals (#817 —
-// this used to assume 6). Sub-cent precision is never rounded (money doctrine)
-// — the caller keeps base units in Raw instead.
+// AmountCents unit) when the mint is a registry USD stablecoin and the value
+// is exactly cent-representable at the mint's on-chain decimals. Sub-cent
+// precision is never rounded; the caller keeps base units in Raw instead.
 func solanaFiatCents(mint string, decimals int, baseUnits uint64) (int64, bool) {
 	if !isUSDStablecoinMint(mint) || decimals < 2 || decimals > config.MaxTokenDecimals {
 		return 0, false

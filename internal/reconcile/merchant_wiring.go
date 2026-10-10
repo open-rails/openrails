@@ -19,18 +19,12 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// #699/#788: the pull plane (provider refresh, unknown-cohort resolution,
-// per-sub probes, operator pulls) arms PER MERCHANT from the armed rail state
-// (psps rows + the merchant secret store) — the ONE Layer-C
-// resolution seam. There is no boot-config plane anymore: a rail with no
-// declared account row is simply not armed. Missing or incomplete secrets
-// fail LOUD: the rail's fetcher/prober is absent and ONE WARN names the
-// merchant, rail and missing secret — never a silent empty map, never a
-// default-allow.
-//
-// Secrets are resolved per merchant, at use time, inside the merchant scope.
-// Nothing is cached process-wide (#653: never a plaintext all-merchants tree);
-// clients are cheap per-merchant structs rebuilt on every pass.
+// The pull plane (provider refresh, unknown-cohort resolution, per-sub probes,
+// operator pulls) arms per merchant from psps rows and the merchant secret
+// store; a rail with no declared account is not armed. Missing secrets fail
+// loud: the rail's fetcher/prober is absent and one WARN names the merchant,
+// rail and secret, never a default-allow. Secrets resolve at use time inside
+// the merchant scope; nothing is cached process-wide.
 
 // MerchantPullClients is one merchant's armed pull plane.
 type MerchantPullClients struct {
@@ -39,11 +33,10 @@ type MerchantPullClients struct {
 	// CCBillDataLink feeds the CCBill DataLink bulk lane (the ACTIVEMEMBERS
 	// roster reconcile) with the same per-merchant client the fetcher uses.
 	CCBillDataLink *ccbill.DataLinkClient
-	// Coverage (#841) records, per armed rail, how many PSPs the merchant
-	// declares ACTIVE on it versus how many this pass actually read. A pull
-	// arms from exactly ONE PSP, so a merchant running two NMI PSPs has half
-	// its book invisible to the roster — and "absent from an exhaustive roster"
-	// would cancel every subscription of the PSP that was not read.
+	// Coverage records, per armed rail, how many PSPs the merchant declares
+	// active versus how many this pass read. A pull arms from one PSP, so with
+	// two NMI PSPs an "exhaustive" roster would cancel every subscription of
+	// the unread one.
 	Coverage map[Provider]PSPCoverage
 }
 
@@ -79,7 +72,7 @@ type MerchantFetcherBuilder struct {
 	DB            *db.DB
 
 	// AccountIDs optionally pins a rail to one declared account_id (operator
-	// pulls; may target archived accounts for drain, #655).
+	// pulls; may target archived accounts for drain).
 	AccountIDs map[Provider]string
 
 	Endpoints ProviderEndpoints
@@ -112,15 +105,14 @@ func (b MerchantFetcherBuilder) readOnly() bool {
 	return b.Config != nil && config.IsProviderReadOnly(b.Config)
 }
 
-// environment is the deployment's PSP environment: test under
-// test_mode, live otherwise (#681) — the test_mode credential filter.
+// environment is the deployment's PSP environment, the test_mode credential
+// filter: test under test_mode, live otherwise.
 func (b MerchantFetcherBuilder) environment() string {
 	return config.ExpectedProviderEnvironment(b.testMode())
 }
 
-// resolveScopeCoverage is resolveScope plus the #841 coverage record: how many
-// PSPs the merchant declares active on the rail versus the one this pass arms
-// from.
+// resolveScopeCoverage is resolveScope plus the coverage record: how many PSPs
+// the merchant declares active on the rail versus the one this pass arms from.
 func (b MerchantFetcherBuilder) resolveScopeCoverage(ctx context.Context, mid billing.MerchantID, provider Provider, out *MerchantPullClients) (merchants.PSPScope, bool) {
 	scope, ok := b.resolveScopeInner(ctx, mid, provider)
 	if !ok || out == nil {
@@ -188,7 +180,7 @@ func (b MerchantFetcherBuilder) secret(ctx context.Context, mid billing.Merchant
 	if b.Merchants == nil || b.Merchants.Secrets() == nil {
 		return "", false, nil
 	}
-	// or#812: honour the PSP row's rotation version floor.
+	// Honour the PSP row's rotation version floor.
 	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", false, err
@@ -207,8 +199,8 @@ func (b MerchantFetcherBuilder) secret(ctx context.Context, mid billing.Merchant
 	return value, true, nil
 }
 
-// requireSecret is secret plus the #699 fail-loud contract: absence or a
-// backend failure logs ONE WARN naming merchant, rail and the secret name.
+// requireSecret is secret, failing loud: absence or a backend failure logs one
+// WARN naming merchant, rail and the secret name.
 func (b MerchantFetcherBuilder) requireSecret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool) {
 	value, found, err := b.secret(ctx, mid, scope, key)
 	if err != nil {
@@ -252,8 +244,8 @@ func (b MerchantFetcherBuilder) buildNMI(ctx context.Context, mid billing.Mercha
 
 func (b MerchantFetcherBuilder) buildCCBill(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if scope, ok := b.resolveScopeCoverage(ctx, mid, ProviderCCBill, out); ok {
-		// #697: CCBill account_id is dash-joined (clientAccnum-clientSubacc,
-		// e.g. 999999-0000). Both parts are numeric, so the first dash splits.
+		// CCBill account_id is dash-joined (clientAccnum-clientSubacc, e.g.
+		// 999999-0000). Both parts are numeric, so the first dash splits.
 		acc, sub, cut := strings.Cut(strings.TrimSpace(scope.AccountID), "-")
 		if !cut || strings.TrimSpace(acc) == "" || strings.TrimSpace(sub) == "" {
 			log.WithContext(ctx).WithFields(log.Fields{
@@ -305,11 +297,11 @@ func (b MerchantFetcherBuilder) buildStripe(ctx context.Context, mid billing.Mer
 	}
 }
 
-// buildSolana: Solana pulls read public chain state — the rail holds no
-// per-merchant PULL credential (private_key is the operator-only SIGNING key).
-// A declared solana account row arms the fetcher; its settings block carries
-// the merchant's RPC knobs (rpc_provider / rpc_api_key, #711), defaulting to
-// the public RPC fallback with the network derived from test_mode.
+// buildSolana: Solana pulls read public chain state, so the rail needs no pull
+// credential (private_key is the operator-only signing key). A declared solana
+// account arms the fetcher; its settings carry the merchant's RPC knobs
+// (rpc_provider / rpc_api_key), defaulting to the public RPC for the test_mode
+// network.
 func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.MerchantID, out *MerchantPullClients) {
 	if b.DB == nil {
 		return
@@ -336,11 +328,11 @@ func (b MerchantFetcherBuilder) buildSolana(ctx context.Context, mid billing.Mer
 			ReadOnly:        true,
 		})
 		fetcher := NewSolanaFetcher(rpc, SolanaSubscriptionSourceFromDB(b.DB))
-		// #714 discovery lanes: the declared account_id IS the merchant wallet.
+		// The PSP's account_id is the merchant wallet the discovery lanes scan.
 		fetcher.MerchantWallet = scope.AccountID
 		plans := SolanaPlanSourceFromDB(b.DB)
 		fetcher.Plans = func(ctx context.Context) ([]string, error) { return plans(db.WithPSPID(ctx, scope.ID)) }
-		fetcher.Due = SolanaDueSubscriptionSourceFromDB(b.DB) // #720: due-window bulk-fetch filter
+		fetcher.Due = SolanaDueSubscriptionSourceFromDB(b.DB) // due-window bulk-fetch filter
 		fetcher.Resolve = SolanaLocalRecordResolverFromDB(b.DB)
 		out.Fetchers[ProviderSolana] = keyedFetcher{RailFetcher: fetcher, key: scope.AccountID}
 	}

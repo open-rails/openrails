@@ -16,7 +16,7 @@ func fixed(v Verdict, err error) Check {
 	return func(context.Context) (Verdict, error) { return v, err }
 }
 
-// Only the posture's expected verdict arms: sandbox needs Simulated, live (SEC-33)
+// Only the posture's expected verdict arms: sandbox needs Simulated, live
 // needs Live. A "matching" verdict that came with an error is not proof.
 func TestOnlyExpectedVerdictArms(t *testing.T) {
 	blip := errors.New("blip")

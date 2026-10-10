@@ -9,16 +9,10 @@ import (
 
 // DunningForensics answers, per provider: did dunning ever run, when did it
 // stop, and did attempts fail? For every locally past_due or
-// canceled-as-expired subscription it lines up THREE evidence sources
-// (decision 2026-06-11 — forensics are generic OpenRails functionality):
-//
-//  1. "provider" — the rail's own charge-attempt timeline (declines
-//     included), from the fetcher's transaction snapshot;
-//  2. "local"    — the local retry fields (last_retry_at / retry_attempts /
-//     next_retry_at), imported from legacy by the migration;
-//  3. "history"  — Postgres history (#735): the imported legacy
-//     rebill/scheduler history plus failed-payment rows —
-//     deep history the provider APIs cannot return.
+// canceled-as-expired subscription it lines up three evidence sources:
+// "provider" (the rail's charge-attempt timeline, declines included), "local"
+// (last_retry_at / retry_attempts / next_retry_at) and "history" (failed
+// payment attempts, which outlive what provider APIs return).
 type DunningForensics struct {
 	Provider              Provider `json:"provider"`
 	SubscriptionsExamined int      `json:"subscriptions_examined"`
@@ -40,7 +34,7 @@ type DunningForensics struct {
 	// (success or decline) across the examined set.
 	LastProviderAttempt *time.Time `json:"last_provider_attempt,omitempty"`
 	// LastHistoryAttempt is the newest charge-type history event across the
-	// examined set (incl. imported legacy rebill attempts).
+	// examined set.
 	LastHistoryAttempt *time.Time `json:"last_history_attempt,omitempty"`
 	// LastDunningActionAnySource is the max of the three, with the source
 	// that supplied it — "when did dunning last act, per ANY evidence".
@@ -78,7 +72,7 @@ type DunningSubscriptionReport struct {
 	FirstDeclineAt     *time.Time `json:"first_decline_at,omitempty"`
 	LastDeclineAt      *time.Time `json:"last_decline_at,omitempty"`
 	DeclineReasons     []string   `json:"decline_reasons,omitempty"`
-	// History (Postgres history incl. imported legacy):
+	// History (failed payment attempts):
 	HistoryEvents    int        `json:"history_events,omitempty"`
 	HistoryFailures  int        `json:"history_failures,omitempty"`
 	HistorySuccesses int        `json:"history_successes,omitempty"`
@@ -95,8 +89,8 @@ const (
 	timelineCap        = 30
 )
 
-// historyEventClass classifies an analytics event for forensics counting:
-// charge attempt (success/failure) vs other lifecycle noise.
+// historyEventClass classifies a history event for forensics counting: charge
+// attempt (success/failure) vs other lifecycle noise.
 func historyEventClass(eventType, status string) (isAttempt, isFailure, isSuccess bool) {
 	et := strings.ToLower(eventType)
 	st := strings.ToLower(status)
@@ -111,8 +105,8 @@ func historyEventClass(eventType, status string) (isAttempt, isFailure, isSucces
 }
 
 // computeDunningForensics builds the per-provider dunning report from the
-// snapshot's transaction timeline, the local retry fields, and the analytics
-// history events. historyNote documents the history source's availability.
+// snapshot's transaction timeline, the local retry fields and the history
+// events. historyNote documents the history source's availability.
 func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *LocalState, history []HistoryEvent, historyNote string, now time.Time) *DunningForensics {
 	idx := buildLocalIndex(local)
 	ridx := buildRemoteIndex(snap)
@@ -185,8 +179,8 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		tl.reasons[reason]++
 	}
 
-	// Third source: analytics history events, correlated by local
-	// subscription id first, rail subscription id second.
+	// Third source: history events, correlated by local subscription id
+	// first, rail subscription id second.
 	historyCorrelated := 0
 	for i := range history {
 		ev := &history[i]
@@ -298,10 +292,9 @@ func computeDunningForensics(provider Provider, snap *RemoteSnapshot, local *Loc
 		}
 		line.Timeline = events
 
-		// History evidence of charge attempts counts as remote declines for
-		// classification when the provider window saw nothing (the migrated
-		// legacy events ARE the decline record for years the provider API
-		// cannot serve).
+		// History evidence of charge attempts counts as remote declines when
+		// the provider window saw nothing: it is the decline record for years
+		// the provider API cannot serve.
 		remoteDeclineEvidence := line.RemoteDeclines > 0 || line.HistoryFailures > 0
 		attempted := s.RetryAttempts > 0 || s.LastRetryAt != nil
 		switch {

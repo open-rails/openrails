@@ -19,24 +19,12 @@ type ccbillDataLink interface {
 	FetchTransactionExport(ctx context.Context, start, end time.Time, types []ccbill.DataLinkTxnType) ([]ccbill.DataLinkExportRow, error)
 }
 
-// CCBillFetcher pulls CCBill state via DataLink batch exports:
-//   - ACTIVEMEMBERS: the roster of currently-active subscriptions.
-//   - REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK exports over [Since,Until]:
-//     charge events plus subscription terminations.
-//
-// Provider quirks:
-//   - CCBill exposes no vault read => Vault=false.
-//   - DataLink is event-based for terminations: a subscription canceled or
-//     expired inside the window appears as a CANCELLATION/EXPIRE row (emitted
-//     here as a RemoteSubscription with that terminal status) and is absent
-//     from ACTIVEMEMBERS. Terminations OUTSIDE the window are simply absent,
-//     so "missing from the snapshot" is NOT proof a subscription never
-//     existed — the phase-2 diff engine must treat CCBill absence as
-//     inactive-or-out-of-window, not unknown-to-CCBill.
-//   - DataLink rows carry no currency, so Currency stays empty (not reported);
-//     the matched local record denominates the row downstream, never a default.
-//   - The ACTIVEMEMBERS roster has no server-side subscription filter;
-//     FetchParams.SubscriptionID narrowing is applied client-side here.
+// CCBillFetcher pulls CCBill via DataLink batch exports: the ACTIVEMEMBERS
+// roster, and REBILL/CANCELLATION/EXPIRE/REFUND/CHARGEBACK over [Since,Until].
+// It has no vault read. A termination appears only inside its window, so
+// absence means inactive-or-out-of-window, never unknown-to-CCBill. Rows carry
+// no currency: the matched local record denominates them, never a default. The
+// roster has no server-side filter, so SubscriptionID narrows here.
 type CCBillFetcher struct {
 	DataLink ccbillDataLink
 }

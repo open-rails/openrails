@@ -17,21 +17,16 @@ import (
 )
 
 // DestructiveRunKindConvergeEnforce is the converge-enforce pass's key in
-// billing.maintenance_runs — the SAME ledger `--prune` writes to (or#859
-// §5.1), never a second one.
+// billing.maintenance_runs, the same ledger `--prune` writes to.
 const DestructiveRunKindConvergeEnforce = "converge_enforce"
 
 // supersededByReverseReason is stamped on every intent the reverse neutralises.
 const supersededByReverseReason = "superseded by destructive-run reversal"
 
-// DestructiveRunRecorder is what makes an enforce pass reversible. The pull
-// engine holds one; without it a pass that would overwrite subscription state
-// REFUSES rather than doing undoable damage (obligation 4 of or#859 §5.1: no
-// bypass).
-//
-// It is an interface for one reason only — the engine is otherwise built from
-// interfaces and its unit tests construct it by literal. Every production path
-// gets the DB-backed implementation from NewEngine.
+// DestructiveRunRecorder makes an enforce pass reversible: without one, a pass
+// that would overwrite subscription state refuses rather than do undoable
+// damage. Every production path gets the DB-backed recorder from NewEngine; it
+// is an interface because unit tests build the engine by literal.
 type DestructiveRunRecorder interface {
 	// Open records the run BEFORE anything is written, carrying the coverage
 	// proof that authorised it and the row count the pass predicted.
@@ -152,8 +147,6 @@ func (r *PGDestructiveRunRecorder) Finish(ctx context.Context, runID uuid.UUID, 
 	return nil
 }
 
-// --- the reverse --------------------------------------------------------------
-
 // IntentDivergence is one provider write a reversed run had queued, and what
 // became of it.
 type IntentDivergence struct {
@@ -168,10 +161,8 @@ type IntentDivergence struct {
 	Consequence string `json:"consequence,omitempty"`
 }
 
-// ConvergeRollbackResult is the reverse's report. Deliberately explicit about
-// what it could NOT undo: an intent that already fired is divergence, and
-// counting it as undone would be the single most dangerous lie this command
-// could tell.
+// ConvergeRollbackResult is the reverse's report, explicit about what it could
+// not undo: an intent that already fired is divergence, never counted as undone.
 type ConvergeRollbackResult struct {
 	RunID uuid.UUID `json:"run_id"`
 	// SubscriptionsRestored is how many rows were re-asserted from before-images.
@@ -220,31 +211,24 @@ func (r ConvergeRollbackResult) Complete() bool {
 	return len(r.IntentsIrreversible) == 0 && len(r.IntentsAmbiguous) == 0
 }
 
-// RollbackConvergeEnforceRun reverses one converge-enforce run.
+// RollbackConvergeEnforceRun reverses one converge-enforce run, in this order:
 //
-// Five steps, in this order, and the order is the design (or#859 §5.2):
+//  1. Quiesce: clear the merchant's first-enforce arming and trip its
+//     destructive stop, so nothing re-cancels what is being restored and no
+//     new intent claim starts.
+//  2. Supersede the unfired intents before any row is restored: the intent
+//     runner may claim a queued NMI vault delete at any moment, and winning
+//     that race is what makes recovery complete rather than partial.
+//  3. Restore the stamped rows from their before-images (Class A untouched,
+//     Class D not restored).
+//  4. Reset the confirmed-absence proof, so the incomplete post-rollback book
+//     cannot license a mass retraction.
+//  5. Report, including what could not be undone.
 //
-//  1. QUIESCE. Clear the merchant's first-enforce arming and trip its
-//     destructive stop, so nothing re-cancels what is about to be restored and
-//     no NEW intent claim starts mid-reversal.
-//  2. SUPERSEDE THE UNFIRED INTENTS — FIRST, before a single row is restored,
-//     because this is the only step racing a live actor. The intent runner may
-//     claim a queued NMI vault delete at any moment; every millisecond spent
-//     restoring rows first is a millisecond that race can be lost. Winning it
-//     is what makes recovery from the mass-cancel COMPLETE rather than partial.
-//  3. RESTORE the stamped rows from their before-images. Class A untouched;
-//     Class D not restored.
-//  4. RESET the confirmed-absence proof, so the post-rollback book — which is
-//     definitionally incomplete — cannot license a mass retraction.
-//  5. REPORT, including what could not be undone.
-//
-// Steps 2-4 share ONE transaction: a reversal that superseded the intents but
-// failed to restore the rows would leave the operator worse off than before.
-//
-// Per or#859 §2.1 a rollback is not a complete operation — `rollback → pull →
-// converge` is. Entitlements come back through that Converge, recomputed from
-// the append-only grant log; they are never restored here. Must run
-// merchant-scoped.
+// Steps 2-4 share one transaction: superseding without restoring would leave
+// the operator worse off. A rollback is not a complete operation (`rollback →
+// pull → converge` is); entitlements come back through Converge from the
+// append-only grant log, never restored here. Must run merchant-scoped.
 func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string, recompute Recomputer) (ConvergeRollbackResult, error) {
 	res := ConvergeRollbackResult{RunID: runID}
 	mid, err := requireMerchantUUID(ctx)
@@ -383,10 +367,8 @@ func requireMerchantUUID(ctx context.Context) (uuid.UUID, error) {
 
 func isNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
-// irreversibleConsequence names the provider-side fact a fired intent created,
-// per type. An operator reading "1 intent already fired" learns nothing; an
-// operator reading "the NMI vault entry is gone — the customer must re-enter a
-// card" knows what work they now own.
+// irreversibleConsequence names, per intent type, the provider-side fact a
+// fired intent created, so the operator knows what work they now own.
 func irreversibleConsequence(intentType string) string {
 	switch intentType {
 	case "nmi_delete_subscription":

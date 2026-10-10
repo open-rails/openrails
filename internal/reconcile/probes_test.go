@@ -16,8 +16,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// Probes are snapshot SOURCES: each verdict below is the one decider's answer
-// for an `unknown` row fed that snapshot (the #633 resolution path).
+// Probes are snapshot sources: each verdict below is the one decider's answer
+// for an `unknown` row fed that snapshot.
 func decideUnknown(railSub string, periodEnd *time.Time, snap *RemoteSnapshot, now time.Time) Decision {
 	return Decide(SubscriptionState{Status: "unverified", RailSubscriptionID: railSub, PeriodEnd: periodEnd}, EvidenceBundle{Snapshot: snap}, now, 0)
 }
@@ -182,7 +182,7 @@ func TestStripePastDueFollowsStripeRetries(t *testing.T) {
 	require.True(t, d.RemoteGone)
 }
 
-// #696: viewSubscriptionStatus is the per-record read; probes only ever send it.
+// viewSubscriptionStatus is the per-record read; probes only ever send it.
 func TestCCBillSubscriptionProber(t *testing.T) {
 	now := time.Date(2040, time.August, 14, 17, 30, 0, 0, time.UTC)
 	periodEnd := now.Add(-5 * oneDay)

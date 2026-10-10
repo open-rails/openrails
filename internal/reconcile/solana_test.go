@@ -159,7 +159,7 @@ func staticRefs(refs ...SolanaSubscriptionRef) SolanaSubscriptionSource {
 	return func(context.Context) ([]SolanaSubscriptionRef, error) { return refs, nil }
 }
 
-// discoverySlot finds an instant inside (due) or outside planPDA's #720 slot.
+// discoverySlot finds an instant inside (due) or outside planPDA's discovery slot.
 func discoverySlot(t *testing.T, planPDA string, due bool) time.Time {
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	for i := 0; i < int(solanaDiscoveryCadence/solanaDiscoverySlotWidth); i++ {
@@ -215,7 +215,7 @@ func TestSolanaSubscriptionStatusDoctrine(t *testing.T) {
 	}
 }
 
-// FAB-4: subscribe/cancel are lifecycle events, never sales; sub-cent never rounds.
+// Subscribe/cancel are lifecycle events, never sales; sub-cent never rounds.
 func TestSolanaSignatureClassification(t *testing.T) {
 	sub, wallet := newKey(), newKey()
 	cancelIx := subscriptions.BuildCancelSubscription(subscriptions.CancelOrResumeParams{Subscriber: wallet, PlanPDA: newKey(), SubscriptionPDA: sub, EventAuthority: newKey()})
@@ -261,8 +261,8 @@ func TestSolanaSignatureClassification(t *testing.T) {
 	require.Contains(t, string(unreadable.Raw), "signature_only")
 }
 
-// #714: the merchant-wallet scan recognizes OUR memos only, parks anything it
-// cannot fully verify, and walks a bounded number of signatures.
+// The merchant-wallet scan recognizes our memos only, parks anything it cannot
+// fully verify, and walks a bounded number of signatures.
 func TestSolanaWalletScan(t *testing.T) {
 	wallet, pullSub := newKey(), newKey()
 	customerID, priceID := uuid.New(), uuid.New()
@@ -375,8 +375,8 @@ func TestSolanaWalletScan(t *testing.T) {
 	})
 }
 
-// #714 scan 2 + #720 cadence: subscriptions under OUR plans the mirror does not
-// know are enumerated on the plan's slow discovery slot only.
+// Subscriptions under our plans the mirror does not know are enumerated on the
+// plan's slow discovery slot only.
 func TestSolanaPlanEnumeration(t *testing.T) {
 	known, stranger, plan, otherPlan := newKey(), newKey(), newKey(), newKey()
 	knownSub, discoveredSub := newKey(), newKey()
@@ -465,8 +465,8 @@ func TestWalletTransferMoney(t *testing.T) {
 	require.False(t, ok)
 }
 
-// #817: the shift is the mint's decimals; only registry USD stablecoins at
-// exactly cent-representable values produce fiat.
+// The shift is the mint's decimals; only registry USD stablecoins at exactly
+// cent-representable values produce fiat.
 func TestSolanaFiatCents(t *testing.T) {
 	usdc := usdcMint.String()
 	for _, c := range []struct {

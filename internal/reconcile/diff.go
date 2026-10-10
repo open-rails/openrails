@@ -372,8 +372,6 @@ func uniqueSub(subs []*LocalSubscription) (*LocalSubscription, bool) {
 	return nil, false
 }
 
-// --- evidence helpers ---
-
 func localSubEvidence(s *LocalSubscription) map[string]any {
 	ev := map[string]any{
 		"subscription_id":      billing.SubscriptionID(s.ID).String(),
@@ -455,9 +453,8 @@ func txnCurrency(t *RemoteTransaction, local string) (currency string, inherited
 	return c, c != ""
 }
 
-// deletionIntent builds the class-3 intent annotation (design decision 5)
-// when a local subscription carries a recorded-but-unexecuted rail
-// delete marker.
+// deletionIntent builds the intent annotation when a local subscription
+// carries a recorded-but-unexecuted rail delete marker.
 func deletionIntent(s *LocalSubscription) map[string]any {
 	if s.DeletionScheduledAt == nil {
 		return nil
@@ -476,16 +473,16 @@ type diffOptions struct {
 	// PS-1 findings whose identity and plan both resolve unambiguously carry
 	// a materialize apply action instead of going requires_review.
 	Materialize bool
-	// EvidenceFloor (#835) is the merchant's first-pull instant, handed to
-	// every decider invocation this diff makes: a cancel resting on evidence
-	// older than it is withheld and the row parks as `unknown`.
+	// EvidenceFloor is the merchant's first-pull instant, handed to every
+	// decider invocation this diff makes: a cancel resting on older evidence
+	// is withheld and the row parks as `unknown`.
 	EvidenceFloor time.Time
 }
 
-// diffProvider runs every capability-gated PULL-plane check for one provider
+// diffProvider runs every capability-gated pull-plane check for one provider
 // snapshot vs local state and returns the findings, each carrying its enforce
 // instruction where one is safe. Internal-plane checks (DERIVE/LIFE/CON) live
-// in the Convergence Engine, never here (#665 single-writer rule).
+// in the Convergence Engine.
 func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, localPayments []LocalPayment, now time.Time, opts diffOptions) []Finding {
 	idx := buildLocalIndex(local)
 	ridx := buildRemoteIndex(snap)
@@ -512,10 +509,9 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 		findings = append(findings, diffPaymentMethods(provider, local, ridx, traits)...)
 	}
 
-	// #835: every cancel the staleness floor withheld surfaces as its own
-	// requires_review finding. Done HERE, over the finished finding set, so it
-	// covers every decider invocation this diff makes — present and future —
-	// rather than being repeated at each decideApply call site.
+	// Every cancel the staleness floor withheld surfaces as its own
+	// requires_review finding, raised here over the finished set so it covers
+	// every decider invocation this diff makes.
 	findings = append(findings, evidenceFlooredFindings(provider, findings)...)
 
 	sort.SliceStable(findings, func(i, j int) bool {
@@ -527,7 +523,7 @@ func diffProvider(provider Provider, snap *RemoteSnapshot, local *LocalState, lo
 	return findings
 }
 
-// evidenceFlooredFindings raises the operator record for each decision the #835
+// evidenceFlooredFindings raises the operator record for each decision the
 // staleness floor downgraded from a terminal cancel to a park.
 func evidenceFlooredFindings(provider Provider, findings []Finding) []Finding {
 	var out []Finding
@@ -578,15 +574,11 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 		}
 	}
 
-	// Local -> remote: absence-based PS-2 (NMI: the recurring report only
-	// lists live subscriptions, so a locally-live linked subscription that is
-	// absent is dead at the rail). Guarded upstream by the circuit breaker and
-	// the cancellation cap.
-	//
-	// #842: absence is only proof when the roster PROVES it covered everything.
-	// This used to force SubscriptionsExhaustive=true regardless of what the
-	// fetcher declared, so an empty or silently-truncated pull canceled the
-	// merchant's whole book. The snapshot's own coverage decides now.
+	// Local -> remote: absence-based PS-2 (NMI's recurring report lists only
+	// live subscriptions, so a locally-live linked one that is absent is dead
+	// at the rail). Absence is proof only when the snapshot's own coverage
+	// says the roster covered everything; the circuit breaker and the
+	// cancellation cap guard it upstream.
 	if traits.absenceMeansCanceled && snap.Coverage.SubscriptionsExhaustive {
 		for _, s := range idx.byPSID {
 			if !s.IsLive() {
@@ -607,8 +599,8 @@ func diffSubscriptions(provider Provider, snap *RemoteSnapshot, idx *localIndex,
 					"rail_subscription_id":         s.RailSubscriptionID,
 				},
 				RecommendedAction: "rail no longer bills this subscription; enforce cancels it locally and revokes its subscription-sourced entitlements (decider: provider-confirmed dead)",
-				// absenceMeansCanceled: the provider's live-only roster IS
-				// exhaustive for this subject — coverage-absence proof (#665).
+				// absenceMeansCanceled: the provider's live-only roster is
+				// exhaustive for this subject (coverage-absence proof).
 				Apply: decideApply(s, snap, now, opts),
 			}
 			if intent := deletionIntent(s); intent != nil {
@@ -662,9 +654,9 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 		return f
 	}
 
-	// Materialization (bootstrap mode v1.1): auto-create ONLY when both
-	// identity and plan resolve unambiguously; anything else stays
-	// requires_review exactly as without the flag, with the blocker documented.
+	// Materialization: auto-create only when both identity and plan resolve
+	// unambiguously; anything else stays requires_review with the blocker
+	// documented.
 	subjectID, identityVia, identityNote := resolvePS1Identity(r, idx)
 	link, planNote := resolvePS1Plan(r, planIdx)
 	var blockers []string
@@ -680,13 +672,13 @@ func makePS1(provider Provider, r *RemoteSubscription, idx *localIndex, planIdx 
 	}
 	localStatus, materializable := LocalMaterializeStatus(r.Status)
 	if !materializable {
-		// or#893: the local lifecycle has no state that means "the provider's
-		// date passed". Only a live remote subscription is minted locally.
+		// The local lifecycle has no state meaning "the provider's date
+		// passed". Only a live remote subscription is minted locally.
 		blockers = append(blockers, fmt.Sprintf("remote status %q has no canonical local lifecycle state; only a live remote subscription is materialized", r.Status))
 	}
 	if discoveredNotLocalRaw(r.Raw) {
-		// #714: chain-scan discoveries (permissionless `subscribe`) never
-		// auto-create local billing state — operator decision only.
+		// Chain-scan discoveries (permissionless `subscribe`) never
+		// auto-create local billing state: operator decision only.
 		blockers = append(blockers, "subscription was discovered on-chain with no local checkout trail (#714); creating billing state from chain data alone is an operator decision")
 	}
 	if len(blockers) > 0 {
@@ -842,10 +834,8 @@ func latestChargeForRemoteSub(snap *RemoteSnapshot, r *RemoteSubscription) *Remo
 }
 
 // perSubscriptionSnapshot narrows a bulk snapshot to one subscription's
-// evidence slice (roster entry + linked charge events + coverage), the shape
-// the decider consumes. forceExhaustive stamps SubscriptionsExhaustive for
-// providers whose live-only roster is exhaustive by construction
-// (traits.absenceMeansCanceled) even when a fixture omitted the coverage flag.
+// evidence slice (roster entry, linked charge events, coverage), the shape the
+// decider consumes.
 func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot {
 	out := &RemoteSnapshot{
 		Provider:     snap.Provider,
@@ -866,10 +856,9 @@ func perSubscriptionSnapshot(snap *RemoteSnapshot, psid string) *RemoteSnapshot 
 	return out
 }
 
-// decideApply computes the decider transition for one local subscription from
-// its per-subscription snapshot slice and wraps it as the finding's apply
-// action (#665: the pull engine invokes the decider; no applier writes domain
-// state). Nil when the decider has no evidence-justified move.
+// decideApply wraps the decider transition for one local subscription,
+// computed from its per-subscription snapshot slice, as the finding's apply
+// action. Nil when the decider has no evidence-justified move.
 func decideApply(s *LocalSubscription, snap *RemoteSnapshot, now time.Time, opts diffOptions) *ApplyAction {
 	state := SubscriptionState{
 		Status:             s.Status,
@@ -1212,8 +1201,8 @@ func diffTransactions(provider Provider, snap *RemoteSnapshot, idx *localIndex, 
 				}
 				continue
 			}
-			// #714 wallet-scan discoveries route on their verdict envelope
-			// (before the amount gate: unpriced discoveries must still park).
+			// Wallet-scan discoveries route on their verdict envelope (before
+			// the amount gate: unpriced discoveries must still park).
 			if f, ok := makeSolanaDiscoveryPS4(provider, t); ok {
 				findings = append(findings, f)
 				continue
@@ -1349,7 +1338,7 @@ func makePS4(provider Provider, t *RemoteTransaction, corr *correlator, now time
 	return f
 }
 
-// decodeSolanaDiscovery extracts the #714 wallet-scan verdict envelope from a
+// decodeSolanaDiscovery extracts the wallet-scan verdict envelope from a
 // transaction's Raw; nil when the transaction is not a wallet-scan discovery.
 func decodeSolanaDiscovery(raw json.RawMessage) *solanaDiscovery {
 	if len(raw) == 0 {
@@ -1364,7 +1353,7 @@ func decodeSolanaDiscovery(raw json.RawMessage) *solanaDiscovery {
 	return wrap.D
 }
 
-// discoveredNotLocalRaw reports the #714 program-scan marker: the remote
+// discoveredNotLocalRaw reports the program-scan marker: the remote
 // subscription exists on-chain with no local mirror row.
 func discoveredNotLocalRaw(raw json.RawMessage) bool {
 	if len(raw) == 0 {
@@ -1377,15 +1366,15 @@ func discoveredNotLocalRaw(raw json.RawMessage) bool {
 	return wrap.D
 }
 
-// makeSolanaDiscoveryPS4 routes a #714 wallet-scan discovery (memo-recognized
+// makeSolanaDiscoveryPS4 routes a wallet-scan discovery (memo-recognized
 // merchant-wallet charge with no local payment). Verify-not-decline:
 //   - fetcher verdict "park" (any memo/local-record/transfer disagreement,
 //     duplicate local-id) => requires_review, never applied;
 //   - clean but unpriced (asset is not a registry USD stablecoin) => parked
-//     too — the payments mirror is fiat, so the operator prices it manually;
-//   - clean one-off with resolved checkout-session identity => backfill via
-//     the same idempotent payment lane the other rails use, money from the
-//     on-chain transfer only;
+//     too: the payments mirror is fiat, so the operator prices it manually;
+//   - clean one-off with resolved checkout identity => backfill via the same
+//     idempotent payment lane the other rails use, money from the on-chain
+//     transfer only;
 //   - clean pull => ok=false, the generic correlator lane owns it (matches by
 //     subscription PDA; unknown subscriptions park there).
 func makeSolanaDiscoveryPS4(provider Provider, t *RemoteTransaction) (Finding, bool) {

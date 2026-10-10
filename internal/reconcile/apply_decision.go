@@ -19,12 +19,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
-// ApplyDecision moves subscription state for one decider transition (#665)
-// through the lifecycle state machine (#1091): the row is locked, re-checked
-// against the row the decision was made on, and the decision's event is
-// applied with Transition and ApplyEffects in one transaction. Only a payment
-// fact renews and only a decline fact opens dunning. Returns whether a
-// transition was attempted.
+// ApplyDecision moves subscription state for one decider transition through
+// the lifecycle state machine: the row is locked, re-checked against the row
+// the decision was made on, and the event applied with Transition and
+// ApplyEffects in one transaction. Only a payment fact renews and only a
+// decline fact opens dunning. Returns whether a transition was attempted.
 func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, d Decision, now time.Time) (bool, error) {
 	if database == nil || lc == nil || sub == nil {
 		return false, fmt.Errorf("apply decision: db, lifecycle and subscription are required")
@@ -45,7 +44,7 @@ func ApplyDecision(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 		}
 		if d.Decline == nil && !d.Declared && subscriptions.OwnerOf(sub) != lifecycle.Provider {
 			// A stalled provider date is no decline: the row is verified
-			// instead of dunned (#1089 §1).
+			// instead of dunned.
 			if sub.Status != models.StatusActive {
 				return false, nil
 			}
@@ -222,9 +221,9 @@ func paidThroughOf(sub *models.Subscription) time.Time {
 }
 
 // customerNotices keeps a mirrored transition's effects, except: the end of
-// access notice, which the converge NOTIFY pass sends once for every ending
-// (#789); every notice when the decision replays declared history; and a
-// provider cancel for a schedule the provider already ended.
+// access notice, which the converge NOTIFY pass sends once for every ending;
+// every notice when the decision replays declared history; and a provider
+// cancel for a schedule the provider already ended.
 func customerNotices(effects []lifecycle.Effect, silent, gone bool) []lifecycle.Effect {
 	out := effects[:0:0]
 	for _, e := range effects {

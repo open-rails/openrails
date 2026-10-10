@@ -1,12 +1,6 @@
-// Package recommend is the structured-recommendation contract for operator
-// findings (#692). Checks that emit ADMIN/OPERATOR findings write a
-// machine-executable Recommendation into finding evidence under EvidenceKey,
-// alongside the human prose in reconciliation_findings.recommended_action.
-// The admin findings queue (POST /admin/findings/{id}/resolve, outcome
-// approve) executes it through existing machinery.
-//
-// Leaf package by design: importable from internal/intents,
-// internal/reconcile and internal/reconcile/converge without cycles.
+// Package recommend is the machine-executable Recommendation an operator
+// finding carries in its evidence; approving the finding at
+// POST /v1/admin/findings/{id}/resolve executes it. A leaf package (no cycles).
 package recommend
 
 import (
@@ -20,16 +14,13 @@ import (
 // Known actions. Params are plain JSON objects; ids travel in their typed
 // wire spelling (sub_, pay_, prod_; customers as plain UUIDs).
 const (
-	// ActionCancelAndRefund cancels a local subscription (the remote side
-	// rides the durable rail-intents ledger — queue-always #679,
-	// breaker-guarded) and refunds one payment through the rail's refund API
-	// via the intents log. CCBill refund requests are refused before either leg;
-	// cancellation-only remains supported.
-	// Params: subscription_id (sub_<uuid>, optional — no cancel when absent,
-	// e.g. a pure one-off ownership duplicate); refund_payment_id (pay_<uuid>,
-	// optional — no refund when absent); at least one of the two is required;
-	// amount (decimal string of the payment currency's native unit, optional —
-	// defaults to the payment's full amount).
+	// ActionCancelAndRefund cancels a local subscription (the remote cancel
+	// goes through the breaker-guarded intents ledger) and refunds one payment
+	// through the intents log. CCBill refunds are refused before either leg;
+	// cancel-only still works.
+	// Params: subscription_id (sub_<uuid>, optional); refund_payment_id
+	// (pay_<uuid>, optional); at least one of the two; amount (decimal string
+	// in the payment currency's native unit, optional, default the full amount).
 	ActionCancelAndRefund = "cancel_and_refund"
 	// ActionRevokeProductAccess revokes one product-access window as of a time.
 	// Params: access_id (uuid, required); as_of (RFC3339, optional = now).
@@ -40,8 +31,8 @@ const (
 	// required); reason (string, optional — recorded as the grant note).
 	ActionGrantProduct = "grant_product"
 	// ActionAckResume is a plain resolution with no side effects; machinery
-	// keyed off the finding STATUS (e.g. the #679 destructive-volume breaker)
-	// re-arms itself when the finding leaves the open states. Params: none.
+	// keyed off the finding status (e.g. the intents volume breaker) re-arms
+	// when the finding leaves the open states. Params: none.
 	ActionAckResume = "ack_resume"
 )
 
@@ -97,8 +88,8 @@ func FromEvidence(evidence map[string]any) (Recommendation, bool) {
 	if err != nil {
 		return Recommendation{}, false
 	}
-	// or#863: UseNumber, so a JSON amount literal arrives as an exact
-	// json.Number and not as a float64 that an executor would truncate.
+	// UseNumber, so a JSON amount literal arrives as an exact json.Number,
+	// not a float64 an executor would truncate.
 	dec := json.NewDecoder(bytes.NewReader(b))
 	dec.UseNumber()
 	var rec Recommendation
@@ -109,10 +100,9 @@ func FromEvidence(evidence map[string]any) (Recommendation, bool) {
 }
 
 // DecodeParams decodes an operator-supplied params object with UseNumber, so
-// every numeric leaf is an exact json.Number. It is the ONLY sanctioned way to
-// turn a params JSON body into map[string]any: plain json.Unmarshal yields
-// float64, and a money amount that has been through a float64 is already a
-// different amount (MONEY-3).
+// every numeric leaf is an exact json.Number. It is the only sanctioned way to
+// turn params JSON into map[string]any: a money amount that has been through a
+// float64 is already a different amount.
 func DecodeParams(raw []byte) (map[string]any, error) {
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		return nil, nil
@@ -125,8 +115,6 @@ func DecodeParams(raw []byte) (map[string]any, error) {
 	}
 	return out, nil
 }
-
-// --- Builders for the #690 detector emissions ---
 
 // RevokeProductAccessRec recommends revoking one window; asOf empty = now at
 // approve time. alternative (usually GrantProductRec) is informational.

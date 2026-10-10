@@ -29,10 +29,10 @@ func TestRenewalCatchupGrantsTheLatestPaidWindow(t *testing.T) {
 	require.Equal(t, wantEnd, event.PeriodEnd)
 }
 
-// A provider roster's rebill date is no payment (#1089 §1): an unverified
-// row it lists as alive is confirmed only while its paid period still runs,
-// and its period never moves. Only a charge renews. Law for every
-// provider-read rail; CCBill's roster reports the rebill date as next billing.
+// A provider roster's rebill date is no payment: an unverified row it lists as
+// alive is confirmed only while its paid period still runs, and its period
+// never moves. Only a charge renews. Holds for every provider-read rail;
+// CCBill's roster reports the rebill date as next billing.
 func TestRosterDateIsNoPayment(t *testing.T) {
 	now := decideNow
 	next := now.Add(25 * oneDay)

@@ -15,11 +15,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// DestructiveRunKindPrune is this run kind's key in billing.maintenance_runs
-// (or#859 §5.1 — the general ledger; prune is its first user).
+// DestructiveRunKindPrune is this run kind's key in billing.maintenance_runs.
 const DestructiveRunKindPrune = "prune"
 
-// PruneParams bounds a #511 pull-provider --prune pass.
+// PruneParams bounds a pull-provider --prune pass.
 type PruneParams struct {
 	Since time.Time
 	Until time.Time
@@ -40,7 +39,7 @@ type PruneResult struct {
 	// `openrails undo-run --run <id>` reverses.
 	RunID                  uuid.UUID
 	Subscriptions          int // soft-deleted (Apply) or would-delete (dry-run)
-	SubscriptionsSkipped   int // excess but entangled with the #514 grant ledger
+	SubscriptionsSkipped   int // excess but entangled with the grant ledger
 	Payments               int
 	PaymentsSkipped        int // excess but with protected dependents
 	CheckoutAttempts       int // dependents soft-deleted with their subscription
@@ -84,27 +83,23 @@ func (e *ErrPruneCountMismatch) Error() string {
 		e.Expected, e.Found)
 }
 
-// PrunePSPExcess fetches the provider's current snapshot for the
-// bound account and prunes local mirror rows attributed to that PSP
-// that are ABSENT from the snapshot. It is account-bound and FAILS CLOSED
-// (or#893: every provider row is attributed now, so a row whose PSP this pass
-// did not pull is out of scope, never "maybe ours") and safe by construction:
+// PrunePSPExcess fetches the bound account's current snapshot and prunes local
+// mirror rows attributed to that PSP that are absent from it. It is
+// account-bound and fails closed (a row whose PSP this pass did not pull is out
+// of scope, never "maybe ours"):
 //
-//   - or#858: nothing is DELETED. Eligible rows are SOFT-deleted (deleted_at)
-//     and stamped with a maintenance_runs id, so the whole pass reverses with
-//     `openrails undo-run --run <id>`.
-//   - An empty remote set REFUSES — in the SQL (cardinality 0 matches nothing)
-//     and here (an error) — rather than matching everything.
-//   - --apply requires a typed expected row count that must match what the pass
-//     discovered.
-//   - A subscription that fed the #514 grant ledger is SKIPPED: removing its row
-//     would orphan an append-only grant. Such excess is retracted through
-//     convergence (grant revoke), not deletion.
-//   - A payment with protected dependents (a grant, a refund, an entitlement
-//     grant, or a checkout attempt) is SKIPPED for the same reason.
+//   - Nothing is deleted: eligible rows are soft-deleted (deleted_at) and
+//     stamped with a maintenance_runs id, so `openrails undo-run --run <id>`
+//     reverses the pass.
+//   - An empty remote set refuses, in the SQL and here, rather than matching
+//     everything.
+//   - --apply requires a typed expected row count that must match.
+//   - A subscription that fed the grant ledger is skipped (removing it would
+//     orphan an append-only grant; convergence revokes instead), as is a
+//     payment with protected dependents (grant, refund, entitlement grant,
+//     checkout attempt).
 //
-// Dry-run (Apply=false) only discovers and counts; it writes nothing. Must be
-// called inside a merchant-scoped connection (the CLI's RunInMerchantConn).
+// Dry-run writes nothing. Must run merchant-scoped.
 func PrunePSPExcess(ctx context.Context, database *db.DB, fetcher RailFetcher, provider Provider, binding PSPBinding, params PruneParams) (PruneResult, error) {
 	var res PruneResult
 	merchantID, err := merchant.Require(ctx)
@@ -338,17 +333,12 @@ type RollbackResult struct {
 }
 
 // RollbackDestructiveRun reverses one prune run by id: every row that run
-// soft-deleted has its deleted_at cleared and its stamp removed, in ONE
-// transaction. Restoring only rows carrying THIS run's id means an unrelated
-// soft delete (an ordinary entitlement revocation) is never resurrected.
-//
-// A restore can fail on a unique or exclusion constraint when the provider
-// re-created what the prune removed and a new local row took the key. That
-// aborts the whole rollback rather than half-restoring it; the operator then
-// resolves the conflict deliberately.
-//
-// Per or#859 §2.1 a rollback is not a complete operation — `rollback → pull →
-// converge` is. Must run merchant-scoped.
+// soft-deleted has its deleted_at and stamp cleared, in one transaction. Only
+// rows carrying this run's id are restored, so an unrelated soft delete is
+// never resurrected. A unique or exclusion conflict (the provider re-created
+// what the prune removed) aborts the whole rollback rather than half-restoring.
+// A rollback is not a complete operation: `rollback → pull → converge` is.
+// Must run merchant-scoped.
 func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string) (RollbackResult, error) {
 	var res RollbackResult
 	merchantID, err := merchant.Require(ctx)
@@ -368,11 +358,10 @@ func RollbackDestructiveRun(ctx context.Context, database *db.DB, runID uuid.UUI
 	if run.Status == "reversed" {
 		return res, fmt.Errorf("destructive run %s was already reversed", runID)
 	}
-	// The ledger is general (or#859 §5.1) but this reverse is not: it only knows
-	// how to clear soft-delete tombstones. A converge-enforce run destroyed row
-	// VALUES, not rows, so running this against one would restore nothing, leave
-	// its queued provider writes free to fire, and still mark the run reversed —
-	// a silent no-op wearing a success message.
+	// This reverse only clears soft-delete tombstones. A converge-enforce run
+	// overwrote row values, so running this against one would restore nothing,
+	// leave its queued provider writes free to fire, and still mark the run
+	// reversed.
 	if run.Kind != DestructiveRunKindPrune {
 		return res, fmt.Errorf("destructive run %s is kind %q; this reverse only handles %q runs. Use `openrails undo-run --run %s`, which dispatches on kind",
 			runID, run.Kind, DestructiveRunKindPrune, runID)

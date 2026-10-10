@@ -18,11 +18,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// #684: the webhook fetch-and-converge entry point. A verified webhook is only
-// a wake-up signal — the coalesced fetch job probes provider truth for ONE
-// subscription and converges the local row through the #665 decider. This is
-// the same (snapshot → Decide → side-effects → ApplyDecision) pipeline the
-// unknown-cohort resolution uses, exposed per subscription.
+// A verified webhook is only a wake-up signal: the coalesced fetch job probes
+// provider truth for one subscription and converges it through the same
+// snapshot → Decide → side effects → ApplyDecision pipeline the unknown-cohort
+// resolution uses.
 
 // SubscriptionConvergence reports one converge pass.
 type SubscriptionConvergence struct {
@@ -46,16 +45,11 @@ func SubscriptionStateOf(sub *models.Subscription) SubscriptionState {
 }
 
 // ConvergeSubscriptionFromSnapshot converges one local subscription to fetched
-// provider truth: Decide over the snapshot evidence, backfill the provider's
-// charge records (money truth — idempotent by transaction id), materialize the
-// provider customer id, then ApplyDecision through the lifecycle chokepoints.
-// Ordering-free by construction: N calls against the same truth are no-ops
-// after the first. Must run on a merchant-scoped connection.
-//
-// Terminal/pending rows take no lifecycle transition (the decider refuses
-// them), but their snapshot charges are STILL backfilled: a renewal charge
-// against a terminal row is money truth and must leave a durable payment row
-// (money truth ≠ lifecycle truth).
+// provider truth: Decide, backfill the provider's charges (idempotent by
+// transaction id), materialize the provider customer id, then ApplyDecision.
+// Repeat calls against the same truth are no-ops. Must run merchant-scoped.
+// Terminal/pending rows take no transition, but their charges are still
+// backfilled: money truth is not lifecycle truth.
 func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration) (SubscriptionConvergence, error) {
 	var floor time.Time
 	if database != nil && sub != nil {
@@ -64,14 +58,12 @@ func ConvergeSubscriptionFromSnapshot(ctx context.Context, database *db.DB, lc *
 	return convergeSubscriptionFromSnapshotLookback(ctx, database, lc, sub, snap, now, dunningWindow, defaultBackfillLookback, floor)
 }
 
-// convergeSubscriptionFromSnapshotLookback is the lookback-parameterized core:
-// live planes cap backfill at #634's 3y; the declared import (#737) unbounds it
-// (a legacy book's charges are all in scope by declaration).
-//
-// floor is the #835 evidence-staleness floor. The live path passes the
-// merchant's first-pull instant; the declared import passes ZERO on purpose —
-// its snapshot is dated at the operator's AsOf horizon and that declaration IS
-// the observation, so AsOf becomes the floor (see EvidenceBundle.EvidenceFloor).
+// convergeSubscriptionFromSnapshotLookback is the core with a backfill
+// lookback: live planes cap it; the declared import unbounds it (a legacy
+// book's charges are all in scope by declaration). floor is the evidence
+// staleness floor: the merchant's first-pull instant live, zero for the
+// declared import, whose AsOf declaration is the observation and becomes the
+// floor (see EvidenceBundle.EvidenceFloor).
 func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, sub *models.Subscription, snap *RemoteSnapshot, now time.Time, dunningWindow time.Duration, lookback time.Duration, floor time.Time) (SubscriptionConvergence, error) {
 	out := SubscriptionConvergence{}
 	if database == nil || lc == nil || sub == nil || snap == nil {
@@ -137,7 +129,7 @@ func convergeSubscriptionFromSnapshotLookback(ctx context.Context, database *db.
 }
 
 // defaultBackfillLookback bounds how old a provider charge may be and still be
-// imported (#634's 3y recoverable scope).
+// imported.
 const defaultBackfillLookback = 3 * 365 * 24 * time.Hour
 
 // snapshotChargesFor returns ALL of the snapshot's charge events for one
@@ -156,9 +148,8 @@ func snapshotChargesFor(sub *models.Subscription, snap *RemoteSnapshot) []Remote
 }
 
 // applyDecisionSideEffects lands a decision's evidence-derived side data:
-// payment backfill (#634) and rail-customer materialization (#635). Shared by
-// the unknown-cohort resolution and the webhook converge path. Returns the
-// backfilled-payment count and whether a rail customer row was materialized.
+// payment backfill and rail-customer materialization. Returns the backfilled
+// payment count and whether a rail customer row was materialized.
 func applyDecisionSideEffects(ctx context.Context, database *db.DB, sub *models.Subscription, d Decision, now time.Time, lookbackCap time.Duration) (int, bool, error) {
 	q := database.Gen(ctx)
 	backfilled, err := backfillSubscriptionPayments(ctx, q, sub, d.Backfill, now, lookbackCap)
@@ -178,9 +169,8 @@ func applyDecisionSideEffects(ctx context.Context, database *db.DB, sub *models.
 	if d.RemoteCustomerID != "" && rails.HasRemoteCustomer(sub.Rail) {
 		if err := q.UpsertPSPCustomer(ctx, gen.UpsertPSPCustomerParams{
 			CustomerID: sub.CustomerID,
-			// or#893: the mapping belongs to the account that owns the
-			// subscription, which is the account whose remote customer id this
-			// is. The subscription's own provenance answers it — no resolution.
+			// The mapping belongs to the account that owns the subscription,
+			// whose remote customer id this is.
 			PspID:             sub.PspID,
 			RemoteCustomerRef: d.RemoteCustomerID,
 			At:                now,

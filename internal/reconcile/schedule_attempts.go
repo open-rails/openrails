@@ -16,12 +16,10 @@ import (
 )
 
 // recordScheduleAttempts records a provider schedule's own charges as rebill
-// attempts (#1111): NMI's for an NMI-owned subscription, Stripe's or CCBill's
-// for a provider-owned one. The first charge at or after the paid period's end
-// is that cycle's rebill (a provider's later ones its retries), and each
-// approval moves on to the next cycle. Older history has no cycle here.
-// OpenRails' own retries carry the same transaction ids and were recorded
-// when they completed.
+// attempts: NMI's for an NMI-owned subscription, Stripe's or CCBill's for a
+// provider-owned one. The first charge at or after the paid period's end is
+// that cycle's rebill, later ones its retries. OpenRails' own retries share
+// these transaction ids and are recorded when they complete.
 func recordScheduleAttempts(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction, now time.Time) error {
 	owner := attempts.OwnerOf(sub.CollectionPolicy)
 	if (owner != attempts.OwnerNMISchedule && owner != attempts.OwnerProvider) || sub.CurrentPeriodStartsAt == nil || sub.CurrentPeriodEndsAt == nil || !sub.CurrentPeriodEndsAt.After(*sub.CurrentPeriodStartsAt) {

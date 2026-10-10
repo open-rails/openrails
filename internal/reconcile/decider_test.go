@@ -266,7 +266,7 @@ func TestDecideFirstPartyLaw(t *testing.T) {
 	}
 }
 
-// #821: NMI rebills forever, so a wedged next-billing date is dunning, never death.
+// NMI rebills forever, so a wedged next-billing date is dunning, never death.
 func TestDecideStaleRosterDateNeverCancels(t *testing.T) {
 	for _, staleDays := range []int{15, 30, 90, 365, 3 * 365} {
 		end := rel(-time.Duration(staleDays) * oneDay)

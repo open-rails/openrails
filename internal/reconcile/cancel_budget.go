@@ -5,13 +5,11 @@ import (
 	"math"
 )
 
-// #837/#834 — the pass-level brakes on convergence-driven cancellation.
-//
-// Every guard here bounds the LOCAL cancel + entitlement revoke, not just the
-// provider intent. Gating only the provider intent (the #679 volume breaker)
-// leaves the worst case uncovered: an `absent_from_exhaustive_roster` cancel
-// carries RemoteGone=true, creates NO provider intent, and so is invisible to
-// that breaker while it still revokes the customer's access.
+// Pass-level brakes on convergence-driven cancellation. Each bounds the local
+// cancel + entitlement revoke, not just the provider intent: an
+// `absent_from_exhaustive_roster` cancel carries RemoteGone and creates no
+// provider intent, so the intents volume breaker never sees it, yet it still
+// revokes the customer's access.
 
 const (
 	// DefaultMaxCancelsPerPass is the absolute per-merchant, per-pass ceiling
@@ -22,12 +20,10 @@ const (
 	// DefaultMaxCancelFraction is the share of a merchant's live book one pass
 	// may cancel.
 	DefaultMaxCancelFraction = 0.05
-	// DefaultMinCancelAllowance keeps the percentage cap from livelocking small
-	// books. 5% of a nine-subscriber merchant rounds to zero, so a pure
-	// percentage cap would hold even two genuinely provider-canceled
-	// subscriptions FOREVER and the mirror could never converge — entitlements
-	// granted in perpetuity off subscriptions that no longer exist. A handful
-	// still makes mass cancellation structurally impossible.
+	// DefaultMinCancelAllowance keeps the percentage cap from livelocking
+	// small books: 5% of nine rounds to zero, which would hold genuinely
+	// provider-canceled subscriptions (and their entitlements) forever. A
+	// handful still makes mass cancellation impossible.
 	DefaultMinCancelAllowance = 3
 	// DefaultTinyBook is the largest live book a pass may cancel entirely. A
 	// merchant with a handful of subscribers whose schedules the provider

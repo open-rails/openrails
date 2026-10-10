@@ -14,11 +14,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// #665: per-subscription provider probes — the #367 liveness worker's probing
-// capability rebuilt as SNAPSHOT SOURCES for the one decision core
-// (ResolveUnknownFromSnapshot). A probe answers provider truth for a single
-// subscription as a narrow RemoteSnapshot; it never decides outcomes itself.
-// Read-only by construction: NMI query.php + v5 GET, Stripe GET.
+// Per-subscription provider probes are snapshot sources for the one decision
+// core: a probe answers provider truth for one subscription as a narrow
+// RemoteSnapshot and never decides. Read-only by construction.
 
 // ProbeSubject identifies one `unknown` subscription for a per-sub probe.
 type ProbeSubject struct {
@@ -206,7 +204,7 @@ func (p *StripeSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 
 // StripeSnapshotFromLiveness maps one fetched Stripe subscription record onto a
 // narrow RemoteSnapshot for the decider. Shared by the unknown-cohort probe and
-// the #684 webhook fetch-and-converge path.
+// the webhook fetch-and-converge path.
 func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) *RemoteSnapshot {
 	snap := &RemoteSnapshot{
 		Provider:  ProviderStripe,
@@ -247,15 +245,14 @@ func StripeSnapshotFromLiveness(railSubID string, rec subscriptions.StripeLivene
 			OccurredAt:     rec.CurrentPeriodStart,
 		}}
 	}
-	// An UNPAID latest invoice with an amount due is decline evidence (#684):
-	// the fetch-sourced replacement for invoice.payment_failed's payload facts.
-	// The "failed:" transaction-id prefix matches the legacy failed-row key so a
-	// backfilled failed attempt and the eventual success never collide. Only
-	// recorded when Stripe gives the invoice's own created time (#651: no
-	// fabricated instants).
-	// A dead subscription's failed invoice is not a decline in progress: it
-	// would hold the row in dunning against Stripe's final word. An unpaid
-	// proration (a tier change) is not a declined renewal: the paid period stands.
+	// An unpaid latest invoice with an amount due is decline evidence, the
+	// fetch-sourced replacement for invoice.payment_failed's payload. The
+	// "failed:" transaction-id prefix keeps a backfilled failed attempt and the
+	// eventual success from colliding. Recorded only with the invoice's own
+	// created time (no fabricated instants). A dead subscription's failed
+	// invoice is no decline in progress (it would hold the row in dunning
+	// against Stripe's final word), and an unpaid proration (a tier change) is
+	// no declined renewal: the paid period stands.
 	if rec.LatestInvoiceCollectionFailed && rec.LatestInvoiceAmountDue > 0 && sub.Status != SubscriptionStatusExpired &&
 		!strings.EqualFold(rec.LatestInvoiceBillingReason, "subscription_update") &&
 		rec.LatestInvoiceTransactionID != "" && !rec.LatestInvoiceCreated.IsZero() {
@@ -279,8 +276,7 @@ type CCBillStatusReader interface {
 }
 
 // CCBillSubscriptionProber probes one CCBill subscription via DataLink's
-// per-record viewSubscriptionStatus (#696 — corrects the old premise that
-// CCBill had no per-record read API). Read-only by construction.
+// per-record viewSubscriptionStatus. Read-only by construction.
 type CCBillSubscriptionProber struct {
 	Client CCBillStatusReader
 }
@@ -294,8 +290,8 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	}
 	res, err := p.Client.ViewSubscriptionStatus(ctx, subj.RailSubscriptionID)
 	if err != nil {
-		// Includes the (Phase-0-uncaptured) unknown-subscription answer: an
-		// error keeps the row `unknown` — absence is never fabricated.
+		// Includes the unknown-subscription answer: an error keeps the row
+		// `unknown`; absence is never fabricated.
 		return nil, err
 	}
 	snap := &RemoteSnapshot{
@@ -311,8 +307,8 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	}
 	// Provisional SMS vocabulary (ccbill.SubscriptionStatusResult): "2" active
 	// recurring, "1" active non-recurring (no future rebill), "0" inactive.
-	// Unrecognized values stay SubscriptionStatusUnknown — the decider then
-	// leaves the row unknown rather than acting on a guess (#651).
+	// Unrecognized values stay SubscriptionStatusUnknown, so the decider leaves
+	// the row unknown rather than acting on a guess.
 	sub.Status = SubscriptionStatusUnknown
 	if rebilling, verr := res.Rebilling(); verr == nil {
 		switch {
@@ -334,7 +330,5 @@ func (p *CCBillSubscriptionProber) ProbeSubscription(ctx context.Context, subj P
 	return snap, nil
 }
 
-// Probers are assembled per merchant alongside the fetchers (#699): NMI
-// (query.php + v5 GET), Stripe (GET /v1/subscriptions/{id}) and CCBill
-// (DataLink viewSubscriptionStatus, #696) all probe per-record; Solana is
-// pull-based and gets none. See MerchantFetcherBuilder in merchant_wiring.go.
+// Probers are built per merchant with the fetchers (MerchantFetcherBuilder):
+// NMI, Stripe and CCBill probe per record; Solana is pull-based and gets none.

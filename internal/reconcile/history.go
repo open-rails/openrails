@@ -11,12 +11,11 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// HistoryEvent is one Postgres history row used as the THIRD dunning evidence
-// source: alongside the provider-pulled transaction timeline ("provider") and
-// the local retry fields ("local"), failed-payment rows carry history the
-// provider APIs may no longer return.
+// HistoryEvent is one failed payment attempt, the third dunning evidence
+// source beside the provider transaction timeline ("provider") and the local
+// retry fields ("local"): it keeps history provider APIs may no longer return.
 type HistoryEvent struct {
-	// Table is the originating Postgres table (payments).
+	// Table is the originating Postgres table (payment_attempts).
 	Table     string
 	EventType string
 	Rail      string
@@ -48,8 +47,8 @@ type HistoryEventSource interface {
 // the cap is generous but finite.
 const historyEventLimit = 100000
 
-// PGHistorySource reads failed payment receipts for dunning forensics.
-// This evidence is display-only, never a charging decision input.
+// PGHistorySource reads failed payment attempts for dunning forensics.
+// Display-only, never a charging decision input.
 type PGHistorySource struct {
 	DB *db.DB
 }

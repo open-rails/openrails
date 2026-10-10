@@ -1,17 +1,6 @@
-// Package reconcile compares local OpenRails billing state against the payment
-// rails as the source of truth (#107). It is the sibling of internal/audit:
-// audit checks internal DB consistency, reconcile checks local-vs-rail
-// drift.
-//
-// This file defines phase 1 of #107: the per-provider RailFetcher
-// interface and the normalized RemoteSnapshot model every fetcher produces.
-// The diff engine, findings persistence, enforce appliers, and admin surfaces
-// are phase 2 and deliberately absent.
-//
-// HARD CONSTRAINT: fetchers are read-only by construction. They are built
-// exclusively on query/report/list APIs (NMI query.php, CCBill DataLink
-// exports, Stripe GETs through the stripeapi read-only choke point, Solana RPC
-// account reads) and never perform a rail mutation.
+// Package reconcile compares local billing state against the payment rails as
+// the source of truth and converges the drift. Fetchers are read-only by
+// construction: query/report/list APIs only, never a rail mutation.
 package reconcile
 
 import (
@@ -37,10 +26,9 @@ const (
 	ProviderSolana Provider = "solana"
 )
 
-// SubscriptionStatus is the normalized cross-provider subscription state. The
-// provider's literal status string is always preserved alongside it in
-// RemoteSubscription.RawStatus for forensics; the normalized value is what the
-// phase-2 diff engine compares against local state.
+// SubscriptionStatus is the normalized cross-provider subscription state, the
+// value the diff engine compares; RemoteSubscription.RawStatus keeps the
+// provider's literal status for forensics.
 type SubscriptionStatus string
 
 const (
@@ -51,13 +39,11 @@ const (
 	SubscriptionStatusUnknown  SubscriptionStatus = "unknown"
 )
 
-// LocalMaterializeStatus maps a REMOTE roster status onto the canonical LOCAL
-// lifecycle (or#893). It is deliberately partial: only a live remote
-// subscription may be materialized. A remote `expired` means the provider's
-// paid-through date passed — a clock reading, not a local lifecycle state, and
-// there is no longer a local status that says it. When a pull PROVES the remote
-// subscription is dead, the #665 decider converges the existing local row to
-// canceled (cancel_type=expired); it never mints one.
+// LocalMaterializeStatus maps a remote roster status onto the local lifecycle.
+// Deliberately partial: only a live remote subscription may be materialized. A
+// remote `expired` (paid-through date passed) is a clock reading with no local
+// status; when a pull proves the remote dead, the decider converges the
+// existing row to canceled (cancel_type=expired) and never mints one.
 func LocalMaterializeStatus(remote SubscriptionStatus) (models.SubscriptionStatus, bool) {
 	switch remote {
 	case SubscriptionStatusActive:
@@ -82,8 +68,8 @@ const (
 )
 
 // Capabilities declares which data classes a provider's fetcher can supply.
-// The phase-2 diff engine only runs the checks the provider can answer (e.g.
-// no PS-6 chargeback checks against a provider with Chargebacks=false).
+// The diff engine runs only the checks a provider can answer (no chargeback
+// checks when Chargebacks=false).
 type Capabilities struct {
 	Subscriptions bool `json:"subscriptions"`
 	Transactions  bool `json:"transactions"`
@@ -107,7 +93,7 @@ type RemoteSubscription struct {
 	// provider has one (NMI customer_vault_id, Stripe cus_..., Solana
 	// subscriber wallet). Empty for CCBill (no vault concept exposed).
 	CustomerID string `json:"customer_id,omitempty"`
-	// Email / Username are identity fallbacks for PS-1/bootstrap matching,
+	// Email / Username are identity fallbacks for materialization matching,
 	// populated when the provider exposes them.
 	Email    string `json:"email,omitempty"`
 	Username string `json:"username,omitempty"`
@@ -162,9 +148,9 @@ type RemoteTransaction struct {
 	// DeclineReason carries the rail's failure/decline text for declined
 	// attempts; it is the raw material for the dunning-forensics report.
 	DeclineReason string `json:"decline_reason,omitempty"`
-	// DeclineCode is the rail's decline CODE verbatim (NMI response_code,
-	// Stripe failure_code) — the payments.failure_code stamp (#796): a
-	// backfilled decline without it reads failure_reason='unknown'.
+	// DeclineCode is the rail's decline code verbatim (NMI response_code,
+	// Stripe failure_code), stamped as payments.failure_code: a backfilled
+	// decline without it reads failure_reason='unknown'.
 	DeclineCode string `json:"decline_code,omitempty"`
 	// Answer is the provider's full answer and card, when its read gives
 	// them (NMI's Query API); attempts record it.

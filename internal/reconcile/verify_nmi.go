@@ -116,7 +116,7 @@ func resolveNMIChunk(ctx context.Context, database *db.DB, lc *subscriptions.Sub
 }
 
 // applyVerified decides every read row, holds all of the batch's
-// cancellations when they exceed the pass budget (#837), and applies the rest.
+// cancellations when they exceed the pass budget, and applies the rest.
 func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, subs []*models.Subscription, snaps map[uuid.UUID]*RemoteSnapshot, now time.Time) error {
 	if len(snaps) == 0 {
 		return nil
@@ -138,8 +138,8 @@ func applyVerified(ctx context.Context, database *db.DB, lc *subscriptions.Subsc
 	}
 	holdCancels := false
 	if cancels > 0 {
-		// The kill switch and first-enforce gate (#835/#836) hold every
-		// destructive outcome of a read, as they do the refresh pass's.
+		// The kill switch and first-enforce gate hold every destructive
+		// outcome of a read, as they do the refresh pass's.
 		if verdict := destructive.New(database).Check(ctx, mid.UUID()); !verdict.Allowed || !verdict.EnforceArmed {
 			holdCancels = true
 		}
@@ -288,11 +288,11 @@ func vaultsOf(ctx context.Context, database *db.DB, subs []*models.Subscription)
 }
 
 // Bulk resolves every unverified row of the merchant's NMI account from one
-// paged roster read and one paged transaction read by date range (§12 bulk
-// mode), instead of per-row reads. Each transaction page's charges are
-// recorded as payments and checkpointed, so a crashed pass resumes at the
-// next page; rows are then decided from their recorded charges. Rows the
-// bulk read cannot attribute fall back to batched reads.
+// paged roster read and one paged transaction read by date range. Each
+// transaction page's charges are recorded as payments and checkpointed, so a
+// crashed pass resumes at the next page; rows are then decided from their
+// recorded charges. Rows the bulk read cannot attribute fall back to batched
+// reads.
 func (v *Verifier) Bulk(ctx context.Context, mid billing.MerchantID) error {
 	v.init()
 	v.mu.Lock()

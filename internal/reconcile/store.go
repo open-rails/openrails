@@ -42,11 +42,10 @@ type FindingRecord struct {
 	Notes             string         `json:"operator_notes,omitempty"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
-	// NotifiedAt/NotifiedSeverity are the #787 operator-notification dedupe
-	// linkage: NotifiedAt nil means this open finding has not yet pushed a
-	// notification; NotifiedSeverity is the severity it was notified at, so a
-	// FindingNotifier can detect a genuine escalation vs mere re-observation.
-	// Cleared on every resolution (see the reconciliation.sql resolve queries).
+	// NotifiedAt/NotifiedSeverity are the operator-notification dedupe
+	// linkage: NotifiedAt nil means this open finding has not pushed a
+	// notification; NotifiedSeverity lets a FindingNotifier tell an escalation
+	// from re-observation. Cleared on every resolution.
 	NotifiedAt       *time.Time `json:"notified_at,omitempty"`
 	NotifiedSeverity string     `json:"notified_severity,omitempty"`
 	// PSPID and the resource columns are set on catalog and pull.* findings.
@@ -86,8 +85,8 @@ type Store interface {
 	AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error)
 	MarkFindingVanished(ctx context.Context, id uuid.UUID) error
 	MarkFindingAutoFixed(ctx context.Context, id uuid.UUID, resolutionEvidence map[string]any) error
-	// MarkFindingNotified stamps the #787 dedupe linkage after a FindingNotifier
-	// successfully pushes an operator notification for an OPEN finding.
+	// MarkFindingNotified stamps the dedupe linkage after a FindingNotifier
+	// pushes an operator notification for an open finding.
 	MarkFindingNotified(ctx context.Context, id uuid.UUID, at time.Time, severity Severity) error
 }
 
@@ -249,10 +248,9 @@ func (s *PGStore) ListActionablePullFindings(ctx context.Context, pspID uuid.UUI
 	return out, nil
 }
 
-// autoResolveBatch bounds one auto-resolve statement (or#837). The whole
-// backlog still resolves — the loop below runs until a short batch — but as
-// many short transactions instead of one that holds the findings table for the
-// length of the backlog.
+// autoResolveBatch bounds one auto-resolve statement: the loop still resolves
+// the whole backlog, as many short transactions instead of one that holds the
+// findings table for its length.
 const autoResolveBatch = 1000
 
 func (s *PGStore) AutoResolveVanished(ctx context.Context, pspID uuid.UUID, runID uuid.UUID, types []FindingType) (int64, error) {
@@ -316,9 +314,6 @@ func (s *PGStore) MarkFindingNotified(ctx context.Context, id uuid.UUID, at time
 	})
 	return err
 }
-
-// --- admin/report reads + lifecycle (used by the CLI and admin API, not the
-// engine interface) ---
 
 // FindingFilter narrows ListFindings.
 type FindingFilter struct {
@@ -436,28 +431,19 @@ func (s *PGStore) DismissFinding(ctx context.Context, id uuid.UUID, notes string
 	return n > 0, err
 }
 
-// --- #692 operator findings queue (admin API) ---
-
-// #690 gauge type sets: named counts over OPEN findings, one per error
-// category (Orphaned / Freeloader / Double-Billed). The detectors live in the
-// converge DERIVE/CON passes; extend the sets here when a new type joins a
-// gauge, not the queries.
+// Gauge type sets: named counts over open findings, one per error category.
+// Extend the sets here, not the queries, when a type joins a gauge.
 var (
-	// OrphanedFindingTypes: PAYING WITHOUT ACCESS — the MISSING side (money
-	// collected, entitlement absent/wrongly revoked). Only the ADMIN-side
-	// type counts: derive.subscription.missing and derive.wallet.missing are
-	// AUTO-repaired in the same sweep and never sit open (same rationale that
-	// keeps the dead-subs AUTO check out of freeloaders) — they are episode
-	// material (orphaned episodes, CountErrorEpisodeTotals), not standing errors.
-	// derive.grant.missing is ADMIN surface-only and DOES sit open.
+	// OrphanedFindingTypes: paying without access (money collected,
+	// entitlement absent or wrongly revoked). derive.subscription.missing and
+	// derive.wallet.missing are auto-repaired in the same sweep and never sit
+	// open, so only the admin-side derive.grant.missing counts.
 	OrphanedFindingTypes = []string{
 		"derive.grant.missing",
 	}
-	// FreeloaderFindingTypes: ACCESS WITHOUT PAYING — live access whose
-	// source is PROVEN absent or reversed (#691: stale ≠ freeloader). The
-	// dead-sub-live-window check (derive.grant_effect.mismatch, revoke
-	// direction) is deliberately NOT in the set: it is AUTO-repaired (the
-	// missed #691 closure) in the same sweep, so it never sits open.
+	// FreeloaderFindingTypes: access without paying, whose source is proven
+	// absent or reversed (stale is not freeloading). derive.grant_effect.mismatch
+	// (revoke direction) is auto-repaired in the same sweep, so it is not here.
 	FreeloaderFindingTypes = []string{
 		"derive.entitlement.unjustified",
 		"derive.grant_effect.excess",

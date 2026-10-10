@@ -22,9 +22,8 @@ func TestStripePullDoesNotBackfillNativeRenewalFromCustomer(t *testing.T) {
 	require.Empty(t, diffProvider(ProviderStripe, snapshot, local, []LocalPayment{known}, time.Now(), diffOptions{}))
 }
 
-// The active Stripe checkout.session.completed handler stores pi_* payment
-// IDs (also asserted by ci/TestStripeWebhookReplayAndReorderingConverges). Bulk charge
-// reports must recognize those same payments without re-allocating them.
+// The Stripe checkout.session.completed handler stores pi_* payment IDs; bulk
+// charge reports must recognize those payments without re-allocating them.
 func TestStripePullRecognizesCheckoutPaymentIntent(t *testing.T) {
 	for _, name := range []string{"match", "wrong_amount", "wrong_currency", "two_allocations", "two_charges", "not_settled"} {
 		t.Run(name, func(t *testing.T) {

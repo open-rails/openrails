@@ -17,19 +17,13 @@ import (
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
-// Engine is the PULL-plane engine (#107 phase 2, #665 mirror-writer): it
-// fetches each provider's declared state, diffs it against the local mirror,
-// persists pull.* findings with stable identity, and (in enforce mode) applies
-// idempotent LOCAL MIRROR writes plus decider invocations — subscription state
-// transitions go through the ONE decider (Decide/DecisionApplier), never a
-// bespoke applier. It NEVER mutates a rail — remote actions are findings in
-// the admin queue (requires_admin), and the fetchers are read-only by
-// construction. Internal-plane checks (derive.*/life.*/consistency.*) belong
-// to the Convergence Engine, never here (#665).
-//
-// The caller must run the engine on a merchant-scoped context (a pinned merchant
-// connection / merchant in context) so every read and write is scoped
-// to one merchant; a run executes under exactly one merchant.
+// Engine is the pull-plane engine: it fetches each provider's declared state,
+// diffs it against the local mirror, persists pull.* findings with stable
+// identity and, in enforce mode, applies idempotent local mirror writes, with
+// subscription transitions going through the one decider. It never mutates a
+// rail: remote actions are requires_review findings, and the fetchers are
+// read-only by construction. Internal-plane checks belong to the Convergence
+// Engine. A run executes under exactly one merchant-scoped context.
 type Engine struct {
 	Fetchers map[Provider]RailFetcher
 	Store    Store
@@ -37,13 +31,12 @@ type Engine struct {
 	// Writer applies enforce-mode local mirror writes. May be nil for
 	// advisory-only engines.
 	Writer LocalWriter
-	// Decisions applies decider transitions (PS-2/PS-3 demotion, #665). May be
-	// nil for advisory-only engines.
+	// Decisions applies decider transitions (PS-2/PS-3). May be nil for
+	// advisory-only engines.
 	Decisions DecisionApplier
-	// History is the THIRD dunning-forensics evidence source (Postgres:
-	// imported legacy history + failed payments, #735). May be nil /
-	// unconfigured: the forensics report then carries a note instead — an
-	// unavailable history source is NEVER a run error.
+	// History is the third dunning-forensics evidence source (failed payment
+	// attempts). May be nil or unconfigured: the forensics report then carries
+	// a note; an unavailable history source is never a run error.
 	History HistoryEventSource
 
 	// RecoverInvoicePayment qualifies an observed NMI invoice receipt through
@@ -51,34 +44,30 @@ type Engine struct {
 	// Nil leaves missing invoice receipts as visible findings.
 	RecoverInvoicePayment func(context.Context, uuid.UUID, string) error
 
-	// Notifier bridges persisted findings into the #736 operator notification
-	// store (#787). Optional; nil is a no-op (e.g. embedded runtimes with no
-	// alerting service wired). Best-effort: a notify failure is logged, never
-	// fails the run — the finding is already durably persisted.
+	// Notifier bridges persisted findings into the operator notification
+	// store. Optional; nil is a no-op. Best-effort: a notify failure is
+	// logged, never fails the run (the finding is already persisted).
 	Notifier FindingNotifier
 
-	// Policy reads the merchant's destructive policy — today only the #835
-	// evidence-staleness floor. NewEngine wires it; a nil Policy means the
-	// decider falls back to trusting ONLY what this pass observed, which is
-	// stricter, never more permissive.
+	// Policy reads the merchant's evidence-staleness floor. A nil Policy makes
+	// the decider trust only what this pass observed: stricter, never more
+	// permissive.
 	Policy EvidenceFloorReader
 
-	// Runs makes an enforce pass REVERSIBLE (or#859): it opens a
-	// maintenance_runs record carrying the coverage proof that authorised the
-	// pass, captures a before-image of every subscription the pass is about to
-	// overwrite, and attributes the provider intents it queues. Enforce passes
-	// that would overwrite subscription state REFUSE when it is nil — an
-	// unrecorded destructive pass has no undo, and the empty-roster incident is
-	// exactly why that is not an acceptable default.
+	// Runs makes an enforce pass reversible: it opens a maintenance_runs
+	// record with the coverage proof that authorised the pass, captures a
+	// before-image of every subscription the pass overwrites, and attributes
+	// the provider intents it queues. Passes that would overwrite subscription
+	// state refuse when it is nil: an unrecorded destructive pass has no undo.
 	Runs DestructiveRunRecorder
 
 	// Now is the clock (defaults to time.Now UTC).
 	Now func() time.Time
 
-	// Circuit breaker for absence-based PS-2 detection (design decision 6):
-	// when the provider reports implausibly few live subscriptions vs local
-	// state, ABORT the provider's run instead of generating mass PS-2.
-	// Defaults: MinLocal 1 (#837 — no small-merchant blind spot), Ratio 0.10.
+	// Circuit breaker for absence-based PS-2 detection: when the provider
+	// reports implausibly few live subscriptions vs local state, abort the
+	// provider's run instead of generating mass PS-2. Defaults: MinLocal 1
+	// (no small-merchant blind spot), Ratio 0.10.
 	CircuitBreakerMinLocal int
 	CircuitBreakerRatio    float64
 
@@ -87,8 +76,8 @@ type Engine struct {
 	// "converge-enforce" — an audit trail, not authentication.
 	Actor string
 
-	// CancelBudget (#837) caps how many subscriptions ONE pass may cancel for
-	// this merchant. Over the cap, the pass applies NOTHING, raises a
+	// CancelBudget caps how many subscriptions one pass may cancel for this
+	// merchant. Over the cap the pass applies nothing, raises a
 	// requires_review finding and halts. Zero value = the defaults.
 	CancelBudget CancelBudget
 }
@@ -97,22 +86,21 @@ type Engine struct {
 type RunParams struct {
 	Mode Mode
 	// Mutations, when non-nil, limits enforce-mode local writes to specific
-	// mutation classes. Nil preserves the historical "apply every safe local
-	// fix" behavior for in-process callers; the operator CLI passes an explicit
-	// policy from --insert/--overwrite.
+	// mutation classes. Nil applies every safe local fix (in-process callers);
+	// the operator CLI passes an explicit policy from --insert/--overwrite.
 	Mutations *LocalMutationPolicy
 	// Providers to reconcile; empty means every wired fetcher.
 	Providers []Provider
-	// PSPCoverage (#841) declares, per provider, how many PSPs the merchant has
-	// active on that rail and how many this pass actually read. A pull arms
-	// from ONE PSP, so anything short of complete coverage strips
+	// PSPCoverage declares, per provider, how many PSPs the merchant has
+	// active on that rail and how many this pass read. A pull arms from one
+	// PSP, so anything short of complete coverage strips
 	// SubscriptionsExhaustive: a roster that saw one of two accounts cannot
-	// prove a subscription of the OTHER account is gone.
+	// prove a subscription of the other is gone.
 	PSPCoverage map[Provider]PSPCoverage
-	// PSPs binds each provider section to the ONE merchant-scoped PSP whose
-	// credentials armed its fetcher. REQUIRED (or#893): the engine scopes local
-	// mirror reads and stamps local materialization writes with it, and a
-	// provider with no binding is refused rather than run account-agnostically.
+	// PSPs binds each provider section to the one merchant-scoped PSP whose
+	// credentials armed its fetcher. Required: the engine scopes mirror reads
+	// and stamps materialization writes with it, and a provider with no
+	// binding is refused rather than run account-agnostically.
 	PSPs map[Provider]PSPBinding
 	// Since/Until bound the transaction window passed to the fetchers.
 	Since time.Time
@@ -158,8 +146,7 @@ type ProviderReport struct {
 	Provider Provider `json:"provider"`
 	PspID    string   `json:"psp_id,omitempty"`
 	// DestructiveRunID is set when this provider's enforce pass overwrote
-	// subscription state: the handle `openrails undo-run --run <id>`
-	// reverses (or#859).
+	// subscription state: the handle `openrails undo-run --run <id>` reverses.
 	DestructiveRunID     string            `json:"destructive_run_id,omitempty"`
 	Aborted              bool              `json:"aborted,omitempty"`
 	Error                string            `json:"error,omitempty"`
@@ -360,7 +347,7 @@ func (e *Engine) syncDBClocks() {
 	}
 }
 
-// EvidenceFloorReader yields a merchant's #835 evidence-staleness floor.
+// EvidenceFloorReader yields a merchant's evidence-staleness floor.
 // internal/destructive.Gate implements it.
 type EvidenceFloorReader interface {
 	EvidenceFloor(ctx context.Context, merchantID uuid.UUID) time.Time
@@ -391,10 +378,9 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	fetcher := e.Fetchers[provider]
-	// or#893: a pull is always bound to the ONE PSP whose credentials armed its
-	// fetcher. An unbound section used to read and write the rail's local mirror
-	// account-agnostically: the roster of PSP A was diffed against the rows of
-	// PSP B, and every row it materialised carried NULL provenance. Refuse.
+	// A pull is always bound to the one PSP whose credentials armed its
+	// fetcher; an unbound section would diff one PSP's roster against
+	// another's rows. Refuse.
 	binding, ok := params.PSPs[provider]
 	if !ok || binding.ID == uuid.Nil {
 		return rep, nil, nil, nil, fmt.Errorf("no PSP binding for provider %s: a pull must name the PSP its credentials armed from", provider)
@@ -419,10 +405,9 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		return rep, nil, nil, nil, fmt.Errorf("fetch: %w", err)
 	}
 	snap.PspID = binding.ID.String()
-	// #841: strip the absence proof when the pass did not read every active PSP
-	// on the rail. A merchant running mobius + paykings on NMI would otherwise
-	// have the non-armed PSP's entire book canceled as "absent from an
-	// exhaustive roster".
+	// Strip the absence proof when the pass did not read every active PSP on
+	// the rail, or a merchant with two NMI PSPs would have the unread one's
+	// whole book canceled as "absent from an exhaustive roster".
 	if cov, ok := params.PSPCoverage[provider]; ok && !cov.Complete() && snap.Coverage.SubscriptionsExhaustive {
 		snap.Coverage.SubscriptionsExhaustive = false
 		log.WithContext(ctx).WithFields(log.Fields{
@@ -442,21 +427,16 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 	}
 
-	// Circuit breaker (design decision 6): on absence-based providers, refuse
-	// to treat absence as truth when the remote live set is implausibly small
-	// relative to local live state — a truncated/failed report would otherwise
-	// cancel the whole local roster as mass PS-2. #837: the old `localLive >= 10`
-	// floor DISABLED the breaker for exactly the merchants least able to absorb
-	// the mistake; it is gone. The breaker only has a job where the roster claims
-	// to be an absence proof (#842) — a non-exhaustive roster proves nothing and
-	// produces no absence findings to guard.
+	// Circuit breaker: on absence-based providers, refuse to treat absence as
+	// truth when the remote live set is implausibly small against local live
+	// state; a truncated report would otherwise cancel the whole roster as
+	// mass PS-2. It guards small books too, and only where the roster claims
+	// to be an absence proof (a non-exhaustive one yields no absence findings).
 	traits := traitsFor(provider)
 	if (params.Mutations == nil || params.Mutations.Overwrite) && traits.absenceMeansCanceled && snap.Capabilities.Subscriptions && snap.Coverage.SubscriptionsExhaustive {
 		tripped, reason := e.rosterBreaker().Implausible(provider, len(snap.Subscriptions), localLive)
-		// or#837: the ratio is emitted on EVERY absence-capable pass, not only
-		// when it trips. A breaker whose only trace is the moment it fires
-		// cannot be trended, so nobody sees the roster degrading toward the
-		// threshold until it has already halted a merchant.
+		// The ratio is emitted on every absence-capable pass, not only when it
+		// trips, so a roster degrading toward the threshold can be trended.
 		opsmetric.Emit(ctx, opsmetric.MetricRosterRatio, log.Fields{
 			"provider": string(provider), "remote_live": len(snap.Subscriptions),
 			"local_live": localLive, "ratio": ratioOf(len(snap.Subscriptions), localLive),
@@ -524,11 +504,10 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		rep.Dunning = computeDunningForensics(provider, snap, local, history, historyNote, now)
 	}
 
-	// #837 cancellation cap. Counted BEFORE anything is applied, over the
-	// decider transitions this pass would perform — the LOCAL cancel + revoke,
-	// which no other guard in the system sees. Over the cap the pass applies
-	// NOTHING (findings are still persisted: they are the evidence an operator
-	// needs) and halts the merchant.
+	// Cancellation cap, counted before anything is applied over the decider
+	// transitions this pass would perform (the local cancel + revoke, which no
+	// other guard sees). Over the cap the pass applies nothing (findings are
+	// still persisted as the operator's evidence) and halts the merchant.
 	plannedCancels := countPlannedCancellations(findings)
 	capExceeded, capReason := e.CancelBudget.Exceeded(plannedCancels, localLive)
 	if params.Mutations != nil && !params.Mutations.Overwrite {
@@ -596,16 +575,14 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		return rep, records, planned, appliedChanges, errors.New(capReason)
 	}
 
-	// Enforce: apply the idempotent local writes (one-shot fetch+diff+apply,
-	// design decision 2). Apply failures don't abort the provider — each is
-	// reported and the finding stays reconcile_required for the next run.
+	// Enforce: apply the idempotent local writes. Apply failures don't abort
+	// the provider: each is reported and the finding stays reconcile_required
+	// for the next run.
 	if params.Mode == ModeEnforce {
-		// or#859 tier 1: a pass that OVERWRITES subscription state opens a
-		// destructive run BEFORE it writes anything, carrying the coverage proof
-		// that authorised it and the row count it predicted. The empty-roster
-		// incident canceled 40/40 subscriptions with no record of what the rows
-		// looked like beforehand and no handle to undo it by; a run id plus a
-		// before-image per row is precisely that missing pair.
+		// A pass that overwrites subscription state opens a destructive run
+		// before it writes anything, carrying the coverage proof that
+		// authorised it and its predicted row count: the run id plus a
+		// before-image per row is the undo.
 		destRunID, runErr := e.openDestructiveRun(ctx, provider, binding, snap, countStateOverwrites(applyByID))
 		if runErr != nil {
 			return rep, records, planned, appliedChanges, runErr
@@ -686,7 +663,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 	}
 
 	// Auto-resolve: state-roster findings absent from this completed run
-	// vanished on their own (design decision 1)...
+	// vanished on their own.
 	resolvable := []FindingType{FindingPaymentMethodMismatch}
 	if snap.Coverage.SubscriptionsExhaustive {
 		resolvable = stateRosterFindingTypes
@@ -744,11 +721,10 @@ func countStateOverwrites(applyByID map[uuid.UUID]*Finding) int {
 	return n
 }
 
-// openDestructiveRun opens the run for a converge-enforce pass that is about to
-// overwrite subscription state, or returns uuid.Nil when the pass overwrites
-// nothing. It is the no-bypass gate (or#859 §5.1 obligation 4): an enforce pass
-// with state transitions and no recorder is refused outright rather than run
-// without an undo.
+// openDestructiveRun opens the run for a converge-enforce pass about to
+// overwrite subscription state, or returns uuid.Nil when it overwrites
+// nothing. It is the no-bypass gate: an enforce pass with state transitions
+// and no recorder is refused rather than run without an undo.
 func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, binding PSPBinding, snap *RemoteSnapshot, plannedOverwrites int) (uuid.UUID, error) {
 	if plannedOverwrites == 0 {
 		return uuid.Nil, nil
@@ -773,8 +749,8 @@ func (e *Engine) openDestructiveRun(ctx context.Context, provider Provider, bind
 	})
 }
 
-// fetchHistory pulls the third dunning evidence source (Postgres history,
-// #735). It NEVER fails the run: unconfigured or unreachable degrades to a
+// fetchHistory pulls the third dunning evidence source (failed payment
+// attempts). It never fails the run: unconfigured or unreachable degrades to a
 // note carried into the forensics report.
 func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params RunParams) ([]HistoryEvent, string) {
 	if e.History == nil || !e.History.Configured() {
@@ -790,8 +766,8 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 }
 
 // bindApplyActions stamps the pull's PSP onto every local write the pass will
-// perform. or#893: the pass always HAS a PSP now (runProvider refuses a section
-// without one), so no mirror row the pull path creates is unattributed.
+// perform. runProvider refuses a section without a PSP, so no mirror row the
+// pull path creates is unattributed.
 func bindApplyActions(findings []Finding, psp uuid.UUID) {
 	pspID := &psp
 	for i := range findings {
@@ -823,9 +799,8 @@ func (e *Engine) applyFinding(ctx context.Context, f *Finding) (map[string]any, 
 	evidence := map[string]any{"applied_at": now.Format(time.RFC3339)}
 	switch {
 	case a.Decide != nil:
-		// #665: subscription state transitions route through the ONE decider
-		// applier (park + resolve via the shared lifecycle), never a bespoke
-		// SQL applier.
+		// Subscription state transitions route through the one decider
+		// applier (park + resolve via the shared lifecycle).
 		if e.Decisions == nil {
 			return nil, false, fmt.Errorf("no decision applier wired (enforce with subscription transitions requires Engine.Decisions)")
 		}

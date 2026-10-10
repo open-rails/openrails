@@ -14,25 +14,16 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
-// StripeFetcher pulls Stripe state via raw GETs against the REST API (house
-// style: no stripe-go SDK), always through the stripeapi read-only choke
-// transport so any write sneaking onto this path fails loudly before the
-// network.
+// StripeFetcher pulls Stripe state with raw GETs, always through the stripeapi
+// read-only transport so any write on this path fails before the network.
+// Sources: /v1/subscriptions (status=all), /v1/charges, /v1/refunds and
+// /v1/disputes over [Since,Until].
 //
-// Sources: /v1/subscriptions (status=all, cursor-paginated), /v1/charges,
-// /v1/refunds, /v1/disputes over [Since,Until]. Full capabilities.
-//
-// Provider quirks:
-//   - On current API versions current_period_start/end live on the
-//     subscription ITEM, not the subscription envelope; both locations are
-//     read (item wins when the envelope is zero).
-//   - charge.invoice is set for subscription-driven charges but the
-//     subscription id itself requires an invoice expansion; SubscriptionID is
-//     left empty and the invoice id is preserved in Raw.
-//   - Vault entries are derived from the subscriptions' default_payment_method
-//     expansion (card last4/exp) rather than a separate per-customer
-//     /v1/payment_methods sweep (which is a per-customer API, N+1 over the
-//     roster).
+// Quirks: current_period_start/end live on the subscription item on current
+// API versions (the item wins when the envelope is zero). A charge's
+// subscription id needs an invoice expansion, so SubscriptionID stays empty and
+// the invoice id stays in Raw. Vault entries come from the expanded
+// default_payment_method, not an N+1 /v1/payment_methods sweep.
 type StripeFetcher struct {
 	SecretKey string
 	// BaseURL defaults to https://api.stripe.com; overridable for tests.
@@ -86,15 +77,11 @@ func (f *StripeFetcher) Fetch(ctx context.Context, params FetchParams) (*RemoteS
 			snap.PaymentMethods = append(snap.PaymentMethods, *vault)
 		}
 	}
-	// #842 (same rule as nmi.go): "exhaustive" is an ABSENCE PROOF — it flips
-	// the §3.2 confirmed-absence gate and authorizes cancelling every local
-	// subscription missing from this list. It is therefore decided AFTER the
-	// fetch, from what actually came back. A 200 with an empty `data` and
-	// has_more=false is indistinguishable from a complete roster of an account
-	// that is not ours: a key rotated onto a sibling Stripe account, a restricted
-	// key, or an incident returning an empty first page all look exactly like
-	// "this merchant has no subscribers". A customer-filtered roster proves
-	// nothing about the merchant's book either.
+	// "Exhaustive" is an absence proof: it sets the confirmed-absence gate and
+	// authorizes cancelling every local subscription missing from this list, so
+	// it is decided from what came back. An empty 200 is indistinguishable from
+	// another account's complete roster (rotated or restricted key, incident),
+	// and a customer-filtered roster proves nothing about the book.
 	if params.SubscriptionID == "" && params.CustomerID == "" && len(snap.Subscriptions) > 0 {
 		snap.Coverage.SubscriptionsExhaustive = true
 	}
@@ -214,10 +201,9 @@ func (f *StripeFetcher) listRaw(ctx context.Context, path string, params FetchPa
 	return all, nil
 }
 
-// listSubscriptions pages /v1/subscriptions?status=all with the price,
-// default payment method and latest invoice expanded. A SubscriptionID filter short-circuits to
-// the single-object GET. Note: /v1/subscriptions does not date-filter on
-// created here — the subscription roster is point-in-time state, not events.
+// listSubscriptions pages /v1/subscriptions?status=all with the price, default
+// payment method and latest invoice expanded; a SubscriptionID filter is a
+// single GET. The roster is point-in-time state, so it takes no created window.
 func (f *StripeFetcher) listSubscriptions(ctx context.Context, params FetchParams) ([]json.RawMessage, error) {
 	if params.SubscriptionID != "" {
 		body, err := f.get(ctx, "/v1/subscriptions/"+url.PathEscape(params.SubscriptionID)+"?expand[]=default_payment_method&expand[]=latest_invoice")
@@ -265,8 +251,6 @@ func (f *StripeFetcher) get(ctx context.Context, pathAndQuery string) ([]byte, e
 	}
 	return body, nil
 }
-
-// --- normalizers ---
 
 type stripeSubscriptionJSON struct {
 	ID                 string `json:"id"`

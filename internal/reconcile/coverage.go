@@ -89,28 +89,22 @@ func (r *RunResult) hasUnapplied(provider string, financialOnly bool) bool {
 	return false
 }
 
-// MarkReconciledSourceDomains flips the §3.2 confirmed-absence gate
-// (billing.reconciliation_state) for every source domain the given pull
-// proofs actually PROVE, and returns the domains flipped. The rule (#665):
+// MarkReconciledSourceDomains sets the confirmed-absence gate
+// (billing.reconciliation_state) for each source domain the proofs prove, and
+// returns those domains:
 //
-//   - Absence proofs need EXHAUSTIVE coverage (SnapshotCoverage), never mere
-//     event-window watermark freshness.
-//   - A domain is proven only when EVERY rail in the merchant's declared
-//     psps catalog was covered — and only rails with exactly
-//     ONE declared account (any environment) qualify, because a single
-//     credentials-set pull cannot prove absence across sibling accounts. An
-//     account-bound pull must be bound to that one account. An empty catalog
-//     proves nothing (accounts may simply not be declared yet).
-//   - `subscriptions` needs SubscriptionsExhaustive (rosters are not
-//     windowed, so bounded event pulls still prove it). `payments` needs
-//     exhaustive, pagination-complete, UNBOUNDED transaction coverage (full
-//     history) — only a full-head pull proves it. `grants` is admin/local-
-//     sourced: no pull ever proves it (manual/bulk-import decision only).
-//   - The flag is a ratchet: proven domains flip true; nothing is unset.
+//   - Absence needs exhaustive coverage, never watermark freshness.
+//   - Every rail in the merchant's psps catalog must be covered and have
+//     exactly one declared account (one pull cannot prove absence across
+//     sibling accounts); an account-bound pull must be bound to it. An empty
+//     catalog proves nothing.
+//   - `subscriptions` needs SubscriptionsExhaustive; `payments` needs
+//     exhaustive, pagination-complete, unbounded transaction coverage. No pull
+//     proves `grants`.
+//   - It is a ratchet: nothing is unset.
 //
-// Callers run it merchant-scoped after mirror writes were applied
-// (enforce insert+overwrite) — an advisory dry-run proves nothing about the
-// LOCAL mirror.
+// Callers run it merchant-scoped after enforce mirror writes; an advisory pass
+// proves nothing about the local mirror.
 func MarkReconciledSourceDomains(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, proofs PullProofs) ([]string, error) {
 	accounts, err := q.ListPSPsForMerchant(ctx, merchantID)
 	if err != nil {

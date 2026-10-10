@@ -36,41 +36,32 @@ const pendingStaleAfter = 72 * time.Hour
 // payment before the missing activation is surfaced.
 const paidPendingAfter = time.Hour
 
-// deriveBackfillWindow bounds derive-1 (#631): only subscriptions/payments whose
-// access window ends within this lookback are derived. Banking-aligned 3y
-// (replaces the migrate's old 1-year hack). A past-ended window is harmless
-// (not live); the bound just keeps the merchant-wide sweep cheap.
-// ponytail: const, not a config knob — make it a knob if a merchant needs to tune it.
+// deriveBackfillWindow bounds derive-1: only subscriptions/payments whose
+// access window ends within this lookback are derived. A past-ended window is
+// harmless (not live); the bound keeps the merchant-wide sweep cheap.
 const deriveBackfillWindow = 3 * 365 * 24 * time.Hour
 
-// convergeScanCap bounds ONE pass's per-merchant detector scans (or#837). The
-// sweep runs every 15 minutes across every armed merchant, so a scan whose size
-// is the merchant's whole book is work scaling with records on file. Each capped
-// scan is ordered by URGENCY (oldest lapse / longest-dead / oldest window), and
-// a converge pass REMOVES what it repairs, so a merchant over the cap drains
-// from the front across passes rather than losing findings. Deliberately far
-// above any healthy merchant's drift: hitting it means something is wrong.
+// convergeScanCap bounds one pass's per-merchant detector scans, so sweep work
+// does not scale with the whole book. Each capped scan is ordered by urgency
+// and a pass removes what it repairs, so a merchant over the cap drains from
+// the front across passes. Far above any healthy merchant's drift.
 const convergeScanCap = 5000
 
-// The three internal-plane passes, run in DERIVE → LIFE → CON order (sources must
-// be truthful before grant effects are derived; lifecycle state must be current
-// before final consistency checks). Each is fleshed out in #511 Phase D — the
-// skeletons here emit nothing, so Converge is a verified no-op until the checks
-// land. Every pass holds the engine for DB access + the grants layer (#514).
+// The three internal-plane passes run in DERIVE → LIFE → CON order: sources
+// must be truthful before grant effects are derived, and lifecycle state
+// current before the final consistency checks.
 
-// derivePass — DERIVE plane: source → grant → grant effect. The
-// heart of the engine; it drives derive-1/derive-2 (the #514 grants package, the
-// sole writers of grants + grant effects) and verifies their output against the
-// source ledger.
+// derivePass is the DERIVE plane (source → grant → grant effect): it drives
+// derive-1/derive-2 through the grants package, the sole writer of grants and
+// grant effects, and verifies their output against the source ledger.
 type derivePass struct{ e *ConvergeEngine }
 
 func (*derivePass) Plane() string { return "DERIVE" }
 func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
-	// DERIVE belongs to a customer (grants belong to a customer). A customer-scoped
-	// Converge checks that one customer; the merchant-scoped sweep checks every
-	// grant in ONE set query per check (#575 — `customer` nil), not one query per
-	// grant-holder. Per-subscription scope has no extra DERIVE beyond its customer,
-	// so it defers to the customer-scope run.
+	// DERIVE belongs to a customer (grants belong to a customer). A
+	// customer-scoped Converge checks that one customer; the merchant-scoped
+	// sweep checks every grant in one set query per check (`customer` nil).
+	// Per-subscription scope defers to the customer-scope run.
 	if scope.Customer == nil && scope.Subscription != nil {
 		return nil, nil // subscription-scope DERIVE rides on its customer-scope run
 	}
@@ -82,9 +73,8 @@ func (p *derivePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 // set queries, so the checks can never diverge between inline and sweep.
 func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.UUID) ([]ConvergeFinding, error) {
 	// derive.grant_effect.missing — every live grant has its derived effect
-	// (entitlement windows / credit deposit). Repair = MaterializeGrant (#514,
-	// idempotent). The remaining DERIVE checks (grant.*, grant_effect.mismatch)
-	// follow.
+	// (entitlement windows / credit deposit). Repair = MaterializeGrant
+	// (idempotent).
 	gl := grants.New(p.e.DB.Gen(ctx), scope.Merchant.UUID())
 	gl.SetClock(p.e.Now)
 	missing, err := gl.MissingEffects(ctx, customer)
@@ -107,12 +97,10 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 	}
 
 	// derive.grant_effect.excess — a terminated grant whose effect was never
-	// retracted (recorded revoke/expire that didn't propagate). Repair =
-	// MaterializeGrant (retracts: entitlement revoke / credit clawback). The grant
-	// + its termination are both present, so this is NOT the confirmed-absence
-	// case (DomainNone) — it's AUTO propagation of a recorded decision. (The true
-	// orphan case — a live effect with NO grant at all — is the gated/ADMIN variant,
-	// added with merchant-wide enumeration.)
+	// retracted (a recorded revoke/expire that didn't propagate). Repair =
+	// MaterializeGrant (entitlement revoke / credit clawback). Grant and
+	// termination are both present, so this is AUTO propagation of a recorded
+	// decision, not the confirmed-absence case.
 	unretracted, err := gl.UnretractedTerminations(ctx, customer)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan unretracted terminations: %w", err)
@@ -134,25 +122,17 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// derive.grant.excess (grant tier) — a LIVE grant whose backing payment was
-	// REFUNDED: the source no longer justifies the grant. Surface-only ADMIN, NOT
-	// gated: the refund is a PRESENT recorded fact (not confirmed-absence), but a
-	// refund that intentionally keeps access (goodwill) is legitimate, so an
-	// operator decides whether to revoke — never auto-retracted. (The
-	// subscription-canceled case is handled at write time by the #511 revocation
-	// unification, which terminates the grant when the effect is revoked, so it
-	// does not surface here.)
-	// derive.grant.missing (grant tier) — a completed, positive, one-off payment
-	// for a product that PROMISES grants (non-empty entitlements/credits spec) yet
-	// produced NO grant: "paid for a grantable product, got nothing" (a derive-1
-	// failure). SPEC-AWARE — the product's own grant spec (payment→price→product)
-	// is the positive signal, so empty-spec products / pure fees are never flagged.
-	// MISSING → ADMIN surface-only: auto-granting re-runs derive-1 (product-spec-
-	// dependent, owned by the purchase path), so an operator investigates the
-	// creation failure and re-triggers rather than the engine guessing the window.
-	// Severity CRITICAL (#690, Paul's ordering): this is the ORPHANED category —
-	// taking money without delivering access — which outranks giving content
-	// away (freeloader findings stay high).
+	// derive.grant.excess (grant tier) — a live grant whose backing payment
+	// was refunded. Surface-only ADMIN, not gated: a refund that keeps access
+	// (goodwill) is legitimate, so an operator decides; never auto-retracted.
+	// A subscription cancel terminates the grant at write time, so it never
+	// surfaces here.
+	// derive.grant.missing (grant tier) — a completed, positive one-off
+	// payment for a product whose spec promises grants, yet no grant ("paid,
+	// got nothing"). The product's own spec is the signal, so empty-spec
+	// products and fees never flag. ADMIN surface-only: re-granting re-runs
+	// derive-1, so an operator investigates. Critical: taking money without
+	// delivering access outranks giving content away.
 	ungranted, err := gl.UngrantedGrantablePayments(ctx, customer)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan ungranted grantable payments: %w", err)
@@ -171,12 +151,11 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// derive.subscription.missing (#631) — a stored subscription in an
-	// access-granting state for a grantable product with NO grant. Unlike the
-	// payment finding above this is AUTO-repaired: the window is unambiguous (the
-	// subscription period), so the engine materializes grant + entitlement. NO-OP
-	// for live subs (they already carry their grant); fires on the migrated cohort
-	// after the migrate stops writing entitlements (#724).
+	// derive.subscription.missing — a stored subscription in an
+	// access-granting state for a grantable product with no grant. Unlike the
+	// payment finding above this is AUTO-repaired: the subscription period is
+	// the unambiguous window. A no-op for live subs (they carry their grant);
+	// it fires on imported ones.
 	scanSince := p.e.Now().Add(-deriveBackfillWindow)
 	ungrantedSubs, err := gl.UngrantedSubscriptions(ctx, customer, scanSince)
 	if err != nil {
@@ -196,9 +175,9 @@ func (p *derivePass) runScope(ctx context.Context, scope Scope, customer *uuid.U
 		})
 	}
 
-	// derive.wallet.missing (#631) — a completed solana wallet payment with a
-	// stored access window and NO grant. AUTO-repaired (the stored expiration is the
-	// unambiguous window). NO-OP for live; fires on the migrated wallet cohort.
+	// derive.wallet.missing — a completed solana wallet payment with a stored
+	// access window and no grant. AUTO-repaired (the stored expiration is the
+	// window). A no-op for live payments; it fires on imported ones.
 	ungrantedWallet, err := gl.UngrantedWalletPayments(ctx, customer, scanSince)
 	if err != nil {
 		return nil, fmt.Errorf("derive: scan ungranted wallet payments: %w", err)
@@ -374,15 +353,15 @@ func unjustifiedAccessFinding(o *gen.ListUnjustifiedAccessWindowsRow) ConvergeFi
 		Provider:          "self",
 		Evidence:          ev,
 		RecommendedAction: prose,
-		// surface-only (policy, #690): never auto-revoke on a derived conclusion.
+		// surface-only (policy): never auto-revoke on a derived conclusion.
 	}
 }
 
 // lockedMaterialize runs a MaterializeGrant repair inside a merchant tx under
-// the per-customer spend lock (#677): the credit legs (deposit / clawback) are
+// the per-customer spend lock: the credit legs (deposit / clawback) are
 // check-then-write, so overlapping converge runs must serialize with each
-// other and with spends. The entitlement/ownership legs are lock-cheap no-ops
-// when already projected.
+// other and with spends. Entitlement/ownership legs are cheap no-ops when
+// already projected.
 func (p *derivePass) lockedMaterialize(ctx context.Context, scope Scope, g gen.BillingGrant) error {
 	ctx = merchant.WithID(ctx, scope.Merchant)
 	return p.e.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
@@ -402,10 +381,9 @@ type lifePass struct{ e *ConvergeEngine }
 
 func (*lifePass) Plane() string { return "LIFE" }
 func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
-	// life.checkout_attempt.stale — an expired, non-terminal checkout attempt is
-	// cleaned up. EXCESS but time-driven (NOT confirmed-absence gated), so AUTO.
-	// Subscription lifecycle checks (period/dunning/grace/pending) + provider-intent
-	// staleness follow.
+	// life.checkout_attempt.stale — an expired, non-terminal checkout attempt
+	// is cleaned up. EXCESS but time-driven (not confirmed-absence gated), so
+	// AUTO.
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
 	// Repairs retain this pass's detection clock without mutating the lifecycle
@@ -441,11 +419,11 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		})
 	}
 
-	// A clock reading is not evidence (#1089 §1, §8): an overdue renewal or a
-	// dunning window that closed with nothing scheduled only asks the
-	// provider. The repair is the lifecycle's own event on the locked row
-	// (RenewalOverdue / DunningStale → unverified, read at once, §12), taken
-	// only while the premise still holds; it never moves a period or a retry.
+	// A clock reading is not evidence: an overdue renewal or a dunning window
+	// that closed with nothing scheduled only asks the provider. The repair is
+	// the lifecycle's own event on the locked row (RenewalOverdue /
+	// DunningStale → unverified, read at once), taken only while the premise
+	// still holds; it never moves a period or a retry.
 	overdue, err := q.ListOverdueRenewals(ctx, gen.ListOverdueRenewalsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, OverdueBefore: now.Add(-reconcile.PeriodGrace), RowLimit: convergeScanCap,
 	})
@@ -555,9 +533,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 
 	// life.subscription.pending_stale — a `pending` sub that never confirmed
 	// within the threshold is abandoned; cancel it (no entitlements/money to
-	// unwind). EXCESS → gated on the `subscriptions` domain (#842): the repair
-	// is justified by an absence (no confirmation arrived), and an absence is
-	// only proof once provider truth has been fully reconciled.
+	// unwind). EXCESS, gated on the `subscriptions` domain: the repair rests
+	// on an absence (no confirmation arrived), which is proof only once
+	// provider truth is fully reconciled.
 	stalePending, err := q.ListStalePendingSubscriptions(ctx, gen.ListStalePendingSubscriptionsParams{
 		MerchantID: scope.Merchant.UUID(), CustomerID: scope.Customer, Cutoff: now.Add(-pendingStaleAfter),
 		RowLimit: convergeScanCap,
@@ -572,9 +550,9 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 			Type:  "life.subscription.pending_stale",
 			Shape: ShapeExcess,
 			Class: ClassAuto,
-			// #842: this cancels a subscription because a confirmation did not
-			// ARRIVE — an absence, and absence needs the §3.2 proof. A delayed
-			// or dropped webhook is not evidence the customer did not pay.
+			// This cancels because a confirmation did not arrive: an absence,
+			// which needs the confirmed-absence proof. A delayed or dropped
+			// webhook is not evidence the customer did not pay.
 			SourceDomain: DomainSubscriptions,
 			Severity:     "low",
 			SubjectKey:   "subscription:" + subID.String(),
@@ -659,13 +637,13 @@ func (p *lifePass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, err
 		}
 	}
 
-	// life.provider_intent.stuck (#665, moved from the legacy pull engine's
-	// PS-10) — a rail intent sitting non-terminal beyond the stuck thresholds.
-	// LOCAL ledger only, merchant-wide (intents carry no customer), so it runs
-	// on the sweep/post-pull scope. Mode/kill-switch parks are informational
-	// (the executor drains them when the blocker lifts); everything else means
-	// provider failures, bad credentials, or a dead executor/verifier. NEVER
-	// repaired here: the intent executor/verifier own the intent.
+	// life.provider_intent.stuck — a rail intent sitting non-terminal beyond
+	// the stuck thresholds. Local ledger only, merchant-wide (intents carry no
+	// customer), so it runs on the sweep/post-pull scope. Mode/kill-switch
+	// parks are informational (the executor drains them when the blocker
+	// lifts); anything else means provider failures, bad credentials or a
+	// dead executor/verifier. Never repaired here: the executor/verifier own
+	// the intent.
 	if scope.IsGlobal() {
 		actionCutoff, verifyCutoff := now.Add(-stuckActionableAge), now.Add(-stuckVerifyAge)
 		scopeMerchantID, scopeErr := merchant.Require(ctx)
@@ -749,9 +727,8 @@ const (
 // blocker lifts — so the finding is informational, not the admin queue.
 func isModeParkedReason(reason string) bool { return strings.Contains(reason, "mode=") }
 
-// stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the BARE
-// intent id — ledger continuity with the legacy pull-engine emissions of the
-// same finding type. Provider is the intent's own rail.
+// stuckIntentFinding diagnoses one stuck rail intent. SubjectKey is the bare
+// intent id; Provider is the intent's own rail.
 func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFinding {
 	age := now.Sub(si.CreatedAt)
 	ev := map[string]any{
@@ -801,12 +778,12 @@ func stuckIntentFinding(si *gen.BillingProviderIntent, now time.Time) ConvergeFi
 // longer ago than this is stale news, never emailed.
 const accessEndedLookback = 30 * 24 * time.Hour
 
-// notifyPass — NOTIFY plane (#789): whatever plane closed a customer's LAST
+// notifyPass is the NOTIFY plane: whatever plane closed a customer's last
 // entitlement window (dunning, reconcile-driven cancel, grant lapse), the
-// customer is told exactly once. The pass only CREATES notifications rows
-// (emailed_at NULL); delivery belongs to the notification email sweep — the
-// converge engine carries no EmailService. Dedupe: any premium_ended row at or
-// after the close means a transition site already told them.
+// customer is told exactly once. It only creates notifications rows
+// (emailed_at NULL); the notification email sweep delivers them. Dedupe: any
+// premium_ended row at or after the close means a transition site already
+// told them.
 type notifyPass struct{ e *ConvergeEngine }
 
 func (*notifyPass) Plane() string { return "NOTIFY" }
@@ -871,34 +848,27 @@ func (p *notifyPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, e
 	return out, nil
 }
 
-// conPass — CON plane: residual internal consistency (duplicate /
-// amount_mismatch / reference).
+// conPass — CON plane: residual internal consistency (duplicate / reference).
 type conPass struct{ e *ConvergeEngine }
 
 func (*conPass) Plane() string { return "CON" }
 func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error) {
-	// CON is intentionally small (spec §CON): the residual internal-accounting /
-	// referential checks that aren't already a DB constraint, a LIFE state-machine
-	// transition, or a DERIVE grant effect. Findings here are surface-only — a
-	// dangling reference or a duplicate has no safe automatic repair, it needs an
-	// admin/operator decision — so they are ADMIN, no Repair closure.
+	// CON holds the residual accounting/referential checks that are not a DB
+	// constraint, a LIFE transition or a DERIVE grant effect. Its findings are
+	// ADMIN and surface-only: a dangling reference or a duplicate has no safe
+	// automatic repair.
 	//
 	// consistency.reference.source_reference — an entitlement's polymorphic
-	// source_type/source_id pair resolves to no row (or to a
-	// row in the wrong merchant). EXCESS/MISMATCH → ADMIN. Customer-scope filters
-	// in code (the underlying audit queries are merchant-wide); merchant-
-	// scope reports all. The remaining CON subtypes (duplicate.*, amount_mismatch.*)
-	// layer onto this same harness.
+	// source_type/source_id pair resolves to no row (or to one in the wrong
+	// merchant). EXCESS/MISMATCH → ADMIN.
 	q := p.e.DB.Gen(ctx)
 	now := p.e.Now()
 	var out []ConvergeFinding
 
-	// Customer-scoped when scope.Customer is set (inline Converge(customer) → the
-	// scan is O(that customer)), merchant-wide when nil (the sweep). The SQL does
-	// the filtering, so an after-every-mutation invocation stays cheap.
-	// #690 partition: LIVE windows with dangling sub sources are freeloaders
-	// (derive.entitlement.unjustified); this reference check keeps the
-	// non-live rest.
+	// Customer-scoped when scope.Customer is set, merchant-wide when nil; the
+	// SQL filters, so an after-every-mutation run stays cheap. Live windows
+	// with dangling sub sources are freeloaders (derive.access.unjustified);
+	// this check keeps the non-live rest.
 	cust := scope.Customer
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
@@ -943,14 +913,13 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 		emit(r.AccessID, r.UserID, r.ProductID, r.SourceType, r.SourceID)
 	}
 
-	// consistency.duplicate.provider_charge — more than one captured charge for
-	// ONE period of one subscription (the period each charge paid for, or for
-	// older rows the subscription's cadence). Distinct consecutive periods are
-	// never duplicates, however short the cadence. EXCESS → ADMIN, surface-only:
-	// collecting money twice is never auto-undone (a refund is an operator
-	// decision); the finding carries the duplicate payment ids + the #692 refund
-	// recommendation. Severity CRITICAL (#690): money harm. Findings the scan no
-	// longer reports close themselves.
+	// consistency.duplicate.provider_charge — more than one captured charge
+	// for one period of one subscription (the period each charge paid for, or
+	// for older rows the subscription's cadence). Distinct consecutive periods
+	// are never duplicates. EXCESS → ADMIN, surface-only: collecting money
+	// twice is never auto-undone (a refund is an operator decision); the
+	// finding carries the payment ids and a refund recommendation. Critical:
+	// money harm. Findings the scan no longer reports close themselves.
 	dupCharges, err := q.ConDuplicateChargesSamePeriod(ctx, gen.ConDuplicateChargesSamePeriodParams{MerchantID: scopeMerchantID.UUID(), CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate charges: %w", err)
@@ -989,12 +958,11 @@ func (p *conPass) Run(ctx context.Context, scope Scope) ([]ConvergeFinding, erro
 		})
 	}
 
-	// consistency.duplicate.ownership (#690) — more than one LIVE paid
-	// ownership grant per (customer, product): the cross-month one-off/
-	// lifetime double-purchase that duplicate.provider_charge's month scope
-	// misses. CRITICAL (customer charged twice), ADMIN surface-only, with the
-	// #692 cancel_and_refund recommendation targeting the LATER purchase
-	// (default only — override_params can flip it before approving).
+	// consistency.duplicate.ownership — more than one live paid ownership
+	// grant per (customer, product): the cross-month one-off/lifetime double
+	// purchase duplicate.provider_charge misses. Critical, ADMIN surface-only,
+	// with a cancel_and_refund recommendation targeting the later purchase
+	// (override_params can flip it before approving).
 	dupOwn, err := q.ConDuplicateOwnershipGrants(ctx, gen.ConDuplicateOwnershipGrantsParams{MerchantID: scopeMerchantID.UUID(), Now: now, CustomerID: cust})
 	if err != nil {
 		return nil, fmt.Errorf("con: scan duplicate ownership grants: %w", err)
@@ -1124,7 +1092,7 @@ func duplicateOwnershipFinding(d *gen.ConDuplicateOwnershipGrantsRow) (ConvergeF
 }
 
 // unverifiedUnresolvedAfter is how long a row may stay unverified before it is
-// escalated to the operator (#1089 §11: unverified is never a dead end).
+// escalated to the operator (unverified is never a dead end).
 const unverifiedUnresolvedAfter = 72 * time.Hour
 
 // unverifiedFindings reports the unverified backlog per account
@@ -1243,11 +1211,11 @@ func (p *lifePass) heldRenewalsFinding(ctx context.Context, scope Scope, now tim
 	}, nil
 }
 
-// funnelFinding is the merchant's recovery funnel (#1089 §9): live
-// subscriptions by state, the oldest unverified entry and open unknown
-// provider operations (unmapped decline codes are life.decline.unmapped).
-// Raised only while something is in recovery or needs attention; it resolves
-// when the funnel is empty.
+// funnelFinding is the merchant's recovery funnel: live subscriptions by
+// state, the oldest unverified entry and open unknown provider operations
+// (unmapped decline codes are life.decline.unmapped). Raised only while
+// something is in recovery or needs attention; resolves when the funnel is
+// empty.
 func (p *lifePass) funnelFinding(ctx context.Context, scope Scope, now time.Time) (*ConvergeFinding, error) {
 	q := p.e.DB.Gen(ctx)
 	mid := scope.Merchant.UUID()

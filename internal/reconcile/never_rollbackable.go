@@ -2,25 +2,11 @@ package reconcile
 
 import "fmt"
 
-// or#859 §4: the never-rollbackable register, in code.
-//
-// The spec's Class A is a list of tables no rollback may restore at any scope by
-// any tier — the money spine, the grant log that every derived effect is
-// recomputed from, the lifecycle audit trail, the record of what we did to the
-// outside world, and the dedup truth that stops a webhook being processed twice.
-// Prose in a spec is not a guard, so the register lives here, three enforcement
-// points read it, and the reasons travel with the names:
-//
-//   - TestNeverRollbackableRegisterIsEnforced scans the SQL of every query the
-//     undo paths issue and fails if one writes a registered table;
-//   - migration 0036 revokes the privileges the doctrine says nothing
-//     legitimately uses, so the rule survives a query that never met this file;
-//   - UndoRun refuses a run KIND whose damage is registered as unrecoverable
-//     rather than reporting a reversal it cannot perform.
-//
-// The asymmetry that governs all of it: a rollback restores state wrongly
-// DESTROYED; it can never retract value wrongly GRANTED. Retraction is a revoke
-// event plus a compensating transfer plus an operator-authorised refund.
+// NeverRollbackableTables lists the tables no rollback may restore, with why:
+// the money spine, the grant log every derived effect is recomputed from, the
+// lifecycle audit trail, the provider mutation record and webhook dedup. A
+// rollback restores state wrongly destroyed; it never retracts value wrongly
+// granted (that is a revoke, a compensating transfer and a refund).
 var NeverRollbackableTables = map[string]string{
 	"ledger_transfers": "money. Reversal is a compensating transfer, never a deletion — and any row-level write bypassing the counter trigger silently corrupts every balance read",
 	"ledger_accounts":  "trigger-maintained balance projection; restoring a row desynchronises it from its transfers",
@@ -34,21 +20,14 @@ var NeverRollbackableTables = map[string]string{
 	"price_key_movements":     "forensics: price-identity history",
 }
 
-// Two tables an undo legitimately writes and which are nonetheless append-only
-// in substance — `maintenance_runs` and `destructive_run_before_images` — are
-// absent from the register on purpose. They are the undo's own bookkeeping
-// (status/reversed_at, restored_at), and the schema already holds the line
-// harder than a name list could: guard_billing_fact_columns triggers on both
-// refuse any rewrite of a run's identity or a captured image.
+// maintenance_runs and destructive_run_before_images are absent on purpose: an
+// undo writes its own bookkeeping there, and guard_billing_fact_columns
+// triggers refuse any rewrite of a run's identity or a captured image.
 
-// provider_intents is deliberately NOT in the register even though the spec lists it
-// as Class A, and the distinction is the single most valuable thing tier 1 does:
-// moving a queued row to `status='superseded'` is a FORWARD lifecycle transition
-// on an existing status value, not a rollback of an append-only log. That is how
-// an undo neutralises a provider write that has not fired yet. What stays
-// forbidden is deleting the row or rewriting one that already executed, and the
-// supersede query's `status IN ('pending','failed_retryable')` predicate is what
-// holds that line.
+// provider_intents is absent too: an undo supersedes a queued intent
+// (pending/failed_retryable -> superseded), a forward transition. Deleting one
+// or rewriting one that executed stays forbidden; the supersede query's status
+// predicate holds that line.
 const providerIntentsForwardOnlyReason = "forward lifecycle transition only: pending/failed_retryable -> superseded. Never deleted, never rewritten once it has executed"
 
 // UnrecoverableRunKinds are destructive-run kinds whose damage no local undo can
@@ -59,9 +38,8 @@ var UnrecoverableRunKinds = map[string]string{
 		"Nothing local restores them: recovery is tier 0 (cluster PITR) or a tier 2 snapshot taken before the purge",
 }
 
-// ReversibleRunKinds are the kinds an undo actually knows how to reverse. A kind
-// outside both maps is declared in the schema but not yet converted, and saying
-// so is more useful than a no-op that marks the run reversed.
+// ReversibleRunKinds are the kinds an undo can reverse. A kind in neither map
+// has no undo yet and is refused rather than marked reversed.
 var ReversibleRunKinds = map[string]string{
 	DestructiveRunKindPrune:           "rows were soft-deleted with the run's stamp; the undo clears the tombstones",
 	DestructiveRunKindConvergeEnforce: "row VALUES were overwritten; the undo re-asserts them from the captured before-images and supersedes the provider writes the run queued but has not sent",

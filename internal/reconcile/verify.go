@@ -24,16 +24,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// Verifier resolves unverified subscriptions from provider reads (#1089 §12).
-// Reads are non-destructive, so there is no durable queue: a row stays
-// unverified until a read settles it, and a missed or crashed read is
-// re-detected by the next notification or pass. Duplicate reads, across
-// replicas or passes, are harmless.
+// Verifier resolves unverified subscriptions from provider reads. Reads are
+// non-destructive, so there is no durable queue: a row stays unverified until a
+// read settles it, a missed read is re-detected by the next notification or
+// pass, and duplicate reads are harmless.
 //
-// Requests arrive from the unverified trigger's NOTIFY (Listen) and from the
-// refresh pass (Pass). A merchant's requests coalesce for Coalesce, then
-// bounded workers read them verifyBatchSize at a time; above BulkThreshold
-// pending rows (an import) the account is read in bulk instead.
+// Requests arrive from the unverified trigger's NOTIFY (Listen) and the refresh
+// pass (Pass). A merchant's requests coalesce for Coalesce, then bounded
+// workers read them verifyBatchSize at a time; above BulkThreshold pending rows
+// (an import) the account is read in bulk instead.
 type Verifier struct {
 	DB            *db.DB
 	Clock         clockwork.Clock
@@ -74,7 +73,7 @@ const (
 	verifyBatchSize       = 50
 	verifyReadTimeout     = 2 * time.Minute
 	bulkReadTimeout       = 30 * time.Minute
-	// unverifiedChannel prefixes the per-schema NOTIFY channel of migration 0014.
+	// unverifiedChannel prefixes the unverified trigger's per-schema NOTIFY channel.
 	unverifiedChannel = "openrails_unverified:"
 )
 

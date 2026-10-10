@@ -63,7 +63,7 @@ type Key struct {
 	Endpoint   string
 	Credential [sha256.Size]byte
 	// Expect is the verdict that arms this key: Simulated (zero value) under
-	// sandbox posture, Live under live posture (SEC-33).
+	// sandbox posture, Live under live posture.
 	Expect Verdict
 }
 

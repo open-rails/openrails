@@ -10,13 +10,12 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// Payment health findings (#1118): decline and rebill-failure spikes per PSP
-// account and owner, system errors, decline codes no table maps, and PSPs
-// whose webhooks went silent (#1112). They
-// read the #1116 measures, so an alert and the console's health page agree on
-// every number. Each is a standing finding: it stays open while its condition
-// holds (one notification per episode) and resolves when it no longer does.
-// Rates are compared as integer ratios of counts.
+// Payment health findings: decline and rebill-failure spikes per PSP account
+// and owner, system errors, decline codes no table maps, and PSPs whose
+// webhooks went silent. They read the metrics measures the console's health
+// page reads, so both agree on every number. Each stays open while its
+// condition holds (one notification per episode) and resolves when it no
+// longer does. Rates are compared as integer ratios of counts.
 const (
 	findingNewCardDeclineSpike = "life.payments.new_card_decline_spike"
 	findingRebillFailureSpike  = "life.payments.rebill_failure_spike"

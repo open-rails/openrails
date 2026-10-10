@@ -13,21 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// or#859 §5.2: ONE undo verb over the whole destructive-run ledger.
-//
-// `--prune` destroys rows and reverses by clearing tombstones; a converge-enforce
-// pass destroys row VALUES and reverses from captured before-images. Those are
-// different mechanisms, but an operator holding a run id in the middle of an
-// incident should not have to know which — nor discover, after typing the wrong
-// verb, that the command restored nothing and marked the run reversed anyway.
-// So the kind is read from the ledger and dispatched on, and a kind with no undo
-// is refused by name.
-//
-// Dry-run is the DEFAULT. Applying requires a typed row count that matches the
-// plan, which is the same shape `--prune --expect-rows` already demands of the
-// destructive direction: the confirmation gate belongs on the undo too, because
-// an undo IS a mass mutation — of the merchant's live book, at the worst
-// possible moment to be wrong.
+// One undo verb covers the whole destructive-run ledger: a prune reverses by
+// clearing tombstones, a converge-enforce pass from captured before-images. The
+// kind is read from the ledger and dispatched on; a kind with no undo is
+// refused by name. Dry-run is the default, and applying needs a typed row count
+// matching the plan, because an undo is itself a mass mutation of the live book.
 
 // UndoScope is the scope a run's reversal is confined to. It is descriptive, not
 // a filter: the scope is a PROPERTY of the run (the ledger row carries the
@@ -41,12 +31,9 @@ type UndoScope struct {
 	PspScoped bool `json:"psp_scoped"`
 }
 
-// UnattributedRows counts live provider-bound rows carrying no PSP. or#859
-// §3.2, hole 1 reported this as a coverage BLIND SPOT because psp_id was
-// nullable; or#893 made it NOT NULL everywhere, so every count here is
-// structurally zero and this is now an INVARIANT rather than a report. A
-// non-zero total means the schema was reopened underneath this code, and the
-// undo refuses instead of silently under-covering.
+// UnattributedRows counts live provider-bound rows carrying no PSP. psp_id is
+// NOT NULL, so every count is zero; a non-zero total means the schema changed
+// underneath this code, and the undo refuses rather than under-cover.
 type UnattributedRows struct {
 	Subscriptions    int64 `json:"subscriptions"`
 	Payments         int64 `json:"payments"`
@@ -56,7 +43,7 @@ type UnattributedRows struct {
 }
 
 // Total is how many live rows this merchant holds that no PSP-scoped predicate
-// can reach. Always zero under the or#893 schema.
+// can reach. Always zero while psp_id is NOT NULL.
 func (b UnattributedRows) Total() int64 {
 	return b.Subscriptions + b.Payments + b.CheckoutAttempts + b.PaymentMethods + b.UnfiredIntents
 }
@@ -93,8 +80,8 @@ type UndoPlan struct {
 	IntentsUnfired      int                `json:"intents_unfired"`
 	IntentsIrreversible []IntentDivergence `json:"intents_irreversible,omitempty"`
 	IntentsAmbiguous    []IntentDivergence `json:"intents_ambiguous,omitempty"`
-	// Unattributed is the or#893 invariant, asserted and carried in the plan so
-	// the operator sees the zero rather than trusting it.
+	// Unattributed is the every-row-has-a-PSP invariant, carried in the plan
+	// so the operator sees the zero rather than trusting it.
 	Unattributed UnattributedRows `json:"unattributed_rows"`
 }
 
@@ -227,17 +214,12 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 	return plan, nil
 }
 
-// UndoRun reverses one destructive run of any reversible kind.
-//
-// expectRows is the operator's typed confirmation and must equal the plan's
-// restorable total. The plan is recomputed here rather than passed in: a plan
-// the operator read minutes ago is not evidence about the database now, and the
-// gate is worth nothing if it can be satisfied by a stale number.
-//
-// A rollback is not a complete operation — `rollback → pull → converge` is
-// (or#859 §2.1). recompute closes the derive half inside this call; the provider
-// pull is the operator's next step and runs advisory until enforcement is
-// re-armed by hand.
+// UndoRun reverses one destructive run of any reversible kind. expectRows is
+// the operator's typed confirmation and must equal the plan's restorable total;
+// the plan is recomputed here so a stale number cannot satisfy the gate. A
+// rollback is not a complete operation (`rollback → pull → converge` is):
+// recompute closes the derive half here; the provider pull is the operator's
+// next step and runs advisory until enforcement is re-armed by hand.
 func UndoRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string, expectRows int64, recompute Recomputer) (UndoResult, error) {
 	plan, err := PlanUndoRun(ctx, database, runID)
 	if err != nil {

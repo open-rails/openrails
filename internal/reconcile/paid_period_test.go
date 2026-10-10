@@ -7,8 +7,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// A renewal advances exactly the periods its charges paid (audit 8); NMI's
-// next billing date is adopted only when it lands on that boundary.
+// A renewal advances exactly the periods its charges paid; NMI's next billing
+// date is adopted only when it lands on that boundary.
 func TestPaidPeriod(t *testing.T) {
 	start := time.Date(2030, 1, 1, 18, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 0, 30)

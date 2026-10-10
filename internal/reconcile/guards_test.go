@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// #837/#834: all-or-nothing pass brakes; small books still converge.
+// All-or-nothing pass brakes; small books still converge.
 func TestCancelBudgetAndRosterBreaker(t *testing.T) {
 	var b CancelBudget
 	for live, want := range map[int]int{0: 3, 4: 4, 5: 5, 6: 3, 9: 3, 20: 3, 100: 5, 500: 25, 1000: 25, 10000: 25} {
@@ -39,7 +39,7 @@ func TestCancelBudgetAndRosterBreaker(t *testing.T) {
 	}
 }
 
-// or#858: an exhaustive declared book is an absence proof; a count must confirm it.
+// An exhaustive declared book is an absence proof; a count must confirm it.
 func TestDeclaredCoverageRefusesUnconfirmedExhaustiveBook(t *testing.T) {
 	n := func(i int) *int { return &i }
 	for _, c := range []struct {
@@ -90,7 +90,7 @@ func TestCCBillPlanIndexUsesRecurringBillingOption(t *testing.T) {
 	require.Equal(t, "ccbill", idx["0000007498"][0].railName)
 }
 
-// or#893: remote `expired` has no local lifecycle state, so PS-1 blocks
+// Remote `expired` has no local lifecycle state, so materialization blocks
 // instead of minting an unrepresentable row.
 func TestRemoteStatesWithoutALocalStateNeverMaterialize(t *testing.T) {
 	for remote, local := range map[SubscriptionStatus]models.SubscriptionStatus{

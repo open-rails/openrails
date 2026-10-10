@@ -19,21 +19,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// #737: the DeclaredBilling import — a host-declared snapshot of its legacy
-// billing book, landed through the SAME decider pipeline the pull/probe/webhook
-// planes use. The host asserts FACTS (who, what price, paid-through, explicit
-// cancel evidence, dunning evidence, charges); classification of the ambiguous
-// cohort is Decide's job, evaluated at the declared AsOf horizon so the same
-// book classifies identically no matter when the import runs.
-//
-// Two lanes per fact:
-//   - explicit cancel evidence (user_canceled / chargeback / provider_terminated)
-//     is settled history — written directly with faithful cancel_type and dates;
-//     no doctrine is needed to "decide" a fact.
-//   - no cancel evidence — seeded as `unknown` (the park state) and resolved by
-//     Decide against the declared snapshot: alive-with-future-boundary → adopt,
-//     declined/dunning within window → past_due w/ grace, roster-dead → cancel,
-//     evidence-starved → stays parked (cancellation-last-resort by construction).
+// The DeclaredBilling import lands a host-declared snapshot of its legacy
+// billing book through the same decider pipeline the pull, probe and webhook
+// planes use. The host asserts facts; Decide classifies the ambiguous cohort
+// at the declared AsOf horizon, so a book classifies identically whenever the
+// import runs. Explicit cancel evidence (user_canceled / chargeback /
+// provider_terminated) is settled history, written directly with faithful
+// cancel_type and dates. Rows without it seed as `unknown` and Decide resolves
+// them: alive with a future boundary adopts, declines within the window go
+// past_due with grace, roster-dead cancels, evidence-starved stays parked.
 
 // DeclaredCancelKind is the host's explicit cancel evidence vocabulary.
 type DeclaredCancelKind string
@@ -53,9 +47,8 @@ type DeclaredSubscriptionFact struct {
 	PriceID            uuid.UUID
 	Rail               string
 	RailSubscriptionID string // required (idempotency key with Rail); hosts synthesize a stable one for rail-less legacy rows
-	// PspID is the PSP that owns the declared row. Required (or#893): the
-	// import must state which of the merchant's accounts the legacy book came
-	// from — there is no unbound lane left to fall into.
+	// PspID is the PSP that owns the declared row. Required: the import must
+	// state which of the merchant's accounts the legacy book came from.
 	PspID              uuid.UUID
 	StartedAt          time.Time
 	PaidThrough        *time.Time // last paid-through evidence (legacy expiration)
@@ -86,19 +79,14 @@ const (
 )
 
 // declaredImportLookback effectively unbounds the payment backfill: a legacy
-// book's charges are all in recoverable scope by declaration (unlike live-pull
-// backfill, capped at #634's 3y).
+// book's charges are all in recoverable scope by declaration.
 const declaredImportLookback = 200 * 365 * 24 * time.Hour
 
-// DeclaredCoverage is the importer's absence claim, plus the typed confirmation
-// that makes the claim expensive to get wrong (or#858).
-//
-// SubscriptionsExhaustive says "this call is the merchant's ENTIRE book", and
-// that is an absence proof: every local subscription NOT in the batch is
-// canceled. An importer that batches its book and forgets to clear the flag
-// therefore cancels everything it did not happen to send. A boolean cannot tell
-// the two apart — a count can, so the caller must also state how many
-// subscriptions the exhaustive book contains, and it must match what arrived.
+// DeclaredCoverage is the importer's absence claim plus its typed
+// confirmation. SubscriptionsExhaustive says "this call is the merchant's
+// entire book": every local subscription not in the batch is canceled, so a
+// batching importer that forgets to clear it cancels everything it did not
+// send. A count tells the two apart where a boolean cannot.
 type DeclaredCoverage struct {
 	SubscriptionsExhaustive bool
 	// ExpectedSubscriptions is required when SubscriptionsExhaustive. It must
@@ -148,11 +136,9 @@ func ImportDeclaredSubscriptions(
 	if err := coverage.validate(len(facts)); err != nil {
 		return nil, err
 	}
-	// or#893: every declared row is a provider row and must name the account it
-	// came from. billingimport resolves this from the row's `psp` or the book's
-	// `default_psp` and refuses first; this is the seam's own guard, so a direct
-	// caller cannot slip an unattributed fact past the DB constraint with a
-	// bare FK error.
+	// Every declared row is a provider row and must name its account.
+	// billingimport resolves it first; this guard keeps a direct caller from
+	// reaching the DB constraint with a bare FK error.
 	for i := range facts {
 		if facts[i].PspID == uuid.Nil {
 			return nil, fmt.Errorf("declared import: subscription %q names no PSP; a declared provider row must state the account it came from", facts[i].SourceID)
@@ -343,19 +329,17 @@ func ImportDeclaredSubscriptions(
 				}
 			}
 		} else {
-			// Fresh ambiguous rows AND every pre-existing row (incremental
-			// re-import): converge against the declared snapshot at AsOf. A row
-			// canceled between dumps carries a roster-dead entry, so the decider
-			// lands the terminal transition (cancel_type 'expired' at AsOf —
-			// faithful user/chargeback fidelity applies to first import only);
-			// already-terminal rows take no transition but still backfill charges.
-			// #835: no first-pull floor here on purpose — the declared snapshot
-			// is dated at AsOf and the operator's declaration IS the
-			// observation, so AsOf itself is the floor.
-			// A lifecycle conflict is an expected per-source business block. Isolate
-			// the convergence attempt in a nested transaction (pgx savepoint) so its
-			// constraint error does not poison the caller-owned book transaction.
-			// Any non-business error still escapes and rolls back the whole book.
+			// Fresh ambiguous rows and every pre-existing row (incremental
+			// re-import) converge against the declared snapshot at AsOf. A row
+			// canceled between dumps carries a roster-dead entry, so the
+			// decider lands the terminal transition (cancel_type 'expired' at
+			// AsOf; faithful cancel types apply to first import only);
+			// already-terminal rows take no transition but still backfill
+			// charges. No first-pull floor: the declaration is the
+			// observation, so AsOf is the floor.
+			// A lifecycle conflict is an expected per-source block: a nested
+			// transaction (savepoint) keeps its constraint error from poisoning
+			// the book transaction. Any other error rolls back the whole book.
 			err := database.RunInTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 				txdb := db.NewWithPgxTx(tx)
 				_, err := convergeSubscriptionFromSnapshotLookback(ctx, txdb, lc, sub, snap, asOf, 0, declaredImportLookback, time.Time{})
@@ -390,8 +374,8 @@ func ImportDeclaredSubscriptions(
 }
 
 // insertDeclaredCanceled writes an explicitly-canceled fact directly: settled
-// history keeps its faithful cancel_type and dates (the decider's ResolveCanceled
-// would stamp 'expired' at AsOf, losing user/chargeback semantics).
+// history keeps its faithful cancel_type and dates (the decider would stamp
+// 'expired' at AsOf, losing user/chargeback semantics).
 func insertDeclaredCanceled(
 	ctx context.Context,
 	q *gen.Queries,
@@ -453,7 +437,7 @@ func insertDeclaredCanceled(
 }
 
 // materializeDeclaredUnknown seeds the ambiguous lane through the pull path's
-// own PS-1 materialization: spec snapshots from the catalog, idempotent by
+// own materialization: spec snapshots from the catalog, idempotent by
 // (rail, rail_subscription_id), born `unknown` for the decider to resolve.
 func materializeDeclaredUnknown(
 	ctx context.Context,

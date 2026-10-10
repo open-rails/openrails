@@ -8,7 +8,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
-// FindingType is the PS-1..PS-9 discrepancy taxonomy from #107.
+// FindingType is the PS-1..PS-9 pull discrepancy taxonomy.
 type FindingType string
 
 const (
@@ -41,28 +41,26 @@ const (
 	// with the rail vault. Enforce: adopt the rail record.
 	FindingPaymentMethodMismatch FindingType = "pull.payment_method.mismatch"
 	// FindingDuplicateSubscriptions (PS-8): one subject carries overlapping
-	// live REMOTE subscriptions. Only the provider snapshot can see this
-	// (local duplicates are schema-blocked), so it is a PULL-plane finding
-	// (#665 single-writer rule; renamed from consistency.duplicate.subscription
-	// by migration 058). Always requires_review — the fix (cancel+refund at
-	// the rail) is remote and human.
+	// live remote subscriptions. Only the provider snapshot can see this
+	// (local duplicates are schema-blocked), so it is a pull-plane finding.
+	// Always requires_review: the fix (cancel+refund at the rail) is remote
+	// and human.
 	FindingDuplicateSubscriptions FindingType = "pull.subscription.duplicate"
-	// FindingEvidenceStale (#835): a terminal cancel was WITHHELD because the
-	// evidence justifying it predates this deployment's first pull of the
-	// merchant (or carries no date at all) — inherited history that was never
-	// corroborated by anything we observed. The row parks as `unknown` with its
-	// access intact. Always requires_review: only an operator can say whether
-	// an imported record is true, and a withheld action must be visible rather
-	// than a silent no-op ("unchecked ≠ disappeared").
+	// FindingEvidenceStale: a terminal cancel was withheld because its
+	// evidence predates this deployment's first pull of the merchant (or has
+	// no date), so nothing we observed corroborates it. The row parks as
+	// `unknown` with access intact. Always requires_review: only an operator
+	// can say whether an imported record is true, and a withheld action must
+	// be visible.
 	//
-	// Deliberately NOT in stateRosterFindingTypes: the unknown-cohort and
-	// webhook-converge planes write it too, so auto-resolving it on absence
-	// from a pull run would erase another plane's open finding.
+	// Not in stateRosterFindingTypes: the unknown-cohort and webhook planes
+	// write it too, so auto-resolving it on absence from a pull run would
+	// erase their open findings.
 	FindingEvidenceStale FindingType = "pull.subscription.evidence_stale"
-	// FindingCancellationCapped (#837): one pass planned more cancellations
-	// than the merchant's per-pass budget allows, so NONE were applied and the
-	// pass halted. Always requires_review — a book-sized cancellation is a
-	// human decision, never an automatic one.
+	// FindingCancellationCapped: one pass planned more cancellations than the
+	// merchant's per-pass budget allows, so none were applied and the pass
+	// halted. Always requires_review: a book-sized cancellation is a human
+	// decision.
 	FindingCancellationCapped FindingType = "pull.cancellation.capped"
 	// FindingReversalUnlinked: a refund or chargeback reached the charge
 	// mirror (a declared book, a probe) without the sale it reverses. It is
@@ -75,11 +73,9 @@ const (
 	FindingProviderScheduleDrift FindingType = "pull.subscription.drift"
 )
 
-// #665 single-writer-per-invariant: the legacy PS-9 entitlement check
-// (derive.grant_effect.mismatch) moved into the Convergence Engine's DERIVE
-// pass and PS-10 (life.provider_intent.stuck) into its LIFE pass — see
-// internal/reconcile/converge/converge_passes.go. The pull engine emits
-// pull.* findings only.
+// The entitlement check (derive.grant_effect.mismatch) and stuck-intent check
+// (life.provider_intent.stuck) belong to the Convergence Engine's DERIVE and
+// LIFE passes; the pull engine emits pull.* findings only.
 
 // Severity of a finding.
 type Severity string
@@ -104,7 +100,7 @@ const (
 )
 
 // Mode selects advisory (diff + report, zero local writes) or enforce
-// (one-shot fetch+diff+apply; LOCAL writes only — design decision 2).
+// (one-shot fetch+diff+apply; local writes only).
 type Mode string
 
 const (
@@ -113,8 +109,8 @@ const (
 )
 
 // Finding is one diagnosed discrepancy as emitted by the diff engine, before
-// persistence. SubjectKey is the stable identity within (provider, type) —
-// design decision 1 — so re-runs update rather than duplicate.
+// persistence. SubjectKey is the stable identity within (provider, type), so
+// re-runs update rather than duplicate.
 type Finding struct {
 	Provider Provider
 	// PSPID is the PSP whose read raised a pull.* finding; part of its
@@ -128,10 +124,10 @@ type Finding struct {
 	RecommendedAction string
 	LocalEvidence     map[string]any
 	RemoteEvidence    map[string]any
-	// IntentEvidence carries class-3 local-intent annotation (design decision
-	// 5): when local state already records the intent that explains the drift
-	// (e.g. DeletionScheduledAt set => the recorded delete never executed),
-	// the finding documents it instead of escalating to the admin queue.
+	// IntentEvidence is the local-intent annotation: when local state already
+	// records the intent that explains the drift (e.g. DeletionScheduledAt set
+	// => the recorded delete never executed), the finding documents it
+	// instead of escalating to the admin queue.
 	IntentEvidence map[string]any
 
 	// Apply is the enforce instruction derived during the diff; nil when the
@@ -140,11 +136,11 @@ type Finding struct {
 	Apply *ApplyAction `json:"-"`
 }
 
-// ApplyAction is one idempotent LOCAL write the enforce mode performs for a
-// finding. Exactly one field is set. No ApplyAction ever touches a rail.
-// Mirror writes (payments / refunds / vault metadata / subscription
-// materialization) are direct appliers; subscription STATE transitions are a
-// Decide action — the #665 decider is the only thing that moves lifecycle state.
+// ApplyAction is one idempotent local write the enforce mode performs for a
+// finding. Exactly one field is set; none ever touches a rail. Mirror writes
+// (payments, refunds, vault metadata, subscription materialization) are direct
+// appliers; subscription state transitions are a Decide action, since only the
+// decider moves lifecycle state.
 type ApplyAction struct {
 	Decide             *DecideAction
 	BackfillPayment    *BackfillPaymentAction
@@ -154,27 +150,23 @@ type ApplyAction struct {
 }
 
 // DecideAction carries a decider transition computed at diff time from the
-// snapshot evidence (#665 mirror-writer refactor: the pull engine invokes the
-// decider instead of writing domain state). Applied through the engine's
-// DecisionApplier under the same mutation-policy gate the legacy appliers had.
+// snapshot evidence, applied through the engine's DecisionApplier under the
+// mutation-policy gate.
 type DecideAction struct {
 	SubscriptionID uuid.UUID
 	Decision       Decision
 }
 
 // MaterializeSubscriptionAction creates the local subscription for a PS-1
-// finding whose identity AND plan both resolved unambiguously (applied
-// automatically in enforce mode). Identity comes from the engine's
-// existing matcher (a single vault/email match — zero or multiple candidates
-// keep the finding requires_review), the plan from catalog provider_links (the
-// billable price whose rails[provider] ids carry the remote plan id).
-// The created subscription snapshots the product's entitlements/credits specs
-// like a normal signup, so entitlements flow through the ordinary
-// subscription-sourced path.
+// finding whose identity and plan both resolved unambiguously. Identity comes
+// from the engine's matcher (one vault/email match; zero or several keep the
+// finding requires_review), the plan from catalog provider_links. The new
+// subscription snapshots the product's specs like a normal signup, so
+// entitlements flow through the subscription-sourced path.
 type MaterializeSubscriptionAction struct {
 	Provider Provider
 	// PspID is billing.psps.id for the pull that materialized this row.
-	// Required (or#893): subscriptions.psp_id is NOT NULL.
+	// Required: subscriptions.psp_id is NOT NULL.
 	PspID uuid.UUID
 	// Rail is the LOCAL rail name to stamp on the subscription —
 	// the key under which the price's provider link matched (e.g. "mobius",
@@ -184,8 +176,8 @@ type MaterializeSubscriptionAction struct {
 	CustomerID         uuid.UUID
 	PriceID            uuid.UUID
 	ProductID          uuid.UUID
-	// Status is the CANONICAL LOCAL lifecycle state (or#893) the row is created
-	// with — active or past_due; PS-1 only fires for a live remote subscription.
+	// Status is the canonical local lifecycle state the row is created with:
+	// active or past_due, since PS-1 fires only for a live remote subscription.
 	Status         models.SubscriptionStatus
 	PeriodStartsAt *time.Time
 	PeriodEndsAt   *time.Time
@@ -287,8 +279,8 @@ var stateRosterFindingTypes = []FindingType{
 }
 
 // SeverityRank orders severities worst-first (critical=0 .. low=3) for sorting
-// and escalation comparisons (a #787 FindingNotifier re-fires only when the
-// rank strictly decreases — a genuine escalation).
+// and escalation (a FindingNotifier re-fires only when the rank strictly
+// decreases).
 func SeverityRank(s Severity) int {
 	switch s {
 	case SeverityCritical:

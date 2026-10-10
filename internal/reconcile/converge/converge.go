@@ -21,16 +21,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
 
-// The Convergence Engine (#511) — the single idempotent driver of the internal
-// DERIVE / LIFE / CON planes (see docs/consistency-invariants.md §7). The PULL
-// plane is the provider pull that feeds it; once Phase B/F land, `reconcile pull`
-// overwrites the mirror and then runs one Converge pass, and this becomes the
-// sole engine (the legacy per-provider PS-* diff in engine.go is retired).
-//
-// Converge is invoked three ways: inline after a source mutation (scoped to a
-// customer/subscription), once after a pull (scoped to a merchant), and on a
-// background sweep. It is idempotent: a converged scope emits no findings and
-// every repair is a no-op, so re-running changes nothing.
+// The Convergence Engine is the single idempotent driver of the internal
+// DERIVE / LIFE / CON planes; the provider pull feeds it. Converge runs inline
+// after a source mutation (customer/subscription scope), once after a pull
+// (merchant scope) and on a background sweep. A converged scope emits no
+// findings and every repair is a no-op, so re-running changes nothing.
 
 // Severity is a finding's urgency label, persisted verbatim to the ledger.
 type Severity string
@@ -47,7 +42,7 @@ type Shape string
 
 const (
 	ShapeMissing  Shape = "MISSING"  // under-representation → MATERIALIZE
-	ShapeExcess   Shape = "EXCESS"   // over-representation → RETRACT (gated §3.2)
+	ShapeExcess   Shape = "EXCESS"   // over-representation → RETRACT (gated)
 	ShapeMismatch Shape = "MISMATCH" // wrong attribute/value → ADJUST
 )
 
@@ -60,8 +55,8 @@ const (
 	ClassOperator Class = "OPERATOR" // no API / too sensitive (refund, dispute); surfaced
 )
 
-// SourceDomain names the source domain a destructive EXCESS repair depends on, so
-// the confirmed-absence gate (§3.2) can hold it until that domain is proven fully
+// SourceDomain names the source domain a destructive EXCESS repair depends on,
+// so the confirmed-absence gate can hold it until that domain is proven fully
 // reconciled. Empty = not gated (e.g. MISSING/MISMATCH, which are always safe).
 type SourceDomain string
 
@@ -84,9 +79,9 @@ type Scope struct {
 // IsGlobal reports whether the scope is merchant-wide (the sweep / post-pull pass).
 func (s Scope) IsGlobal() bool { return s.Customer == nil && s.Subscription == nil }
 
-// ConvergeFinding is one divergence emitted by a plane pass. Repair, when set, is
-// the idempotent local write that fixes an AUTO finding; nil means surface-only.
-// RecommendedAction is the operator-readable prose for ADMIN findings (#692);
+// ConvergeFinding is one divergence emitted by a plane pass. Repair, when set,
+// is the idempotent local write that fixes an AUTO finding; nil means
+// surface-only. RecommendedAction is the operator prose for ADMIN findings;
 // the machine-executable shape rides in Evidence under recommend.EvidenceKey.
 type ConvergeFinding struct {
 	Type         string // finding_type, e.g. "derive.grant.excess"
@@ -96,21 +91,18 @@ type ConvergeFinding struct {
 	SubjectKey   string // stable per-finding identity within (merchant, provider, type)
 	Provider     string // "self" for internal planes; a provider name for PULL
 	SourceDomain SourceDomain
-	// Ungated opts a ShapeExcess repair OUT of the §3.2 confirmed-absence gate.
-	// Only legitimate when the retraction is justified by a LOCAL terminal fact
-	// rather than by an absence in provider data — retracting the effect of an
-	// already-terminated grant, expiring an abandoned checkout attempt. Every
-	// use must say why in a comment. #842: the gate used to be skipped
-	// implicitly by leaving SourceDomain empty, so the dangerous sites and the
-	// harmless ones were indistinguishable.
+	// Ungated opts a ShapeExcess repair out of the confirmed-absence gate. Only
+	// legitimate when a local terminal fact, not an absence in provider data,
+	// justifies the retraction (an already-terminated grant's effect, an
+	// abandoned checkout attempt). Every use must say why in a comment.
 	Ungated           bool
 	Evidence          map[string]any
 	RecommendedAction string                          // prose; "" = none
 	Repair            func(ctx context.Context) error // AUTO repair; nil = surface only
 }
 
-// Pass is one diagnostic plane. Passes run in DERIVE → LIFE → CON order;
-// the NOTIFY stage (#789) runs after their repairs, on the converged state.
+// Pass is one diagnostic plane. Passes run in DERIVE → LIFE → CON order; the
+// NOTIFY stage runs after their repairs, on the converged state.
 type Pass interface {
 	Plane() string
 	Run(ctx context.Context, scope Scope) ([]ConvergeFinding, error)
@@ -145,33 +137,27 @@ func markTruncated(ctx context.Context, n int, findingTypes ...string) {
 type ConvergeEngine struct {
 	DB  *db.DB
 	Now func() time.Time
-	// lifecycle is the shared subscription local-state core. The LIFE pass's
-	// terminal repairs (grace_exhausted / pending_stale) route
-	// through it instead of bespoke SQL appliers, so a converged cancellation is
-	// identical to a user-driven one (status flip, the #264 Solana cranker
-	// cascade, as-of entitlement revoke) — minus the durable side-effects, which
-	// are deliberately not re-fired for a transition that logically already
-	// happened. Built from db (no import cycle: subscriptions never imports
-	// converge); side-effect deps are intentionally nil.
+	// lifecycle is the shared subscription core: the LIFE pass's terminal
+	// repairs (grace_exhausted / pending_stale) go through it, so a converged
+	// cancellation equals a user-driven one (status flip, Solana cranker
+	// cascade, as-of entitlement revoke) minus the durable side effects, which
+	// are not re-fired for a transition that already happened. Side-effect
+	// deps are intentionally nil.
 	lifecycle *subscriptions.SubscriptionLifecycleService
 	passes    []Pass
 
-	// Notifier bridges persisted findings into the #736 operator notification
-	// store (#787). Optional; nil is a no-op (e.g. embedded runtimes with no
-	// alerting service wired). Set directly on the constructed engine, same as
-	// Now — reconcile.FindingNotifier lives in the parent package, which
-	// converge already imports (the LIFE pass's decider).
+	// Notifier bridges persisted findings into the operator notification
+	// store. Optional; nil is a no-op. Set directly on the constructed engine.
 	Notifier reconcile.FindingNotifier
 
-	// notify (#789) is NOT in passes: it detects on the state the plane repairs
-	// just left behind (a window DERIVE re-projected this run never emails), so
-	// Converge runs it after the remediation loop, not at collection time.
+	// notify is not in passes: it detects on the state the repairs just left
+	// (a window DERIVE re-projected this run never emails), so Converge runs it
+	// after the remediation loop.
 	notify *notifyPass
 }
 
-// NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes
-// (#511 Phase D) plus the post-repair NOTIFY stage (#789).
-// It reads the caller's clock when one is given.
+// NewConvergeEngine wires the engine with the DERIVE → LIFE → CON passes plus
+// the post-repair NOTIFY stage. It reads the caller's clock when one is given.
 func NewConvergeEngine(database *db.DB, clocks ...clockwork.Clock) *ConvergeEngine {
 	clock := timeutil.FirstClock(clocks...)
 	e := &ConvergeEngine{DB: database, Now: func() time.Time { return clock.Now().UTC() }}
@@ -213,11 +199,9 @@ func AfterMutation(ctx context.Context, database *db.DB, merchantID billing.Merc
 }
 
 // Converge runs every plane pass for the scope (DERIVE → LIFE → CON), persists
-// + remediates each finding, then runs the post-repair NOTIFY stage (#789) on
-// the converged state. It must be called inside a merchant-scoped
-// connection (RunInMerchantConn) so the gen queries resolve to the merchant.
-// When the scope is clean (no findings) it does no writes at all — the idempotent
-// no-op that keeps the inline hot path cheap.
+// and remediates each finding, then runs the post-repair NOTIFY stage on the
+// converged state. Must run merchant-scoped. A clean scope does no writes at
+// all, which keeps the inline hot path cheap.
 func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res ConvergeResult, runErr error) {
 	res.Scope = scope
 	if scope.Merchant.UUID() == uuid.Nil {
@@ -309,7 +293,7 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 		return res, err
 	}
 
-	// NOTIFY (#789) detects on the state the repairs above just converged, so a
+	// NOTIFY detects on the state the repairs above just converged, so a
 	// window DERIVE re-projected in this very run never emails "access ended".
 	notifyFindings, err := e.notify.Run(ctx, scope)
 	if err != nil {
@@ -357,15 +341,11 @@ func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, sco
 const findingKeySep = "\x1f"
 
 // remediate decides a finding's ledger status and applies its repair. The
-// confirmed-absence gate (§3.2) keeps a destructive EXCESS repair in
-// reconcile_required until its source domain is proven fully reconciled for the
-// merchant.
+// confirmed-absence gate keeps a destructive EXCESS repair in
+// reconcile_required until its source domain is proven fully reconciled.
 func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeFinding) (string, error) {
-	// #842: EVERY retraction passes the gate now. It used to fire only when a
-	// finding happened to carry a SourceDomain, so the sites that forgot one —
-	// including life.subscription.pending_stale, which cancels a subscription
-	// off a TIMEOUT — retracted freely while the gate guarded the sites that
-	// had already thought about it.
+	// Every retraction passes the gate, including
+	// life.subscription.pending_stale, which cancels off a timeout.
 	if f.Shape == ShapeExcess && !f.Ungated {
 		if f.SourceDomain == DomainNone {
 			// A retraction that names no source of truth cannot prove the thing
@@ -402,9 +382,9 @@ func (e *ConvergeEngine) remediate(ctx context.Context, scope Scope, f ConvergeF
 	}
 }
 
-// persist upserts a finding into the shared ledger, returning the upserted row
-// so the caller can feed it to a FindingNotifier (#787). finding_type is the
-// self-describing qualified slug; shape/class + finding details ride in evidence.
+// persist upserts a finding into the shared ledger and returns the row for a
+// FindingNotifier. finding_type is the qualified slug; shape/class and details
+// ride in evidence.
 func (e *ConvergeEngine) persist(ctx context.Context, q *gen.Queries, scope Scope, runID uuid.UUID, f ConvergeFinding, status string) (gen.BillingReconciliationFinding, error) {
 	meta := map[string]any{
 		"shape": string(f.Shape), "class": string(f.Class),

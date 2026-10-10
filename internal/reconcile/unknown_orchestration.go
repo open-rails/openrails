@@ -20,17 +20,17 @@ import (
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
 )
 
-// UnknownReconcileOptions bounds one reconcile pass over the `unknown` cohort (#633).
+// UnknownReconcileOptions bounds one reconcile pass over the `unknown` cohort.
 type UnknownReconcileOptions struct {
 	MaxPerRail    int           // cap subscriptions pulled per rail per run (0 -> 500)
 	DunningWindow time.Duration // a failed renewal within this of the period end is recoverable (0 -> 14d)
-	LookbackCap   time.Duration // never pull a window wider than this (#634 3y bound; 0 -> 3y)
+	LookbackCap   time.Duration // never pull a window wider than this (0 -> 3y)
 	WindowSlack   time.Duration // pull from (oldest period end - slack) (0 -> 48h)
-	// CancelBudget (#834/#837) caps how many of this cohort ONE pass may
-	// cancel. Over the cap the rail applies NOTHING. Zero value = defaults.
+	// CancelBudget caps how many of this cohort one pass may cancel. Over the
+	// cap the rail applies nothing. Zero value = defaults.
 	CancelBudget CancelBudget
-	// Breaker (#834) refuses to read absence from an implausibly small roster.
-	// Zero value = defaults.
+	// Breaker refuses to read absence from an implausibly small roster. Zero
+	// value = defaults.
 	Breaker RosterBreaker
 	// SkipRails are rails another plane verifies (the NMI Verifier).
 	SkipRails []string
@@ -55,20 +55,19 @@ func (o UnknownReconcileOptions) withDefaults() UnknownReconcileOptions {
 // UnknownReconcileResult summarizes one pass.
 type UnknownReconcileResult struct {
 	Renewed       int
-	Adopted       int // remote period end adopted without a charge (#367 doctrine)
+	Adopted       int // remote period end adopted without a charge
 	PastDue       int
 	Canceled      int
 	StillUnknown  int
-	Probed        int                 // per-subscription probe fallbacks attempted (#665)
-	Held          int                 // cancellations a pass-level guard withheld (#834)
-	Backfilled    int                 // payments imported (#634)
-	RailCustomers int                 // psp_customers materialized from a remote customer id (#635)
+	Probed        int                 // per-subscription probe fallbacks attempted
+	Held          int                 // cancellations a pass-level guard withheld
+	Backfilled    int                 // payments imported
+	RailCustomers int                 // psp_customers materialized from a remote customer id
 	RailErrors    map[Provider]string // rails that could not be pulled (their subs stay unknown; caller backs off)
 }
 
-// reconcilableRails returns the rails with PSPs (registry-driven,
-// #669) in stable order; their reconcile Provider is the rail name itself
-// (#630: mobius is a PSP on rail nmi, not a rail).
+// reconcilableRails returns the rails with PSPs in stable order; each rail
+// name is its reconcile Provider.
 func reconcilableRails() []string {
 	var out []string
 	for _, d := range rails.All() {
@@ -79,24 +78,20 @@ func reconcilableRails() []string {
 	return out
 }
 
-// ReconcileUnknownCohort resolves the `unknown` subscription cohort (#632) against
-// provider truth using ONE windowed bulk fetch PER RAIL (#633) — plus a targeted
-// per-subscription probe (#665) ONLY for rows the bulk snapshot could not decide
-// (NULL period end, evidence outside the window, non-exhaustive roster). For each
-// rail it pulls [oldestPeriodEnd-slack, now] (clamped to LookbackCap), feeds
-// every unknown sub to the ONE decider (Decide), applies the transition
-// (ApplyDecision), and backfills the provider's missing charges (#634,
-// idempotent by transaction id, declines recorded as failed). A rail whose
-// fetch fails is recorded in RailErrors and its subs are LEFT unknown — the
-// caller (a River job) retries with exponential backoff, and no per-sub probes
-// are fanned out against a rail that just failed a bulk read. Must run inside a
-// merchant-scoped connection.
+// ReconcileUnknownCohort resolves the `unknown` subscription cohort against
+// provider truth with one windowed bulk fetch per rail, probing a single
+// subscription only when the bulk snapshot cannot decide it. Per rail it pulls
+// [oldest period end - slack, now] (clamped to LookbackCap), runs each row
+// through Decide and ApplyDecision, and backfills missing charges idempotently.
+// A rail whose fetch fails is recorded in RailErrors and its rows stay unknown:
+// the River caller backs off, and no probes fan out against that rail. Must
+// run merchant-scoped.
 func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscriptions.SubscriptionLifecycleService, fetchers map[Provider]RailFetcher, probers map[Provider]SubscriptionProber, merchantID billing.MerchantID, now time.Time, opts UnknownReconcileOptions) (UnknownReconcileResult, error) {
 	opts = opts.withDefaults()
 	res := UnknownReconcileResult{RailErrors: map[Provider]string{}}
 	q := database.Gen(ctx)
-	// #835: nothing this cohort holds that predates the deployment's first pull
-	// may cancel anybody — an unknown row on an imported book carries inherited
+	// Nothing this cohort holds that predates the deployment's first pull may
+	// cancel anybody: an unknown row on an imported book carries inherited
 	// history by definition.
 	floor := EvidenceFloorFor(ctx, database, merchantID.UUID())
 
@@ -147,12 +142,9 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			}
 		}
 
-		// #834: the pass-level brakes this path never had. It had ONLY a 500-row
-		// FETCH cap: every unknown row absent from the snapshot hit
-		// `absent_from_exhaustive_roster` -> cancel + entitlement revoke, and
-		// because those cancels carry RemoteGone=true they create NO provider
-		// intent, so the #679 volume breaker could not see — let alone stop — a
-		// single one of them.
+		// Pass-level brakes: an unknown row absent from an exhaustive snapshot
+		// cancels with RemoteGone and creates no provider intent, so the
+		// intents volume breaker never sees it.
 		localLive, cerr := q.CountLiveLinkedSubscriptionsForRail(ctx, gen.CountLiveLinkedSubscriptionsForRailParams{
 			MerchantID: merchantID.UUID(), Rail: rail,
 		})
@@ -204,9 +196,9 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			// per-subscription probe, which reads charges by schedule id.
 			needsProbe := decision.Kind == TransitionNone || (provider == ProviderNMI && decision.Kind == TransitionAdoptPeriodEnd)
 			if needsProbe && prober != nil && r.RailSubscriptionID != nil {
-				// #665: the bulk window couldn't decide this row — ONE targeted
-				// per-sub probe, fed to the SAME decider. A probe failure keeps
-				// the row unknown (retried next pass).
+				// The bulk window couldn't decide this row: one targeted probe,
+				// fed to the same decider. A probe failure keeps the row
+				// unknown (retried next pass).
 				res.Probed++
 				if psnap, perr := prober.ProbeSubscription(ctx, ProbeSubject{
 					LocalID: r.ID, RailSubscriptionID: models.DerefStr(r.RailSubscriptionID), PeriodStart: r.CurrentPeriodStartsAt, PeriodEnd: r.CurrentPeriodEndsAt, ObservedAt: now,
@@ -229,7 +221,7 @@ func ReconcileUnknownCohort(ctx context.Context, database *db.DB, lc *subscripti
 			decisions = append(decisions, pendingDecision{id: r.ID, decision: decision})
 		}
 
-		// #837 all-or-nothing cap on the LOCAL cancel + entitlement revoke.
+		// All-or-nothing cap on the local cancel + entitlement revoke.
 		exceeded, reason := opts.CancelBudget.Exceeded(cancels, int(localLive))
 		opsmetric.Emit(ctx, opsmetric.MetricCancellationsPerPass, log.Fields{
 			"provider": string(provider), "merchant_id": merchantID.String(), "rail": rail,
@@ -264,9 +256,9 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 		return fmt.Errorf("reconcile unknown: load subscription %s: %w", subID, err)
 	}
 
-	// Backfill the provider's missing charges first (#634) so a renewed sub's
-	// confirming payment exists before/with the status flip, and materialize the
-	// provider customer id (#635) — shared with the #684 webhook converge path.
+	// Backfill the provider's missing charges first, so a renewed sub's
+	// confirming payment lands with the status flip, and materialize the
+	// provider customer id.
 	backfilled, railCustomer, err := applyDecisionSideEffects(ctx, database, sub, d, now, lookbackCap)
 	if err != nil {
 		return fmt.Errorf("reconcile unknown: %w", err)
@@ -294,12 +286,10 @@ func applyUnknownDecision(ctx context.Context, database *db.DB, lc *subscription
 	return nil
 }
 
-// backfillSubscriptionPayments imports a subscription's provider-observed charges
-// that we are missing (#634), idempotent by transaction id (CreatePaymentIfNotExists
-// ON CONFLICT DO NOTHING). Successful charges land as `completed`, declines/voids as
-// `failed` — the true attempt history, so dunning/analytics see reality. Bounded to
-// the LookbackCap (3y); older charges are out of recoverable scope. Returns the
-// count newly inserted.
+// backfillSubscriptionPayments imports a subscription's provider-observed
+// successful charges we are missing, idempotent by transaction id (ON CONFLICT
+// DO NOTHING). Declines are attempts, not payments; refunds and chargebacks
+// are never charge rows. Bounded to lookbackCap. Returns the count inserted.
 func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *models.Subscription, txns []RemoteTransaction, now time.Time, lookbackCap time.Duration) (int, error) {
 	floor := now.Add(-lookbackCap)
 	inserted := 0
@@ -321,21 +311,12 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 		if !t.Success {
 			continue // a decline is an attempt (recordScheduleAttempts), never a payment
 		}
-		// CUR-6: this is a provider INGESTION boundary — Stripe reports currency
-		// lower-case on the wire — and the value lands in payments.currency, so
-		// it must be canonicalised here, not left as the rail wrote it.
+		// A provider ingestion boundary (Stripe sends lower-case): canonicalise
+		// before the value lands in payments.currency.
 		currency := money.NormalizeCurrency(t.Currency)
-		// or#864 / CUR-9: a decline or void carries no currency of its own, and
-		// the previous code borrowed the subscription's under a comment claiming
-		// it did not fabricate. Both halves of that were wrong: the borrow IS a
-		// substitution, and it was invisible on the row afterwards.
-		//
-		// The borrow stays — the roster reports transactions FOR this
-		// subscription, so its billing currency is the one this attempt was
-		// denominated in; that is a real relationship, not a guess — but it is
-		// an INFERENCE, so the row says so. Metadata carries the provenance and
-		// the log names it, which is the difference between an inference and a
-		// fabrication: a reader can tell which one they are looking at.
+		// A charge without a currency inherits the subscription's billing
+		// currency (the roster reports it for this subscription). That is an
+		// inference, so metadata and the log record its provenance.
 		currencyInherited := false
 		if currency == "" && sub.Price != nil {
 			currency = money.NormalizeCurrency(sub.Price.Currency)
@@ -351,8 +332,8 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			continue
 		}
 		subID := sub.ID
-		// #684/#671: RemoteTransaction amounts are rail minor units; the
-		// payments ledger is native units of the row's currency.
+		// RemoteTransaction amounts are rail minor units; the payments ledger
+		// is native units of the row's currency.
 		amount, err := t.nativeIn(currency)
 		if err != nil {
 			log.WithContext(ctx).WithError(err).WithFields(log.Fields{
@@ -375,10 +356,10 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 			SubscriptionID: &subID,
 			PurchasedAt:    t.OccurredAt,
 			CustomerID:     sub.CustomerID,
-			// or#893: a charge belongs to the account that took it, which is the
-			// account that owns the subscription it renewed.
+			// A charge belongs to the account that took it: the one owning the
+			// subscription it renewed.
 			PspID: &sub.PspID,
-			// or#827: a mirrored success IS money the rail moved.
+			// A mirrored success is money the rail moved.
 			MoneyMovement: string(models.MoneyMovementRail),
 		}
 		if currencyInherited {
@@ -389,8 +370,8 @@ func backfillSubscriptionPayments(ctx context.Context, q *gen.Queries, sub *mode
 				"currency":        currency,
 			}).Warn("reconcile backfill: transaction reported no currency; denominating the attempt in the subscription's billing currency and recording the inheritance as provenance (CUR-9)")
 		}
-		// Provider-driven: NMI can only rebill a card IT holds, so the custody
-		// fact here is stated, not guessed (or#879).
+		// NMI can only rebill a card it holds, so the custody fact is stated,
+		// not guessed.
 		if tt := payments.DefaultTokenType(string(sub.Rail), models.CustodianPSP); tt != "" {
 			params.TokenType = &tt
 		}
@@ -432,10 +413,10 @@ func evidenceStaleAction(reason string) string {
 		"Verify it against the provider (a per-subscription probe re-decides it on evidence THIS deployment observed) before cancelling anything"
 }
 
-// recordEvidenceStaleFinding persists the operator-facing record of a cancel the
-// #835 staleness floor withheld. Best-effort, like every guard finding: the
-// floor has already done its job in memory, and failing to write the record
-// must never turn a SAFE outcome into an error that retries into an unsafe one.
+// recordEvidenceStaleFinding persists the operator-facing record of a cancel
+// the staleness floor withheld. Best-effort: the floor already acted in
+// memory, and a failed write must never turn a safe outcome into an error that
+// retries into an unsafe one.
 func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subscriptionID, reason string) {
 	action := evidenceStaleAction(reason)
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
@@ -459,9 +440,9 @@ func evidenceStaleSubjectKey(provider Provider, subscriptionID string) string {
 }
 
 // recordGuardFinding persists the operator-facing record of a pass-level guard
-// that withheld cancellations (#834). Best-effort: the guard has already done
-// its job in memory, and failing to write the finding must never turn a SAFE
-// outcome into an error that retries into an unsafe one.
+// that withheld cancellations. Best-effort: the guard already acted in memory,
+// and a failed write must never turn a safe outcome into an error that retries
+// into an unsafe one.
 func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID billing.MerchantID, provider Provider, subject, reason string) {
 	if _, err := q.UpsertReconciliationFinding(ctx, gen.UpsertReconciliationFindingParams{
 		MerchantID:        merchantID.UUID(),
