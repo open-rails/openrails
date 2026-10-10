@@ -21,7 +21,7 @@ network hop, no second credential. Concretely:
   `http.RoundTripper` instead of a socket. The embedded Client adds the hosting
   operations: `Start`, `Close`, `Routes`, `RiverJobs`, `Ready` and `Probes`.
 - An engine with `Config.Merchant` serves that merchant. One without a declared
-  merchant (`examples/multimerchant`) serves many: `WithDefaultMerchant`
+  merchant serves many: `WithDefaultMerchant`
   supplies an immutable default, and each operation can select a slug with
   `WithMerchant` or a stable ID with `ForMerchantID`. Selection never grants
   authority or overrides the declared merchant.
