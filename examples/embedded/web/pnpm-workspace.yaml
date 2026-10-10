@@ -11,5 +11,7 @@ dangerouslyAllowAllBuilds: false
 minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 minimumReleaseAgeIgnoreMissingTime: false
+minimumReleaseAgeExclude:
+  - "@openrails/*"
 trustPolicy: no-downgrade
 trustLockfile: false

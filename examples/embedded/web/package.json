@@ -12,7 +12,7 @@
     "test:e2e": "playwright test"
   },
   "dependencies": {
-    "@openrails/auth-ui": "https://github.com/open-rails/authkit/releases/download/v1.14.0/openrails-auth-ui-1.14.0.tgz",
+    "@openrails/auth-ui": "1.14.0",
     "@openrails/billing-ui": "file:../../../sdk/billing-ui",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
