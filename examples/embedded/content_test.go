@@ -27,6 +27,7 @@ import (
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/fxfake"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
 
@@ -127,6 +128,9 @@ func startApp(t *testing.T) *app {
 	require.NoError(t, err)
 	products, err := catalog.ReadFile("catalog.yaml")
 	require.NoError(t, err)
+	// Exchange rates from a fake exchange-api: no test reaches the real one.
+	fx := fxfake.New()
+	t.Cleanup(fx.Close)
 	bill, err := openrails.New(ctx, openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"},
 		TestMode:          openrails.Sandbox,
@@ -134,7 +138,7 @@ func startApp(t *testing.T) *app {
 		ProviderSandbox:   &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()},
 		Merchant:          merchant,
 		Catalog:           products,
-	}, openrails.Deps{Postgres: db, UserInfo: ak.UserInfo()})
+	}, openrails.Deps{Postgres: db, UserInfo: ak.UserInfo(), FXTransport: fx.Transport()})
 	require.NoError(t, err)
 	t.Cleanup(func() { bill.Close(context.Background()) })
 	require.NoError(t, ak.Start(ctx))
