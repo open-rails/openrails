@@ -10,8 +10,7 @@ import (
 )
 
 // IntentionalRouteGroups are the AuthKit route groups OpenRails exposes when
-// registration is closed (issue #224 task 4), deliberately not AuthKit's
-// full surface:
+// registration is closed, deliberately not AuthKit's full surface:
 //
 //   - RouteAuth: discovery, login, refresh, logout, password reset, JWKS.
 //   - RouteAccount: self-service account routes (me, sessions, password change).
@@ -22,8 +21,7 @@ import (
 var IntentionalRouteGroups = []iam.RouteGroup{iam.RouteAuth, iam.RouteAccount, iam.RoutePermissionGroups}
 
 // registrationRouteGroups is AuthKit's JSON API, mounted when people can
-// register (open or invite-only). Browser OIDC and delegated-token minting
-// (superseded by RFC 9068 access tokens) stay unmounted.
+// register (open or invite-only). Browser OIDC stays unmounted.
 var registrationRouteGroups = []iam.RouteGroup{
 	iam.RouteAuth, iam.RouteRegistration, iam.RouteAccount, iam.RouteAdmin,
 	iam.RoutePermissionGroups, iam.RouteDeviceKeys,

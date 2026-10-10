@@ -11,15 +11,14 @@ import (
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
 
-// newPullProviderCmd wires the #107/#511 provider-pull CLI:
+// newPullProviderCmd wires provider pull:
 //
 //	openrails pull-provider [--rail=... --since=... --until=...] [--insert|--overwrite|--prune]
 //	openrails pull-provider report [--run=ID] latest/specified run report
 //
-// Reconciliation is manual-only by design (no scheduled runs). The remote
-// rails are NEVER mutated: mutation flags converge local state only.
-// Remote-provider writes are queued by the operation that requests them through
-// the provider intent ledger, not by provider pull.
+// Manual-only (no scheduled runs). The remote rails are never mutated:
+// mutation flags converge local state only, and provider writes go through
+// the provider intent ledger.
 func newPullProviderCmd() *cobra.Command {
 	var (
 		providers    []string
@@ -127,15 +126,9 @@ func runReconcileReport(cmd *cobra.Command, runIDStr, format, merchantSlug strin
 	})
 }
 
-// newPruneCmd wires the or#858 inspection surface:
-//
-//	openrails prune list --merchant <slug>
-//
-// A prune no longer deletes rows — it soft-deletes them and stamps each one
-// with the destructive run that took it, so an operator who pruned against a
-// bad snapshot gets the book back with one command. That command is
-// `openrails undo-run` (or#859): the reversal is one verb over the whole run
-// ledger, kind-dispatched, so nobody can reverse the wrong way round.
+// newPruneCmd lists prune runs (`openrails prune list --merchant <slug>`). A
+// prune soft-deletes rows, stamping each with its run, so `openrails undo-run`
+// restores a prune against a bad snapshot in one command.
 func newPruneCmd() *cobra.Command {
 	var merchantSlug, format string
 	var limit int

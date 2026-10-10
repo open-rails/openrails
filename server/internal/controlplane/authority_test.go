@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/staffperm"
 )
 
-// #565: every credential type matches grants with the same namespace-anchored glob.
+// Every credential type matches grants with the same namespace-anchored glob.
 func TestCredentialPermissionGlob(t *testing.T) {
 	for _, tc := range []struct {
 		grants []string
@@ -35,7 +35,7 @@ func TestCredentialPermissionGlob(t *testing.T) {
 		require.Equal(t, tc.want, len(credential.IntersectPermissions([]string{tc.perm}, tc.grants)) > 0, "intersect %v %s", tc.grants, tc.perm)
 	}
 
-	// #569: merchant credentials are merchant-wide but never act without a merchant or subject.
+	// Merchant credentials are merchant-wide but never act without a merchant or subject.
 	wide := &ResolvedServiceCredential{MerchantID: billing.MerchantID(uuid.New())}
 	require.True(t, wide.AllowsCustomer(uuid.New()))
 	require.False(t, wide.AllowsCustomer(uuid.Nil))

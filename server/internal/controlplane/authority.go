@@ -79,9 +79,8 @@ func (c *ControlPlane) CheckRecentSignIn(ctx context.Context, r *http.Request) e
 }
 
 // HasRootPermission reports whether the request's user holds perm in the root
-// group (#721), checked live with its session. The root owner holds root:*;
-// the bounded operator roles hold root:merchants:*. A hosted product's
-// operator pages gate on it.
+// group, checked live with its session. The root owner holds root:*; the
+// bounded operator roles hold root:merchants:*.
 func (c *ControlPlane) HasRootPermission(ctx context.Context, r *http.Request, perm string) (bool, error) {
 	if c == nil || c.Core() == nil {
 		return false, ErrNoControlPlane

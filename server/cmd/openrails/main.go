@@ -29,8 +29,8 @@ func main() {
 	}
 }
 
-// bootNMIProbeV5BaseURL is a test-only override for the #348 test_mode NMI
-// arm probe target during the boot-manifest reconcile; empty in production.
+// bootNMIProbeV5BaseURL is a test-only override for the test_mode NMI arm
+// probe target during the boot-manifest reconcile; empty in production.
 var bootNMIProbeV5BaseURL string
 
 func newRootCmd() *cobra.Command {
@@ -44,11 +44,8 @@ func newRootCmd() *cobra.Command {
 				return fmt.Errorf("failed to get config flag: %w", err)
 			}
 
-			// Flags ride the same koanf pipeline as everything else as a
-			// confmap overlay above env: flag beats env beats yaml (or#915 —
-			// the old path wrote PROVIDER_WRITE_MODE/TEST_MODE into the
-			// process env before Load, a back-door the env doctrine bans).
-			// The deprecated --mode alias is gone (#710).
+			// Flags are a koanf confmap overlay above env: flag beats env
+			// beats yaml. They never write the process env.
 			var loadOpts []hostconfig.LoadOption
 			if mode, err := cmd.Flags().GetString("provider-write-mode"); err == nil && strings.TrimSpace(mode) != "" {
 				loadOpts = append(loadOpts, hostconfig.WithOverride("provider_write_mode", strings.TrimSpace(mode)))
@@ -155,10 +152,9 @@ func runServer(cmd *cobra.Command, args []string) error {
 	log.Info(buildinfo.Get().String())
 	config.LogStartupStatus(cfg)
 
-	// xs-007 row 40: the boot waits for the database for as long as it takes
-	// — a failover, a slow start — and only an operator's stop signal ends the
-	// wait. While waiting the process is not listening, which is exactly what
-	// "not ready" means to whoever is probing it.
+	// The boot waits for the database as long as it takes (a failover, a slow
+	// start); only a stop signal ends the wait. Meanwhile the process is not
+	// listening, which is what "not ready" means to a probe.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	srv, graph, cp, err := openServer(ctx, openrails.Deps{})
@@ -175,9 +171,8 @@ func runServer(cmd *cobra.Command, args []string) error {
 		return errors.Join(err, srv.Close(closeCtx))
 	}
 
-	// Startup bootstrap (#327/#531): if the conventional bootstrap manifest is
-	// mounted, apply control-plane authority on first run only. Catalog
-	// reconciliation stays an explicit CLI/init-job operation.
+	// A mounted bootstrap manifest applies AuthKit authority on first run
+	// only. Catalog reconciliation stays an explicit CLI/init-job operation.
 	if err := applyStartupBootstrap(ctx, cp); err != nil {
 		return closeOnError(fmt.Errorf("startup bootstrap: %w", err))
 	}
@@ -209,7 +204,7 @@ func runWorker(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read merchant-manifest flag: %w", err)
 	}
-	// xs-007 row 40: see runServer — the database wait ends on a stop signal.
+	// As in runServer, the database wait ends on a stop signal.
 	ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	// The same server as run-server, without a listener: AuthKit's jobs run

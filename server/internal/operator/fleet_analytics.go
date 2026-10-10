@@ -7,14 +7,10 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
-// FleetAnalytics returns cross-merchant operator aggregates —
-// the fleet view no per-merchant scope can compute. Its queries
-// return aggregates only, never merchant rows. Like
-// SearchMerchants (#226) this is a sensitive cross-merchant read: the CALLER
-// gates it behind platform-superadmin authority and audits every request.
-// exclude removes one merchant from every aggregate (a hosted platform passes
-// its own platform merchant); zero excludes nothing. windowDays outside 1..365
-// is refused.
+// FleetAnalytics returns cross-merchant operator aggregates, never merchant
+// rows; the caller gates and audits every request. exclude removes one
+// merchant from every aggregate (a hosted platform passes its own); zero
+// excludes nothing. windowDays outside 1..365 is refused.
 func FleetAnalytics(ctx context.Context, cp *controlplane.ControlPlane, exclude billing.MerchantID, windowDays int) (*billing.FleetSnapshot, error) {
 	snapshot, err := cp.FleetAnalytics(ctx, exclude, windowDays)
 	if err != nil {

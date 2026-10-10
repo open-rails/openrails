@@ -109,7 +109,7 @@ func TestUsernamePolicyFollowsNaming(t *testing.T) {
 	require.Equal(t, authkit.UsernameConfig{Renames: true, RenameInterval: 72 * time.Hour, FormerNames: authkit.FormerNamesConfig{Mode: authkit.FormerNamesForever}}, usernames(p))
 }
 
-// ak#299: an undeclared client-IP posture refuses boot rather than sharing one
+// An undeclared client-IP posture refuses boot rather than sharing one
 // rate-limit bucket behind an unknown proxy.
 func TestClientIPPostureMustBeDeclared(t *testing.T) {
 	proxies := []string{"10.0.0.0/8"}
@@ -141,8 +141,8 @@ func TestClientIPPostureMustBeDeclared(t *testing.T) {
 	}
 }
 
-// #752: inline keys cannot rotate, so they warn; without them keys_path
-// resolves in AuthKit.
+// Inline keys cannot rotate, so they warn; without them keys_path resolves in
+// AuthKit.
 func TestInlineKeySource(t *testing.T) {
 	_, priv, err := ed25519.GenerateKey(nil)
 	require.NoError(t, err)

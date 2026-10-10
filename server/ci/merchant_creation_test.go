@@ -15,10 +15,10 @@ import (
 )
 
 // A user creates a merchant only through a hosted product's own route, on
-// ProvisionMerchant with the user as owner (#1173): the creation policy
-// (verified email, reserved names, the free allowance) applies, and the
-// user's merchants list it with the owner role. OpenRails serves no route
-// that creates or lists merchants.
+// ProvisionMerchant with the user as owner: the creation policy (verified
+// email, reserved names, the free allowance) applies, and the user's merchants
+// list it with the owner role. OpenRails serves no route that creates or lists
+// merchants.
 func TestMerchantCreationPolicy(t *testing.T) {
 	f := newFixture(t)
 	reserved := uniqueName("house")

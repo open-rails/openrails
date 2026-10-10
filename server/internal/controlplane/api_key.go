@@ -19,15 +19,9 @@ const (
 	APIKeyPrefix = "openrails"
 )
 
-// ResolvedServiceCredential is the common authorization result for
-// merchant-scoped programmatic credentials: OpenRails-issued shared-secret API
-// keys, first-party service JWTs, and AuthKit remote-application self tokens.
-// It carries everything route authorization needs: the resolved OpenRails
-// merchant and the granted permission strings.
-//
-// #567/#569: a merchant IS a merchant permission group. A programmatic
-// credential belongs to that group; its merchant identity is THE GROUP, never a
-// resource scope, and its authority is its role there.
+// ResolvedServiceCredential is a resolved merchant API key: the merchant bound
+// to the key's permission group (never a resource scope) and the permissions
+// its role there grants.
 type ResolvedServiceCredential = credential.ResolvedServiceCredential
 
 // MerchantScope resolves a current or former merchant name to its bound
@@ -62,9 +56,9 @@ func (c *ControlPlane) LooksLikeAPIKey(token string) bool {
 // ResolveAPIKey validates a presented API key: AuthKit resolves it live (its
 // group, its role's permissions, expiry and revocation: iam.ErrAPIKeyInvalid,
 // ErrAPIKeyExpired, ErrAPIKeyRevoked), and the merchant is the one bound to
-// that group (#567/#569), never a resource scope. A key whose group backs no
-// active merchant is ErrServiceCredentialMerchantUnresolved, and one presented
-// against another merchant's Host is ErrServiceCredentialHostMismatch.
+// that group. A key whose group backs no active merchant is
+// ErrServiceCredentialMerchantUnresolved, and one presented against another
+// merchant's Host is ErrServiceCredentialHostMismatch.
 func (c *ControlPlane) ResolveAPIKey(ctx context.Context, token string) (*ResolvedServiceCredential, error) {
 	if c == nil || c.Core() == nil {
 		return nil, ErrNoControlPlane
@@ -109,9 +103,8 @@ var ErrServiceCredentialMerchantUnresolved = credential.ErrServiceCredentialMerc
 // lacks the required OpenRails merchant authority.
 var ErrServiceCredentialScopeDenied = credential.ErrServiceCredentialScopeDenied
 
-// merchantForGroupID resolves the OpenRails merchant bound to an AuthKit group
-// (#567: a merchant IS its own group). Suspended and deleted merchants are
-// rejected.
+// merchantForGroupID resolves the active merchant bound to an AuthKit group (a
+// merchant is its own group).
 func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (billing.MerchantID, string, error) {
 	groupID = strings.TrimSpace(groupID)
 	if c.pool == nil {
@@ -127,11 +120,8 @@ func (c *ControlPlane) merchantForGroupID(ctx context.Context, groupID string) (
 	return mid, slug, err
 }
 
-// AuthorizeMerchant checks that the caller's permission group backs the named
-// merchant: the merchant's permission_group_id must equal the caller's group id,
-// and the merchant must be active (#567).
-// merchantForGroupID resolves the group's merchant; AuthorizeMerchant is the
-// explicit fail-closed gate for any path that NAMES a merchant id directly.
+// AuthorizeMerchant is the fail-closed gate for a path that names a merchant
+// id: the merchant must be active and bound to the caller's permission group.
 func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mid billing.MerchantID) error {
 	groupID = strings.TrimSpace(groupID)
 	if c == nil || c.pool == nil {
@@ -153,10 +143,9 @@ func (c *ControlPlane) AuthorizeMerchant(ctx context.Context, groupID string, mi
 	return nil
 }
 
-// merchantDirectoryRow resolves one live directory lookup (LIMIT 2). It
-// returns pgx.ErrNoRows untouched so callers can decide whether a fallback
-// applies. If the lookup matches multiple active merchants, the caller must
-// name a merchant explicitly and authorize it with AuthorizeMerchant.
+// merchantDirectoryRow is the one active merchant a directory lookup matched:
+// pgx.ErrNoRows for none (the caller picks the error), and an ambiguous or
+// inactive match is ErrServiceCredentialMerchantUnresolved.
 func (c *ControlPlane) merchantDirectoryRow(matches []gen.BillingMerchant, err error) (billing.MerchantID, string, error) {
 	if err != nil {
 		return billing.MerchantID{}, "", err

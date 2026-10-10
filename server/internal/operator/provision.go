@@ -8,13 +8,10 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
-// ProvisionMerchant idempotently provisions a merchant at runtime through the
-// attached control plane (#738): the live merchant the name resolves to, or a
-// new one claiming it, bound to a new merchant permission-group (persona
-// merchant, parent root, owner req.OwnerUserID). Safe to re-run.
-//
-// This is the mechanism behind a hosted wrapper's "registration is
-// provisioning" flow.
+// ProvisionMerchant idempotently provisions a merchant: the live merchant the
+// name resolves to, or a new one claiming it, bound to a new merchant
+// permission-group (parent root, owner req.OwnerUserID). It backs a hosted
+// product's "registration is provisioning" flow.
 func ProvisionMerchant(ctx context.Context, cp *controlplane.ControlPlane, req billing.ProvisionMerchantParams) (*billing.ProvisionMerchantResult, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	if err := billing.ValidateMerchantSlug(slug); err != nil {

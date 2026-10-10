@@ -10,19 +10,14 @@ import (
 	"github.com/open-rails/openrails/internal/hosttools"
 )
 
-// newUndoRunCmd wires or#859 §5.2's single undo verb over the whole
-// destructive-run ledger:
+// newUndoRunCmd is the one undo verb over the destructive-run ledger:
 //
 //	openrails undo-run --merchant <slug> --run <id>                        # plan
 //	openrails undo-run --merchant <slug> --run <id> --apply --expect-rows N
 //
-// One verb, not one per kind. `--prune` destroys rows and reverses by clearing
-// tombstones; a converge-enforce pass destroys row VALUES and reverses from
-// captured before-images — but an operator holding a run id in the middle of an
-// incident should not have to know which, and must not be able to learn the
-// difference by typing the wrong verb and being told a reversal succeeded when
-// it restored nothing. The kind is read from the ledger and dispatched on, and a
-// kind with no undo is refused by name with what to reach for instead.
+// A prune reverses by clearing tombstones, a converge-enforce pass from
+// captured before-images. The kind is read from the ledger, so an operator
+// cannot reverse the wrong way; a kind with no undo is refused by name.
 func newUndoRunCmd() *cobra.Command {
 	var merchantSlug, runID, format string
 	var apply bool

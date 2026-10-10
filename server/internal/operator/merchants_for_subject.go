@@ -7,11 +7,9 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
-// ListMerchantsForSubject returns the active merchants where the AuthKit subject
-// holds a customer record — the "which merchants do I buy
-// from" enumeration a hosted customer portal needs, and which no per-merchant
-// surface can answer. Delegates to the control plane's cross-merchant
-// directory read.
+// ListMerchantsForSubject returns the active merchants where the AuthKit
+// subject holds a customer record: the "which merchants do I buy from" list a
+// hosted customer portal needs.
 func ListMerchantsForSubject(ctx context.Context, cp *controlplane.ControlPlane, subject string) ([]billing.MerchantRef, error) {
 	rows, err := cp.ListMerchantsForSubject(ctx, subject)
 	if err != nil {

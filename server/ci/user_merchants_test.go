@@ -15,9 +15,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// ListUserMerchants is a hosted product's merchant list (#1106): the live
-// merchants a user holds a role in, by current name, with the user's role in
-// each.
+// ListUserMerchants is a hosted product's merchant list: the live merchants a
+// user holds a role in, by current name, with the user's role in each.
 func TestUserMerchantsListing(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())

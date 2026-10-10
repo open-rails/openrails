@@ -13,16 +13,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Fleet timeseries: the trend companion to FleetAnalytics
-// — weekly buckets over the same truth tables, aggregates only, under the
-// same SearchMerchants (#226) doctrine: the
-// CALLER gates (platform superadmin) and audits every request. Buckets are
-// ISO weeks (Postgres date_trunc('week', ...), Monday-start, UTC), computed on
-// request — no rollup storage at current fleet scale.
+// Fleet timeseries: FleetAnalytics' weekly trend, aggregates only; the caller
+// gates and audits every request. Buckets are ISO weeks (date_trunc('week'),
+// Monday-start, UTC), computed on request with no rollup storage.
 
 // FleetWeeklyPoint is one week's fleet movement: merchants provisioned, the
 // distinct merchants with a settled sale, and canceled subscriptions (the
-// churn proxy until a richer signal exists).
+// churn proxy).
 type FleetWeeklyPoint struct {
 	WeekStart             time.Time
 	NewMerchants          int64

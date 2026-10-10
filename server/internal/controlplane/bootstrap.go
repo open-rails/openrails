@@ -18,7 +18,7 @@ const BootstrapAdminAPIKeyName = "openrails-bootstrap-admin"
 // BootstrapResult reports what the idempotent bootstrap did/ensured.
 type BootstrapResult struct {
 	BootstrapMerchantSlug string
-	// BootstrapMerchantGroupID is the merchant permission-group's internal id (#567).
+	// BootstrapMerchantGroupID is the merchant permission-group's internal id.
 	BootstrapMerchantGroupID string
 	// MerchantGroupCreated is true if this run created and bound the merchant's
 	// group (false if it was already bound).
@@ -43,40 +43,23 @@ type BootstrapOptions struct {
 	// alone and add an admin user later.
 	InitialAdminUserID string
 
-	// MintInitialAPIKey requests minting the merchant's first deployment admin
-	// API key. Defaults to false (the zero value) — Bootstrap never mints
-	// unless a caller explicitly asks (#747).
-	//
-	// Even when true, a key is minted ONLY if this merchant group has NEVER
-	// had one: eligibility is checked against the FULL key history (live AND
-	// revoked), not just the currently-live count. A merchant group with zero
-	// LIVE keys because an operator revoked all of them (e.g. after a
-	// suspected compromise) is NOT a first-run state, and is never
-	// auto-healed with a silently-minted replacement — including by a
-	// standalone caller that passes true on every boot as a routine "ensure a
-	// key exists" idiom. That idiom now gets exactly one mint, ever, per
-	// merchant group. A deliberate replacement key after a revocation is a
-	// separate, explicit operator action, not a Bootstrap side effect.
+	// MintInitialAPIKey mints the merchant's first deployment admin API key,
+	// only if its group never had one (live or revoked): a group whose keys an
+	// operator revoked is never auto-healed with a silent replacement.
 	MintInitialAPIKey bool
 }
 
-// Bootstrap idempotently ensures the OpenRails control-plane state for the
-// bootstrap merchant (#567): the named merchant (which must already exist) is
-// bound to its AuthKit group (a top-level child of `root`), the initial admin
-// is its `owner` (auto-holds `merchant:*`), and an initial deployment admin API
-// key is optionally minted under the group when none ever existed.
-//
-// It runs AFTER migrations / at startup, through in-process AuthKit Client calls
-// — never raw AuthKit SQL or a private HTTP route. Re-running it is safe: group
-// creation and owner assignment are idempotent; the API key is minted only
-// when none ever existed.
+// Bootstrap idempotently binds the bootstrap merchant (which must exist) to its
+// AuthKit group, a top-level child of `root`, makes the initial admin its
+// `owner` (`merchant:*`), and optionally mints a deployment admin API key. It
+// uses in-process AuthKit Client calls, never raw AuthKit SQL.
 func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*BootstrapResult, error) {
 	if c == nil || c.Core() == nil {
 		return nil, errors.New("controlplane: core service unavailable")
 	}
 	slug := billing.NormalizeMerchantSlug(opts.BootstrapMerchantSlug)
 	if slug == "" {
-		// No default merchant (#336): bootstrap must name the merchant slug to seed.
+		// No default merchant: bootstrap must name the one to seed.
 		return nil, errors.New("controlplane: bootstrap requires a merchant slug (BootstrapMerchantSlug)")
 	}
 	directory, err := c.directory()
@@ -112,13 +95,8 @@ func (c *ControlPlane) Bootstrap(ctx context.Context, opts BootstrapOptions) (*B
 		}
 	}
 
-	// 2. Mint an initial deployment admin API key only when explicitly
-	//    requested AND this merchant group has NEVER had one before (#747).
-	//    "Never had one" is the FULL key history (live and revoked) — a
-	//    merchant with zero LIVE keys because an operator revoked all of them
-	//    is not a first-run state, and a routine re-Bootstrap must not
-	//    auto-heal that revocation with a fresh, silently-minted replacement.
-	//    The system issues it: a deployment key has no creator.
+	// 2. Mint only when asked and the group's full key history (live and
+	//    revoked) is empty. The system issues it: a deployment key has no creator.
 	if opts.MintInitialAPIKey {
 		existing, err := c.client.ListAPIKeys(ctx, group, iam.PageRequest{Limit: 1})
 		if err != nil {

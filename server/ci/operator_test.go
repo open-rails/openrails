@@ -17,8 +17,8 @@ import (
 
 // The operator's merchant directory, worker health and lockouts are the
 // server's Go API (the openrails CLI's merchants, workers and admin-lockouts
-// commands) with no HTTP route (#1173). Soft delete leaves the directory and
-// the merchant's credentials resolving nothing; restore brings both back.
+// commands) with no HTTP route. Soft delete leaves the directory and the
+// merchant's credentials resolving nothing; restore brings both back.
 func TestOperatorDirectoryAndWorkers(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, nil)

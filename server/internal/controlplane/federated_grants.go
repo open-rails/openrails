@@ -15,8 +15,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Federated grants (#1140): merchant roles an owner grants by email to users
-// of the merchant's trusted issuers, who accept them with that verified email.
+// Federated grants: merchant roles an owner grants by email to users of the
+// merchant's trusted issuers, who accept them with that verified email.
 var (
 	ErrFederatedGrantInvalidEmail = errors.New("controlplane: federated grant email is malformed")
 	ErrFederatedGrantExists       = errors.New("controlplane: the email is already invited, or the user already holds a grant")

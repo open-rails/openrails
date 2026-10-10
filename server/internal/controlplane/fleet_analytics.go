@@ -12,12 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// Fleet analytics for the hosted product: cross-merchant operator aggregates over
-// the engine's truth tables. Like SearchMerchants (#226) this is a sensitive
-// cross-merchant read — no per-merchant scope could compute a fleet view —
-// and the CALLER is responsible for gating (platform superadmin) and auditing
-// each request. Its queries return aggregates only, never merchant rows. The
-// control-plane pool is not privileged; it is the same role and DSN as the app's.
+// Fleet analytics: cross-merchant operator aggregates over the engine's truth
+// tables, never merchant rows. The caller gates and audits each request.
 
 // FleetMerchantFunnel counts merchants by lifecycle stage: provisioned (total),
 // armed (a live PSP declared), first-revenue (any completed payment ever), and
@@ -39,7 +35,7 @@ type FleetCurrencyRevenue struct {
 
 // FleetRailHealth is one rail's window outcome split across the fleet.
 // Chargebacks counts reversal_kind='chargeback' mirror rows recorded in the
-// window (#733) — the dispute signal VAMP-style monitoring watches.
+// window: the dispute signal VAMP-style monitoring watches.
 type FleetRailHealth struct {
 	Rail        string
 	Succeeded   int64
@@ -82,10 +78,8 @@ func (c *ControlPlane) FleetAnalytics(ctx context.Context, exclude billing.Merch
 		excludeArg = &id
 	}
 
-	// or#861: every aggregate below reads merchant-owned tables (payments,
-	// subscriptions, prices, psps). A fleet dashboard is a genuinely
-	// cross-merchant read; its queries return aggregates only — counts and sums
-	// grouped by currency/rail — never a merchant-owned row.
+	// Every aggregate below reads merchant-owned tables (payments,
+	// subscriptions, prices, psps) and returns counts and sums only.
 	out := &FleetAnalytics{WindowDays: windowDays}
 	q := gen.New(c.pool)
 	funnel, err := q.FleetMerchantFunnel(ctx, gen.FleetMerchantFunnelParams{ExcludeMerchantID: excludeArg, Since: since})

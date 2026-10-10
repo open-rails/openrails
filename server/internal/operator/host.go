@@ -9,16 +9,9 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
-// SetMerchantAPIHost sets id's canonical #734 API host through the attached
-// control plane (hosted products provision a merchant's
-// api_host right after ProvisionMerchant succeeds, using the MerchantID that
-// call already returned). apiHost empty clears the mapping. Mirrors
-// ProvisionMerchant's shape: resolve the attached control plane, build the
-// directory-only merchants.Service (merchants.NewDirectoryService), and
-// forward to its SetHostConfig — the exact seam ProvisionMerchant already
-// uses for the directory row itself. Safe to call multiple times (a plain
-// UPDATE); returns merchants.ErrAPIHostTaken (errors.Is-able) when apiHost is
-// already assigned to a different active merchant.
+// SetMerchantAPIHost binds id's canonical API host without proof; "" clears
+// it. Idempotent; merchants.ErrAPIHostTaken when another active merchant
+// holds the host.
 func SetMerchantAPIHost(ctx context.Context, cp *controlplane.ControlPlane, id billing.MerchantID, apiHost string) error {
 	dir, err := merchants.NewDirectoryService(cp.Pool())
 	if err != nil {

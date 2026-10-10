@@ -12,7 +12,7 @@ import (
 )
 
 // MerchantCreationConfig declares a hosted deployment's policy for merchant
-// names claimed by users (or#914): at creation and on rename. Operator paths
+// names claimed by users, at creation and on rename. Operator paths
 // (Bootstrap, manifests, ownerless provisioning) are never subject to it.
 type MerchantCreationConfig struct {
 	// ReservedSlugs are reserved IN ADDITION to billing.ReservedMerchantSlugs.

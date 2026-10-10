@@ -6,10 +6,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// registerControlPlaneAuthRoutes mounts the AuthKit route groups OpenRails
-// intentionally exposes (#224 task 4): the registration mode's explicit group list
-// (ControlPlane.MountedRouteGroups, never AuthKit's default surface or browser
-// OIDC), plus JWKS at the issuer.
+// registerControlPlaneAuthRoutes mounts ControlPlane.AuthRoutes: the
+// registration mode's explicit AuthKit groups (never AuthKit's default surface
+// or browser OIDC), plus JWKS at the issuer.
 func (s *Server) registerControlPlaneAuthRoutes(mux router.Registrar) error {
 	cp := s.controlPlane
 	if cp == nil || cp.AuthHandler() == nil {

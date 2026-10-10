@@ -20,11 +20,11 @@ import (
 	"github.com/open-rails/openrails/server"
 )
 
-// SEC: adding a teammate by email (the server's InviteMerchantTeamMember)
-// never grants a merchant role to an account that has not proved the
-// address: anyone can register an address they do not own. Only a live account that verified it joins directly; an unverified or
-// deleted account gets the answer an unregistered address gets (an invitation
-// where registration mints one), and no role.
+// SEC: adding a teammate by email (InviteMerchantTeamMember) never grants a
+// merchant role to an account that has not proved the address: anyone can
+// register an address they do not own. Only a live account that verified it
+// joins directly; an unverified or deleted account gets an unregistered
+// address's answer (an invitation where registration mints one), and no role.
 func TestSecurityTeamEmailGrantsOnlyAVerifiedAccount(t *testing.T) {
 	f := newFixture(t)
 	for _, mode := range []iam.RegistrationMode{iam.RegistrationModeClosed, iam.RegistrationModeOpen} {

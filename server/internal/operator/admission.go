@@ -1,10 +1,8 @@
 package operator
 
-// or#914 item 3: the hosted product's merchant creation cost gate, composed from
-// openrails' own state: verified email ALWAYS; a free allowance of owned
-// merchants; and beyond it, a VAULTED payment method on file (setup-intent
-// vault + Radar check, no charge — openrails holds the vault) unlocks more.
-// This is the "card before your 3rd org" gate.
+// A hosted product's merchant creation cost gate, from OpenRails' own state:
+// a verified email always and, past a free allowance of owned merchants, a
+// vaulted payment method on file (no charge).
 
 import (
 	"context"
@@ -36,13 +34,11 @@ type MerchantCreationPolicy struct {
 	HasVaultedPaymentMethod func(ctx context.Context, subjectUserID string) (bool, error)
 }
 
-// MerchantCreationAdmission composes the or#914 hosted admission predicate for
-// MerchantCreationConfig.Admission. Late-bound: controlPlane is called per
-// check (the predicate is built before the control plane). Every
-// unanswerable question refuses — admission is a judgment about identity and
-// money, never made on an unanswered question. A name the user already owns is
-// an idempotent repair, not a creation event, so it returns before allowance
-// and vault checks. The allowance counts live merchants the user owns.
+// MerchantCreationAdmission builds MerchantCreationConfig.Admission.
+// controlPlane is called per check (the predicate is built before the control
+// plane). Every unanswerable question refuses. A name the user already owns is
+// an idempotent repair and skips the allowance and vault checks; the allowance
+// counts live merchants the user owns.
 func MerchantCreationAdmission(controlPlane func() *controlplane.ControlPlane, policy MerchantCreationPolicy) (func(ctx context.Context, instanceSlug, ownerUserID string) error, error) {
 	if controlPlane == nil {
 		return nil, errors.New("merchant creation admission: control plane is required")

@@ -1,16 +1,10 @@
 package controlplane
 
-// Merchant team management (#760), behind the server's team methods. Roster, invites, role changes and removal go through
-// AuthKit group membership (ListGroupMembers, SetGroupRole, RemoveGroupMember,
-// CreateInvitation) — never raw AuthKit SQL. A member holds one of the fixed
-// merchant roles (#567).
-//
-// Adding a teammate by email assigns the role at once only to a live account
-// that has VERIFIED the address: anyone can register an address they do not
-// own (#1107). Any other address gets a single-use register+join link the
-// owner shares — when AuthKit registration is open. Locked-down standalone
-// runs registration closed, so there the operator provisions the account and
-// verifies its email first (ErrTeamInvitesDisabled).
+// Merchant team management goes through AuthKit group membership, never raw
+// AuthKit SQL. Adding a teammate by email assigns the role at once only to a
+// live account that has verified the address (anyone can register an address
+// they do not own); any other address gets a single-use register+join link,
+// which needs registration open or invite-only (else ErrTeamInvitesDisabled).
 
 import (
 	"context"
@@ -26,19 +20,17 @@ import (
 )
 
 var (
-	// ErrCannotRemoveLastOwner guards the #760 invariant: a merchant always
-	// keeps at least one owner. Demoting or removing the last owner is refused
-	// with a corrective error, never silently allowed.
+	// ErrCannotRemoveLastOwner refuses demoting or removing a merchant's last
+	// owner: a merchant always keeps one.
 	ErrCannotRemoveLastOwner = errors.New("controlplane: cannot remove or demote the last merchant owner")
 
 	// ErrNotATeamMember is returned by role-change/remove for a user who holds no
 	// role in the merchant group (so there is nothing to change or remove).
 	ErrNotATeamMember = errors.New("controlplane: user is not a member of this merchant")
 
-	// ErrTeamInvitesDisabled is returned when inviting an email no live account
-	// has verified but the deployment runs AuthKit registration closed
-	// (locked-down standalone): no self-registration link can be minted. The
-	// operator must provision the account and verify its email first.
+	// ErrTeamInvitesDisabled refuses inviting an email no live account has
+	// verified when registration is closed: the operator provisions the account
+	// and verifies its email first.
 	ErrTeamInvitesDisabled = errors.New("controlplane: link invites for new users are disabled on this deployment")
 )
 
@@ -47,7 +39,7 @@ var (
 type MerchantTeamMember = billing.TeamMember
 
 // MerchantTeamInvite is a register+join invite link for the merchant. Its
-// single-use URL is returned ONLY at creation (InviteResult), never listed.
+// single-use URL is returned only at creation (MerchantTeamInviteResult).
 type MerchantTeamInvite = billing.TeamInvite
 
 // MerchantTeamInviteResult is the outcome of inviting an email. Exactly one of
@@ -78,10 +70,10 @@ func (c *ControlPlane) ListMerchantTeam(ctx context.Context, mid billing.Merchan
 	return out, nil
 }
 
-// InviteMerchantTeamMember adds a teammate by email as actor. If a live
-// account has verified the email, it is assigned role immediately (Added).
-// Otherwise a single-use register+join link is minted and returned (URL) —
-// unless the deployment runs registration closed (ErrTeamInvitesDisabled).
+// InviteMerchantTeamMember adds a teammate by email as actor: a live account
+// that verified the email gets role at once (Member); otherwise a single-use
+// register+join link is minted (Invite, URL), or ErrTeamInvitesDisabled when
+// registration is closed.
 func (c *ControlPlane) InviteMerchantTeamMember(ctx context.Context, mid billing.MerchantID, email string, role iam.Role, actor helpersauth.Identity) (MerchantTeamInviteResult, error) {
 	email = strings.TrimSpace(email)
 	if email == "" {
@@ -140,8 +132,8 @@ func teamInvite(inv iam.Invitation) MerchantTeamInvite {
 	return MerchantTeamInvite{ID: inv.ID, Role: inv.Role.Name(), CreatedAt: inv.CreatedAt, ExpiresAt: inv.ExpiresAt, RedeemedAt: inv.RedeemedAt, RevokedAt: inv.RevokedAt}
 }
 
-// InvitesEnabled reports whether the deployment can mint register+join links
-// (the console tailors its invite affordance on this).
+// InvitesEnabled reports whether the deployment can mint register+join links:
+// registration is not closed.
 func (c *ControlPlane) InvitesEnabled() bool {
 	return c != nil && c.Core() != nil && c.registers()
 }
@@ -188,8 +180,8 @@ func (c *ControlPlane) RemoveMerchantTeamMember(ctx context.Context, mid billing
 }
 
 // teamMember is targetUserID's role in the merchant's group and the number of
-// users owning it: the merchant keeps a human owner (#760), whatever
-// applications also hold the role.
+// users owning it: the merchant keeps a human owner, whatever applications
+// also hold the role.
 func (c *ControlPlane) teamMember(ctx context.Context, mid billing.MerchantID, targetUserID string) (iam.GroupRef, string, int, error) {
 	group, err := c.merchantGroup(ctx, mid)
 	if err != nil {

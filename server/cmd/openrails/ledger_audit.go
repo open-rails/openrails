@@ -18,8 +18,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
-// newLedgerAuditCmd wires the #833 ledger-integrity diagnostics as an operator
-// command:
+// newLedgerAuditCmd runs the ledger-integrity diagnostics:
 //
 //	openrails ledger-audit [--merchant=<slug|id>] [--format=table|json]
 //

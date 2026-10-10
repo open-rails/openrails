@@ -37,7 +37,7 @@ func TestUserAuthenticator(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, billingauth.UserContext{UserID: userID, Email: "e@x", Username: "u", SessionID: "sid"}, uc, "token role snapshots are never carried")
 
-	// DPoP proofs are single-use and belong to the delegated verifier.
+	// DPoP proofs are single-use and belong to the resource server's verifier.
 	v := &countingVerifier{claims: claims}
 	_, err = NewAuthenticator(v).Authenticate(t.Context(), bearer(" dpop abc"))
 	require.ErrorIs(t, err, billingauth.ErrUnauthenticated)

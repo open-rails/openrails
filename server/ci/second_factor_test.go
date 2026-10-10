@@ -22,10 +22,9 @@ import (
 )
 
 // The root owner always needs a second factor, so a control plane where none
-// can be enrolled refuses to start (AuthKit #419): no totp.key beside the
-// signing keys and no sender. A deployment allowed a disposable signing key
-// gets a TOTP key too, which AuthKit writes beside it so restarts keep
-// enrollments.
+// can be enrolled refuses to start: no totp.key beside the signing keys and no
+// sender. A deployment allowed a disposable signing key gets a TOTP key too,
+// which AuthKit writes beside it so restarts keep enrollments.
 func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	f := newFixture(t)
 	attach := func(auth server.AuthConfig) (*server.Server, error) {

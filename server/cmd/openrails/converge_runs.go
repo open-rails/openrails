@@ -20,17 +20,10 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile"
 )
 
-// newConvergeCmd wires the or#859 inspection surface for converge-enforce, the
-// sibling of `openrails prune list`:
-//
-//	openrails converge list --merchant <slug>
-//
-// A prune destroys ROWS and reverses by clearing their tombstones. An enforce
-// pass destroys row VALUES — an empty NMI roster cancelling 40/40
-// subscriptions overwrote status, ended_at, the grace/retry schedule and the
-// period bounds, and queued deferred vault deletes behind them. Those are
-// different reversals over ONE run ledger, and both are performed by
-// `openrails undo-run`, which dispatches on the run's recorded kind.
+// newConvergeCmd lists converge-enforce runs (`openrails converge list
+// --merchant <slug>`), the sibling of `openrails prune list`. An enforce pass
+// overwrites row values rather than deleting rows; `openrails undo-run`
+// reverses either kind from the one run ledger.
 func newConvergeCmd() *cobra.Command {
 	var merchantSlug, format string
 	var limit int

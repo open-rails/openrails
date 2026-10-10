@@ -9,15 +9,15 @@ import (
 	"github.com/open-rails/authkit/iam"
 )
 
-// CustomerGroup addresses a customer's own permission group (#567): it is
-// keyed by the customer's id, the payer's user id.
+// CustomerGroup addresses a customer's own permission group, keyed by the
+// customer's user id.
 func CustomerGroup(customerID string) iam.GroupRef {
 	return iam.GroupByID(strings.TrimSpace(customerID))
 }
 
-// EnsureCustomerPermissionGroup creates the hosted customer-portal membership
-// used by the hosted product, owned by ownerSubject, and returns its id. It is idempotent.
-// Billing records and spend policies do not call this.
+// EnsureCustomerPermissionGroup idempotently creates a customer's portal group
+// for a hosted product, owned by ownerSubject, and returns its id. Billing
+// never calls it.
 func (c *ControlPlane) EnsureCustomerPermissionGroup(ctx context.Context, customerID, ownerSubject string) (string, error) {
 	if c.Core() == nil {
 		return "", errors.New("controlplane: core service unavailable")

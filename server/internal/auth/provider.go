@@ -90,8 +90,8 @@ func (p *Authenticator) claims(ctx context.Context, r *http.Request) (verify.Cla
 	if p == nil || p.verifier == nil || r == nil {
 		return verify.Claims{}, billingauth.ErrUnauthenticated
 	}
-	// AuthKit DPoP authenticates delegated subjects, never a local user. Leave
-	// its single-use proof for the delegated route's verifier.
+	// A DPoP-bound token is never a local user's: leave its single-use proof
+	// for the resource server's verifier.
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(r.Header.Get("Authorization"))), "dpop ") {
 		return verify.Claims{}, billingauth.ErrUnauthenticated
 	}

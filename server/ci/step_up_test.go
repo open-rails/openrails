@@ -14,13 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SEC (secaudit round 2, D1): the standalone server asks AuthKit for a
-// recent sign-in (Sensitive) before an owner moves money or grants access,
-// and offers the same check (CheckRecentSignIn) to a hosted product's
-// credential changes. A live owner session whose sign-in is stale, as a
-// stolen token's is, gets 403 step_up_required with AuthKit's step-up
-// methods; the same owner signed in recently, and the owner's API key, pass.
-// Reads need no step-up.
+// SEC: the standalone server asks AuthKit for a recent sign-in (Sensitive)
+// before an owner moves money or grants access, and offers the same check
+// (CheckRecentSignIn) to a hosted product's credential changes. A live owner
+// session whose sign-in is stale, as a stolen token's is, gets 403
+// step_up_required with AuthKit's step-up methods; a recent sign-in, and the
+// owner's API key, pass. Reads need no step-up.
 func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())

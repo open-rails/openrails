@@ -7,13 +7,9 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
 
-// FleetTimeseries returns the weekly fleet trend series
-// as aggregates only — the FleetAnalytics
-// snapshot's trend companion, under the same SearchMerchants (#226) doctrine: the CALLER
-// gates it behind platform-superadmin authority and audits every request.
-// exclude removes one merchant from every series (a hosted platform passes its
-// own platform merchant); zero excludes nothing. weeks outside 4..52 is
-// refused.
+// FleetTimeseries returns FleetAnalytics' weekly trend, aggregates only; the
+// caller gates and audits every request. exclude removes one merchant from
+// every series; zero excludes nothing. weeks outside 4..52 is refused.
 func FleetTimeseries(ctx context.Context, cp *controlplane.ControlPlane, exclude billing.MerchantID, weeks int) (*billing.FleetSeries, error) {
 	series, err := cp.FleetTimeseries(ctx, exclude, weeks)
 	if err != nil {

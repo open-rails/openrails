@@ -14,8 +14,7 @@ import (
 // calls OpenRails directly with it. Every operation is scoped to the token's
 // customer and resolved merchant.
 func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
-	// Browser tier (#765): self-service patterns get the static permissive
-	// CORS policy.
+	// Browser tier: self-service patterns get the static permissive CORS policy.
 	httproutes.RegisterCustomerRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
 		s.runtime, httproutes.CustomerMount{Auth: s.customerAuth(), AuthBindsMerchant: true, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
