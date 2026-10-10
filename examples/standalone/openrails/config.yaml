@@ -14,8 +14,8 @@ public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach t
 
 db:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
-redis:
-  addr: redis:6379 # DPoP proof replay, shared by replicas, and rate limits
+redis: # optional: rate limits shared by replicas; one server without it sets auth.allow_memory
+  addr: redis:6379
 
 # The server's own AuthKit: its tables (schema profiles) and signing key. Its
 # sign-in stays off: people sign in at the app, the trusted issuer below.

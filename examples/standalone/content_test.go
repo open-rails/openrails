@@ -268,7 +268,7 @@ func startStack(t *testing.T) *stack {
 	require.NoError(t, err)
 	config = bytes.ReplaceAll(config, []byte("localhost:8080"), []byte(strings.TrimPrefix(appURL, "http://")))
 	config = bytes.ReplaceAll(config, []byte("localhost:3053"), []byte(strings.TrimPrefix(serverURL, "http://")))
-	if redisAddr == "" { // Redis is optional: without it the server counts in PostgreSQL
+	if redisAddr == "" { // Redis is optional: one server without it counts its limits in memory
 		config = regexp.MustCompile(`(?m)^redis:.*\n(?:  .*\n)*`).ReplaceAll(config, nil)
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), config, 0o600))
@@ -287,6 +287,8 @@ func startStack(t *testing.T) *stack {
 	}
 	if redisAddr != "" {
 		env = append(env, "REDIS_ADDR="+redisAddr)
+	} else {
+		env = append(env, "AUTH_ALLOW_MEMORY=true")
 	}
 	bin := openrailsBinary(t)
 	server := exec.Command(bin, "run-server", "--config", "config.yaml", "--merchant-manifest", "merchant.yaml")
