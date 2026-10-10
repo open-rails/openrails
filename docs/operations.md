@@ -71,6 +71,115 @@ eligible work automatically after verified catch-up; explicit `readonly` remains
 readonly. See [provider recovery](provider-recovery.md) for the account scope,
 completion rules and limits. CCBill and Solana retain their existing controls.
 
+## Running several instances
+
+Several instances can serve one billing book: replicas of a host app that each
+call `openrails.New` and `Start` (embedded), or several `openrails run-server`
+and `run-worker` processes (standalone). They need nothing from each other but
+the database: there is no instance count to configure, no primary instance and
+no sticky session. `TestInstancesShareOneDatabase`, `TestServersShareOneDatabase`
+and the `TestReplicas` suites run several instances on one database.
+
+### What they share
+
+- **PostgreSQL**, one writable primary (above): every record, River's queue and
+  its leader election (in the River schema), request idempotency claims,
+  webhook deduplication, provider intents, and the locks that admit a charge.
+- **Redis**, optional at any scale and never assumed: an instance uses one only
+  when `Config.Redis` (an address or a `redis://` or `rediss://` URL, with an
+  ACL user and TLS as needed) or `Deps.Redis` names it. With it, rate-limit
+  windows, admin lockouts and captcha challenges are counted there; without it
+  they are counted in PostgreSQL, once for the whole fleet either way. A
+  declared Redis that stops answering costs speed, not correctness: requests
+  count in PostgreSQL meanwhile and readiness reports it degraded without
+  failing. Only Redis carries the card-abuse captcha accelerator, the
+  admission-denial statistics and the shared FX quote cache: without it each
+  instance fetches and caches its own rates for five minutes.
+- The standalone server records spent DPoP proofs in PostgreSQL. Its AuthKit
+  still counts its own rate limits in Redis: without Redis, `auth.allow_memory`
+  keeps them in the process, for one instance only.
+
+### What must be identical
+
+- **Configuration**: the schemas, `TestMode`, `ProviderWriteMode`,
+  `Config.Merchant` with its PSPs and secrets, `Config.Catalog`,
+  `Config.RateLimits`, `Config.Captcha`, `Config.TrustedProxies` and
+  `Config.ReturnOrigins`. Every start applies the declaration: instances
+  declaring different SCIM tokens replace each other's token at each start.
+- **Routes**: every instance mounts the same `openrails.Routes` (prefix,
+  permission bundles, admin console). A load balancer sends any request to any
+  instance, so a route mounted on some instances is a 404 on the others.
+- **Keys**: `encryption.master_key` (an instance with another key cannot read
+  merchant credentials, and the first to create a merchant's data key locks
+  the others out of it); the standalone signing key (`auth.active_key_id` and
+  `auth.active_private_key_pem`, or `keys.json` in `auth.keys_path`) and the
+  `totp.key` beside it, since a token one instance signs is refused by another
+  (`auth.allow_ephemeral_signing_key` makes a key per process: one instance
+  only); `resource_server.dpop_nonce_key`, since a nonce from one instance is
+  refused by another; the captcha secret.
+- **Version**, except during a rolling upgrade.
+
+### Background work and leadership
+
+Every instance that calls `Start` (or runs `run-server` without `--no-workers`,
+or `run-worker`) works River jobs; River hands each job to one instance. A job
+whose instance dies stops its liveness beat and is rescued about five minutes
+later. Periodic work is scheduled by River's leader alone: the first instance
+to start leads, an instance that closes resigns and another takes over at once,
+and a crashed leader is replaced within about 20 seconds. Each schedule fires
+on its period's clock boundaries and is unique per period, so the fleet runs
+each sweep once a period whoever leads; a new leader repeats only the passes
+that run on start (the due pass, rescue, provider refresh), which are
+idempotent. A host fleet (`openrails.WithRiverClient`) follows the same rules,
+and every replica's fleet in that River schema must carry OpenRails' jobs:
+whichever replica leads schedules them.
+
+Outside River, every instance runs the Solana Pay poller, which shares
+references through leased claims, and verifies its own PSP credentials at
+start.
+
+### Caches
+
+Catalog, merchant settings and lookups, PSPs, write posture, the kill switch
+and entitlements are read from PostgreSQL per request: an edit through one
+instance is read by every other on its next request. Per-instance caches:
+
+| Cache | An edit elsewhere shows after |
+|---|---|
+| Merchant secrets (database backend) | at once for PSP credentials (read by version); up to 15 minutes for other secrets |
+| Solana keypair signer | 60 seconds |
+| FX quotes without Redis | 5 minutes |
+| `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
+| PSP posture verdicts | the instance's next start: restart every instance after fixing a PSP that started disarmed |
+
+### What scales
+
+- **HTTP**: any instance serves any request: checkout pages, webhooks, the
+  admin console and its API.
+- **Webhooks**: one effect per provider event however many instances receive
+  it. A copy arriving while the first is applied waits up to 10 seconds, then
+  answers 500 so the provider retries.
+- **Idempotent requests**: one execution per key; a retry on another instance
+  replays the result, or answers 409 while the first still runs.
+- **Money**: one charge per renewal and retry slot, one payment per provider
+  transaction, one grant, one ledger posting and one email per notification.
+- **Workers**: each standalone instance works up to 20 billing jobs at once,
+  so instances add throughput. Readiness needs the instance's own workers, so
+  every `run-server` instance runs them (`--no-workers` is never ready); add
+  `run-worker` instances for background work that serves no HTTP.
+- PostgreSQL is the limit: size `max_connections` for every instance's pool.
+
+### Rolling upgrades
+
+`New` and `run-server` migrate before serving, under an advisory lock: the first
+instance migrates, the others wait for it, and none fails or applies a
+migration twice. Migrations are additive, so instances of the previous build
+keep running on the migrated schema and a rollback to it is safe; the newer
+migration stays. `openrails migrate up` can run first as a deploy step
+instead. During the rollout a browser may load the admin console from a new
+instance and its assets from an old one; a reload fixes it once the rollout
+ends.
+
 ## Mutation Flags
 
 Provider pull and merchant-configuration commands use mutation flags. Catalog
