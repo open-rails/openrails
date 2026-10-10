@@ -170,8 +170,6 @@ export const subscriptionSchema = z.object({
   price_id: z.string().nullish(),
   /** Seats of a per-seat price; null otherwise. */
   quantity: z.number().nullish(),
-  /** Seats the next renewal bills, when a change waits for it. */
-  scheduled_quantity: z.number().nullish(),
   psp_id: z.string().nullish(),
   payment_method_id: z.string().nullish(),
   started_at: time.nullish(),

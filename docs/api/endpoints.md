@@ -186,10 +186,22 @@ must act. `…/change/preview` answers the same numbers and changes nothing.
   `/v1/me/payment-operations/{id}/authentication`, then repeat the request).
 - **Fewer seats and a downgrade** are effective at period end: nothing is
   charged or refunded, and the next renewal bills them; the subscription shows
-  `scheduled_price_id` and `scheduled_quantity`. Another pending price change
-  is `409 subscription_change_already_scheduled`.
-- **Staff never purchase for others**: an admin change charges nothing and
-  always takes effect at period end.
+  them as its `scheduled_change`. A change to another tier while one is
+  pending, or while a price migration is, is
+  `409 subscription_change_already_scheduled`.
+- **A change back** to the subscription's current price and seats cancels its
+  pending change and charges nothing.
+- **Staff** change a subscription at the customer's request through
+  `POST /v1/admin/subscriptions/{id}/change`, which needs a recent sign-in and
+  a `reason`. It behaves as the customer's own change: an upgrade or more
+  seats is charged now, merchant-initiated under the card's recurring
+  agreement (`409 stored_credential_required` when the card has none
+  active), and fewer seats or a downgrade wait for the renewal. The reason and
+  the staff member are kept with the change and its payment (the payment's
+  `reason`), and the customer gets a `subscription_changed` notice. Staff
+  cannot charge a subscription its provider bills
+  (`403 customer_action_required`), and a staff change back also cancels a
+  pending price migration for that subscription.
 - **Refusals.** `409 subscription_change_renewal_due` while the period has
   ended or its renewal is unresolved; `422 subscription_change_cycle_unknown`
   and `422 subscription_change_period_unknown` when proration has nothing to

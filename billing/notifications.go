@@ -81,6 +81,10 @@ type NotificationData struct {
 	RailSubscriptionID string `json:"rail_subscription_id,omitempty"`
 	TransactionID      string `json:"transaction_id,omitempty"`
 
+	// Quantity is the seats a subscription_changed notice's subscription has
+	// from EffectiveAt; Amount is what the change charged now.
+	Quantity *int `json:"quantity,omitempty"`
+
 	// One-off purchase receipt (one_off_purchase_completed). UserEmail is the
 	// address the purchase was made with, for buyers without a profile email.
 	Amount        *int64 `json:"amount,omitempty,string"`

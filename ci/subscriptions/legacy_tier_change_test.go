@@ -345,7 +345,8 @@ func (w *world) accessEndedNotices(customerID string) int {
 
 // A named-plan schedule changes only by switching plans, so a target price
 // without a linked NMI plan of its amount and cycle is refused before any
-// charge, on preview and change, by the customer and by staff.
+// charge, on preview and change, by the customer and by staff; staff never
+// charge a provider-billed upgrade.
 func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -360,9 +361,12 @@ func TestLegacyNMITierChangeRequiresLinkedPlan(t *testing.T) {
 		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
 		_, err = l.c.change(l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "x-" + uuid.NewString()})
 		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
-		// Staff take the same provider path, deferred.
-		_, err = w.client[remote].ChangeSubscription(t.Context(), l.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(target.ID), IdempotencyKey: "staff-" + uuid.NewString()})
-		requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
+		_, err = w.client[remote].ChangeSubscription(t.Context(), l.sub, billing.ChangeSubscriptionParams{Reason: "customer asked", PriceID: priceRef(target.ID), IdempotencyKey: "staff-" + uuid.NewString()})
+		if target.ID == unlinked.ID {
+			requireCode(t, err, http.StatusForbidden, billing.CodeCustomerActionRequired)
+		} else {
+			requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeRequiresLinkedPlan)
+		}
 	}
 	w.settle()
 	require.Len(t, l.tierSales(), sales, "nothing charged")

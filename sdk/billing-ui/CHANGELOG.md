@@ -24,8 +24,8 @@
   no `action`, a `quantity`. `useSubscriptions().changeTier` is
   `changeSubscription`, its pending state `change`, and its host event
   `subscription.changed`.
-- `Subscription` has `quantity` and `scheduled_quantity`: the seats of a
-  per-seat price, null otherwise. The `tier_change_*` codes are
+- `Subscription` has `quantity`: the seats of a per-seat price, null
+  otherwise; `scheduled_change.quantity` is the seats the next renewal bills. The `tier_change_*` codes are
   `subscription_change_*`, and `quantity_not_allowed` refuses seats on a price
   without them.
 

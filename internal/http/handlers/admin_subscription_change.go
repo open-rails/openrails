@@ -16,16 +16,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// AdminChangeSubscription changes a subscription's price or seats on the
-// customer's behalf. Staff never purchase for others: the change charges
-// nothing and applies at the next renewal. The staff route's permission authorizes
-// the operator; CheckoutService runs as the subscription's customer so
-// ownership and rail behavior match the customer's own change.
+// AdminChangeSubscription changes a subscription's price or seats at the
+// customer's request, as the customer's own change would: an upgrade or more
+// seats are charged now, merchant-initiated under the card's agreement; a
+// downgrade or fewer seats wait for the renewal. The reason and the staff
+// member are kept with the change and its charge, and the customer is told.
+// CheckoutService runs as the subscription's customer so ownership and rail
+// behavior match the customer's own change.
 func AdminChangeSubscription(r *httprequest.Request) {
 	req, customer, subscription, ok := adminChangeRequest(r)
 	if !ok {
 		return
 	}
+	if req.Reason == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "reason is required").WithParam("reason"))
+		return
+	}
+	req.Invoker = resolveActorIdentity(r)
 	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
 	// A replay is answered from the durable operation before the admission
 	// guards: once the change committed, the subscription no longer passes them.
@@ -46,8 +53,8 @@ func AdminChangeSubscription(r *httprequest.Request) {
 	writeTierChangeResponse(r, resp)
 }
 
-// AdminPreviewSubscriptionChange previews a staff change: nothing now, the
-// new price and seats from the next renewal.
+// AdminPreviewSubscriptionChange quotes a staff change: what it charges now
+// and from the next renewal.
 func AdminPreviewSubscriptionChange(r *httprequest.Request) {
 	req, customer, subscription, ok := adminChangeRequest(r)
 	if !ok || !adminTierChangeAdmissible(r, subscription) {
@@ -72,6 +79,10 @@ func adminChangeRequest(
 	}
 	req, ok := changeRequest(r, body.PriceID, body.Quantity)
 	if !ok {
+		return nil, nil, nil, false
+	}
+	if req.Reason = strings.TrimSpace(body.Reason); len(req.Reason) > 500 {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "reason is at most 500 characters").WithParam("reason"))
 		return nil, nil, nil, false
 	}
 	req.Staff = true
@@ -123,10 +134,6 @@ func adminTierChangeAdmissible(r *httprequest.Request, subscription *models.Subs
 		r.ErrorCode(billing.CodeInternalError, "failed to check the scheduled change")
 		return false
 	}
-	if pending != nil && pending.Source == billing.ScheduledChangeMigration {
-		r.ErrorCode(billing.CodeResourceConflict, "subscription already has a scheduled price change")
-		return false
-	}
 	// An engine subscription's service answers its own schedule: the same
 	// downgrade replays, another is a typed refusal, an upgrade replaces it.
 	if pending != nil && subscription.CollectionPolicy != models.CollectionPolicyEngine {
@@ -153,6 +160,7 @@ func logAdminTierChange(
 		"event":           "admin_subscription_change",
 		"subscription_id": req.SubscriptionID,
 		"target_price_id": req.PriceID,
+		"reason":          req.Reason,
 	}
 	if req.Quantity != nil {
 		fields["target_quantity"] = *req.Quantity

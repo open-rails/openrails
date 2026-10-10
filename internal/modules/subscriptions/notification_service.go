@@ -185,6 +185,8 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 			PaymentMethod: notification.Data.PaymentMethod,
 			IsPremium:     true,
 		})
+	case models.NotificationSubscriptionChanged:
+		return s.emailService.SendSubscriptionChanged(ctx, notification.CustomerID.String(), notification.Data)
 	case models.NotificationPaymentMethodAutoUpdated:
 		log.WithContext(ctx).Debug("payment method auto-updated - no email sent")
 		return nil

@@ -10,6 +10,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jonboulle/clockwork"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -271,6 +272,24 @@ func (s *EmailService) SendOneOffPurchaseReceipt(ctx context.Context, data OneOf
 // ============================================================================
 // Subscription Email Methods (formerly in SubscriptionEmailService)
 // ============================================================================
+
+// SendSubscriptionChanged sends the receipt of a change staff made at the
+// customer's request.
+func (s *EmailService) SendSubscriptionChanged(ctx context.Context, userID string, data billing.NotificationData) error {
+	if !s.IsEnabled() {
+		return nil
+	}
+	username, email, err := s.getUserEmail(ctx, userID)
+	if errors.Is(err, errUserEmailUnavailable) {
+		log.WithContext(ctx).Debug("email unavailable - skipping subscription change email")
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	content := RenderSubscriptionChangedEmail(s.storeName(ctx), username, data)
+	return s.SendEmail(ctx, email, content.Subject, content.HTML, content.Plain)
+}
 
 // SendSubscriptionConfirmed sends a subscription confirmation email
 func (s *EmailService) SendSubscriptionConfirmed(ctx context.Context, userID string) error {

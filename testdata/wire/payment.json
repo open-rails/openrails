@@ -9,8 +9,10 @@
   "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
   "order_id": null,
   "invoice_id": null,
+  "quantity": null,
   "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
   "price": {
+    "quantity": null,
     "revision": 0,
     "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
     "key": "pro-monthly",

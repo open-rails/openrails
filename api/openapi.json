@@ -3611,7 +3611,7 @@
         ]
       }
     },
-    "/v1/admin/subscriptions/{id}/change-tier": {
+    "/v1/admin/subscriptions/{id}/change": {
       "post": {
         "tags": [
           "admin"
@@ -3637,7 +3637,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierParams"
+                "$ref": "#/components/schemas/ChangeSubscriptionParams"
               }
             }
           }
@@ -3648,7 +3648,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChange"
+                  "$ref": "#/components/schemas/SubscriptionChange"
                 }
               }
             }
@@ -3658,7 +3658,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChange"
+                  "$ref": "#/components/schemas/SubscriptionChange"
                 }
               }
             }
@@ -3687,21 +3687,28 @@
           "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
+          "quantity_not_allowed",
           "rebill_terms_committed",
           "resource_conflict",
           "resource_not_found",
           "scheduled_change_exists",
           "service_unavailable",
+          "stored_credential_required",
+          "subscription_change_already_scheduled",
+          "subscription_change_credit_exceeds_price",
+          "subscription_change_cycle_unknown",
+          "subscription_change_idempotency_conflict",
+          "subscription_change_idempotency_key_required",
+          "subscription_change_in_flight",
+          "subscription_change_period_unknown",
+          "subscription_change_provider_conflict",
+          "subscription_change_refused",
+          "subscription_change_renewal_due",
+          "subscription_change_requires_linked_plan",
+          "subscription_change_target_inactive",
+          "subscription_change_unsupported_on_rail",
           "subscription_not_active",
-          "subscription_not_found",
-          "tier_change_already_scheduled",
-          "tier_change_in_flight",
-          "tier_change_period_unknown",
-          "tier_change_provider_conflict",
-          "tier_change_refused",
-          "tier_change_requires_linked_plan",
-          "tier_change_target_inactive",
-          "tier_change_unsupported_on_rail"
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -3709,7 +3716,7 @@
         ]
       }
     },
-    "/v1/admin/subscriptions/{id}/change-tier/preview": {
+    "/v1/admin/subscriptions/{id}/change/preview": {
       "post": {
         "tags": [
           "admin"
@@ -3728,7 +3735,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierParams"
+                "$ref": "#/components/schemas/ChangeSubscriptionParams"
               }
             }
           }
@@ -3739,7 +3746,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangePreview"
+                  "$ref": "#/components/schemas/SubscriptionChangePreview"
                 }
               }
             }
@@ -3765,18 +3772,22 @@
           "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
+          "quantity_not_allowed",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable",
+          "subscription_change_already_scheduled",
+          "subscription_change_credit_exceeds_price",
+          "subscription_change_cycle_unknown",
+          "subscription_change_in_flight",
+          "subscription_change_period_unknown",
+          "subscription_change_provider_conflict",
+          "subscription_change_renewal_due",
+          "subscription_change_requires_linked_plan",
+          "subscription_change_target_inactive",
+          "subscription_change_unsupported_on_rail",
           "subscription_not_active",
-          "subscription_not_found",
-          "tier_change_already_scheduled",
-          "tier_change_in_flight",
-          "tier_change_period_unknown",
-          "tier_change_provider_conflict",
-          "tier_change_requires_linked_plan",
-          "tier_change_target_inactive",
-          "tier_change_unsupported_on_rail"
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -4519,7 +4530,7 @@
         ]
       }
     },
-    "/v1/me/subscriptions/{id}/change-tier": {
+    "/v1/me/subscriptions/{id}/change": {
       "post": {
         "tags": [
           "customer"
@@ -4545,7 +4556,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CustomerChangeTierParams"
+                "$ref": "#/components/schemas/CustomerChangeSubscriptionParams"
               }
             }
           }
@@ -4556,7 +4567,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChange"
+                  "$ref": "#/components/schemas/SubscriptionChange"
                 }
               }
             }
@@ -4566,7 +4577,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChange"
+                  "$ref": "#/components/schemas/SubscriptionChange"
                 }
               }
             }
@@ -4593,6 +4604,7 @@
           "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
+          "quantity_not_allowed",
           "rebill_terms_committed",
           "resource_conflict",
           "resource_not_found",
@@ -4600,15 +4612,21 @@
           "service_unavailable",
           "solana_rpc_unavailable",
           "solana_transaction_refused",
+          "subscription_change_already_scheduled",
+          "subscription_change_credit_exceeds_price",
+          "subscription_change_cycle_unknown",
+          "subscription_change_idempotency_conflict",
+          "subscription_change_idempotency_key_required",
+          "subscription_change_in_flight",
+          "subscription_change_period_unknown",
+          "subscription_change_provider_conflict",
+          "subscription_change_refused",
+          "subscription_change_renewal_due",
+          "subscription_change_requires_linked_plan",
+          "subscription_change_target_inactive",
+          "subscription_change_unsupported_on_rail",
           "subscription_not_active",
-          "subscription_not_found",
-          "tier_change_in_flight",
-          "tier_change_period_unknown",
-          "tier_change_provider_conflict",
-          "tier_change_refused",
-          "tier_change_requires_linked_plan",
-          "tier_change_target_inactive",
-          "tier_change_unsupported_on_rail"
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -4616,7 +4634,7 @@
         ]
       }
     },
-    "/v1/me/subscriptions/{id}/change-tier/preview": {
+    "/v1/me/subscriptions/{id}/change/preview": {
       "post": {
         "tags": [
           "customer"
@@ -4635,7 +4653,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ChangeTierParams"
+                "$ref": "#/components/schemas/PreviewSubscriptionChangeParams"
               }
             }
           }
@@ -4646,7 +4664,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TierChangePreview"
+                  "$ref": "#/components/schemas/SubscriptionChangePreview"
                 }
               }
             }
@@ -4671,17 +4689,22 @@
           "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
+          "quantity_not_allowed",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable",
+          "subscription_change_already_scheduled",
+          "subscription_change_credit_exceeds_price",
+          "subscription_change_cycle_unknown",
+          "subscription_change_in_flight",
+          "subscription_change_period_unknown",
+          "subscription_change_provider_conflict",
+          "subscription_change_renewal_due",
+          "subscription_change_requires_linked_plan",
+          "subscription_change_target_inactive",
+          "subscription_change_unsupported_on_rail",
           "subscription_not_active",
-          "subscription_not_found",
-          "tier_change_in_flight",
-          "tier_change_period_unknown",
-          "tier_change_provider_conflict",
-          "tier_change_requires_linked_plan",
-          "tier_change_target_inactive",
-          "tier_change_unsupported_on_rail"
+          "subscription_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -13380,6 +13403,16 @@
               }
             ]
           },
+          "quantity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Quantity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "psps": {
             "oneOf": [
               {
@@ -14583,10 +14616,16 @@
           "writes_allowed"
         ]
       },
-      "ChangeTierParams": {
+      "ChangeSubscriptionParams": {
         "type": "object",
         "properties": {
           "price_id": {
+            "type": "string"
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "reason": {
             "type": "string"
           }
         }
@@ -15490,6 +15529,9 @@
           "customer_amount": {
             "$ref": "#/components/schemas/CustomerAmount"
           },
+          "quantity": {
+            "$ref": "#/components/schemas/Quantity"
+          },
           "product_id": {
             "type": "string"
           },
@@ -16090,11 +16132,28 @@
           }
         }
       },
-      "CustomerChangeTierParams": {
+      "CustomerChangeSubscriptionParams": {
         "type": "object",
         "properties": {
           "price_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "signature": {
             "type": "string"
@@ -16714,6 +16773,26 @@
               }
             ]
           },
+          "quantities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "held": {
             "oneOf": [
               {
@@ -16730,6 +16809,7 @@
         },
         "required": [
           "entitlements",
+          "quantities",
           "held"
         ]
       },
@@ -19046,6 +19126,9 @@
           "transaction_id": {
             "type": "string"
           },
+          "quantity": {
+            "type": "integer"
+          },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -20190,6 +20273,16 @@
               }
             ]
           },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "price_id": {
             "oneOf": [
               {
@@ -20312,6 +20405,7 @@
           "subscription_id",
           "order_id",
           "invoice_id",
+          "quantity",
           "price_id",
           "price",
           "product",
@@ -21057,11 +21151,46 @@
           }
         }
       },
+      "PreviewSubscriptionChangeParams": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
       "Price": {
         "type": "object",
         "properties": {
           "customer_amount": {
             "$ref": "#/components/schemas/CustomerAmount"
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Quantity"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "revision": {
             "type": "integer"
@@ -21155,6 +21284,7 @@
           }
         },
         "required": [
+          "quantity",
           "revision",
           "id",
           "key",
@@ -21594,10 +21724,31 @@
                 "type": "null"
               }
             ]
+          },
+          "quantities": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "type": "integer"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "access"
+          "access",
+          "quantities"
         ]
       },
       "ProductAccessGrant": {
@@ -21634,6 +21785,16 @@
             "oneOf": [
               {
                 "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -21733,6 +21894,7 @@
           "source_type",
           "source_id",
           "payment_id",
+          "quantity",
           "grant_reason",
           "granted_by",
           "note",
@@ -22435,6 +22597,21 @@
           "capabilities",
           "currencies",
           "payment"
+        ]
+      },
+      "Quantity": {
+        "type": "object",
+        "properties": {
+          "min": {
+            "type": "integer"
+          },
+          "max": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "min",
+          "max"
         ]
       },
       "RailDefinition": {
@@ -23397,7 +23574,14 @@
             "type": "string"
           },
           "quantity": {
-            "type": "integer"
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "psp_id": {
             "type": "string"
@@ -23620,6 +23804,138 @@
           "kind",
           "product_id",
           "starts_at"
+        ]
+      },
+      "SubscriptionChange": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "string"
+          },
+          "price_id": {
+            "type": "string"
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rail": {
+            "type": "string"
+          },
+          "subscription_id": {
+            "type": "string"
+          },
+          "next_action": {
+            "$ref": "#/components/schemas/NextAction"
+          },
+          "transaction_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "delayed_start": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount_due_now": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "next_charge_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "next_charge_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "operation_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "price_id",
+          "quantity",
+          "rail",
+          "transaction_id",
+          "amount_due_now",
+          "next_charge_amount"
+        ]
+      },
+      "SubscriptionChangePreview": {
+        "type": "object",
+        "properties": {
+          "effective": {
+            "type": "string"
+          },
+          "price_id": {
+            "type": "string"
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "rail": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "amount_due_now": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "next_charge_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "next_charge_date": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "is_estimate": {
+            "type": "boolean"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "effective",
+          "price_id",
+          "quantity",
+          "rail",
+          "currency",
+          "amount_due_now",
+          "next_charge_amount",
+          "is_estimate"
         ]
       },
       "SubscriptionDunning": {
@@ -23913,123 +24229,6 @@
           "tier_rank",
           "product_id",
           "product_key"
-        ]
-      },
-      "TierChange": {
-        "type": "object",
-        "properties": {
-          "status": {
-            "type": "string"
-          },
-          "action": {
-            "type": "string"
-          },
-          "effective": {
-            "type": "string"
-          },
-          "price_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "next_action": {
-            "$ref": "#/components/schemas/NextAction"
-          },
-          "transaction_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "message": {
-            "type": "string"
-          },
-          "delayed_start": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount_due_now": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "next_charge_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "next_charge_date": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "operation_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "price_id",
-          "rail",
-          "transaction_id",
-          "amount_due_now",
-          "next_charge_amount"
-        ]
-      },
-      "TierChangePreview": {
-        "type": "object",
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "price_id": {
-            "type": "string"
-          },
-          "rail": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "amount_due_now": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "next_charge_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "next_charge_date": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "effective": {
-            "type": "string"
-          },
-          "is_estimate": {
-            "type": "boolean"
-          },
-          "message": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "action",
-          "price_id",
-          "rail",
-          "currency",
-          "amount_due_now",
-          "next_charge_amount",
-          "effective",
-          "is_estimate"
         ]
       },
       "TieredPrice": {
@@ -25782,7 +25981,7 @@
     "quantity_not_allowed": {
       "status": 422,
       "type": "invalid_request_error",
-      "meaning": "The line's recurring price has no seats: it takes no quantity."
+      "meaning": "A quantity was sent for a price that is not sold per seat."
     },
     "rate_card_currency_mismatch": {
       "status": 409,
@@ -25924,6 +26123,81 @@
       "type": "authorization_error",
       "meaning": "The operation needs a recent sign-in and this credential cannot prove one."
     },
+    "stored_credential_required": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The card has no active agreement for a merchant-initiated charge; the customer makes this change."
+    },
+    "subscription_change_already_scheduled": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A different period-end change is already scheduled."
+    },
+    "subscription_change_cadence_unsupported": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "A provider-billed subscription can change only to a price of the same cadence."
+    },
+    "subscription_change_credit_exceeds_price": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The current plan's unused value exceeds the target price; change at period end."
+    },
+    "subscription_change_cycle_unknown": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The target price has no positive billing cycle."
+    },
+    "subscription_change_idempotency_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The Idempotency-Key already names a different change."
+    },
+    "subscription_change_idempotency_key_required": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "A subscription change needs an Idempotency-Key."
+    },
+    "subscription_change_in_flight": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "Another unresolved change owns the subscription; metadata.operation_id names it."
+    },
+    "subscription_change_period_unknown": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The subscription has no valid current period."
+    },
+    "subscription_change_provider_conflict": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The provider's copy of the subscription is missing or differs; reconcile it first."
+    },
+    "subscription_change_refused": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The change was refused and not executed."
+    },
+    "subscription_change_renewal_due": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The current period ended or its renewal is unresolved; the renewal settles first."
+    },
+    "subscription_change_requires_linked_plan": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The target price has no plan on the subscription's PSP that this change can use."
+    },
+    "subscription_change_target_inactive": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The target price or its product is archived."
+    },
+    "subscription_change_unsupported_on_rail": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "The subscription's rail cannot make this change."
+    },
     "subscription_not_active": {
       "status": 409,
       "type": "invalid_request_error",
@@ -25943,76 +26217,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again."
-    },
-    "tier_change_already_scheduled": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "A different period-end change is already scheduled."
-    },
-    "tier_change_cadence_unsupported": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "A provider-billed subscription can change only to a price of the same cadence."
-    },
-    "tier_change_credit_exceeds_price": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The current plan's unused value exceeds the target price; change at period end."
-    },
-    "tier_change_cycle_unknown": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The target price has no positive billing cycle."
-    },
-    "tier_change_idempotency_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The Idempotency-Key already names a different tier change."
-    },
-    "tier_change_idempotency_key_required": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "A tier change needs an Idempotency-Key."
-    },
-    "tier_change_in_flight": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "Another unresolved tier change owns the subscription; metadata.operation_id names it."
-    },
-    "tier_change_period_unknown": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The subscription has no valid current period."
-    },
-    "tier_change_provider_conflict": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The provider's copy of the subscription is missing or differs; reconcile it first."
-    },
-    "tier_change_refused": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The tier change was refused and not executed."
-    },
-    "tier_change_renewal_due": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The current period ended or its renewal is unresolved; the renewal settles first."
-    },
-    "tier_change_requires_linked_plan": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The target price has no plan on the subscription's PSP that this change can use."
-    },
-    "tier_change_target_inactive": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The target price or its product is archived."
-    },
-    "tier_change_unsupported_on_rail": {
-      "status": 400,
-      "type": "invalid_request_error",
-      "meaning": "The subscription's rail cannot make this tier change."
     },
     "trial_unsupported_on_rail": {
       "status": 400,

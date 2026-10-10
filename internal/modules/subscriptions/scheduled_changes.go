@@ -43,6 +43,8 @@ type NewScheduledChange struct {
 	Source                  billing.ScheduledChangeSource
 	PriceMigrationID        *uuid.UUID
 	AcknowledgedShortNotice bool
+	// Staff scheduled the change at the customer's request.
+	Staff *StaffChange
 }
 
 func requireTx(d *db.DB) error {
@@ -80,7 +82,7 @@ func insertChange(ctx context.Context, d *db.DB, sub *models.Subscription, c New
 		return nil, err
 	}
 	if c.PriceID == uuid.Nil || (c.Source == billing.ScheduledChangeMigration) != (c.PriceMigrationID != nil) ||
-		(c.Source != billing.ScheduledChangeChange && c.Source != billing.ScheduledChangeMigration) || (c.Quantity != nil && *c.Quantity < 1) {
+		(c.Source != billing.ScheduledChangeChange && c.Source != billing.ScheduledChangeMigration) || (c.Quantity != nil && *c.Quantity < 1) || (c.Staff != nil && (!c.Staff.valid() || c.Source != billing.ScheduledChangeChange)) {
 		return nil, errors.New("scheduled change is incomplete")
 	}
 	pending, err := PendingChange(ctx, d, sub.ID)
@@ -103,6 +105,8 @@ func insertChange(ctx context.Context, d *db.DB, sub *models.Subscription, c New
 		MerchantID: sub.MerchantID, SubscriptionID: sub.ID, FromPriceID: sub.PriceID, PriceID: c.PriceID,
 		Quantity: quantity, EffectiveAt: effective.UTC(), Source: string(c.Source), PriceMigrationID: c.PriceMigrationID,
 		AcknowledgedShortNotice: c.AcknowledgedShortNotice,
+		Invoker:                 staffField(c.Staff, func(s *StaffChange) string { return s.Invoker }),
+		Reason:                  staffField(c.Staff, func(s *StaffChange) string { return s.Reason }),
 	})
 	if db.IsUniqueViolation(err) {
 		return nil, ErrChangeAlreadyScheduled
@@ -111,6 +115,14 @@ func insertChange(ctx context.Context, d *db.DB, sub *models.Subscription, c New
 		return nil, err
 	}
 	return models.ScheduledChangeFromGen(row), nil
+}
+
+func staffField(s *StaffChange, field func(*StaffChange) string) *string {
+	if s == nil {
+		return nil
+	}
+	v := field(s)
+	return &v
 }
 
 // PendingChange is the subscription's scheduled change, or nil.

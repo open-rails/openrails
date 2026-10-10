@@ -6,11 +6,13 @@ import "time"
 // PriceID names another price of the subscription's tier group; nil keeps the
 // price. Quantity is the seats wanted, within the price's bounds; nil keeps
 // them. Only a per-seat price has seats: a quantity for any other is refused
-// with quantity_not_allowed. IdempotencyKey identifies the change; reuse it
-// until the change resolves.
+// with quantity_not_allowed. Reason is why staff make the change, required
+// on a change (not a preview) and kept with it and any charge. IdempotencyKey
+// identifies the change; reuse it until the change resolves.
 type ChangeSubscriptionParams struct {
 	PriceID        *PriceID `json:"price_id,omitempty"`
 	Quantity       *int     `json:"quantity,omitempty"`
+	Reason         string   `json:"reason,omitempty"`
 	IdempotencyKey string   `json:"-"`
 }
 
@@ -112,4 +114,7 @@ const (
 	// subscription is missing or differs from OpenRails' (another price, a
 	// provider schedule); reconcile it first.
 	CodeSubscriptionChangeProviderConflict = "subscription_change_provider_conflict"
+	// CodeStoredCredentialRequired: a merchant-initiated charge (a staff
+	// change charged now) found no active agreement on the card for it.
+	CodeStoredCredentialRequired = "stored_credential_required"
 )

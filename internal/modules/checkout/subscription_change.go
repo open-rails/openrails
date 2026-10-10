@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	log "github.com/sirupsen/logrus"
 )
 
 // A subscription change moves a subscription to another price of its tier
@@ -26,16 +28,21 @@ import (
 //   - a tier upgrade applies now and prorates the new price × seats against
 //     the old price × seats; a tier downgrade applies at the next renewal with
 //     its seats;
-//   - a change by staff never charges: all of it waits for the next renewal.
+//   - a change to what the subscription bills now cancels its pending change;
+//   - staff change at the customer's request the same way, charging now
+//     merchant-initiated under the card's recurring agreement, with their
+//     reason kept and the customer told; they never charge a subscription
+//     its provider bills.
 //
 // Seats exist only for a price sold per seat (its catalog quantity bounds),
 // on engine-owned NMI and Stripe subscriptions.
 
 var (
-	errSeatsUnsupported   = &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: "only a subscription billed by OpenRails on a card rail has seats"}
-	errNothingToChange    = &TierChangeError{Code: billing.CodeResourceConflict, Message: "the subscription already has this price and these seats"}
-	errQuantityNotAllowed = &TierChangeError{Code: billing.CodeQuantityNotAllowed, Message: "the price is not sold per seat; send no quantity"}
-	errProviderHeldChange = &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "the provider already bills the scheduled change; it cannot be changed back here"}
+	errSeatsUnsupported    = &TierChangeError{Code: billing.CodeSubscriptionChangeUnsupportedOnRail, Message: "only a subscription billed by OpenRails on a card rail has seats"}
+	errNothingToChange     = &TierChangeError{Code: billing.CodeResourceConflict, Message: "the subscription already has this price and these seats"}
+	errQuantityNotAllowed  = &TierChangeError{Code: billing.CodeQuantityNotAllowed, Message: "the price is not sold per seat; send no quantity"}
+	errStaffProviderCharge = &TierChangeError{Code: billing.CodeCustomerActionRequired, Message: "staff cannot charge a subscription its provider bills; the customer makes this upgrade"}
+	errProviderHeldChange  = &TierChangeError{Code: billing.CodeSubscriptionChangeProviderConflict, Message: "the provider already bills the scheduled change; it cannot be changed back here"}
 )
 
 // changeTarget is a resolved change: the subscription as read, its current
@@ -57,7 +64,17 @@ type changeTarget struct {
 	requested *int
 	// pending is the subscription's scheduled change, as read.
 	pending *models.ScheduledChange
-	staff   bool
+	// staff made the change at the customer's request.
+	staff *subscriptions.StaffChange
+}
+
+// staffChange is the staff member and reason a staff change keeps; nil for
+// the customer's own.
+func staffChange(req *SubscriptionChangeRequest) *subscriptions.StaffChange {
+	if !req.Staff {
+		return nil
+	}
+	return &subscriptions.StaffChange{Invoker: req.Invoker, Reason: req.Reason}
 }
 
 // clears reports whether the change asks for what the subscription bills
@@ -98,6 +115,48 @@ func (s *CheckoutService) changeSubscription(ctx context.Context, req *Subscript
 	if err := s.refuseTierChangeInFlight(ctx, c.sub); err != nil {
 		return nil, err
 	}
+	resp, err := s.routeChange(ctx, req, user, c)
+	// A staff change charged now is told from its completion; one scheduled
+	// or canceled here is told now.
+	if err == nil && c.staff != nil && resp.Status == "succeeded" && (resp.Effective != "now" || c.clears()) {
+		s.notifyStaffChange(ctx, c, resp)
+	}
+	return resp, err
+}
+
+// notifyStaffChange tells the customer of a change staff made at their
+// request that charged nothing. A failure is logged: the change stands.
+func (s *CheckoutService) notifyStaffChange(ctx context.Context, c *changeTarget, resp *TierChangeResponse) {
+	product := c.product.DisplayName
+	if resp.PriceID != billing.PriceID(c.price.ID) {
+		if price, err := s.PriceService.GetByID(ctx, resp.PriceID.UUID()); err == nil {
+			if p, err := s.ProductService.GetByID(ctx, price.ProductID); err == nil {
+				product = p.DisplayName
+			}
+		}
+	}
+	at := s.now()
+	if resp.Effective != "now" && c.sub.CurrentPeriodEndsAt != nil {
+		at = *c.sub.CurrentPeriodEndsAt
+	}
+	key := fmt.Sprintf("%s:%s:%d:%s", resp.Effective, resp.PriceID, subscriptions.SeatCount(resp.Quantity), at.UTC().Format(time.RFC3339Nano))
+	if c.clears() && c.pending != nil {
+		key = "canceled:" + c.pending.ID.String()
+	}
+	notice, err := subscriptions.QueueStaffChangeNotice(ctx, s.SubscriptionService.Database(), c.sub, subscriptions.StaffChangeNotice{
+		Key: key, PriceID: resp.PriceID.UUID(), ProductName: product, Quantity: resp.Quantity,
+		Currency: resp.Currency, NextAmount: resp.NextChargeAmount, EffectiveAt: at,
+	})
+	if err != nil {
+		log.WithContext(ctx).WithError(err).WithField("subscription_id", c.sub.ID).Error("queue staff change notice")
+		return
+	}
+	if s.Lifecycle != nil {
+		s.Lifecycle.DispatchNotifications(ctx, []*models.NotificationQueue{notice})
+	}
+}
+
+func (s *CheckoutService) routeChange(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity, c *changeTarget) (*TierChangeResponse, error) {
 	sub := c.sub
 	if sub.CollectionPolicy == models.CollectionPolicyEngine && sub.Rail != models.RailSolana {
 		switch {
@@ -117,10 +176,13 @@ func (s *CheckoutService) changeSubscription(ctx context.Context, req *Subscript
 	if !c.tier {
 		return nil, errNothingToChange
 	}
-	// A provider-owned change by staff takes the provider's period-end path,
-	// which charges nothing.
+	// Staff cannot charge a provider-owned subscription: the provider, not
+	// OpenRails, would charge without the card's agreement checked.
+	if req.Staff && c.upgrade {
+		return nil, errStaffProviderCharge
+	}
 	action := "upgrade"
-	if req.Staff || !c.upgrade {
+	if !c.upgrade {
 		action = "downgrade"
 	}
 	switch {
@@ -175,7 +237,10 @@ func (s *CheckoutService) previewSubscriptionChange(ctx context.Context, req *Su
 	if !c.tier {
 		return nil, errNothingToChange
 	}
-	deferred := req.Staff || !c.upgrade
+	if req.Staff && c.upgrade {
+		return nil, errStaffProviderCharge
+	}
+	deferred := !c.upgrade
 	if rails.IsNMI(sub.Rail) {
 		return s.previewProviderNMITierChange(ctx, resp, sub, c.currentPrice, c.price, c.product, deferred)
 	}
@@ -230,7 +295,7 @@ func (s *CheckoutService) resolveChange(ctx context.Context, req *SubscriptionCh
 	if err := validateTierChangeSubscriptionStatus(sub); err != nil {
 		return nil, err
 	}
-	c := &changeTarget{sub: sub, requested: req.Quantity, staff: req.Staff}
+	c := &changeTarget{sub: sub, requested: req.Quantity, staff: staffChange(req)}
 	if c.pending, err = subscriptions.PendingChange(ctx, s.SubscriptionService.Database(), sub.ID); err != nil {
 		return nil, err
 	}

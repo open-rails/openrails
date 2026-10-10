@@ -402,7 +402,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
           body: {
             price_id: change.priceId,
             quantity: change.quantity,
-          } satisfies wire.ChangeSubscriptionParams,
+          } satisfies wire.PreviewSubscriptionChangeParams,
           signal,
         }
       )

@@ -17,9 +17,9 @@ import (
 // Engine-owned tier changes (#1071). A customer's upgrade is one engine
 // charge of new price − unused credit on the membership's card, effective
 // now: a successor membership opens a period of the new cadence and replaces
-// the old one. A downgrade, and any change by staff, takes effect at period
-// end: nothing is charged or refunded now, and the renewal bills the new
-// price for a period of its cadence.
+// the old one. A downgrade, by the customer or by staff, takes effect at
+// period end: nothing is charged or refunded now, and the renewal bills the
+// new price for a period of its cadence.
 
 func (w *world) engineMember(rail string, tp topology, from tier) (*customer, billing.SubscriptionID) {
 	w.t.Helper()
@@ -173,16 +173,16 @@ func TestEngineTierDowngrade(t *testing.T) {
 				require.True(t, end.Equal(*preview.NextChargeDate), "%s: takes effect at period end", row.name)
 			}
 			key := "downgrade-" + uuid.NewString()
-			done, err := w.client[tp].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: req.PriceID, IdempotencyKey: key})
+			done, err := w.client[tp].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{Reason: "customer asked", PriceID: req.PriceID, IdempotencyKey: key})
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", done.Status, "%+v", done)
 			require.Equal(t, "period_end", done.Effective)
 			require.Zero(t, done.AmountDueNow)
 			require.True(t, end.Equal(*done.DelayedStart))
-			again, err := w.client[other(tp)].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: req.PriceID, IdempotencyKey: key})
+			again, err := w.client[other(tp)].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{Reason: "customer asked", PriceID: req.PriceID, IdempotencyKey: key})
 			require.NoError(t, err)
 			require.Equal(t, "succeeded", again.Status, "the same downgrade replays")
-			_, err = w.client[tp].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{PriceID: priceRef(lowest.ID), IdempotencyKey: "downgrade-" + uuid.NewString()})
+			_, err = w.client[tp].ChangeSubscription(t.Context(), sub, billing.ChangeSubscriptionParams{Reason: "customer asked", PriceID: priceRef(lowest.ID), IdempotencyKey: "downgrade-" + uuid.NewString()})
 			requireCode(t, err, http.StatusConflict, billing.CodeSubscriptionChangeAlreadyScheduled)
 
 			current := w.subscription(tp, sub)

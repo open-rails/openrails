@@ -1609,6 +1609,9 @@ type BillingScheduledChange struct {
 	CreatedAt               time.Time
 	AppliedAt               *time.Time
 	CanceledAt              *time.Time
+	// The staff member who scheduled the change at the customer's request, with reason; NULL for the customer's own change and a migration.
+	Invoker *string
+	Reason  *string
 }
 
 // Every signature observed on a Solana Pay reference, recorded once. credited = the checkout was paid by it (overpaid flags the excess for refund); review = money that was not credited (already_paid, late, underpaid, session_closed, wrong_asset, unreadable, settle_failed) and needs a refund or operator decision, closed by resolved_at; duplicate = the transfer already settled another reference; ignored = no value to the merchant (deleted with its reference). A transfer to one recipient in one mint is credited or reviewed at most once across every reference. Unresolved reviews refuse the billing archive. Retention: permanent for credited and review receipts; an ignored receipt goes with its settled reference.

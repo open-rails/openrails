@@ -93,6 +93,10 @@ func paymentView(p *models.Payment, amountRefunded int64) billing.Payment {
 		if reason := adminRefundMetadataString(p.Metadata, "admin_refund_reason"); reason != "" {
 			out.Reason = &reason
 		}
+	} else if adminRefundMetadataString(p.Metadata, "changed_by") == "staff" {
+		if reason := adminRefundMetadataString(p.Metadata, "reason"); reason != "" {
+			out.Reason = &reason
+		}
 	}
 	if out.Kind == billing.PaymentCharge && out.Status == billing.PaymentSucceeded && amountRefunded > 0 {
 		out.Status = billing.PaymentPartiallyRefunded

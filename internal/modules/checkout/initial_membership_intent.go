@@ -155,9 +155,14 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	mode := p.Instrument.Cites(charge.InitiatorCustomer, charge.AgreementRecurring)
+	mode := p.Instrument.Cites(p.Initiator(), charge.AgreementRecurring)
 	if proxy != nil {
-		result, refusal, err := proxy.ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
+		// A staff change is merchant-initiated under the card's agreement.
+		execute := proxy.ChargeInitialRecurring
+		if p.Staff != nil {
+			execute = proxy.ChargeRecurringMIT
+		}
+		result, refusal, err := execute(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
 		if errors.Is(err, charge.ErrNotDispatched) {
 			return h.completeInitialNonexecution(ctx, in, proof)
 		}
@@ -179,7 +184,12 @@ func (h *InitialMembershipIntentHandler) Execute(ctx context.Context, in gen.Bil
 		return h.Verify(ctx, in)
 	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
-		result, refusal, err := nmidirect.New(client).ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
+		direct := nmidirect.New(client)
+		execute := direct.ChargeInitialRecurring
+		if p.Staff != nil {
+			execute = direct.ChargeRecurringMIT
+		}
+		result, refusal, err := execute(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef}, AmountMinor: minor, Currency: p.Terms.Currency, OrderRef: intents.NMIEnrollmentOrder(in), Context: mode})
 		if errors.Is(err, charge.ErrNotDispatched) {
 			return h.completeInitialNonexecution(ctx, in, proof)
 		}
@@ -501,7 +511,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			if receipt.ReversalKind() != "" {
 				// The provider already reversed the charge: no seats were bought.
 				evidence["message"] = "Payment reversed by the provider; seats unchanged"
-			} else if err := h.Checkout.Lifecycle.AddSeatsTx(ctx, d, p.Terms, models.Rail(in.Rail), transaction, p.Instrument.Custodian); err != nil {
+			} else if err := h.Checkout.Lifecycle.AddSeatsTx(ctx, d, p.Terms, models.Rail(in.Rail), transaction, p.Instrument.Custodian, p.Staff); err != nil {
 				return err
 			}
 			if paid {
@@ -520,15 +530,24 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			if paid {
 				transaction = receipt.TransactionID()
 			}
-			metadata := map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction}
+			metadata := p.Staff.Metadata(map[string]any{"order_id": intents.NMIEnrollmentOrder(in), "provider_transaction_id": transaction})
 			if reversal := receipt.ReversalKind(); reversal != "" {
 				metadata["initial_payment_reversal"] = reversal
 			}
 			if p.DelayedStart() != nil {
 				metadata["delayed_start"] = p.DelayedStart().UTC().Format(time.RFC3339Nano)
 			}
-			if _, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, InitialPaymentReversal: receipt.ReversalKind(), UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata}); err != nil {
+			created, _, err := h.Checkout.Lifecycle.CreateMembershipTx(ctx, d, &subscriptions.CreateMembershipParams{Prepared: &p.Terms, PaymentCustodian: p.Instrument.Custodian, InitialPaymentReversal: receipt.ReversalKind(), UserID: p.Terms.CustomerID.String(), PriceID: p.Terms.PriceID, Rail: models.Rail(in.Rail), RailSubscriptionID: &providerSub, TransactionID: transaction, Amount: p.Terms.Amount, AmountProvided: true, Currency: p.Terms.Currency, PurchasedAt: &p.Terms.AcceptedAt, PaymentMetadata: metadata})
+			if err != nil {
 				return err
+			}
+			if p.Staff != nil && created != nil {
+				if _, err := subscriptions.QueueStaffChangeNotice(ctx, d, created, subscriptions.StaffChangeNotice{
+					Key: p.Terms.PaymentID.String(), PriceID: p.Terms.PriceID, ProductName: p.Terms.ProductName, Quantity: p.Terms.Quantity,
+					Charged: p.Terms.Amount, Currency: p.Terms.Currency, TransactionID: transaction, NextAmount: p.Terms.RecurringAmount, EffectiveAt: p.Terms.AcceptedAt,
+				}); err != nil {
+					return err
+				}
 			}
 			if paid {
 				if err := recordInitialAttempt(ctx, d, in, p, attempts.Attempt{Approved: true, TransactionID: transaction, PaymentID: &p.Terms.PaymentID}, h.Checkout.now()); err != nil {

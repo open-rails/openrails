@@ -14,14 +14,16 @@ import (
 )
 
 // SubscriptionChangeRequest changes a subscription's price, seats or both.
-// PriceID "" keeps the price; Quantity nil keeps the seats. Staff changes
-// never charge: they wait for the next renewal.
+// PriceID "" keeps the price; Quantity nil keeps the seats.
 type SubscriptionChangeRequest struct {
 	PriceID        string
 	Quantity       *int
 	SubscriptionID uuid.UUID
 	IdempotencyKey string
-	Staff          bool
+	// Staff make the change at the customer's request: Invoker is the staff
+	// member and Reason why, kept with the change and any charge.
+	Staff           bool
+	Invoker, Reason string
 }
 
 var (

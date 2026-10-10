@@ -283,6 +283,7 @@ var errorCodes = []ErrorCode{
 	{CodeSubscriptionChangeTargetInactive, 422, invalid, "The target price or its product is archived."},
 	{CodeSubscriptionChangeUnsupportedOnRail, 400, invalid, "The subscription's rail cannot make this change."},
 	{CodeSubscriptionChangeProviderConflict, 409, invalid, "The provider's copy of the subscription is missing or differs; reconcile it first."},
+	{CodeStoredCredentialRequired, 409, invalid, "The card has no active agreement for a merchant-initiated charge; the customer makes this change."},
 	{"customer_email_required", 400, invalid, "The rail needs the customer's verified email and username."},
 	{"solana_transaction_refused", 400, invalid, "The wallet transaction could not be prepared or confirmed; the message says why."},
 	{"solana_rpc_unavailable", 502, fault, "The Solana RPC endpoints did not answer; retry."},

@@ -44,6 +44,35 @@ type InitialMembershipPayload struct {
 	// RequestedPrice is the price reference a tier upgrade named (an id or
 	// price key); a replay may name either it or the canonical price id.
 	RequestedPrice string `json:"requested_price,omitempty"`
+	// Staff charge a change at the customer's request: merchant-initiated,
+	// under the card's recurring agreement.
+	Staff *StaffChange `json:"staff,omitempty"`
+}
+
+// StaffChange is who on the merchant's staff made a change, and why.
+type StaffChange struct {
+	Invoker string `json:"invoker"`
+	Reason  string `json:"reason"`
+}
+
+func (c *StaffChange) valid() bool {
+	return c != nil && strings.TrimSpace(c.Invoker) != "" && strings.TrimSpace(c.Reason) != ""
+}
+
+// Metadata records the change's staff member and reason on its payment.
+func (c *StaffChange) Metadata(into map[string]any) map[string]any {
+	if c != nil {
+		into["changed_by"], into["staff_invoker"], into["reason"] = "staff", c.Invoker, c.Reason
+	}
+	return into
+}
+
+// Initiator is who initiates the operation's charge.
+func (p InitialMembershipPayload) Initiator() charge.Initiator {
+	if p.Staff != nil {
+		return charge.InitiatorMerchant
+	}
+	return charge.InitiatorCustomer
 }
 
 // TierChangeKeyPrefix scopes an upgrade's client key beside checkout keys.
@@ -99,6 +128,11 @@ func DecodeInitialMembershipPayload(in gen.BillingProviderIntent) (InitialMember
 	}
 	if p.Terms.Quantity != nil && in.Rail != string(models.RailNMI) && in.Rail != string(models.RailStripe) {
 		return p, errors.New("only an NMI or Stripe engine membership has seats")
+	}
+	// A staff charge changes an engine membership under the agreement the
+	// card already carries.
+	if p.Staff != nil && (!p.Staff.valid() || !change || p.Terms.CollectionPolicy != models.CollectionPolicyEngine || p.Instrument.Mandate == nil || in.Origin != "admin") {
+		return p, errors.New("staff change requires its staff member, reason and the card's recurring agreement")
 	}
 	if p.Terms.CollectionPolicy == models.CollectionPolicyEngine {
 		if p.NativeSchedule != nil || in.CustodianID != nil || p.Terms.Pending || p.Terms.Amount <= 0 || (p.Terms.Amount != p.Terms.RecurringAmount && !change) || !p.Terms.PeriodStart.Equal(p.Terms.AcceptedAt) {

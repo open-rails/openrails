@@ -194,7 +194,7 @@ func TestSecurityTierChangeStaysInGroup(t *testing.T) {
 		target billing.PriceID
 	}{{sub, loose.ID}, {looseSub, basic.ID}} {
 		for _, tp := range []topology{embedded, remote} {
-			_, err := w.client[tp].ChangeSubscription(t.Context(), tc.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(tc.target), IdempotencyKey: "cross-" + uuid.NewString()})
+			_, err := w.client[tp].ChangeSubscription(t.Context(), tc.sub, billing.ChangeSubscriptionParams{Reason: "customer asked", PriceID: priceRef(tc.target), IdempotencyKey: "cross-" + uuid.NewString()})
 			require.Error(t, err)
 			_, err = w.client[tp].PreviewSubscriptionChange(t.Context(), tc.sub, billing.ChangeSubscriptionParams{PriceID: priceRef(tc.target)})
 			require.Error(t, err)

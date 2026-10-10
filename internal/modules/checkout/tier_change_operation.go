@@ -156,7 +156,7 @@ func (s *CheckoutService) replayTierChangeOperation(ctx context.Context, in gen.
 	if s.Intents != nil && (in.Status == intents.StatusPending || in.Status == intents.StatusFailedRetryable) {
 		psp := derefUUID(in.PspID)
 		ctx = db.WithPSPID(ctx, psp)
-		if in, err = s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: psp, SubscriptionID: in.SubscriptionID, PriceID: in.PriceID, IntentType: in.IntentType, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: s.now(), Origin: intents.OriginUser, OriginReason: "resume tier change"}); err != nil {
+		if in, err = s.Intents.EnqueueAndExecute(ctx, intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: psp, SubscriptionID: in.SubscriptionID, PriceID: in.PriceID, IntentType: in.IntentType, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: s.now(), Origin: intents.Origin(in.Origin), OriginReason: "resume tier change"}); err != nil {
 			return nil, err
 		}
 	}

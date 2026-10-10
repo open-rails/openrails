@@ -45,6 +45,7 @@ func StripeEngineParams(in gen.BillingProviderIntent) (subscriptions.StripeEngin
 		params.AmountMinor = minor
 		params.Currency = p.Terms.Currency
 		params.Initial = true
+		params.MerchantInitiated = p.Staff != nil
 	case payments.TypeNMISale:
 		p, err := payments.DecodeNMISalePayload(in)
 		if err != nil {

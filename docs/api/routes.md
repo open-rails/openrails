@@ -59,7 +59,7 @@ A customer acting on its own account.
 | GET | `/v1/me/subscriptions/{id}` | customer | — | — | 200 `Subscription` |  |
 | POST | `/v1/me/subscriptions/{id}/retry-now` | customer | — | `RetrySubscriptionNowParams` | 200 `SubscriptionRetryNowResult`<br>202 `SubscriptionRetryNowResult` |  |
 | POST | `/v1/me/subscriptions/{id}/change` | customer | — | `CustomerChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | `Idempotency-Key` |
-| POST | `/v1/me/subscriptions/{id}/change/preview` | customer | — | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
+| POST | `/v1/me/subscriptions/{id}/change/preview` | customer | — | `PreviewSubscriptionChangeParams` | 200 `SubscriptionChangePreview` |  |
 | GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/me/product-access` | customer | — | — | 200 `ListPage<ProductAccessGrant>` |  |
 | GET | `/v1/me/spend-limits` | customer | — | — | 200 `SpendLimits` |  |

@@ -69,7 +69,8 @@ type Payment struct {
 	Card              *CardDetails    `json:"card"`
 	Failure           *PaymentFailure `json:"failure"`
 	RefundedPaymentID *PaymentID      `json:"refunded_payment_id"`
-	// Reason is the merchant's stated reason for a refund.
+	// Reason is the merchant's stated reason for a refund, or for a change
+	// staff charged at the customer's request.
 	Reason *string `json:"reason"`
 	// Refunds are the reversals of a charge: read with a single payment, null
 	// in lists.

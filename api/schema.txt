@@ -39,6 +39,7 @@ migration 0035_psp_credential_fingerprint.up.sql sha256:26ed2be2aa9c819c86cfc7e2
 migration 0036_invoice_overdue_is_a_filter.up.sql sha256:4d1c199b499f2a956ea1adbba79a47ba5c48444ca6a7ea51d6b55b3046164f48
 migration 0037_failed_usage.up.sql sha256:440a0bea4b34c76571c07a94918d935e1ce94c889b5e583c9c68ec0b52901cba
 migration 0038_orders.up.sql sha256:f86c20901b76602ca48f6007250096be288b84bed1f3798991f4a328f4dd56cb
+migration 0039_seat_changes.up.sql sha256:01cdc00df32eafff33a059e754d9a576a0f8f184d3bb0ef2aba86a6c89ceded6
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -576,8 +577,10 @@ table billing.customer_entitlement_cache
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column entitlement text COLLATE "C" NOT NULL
+  column quantity integer
   constraint customer_entitlement_cache_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint customer_entitlement_cache_pkey PRIMARY KEY (merchant_id, id)
+  constraint customer_entitlement_cache_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   index CREATE UNIQUE INDEX customer_entitlement_cache_key ON billing.customer_entitlement_cache USING btree (merchant_id, customer_id, entitlement)
   index CREATE UNIQUE INDEX customer_entitlement_cache_pkey ON billing.customer_entitlement_cache USING btree (merchant_id, id)
 
@@ -743,6 +746,7 @@ table billing.grants
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column actor text
   column grant_reason text
+  column quantity integer
   constraint grants_access_grant_reason_check CHECK (((NOT ((kind = 'access'::text) AND (source_type = 'grant'::text) AND (event = 'grant'::text))) OR ((grant_reason IS NOT NULL) AND (actor IS NOT NULL))))
   constraint grants_access_product_check CHECK (((kind <> 'access'::text) OR ((product_id IS NOT NULL) AND (spec_snapshot IS NULL) AND (source_id IS NOT NULL))))
   constraint grants_actor_check CHECK (((actor IS NULL) OR ((octet_length(actor) >= 1) AND (octet_length(actor) <= 255))))
@@ -760,6 +764,7 @@ table billing.grants
   constraint grants_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint grants_pkey PRIMARY KEY (merchant_id, id)
   constraint grants_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint grants_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   constraint grants_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 255)))
   constraint grants_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'admin'::text, 'grace'::text, 'grant'::text])))
   constraint grants_termination_no_window_check CHECK (((event = 'grant'::text) OR (ends_at IS NULL)))
@@ -1726,6 +1731,7 @@ table billing.payments
   column order_id uuid
   column invoice_id uuid
   column ledger_transfer_id uuid
+  column quantity integer
   constraint payments_attempt_kind_check CHECK (((attempt_kind IS NULL) OR (attempt_kind = ANY (ARRAY['initial'::text, 'renewal'::text]))))
   constraint payments_channel_check CHECK ((channel = ANY (ARRAY['rail'::text, 'manual'::text])))
   constraint payments_channel_psp_check CHECK ( CASE WHEN (channel = 'rail'::text) THEN ((rail IS NOT NULL) AND (psp_id IS NOT NULL)) ELSE ((rail IS NULL) AND (psp_id IS NULL)) END)
@@ -1747,6 +1753,7 @@ table billing.payments
   constraint payments_pkey PRIMARY KEY (merchant_id, id)
   constraint payments_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id)
   constraint payments_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint payments_quantity_check CHECK (((quantity IS NULL) OR ((quantity >= 1) AND (subscription_id IS NOT NULL))))
   constraint payments_reversal_check CHECK (((reversal_kind IS NULL) = (refunded_payment_id IS NULL)))
   constraint payments_reversal_kind_check CHECK (((reversal_kind IS NULL) OR (reversal_kind = ANY (ARRAY['refund'::text, 'chargeback'::text, 'dispute_reversal'::text]))))
   constraint payments_sign_check CHECK ( CASE WHEN ((reversal_kind IS NULL) OR (reversal_kind = 'dispute_reversal'::text)) THEN (amount >= 0) ELSE (amount <= 0) END)
@@ -1859,6 +1866,7 @@ table billing.prices
   column revision bigint NOT NULL
   column customer_amount jsonb
   column billing_interval_hours integer
+  column quantity jsonb
   constraint prices_access_duration_positive_check CHECK (((access_duration_hours IS NULL) OR (access_duration_hours > 0)))
   constraint prices_amount_nonneg_check CHECK ((amount >= 0))
   constraint prices_billing_interval_positive_check CHECK (((billing_interval_hours IS NULL) OR (billing_interval_hours > 0)))
@@ -1868,9 +1876,10 @@ table billing.prices
   constraint prices_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint prices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint prices_pkey PRIMARY KEY (merchant_id, id)
-  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount)
+  constraint prices_product_amount_window_key UNIQUE NULLS NOT DISTINCT (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity)
   constraint prices_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
   constraint prices_product_key_revision_key UNIQUE (merchant_id, product_id, key, revision)
+  constraint prices_quantity_terms CHECK (((quantity IS NULL) OR ((jsonb_typeof(quantity) = 'object'::text) AND (billing_interval_hours IS NOT NULL) AND (customer_amount IS NULL) AND (quantity ? 'min'::text) AND (quantity ? 'max'::text) AND COALESCE((((quantity ->> 'min'::text))::integer >= 1), false) AND COALESCE(((((quantity ->> 'max'::text))::integer >= ((quantity ->> 'min'::text))::integer) AND (((quantity ->> 'max'::text))::integer <= 10000)), false))))
   constraint prices_revision_nonnegative CHECK ((revision >= 0))
   constraint prices_trial_amount_nonneg_check CHECK (((trial_unit_amount IS NULL) OR (trial_unit_amount >= 0)))
   constraint prices_trial_both_or_neither_check CHECK (((trial_unit_amount IS NULL) = (trial_duration_hours IS NULL)))
@@ -1881,7 +1890,7 @@ table billing.prices
   index CREATE INDEX prices_key_idx ON billing.prices USING btree (merchant_id, product_id, key)
   index CREATE UNIQUE INDEX prices_key_key ON billing.prices USING btree (merchant_id, product_id, key) WHERE (NOT archived)
   index CREATE UNIQUE INDEX prices_pkey ON billing.prices USING btree (merchant_id, id)
-  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount) NULLS NOT DISTINCT
+  index CREATE UNIQUE INDEX prices_product_amount_window_key ON billing.prices USING btree (merchant_id, product_id, key, amount, currency, access_duration_hours, billing_interval_hours, trial_unit_amount, trial_duration_hours, customer_amount, quantity) NULLS NOT DISTINCT
   index CREATE UNIQUE INDEX prices_product_key_revision_key ON billing.prices USING btree (merchant_id, product_id, key, revision)
   trigger CREATE TRIGGER catalog_authored_price BEFORE INSERT OR DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
@@ -1907,6 +1916,7 @@ table billing.product_access
   column destructive_run_class text GENERATED ALWAYS AS ( CASE WHEN (destructive_run_id IS NOT NULL) THEN 'destructive'::text ELSE NULL::text END) STORED
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column quantity integer
   constraint product_access_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
   constraint product_access_destructive_run_id_fkey FOREIGN KEY (merchant_id, destructive_run_id, destructive_run_class) REFERENCES billing.maintenance_runs(merchant_id, id, run_class) ON DELETE RESTRICT
   constraint product_access_grant_id_fkey FOREIGN KEY (merchant_id, customer_id, grant_id) REFERENCES billing.grants(merchant_id, customer_id, id)
@@ -1914,6 +1924,7 @@ table billing.product_access
   constraint product_access_payment_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_id) REFERENCES billing.payments(merchant_id, customer_id, id)
   constraint product_access_pkey PRIMARY KEY (merchant_id, id)
   constraint product_access_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
+  constraint product_access_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   constraint product_access_revoke_fields_together_check CHECK (((revoked_at IS NULL) = (revoke_reason IS NULL)))
   constraint product_access_source_id_check CHECK (((octet_length(source_id) >= 1) AND (octet_length(source_id) <= 255)))
   constraint product_access_source_type_check CHECK ((source_type = ANY (ARRAY['purchase'::text, 'subscription'::text, 'grace'::text, 'grant'::text])))
@@ -2214,6 +2225,7 @@ table billing.rebill_cycles
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column missed_at timestamp with time zone
   column miss_reason text
+  column quantity integer
   constraint rebill_cycles_amount_check CHECK ((amount >= 0))
   constraint rebill_cycles_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint rebill_cycles_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -2223,6 +2235,7 @@ table billing.rebill_cycles
   constraint rebill_cycles_owner_check CHECK ((owner = ANY (ARRAY['engine'::text, 'nmi_schedule'::text, 'provider'::text])))
   constraint rebill_cycles_pkey PRIMARY KEY (merchant_id, id)
   constraint rebill_cycles_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
+  constraint rebill_cycles_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
   constraint rebill_cycles_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE CASCADE
   index CREATE INDEX rebill_cycles_customer_id_idx ON billing.rebill_cycles USING btree (merchant_id, customer_id)
   index CREATE INDEX rebill_cycles_due_at_idx ON billing.rebill_cycles USING btree (merchant_id, due_at)
@@ -2304,16 +2317,21 @@ table billing.scheduled_changes
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column applied_at timestamp with time zone
   column canceled_at timestamp with time zone
+  column invoker text
+  column reason text
   constraint scheduled_changes_applied_check CHECK (((status = 'applied'::text) = (applied_at IS NOT NULL)))
   constraint scheduled_changes_blocked_check CHECK ((((status = 'blocked'::text) = (blocked_reason IS NOT NULL)) AND ((status <> 'blocked'::text) OR (source = 'migration'::text)) AND (blocked_reason <> ''::text)))
   constraint scheduled_changes_canceled_check CHECK (((status = 'canceled'::text) = (canceled_at IS NOT NULL)))
   constraint scheduled_changes_from_price_id_fkey FOREIGN KEY (merchant_id, from_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
+  constraint scheduled_changes_invoker_check CHECK ((invoker <> ''::text))
   constraint scheduled_changes_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint scheduled_changes_pkey PRIMARY KEY (merchant_id, id)
   constraint scheduled_changes_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
   constraint scheduled_changes_price_migration_id_fkey FOREIGN KEY (merchant_id, price_migration_id) REFERENCES billing.price_migrations(merchant_id, id) ON DELETE RESTRICT
   constraint scheduled_changes_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
+  constraint scheduled_changes_reason_check CHECK ((reason <> ''::text))
   constraint scheduled_changes_source_check CHECK (((source = ANY (ARRAY['change'::text, 'migration'::text])) AND ((source = 'migration'::text) = (price_migration_id IS NOT NULL))))
+  constraint scheduled_changes_staff_check CHECK ((((invoker IS NULL) = (reason IS NULL)) AND ((invoker IS NULL) OR (source = 'change'::text))))
   constraint scheduled_changes_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
   constraint scheduled_changes_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
   index CREATE INDEX scheduled_changes_from_price_id_idx ON billing.scheduled_changes USING btree (merchant_id, from_price_id)
@@ -2483,7 +2501,7 @@ table billing.subscriptions
   column row_version bigint NOT NULL DEFAULT 0
   column dunning_policy jsonb
   column access_duration_hours_snapshot integer
-  column quantity integer NOT NULL
+  column quantity integer
   constraint subscriptions_access_duration_hours_snapshot_check CHECK (((access_duration_hours_snapshot IS NULL) OR (access_duration_hours_snapshot > 0)))
   constraint subscriptions_cancel_type_check CHECK ((cancel_type = ANY (ARRAY['user'::text, 'merchant'::text, 'expired'::text, 'chargeback'::text, 'upgrade'::text])))
   constraint subscriptions_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
@@ -2504,8 +2522,7 @@ table billing.subscriptions
   constraint subscriptions_price_id_product_id_fkey FOREIGN KEY (merchant_id, price_id, product_id) REFERENCES billing.prices(merchant_id, id, product_id)
   constraint subscriptions_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id)
   constraint subscriptions_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
-  constraint subscriptions_quantity_check CHECK ((quantity >= 1))
-  constraint subscriptions_quantity_engine_check CHECK (((quantity = 1) OR ((collection_policy = 'engine'::text) AND (rail = ANY (ARRAY['nmi'::text, 'stripe'::text])))))
+  constraint subscriptions_quantity_check CHECK (((quantity IS NULL) OR ((quantity >= 1) AND (collection_policy = 'engine'::text) AND (rail = ANY (ARRAY['nmi'::text, 'stripe'::text])))))
   constraint subscriptions_rail_subscription_id_check CHECK ((rail_subscription_id <> ''::text))
   constraint subscriptions_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscriptions_stop_pending_canceled_check CHECK (((status = 'canceled'::text) OR (deletion_scheduled_at IS NULL)))

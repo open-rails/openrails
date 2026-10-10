@@ -57,7 +57,8 @@ beforeEach(async () => {
   const routes: Record<string, Reply> = {
     "POST /admin/subscriptions/sub-one/change/preview": () => previewAnswer(),
     "POST /admin/subscriptions/sub-one/change": (request) => {
-      const body = request.body as { price_id?: string; quantity?: number }
+      const body = request.body as { price_id?: string; quantity?: number; reason?: string }
+      expect(body.reason).toBe("customer asked")
       sent.push({
         key: request.headers.get("Idempotency-Key")!,
         ...(body.price_id ? { price: body.price_id } : {}),
@@ -99,6 +100,7 @@ async function mountDialog() {
 
 async function review(plan = "pro") {
   await choose(`${plan} ·`)
+  await typeInto("#subscription-change-reason", "customer asked")
   await click("Review change")
   button("Confirm change")
 }
@@ -223,6 +225,10 @@ describe("the mounted dialog on a per-seat subscription", () => {
     expect(reviewButton().disabled).toBe(true)
     await typeSeats("5")
     await click("Review change")
+    const confirm = () =>
+      [...document.querySelectorAll("button")].find((node) => node.textContent === "Confirm change")!
+    expect(confirm().disabled).toBe(true)
+    await typeInto("#subscription-change-reason", "customer asked")
     await click("Confirm change")
     expect(sent).toEqual([{ key: expect.any(String), price: "price-basic", quantity: 5 }])
   })

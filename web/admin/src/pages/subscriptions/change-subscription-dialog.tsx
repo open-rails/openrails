@@ -78,6 +78,7 @@ function ChangeSubscriptionForm({
   const [open, setOpen] = React.useState(false)
   const [selectedPriceId, setSelectedPriceId] = React.useState("")
   const [seats, setSeats] = React.useState("")
+  const [reason, setReason] = React.useState("")
   const [reviewedKey, setReviewedKey] = React.useState("")
   // A dismissed dialog or another preview cannot establish non-execution.
   // Retain each submitted request's key until its outcome is definitive.
@@ -198,8 +199,9 @@ function ChangeSubscriptionForm({
         <DialogHeader>
           <DialogTitle>Change subscription</DialogTitle>
           <DialogDescription>
-            Choose a plan in the same tier group or new seats. A staff change
-            takes effect at the next renewal and charges nothing now.
+            Change at the customer&apos;s request, as their own change would:
+            an upgrade or more seats is charged to their card now; a downgrade
+            or fewer seats waits for the next renewal. The customer is told.
           </DialogDescription>
         </DialogHeader>
 
@@ -262,6 +264,20 @@ function ChangeSubscriptionForm({
               </p>
             </div>
           )}
+
+          <div className="grid gap-1.5">
+            <Label htmlFor="subscription-change-reason">Reason</Label>
+            <Input
+              id="subscription-change-reason"
+              value={reason}
+              maxLength={500}
+              placeholder="What the customer asked for"
+              onChange={(event) => setReason(event.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              Kept with the change and any charge.
+            </p>
+          </div>
 
           {reviewed && selected && (
             <div className="grid gap-3" aria-live="polite">
@@ -382,6 +398,7 @@ function ChangeSubscriptionForm({
               type="button"
               disabled={
                 change.isPending ||
+                !reason.trim() ||
                 (Boolean(change.data) && change.data?.status !== "processing")
               }
               onClick={async () => {
@@ -397,7 +414,7 @@ function ChangeSubscriptionForm({
                 }
                 try {
                   const result = await change.mutateAsync({
-                    change: request,
+                    change: { ...request, reason: reason.trim() },
                     idempotencyKey: changeKey,
                   })
                   if (
@@ -416,6 +433,7 @@ function ChangeSubscriptionForm({
                     handleOpenChange(false)
                     setSelectedPriceId("")
                     setSeats("")
+                    setReason("")
                     setReviewedKey("")
                     preview.reset()
                     change.reset()

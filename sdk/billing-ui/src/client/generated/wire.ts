@@ -73,10 +73,6 @@ export type CardEntry = {
   cvc?: string
 }
 
-export type ChangeTierParams = {
-  price_id?: string
-}
-
 export type CheckoutSession = {
   id: string
   status: string
@@ -198,8 +194,9 @@ export type CustomerCancelSubscriptionParams = {
   signature?: string
 }
 
-export type CustomerChangeTierParams = {
-  price_id?: string
+export type CustomerChangeSubscriptionParams = {
+  price_id?: string | null
+  quantity?: number | null
   signature?: string
 }
 
@@ -346,6 +343,7 @@ export type NotificationData = {
   rail?: string
   rail_subscription_id?: string
   transaction_id?: string
+  quantity?: number
   amount?: string
   product_name?: string
   payment_method?: string
@@ -481,6 +479,7 @@ export type Payment = {
   subscription_id: string | null
   order_id: string | null
   invoice_id: string | null
+  quantity: number | null
   price_id: string | null
   price: Price | null
   product: ProductSummary | null
@@ -573,8 +572,14 @@ export type PreviewOrderParams = {
   lines?: OrderLineParams[]
 }
 
+export type PreviewSubscriptionChangeParams = {
+  price_id?: string | null
+  quantity?: number | null
+}
+
 export type Price = {
   customer_amount?: CustomerAmount
+  quantity: Quantity | null
   revision: number
   id: string
   key: string
@@ -618,6 +623,7 @@ export type ProductAccessGrant = {
   source_type: "grace" | "grant" | "purchase" | "subscription"
   source_id: string
   payment_id: string | null
+  quantity: number | null
   grant_reason: "comp" | "import" | "migration" | "staff" | null
   granted_by: string | null
   note: string | null
@@ -644,6 +650,11 @@ export type PublicConfig = {
   capabilities: Capabilities
   currencies: CurrencyUnits[]
   payment: PaymentConfig | null
+}
+
+export type Quantity = {
+  min: number
+  max: number
 }
 
 export type ReplacePaymentMethodCardParams = {
@@ -736,7 +747,7 @@ export type Subscription = {
   customer_id: string
   product_id: string
   price_id: string
-  quantity: number
+  quantity: number | null
   psp_id: string
   rail: string
   rail_subscription_id: string | null
@@ -774,6 +785,37 @@ export type SubscriptionAccess = {
   ends_at?: string
 }
 
+export type SubscriptionChange = {
+  status: string
+  effective?: string
+  price_id: string
+  quantity: number | null
+  rail: string
+  subscription_id?: string
+  next_action?: NextAction
+  transaction_id: string | null
+  message?: string
+  delayed_start?: string
+  currency?: string
+  amount_due_now: string
+  next_charge_amount: string
+  next_charge_date?: string
+  operation_id?: string
+}
+
+export type SubscriptionChangePreview = {
+  effective: string
+  price_id: string
+  quantity: number | null
+  rail: string
+  currency: string
+  amount_due_now: string
+  next_charge_amount: string
+  next_charge_date?: string
+  is_estimate: boolean
+  message?: string
+}
+
 export type SubscriptionDunning = {
   attempts: number
   retries_left: number | null
@@ -791,37 +833,6 @@ export type SubscriptionRetryNowResult = {
 
 export type SupportedTokensResponse = {
   tokens: TokenInfo[]
-}
-
-export type TierChange = {
-  status: string
-  action?: string
-  effective?: string
-  price_id: string
-  rail: string
-  subscription_id?: string
-  next_action?: NextAction
-  transaction_id: string | null
-  message?: string
-  delayed_start?: string
-  currency?: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  operation_id?: string
-}
-
-export type TierChangePreview = {
-  action: string
-  price_id: string
-  rail: string
-  currency: string
-  amount_due_now: string
-  next_charge_amount: string
-  next_charge_date?: string
-  effective: string
-  is_estimate: boolean
-  message?: string
 }
 
 export type TokenBalance = {

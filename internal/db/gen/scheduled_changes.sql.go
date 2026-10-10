@@ -107,7 +107,7 @@ INSERT INTO billing.scheduled_changes (
     $4::uuid, $5::timestamptz,
     'migration', $6::uuid, 'blocked', $7::text, false
 )
-RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at
+RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
 `
 
 type CreateBlockedScheduledChangeParams struct {
@@ -149,6 +149,8 @@ func (q *Queries) CreateBlockedScheduledChange(ctx context.Context, arg CreateBl
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
 	)
 	return i, err
 }
@@ -157,13 +159,14 @@ const createScheduledChange = `-- name: CreateScheduledChange :one
 
 INSERT INTO billing.scheduled_changes (
     merchant_id, subscription_id, from_price_id, price_id, quantity, effective_at,
-    source, price_migration_id, status, acknowledged_short_notice
+    source, price_migration_id, status, acknowledged_short_notice, invoker, reason
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid,
     $4::uuid, $5::int, $6::timestamptz,
-    $7::text, $8::uuid, 'scheduled', $9::bool
+    $7::text, $8::uuid, 'scheduled', $9::bool,
+    $10::text, $11::text
 )
-RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at
+RETURNING merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason
 `
 
 type CreateScheduledChangeParams struct {
@@ -176,6 +179,8 @@ type CreateScheduledChangeParams struct {
 	Source                  string
 	PriceMigrationID        *uuid.UUID
 	AcknowledgedShortNotice bool
+	Invoker                 *string
+	Reason                  *string
 }
 
 // billing.scheduled_changes: a subscription's change waiting for its renewal.
@@ -191,6 +196,8 @@ func (q *Queries) CreateScheduledChange(ctx context.Context, arg CreateScheduled
 		arg.Source,
 		arg.PriceMigrationID,
 		arg.AcknowledgedShortNotice,
+		arg.Invoker,
+		arg.Reason,
 	)
 	var i BillingScheduledChange
 	err := row.Scan(
@@ -209,12 +216,14 @@ func (q *Queries) CreateScheduledChange(ctx context.Context, arg CreateScheduled
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
 	)
 	return i, err
 }
 
 const getPendingScheduledChange = `-- name: GetPendingScheduledChange :one
-SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at FROM billing.scheduled_changes
+SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason FROM billing.scheduled_changes
 WHERE merchant_id = $1::uuid AND subscription_id = $2::uuid
   AND status = 'scheduled'
 `
@@ -243,12 +252,14 @@ func (q *Queries) GetPendingScheduledChange(ctx context.Context, arg GetPendingS
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
 	)
 	return i, err
 }
 
 const getScheduledChange = `-- name: GetScheduledChange :one
-SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at FROM billing.scheduled_changes
+SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason FROM billing.scheduled_changes
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -276,12 +287,14 @@ func (q *Queries) GetScheduledChange(ctx context.Context, arg GetScheduledChange
 		&i.CreatedAt,
 		&i.AppliedAt,
 		&i.CanceledAt,
+		&i.Invoker,
+		&i.Reason,
 	)
 	return i, err
 }
 
 const listPendingScheduledChanges = `-- name: ListPendingScheduledChanges :many
-SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at FROM billing.scheduled_changes
+SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason FROM billing.scheduled_changes
 WHERE merchant_id = $1::uuid AND subscription_id = ANY($2::uuid[])
   AND status = 'scheduled'
 `
@@ -317,6 +330,8 @@ func (q *Queries) ListPendingScheduledChanges(ctx context.Context, arg ListPendi
 			&i.CreatedAt,
 			&i.AppliedAt,
 			&i.CanceledAt,
+			&i.Invoker,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}
@@ -358,7 +373,7 @@ func (q *Queries) ListRedrivableScheduledChangeMerchants(ctx context.Context, me
 }
 
 const listRedrivableScheduledChanges = `-- name: ListRedrivableScheduledChanges :many
-SELECT c.merchant_id, c.id, c.subscription_id, c.from_price_id, c.price_id, c.quantity, c.effective_at, c.source, c.price_migration_id, c.status, c.blocked_reason, c.acknowledged_short_notice, c.created_at, c.applied_at, c.canceled_at FROM billing.scheduled_changes c
+SELECT c.merchant_id, c.id, c.subscription_id, c.from_price_id, c.price_id, c.quantity, c.effective_at, c.source, c.price_migration_id, c.status, c.blocked_reason, c.acknowledged_short_notice, c.created_at, c.applied_at, c.canceled_at, c.invoker, c.reason FROM billing.scheduled_changes c
 JOIN billing.price_migrations m ON m.merchant_id = c.merchant_id AND m.id = c.price_migration_id
 WHERE c.merchant_id = $1::uuid
   AND c.status = 'blocked' AND c.blocked_reason LIKE 'rail_push_failed:%'
@@ -398,6 +413,8 @@ func (q *Queries) ListRedrivableScheduledChanges(ctx context.Context, arg ListRe
 			&i.CreatedAt,
 			&i.AppliedAt,
 			&i.CanceledAt,
+			&i.Invoker,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}
@@ -410,7 +427,7 @@ func (q *Queries) ListRedrivableScheduledChanges(ctx context.Context, arg ListRe
 }
 
 const listScheduledMigrationChanges = `-- name: ListScheduledMigrationChanges :many
-SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at FROM billing.scheduled_changes
+SELECT merchant_id, id, subscription_id, from_price_id, price_id, quantity, effective_at, source, price_migration_id, status, blocked_reason, acknowledged_short_notice, created_at, applied_at, canceled_at, invoker, reason FROM billing.scheduled_changes
 WHERE merchant_id = $1::uuid AND price_migration_id = $2::uuid
   AND status = 'scheduled'
 ORDER BY id
@@ -446,6 +463,8 @@ func (q *Queries) ListScheduledMigrationChanges(ctx context.Context, arg ListSch
 			&i.CreatedAt,
 			&i.AppliedAt,
 			&i.CanceledAt,
+			&i.Invoker,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}

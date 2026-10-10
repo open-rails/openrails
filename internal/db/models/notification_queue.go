@@ -58,6 +58,10 @@ const (
 	// from reprice_scheduled because the disclosure content differs: the plan
 	// (what the customer receives) is changing, not just the amount.
 	NotificationSubscriptionPlanChangeScheduled NotificationEventType = "subscription_plan_change_scheduled"
+
+	// Staff changed a subscription at the customer's request: its receipt
+	// (amount charged now, if any) and the plan and seats from effective_at.
+	NotificationSubscriptionChanged NotificationEventType = "subscription_changed"
 )
 
 // NotificationQueue stores in-app notification attempts

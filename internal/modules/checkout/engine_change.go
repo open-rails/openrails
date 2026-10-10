@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -44,9 +45,10 @@ import (
 // recovery); on refusal nothing changes.
 
 var (
-	errTierChangeRenewalDue = &TierChangeError{Code: billing.CodeSubscriptionChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change after the renewal settles"}
-	errTierChangeScheduled  = &TierChangeError{Code: billing.CodeSubscriptionChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
-	errTierChangeMoved      = &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "the subscription changed since the change was requested; preview again"}
+	errTierChangeRenewalDue     = &TierChangeError{Code: billing.CodeSubscriptionChangeRenewalDue, Message: "the current period has ended or its renewal is unresolved; change after the renewal settles"}
+	errTierChangeScheduled      = &TierChangeError{Code: billing.CodeSubscriptionChangeAlreadyScheduled, Message: "another plan change is already scheduled for the end of this period"}
+	errTierChangeMoved          = &TierChangeError{Code: billing.CodeSubscriptionChangeRefused, Message: "the subscription changed since the change was requested; preview again"}
+	errStoredCredentialRequired = &TierChangeError{Code: billing.CodeStoredCredentialRequired, Message: "the card has no active recurring agreement for a staff charge; the customer makes this change"}
 )
 
 // engineUpgradeQuote prices an engine upgrade to target at quantity seats at
@@ -153,7 +155,7 @@ func (s *CheckoutService) addEngineSeats(ctx context.Context, req *SubscriptionC
 		if _, err := subscriptions.LockSeatMembership(ctx, d, terms, c.sub.Rail, true); err != nil {
 			return err
 		}
-		return s.Lifecycle.AddSeatsTx(ctx, d, terms, c.sub.Rail, "", "")
+		return s.Lifecycle.AddSeatsTx(ctx, d, terms, c.sub.Rail, "", "", staffChange(req))
 	})
 	if err != nil {
 		return nil, s.engineUpgradeRefusal(ctx, err, c.sub)
@@ -184,9 +186,13 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 	key := tierChangeIdempotencyKey(tierChangeCustomer(user), req.IdempotencyKey)
 	requested := strings.TrimSpace(req.PriceID)
 	fingerprint := sha256.Sum256([]byte(strings.Join([]string{terms.CustomerID.String(), sub.ID.String(), terms.PriceID.String(), strconv.Itoa(subscriptions.SeatCount(terms.Quantity)), key}, "\x00")))
-	reason := "customer tier upgrade"
+	origin, actor, reason := intents.OriginUser, terms.CustomerID.String(), "customer tier upgrade"
 	if terms.Adds != nil {
 		reason = "customer seat increase"
+	}
+	staff := staffChange(req)
+	if staff != nil {
+		origin, actor, reason = intents.OriginAdmin, staff.Invoker, strings.Replace(reason, "customer", "staff", 1)+": "+staff.Reason
 	}
 	database := s.SubscriptionService.Database()
 	var operation gen.BillingProviderIntent
@@ -227,12 +233,21 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 		if err != nil {
 			return err
 		}
+		// Staff charge merchant-initiated, under the subscription's recurring
+		// agreement on this card; without one the customer makes the change.
+		if staff != nil {
+			if instrument.Mandate, err = mandates.ForSubscription(ctx, d.Gen(ctx), mid.UUID(), terms.CustomerID, sub.ID, method.ID, terms.PSPID); errors.Is(err, mandates.ErrMissing) || errors.Is(err, mandates.ErrNotActive) {
+				return errStoredCredentialRequired
+			} else if err != nil {
+				return err
+			}
+		}
 		email := ""
 		if user.Email != nil {
 			email = strings.TrimSpace(*user.Email)
 		}
-		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: instrument, RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: psp.Key, Email: email, RequestedPrice: requested}
-		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: intents.OriginUser, Actor: terms.CustomerID.String(), OriginReason: reason})
+		payload := subscriptions.InitialMembershipPayload{Terms: terms, Instrument: instrument, RequestFingerprint: fmt.Sprintf("%x", fingerprint), CheckoutIdempotencyKey: key, HyperSwitch: binding, PSP: psp.Key, Email: email, RequestedPrice: requested, Staff: staff}
+		operation, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: method.Rail, PspID: terms.PSPID, IntentType: TypeInitialMembership, SubscriptionID: &sub.ID, PriceID: &terms.PriceID, Payload: payload, IdempotencyKey: InitialMembershipIdempotencyKey(key), NextAttemptAt: terms.AcceptedAt, Origin: origin, Actor: actor, OriginReason: reason})
 		return err
 	})
 	var conflict *pgconn.PgError
@@ -288,7 +303,7 @@ func (s *CheckoutService) scheduleEngineChange(ctx context.Context, c *changeTar
 	}
 	_, err = subscriptions.NewSubscriptionRepo(s.SubscriptionService.Database()).ReplaceScheduledChange(ctx, sub.ID, subscriptions.RenewalChange{
 		ExpectedPriceID: sub.PriceID, ExpectedQuantity: subscriptions.CloneQuantity(sub.Quantity), ExpectedPending: expected,
-		PriceID: next.ID, Quantity: quantity,
+		PriceID: next.ID, Quantity: quantity, Staff: c.staff,
 	}, s.now())
 	if err := scheduleRefusal(err); err != nil {
 		return nil, err
@@ -350,13 +365,15 @@ func scheduleRefusal(err error) error {
 }
 
 // engineScheduleAdmissible refuses what the period-end renewal could not
-// honour. A pending price migration is canceled only by staff.
+// honour, and a change to another tier while one is pending: a pending price
+// migration is canceled only by staff, and a pending tier change by changing
+// back.
 func (s *CheckoutService) engineScheduleAdmissible(c *changeTarget) error {
 	sub := c.sub
 	if sub.CurrentPeriodEndsAt == nil || sub.CurrentPeriodEndsAt.IsZero() {
 		return ErrTierChangePeriodUnknown
 	}
-	if c.pending != nil && c.pending.Source != billing.ScheduledChangeChange {
+	if c.pending != nil && (c.pending.Source != billing.ScheduledChangeChange || c.tier && c.pending.PriceID != c.price.ID) {
 		return errTierChangeScheduled
 	}
 	if !c.tier {

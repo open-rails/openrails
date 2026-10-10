@@ -29,6 +29,9 @@ type StripeEnginePaymentParams struct {
 	// OneTime is a customer-present purchase on a saved card: on-session, no
 	// recurring agreement anchor and no future-usage setup.
 	OneTime bool
+	// MerchantInitiated is an initial-membership change staff charge at the
+	// customer's request: off-session, under the card's recurring agreement.
+	MerchantInitiated bool
 
 	MerchantID, PSPID, CustomerID, OperationID uuid.UUID
 	Instrument                                 charge.FrozenInstrument
@@ -83,6 +86,9 @@ func (p StripeEnginePaymentParams) validate() error {
 	if p.OneTime && (p.Initial || p.CustomerInitiated) {
 		return errors.New("one-time purchase cannot be a recurring payment")
 	}
+	if p.MerchantInitiated && (!p.Initial || !StripeAgreementRef(p.Instrument.Mandate)) {
+		return errors.New("a merchant-initiated change requires the card's recurring agreement")
+	}
 	if p.MerchantID == uuid.Nil || p.PSPID == uuid.Nil || p.CustomerID == uuid.Nil || p.OperationID == uuid.Nil || p.Instrument.PSPID != p.PSPID || p.Instrument.Custodian != models.CustodianPSP || p.Instrument.CustodianID != nil || !stripeEngineID(p.Instrument.RailCustomerRef, "cus_") || !stripeEngineID(p.Instrument.RailMethodRef, "pm_") || p.AmountMinor <= 0 || p.AmountMinor > 99999999 {
 		return errors.New("incomplete Stripe engine operation binding")
 	}
@@ -115,6 +121,8 @@ func StripeAgreementRef(m *charge.Mandate) bool {
 // flow is the accepted operation's charge flow.
 func (p StripeEnginePaymentParams) flow() charge.Context {
 	switch {
+	case p.MerchantInitiated:
+		return charge.Merchant(charge.AgreementRecurring, p.Instrument.Mandate)
 	case p.Initial:
 		return charge.Customer(charge.AgreementRecurring, p.Instrument.Mandate)
 	case p.OneTime && p.Instrument.Mandate == nil:
@@ -174,6 +182,9 @@ func (p StripeEnginePaymentParams) metadata() map[string]string {
 	}
 	if p.OneTime {
 		values["openrails_one_time"] = "true"
+	}
+	if p.MerchantInitiated {
+		values["openrails_merchant_initiated"] = "true"
 	}
 	if p.Renewal != nil {
 		values["openrails_renewal_obligation"] = p.Renewal.Obligation
@@ -270,7 +281,7 @@ func (pi stripeEngineIntent) matches(p StripeEnginePaymentParams) error {
 	// A canceled or unpaid PI can drop its method (Stripe clears it with the
 	// last error on cancel); it moves no money, and a paid PI must name it.
 	methodMismatch := method != p.Instrument.RailMethodRef && (method != "" || pi.Status == "succeeded")
-	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || methodMismatch || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || p.Initial && pi.SetupFutureUsage != "off_session" {
+	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || methodMismatch || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || p.Initial && !p.MerchantInitiated && pi.SetupFutureUsage != "off_session" {
 		return errors.New("Stripe engine payment does not match frozen terms")
 	}
 	expected := p.metadata()
@@ -281,7 +292,7 @@ func (pi stripeEngineIntent) matches(p StripeEnginePaymentParams) error {
 	}
 	// These flags are omitted when false. A true flag on another copy's PI
 	// must not be ignored merely because this operation expected no key.
-	for _, key := range []string{"openrails_customer_retry", "openrails_one_time"} {
+	for _, key := range []string{"openrails_customer_retry", "openrails_one_time", "openrails_merchant_initiated"} {
 		if pi.Metadata[key] != expected[key] {
 			return errors.New("Stripe engine payment initiation differs from accepted operation")
 		}

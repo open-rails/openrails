@@ -15,8 +15,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// ChangeSubscriptionRequest is the merchant's change and both previews.
+// ChangeSubscriptionRequest is the staff change and its preview.
 type ChangeSubscriptionRequest = billing.ChangeSubscriptionParams
+
+// PreviewSubscriptionChangeParams is the customer's preview of a change.
+type PreviewSubscriptionChangeParams struct {
+	PriceID  *billing.PriceID `json:"price_id"`
+	Quantity *int             `json:"quantity"`
+}
 
 // CustomerChangeSubscriptionParams is the customer's change. Signature
 // completes a solana_sign_transactions next action: the signature of the
@@ -116,7 +122,7 @@ func writeTierChangeResponse(r *httprequest.Request, resp *checkout.TierChangeRe
 // PreviewSubscriptionChange is the non-mutating dry-run of ChangeSubscription:
 // what it would charge now and at the next renewal.
 func PreviewSubscriptionChange(r *httprequest.Request) {
-	var body ChangeSubscriptionRequest
+	var body PreviewSubscriptionChangeParams
 	if !r.BindJSON(&body) {
 		return
 	}

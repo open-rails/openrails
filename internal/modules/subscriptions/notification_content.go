@@ -3,8 +3,11 @@ package subscriptions
 import (
 	"fmt"
 	"html/template"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -139,6 +142,20 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 <p>The {{.Store}} Team</p>
 {{end}}
 
+{{define "subscription_changed"}}
+<h2>Your subscription was changed</h2>
+<p>Hi {{.Username}},</p>
+<p>Changed by support at your request.</p>
+<ul>
+	<li><strong>Plan:</strong> {{.Product}}{{if .Seats}} ({{.Seats}} seats){{end}}</li>
+	<li><strong>Effective:</strong> {{.Effective}}</li>
+	{{if .Charged}}<li><strong>Charged now:</strong> {{.Charged}}</li>{{end}}
+	{{if .TransactionID}}<li><strong>Transaction ID:</strong> {{.TransactionID}}</li>{{end}}
+	<li><strong>Next renewal:</strong> {{.Next}}</li>
+</ul>
+<p>The {{.Store}} Team</p>
+{{end}}
+
 {{define "purchase_receipt"}}
 <h2>{{if .Solana}}Solana Payment Received{{else}}Payment Received{{end}}</h2>
 <p>Hi there,</p>
@@ -165,6 +182,43 @@ func renderEmailHTML(name string, fields emailFields) string {
 		panic(fmt.Sprintf("email template %s: %v", name, err))
 	}
 	return b.String()
+}
+
+// RenderSubscriptionChangedEmail is the receipt of a change staff made at the
+// customer's request.
+func RenderSubscriptionChangedEmail(storeName, username string, data billing.NotificationData) EmailContent {
+	product := subscriptionProductName(storeName, data.ToProductName)
+	seats, effective, charged, next := "", "now", "", ""
+	if data.Quantity != nil {
+		seats = strconv.Itoa(*data.Quantity)
+	}
+	if data.EffectiveAt != nil {
+		effective = data.EffectiveAt.UTC().Format("January 2, 2006")
+	}
+	if data.Amount != nil && *data.Amount > 0 {
+		charged = moneyutil.FormatAmount(*data.Amount, data.Currency)
+	}
+	if data.NewAmount != nil {
+		next = moneyutil.FormatAmount(*data.NewAmount, data.Currency)
+	}
+	plain := fmt.Sprintf("Your subscription was changed\n\nHi %s,\n\nChanged by support at your request.\n\n- Plan: %s", username, product)
+	if seats != "" {
+		plain += fmt.Sprintf(" (%s seats)", seats)
+	}
+	plain += "\n- Effective: " + effective
+	if charged != "" {
+		plain += "\n- Charged now: " + charged
+	}
+	if data.TransactionID != "" {
+		plain += "\n- Transaction ID: " + data.TransactionID
+	}
+	plain += fmt.Sprintf("\n- Next renewal: %s\n\nThe %s Team\n", next, storeName)
+	return EmailContent{
+		Subject: fmt.Sprintf("Your %s subscription was changed", product),
+		HTML: renderEmailHTML("subscription_changed", emailFields{"Username": username, "Product": product, "Seats": seats, "Effective": effective,
+			"Charged": charged, "TransactionID": data.TransactionID, "Next": next, "Store": storeName}),
+		Plain: plain,
+	}
 }
 
 func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmailData) EmailContent {

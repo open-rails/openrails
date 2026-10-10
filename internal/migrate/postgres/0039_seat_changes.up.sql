@@ -36,3 +36,8 @@ ALTER TABLE billing.product_access ADD COLUMN quantity integer CHECK (quantity I
 COMMENT ON COLUMN billing.product_access.quantity IS 'Seats the window gives, from its grant; NULL unless per seat.';
 ALTER TABLE billing.customer_entitlement_cache ADD COLUMN quantity integer CHECK (quantity IS NULL OR quantity >= 1);
 COMMENT ON COLUMN billing.customer_entitlement_cache.quantity IS 'The most seats of the key a held per-seat product gives; NULL when none is per seat.';
+
+ALTER TABLE billing.scheduled_changes ADD COLUMN invoker text CHECK (invoker <> '');
+ALTER TABLE billing.scheduled_changes ADD COLUMN reason text CHECK (reason <> '');
+ALTER TABLE billing.scheduled_changes ADD CONSTRAINT scheduled_changes_staff_check CHECK ((invoker IS NULL) = (reason IS NULL) AND (invoker IS NULL OR source = 'change'));
+COMMENT ON COLUMN billing.scheduled_changes.invoker IS 'The staff member who scheduled the change at the customer''s request, with reason; NULL for the customer''s own change and a migration.';

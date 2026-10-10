@@ -41,3 +41,11 @@ last receipted renewal creates no `premium_renewed` notification. Hourly and
 daily members therefore get at most one receipt a day; weekly and longer
 cadences get one per renewal. `0` sends a receipt for every renewal. Receipts
 carry `subscription_id`, `period_starts_at` and `period_ends_at`.
+
+## Staff changes
+
+A subscription change staff make at the customer's request sends the customer
+a `subscription_changed` notice, "Changed by support at your request.", with
+`subscription_id`, `to_price_id`, `to_product_name`, `quantity`,
+`effective_at`, `new_amount` (the next renewal) and, when the change charged
+now, `amount` and `transaction_id`.

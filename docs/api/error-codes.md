@@ -183,7 +183,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `psp_last_active` | 409 | `invalid_request_error` | The PSP is the last active one on its rail; pass allow_last to archive it. |
 | `psp_not_found` | 404 | `invalid_request_error` | The PSP does not exist. |
 | `purchase_review_resolved` | 409 | `invalid_request_error` | The purchase review was already resolved. |
-| `quantity_not_allowed` | 422 | `invalid_request_error` | The line's recurring price has no seats: it takes no quantity. |
+| `quantity_not_allowed` | 422 | `invalid_request_error` | A quantity was sent for a price that is not sold per seat. |
 | `rate_card_currency_mismatch` | 409 | `invalid_request_error` | The rate card's currency does not match. |
 | `rate_card_has_overrides` | 409 | `invalid_request_error` | The rate card still has customer overrides. |
 | `rate_card_product_not_found` | 404 | `invalid_request_error` | The rate card names a product that does not exist. |
@@ -212,24 +212,25 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `spend_delegation_not_found` | 404 | `invalid_request_error` | The spend delegation does not exist. |
 | `step_up_required` | 403 | `authorization_error` | The operation needs a recent sign-in; metadata carries the challenge. |
 | `step_up_unavailable` | 403 | `authorization_error` | The operation needs a recent sign-in and this credential cannot prove one. |
+| `stored_credential_required` | 409 | `invalid_request_error` | The card has no active agreement for a merchant-initiated charge; the customer makes this change. |
+| `subscription_change_already_scheduled` | 409 | `invalid_request_error` | A different period-end change is already scheduled. |
+| `subscription_change_cadence_unsupported` | 409 | `invalid_request_error` | A provider-billed subscription can change only to a price of the same cadence. |
+| `subscription_change_credit_exceeds_price` | 409 | `invalid_request_error` | The current plan's unused value exceeds the target price; change at period end. |
+| `subscription_change_cycle_unknown` | 422 | `invalid_request_error` | The target price has no positive billing cycle. |
+| `subscription_change_idempotency_conflict` | 409 | `invalid_request_error` | The Idempotency-Key already names a different change. |
+| `subscription_change_idempotency_key_required` | 400 | `invalid_request_error` | A subscription change needs an Idempotency-Key. |
+| `subscription_change_in_flight` | 409 | `invalid_request_error` | Another unresolved change owns the subscription; metadata.operation_id names it. |
+| `subscription_change_period_unknown` | 422 | `invalid_request_error` | The subscription has no valid current period. |
+| `subscription_change_provider_conflict` | 409 | `invalid_request_error` | The provider's copy of the subscription is missing or differs; reconcile it first. |
+| `subscription_change_refused` | 409 | `invalid_request_error` | The change was refused and not executed. |
+| `subscription_change_renewal_due` | 409 | `invalid_request_error` | The current period ended or its renewal is unresolved; the renewal settles first. |
+| `subscription_change_requires_linked_plan` | 409 | `invalid_request_error` | The target price has no plan on the subscription's PSP that this change can use. |
+| `subscription_change_target_inactive` | 422 | `invalid_request_error` | The target price or its product is archived. |
+| `subscription_change_unsupported_on_rail` | 400 | `invalid_request_error` | The subscription's rail cannot make this change. |
 | `subscription_not_active` | 409 | `invalid_request_error` | The subscription is not active. |
 | `subscription_not_found` | 404 | `invalid_request_error` | The subscription does not exist. |
 | `subscription_paid_through` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid; buy again once its paid period ends. |
 | `subscription_resumable` | 409 | `invalid_request_error` | A canceled subscription to this product is still paid and can be resumed; resume it instead of buying again. |
-| `tier_change_already_scheduled` | 409 | `invalid_request_error` | A different period-end change is already scheduled. |
-| `tier_change_cadence_unsupported` | 409 | `invalid_request_error` | A provider-billed subscription can change only to a price of the same cadence. |
-| `tier_change_credit_exceeds_price` | 409 | `invalid_request_error` | The current plan's unused value exceeds the target price; change at period end. |
-| `tier_change_cycle_unknown` | 422 | `invalid_request_error` | The target price has no positive billing cycle. |
-| `tier_change_idempotency_conflict` | 409 | `invalid_request_error` | The Idempotency-Key already names a different tier change. |
-| `tier_change_idempotency_key_required` | 400 | `invalid_request_error` | A tier change needs an Idempotency-Key. |
-| `tier_change_in_flight` | 409 | `invalid_request_error` | Another unresolved tier change owns the subscription; metadata.operation_id names it. |
-| `tier_change_period_unknown` | 422 | `invalid_request_error` | The subscription has no valid current period. |
-| `tier_change_provider_conflict` | 409 | `invalid_request_error` | The provider's copy of the subscription is missing or differs; reconcile it first. |
-| `tier_change_refused` | 409 | `invalid_request_error` | The tier change was refused and not executed. |
-| `tier_change_renewal_due` | 409 | `invalid_request_error` | The current period ended or its renewal is unresolved; the renewal settles first. |
-| `tier_change_requires_linked_plan` | 409 | `invalid_request_error` | The target price has no plan on the subscription's PSP that this change can use. |
-| `tier_change_target_inactive` | 422 | `invalid_request_error` | The target price or its product is archived. |
-| `tier_change_unsupported_on_rail` | 400 | `invalid_request_error` | The subscription's rail cannot make this tier change. |
 | `trial_unsupported_on_rail` | 400 | `invalid_request_error` | This rail cannot run a trial first phase. |
 | `unknown_field` | 400 | `invalid_request_error` | The JSON body names a field the route does not accept; param is the field. |
 | `unknown_role` | 400 | `invalid_request_error` | The role is not one this merchant defines. |
