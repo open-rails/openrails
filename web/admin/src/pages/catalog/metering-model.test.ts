@@ -114,7 +114,7 @@ describe("negotiated rates", () => {
   const override: RateOverride = {
     customer_id: "cus_1", customer_email: null, meter_key: "tokens",
     price: { model: "package" as const, currency: "USD", package: { amount: "5000000", package_size: 1000 } },
-    allowance: { included: 50 },
+    allowance: { included: 50 }, revision: 1,
     created_at: WHEN, updated_at: WHEN,
   }
 
@@ -150,7 +150,7 @@ describe("negotiated rates", () => {
     const unsupported = { key: "unused", billing_supported: false } as Meter
     const negotiated: RateOverride = {
       customer_id: "cus_1", customer_email: null, meter_key: "tokens", price: { model: "per_unit", currency: "USD" },
-      allowance: null, created_at: WHEN, updated_at: WHEN,
+      allowance: null, revision: 1, created_at: WHEN, updated_at: WHEN,
     }
     expect(customerUsageRateRows([unsupported, ready], [negotiated])).toEqual([
       { meter: ready, override: negotiated },

@@ -117,6 +117,7 @@ export function PriceChangeWizard({
             trial_duration_hours: price.trial_duration_hours ?? undefined,
             key: price.key,
             psps: Object.keys(price.psps ?? {}),
+            expected_revision: price.revision,
           },
           migration:
             value.mode === "migrate"

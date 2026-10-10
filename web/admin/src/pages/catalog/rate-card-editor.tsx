@@ -147,7 +147,10 @@ export function RateCardEditor({
         await saveOverride.mutateAsync({
           customerId,
           meterKey: meter.key,
-          override: negotiatedRateRequest(rateCard),
+          override: {
+            ...negotiatedRateRequest(rateCard),
+            expected_revision: override?.revision ?? 0,
+          },
         })
         toast.success(
           existing ? "Negotiated rate updated" : "Negotiated rate added"

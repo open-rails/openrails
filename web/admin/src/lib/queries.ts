@@ -3,7 +3,6 @@ import { keepPreviousData, queryOptions } from "@tanstack/react-query"
 import { collectCursorPages, selectedMerchant } from "@/lib/api/client"
 import type { ListPage } from "@/lib/api/generated/wire"
 import {
-  getCatalogRevision,
   getCustomer,
   getMerchantConfiguration,
   getPayment,
@@ -401,11 +400,6 @@ export const adminQueries = {
       queryFn: ({ signal }) =>
         listPriceMigrations(productKey!, priceKey!, limit, signal),
       enabled: Boolean(productKey && priceKey),
-    }),
-  catalogRevision: () =>
-    queryOptions({
-      queryKey: [...queryKeys.catalog(), "revision"],
-      queryFn: () => getCatalogRevision(),
     }),
   catalogDrift: (limit = 200, cursor?: string) =>
     queryOptions({

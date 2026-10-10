@@ -33,7 +33,7 @@ const price = { product_id: "prod_1", key: "monthly", unit_amount: "20000000", c
 const ratePrice = { model: "per_unit" as const, currency: "USD", per_unit: { unit_amount: "1000000", divide_by: 1 } }
 const rateCard = { product_id: "prod_1", filter: {}, price: ratePrice }
 const meter = { event_type: "token.used", value_property: "tokens", aggregation: "sum" as const, unit: "tokens", group_by: {} }
-const storedMeter = { ...meter, key: "tokens" } as unknown as Meter
+const storedMeter = { ...meter, key: "tokens", revision: 3 } as unknown as Meter
 const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
 const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
 const application = { schema_version: 1, products: {} }
@@ -65,18 +65,18 @@ const cases: Case[] = [
     "POST /admin/catalog/ask", []],
   ["loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), { productKey: "pro", priceKey: "monthly" }),
     "GET /admin/catalog/products", []],
-  ["applies a catalog application", (c, g) => g(M.applyCatalog(c), JSON.stringify(application)),
+  ["applies a catalog application", (c, g) => g(M.applyCatalog(c), { document: JSON.stringify(application), force: false }),
     "POST /admin/catalog/applications", catalogTree, application],
   ["refreshes drift alone", (c, g) => g(M.refreshCatalogDrift(c), undefined),
     "POST /admin/catalog/drift/refresh", ["drift"]],
   ["creates a product", (c, g) => g(M.createProduct(c), { key: "pro", display_name: "Pro", description: "" }),
     "POST /admin/catalog/products", catalogTree],
-  ["archives a product", (c, g) => g(M.setProductActive(c), { id: "prod_1", active: false }),
-    "PATCH /admin/catalog/products/prod_1", catalogTree, { archived: true }],
+  ["archives a product", (c, g) => g(M.setProductActive(c), { id: "prod_1", active: false, revision: 4 }),
+    "PATCH /admin/catalog/products/prod_1", catalogTree, { archived: true, expected_revision: 4 }],
   ["creates a price", (c, g) => g(M.createPrice(c), price),
     "POST /admin/catalog/prices", catalogTree, price],
-  ["restores a price", (c, g) => g(M.setPriceActive(c), { id: "price_1", active: true }),
-    "PATCH /admin/catalog/prices/price_1", catalogTree, { archived: false }],
+  ["restores a price", (c, g) => g(M.setPriceActive(c), { id: "price_1", active: true, revision: 2 }),
+    "PATCH /admin/catalog/prices/price_1", catalogTree, { archived: false, expected_revision: 2 }],
   ["previews affected subscribers without writing catalog state", (_c, g) => g(M.previewPriceChange(), { productKey: "pro", priceKey: "monthly" }),
     "POST /admin/price-migrations/preview", [], { product_key: "pro", price_key: "monthly" }],
   ["cancels a price migration", (c, g) => g(M.cancelPriceMigration(c), "pmig_1"),
@@ -84,9 +84,9 @@ const cases: Case[] = [
   ["stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
     "PUT /admin/catalog/meters/tokens", meterTree, meter],
   ["stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { meter: storedMeter, rateCard }),
-    "PUT /admin/catalog/meters/tokens", meterTree, { ...meter, rate_card: rateCard }],
+    "PUT /admin/catalog/meters/tokens", meterTree, { ...meter, rate_card: rateCard, expected_revision: 3 }],
   ["removes a default rate card", (c, g) => g(M.deleteDefaultUsageRateCard(c), storedMeter),
-    "PUT /admin/catalog/meters/tokens", meterTree, { ...meter, rate_card: null }],
+    "PUT /admin/catalog/meters/tokens", meterTree, { ...meter, rate_card: null, expected_revision: 3 }],
   ["stores a negotiated rate", (c, g) => g(M.putCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens", override: { price: ratePrice } }),
     "PUT /admin/catalog/rate-overrides/cus_1/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
   ["removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),

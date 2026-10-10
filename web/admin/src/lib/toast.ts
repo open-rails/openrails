@@ -11,6 +11,12 @@ export function toastApiError(err: unknown, action: string) {
       toast.error(`${action}: confirm it's you to continue`)
       return
     }
+    if (err.code === "revision_mismatch") {
+      toast.error(`${action}: changed since you opened it`, {
+        description: "The latest version is loaded; review it and try again.",
+      })
+      return
+    }
     if (err.isPermissionDenied) {
       toast.error(`${action}: your role lacks permission`, {
         description: err.message,

@@ -15,11 +15,14 @@ import {
 import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError, selectedMerchant } from "@/lib/api/client"
-import {
-  getCatalogRevision,
-  type CatalogApplicationReceipt,
-} from "@/lib/api/endpoints"
+import { type CatalogApplicationReceipt } from "@/lib/api/endpoints"
+import type {
+  CatalogConflict,
+  CatalogFieldConflict,
+} from "@/lib/api/generated/wire"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
+import { formatHours } from "@/lib/duration"
+import { formatDate, formatNativeAmount } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 
@@ -31,55 +34,30 @@ export function CatalogApplicationDialog() {
   const [receipt, setReceipt] = React.useState<CatalogApplicationReceipt>()
   const [message, setMessage] = React.useState("")
   const [canEdit, setCanEdit] = React.useState(false)
-  const [loading, setLoading] = React.useState(false)
   const [draftMerchant, setDraftMerchant] = React.useState<string>()
   const apply = useMutation(adminMutations.applyCatalog(useQueryClient()))
 
-  const start = async () => {
-    const merchant = selectedMerchant()
-    setLoading(true)
-    try {
-      const { writes_allowed } = await getCatalogRevision()
-      if (selectedMerchant() !== merchant) {
-        setMessage(
-          "The selected merchant changed. Reload its catalog access before preparing a batch."
-        )
-        return
-      }
-      if (!writes_allowed) {
-        setMessage(
-          "Catalog updates are disabled. The current catalog remains available for reading."
-        )
-        return
-      }
-      setDraftMerchant(merchant)
-      setDocument(
-        JSON.stringify(
-          {
-            schema_version: 1,
-            prune: false,
-            products: {},
-          },
-          null,
-          2
-        )
+  const start = () => {
+    setDraftMerchant(selectedMerchant())
+    setDocument(
+      JSON.stringify(
+        {
+          schema_version: 1,
+          prune: false,
+          products: {},
+        },
+        null,
+        2
       )
-      setSubmitted(undefined)
-      setReceipt(undefined)
-      setReviewed(false)
-      setCanEdit(false)
-      setMessage("")
-    } catch (err) {
-      setMessage(
-        "Could not check catalog access. Retry loading before preparing a batch."
-      )
-      toastApiError(err, "Check catalog access")
-    } finally {
-      setLoading(false)
-    }
+    )
+    setSubmitted(undefined)
+    setReceipt(undefined)
+    setReviewed(false)
+    setCanEdit(false)
+    setMessage("")
   }
 
-  const run = async () => {
+  const run = async (force = false) => {
     if (selectedMerchant() !== draftMerchant) {
       setMessage(
         "This draft belongs to another selected merchant. Return to that merchant before applying it."
@@ -91,18 +69,25 @@ export function CatalogApplicationDialog() {
     setCanEdit(false)
     setMessage("")
     try {
-      const result = await apply.mutateAsync(exactDocument)
+      const result = await apply.mutateAsync({ document: exactDocument, force })
       setReceipt(result)
+      const skipped = result.conflicts?.length ?? 0
       setMessage(
         result.replayed
           ? "This batch was already applied. No changes were repeated, and later catalog edits were preserved."
-          : "Batch applied. Review the current catalog before preparing another batch."
+          : skipped > 0
+            ? `Applied everything no edit changed. ${skipped} ${skipped === 1 ? "object was" : "objects were"} skipped because an edit set ${skipped === 1 ? "its" : "their"} fields differently: change the batch to agree, remove those fields, or overwrite the edits.`
+            : "Batch applied. Review the current catalog before preparing another batch."
       )
-      toast.success(
-        result.replayed
-          ? "Original batch receipt returned"
-          : "Catalog batch applied"
-      )
+      if (skipped > 0) {
+        toast.warning(`Catalog batch applied; ${skipped} skipped`)
+      } else {
+        toast.success(
+          result.replayed
+            ? "Original batch receipt returned"
+            : "Catalog batch applied"
+        )
+      }
     } catch (err) {
       const refused =
         err instanceof ApiError &&
@@ -123,9 +108,9 @@ export function CatalogApplicationDialog() {
     <Dialog
       open={open}
       onOpenChange={(next) => {
-        if (apply.isPending || loading) return
+        if (apply.isPending) return
         setOpen(next)
-        if (next && !document) void start()
+        if (next && !document) start()
       }}
     >
       <DialogTrigger
@@ -140,10 +125,12 @@ export function CatalogApplicationDialog() {
           <DialogTitle>Apply catalog changes</DialogTitle>
           <DialogDescription>
             Paste a JSON or YAML catalog batch; products, prices and meters are
-            maps keyed by their key. Each distinct batch applies once per
-            merchant; retries preserve later catalog edits. Omitted records
-            stay unchanged unless prune is true. With prune, omitted products
-            and prices are archived, including prices under a listed product.
+            maps keyed by their key. Each product, price and meter applies
+            whole, unless a field it names was set differently by an edit: it
+            is skipped and listed, and the rest applies. A batch that applied
+            whole is remembered; retries preserve later catalog edits. Omitted
+            records stay unchanged unless prune is true, which archives the
+            omitted ones only batches set.
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -153,7 +140,7 @@ export function CatalogApplicationDialog() {
             className="max-h-80 min-h-48 font-mono text-xs"
             spellCheck={false}
             value={document}
-            disabled={loading || submitted !== undefined}
+            disabled={submitted !== undefined}
             onChange={(event) => {
               setDocument(event.target.value)
               setReviewed(false)
@@ -170,6 +157,9 @@ export function CatalogApplicationDialog() {
               {message}
             </p>
           )}
+          {receipt && receipt.conflicts.length > 0 && (
+            <CatalogConflicts conflicts={receipt.conflicts} />
+          )}
           {receipt && (
             <pre
               aria-label="Batch receipt"
@@ -180,11 +170,6 @@ export function CatalogApplicationDialog() {
           )}
         </div>
         <DialogFooter>
-          {!document && (
-            <Button disabled={loading} onClick={() => void start()}>
-              Check catalog access
-            </Button>
-          )}
           {canEdit && (
             <Button
               variant="outline"
@@ -198,27 +183,36 @@ export function CatalogApplicationDialog() {
               Edit batch
             </Button>
           )}
+          {receipt && receipt.conflicts.length > 0 && (
+            <Button
+              variant="destructive"
+              disabled={apply.isPending}
+              onClick={() => void run(true)}
+            >
+              Overwrite edits
+            </Button>
+          )}
           {receipt ? (
-            <Button disabled={loading} onClick={() => void start()}>
+            <Button onClick={() => start()}>
               New batch
             </Button>
           ) : submitted !== undefined ? (
             <Button
-              disabled={apply.isPending || loading || canEdit}
+              disabled={apply.isPending || canEdit}
               onClick={() => void run()}
             >
               {apply.isPending ? "Applying…" : "Retry exact batch"}
             </Button>
           ) : reviewed ? (
             <Button
-              disabled={loading || !document.trim()}
+              disabled={!document.trim()}
               onClick={() => void run()}
             >
               Apply reviewed batch
             </Button>
           ) : (
             <Button
-              disabled={loading || !document.trim()}
+              disabled={!document.trim()}
               onClick={() => setReviewed(true)}
             >
               Review batch
@@ -228,4 +222,55 @@ export function CatalogApplicationDialog() {
       </DialogContent>
     </Dialog>
   )
+}
+
+// CatalogConflicts lists each object a batch skipped and the fields an edit
+// set differently, money and durations in readable units.
+function CatalogConflicts({ conflicts }: { conflicts: CatalogConflict[] }) {
+  return (
+    <ul aria-label="Skipped objects" className="grid gap-2 text-sm">
+      {conflicts.map((conflict) => (
+        <li
+          key={`${conflict.object}:${conflict.product_key ?? ""}:${conflict.key}`}
+          className="rounded-md border p-2"
+        >
+          <p className="font-medium">
+            {conflict.product_key
+              ? `Price ${conflict.key} of product ${conflict.product_key}`
+              : `${conflict.object === "meter" ? "Meter" : "Product"} ${conflict.key}`}{" "}
+            skipped
+          </p>
+          <ul className="mt-1 grid gap-1 text-xs text-muted-foreground">
+            {conflict.fields.map((field) => (
+              <li key={field.field}>
+                {field.field}: the batch says{" "}
+                {readableValue(field, field.file_value, conflict.currency)}, an
+                edit set {readableValue(field, field.live_value, conflict.currency)}{" "}
+                ({field.set_by}, {formatDate(field.set_at)})
+              </li>
+            ))}
+          </ul>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function readableValue(
+  field: CatalogFieldConflict,
+  value: unknown,
+  currency: string | null
+): string {
+  if (value === null || value === undefined) return "none"
+  if (
+    (field.field === "unit_amount" || field.field === "trial_unit_amount") &&
+    typeof value === "string" &&
+    currency
+  ) {
+    return formatNativeAmount(value, currency)
+  }
+  if (field.field.endsWith("_hours") && typeof value === "number") {
+    return formatHours(value)
+  }
+  return JSON.stringify(value)
 }

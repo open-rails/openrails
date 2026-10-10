@@ -8,7 +8,11 @@ import type {
   Meter,
   UpdateProductParams,
 } from "@/lib/api/generated/wire"
-import { mutationOptions, type QueryClient } from "@tanstack/react-query"
+import {
+  mutationOptions,
+  type QueryClient,
+  type QueryKey,
+} from "@tanstack/react-query"
 
 import { askCatalog } from "@/lib/api/copilot"
 import {
@@ -102,6 +106,18 @@ const invalidateExactOnSuccess =
 const invalidateTreeOnSuccess =
   (queryClient: QueryClient, queryKey: readonly unknown[]) => () =>
     queryClient.invalidateQueries({ queryKey })
+
+// reloadIfMoved refetches what an edit was refused for: an object another
+// edit changed since it was read (revision_mismatch).
+const reloadIfMoved =
+  (queryClient: QueryClient, ...queryKeys: QueryKey[]) =>
+  (err: unknown) => {
+    if (err instanceof ApiError && err.code === "revision_mismatch") {
+      void Promise.all(
+        queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey }))
+      )
+    }
+  }
 
 // Every factory pins the selected merchant once, up front, with
 // merchantQueryKeys(). Callbacks fire after the request returns, by which time
@@ -409,7 +425,8 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "apply"],
-      mutationFn: (document: string) => applyCatalog(document),
+      mutationFn: ({ document, force }: { document: string; force: boolean }) =>
+        applyCatalog(document, force),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },
@@ -441,15 +458,25 @@ export const adminMutations = {
         product: UpdateProductParams
       }) => updateProduct(id, product),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      onError: reloadIfMoved(queryClient, keys.catalog()),
     })
   },
   setProductActive: (queryClient: QueryClient) => {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "products", "set-active"],
-      mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-        updateProduct(id, { archived: !active }),
+      mutationFn: ({
+        id,
+        active,
+        revision,
+      }: {
+        id: string
+        active: boolean
+        revision: number
+      }) =>
+        updateProduct(id, { archived: !active, expected_revision: revision }),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      onError: reloadIfMoved(queryClient, keys.catalog()),
     })
   },
   createPrice: (queryClient: QueryClient) => {
@@ -464,9 +491,17 @@ export const adminMutations = {
     const keys = merchantQueryKeys()
     return mutationOptions({
       mutationKey: [...keys.catalog(), "prices", "set-active"],
-      mutationFn: ({ id, active }: { id: string; active: boolean }) =>
-        updatePrice(id, { archived: !active }),
+      mutationFn: ({
+        id,
+        active,
+        revision,
+      }: {
+        id: string
+        active: boolean
+        revision: number
+      }) => updatePrice(id, { archived: !active, expected_revision: revision }),
       onSuccess: invalidateTreeOnSuccess(queryClient, keys.catalog()),
+      onError: reloadIfMoved(queryClient, keys.catalog()),
     })
   },
   putUsageMeter: (queryClient: QueryClient) => {
@@ -483,6 +518,7 @@ export const adminMutations = {
             queryKey: keys.usageMeter(key),
           }),
         ]),
+      onError: reloadIfMoved(queryClient, metersKey),
     })
   },
   putDefaultUsageRateCard: (queryClient: QueryClient) => {
@@ -504,6 +540,7 @@ export const adminMutations = {
             queryKey: keys.usageMeter(meter.key),
           }),
         ]),
+      onError: reloadIfMoved(queryClient, metersKey),
     })
   },
   deleteDefaultUsageRateCard: (queryClient: QueryClient) => {
@@ -535,6 +572,7 @@ export const adminMutations = {
         meterKey: string
         override: CustomerUsageRateOverrideRequest
       }) => putCustomerUsageRateOverride(customerId, meterKey, override),
+      onError: reloadIfMoved(queryClient, metersKey, keys.customers()),
       onSuccess: (_result, { customerId, meterKey }) =>
         Promise.all([
           queryClient.invalidateQueries({
@@ -617,7 +655,8 @@ export const adminMutations = {
         return created
       },
       // The price can be created before scheduling fails. Always refresh so
-      // the UI reflects that partial server-side success.
+      // the UI reflects that partial server-side success, or the key's
+      // current revision after a revision_mismatch.
       onSettled: invalidateTreeOnSuccess(queryClient, keys.catalog()),
     })
   },

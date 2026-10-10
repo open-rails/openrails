@@ -98,6 +98,8 @@ export const listCustomerPaymentMethods = (
 export interface CustomerUsageRateOverrideRequest {
   price: RatePrice
   allowance?: Allowance
+  // The override's revision this edit read; 0 when it read none.
+  expected_revision?: number
 }
 
 export const listCustomerUsageRateOverrides = (
@@ -414,6 +416,8 @@ export interface UsageMeterRequest {
   group_by: Record<string, string>
   // Omitted keeps the meter's rate card; null removes it.
   rate_card?: DefaultUsageRateCardRequest | null
+  // The meter's revision this edit read; 0 for a new meter.
+  expected_revision?: number
 }
 
 export interface DefaultUsageRateCardRequest {
@@ -468,6 +472,7 @@ export const putUsageMeterRateCard = (
     unit: meter.unit,
     group_by: meter.group_by ?? {},
     rate_card: rateCard,
+    expected_revision: meter.revision,
   })
 
 export const listPrices = (
@@ -567,17 +572,15 @@ export const cancelPriceMigration = (id: string) =>
 
 export type { CatalogApplicationReceipt } from "./generated/wire"
 
-export const getCatalogRevision = () =>
-  api<{ revision: number; writes_allowed: boolean }>("/admin/catalog/revision")
-
 // JSON is valid YAML too. Keep the reviewed document byte-for-byte unchanged
 // instead of parsing/re-encoding money in the browser. The server deduplicates
-// batches by their canonical content.
-export const applyCatalog = (document: string) =>
+// batches by their canonical content. force overwrites what edits set.
+export const applyCatalog = (document: string, force = false) =>
   api<CatalogApplicationReceipt>("/admin/catalog/applications", {
     method: "POST",
     rawBody: document,
     headers: { "Content-Type": "application/yaml" },
+    ...(force ? { query: { force: "true" } } : {}),
   })
 
 export const refreshCatalogDrift = () =>

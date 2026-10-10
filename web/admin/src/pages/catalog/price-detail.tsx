@@ -78,7 +78,7 @@ export function PriceDetailPage() {
         <div>
           <h2 className="flex items-center gap-2 text-sm">
             {product
-              ? `${product.key}.${price.key}.v${price.revision}`
+              ? `${product.key}.${price.key}.v${price.version}`
               : price.key}
             {price.archived && <Badge variant="secondary">archived</Badge>}
           </h2>
@@ -159,7 +159,7 @@ export function PriceDetailPage() {
                         title={entry.price.id}
                       >
                         {product
-                          ? `${product.key}.${entry.price.key}.v${entry.price.revision}`
+                          ? `${product.key}.${entry.price.key}.v${entry.price.version}`
                           : shortId(entry.price.id, 13)}
                       </Link>
                     </TableCell>

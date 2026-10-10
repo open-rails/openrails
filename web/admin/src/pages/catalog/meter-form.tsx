@@ -55,6 +55,9 @@ export function MeterFormDialog({
       setSubmitError("")
       try {
         const request = buildMeterRequest(value)
+        // The revision this form read: a meter another edit changed since is
+        // refused, and a new one must still be new.
+        request.meter.expected_revision = meter?.revision ?? 0
         await save.mutateAsync(request)
         toast.success(meter ? "Meter updated" : "Meter created")
         setOpen(false)

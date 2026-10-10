@@ -11,15 +11,11 @@ export function useMerchantConfig(): boolean {
 }
 
 // useCatalogWrites reports whether staff may edit the catalog here: the host
-// mounts catalog edits (Permissions.CatalogWrite) and the catalog accepts
-// them (no catalog file is the truth).
+// mounts catalog edits (Permissions.CatalogWrite). A catalog file and edits
+// share the catalog; the file skips what an edit changed.
 export function useCatalogWrites(): boolean {
   const { data: config } = useQuery(adminQueries.config())
-  const { data: revision } = useQuery(adminQueries.catalogRevision())
-  return (
-    (config?.capabilities.route_groups?.catalog_write ?? false) &&
-    revision?.writes_allowed === true
-  )
+  return config?.capabilities.route_groups?.catalog_write ?? false
 }
 
 // configTabs are the settings tabs that are the merchant's configuration.

@@ -8,14 +8,12 @@ import { CatalogProductsPage } from "./index"
 
 afterEach(unmount)
 
-it("keeps catalog reads visible but only offers creation when the server enables it", async () => {
+it("keeps catalog reads visible but only offers creation where catalog edits are mounted", async () => {
   browserEnvironment()
   let enabled = false
   const requests = await server({
-    "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
-    "GET /admin/catalog/revision": () => ({
-      revision: 4,
-      writes_allowed: enabled,
+    "/config": () => ({
+      capabilities: { route_groups: { catalog_write: enabled }, features: {} },
     }),
     "GET /admin/catalog/products": {
       items: [],

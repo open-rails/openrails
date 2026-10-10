@@ -15,19 +15,20 @@ import { PriceDetailPage } from "./price-detail"
 
 afterEach(unmount)
 
-it("shows qualified price revisions while history links keep the immutable price ids", async () => {
+it("shows qualified price versions while history links keep the immutable price ids", async () => {
   browserEnvironment()
   const current = aPrice("price_current", "prod_premium", {
     key: "monthly",
-    revision: 1,
+    version: 1,
+    revision: 3,
   })
   const previous = aPrice("price_previous", "prod_premium", {
     key: "monthly",
-    revision: 0,
+    version: 0,
+    revision: 3,
     archived: true,
   })
   await server({
-    "/admin/catalog/revision": { revision: 2, writes_allowed: true },
     "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
     "/admin/catalog/prices/price_current": current,
     "/admin/catalog/products/prod_premium": aProduct("prod_premium", 0, {

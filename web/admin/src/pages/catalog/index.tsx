@@ -223,6 +223,7 @@ function ProductRow({ product }: { product: Product }) {
       await setProductActive.mutateAsync({
         id: product.id,
         active: product.archived,
+        revision: product.revision,
       })
       toast.success(
         product.archived ? "Product activated" : "Product deactivated"
@@ -311,6 +312,7 @@ function ProductDialog({ product }: { product?: Product }) {
               tier_group: value.tierGroup || null,
               tier_rank: Number(value.tierRank) || 0,
               entitlements,
+              expected_revision: product.revision,
             },
           })
           toast.success("Product updated")
@@ -621,6 +623,7 @@ function PriceRow({
       await setPriceActive.mutateAsync({
         id: price.id,
         active: price.archived,
+        revision: price.revision,
       })
       toast.success(price.archived ? "Price activated" : "Price deactivated")
     } catch (err) {

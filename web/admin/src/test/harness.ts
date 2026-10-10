@@ -146,12 +146,12 @@ export const render = (node: ReactNode, queryClient = client()) =>
 
 const WHEN = "2026-09-18T00:00:00Z"
 export const aProduct = (id: string, tierRank = 0, overrides: Partial<Product> = {}): Product => ({
-  id, key: id, revision: 0, display_name: id, description: "", entitlements: [], tier_group: "plans", ownership: null,
+  id, key: id, revision: 1, display_name: id, description: "", entitlements: [], tier_group: "plans", ownership: null,
   tier_rank: tierRank, archived: false, prices: [], created_at: WHEN, updated_at: WHEN,
   ...overrides,
 })
 export const aPrice = (id: string, productId: string, overrides: Partial<Price> = {}): Price => ({
-  id, key: id, revision: 0, product_id: productId, archived: false, currency: "USD",
+  id, key: id, revision: 1, version: 0, product_id: productId, archived: false, currency: "USD",
   unit_amount: "20000000", access_duration_hours: 720, billing_interval_hours: 720, trial_unit_amount: null, trial_duration_hours: null,
   quantity: null, psps: {}, pending_manual_actions: [], created_at: WHEN, updated_at: WHEN,
   ...overrides,

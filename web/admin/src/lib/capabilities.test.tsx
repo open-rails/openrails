@@ -29,10 +29,7 @@ function Probe() {
   )
 }
 
-const mounted = (
-  groups: Record<string, boolean> | null,
-  writesAllowed = true
-) => {
+const mounted = (groups: Record<string, boolean> | null) => {
   const queries = client()
   if (groups)
     queries.setQueryData(adminQueries.config().queryKey, {
@@ -42,10 +39,6 @@ const mounted = (
       payment: null,
       captcha: null,
     })
-  queries.setQueryData(adminQueries.catalogRevision().queryKey, {
-    revision: 1,
-    writes_allowed: writesAllowed,
-  })
   return render(<Probe />, queries)
 }
 
@@ -61,11 +54,8 @@ describe("the merchant's configuration pages", () => {
     expect(mounted(null)).toContain("no-config")
   })
 
-  it("offer catalog edits only with the catalog_write bundle and an editable catalog", () => {
+  it("offer catalog edits exactly with the catalog_write bundle", () => {
     expect(mounted({ admin: true, catalog_write: true })).toContain(">edits<")
-    expect(mounted({ admin: true, catalog_write: true }, false)).toContain(
-      "no-edits"
-    )
     expect(mounted({ admin: true, merchant_config: true })).toContain(
       "no-edits"
     )
