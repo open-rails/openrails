@@ -42,8 +42,9 @@ func init() {
 // wait for the database; nothing else does. With Config.Catalog, New applies
 // it before returning and fails with the reason if it is refused; only provider
 // references it cannot confirm within seconds finish in the background, and
-// Ready fails until they do. Vault login, PSP posture checks and Redis recover
-// in the background and fail only the features that need them (see Probes).
+// Ready fails until they do. Vault login and PSP posture checks recover in the
+// background and fail only the features that need them (see Probes). A
+// declared Redis fails Ready while it does not answer; boot never waits for it.
 // opts are the options that make sense in process (WithTimeout, a default
 // merchant). The credential and transport options belong to
 // NewRemote and are refused: New authenticates as the host itself. For a

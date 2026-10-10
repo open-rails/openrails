@@ -19,7 +19,7 @@ const testDatabaseURL = "postgres://openrails@db.test:5432/openrails?sslmode=req
 func bootEnv(t *testing.T) (secretsDir string) {
 	t.Helper()
 	t.Chdir(t.TempDir())
-	for _, key := range []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "OPENRAILS_CONFIG", "BILLING_CONFIG"} {
+	for _, key := range []string{"DB_URL", "DB_HOST", "DB_PORT", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD", "DB_SSLMODE", "REDIS_ADDR", "REDIS_URL", "OPENRAILS_CONFIG", "BILLING_CONFIG"} {
 		unsetenv(t, key)
 	}
 	secretsDir = t.TempDir()
@@ -317,4 +317,40 @@ func TestShutdownSettings(t *testing.T) {
 	t.Setenv("DRAIN_DELAY", "-1s")
 	_, err = Load("")
 	require.ErrorContains(t, err, "must not be negative")
+}
+
+// No Redis unless one is named; each connection setting has its variable.
+func TestRedisSettings(t *testing.T) {
+	bootEnv(t)
+	cfg, err := Load("")
+	require.NoError(t, err)
+	require.Nil(t, cfg.Redis, "no default Redis")
+	t.Setenv("REDIS_PASSWORD", "")
+	cfg, err = Load("")
+	require.NoError(t, err)
+	require.Nil(t, cfg.Redis, "a blank variable declares none")
+
+	t.Setenv("REDIS_URL", "rediss://cache.example:6380/2")
+	t.Setenv("REDIS_USERNAME", "openrails")
+	t.Setenv("REDIS_PASSWORD", "s3cret")
+	t.Setenv("REDIS_CA_CERT", "not a certificate")
+	_, err = Load("")
+	require.ErrorContains(t, err, "redis.ca_cert holds no PEM certificate")
+	unsetenv(t, "REDIS_CA_CERT")
+	cfg, err = Load("")
+	require.NoError(t, err)
+	require.Equal(t, &billing.RedisConfig{URL: "rediss://cache.example:6380/2", Username: "openrails", Password: "s3cret"}, cfg.Redis)
+
+	t.Setenv("REDIS_ADDR", "cache:6379")
+	_, err = Load("")
+	require.ErrorContains(t, err, "redis.addr and redis.url are exclusive")
+	unsetenv(t, "REDIS_URL")
+	t.Setenv("REDIS_TLS", "true")
+	cfg, err = Load("")
+	require.NoError(t, err)
+	require.Equal(t, &billing.RedisConfig{Addr: "cache:6379", Username: "openrails", Password: "s3cret", TLS: true}, cfg.Redis)
+
+	unsetenv(t, "REDIS_ADDR")
+	_, err = Load("")
+	require.ErrorContains(t, err, "redis: set redis.addr (REDIS_ADDR) or redis.url (REDIS_URL)")
 }

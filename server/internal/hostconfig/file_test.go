@@ -42,6 +42,7 @@ func TestFileReachesConfig(t *testing.T) {
 	}
 	f.AdminConsole.Enabled = true
 	f.EmailSMTP.Host = "smtp.example"
+	f.Redis.Addr = "redis:6379"
 	f.AdminConsole.Issuer = &ConsoleIssuer{}
 	cfg, err := f.config()
 	require.NoError(t, err)

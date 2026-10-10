@@ -939,13 +939,6 @@ type CCBillConfig struct {
 	DataLinkPassword string
 }
 
-// RedisConfig is a Redis connection.
-type RedisConfig struct {
-	Addr     string
-	Password string
-	DB       int
-}
-
 // TokenConfig defines configuration for a specific Solana token.
 //
 // There is deliberately NO `decimals` field (#817): an SPL token's base-unit
@@ -1133,6 +1126,11 @@ func Validate(cfg *Config) error {
 			if !slices.Contains(RateLimitBuckets, bucket) {
 				return fmt.Errorf("rate_limits.%s is not a bucket (%s); a per-address ceiling belongs to the proxy in front of OpenRails", bucket, strings.Join(RateLimitBuckets, ", "))
 			}
+		}
+	}
+	if cfg.Redis != nil {
+		if _, err := RedisOptions(cfg.Redis); err != nil {
+			return err
 		}
 	}
 	if err := validateCaptcha(cfg.Captcha); err != nil {

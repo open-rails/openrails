@@ -46,10 +46,16 @@ database:
   schema: billing # every OpenRails table lives here; defaults to 'billing' (env DATABASE_SCHEMA)
   # river_schema: billing_river # OpenRails' River jobs; defaults to the schema plus '_river'
 
+# Optional: without redis, rate limits, lockouts and captcha challenges are
+# counted in PostgreSQL. A declared Redis must answer for readiness.
 redis:
-  addr: localhost:6380
+  addr: localhost:6380 # or url: rediss://user:password@cache.example:6380/0
   password: ""
   db: 0
+  # username: openrails # ACL user
+  # tls: true           # verify against the system roots, or ca_cert
+  # ca_cert: |          # PEM CA bundle; implies TLS (env REDIS_CA_CERT)
+  #   -----BEGIN CERTIFICATE-----
 
 auth:
   allow_loopback_http: true # explicit local issuer exception

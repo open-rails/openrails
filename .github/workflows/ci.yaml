@@ -219,6 +219,10 @@ jobs:
         run: |
           image="$(scripts/ci-pull-image.sh redis:7-alpine)"
           docker run -d --pull never --name e2e-redis -p 6379:6379 "$image"
+          # A second one takes only TLS and an ACL user.
+          url="$(scripts/e2e-redis-tls.sh "$RUNNER_TEMP/redis-tls" 6380 "$image")"
+          echo "OPENRAILS_E2E_REDIS_TLS_URL=$url" >>"$GITHUB_ENV"
+          echo "OPENRAILS_E2E_REDIS_TLS_CA=$RUNNER_TEMP/redis-tls/ca.pem" >>"$GITHUB_ENV"
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         id: go
         with:

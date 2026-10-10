@@ -511,29 +511,18 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 	return clockwork.NewRealClock()
 }
 
+// createRedisClient opens the declared Redis. It does not wait for it: the
+// health monitor reports it, and Ready fails until it answers.
 func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	if cfg.Redis == nil {
 		return nil, nil
 	}
-	redisOpts := &redis.Options{
-		Addr: cfg.Redis.Addr,
-		DB:   cfg.Redis.DB,
+	opts, err := config.RedisOptions(cfg.Redis)
+	if err != nil {
+		return nil, err
 	}
-	if cfg.Redis.Password != "" {
-		redisOpts.Password = cfg.Redis.Password
-		log.Info("Redis authentication enabled")
-	} else {
-		log.Info("Redis authentication disabled - connecting without credentials")
-	}
-	client := redis.NewClient(redisOpts)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if _, err := client.Ping(ctx).Result(); err != nil {
-		log.Warnf("Redis connection test failed: %v - rate limiting will fall back to permissive mode", err)
-	} else {
-		log.Info("Redis connection successful - rate limiting enabled")
-	}
-	return client, nil
+	log.WithFields(log.Fields{"addr": opts.Addr, "tls": opts.TLSConfig != nil, "acl_user": opts.Username != ""}).Info("Redis declared")
+	return redis.NewClient(opts), nil
 }
 
 type servicesInstances struct {

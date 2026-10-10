@@ -372,8 +372,12 @@ pkg openrails, type RateLimitsConfig map[string]*config.RateLimit
 pkg openrails, type RedisConfig = config.RedisConfig
 pkg openrails, type RedisConfig struct
 pkg openrails, type RedisConfig struct, Addr string
+pkg openrails, type RedisConfig struct, CACert string
 pkg openrails, type RedisConfig struct, DB int
 pkg openrails, type RedisConfig struct, Password string
+pkg openrails, type RedisConfig struct, TLS bool
+pkg openrails, type RedisConfig struct, URL string
+pkg openrails, type RedisConfig struct, Username string
 pkg openrails, type RequestOption func(*requestOptions)
 pkg openrails, type Route struct
 pkg openrails, type Route struct, Handler http.Handler

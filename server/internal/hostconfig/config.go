@@ -130,12 +130,10 @@ func defaults() *fileConfig {
 		ShutdownTimeout: 20 * time.Second,
 		DB:              &billing.DBConfig{},
 		Database:        billing.DatabaseConfig{Schema: billing.DefaultSchema},
-		// Match docker-compose's host-published Garnet port.
-		Redis:      &billing.RedisConfig{Addr: "localhost:6380"},
-		Logger:     &billing.LoggerConfig{Level: "info"},
-		RateLimits: billing.DefaultRateLimits(),
-		Captcha:    billing.DefaultCaptcha(),
-		Auth:       &AuthConfig{},
+		Logger:          &billing.LoggerConfig{Level: "info"},
+		RateLimits:      billing.DefaultRateLimits(),
+		Captcha:         billing.DefaultCaptcha(),
+		Auth:            &AuthConfig{},
 	}
 }
 
@@ -165,6 +163,15 @@ func databaseURL(db *billing.DBConfig) (string, error) {
 	default:
 		return "", fmt.Errorf("database: db.url (DB_URL) is unset and its parts are incomplete: set %s", strings.Join(missing, ", "))
 	}
+}
+
+// redisSection is the redis section; one that sets nothing (a blank
+// REDIS_PASSWORD) declares no Redis.
+func redisSection(r *billing.RedisConfig) *billing.RedisConfig {
+	if r == nil || *r == (billing.RedisConfig{}) {
+		return nil
+	}
+	return r
 }
 
 // smtpFile is the email_smtp section (EMAIL_SMTP_HOST, …), the same names
@@ -236,7 +243,7 @@ func (f *fileConfig) config() (*Config, error) {
 			PublicBillingBaseURL:              f.PublicBillingBaseURL,
 			DashboardBaseURL:                  f.DashboardBaseURL,
 			DB:                                f.DB,
-			Redis:                             f.Redis,
+			Redis:                             redisSection(f.Redis),
 			Logger:                            f.Logger,
 			SMTP:                              smtp,
 			RateLimits:                        f.RateLimits,

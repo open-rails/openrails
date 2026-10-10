@@ -1084,7 +1084,7 @@
       "type ProviderSandboxConfig struct {\n\tNMIGatewayURL string\n\n\tStripeAPIURL string\n\n\tSolanaRPCURL string\n\n\tCCBillDataLinkURL string\n}",
       "type RateLimit struct {\n\tRequestsPerMinute int\n}",
       "type RateLimitsConfig map[string]*RateLimit",
-      "type RedisConfig struct {\n\tAddr     string\n\tPassword string\n\tDB       int\n}",
+      "type RedisConfig struct {\n\tAddr string\n\n\tURL string\n\n\tUsername string\n\tPassword string\n\tDB       int\n\n\tTLS bool\n\n\tCACert string\n}",
       "type Routes struct {\n\tAuth billingauth.Auth\n\n\tPrefix string\n\n\tPermissions Permissions\n\n\tProvisioning bool\n\n\tCustomerProfiles []CustomerRoutes\n\n\tCookieOrigin string\n\n\tAdminConsole *AdminConsole\n}",
       "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
       "type UserInfo = userinfo.Lookup",
@@ -2228,6 +2228,16 @@
     "internal/config/naming.go": {
       "fmt": "fmt",
       "time": "time"
+    },
+    "internal/config/redis.go": {
+      "errors": "errors",
+      "fmt": "fmt",
+      "net": "net",
+      "strings": "strings",
+      "time": "time",
+      "tls": "crypto/tls",
+      "v9": "github.com/redis/go-redis/v9",
+      "x509": "crypto/x509"
     },
     "internal/contract/model.go": {
       "ast": "go/ast",
