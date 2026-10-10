@@ -128,6 +128,28 @@ func (q *Queries) GetConflictingInitialEnrollmentSubscription(ctx context.Contex
 	return i, err
 }
 
+const getConflictingOrderClaim = `-- name: GetConflictingOrderClaim :one
+SELECT c.order_id FROM billing.ownership_claims c
+JOIN billing.products accepted ON accepted.merchant_id=c.merchant_id AND accepted.id=$1::uuid
+WHERE c.merchant_id=$2::uuid AND c.customer_id=$3::uuid AND c.holder_type='order'
+ AND c.claim_key IN ('product:' || accepted.id::text, 'tier_group:' || accepted.tier_group)
+LIMIT 1
+`
+
+type GetConflictingOrderClaimParams struct {
+	ProductID  uuid.UUID
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// An unpaid order of the customer claiming the product or its tier group.
+func (q *Queries) GetConflictingOrderClaim(ctx context.Context, arg GetConflictingOrderClaimParams) (uuid.UUID, error) {
+	row := q.db.QueryRow(ctx, getConflictingOrderClaim, arg.ProductID, arg.MerchantID, arg.CustomerID)
+	var order_id uuid.UUID
+	err := row.Scan(&order_id)
+	return order_id, err
+}
+
 const getConflictingSubscribeAttempt = `-- name: GetConflictingSubscribeAttempt :one
 SELECT ca.id FROM billing.checkout_attempts ca
 JOIN billing.prices pr ON pr.merchant_id=ca.merchant_id AND pr.id=ca.price_id

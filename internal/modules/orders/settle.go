@@ -25,6 +25,7 @@ import (
 	paycharge "github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
@@ -210,6 +211,24 @@ func (s *Service) reclaim(ctx context.Context, q *gen.Queries, order *Order, now
 			}
 		}
 	}
+	refused, err := s.claimRefusal(ctx, q, order, now)
+	return refused == nil, err
+}
+
+// StillFree refuses paying an open order whose unique lines the customer
+// came to hold, or started buying elsewhere, since it was created. q is the
+// caller's transaction, holding the customer lock.
+func (s *Service) StillFree(ctx context.Context, q *gen.Queries, order *Order, at time.Time) error {
+	refused, err := s.claimRefusal(ctx, q, order, at)
+	if err != nil || refused == nil {
+		return err
+	}
+	return apperr.Conflictf("%s", refused.Message)
+}
+
+// claimRefusal is why another purchase holds one of order's unique lines,
+// nil when none does.
+func (s *Service) claimRefusal(ctx context.Context, q *gen.Queries, order *Order, at time.Time) (*billing.OrderLineRefusal, error) {
 	held := &Quote{Lines: make([]QuotedLine, 0, len(order.Lines))}
 	for _, l := range order.Lines {
 		if l.ClaimKey == nil {
@@ -217,23 +236,23 @@ func (s *Service) reclaim(ctx context.Context, q *gen.Queries, order *Order, now
 		}
 		product, err := q.GetProductByID(ctx, gen.GetProductByIDParams{MerchantID: order.MerchantID, ID: l.ProductID})
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		p, err := models.ProductFromGen(product)
 		if err != nil {
-			return false, err
+			return nil, err
 		}
 		held.Lines = append(held.Lines, QuotedLine{Product: p, ClaimKey: *l.ClaimKey})
 	}
-	if err := s.refuseOwned(ctx, q, order.MerchantID, order.CustomerID, held, order.ID, now); err != nil {
-		return false, err
+	if err := s.refuseOwned(ctx, q, order.MerchantID, order.CustomerID, held, order.ID, at); err != nil {
+		return nil, err
 	}
 	for _, l := range held.Lines {
 		if l.Refusal != nil {
-			return false, nil
+			return l.Refusal, nil
 		}
 	}
-	return true, nil
+	return nil, nil
 }
 
 // recordPayment writes the charge as the order's payment.

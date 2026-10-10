@@ -195,15 +195,15 @@ RETURNING last_number;
 
 -- name: ListLiveOwnership :many
 -- What a customer holds of the given products or tier groups: live
--- subscriptions (a canceled one while still paid through), and product
--- access that never ends.
+-- subscriptions (a canceled one while still paid through or while its
+-- provider schedule may still bill), and product access that never ends.
 SELECT 'subscription'::text AS holder_type, s.id AS holder_id, s.product_id, s.tier_group,
        s.status, s.current_period_ends_at
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(customer_id)::uuid
   AND s.deleted_at IS NULL
   AND (s.product_id = ANY(sqlc.arg(product_ids)::uuid[]) OR s.tier_group = ANY(sqlc.arg(tier_groups)::text[]))
-  AND (s.status <> 'canceled' OR s.current_period_ends_at > sqlc.arg(now)::timestamptz)
+  AND (s.status <> 'canceled' OR s.current_period_ends_at > sqlc.arg(now)::timestamptz OR s.deletion_scheduled_at IS NOT NULL)
 UNION ALL
 SELECT 'product_access'::text, a.id, a.product_id, NULL::text, 'active'::text, a.ends_at
 FROM billing.product_access a

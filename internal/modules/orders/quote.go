@@ -2,17 +2,20 @@ package orders
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -278,7 +281,8 @@ func claimKey(product *models.Product) string {
 }
 
 // refuseOwned refuses the unique lines the customer already holds: a live
-// subscription or never-ending access, or a claim another order holds.
+// subscription or never-ending access, a claim another order holds, or
+// another purchase whose payment is unresolved.
 func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, quote *Quote, exceptOrder uuid.UUID, at time.Time) error {
 	var productIDs []uuid.UUID
 	var groups, keys []string
@@ -332,8 +336,37 @@ func (s *Service) refuseOwned(ctx context.Context, q *gen.Queries, merchantID, c
 			}
 			l.Refusal = claimRefusal(c)
 		}
+		if l.Refusal != nil {
+			continue
+		}
+		pending, err := pendingPurchase(ctx, q, merchantID, customerID, l.Product.ID, at)
+		if err != nil {
+			return err
+		}
+		if pending {
+			l.Refusal = refusal(RefusalAlreadyOwned, "Another purchase of this by the customer awaits its payment.")
+		}
 	}
 	return nil
+}
+
+// pendingPurchase reports another purchase of the product or its tier group
+// whose payment is unresolved: a membership enrollment or Solana subscribe,
+// or a one-time checkout or sale.
+func pendingPurchase(ctx context.Context, q *gen.Queries, merchantID, customerID, productID uuid.UUID, at time.Time) (bool, error) {
+	reason, err := intents.MembershipSlot{MerchantID: merchantID, CustomerID: customerID, ProductID: productID, At: at}.Pending(ctx, q)
+	if err != nil || reason != "" {
+		return reason != "", err
+	}
+	checkout, err := q.HasUnresolvedProductCheckout(ctx, gen.HasUnresolvedProductCheckoutParams{MerchantID: merchantID, CustomerID: customerID, ProductID: productID, ExceptSessionID: uuid.Nil})
+	if err != nil || checkout {
+		return checkout, err
+	}
+	_, err = q.GetUnresolvedSaleForCustomerProduct(ctx, gen.GetUnresolvedSaleForCustomerProductParams{MerchantID: merchantID, CustomerID: customerID.String(), ProductID: productID.String()})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil, err
 }
 
 func owned(by string, hint *string, message string) *billing.OrderLineRefusal {

@@ -242,6 +242,9 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 		case current.Status != string(billing.OrderOpen) || !current.ExpiresAt.After(now):
 			return orders.ErrNotPayable
 		}
+		if err := s.orders.StillFree(ctx, q, order, now); err != nil {
+			return err
+		}
 		row, err := q.GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: method.ID})
 		if err != nil {
 			return err

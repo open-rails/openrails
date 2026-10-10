@@ -45,3 +45,11 @@ WHERE ca.merchant_id=sqlc.arg(merchant_id)::uuid AND ca.customer_id=sqlc.arg(cus
  AND ca.expires_at > sqlc.arg(open_after)::timestamptz AND ca.id <> sqlc.arg(except_id)::uuid AND ca.deleted_at IS NULL
  AND (existing.id=accepted.id OR (accepted.tier_group IS NOT NULL AND existing.tier_group=accepted.tier_group))
 ORDER BY ca.id LIMIT 1;
+
+-- name: GetConflictingOrderClaim :one
+-- An unpaid order of the customer claiming the product or its tier group.
+SELECT c.order_id FROM billing.ownership_claims c
+JOIN billing.products accepted ON accepted.merchant_id=c.merchant_id AND accepted.id=sqlc.arg(product_id)::uuid
+WHERE c.merchant_id=sqlc.arg(merchant_id)::uuid AND c.customer_id=sqlc.arg(customer_id)::uuid AND c.holder_type='order'
+ AND c.claim_key IN ('product:' || accepted.id::text, 'tier_group:' || accepted.tier_group)
+LIMIT 1;

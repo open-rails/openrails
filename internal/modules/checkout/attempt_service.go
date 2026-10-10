@@ -84,11 +84,6 @@ type checkoutAttemptExecutor interface {
 	checkoutRailTargets
 	Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error)
 	RegisterPurchase(ctx context.Context, req *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error)
-	// CheckSubscriptionConflict is the shared duplicate-billing guard (issue
-	// #269): blocks a second non-terminal subscription in the same exact price or
-	// tier-group. The Solana subscribe path runs it before preparing any
-	// transaction.
-	CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error)
 }
 
 // checkoutRailTargets is the multi-PSP resolution capability the session
@@ -1544,27 +1539,6 @@ func (s *CheckoutAttemptService) initializeSolanaSubscriptionSession(ctx context
 		return fmt.Errorf("%w: price not found", ErrCheckoutAttemptValidation)
 	}
 
-	// Duplicate-billing guard (issue #269): a user must never hold two concurrent
-	// non-terminal subscriptions in the same product/tier-group (even at different
-	// tiers — that is double-billing; the correct operation is a subscription change). Run
-	// this BEFORE preparing any on-chain transaction so we neither create the
-	// session nor ask the wallet to sign anything for a duplicate. A tier change on
-	// an EXISTING Solana subscription does NOT go through this subscribe flow — it
-	// uses the dedicated atomic prepare/confirm tier-change endpoints (#272).
-	if s.checkoutService != nil {
-		product, err := s.productService.GetByID(ctx, price.ProductID)
-		if err != nil || product == nil {
-			return fmt.Errorf("%w: product not found", ErrCheckoutAttemptValidation)
-		}
-		conflict, err := s.checkoutService.CheckSubscriptionConflict(ctx, session.CustomerID.String(), price, product)
-		if err != nil {
-			return fmt.Errorf("%w: failed to check existing subscriptions: %v", ErrCheckoutAttemptValidation, err)
-		}
-		if conflict != nil && conflict.Blocked {
-			return fmt.Errorf("%w: %s", ErrCheckoutAttemptConflict, conflict.Message)
-		}
-	}
-
 	terms, err := parseSolanaPlanTerms(price.ForPSP(session.PspID).PSPLinkForRail(models.RailSolana))
 	if err != nil {
 		return err
@@ -1621,8 +1595,7 @@ func (s *CheckoutAttemptService) initializeSolanaSubscriptionSession(ctx context
 // built later by BuildSolanaPayTransaction when the scanning wallet POSTs its
 // account. The decision to land here is purely price-driven (the price carries a
 // published Solana recurring plan → mode resolved to subscription) — no client
-// mode override. The duplicate-billing guard still runs up front so we never
-// hand out a QR that would double-bill.
+// mode override. Admission already reserved the customer's membership slot.
 // solanaSignerAvailable refuses (503) while the Solana rail's signer is
 // unavailable or its identity change awaits approval (#1101).
 func (s *CheckoutAttemptService) solanaSignerAvailable(ctx context.Context) error {
@@ -1639,23 +1612,6 @@ func (s *CheckoutAttemptService) initializeSolanaSubscriptionPayRequest(ctx cont
 	price, err := s.priceService.GetByID(ctx, *session.PriceID)
 	if err != nil || price == nil {
 		return fmt.Errorf("%w: price not found", ErrCheckoutAttemptValidation)
-	}
-
-	// Duplicate-billing guard (issue #269) — same as the wallet subscribe path:
-	// refuse to issue a Solana Pay QR that would create a second concurrent
-	// non-terminal subscription in the same product/tier-group.
-	if s.checkoutService != nil {
-		product, perr := s.productService.GetByID(ctx, price.ProductID)
-		if perr != nil || product == nil {
-			return fmt.Errorf("%w: product not found", ErrCheckoutAttemptValidation)
-		}
-		conflict, cerr := s.checkoutService.CheckSubscriptionConflict(ctx, session.CustomerID.String(), price, product)
-		if cerr != nil {
-			return fmt.Errorf("%w: failed to check existing subscriptions: %v", ErrCheckoutAttemptValidation, cerr)
-		}
-		if conflict != nil && conflict.Blocked {
-			return fmt.Errorf("%w: %s", ErrCheckoutAttemptConflict, conflict.Message)
-		}
 	}
 
 	terms, err := parseSolanaPlanTerms(price.ForPSP(session.PspID).PSPLinkForRail(models.RailSolana))

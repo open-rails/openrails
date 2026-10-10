@@ -619,7 +619,7 @@ FROM billing.subscriptions s
 WHERE s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
   AND s.deleted_at IS NULL
   AND (s.product_id = ANY($3::uuid[]) OR s.tier_group = ANY($4::text[]))
-  AND (s.status <> 'canceled' OR s.current_period_ends_at > $5::timestamptz)
+  AND (s.status <> 'canceled' OR s.current_period_ends_at > $5::timestamptz OR s.deletion_scheduled_at IS NOT NULL)
 UNION ALL
 SELECT 'product_access'::text, a.id, a.product_id, NULL::text, 'active'::text, a.ends_at
 FROM billing.product_access a
@@ -647,8 +647,8 @@ type ListLiveOwnershipRow struct {
 }
 
 // What a customer holds of the given products or tier groups: live
-// subscriptions (a canceled one while still paid through), and product
-// access that never ends.
+// subscriptions (a canceled one while still paid through or while its
+// provider schedule may still bill), and product access that never ends.
 func (q *Queries) ListLiveOwnership(ctx context.Context, arg ListLiveOwnershipParams) ([]ListLiveOwnershipRow, error) {
 	rows, err := q.db.Query(ctx, listLiveOwnership,
 		arg.MerchantID,

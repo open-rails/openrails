@@ -402,26 +402,6 @@ func (r *SubscriptionRepo) GetLatestByUserID(ctx context.Context, userID string)
 	return r.oneWithDetails(ctx, row, false)
 }
 
-func (r *SubscriptionRepo) GetByUserIDAndPriceID(ctx context.Context, userID string, priceID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	row, err := r.db.Gen(ctx).GetSubscriptionByCustomerAndPrice(ctx, gen.GetSubscriptionByCustomerAndPriceParams{
-		MerchantID: scopeMerchantID.UUID(),
-		CustomerID: tsid,
-		PriceID:    &priceID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.oneWithDetails(ctx, row, false)
-}
-
 // GetActiveOrPendingByUserIDAndProductID finds any lifecycle-owning subscription for a user and product.
 // Returns the subscription with the latest period end date.
 func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
@@ -710,51 +690,6 @@ func (r *SubscriptionRepo) GetActiveOrPendingByUserIDAndTierGroup(ctx context.Co
 		return nil, scopeErr
 	}
 	row, err := r.db.Gen(ctx).GetLifecycleSubscriptionByCustomerAndTierGroup(ctx, gen.GetLifecycleSubscriptionByCustomerAndTierGroupParams{
-		MerchantID: scopeMerchantID.UUID(),
-		CustomerID: tsid,
-		TierGroup:  &tierGroup,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.oneWithDetails(ctx, row, true)
-}
-
-// GetUnknownByUserIDAndProductID finds an `unknown`-status subscription for a
-// user and product (checkout guard): parked pending provider verification,
-// possibly still billing at the provider.
-func (r *SubscriptionRepo) GetUnknownByUserIDAndProductID(ctx context.Context, userID string, productID uuid.UUID) (*models.Subscription, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	row, err := r.db.Gen(ctx).GetUnknownSubscriptionByCustomerAndProduct(ctx, gen.GetUnknownSubscriptionByCustomerAndProductParams{
-		MerchantID: scopeMerchantID.UUID(),
-		CustomerID: tsid,
-		ProductID:  productID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return r.oneWithDetails(ctx, row, false)
-}
-
-// GetUnknownByUserIDAndTierGroup is the tier-group variant of the checkout
-// guard lookup. Returns the subscription with Price and Product loaded.
-func (r *SubscriptionRepo) GetUnknownByUserIDAndTierGroup(ctx context.Context, userID string, tierGroup string) (*models.Subscription, error) {
-	tsid, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	scopeMerchantID, scopeErr := merchant.Require(ctx)
-	if scopeErr != nil {
-		return nil, scopeErr
-	}
-	row, err := r.db.Gen(ctx).GetUnknownSubscriptionByCustomerAndTierGroup(ctx, gen.GetUnknownSubscriptionByCustomerAndTierGroupParams{
 		MerchantID: scopeMerchantID.UUID(),
 		CustomerID: tsid,
 		TierGroup:  &tierGroup,

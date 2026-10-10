@@ -187,17 +187,6 @@ func (s *CheckoutService) CheckPurchaseEligibility(ctx context.Context, userID s
 	return s.PurchaseService.CheckPurchaseEligibility(ctx, userID, priceID)
 }
 
-// CheckSubscriptionConflict is the shared duplicate-billing guard: whether the
-// user already holds a non-terminal subscription to this exact price or in its
-// tier group. Run it before charging or preparing any on-chain action, and
-// reject when Blocked.
-func (s *CheckoutService) CheckSubscriptionConflict(ctx context.Context, userID string, price *models.Price, product *models.Product) (*SubscriptionConflict, error) {
-	if s.PurchaseService == nil {
-		return nil, errors.New("purchase service unavailable")
-	}
-	return s.PurchaseService.CheckSubscriptionConflict(ctx, userID, price, product)
-}
-
 // Checkout processes a unified checkout request
 func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, error) {
 	if response, found, err := s.replayInitialMembership(ctx, req, user); found || err != nil {
@@ -348,23 +337,6 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	isSubscription := price.IsRecurring()
 
 	if isSubscription {
-		// An `unknown` sub for this product or tier group may still be billing
-		// at the provider, so a re-purchase double-bills: refuse with the
-		// machine-readable code (verify or resume instead). past_due is already
-		// refused by the tier-group and coverage guards above.
-		if s.PurchaseService != nil {
-			conflict, err := s.PurchaseService.checkUnknownSubscriptionConflict(ctx, user.ID, product)
-			if err != nil {
-				return nil, err
-			}
-			if conflict != nil && conflict.Blocked {
-				return &CheckoutResponse{
-					Status:  "blocked",
-					Code:    conflict.Code,
-					Message: conflict.Message,
-				}, nil
-			}
-		}
 		return s.processSubscription(ctx, req, user, price, product, coverage, rail)
 	}
 	return s.processOneTimePurchase(ctx, req, user, price, product, coverage, rail)

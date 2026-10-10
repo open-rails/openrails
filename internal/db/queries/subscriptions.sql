@@ -119,12 +119,6 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
 ORDER BY sub.created_at DESC
 LIMIT 1;
 
--- name: GetSubscriptionByCustomerAndPrice :one
-SELECT * FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1 AND sub.price_id = $2
-  AND sub.deleted_at IS NULL
-LIMIT 1;
-
 -- name: GetLifecycleSubscriptionByCustomerAndProduct :one
 -- NULLS FIRST prioritizes indefinite subscriptions.
 SELECT * FROM billing.subscriptions sub
@@ -257,28 +251,6 @@ SELECT sub.* FROM billing.subscriptions sub
 JOIN billing.products prod ON prod.id = sub.product_id
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
   AND sub.status IN ('active', 'pending', 'past_due', 'awaiting_method')
-  AND prod.tier_group = $2
-  AND sub.deleted_at IS NULL
-ORDER BY sub.current_period_ends_at DESC NULLS FIRST
-LIMIT 1;
-
--- Checkout guard: an unverified subscription holds no lifecycle slot but may
--- still bill at the provider, so a re-purchase would double-bill. These lookups
--- back the subscribe-time rejection.
--- name: GetUnknownSubscriptionByCustomerAndProduct :one
-SELECT * FROM billing.subscriptions sub
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
-  AND sub.product_id = $2
-  AND sub.status = 'unverified'
-  AND sub.deleted_at IS NULL
-ORDER BY sub.current_period_ends_at DESC NULLS FIRST
-LIMIT 1;
-
--- name: GetUnknownSubscriptionByCustomerAndTierGroup :one
-SELECT sub.* FROM billing.subscriptions sub
-JOIN billing.products prod ON prod.id = sub.product_id
-WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
-  AND sub.status = 'unverified'
   AND prod.tier_group = $2
   AND sub.deleted_at IS NULL
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST

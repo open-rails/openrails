@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -83,39 +82,11 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 				return err
 			}
 		}
-		conflict, err := d.Gen(ctx).GetConflictingInitialEnrollmentSubscription(ctx, gen.GetConflictingInitialEnrollmentSubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
-		if err == nil && (!change || conflict.ID != changed) {
-			if conflict.Status == string(models.StatusCanceled) {
-				return apperr.Conflictf("the customer's canceled subscription for this product or tier group may still bill at its provider until its stop is confirmed; resume it, or retry once the stop completes")
-			}
-			return apperr.Conflictf("customer already has a subscription for this product or tier group")
+		slot := MembershipSlot{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID, At: terms.Terms.AcceptedAt}
+		if change {
+			slot.Changes = &changed
 		}
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if !change {
-			runway, err := d.Gen(ctx).GetPaidRunwaySubscription(ctx, gen.GetPaidRunwaySubscriptionParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID, Now: terms.Terms.AcceptedAt})
-			if err == nil {
-				sub, err := models.SubscriptionFromGen(runway)
-				if err != nil {
-					return err
-				}
-				return subscriptions.PaidRunwayRefusal(sub, terms.Terms.AcceptedAt)
-			}
-			if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-		}
-		if _, err := d.Gen(ctx).GetConflictingSubscribeAttempt(ctx, gen.GetConflictingSubscribeAttemptParams{ProductID: terms.Terms.ProductID, MerchantID: p.MerchantID, CustomerID: customer, OpenAfter: terms.Terms.AcceptedAt.Add(-solana.LateSettlementWindow), ExceptID: uuid.Nil}); err == nil {
-			return apperr.Conflictf("a Solana subscription to this product or tier group awaits its first payment")
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		_, err = d.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: p.MerchantID, CustomerID: customer, ProductID: terms.Terms.ProductID})
-		if err == nil {
-			return apperr.Conflictf("another enrollment of this product or tier group is unresolved")
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
+		if err := slot.Refuse(ctx, d.Gen(ctx)); err != nil {
 			return err
 		}
 		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: terms.Terms.PaymentMethodID})

@@ -205,6 +205,13 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 			if !db.IsNotFound(err) {
 				return err
 			}
+			_, err = d.Gen(ctx).GetConflictingOrderClaim(ctx, gen.GetConflictingOrderClaimParams{MerchantID: mid.UUID(), CustomerID: session.CustomerID, ProductID: product.ID})
+			if err == nil {
+				return fmt.Errorf("%w: an unpaid order of the customer buys this product; pay or cancel it", ErrCheckoutAttemptConflict)
+			}
+			if !db.IsNotFound(err) {
+				return err
+			}
 		}
 		now := s.now().UTC().Truncate(time.Microsecond)
 		terms := acceptedPurchaseTerms{PriceID: price.ID, ProductID: product.ID, PaymentID: uuidutil.NewV7(), ProductKey: product.Key, ProductName: product.DisplayName, Amount: price.Amount, Currency: price.Currency, AccessDurationHours: price.AccessDurationHours, PSPLinks: price.PSPLinks, AcceptedAt: now, EntitlementStart: now}

@@ -295,9 +295,6 @@ func (c *capturingExecutor) Checkout(_ context.Context, req *CheckoutRequest, _ 
 func (c *capturingExecutor) RegisterPurchase(context.Context, *payments.RegisterPurchaseRequest) (*payments.RegisterPurchaseResponse, error) {
 	return nil, nil
 }
-func (c *capturingExecutor) CheckSubscriptionConflict(context.Context, string, *models.Price, *models.Product) (*SubscriptionConflict, error) {
-	return &SubscriptionConflict{}, nil
-}
 
 // The session hands the executor its return URLs, start time and pinned PSP,
 // under a session-derived provider key, and maps the outcome.
