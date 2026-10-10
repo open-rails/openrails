@@ -110,7 +110,7 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	if opts.Capabilities != nil {
 		capabilities = *opts.Capabilities
 	}
-	provisioning := opts.Provisioning && s.Runtime != nil && !s.Runtime.HostContacts
+	provisioning := opts.Provisioning && s.Runtime != nil && !s.Runtime.HostUserInfo
 	capabilities.RouteGroups[string(httproutes.Provisioning)] = provisioning
 	// browserTier tracks the configuration and checkout patterns mounted
 	// below (#765): the ONLY routes on this combined handler that belong to

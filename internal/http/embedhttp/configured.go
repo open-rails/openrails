@@ -81,8 +81,8 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	if err := ValidateRoutes(sel); err != nil {
 		return nil, err
 	}
-	if sel.Provisioning && a.Runtime.HostContacts {
-		return nil, fmt.Errorf("openrails: Routes.Provisioning keeps a pushed copy of your users, and Deps.Contacts reads your directory instead; choose one")
+	if sel.Provisioning && a.Runtime.HostUserInfo {
+		return nil, fmt.Errorf("openrails: Routes.Provisioning keeps a pushed copy of your users, and Deps.UserInfo reads your directory instead; choose one")
 	}
 	perms, _ := RoutePermissions(sel)
 	profiles := CustomerProfiles(sel)

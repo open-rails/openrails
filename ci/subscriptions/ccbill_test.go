@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/helpers/userinfo"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -372,16 +373,16 @@ func (w *world) engineCharges() int {
 }
 
 // CCBill names its buyer by username: the one the host's directory holds for
-// the customer now (Deps.Contacts).
+// the customer now (Deps.UserInfo).
 func TestCCBillUsernameIsTheDirectorys(t *testing.T) {
-	directory := &openrailstest.Contacts{}
+	directory := &openrailstest.UserInfo{}
 	w := prepareWorld(t, 12)
-	w.deps = func(d *openrails.Deps) { d.Contacts = directory }
+	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
 	importCCBill(t, w)
 	buyer, other := w.newCustomer(), w.newCustomer()
 	name := "Buyer" + uuid.NewString()[:8]
-	directory.Put(openrails.Contact{ID: buyer.id, Email: "buyer@example.test", Username: name})
+	directory.Put(userinfo.User{ID: buyer.id, Email: "buyer@example.test", Username: name})
 	failure := func(username string) map[string]string {
 		return map[string]string{"transactionId": ccbillNumericID(), "email": "buyer@example.test", "username": username,
 			"formName": ccbillFormName, "flexId": ccbillFlexID, "subscriptionTypeId": ccbillRBO, "billedCurrencyCode": "840",
@@ -391,7 +392,7 @@ func TestCCBillUsernameIsTheDirectorys(t *testing.T) {
 	require.True(t, buyer.hasNotification("payment_method_failed"), "the directory's username reaches its customer")
 	require.False(t, other.hasNotification("payment_method_failed"))
 
-	directory.Put(openrails.Contact{ID: buyer.id, Email: "buyer@example.test", Username: "Renamed" + uuid.NewString()[:8]})
+	directory.Put(userinfo.User{ID: buyer.id, Email: "buyer@example.test", Username: "Renamed" + uuid.NewString()[:8]})
 	status, body := w.postCCBill("NewSaleFailure", ccbillSourceIP, failure(name))
 	require.NotEqual(t, http.StatusOK, status, "a username no customer holds names nobody: %v", body)
 }

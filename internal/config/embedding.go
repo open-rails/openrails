@@ -25,7 +25,7 @@ type Routes struct {
 	// Provisioning mounts SCIM 2.0 under Prefix's /scim/v2: the merchant's
 	// directory (AuthKit, Okta, Entra ID) pushes its users with a provisioning
 	// token, and the pushed copy is where customers' contacts come from. Off
-	// by default; refused with Deps.Contacts, which reads the directory
+	// by default; refused with Deps.UserInfo, which reads the directory
 	// instead.
 	Provisioning bool
 	// CustomerProfiles mount further customer surfaces: another prefix,

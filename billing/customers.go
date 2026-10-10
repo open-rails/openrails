@@ -26,7 +26,7 @@ type Customer struct {
 
 // CustomerContact is how to reach a customer, as the merchant's directory
 // holds it: read live from the host's directory when OpenRails is embedded
-// beside it (Deps.Contacts), else the copy its SCIM provisioning and verified
+// beside it (Deps.UserInfo), else the copy its SCIM provisioning and verified
 // access tokens keep. Active and SyncedAt describe that copy and are null for
 // a live read.
 type CustomerContact struct {

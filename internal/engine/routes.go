@@ -171,12 +171,12 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 
 // SCIMHandler is the SCIM service provider for mid, rooted at the SCIM root
 // (/Users, /Bulk): a directory in the same process pushes to it, and holding
-// the engine is the authority. An engine reading Deps.Contacts keeps no copy
+// the engine is the authority. An engine reading Deps.UserInfo keeps no copy
 // and refuses.
 func (e *Engine) SCIMHandler(mid billing.MerchantID) (http.Handler, error) {
 	rt := e.App.Runtime
-	if rt.HostContacts {
-		return nil, fmt.Errorf("openrails: Deps.Contacts is the contacts source; there is no copy to provision")
+	if rt.HostUserInfo {
+		return nil, fmt.Errorf("openrails: Deps.UserInfo reads your directory; there is no copy to provision")
 	}
 	if mid.IsZero() {
 		return nil, fmt.Errorf("openrails: SCIMHandler needs the Client's merchant")

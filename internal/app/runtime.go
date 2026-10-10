@@ -126,11 +126,11 @@ type Runtime struct {
 	RouteCapabilities *routesurface.RuntimeCapabilities
 
 	Clock clockwork.Clock
-	// Contacts is who customers are: the host's directory when HostContacts
-	// is set (embedded Deps.Contacts), else the kept copy SCIM and verified
+	// Contacts is who customers are: the host's directory when HostUserInfo
+	// is set (embedded Deps.UserInfo), else the kept copy SCIM and verified
 	// token claims fill.
 	Contacts     identity.Directory
-	HostContacts bool
+	HostUserInfo bool
 	// RiverProducer inserts jobs: the bound fleet, OpenRails' own or the
 	// host's, else the insert-only client New binds in the same schema.
 	RiverProducer  *river.Client[pgx.Tx]

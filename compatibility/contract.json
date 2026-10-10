@@ -180,8 +180,6 @@
       "type Client struct {\n}",
       "type ClientOption func(*Client)",
       "type Config = config.Config",
-      "type Contact = config.Contact",
-      "type Contacts = config.Contacts",
       "type Credential = billingauth.Credential",
       "type CredentialKind = billingauth.CredentialKind",
       "type CredentialPosture = config.CredentialPosture",
@@ -221,6 +219,7 @@
       "type StartOption func(*startOptions)",
       "type StripePSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tSecretKey            string `psp:\"secrets.secret_key,required\"`\n\tWebhookSigningSecret string `psp:\"secrets.webhook_signing_secret,required\"`\n\n\tWebhookSigningSecretThin string `psp:\"secrets.webhook_signing_secret_thin\"`\n\n\tWebhookSigningSecretPrevious string    `psp:\"secrets.webhook_signing_secret_previous\"`\n\tWebhookOverlapExpiresAt      time.Time `psp:\"settings.webhook_overlap_expires_at\"`\n\n\tPublishableKey string `psp:\"settings.publishable_key\"`\n}",
       "type SubjectKind = billingauth.SubjectKind",
+      "type UserInfo = config.UserInfo",
       "type VaultConfig = config.VaultConfig",
       "type requestOptions struct {\n}",
       "type startOptions struct {\n}",
@@ -1066,14 +1065,12 @@
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
       "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
       "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tEncryption *EncryptionConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tSecretBackend string\n\n\tCredentialSnapshotID string\n\n\tCredentialReadOnly bool\n\n\tAlertSecretBackend string\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
-      "type Contact = contacts.Contact",
-      "type Contacts = contacts.Source",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tMerchant string\n\n\tAuth billingauth.Auth\n}",
       "type DBConfig struct {\n\tURL string\n\n\tHost     string\n\tPort     string\n\tDatabase string\n\tUsername string\n\tPassword string\n\n\tSSLMode string\n\n\tSQLTrace bool\n}",
       "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tContacts Contacts\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1095,6 +1092,7 @@
       "type RedisConfig struct {\n\tAddr     string\n\tPassword string\n\tDB       int\n}",
       "type Routes struct {\n\tAuth billingauth.Auth\n\n\tPrefix string\n\n\tPermissions Permissions\n\n\tProvisioning bool\n\n\tCustomerProfiles []CustomerRoutes\n\n\tCookieOrigin string\n\n\tAdminConsole *AdminConsole\n}",
       "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
+      "type UserInfo = userinfo.Lookup",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
     ],
     "internal/nmimock": [
@@ -1102,13 +1100,13 @@
       "type LedgerEntry struct {\n\tTransactionID, OrderID, Vault string\n\tLast4                         string\n\tCents, RefundedCents          int64\n}"
     ],
     "openrailstest": [
-      "func (d *Contacts) Contacts(_ context.Context, ids []string) (map[string]openrails.Contact, error)",
-      "func (d *Contacts) Delete(id string)",
-      "func (d *Contacts) Put(c openrails.Contact)",
-      "func (d *Contacts) SearchContacts(_ context.Context, query string, limit int) ([]openrails.Contact, error)",
+      "func (d *UserInfo) Delete(id string)",
+      "func (d *UserInfo) Get(_ context.Context, ids []string) (map[string]userinfo.User, error)",
+      "func (d *UserInfo) Put(u userinfo.User)",
+      "func (d *UserInfo) Search(_ context.Context, query string, limit int) ([]userinfo.User, error)",
       "func CheckAuth(t testing.TB, a openrails.Auth, c AuthCases)",
       "type AuthCases struct {\n\tPermissions openrails.Permissions\n\n\tCustomer func() *http.Request\n\n\tStaff func() *http.Request\n\n\tHolders map[string]func() *http.Request\n\n\tRefused map[string]func() *http.Request\n\n\tOtherMerchantStaff func() *http.Request\n\n\tStaleStaff func() *http.Request\n\n\tMachine func() *http.Request\n}",
-      "type Contacts struct {\n}"
+      "type UserInfo struct {\n}"
     ],
     "openrailstest/nmimock": [
       "const InsufficientFunds = \"202\"",
@@ -2119,12 +2117,12 @@
     },
     "internal/config/deps.go": {
       "clockwork": "github.com/jonboulle/clockwork",
-      "contacts": "github.com/open-rails/helpers/contacts",
       "context": "context",
       "fs": "io/fs",
       "http": "net/http",
       "net": "net",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
+      "userinfo": "github.com/open-rails/helpers/userinfo",
       "v9": "github.com/redis/go-redis/v9",
       "vaultapi": "github.com/hashicorp/vault/api"
     },
@@ -4573,16 +4571,17 @@
       "testing": "testing",
       "uuid": "github.com/google/uuid"
     },
-    "openrailstest/contacts.go": {
+    "openrailstest/nmimock/nmimock.go": {
+      "nmimock": "github.com/open-rails/openrails/internal/nmimock",
+      "time": "time"
+    },
+    "openrailstest/userinfo.go": {
       "context": "context",
       "openrails": "github.com/open-rails/openrails",
       "sort": "sort",
       "strings": "strings",
-      "sync": "sync"
-    },
-    "openrailstest/nmimock/nmimock.go": {
-      "nmimock": "github.com/open-rails/openrails/internal/nmimock",
-      "time": "time"
+      "sync": "sync",
+      "userinfo": "github.com/open-rails/helpers/userinfo"
     },
     "operations.go": {
       "billing": "github.com/open-rails/openrails/billing",

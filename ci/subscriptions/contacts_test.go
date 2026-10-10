@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/helpers/userinfo"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -49,14 +50,14 @@ func (w *world) mailTo(mail *mailbox, address string) openrails.Email {
 // beside it.
 func TestContactsComeFromTheHostDirectory(t *testing.T) {
 	t.Parallel()
-	directory, mail := &openrailstest.Contacts{}, &mailbox{}
+	directory, mail := &openrailstest.UserInfo{}, &mailbox{}
 	w := prepareWorld(t, 12)
-	w.deps = func(d *openrails.Deps) { d.Contacts, d.Email = directory, mail }
+	w.deps = func(d *openrails.Deps) { d.UserInfo, d.Email = directory, mail }
 	w.start()
 	ctx := t.Context()
 
 	c := w.newCustomer()
-	directory.Put(openrails.Contact{ID: c.id, Email: "member@host.test", Name: "Member One", Username: "member_one"})
+	directory.Put(userinfo.User{ID: c.id, Email: "member@host.test", Name: "Member One", Username: "member_one"})
 	price := w.membership("content:members", 9_990_000)
 	c.subscribe(embedded, "stripe", price.ID.String(), "content:members", c.saveCard("stripe", visa))
 	receipt := w.mailTo(mail, "member@host.test")
@@ -75,13 +76,13 @@ func TestContactsComeFromTheHostDirectory(t *testing.T) {
 	require.Equal(t, c.cid(), found.Items[0].ID)
 
 	// The directory changes; the next read is current.
-	directory.Put(openrails.Contact{ID: c.id, Email: "renamed@host.test", Name: "Member One", Username: "member_one"})
+	directory.Put(userinfo.User{ID: c.id, Email: "renamed@host.test", Name: "Member One", Username: "member_one"})
 	profile, err := w.client[remote].GetCustomer(ctx, c.cid())
 	require.NoError(t, err)
 	require.Equal(t, "renamed@host.test", *profile.Contact.Email)
 
 	_, err = w.rt.Routes(openrails.Routes{Auth: w.auth, Prefix: "/other", Provisioning: true})
-	require.ErrorContains(t, err, "Deps.Contacts", "one source of truth")
+	require.ErrorContains(t, err, "Deps.UserInfo", "one source of truth")
 	_, err = w.rt.SCIMHandler()
 	require.Error(t, err)
 }

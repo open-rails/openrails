@@ -5,7 +5,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/open-rails/helpers/contacts"
+	"github.com/open-rails/helpers/userinfo"
 
 	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/identity"
@@ -79,7 +79,7 @@ type runtimeOverrides struct {
 	Redis           *redis.Client
 	Clock           clockwork.Clock
 	EmailSender     config.EmailSender
-	Contacts        contacts.Source
+	UserInfo        userinfo.Lookup
 	Migrations      fs.FS
 }
 
@@ -234,9 +234,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 	// Who customers are: the host's directory in process, else the kept copy.
 	var directory identity.Directory = identity.Kept{DB: database}
-	hostContacts := overrides != nil && overrides.Contacts != nil
-	if hostContacts {
-		directory = identity.Live{Source: overrides.Contacts}
+	hostUserInfo := overrides != nil && overrides.UserInfo != nil
+	if hostUserInfo {
+		directory = identity.Live{Lookup: overrides.UserInfo}
 	}
 	customers := identity.Customers{Directory: directory}
 	// #1099: idempotency leases renew on their own connections, so a pool
@@ -499,7 +499,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil {
 		runtime.DNSResolver = overrides.DNSResolver
 	}
-	runtime.Contacts, runtime.HostContacts = directory, hostContacts
+	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
 
 	return runtime, nil
 }

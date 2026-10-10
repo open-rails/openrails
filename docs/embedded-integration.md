@@ -102,13 +102,13 @@ explicit:
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
-| `Contacts` | Your directory (`*authkit.Client`, or your own `openrails.Contacts`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
+| `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
 | `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no
 blocked list. A customer is your user's id; its email, username and name come
-from `Deps.Contacts`, or from your directory's SCIM pushes with
+from `Deps.UserInfo`, or from your directory's SCIM pushes with
 `Routes.Provisioning`.
 
 Under `Sandbox` every rail routes to its test environment and live credentials
@@ -519,12 +519,12 @@ Local rail sandboxes: [dev/local-webhooks.md](dev/local-webhooks.md). In your
 end-to-end tests, `openrailstest/nmimock` stands in for NMI on loopback (see
 [NMI sandbox testing](rails/nmi.md#sandbox-testing)).
 
-Customers' emails and names come from `Deps.Contacts`, asked on every read. A
+Customers' emails and names come from `Deps.UserInfo`, asked on every read. A
 host that keeps a pushed copy instead mounts `Routes.Provisioning` and points
 its directory at `{Prefix}/scim/v2` with a provisioning token
 (`client.CreateProvisioningToken`); a directory in the same binary pushes to
-`client.SCIMHandler()` with no token. In tests, `openrailstest.Contacts` is an
-in-memory `openrails.Contacts`. See [customer contacts](customer-contacts.md).
+`client.SCIMHandler()` with no token. In tests, `openrailstest.UserInfo` is an
+in-memory `openrails.UserInfo`. See [customer contacts](customer-contacts.md).
 
 Further reading: [operations.md](operations.md) (operating modes, safety levers,
 dunning, the intents ledger), [billing-policies.md](billing-policies.md)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/helpers/smtp/smtptest"
+	"github.com/open-rails/helpers/userinfo"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -22,19 +23,19 @@ import (
 func TestMembershipReceiptArrivesBySMTP(t *testing.T) {
 	t.Parallel()
 	srv := smtptest.Start(t, smtptest.Options{Username: "apikey", Password: "SG.e2e-key"})
-	directory := &openrailstest.Contacts{}
+	directory := &openrailstest.UserInfo{}
 	w := prepareWorld(t, 12, func(c *openrails.Config) {
 		c.SMTP = &openrails.SMTPConfig{Host: srv.Host, Port: srv.Port, Username: "apikey", Password: "SG.e2e-key",
 			From: openrails.EmailAddress{Name: "Merchant Billing", Address: "noreply@deploy.test"}}
 	})
-	w.deps = func(d *openrails.Deps) { d.Contacts = directory }
+	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.start()
 	ctx := t.Context()
 	const from, to = "billing@merchant.test", "member@host.test"
 	require.NoError(t, w.applySettings(ctx, billing.MerchantSettings{Profile: &billing.MerchantProfile{FromEmail: from}}))
 
 	c := w.newCustomer()
-	directory.Put(openrails.Contact{ID: c.id, Email: to, Name: "Member One", Username: "member_one"})
+	directory.Put(userinfo.User{ID: c.id, Email: to, Name: "Member One", Username: "member_one"})
 	price := w.membership("content:members", 9_990_000)
 	c.subscribe(embedded, "nmi", price.ID.String(), "content:members", c.saveCard("nmi", visa))
 	res, err := w.jobs.Insert(ctx, emailSweep{}, &river.InsertOpts{Queue: openrails.QueueBilling})

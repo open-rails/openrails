@@ -8,30 +8,30 @@ sources:
 
 | Deployment | Source | Copy |
 |---|---|---|
-| Embedded beside your AuthKit | `Deps.Contacts`: an `openrails.Contacts` (`*authkit.Client` is one) asked on every read | none |
+| Embedded beside your AuthKit | `Deps.UserInfo`: an `openrails.UserInfo` (AuthKit's `ak.UserInfo()`) asked on every read | none |
 | Standalone, hosted, or embedded with `Routes.Provisioning` | SCIM 2.0 pushes from your directory, plus verified token claims | what was pushed, and when (`contact.synced_at`) |
 
 Without either, OpenRails sends customers no email; in-app notices and host
-events still arrive. `Deps.Contacts` and `Routes.Provisioning` are exclusive:
+events still arrive. `Deps.UserInfo` and `Routes.Provisioning` are exclusive:
 mounting both fails.
 
 ## In process
 
 ```go
-bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db, Contacts: ak})
+bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: db, UserInfo: ak.UserInfo()})
 ```
 
-Implement `openrails.Contacts` yourself over your own user table if you do not
-use AuthKit: `Contacts(ctx, ids)` returns the users it holds, keyed by id;
-`SearchContacts(ctx, query, limit)` matches email, username or name, ignoring
-case. `contactstest.Check` (helpers) checks an implementation.
+Implement `openrails.UserInfo` yourself over your own user table if you do not
+use AuthKit: `Get(ctx, ids)` returns the users it holds, keyed by id;
+`Search(ctx, query, limit)` matches email, username or name, ignoring case.
+`userinfotest.Check` (helpers) checks an implementation.
 
 ## SCIM provisioning
 
 OpenRails is a SCIM 2.0 service provider (RFC 7643, RFC 7644). Provisioning
 routes live under `{Prefix}/scim/v2`; the standalone server and hosted
 deployments always mount them. Embedded, they are off by default because
-`Deps.Contacts` asks your AuthKit directly; turn them on
+`Deps.UserInfo` asks your AuthKit directly; turn them on
 (`Routes.Provisioning: true`) only to keep a pushed copy instead (one or the
 other: `Mount` refuses both). Point AuthKit's provisioning, Okta or Entra ID at
 them.

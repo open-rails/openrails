@@ -43,7 +43,8 @@ Before the code:
 | A hand-written `ALTER … OWNER` pass after migrating a shared schema | The role of the pool `New` runs with owns every object; for another owner, have that pool's connections `SET ROLE` to it |
 | `CustomerRoutesConfig{Authenticate: fn}` per profile | An `openrails.CustomerRoutes` entry in `Routes.CustomerProfiles` with its own `Auth` |
 | `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Auth` (`Required`, `RequirePermission`, `Sensitive`, `Identity`), is given at `Mount`; a group that needs it fails the mount without it |
-| `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `Deps.Contacts` (your AuthKit) answers each customer's email, username and name when OpenRails needs them; a standalone server keeps what your directory pushes over SCIM. Your auth decides who may sign in |
+| `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `Deps.UserInfo` (your AuthKit) answers each customer's email, username and name when OpenRails needs them; a standalone server keeps what your directory pushes over SCIM. Your auth decides who may sign in |
+| `Deps.Contacts: ak`, `openrails.Contacts`, `openrails.Contact`, `openrailstest.Contacts` | `Deps.UserInfo: ak.UserInfo()` (AuthKit v1.14.0), `openrails.UserInfo` (helpers' `userinfo.Lookup`: `Get`, `Search`), `userinfo.User`, `openrailstest.UserInfo` |
 | `openrails.Identity` (`Kind`, `SubjectID`, `CustomerID`, `CredentialClass`, `Permissions`), `PrincipalKind`, `CredentialClass`, `Requirement`, `Authority`, `Target`, `Scope`, `DelegatedPrincipal`, `GateError`, `RequestAuthenticator`, `ErrForbidden` | `openrails.Identity`: `Subject` and `SubjectKind`, `Invoker`, `Credential`, from `Auth.Identity` |
 | `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
@@ -147,7 +148,7 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 
 | Before | After |
 |---|---|
-| `client.EnsureCustomers`, `billing.EnsureCustomerParams` (`Email`, `Username`, `Blocked`), `POST /customers/ensure` | Nothing to declare: a customer is your user's id, created by its first use; `client.UpdateCustomer` creates one OpenRails has not seen. Emails and names come from `Deps.Contacts` or SCIM ([customer contacts](customer-contacts.md)) |
+| `client.EnsureCustomers`, `billing.EnsureCustomerParams` (`Email`, `Username`, `Blocked`), `POST /customers/ensure` | Nothing to declare: a customer is your user's id, created by its first use; `client.UpdateCustomer` creates one OpenRails has not seen. Emails and names come from `Deps.UserInfo` or SCIM ([customer contacts](customer-contacts.md)) |
 | `Customer.Email`, `Username`, `Blocked` | `Customer.Contact` (`Email`, `Name`, `Username`, `Active`, `SyncedAt`), null when the directory holds none |
 | `CustomerListParams.Query` (`?q=`) | `Search` (`?search=`): email, username, name, or the customer's id |
 | `DeclaredCustomer.Email` in a billing import | Removed: the directory supplies emails |
@@ -459,8 +460,8 @@ up there.
 | `provider_billing_qualifications`, `provider_billing_observations` | `billing.cost_qualifications`, `billing.cost_observations` |
 | `checkout_sessions` (engine), `hosted_checkout_sessions` | `billing.checkout_attempts`, `billing.checkout_sessions` |
 | `psps.evidence` (jsonb), `psps.replaced_at` | Columns on `billing.psps`: `settings`, `signer`, `credential_refs`, `revision`, `archived_at`; `key` is NOT NULL |
-| `subscriptions.user_email`; `cancelled_at`; status `cancelled` | The directory (`Deps.Contacts`) or `customer_contacts.email`; `canceled_at`; `canceled` |
-| `customers.email`, `customers.username`, `customers.blocked` | `billing.customer_contacts` (`email`, `user_name`, `display_name`, `active`), the copy SCIM and token claims keep when OpenRails is not embedded beside the directory; none with `Deps.Contacts` |
+| `subscriptions.user_email`; `cancelled_at`; status `cancelled` | The directory (`Deps.UserInfo`) or `customer_contacts.email`; `canceled_at`; `canceled` |
+| `customers.email`, `customers.username`, `customers.blocked` | `billing.customer_contacts` (`email`, `user_name`, `display_name`, `active`), the copy SCIM and token claims keep when OpenRails is not embedded beside the directory; none with `Deps.UserInfo` |
 | `payment_methods.is_default`, `initial_transaction_id`, `last_four`, `card_type`, `expiry_date` | `card_brand`, `card_last4`, `card_exp_month`, `card_exp_year`; `psp_id` is NULL for a card a custodian holds |
 | Unique payments and subscriptions by `(merchant_id, rail, psp_id, …)` | By `(merchant_id, psp_id, …)`; an `ON CONFLICT` naming the old columns no longer matches |
 | Postgres enums `payment_status`, `subscription_status` | `text` with a CHECK |

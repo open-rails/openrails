@@ -163,8 +163,8 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
 	// of its own: your auth guards its routes when you mount them.
 	return openrails.New(ctx, cfg, openrails.Deps{
-		Postgres: db, // the same pool your app uses
-		Contacts: ak, // AuthKit answers each lookup with the user's current email and name
+		Postgres: db,            // the same pool your app uses
+		UserInfo: ak.UserInfo(), // AuthKit's user lookup: each answer is the user's current email, name and username
 	})
 }
 ```
@@ -236,12 +236,12 @@ it to `New`:
 ```go
 bill, err := openrails.New(ctx, cfg, openrails.Deps{
 	Postgres: db,
-	Contacts: ak, // AuthKit answers each lookup with the user's current email and name
+	UserInfo: ak.UserInfo(), // AuthKit's user lookup: each answer is the user's current email, name and username
 })
 ```
 
-Without AuthKit, implement `openrails.Contacts` (`Contacts` by ids and
-`SearchContacts` by text) over your own user table. Leave it out and OpenRails
+Without AuthKit, implement `openrails.UserInfo` (`Get` by ids and `Search` by
+text) over your own user table. Leave it out and OpenRails
 sends your customers no email; in-app notices and host events still arrive.
 
 A standalone or hosted OpenRails cannot reach into your process, so it keeps a
@@ -251,7 +251,7 @@ provisioning token. AuthKit sends its changes every 5 minutes and reconciles
 daily, so the copy stays current, and deleting a user erases it. Each customer
 request also brings the user's current email and name in its access token, so
 someone who signs up and buys at once is known before the next push. (Embedded,
-you can choose that pushed copy instead of `Contacts` with
+you can choose that pushed copy instead of `UserInfo` with
 `Routes.Provisioning: true`.)
 
 #### Using your own auth
@@ -711,7 +711,7 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/scim/v2/ServiceProviderConfig`, `/ResourceTypes`, `/Schemas` | same | what OpenRails accepts, including the batch limits |
 
 Provisioning routes live under `{Prefix}/scim/v2`. Embedded, they are off by
-default because `Deps.Contacts` asks your AuthKit directly; turn them on only to
+default because `Deps.UserInfo` asks your AuthKit directly; turn them on only to
 keep a pushed copy instead (one or the other: `Mount` refuses both). See
 [customer contacts](docs/customer-contacts.md).
 
@@ -721,7 +721,7 @@ What you will set next:
 
 | To | Set |
 |---|---|
-| Send billing email (receipts, failed-payment notices) | `Config.SMTP` (`Host`, `Port`, `Username`, `Password`, `From`: any SMTP server) or your own `Deps.Email`, plus where addresses come from: `Deps.Contacts` (embedded) or SCIM provisioning (standalone) |
+| Send billing email (receipts, failed-payment notices) | `Config.SMTP` (`Host`, `Port`, `Username`, `Password`, `From`: any SMTP server) or your own `Deps.Email`, plus where addresses come from: `Deps.UserInfo` (embedded) or SCIM provisioning (standalone) |
 | Publish the admin routes | `Routes.Permissions`: your permissions for admin reads, admin writes, catalog edits and merchant config |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |

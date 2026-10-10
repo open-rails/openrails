@@ -1,5 +1,5 @@
 // Package identity is who a merchant's customers are: their contacts, read
-// from the host's directory in process (Deps.Contacts), else from the copy
+// from the host's directory in process (Deps.UserInfo), else from the copy
 // OpenRails keeps of what the merchant's directory pushed over SCIM and
 // verified access tokens claimed. Which one is decided at construction.
 package identity
@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/helpers/contacts"
+	"github.com/open-rails/helpers/userinfo"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
@@ -41,7 +41,7 @@ type Directory interface {
 
 // Live asks the host's directory on every read. It serves every merchant of
 // the engine: an embedded host's directory is its merchant's.
-type Live struct{ Source contacts.Source }
+type Live struct{ Lookup userinfo.Lookup }
 
 // liveBatch bounds one lookup the host answers.
 const liveBatch = 500
@@ -54,12 +54,12 @@ func (l Live) Contacts(ctx context.Context, _ billing.MerchantID, ids []uuid.UUI
 		for i, id := range chunk {
 			asked[i] = id.String()
 		}
-		found, err := l.Source.Contacts(ctx, asked)
+		found, err := l.Lookup.Get(ctx, asked)
 		if err != nil {
 			return nil, err
 		}
-		for _, c := range found {
-			if contact, ok := liveContact(c); ok {
+		for _, u := range found {
+			if contact, ok := liveContact(u); ok {
 				out[contact.CustomerID] = contact
 			}
 		}
@@ -72,27 +72,27 @@ func (l Live) Search(ctx context.Context, _ billing.MerchantID, query string, li
 	if query == "" || limit < 1 {
 		return nil, nil
 	}
-	found, err := l.Source.SearchContacts(ctx, query, limit)
+	found, err := l.Lookup.Search(ctx, query, limit)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]Contact, 0, len(found))
-	for _, c := range found {
-		if contact, ok := liveContact(c); ok {
+	for _, u := range found {
+		if contact, ok := liveContact(u); ok {
 			out = append(out, contact)
 		}
 	}
 	return out, nil
 }
 
-// liveContact is a directory contact whose id is a customer id: the host's
+// liveContact is a directory user whose id is a customer id: the host's
 // subject UUID.
-func liveContact(c contacts.Contact) (Contact, bool) {
-	id, err := uuid.Parse(strings.TrimSpace(c.ID))
+func liveContact(u userinfo.User) (Contact, bool) {
+	id, err := uuid.Parse(strings.TrimSpace(u.ID))
 	if err != nil {
 		return Contact{}, false
 	}
-	return Contact{CustomerID: id, Email: strings.TrimSpace(c.Email), Name: strings.TrimSpace(c.Name), Username: strings.TrimSpace(c.Username)}, true
+	return Contact{CustomerID: id, Email: strings.TrimSpace(u.Email), Name: strings.TrimSpace(u.Name), Username: strings.TrimSpace(u.Username)}, true
 }
 
 // Kept reads billing.customer_contacts.

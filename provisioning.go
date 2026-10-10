@@ -46,8 +46,8 @@ func (c *Client) DeleteProvisioningToken(ctx context.Context, id billing.Provisi
 // a directory in the same process (AuthKit's provisioning) to push its users
 // to without a network hop. Its paths are relative to the SCIM root (/Users,
 // /Bulk, /ServiceProviderConfig); it authenticates nothing, since holding the
-// Client is the authority. It fails on a remote Client and on an engine whose
-// Deps.Contacts is the contacts source.
+// Client is the authority. It fails on a remote Client and on an engine that
+// reads Deps.UserInfo.
 func (c *Client) SCIMHandler() (http.Handler, error) {
 	e, err := c.embedded()
 	if err != nil {

@@ -72,8 +72,8 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
 	// of its own: your auth guards its routes when you mount them.
 	return openrails.New(ctx, cfg, openrails.Deps{
-		Postgres: db, // the same pool your app uses
-		Contacts: ak, // AuthKit answers each lookup with the user's current email and name
+		Postgres: db,            // the same pool your app uses
+		UserInfo: ak.UserInfo(), // AuthKit's user lookup: each answer is the user's current email, name and username
 	})
 }
 

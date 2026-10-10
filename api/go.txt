@@ -240,8 +240,6 @@ pkg openrails, type Config struct, TestMode config.CredentialPosture
 pkg openrails, type Config struct, TrustedProxies []string
 pkg openrails, type Config struct, Vault *config.VaultConfig
 pkg openrails, type Config struct, WebhookSecretOverlap string
-pkg openrails, type Contact = config.Contact
-pkg openrails, type Contacts = config.Contacts
 pkg openrails, type Credential = billingauth.Credential
 pkg openrails, type CredentialKind = billingauth.CredentialKind
 pkg openrails, type CredentialPosture = config.CredentialPosture
@@ -279,13 +277,13 @@ pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, ConsoleAssets fs.FS
-pkg openrails, type Deps struct, Contacts config.Contacts
 pkg openrails, type Deps struct, DNSResolver *net.Resolver
 pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
 pkg openrails, type Deps struct, Redis *redis.Client
 pkg openrails, type Deps struct, StripeTransport http.RoundTripper
+pkg openrails, type Deps struct, UserInfo config.UserInfo
 pkg openrails, type Deps struct, Vault *api.Client
 pkg openrails, type Email = config.Email
 pkg openrails, type Email struct
@@ -434,6 +432,7 @@ pkg openrails, type StripePSP struct, WebhookSigningSecret string `psp:"secrets.
 pkg openrails, type StripePSP struct, WebhookSigningSecretPrevious string `psp:"secrets.webhook_signing_secret_previous"`
 pkg openrails, type StripePSP struct, WebhookSigningSecretThin string `psp:"secrets.webhook_signing_secret_thin"`
 pkg openrails, type SubjectKind = billingauth.SubjectKind
+pkg openrails, type UserInfo = config.UserInfo
 pkg openrails, type VaultConfig = config.VaultConfig
 pkg openrails, type VaultConfig struct
 pkg openrails, type VaultConfig struct, Address string
@@ -3366,10 +3365,10 @@ pkg openrails/catalog, type TieredPrice struct
 pkg openrails/catalog, type TieredPrice struct, Mode TierMode `json:"mode,omitempty"`
 pkg openrails/catalog, type TieredPrice struct, Tiers []RateTier `json:"tiers,omitempty"`
 pkg openrails/openrailstest, func CheckAuth(testing.TB, openrails.Auth, AuthCases)
-pkg openrails/openrailstest, method (*Contacts) Contacts(context.Context, []string) (map[string]openrails.Contact, error)
-pkg openrails/openrailstest, method (*Contacts) Delete(string)
-pkg openrails/openrailstest, method (*Contacts) Put(openrails.Contact)
-pkg openrails/openrailstest, method (*Contacts) SearchContacts(context.Context, string, int) ([]openrails.Contact, error)
+pkg openrails/openrailstest, method (*UserInfo) Delete(string)
+pkg openrails/openrailstest, method (*UserInfo) Get(context.Context, []string) (map[string]userinfo.User, error)
+pkg openrails/openrailstest, method (*UserInfo) Put(userinfo.User)
+pkg openrails/openrailstest, method (*UserInfo) Search(context.Context, string, int) ([]userinfo.User, error)
 pkg openrails/openrailstest, type AuthCases struct
 pkg openrails/openrailstest, type AuthCases struct, Customer func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, Holders map[string]func() *http.Request
@@ -3379,7 +3378,7 @@ pkg openrails/openrailstest, type AuthCases struct, Permissions openrails.Permis
 pkg openrails/openrailstest, type AuthCases struct, Refused map[string]func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, Staff func() *http.Request
 pkg openrails/openrailstest, type AuthCases struct, StaleStaff func() *http.Request
-pkg openrails/openrailstest, type Contacts struct
+pkg openrails/openrailstest, type UserInfo struct
 pkg openrails/openrailstest/nmimock, const InsufficientFunds untyped string = "202"
 pkg openrails/openrailstest/nmimock, func New(Options) *Mock
 pkg openrails/openrailstest/nmimock, method (*Mock) Charged(string, string) int64

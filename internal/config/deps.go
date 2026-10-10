@@ -9,7 +9,7 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/helpers/contacts"
+	"github.com/open-rails/helpers/userinfo"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -36,12 +36,12 @@ type Deps struct {
 	// Config.SMTP.
 	Email EmailSender
 
-	// Contacts is the host's directory (helpers/contacts.Source, which
-	// *authkit.Client implements): who each customer is, asked whenever
-	// OpenRails emails a customer or shows one, and never copied. Nil keeps
-	// the copy Routes.Provisioning's SCIM pushes fill instead; without either,
+	// UserInfo is the host's directory (helpers/userinfo.Lookup, AuthKit's
+	// Client.UserInfo()): who each customer is, asked whenever OpenRails emails
+	// a customer or shows one, and never copied. Nil keeps the copy
+	// Routes.Provisioning's SCIM pushes fill instead; without either,
 	// customers get no email.
-	Contacts Contacts
+	UserInfo UserInfo
 
 	// Test seams, refused with Config.TestMode live. StripeTransport and
 	// NMITransport replace the provider wires; DNSResolver answers api_host
@@ -52,12 +52,9 @@ type Deps struct {
 	Clock           clockwork.Clock
 }
 
-// Contacts is helpers/contacts' Source: the host's directory, read in
+// UserInfo is helpers/userinfo's Lookup: the host's directory, read in
 // process.
-type Contacts = contacts.Source
-
-// Contact is how to reach a person, as Contacts answers it.
-type Contact = contacts.Contact
+type UserInfo = userinfo.Lookup
 
 // EmailSender delivers rendered email and reports whether it can.
 type EmailSender interface {

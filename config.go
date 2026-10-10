@@ -93,12 +93,10 @@ type (
 	// EmailAddress is a mailbox and its display name.
 	EmailAddress = config.EmailAddress
 
-	// Contacts is Deps.Contacts: helpers/contacts' Source, the host's
-	// directory read in process, which *authkit.Client implements. Email
-	// notices, the admin customer read, lists and search ask it.
-	Contacts = config.Contacts
-	// Contact is how to reach a person, as Contacts answers it.
-	Contact = config.Contact
+	// UserInfo is Deps.UserInfo: helpers/userinfo's Lookup, the host's
+	// directory read in process (AuthKit's Client.UserInfo()). Email notices,
+	// the admin customer read, lists and search ask it.
+	UserInfo = config.UserInfo
 
 	// Auth is Routes.Auth: helpers/auth's Auth, the host's auth as net/http
 	// middleware (Required, RequirePermission, Sensitive and Identity), which
