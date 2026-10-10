@@ -267,13 +267,11 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 			return nil
 		}
 		if runID == nil {
-			run, err := q.CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
-				MerchantID: scope.Merchant.UUID(), Mode: "enforce", Rails: []string{"self"},
-			})
+			run, err := (&reconcile.PGStore{DB: e.DB}).CreateRun(ctx, reconcile.ModeEnforce, []reconcile.Provider{"self"}, nil, nil)
 			if err != nil {
 				return fmt.Errorf("converge: create run: %w", err)
 			}
-			runID = &run.ID
+			runID = &run
 			res.RunID = runID
 		}
 		for i := range findings {

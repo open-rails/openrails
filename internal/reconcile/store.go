@@ -154,7 +154,13 @@ func nestedEvidence(evidence map[string]any, key string) map[string]any {
 	return nested
 }
 
+// CreateRun starts a run. A started create is bookkeeping a canceled pass
+// must not interrupt, as FinishRun is: an abandoned insert can still commit,
+// leaving a running run nothing finishes, which the merchant archive refuses.
 func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider, since, until *time.Time) (uuid.UUID, error) {
+	if err := ctx.Err(); err != nil {
+		return uuid.Nil, err
+	}
 	names := make([]string, 0, len(providers))
 	for _, p := range providers {
 		names = append(names, string(p))
@@ -163,6 +169,8 @@ func (s *PGStore) CreateRun(ctx context.Context, mode Mode, providers []Provider
 	if err != nil {
 		return uuid.Nil, err
 	}
+	ctx, cancel := db.DetachedWriteContext(ctx, 5*time.Second)
+	defer cancel()
 	row, err := s.DB.Gen(ctx).CreateReconciliationRun(ctx, gen.CreateReconciliationRunParams{
 		MerchantID:     tid.UUID(),
 		Mode:           string(mode),
