@@ -1,9 +1,9 @@
-// Package nmimock is a fake NMI gateway for a host's end-to-end tests. It
-// serves the NMI APIs OpenRails calls on a loopback listener, keeps what it
-// was charged, and declines on demand, so a test drives a real OpenRails
-// through card saves, sales, renewals and dunning without NMI.
+// Package nmimock is a fake NMI gateway for a host's end-to-end tests: it
+// serves the NMI APIs OpenRails calls on a loopback listener, records what it
+// was charged and declines on demand. It accepts any credentials and sends no
+// webhooks. Only test code may import it.
 //
-// Point a sandbox engine at it:
+// Point a sandbox engine at it, sharing one clock so a renewal is a clock step:
 //
 //	gateway := nmimock.New(nmimock.Options{Clock: clock.Now})
 //	defer gateway.Close()
@@ -16,15 +16,8 @@
 //		}},
 //	}, openrails.Deps{Postgres: pool, Clock: clock})
 //
-// Tokenize stands in for Collect.js: its token is the payment_token a
-// customer saves or pays with. Share one clock between the gateway and
-// Deps.Clock, so a renewal is a clock step. SetDecline(card.Last4,
-// InsufficientFunds) makes the next charge of that stored card decline, which
-// sends a renewal into dunning. Ledger, Charged, LastSale and LastDecline read
-// what the gateway saw; Unexpected lists requests it does not model.
-//
-// The gateway accepts any credentials and sends no webhooks. Only test code
-// may import it.
+// Tokenize stands in for Collect.js; SetDecline(card.Last4, InsufficientFunds)
+// makes that stored card's next charge decline, sending a renewal into dunning.
 package nmimock
 
 import (

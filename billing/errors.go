@@ -26,16 +26,14 @@ var (
 	// equivalent: a service error the handlers would have mapped to 500).
 	ErrInternal = errors.New("openrails: internal error")
 
-	// ErrInsufficientCredits is the payer-balance deny (HTTP 402 /
-	// "insufficient_credits"). Message kept identical to go-client's sentinel.
+	// ErrInsufficientCredits is the customer-balance refusal (HTTP 402
+	// "insufficient_credits").
 	ErrInsufficientCredits = errors.New("insufficient_credits")
 
-	// ErrIdempotencyKeyReused is the money-write refusal (HTTP 422 /
-	// "idempotency_key_reused"): the key already committed and THIS retry
-	// carries different charging terms (or#891). A caller bug, not an engine
-	// fault — retrying it unchanged will refuse again. The engine-side twin is
-	// internal/service.ErrIdempotencyKeyReused; the StatusError's Message carries the
-	// detail (which field, committed vs retried).
+	// ErrIdempotencyKeyReused is the money-write refusal (HTTP 422
+	// "idempotency_key_reused"): the key already committed with different
+	// charging terms. A caller bug: retrying it unchanged refuses again. The
+	// StatusError's Message says which field differs.
 	ErrIdempotencyKeyReused = errors.New("idempotency_key_reused")
 )
 

@@ -37,7 +37,7 @@ const (
 	// HostEventProductEntitlementsChanged is a product gaining or losing keys:
 	// every holder's access changed with it.
 	HostEventProductEntitlementsChanged HostEventType = "product.entitlements_changed"
-	// Order transitions (#1168): fulfil on order.paid.
+	// Order transitions: fulfil on order.paid.
 	HostEventOrderPaid           HostEventType = "order.paid"
 	HostEventOrderRequiresAction HostEventType = "order.requires_action"
 	HostEventOrderPaymentFailed  HostEventType = "order.payment_failed"
@@ -94,7 +94,7 @@ type DelinquencyHostEvent struct {
 }
 
 // HostEvent has exactly one payload, selected by Type. Acknowledgment is a
-// durable consumer action; it never changes a payer or merchant notification.
+// durable consumer action; it never changes a customer or merchant notification.
 type HostEvent struct {
 	ID             HostEventID           `json:"id"`
 	MerchantID     MerchantID            `json:"merchant_id"`

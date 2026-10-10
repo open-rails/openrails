@@ -3,9 +3,8 @@ package billing
 import "time"
 
 // CheckoutOption is one way checkout can sell a price now: the PSP is armed
-// and its rail can make this kind of sale (#1078). Driver and PublicConfig are
-// what a browser needs to render it; an empty Driver means no browser flow can
-// execute the option.
+// and its rail can make this kind of sale. Driver and PublicConfig are what a
+// browser needs to render it; an empty Driver means no browser flow can run it.
 type CheckoutOption struct {
 	// PSP is the PSP's key: the value a checkout attempt's payment.psp names.
 	PSP   string `json:"psp"`
@@ -46,14 +45,12 @@ type CheckoutCustomerIdentity struct {
 	ClientIP string `json:"client_ip"`
 }
 
-// CreateCheckoutAttemptParams charges one price for a merchant-owned
-// customer now, relaying that customer's pay action: a recurring price is
-// enrolled and charged in this call. The server derives one-off versus
-// recurring from the price. Retries with the same IdempotencyKey never charge
-// twice. Merchant credentials authorize the host; they do not prove customer
-// interaction, so never call this unattended to establish a stored-card
-// agreement. To hand a purchase to the customer instead, create a checkout
-// session.
+// CreateCheckoutAttemptParams charges one price for a merchant-owned customer
+// now, relaying that customer's pay action; a recurring price is enrolled and
+// charged in this call. Retries with the same IdempotencyKey never charge
+// twice. Merchant credentials do not prove customer interaction: never call
+// this unattended to establish a stored-card agreement. To hand a purchase to
+// the customer instead, create a checkout session.
 type CreateCheckoutAttemptParams struct {
 	Customer CheckoutCustomerIdentity `json:"customer"`
 	// Supply PriceID or the pair ProductKey + PriceKey. Keys are always opaque, even

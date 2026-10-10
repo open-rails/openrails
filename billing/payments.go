@@ -16,8 +16,8 @@ const (
 
 // PaymentStatus is where a payment stands. A charge with refunds against it
 // reads refunded or partially_refunded. A charge never fails: a decline is a
-// PaymentAttempt. A refund the PSP refused is failed, as are decline records
-// kept from before declines were attempts.
+// PaymentAttempt. A refund the PSP refused is failed, as is an older decline
+// record.
 type PaymentStatus string
 
 const (

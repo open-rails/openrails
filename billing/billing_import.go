@@ -102,7 +102,7 @@ type DunningEvidence struct {
 }
 
 // DeclaredTransaction is one charge-level fact, successes and declines alike.
-// Amount is in the currency's native units (micros for fiat), and must be a
+// Amount is in the currency's native units (micros for USD), and must be a
 // whole number of the provider's minor unit.
 type DeclaredTransaction struct {
 	RailSubscriptionID string    `json:"rail_subscription_id"`

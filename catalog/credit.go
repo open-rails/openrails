@@ -16,9 +16,9 @@ type CreditGrantSpec struct {
 	ExpiresAfterDays *int   `json:"expires_after_days,omitempty"`
 }
 
-// CustomerAmount is an immutable, inclusive range of currency micros that a
-// customer may choose for a one-off credit deposit. The price's UnitAmount is
-// zero; checkout requires an explicit amount within this range.
+// CustomerAmount is an immutable, inclusive range, in native units of the
+// price's currency, that a customer may choose for a one-off credit deposit.
+// The price's UnitAmount is zero; checkout requires an amount within it.
 type CustomerAmount struct {
 	MinAmount int64 `json:"min_amount,string"`
 	MaxAmount int64 `json:"max_amount,string"`

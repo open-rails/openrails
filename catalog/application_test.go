@@ -253,8 +253,7 @@ func TestApplicationRejectsDuplicateKeys(t *testing.T) {
 	}
 }
 
-// The list form with key: fields was replaced by maps keyed by key; it fails
-// with an error naming the new shape.
+// A list form with key: fields fails with an error naming the map shape.
 func TestApplicationRejectsListForm(t *testing.T) {
 	for name, raw := range map[string]string{
 		"products": "schema_version: 1\nproducts:\n  - key: a\n    display_name: A\n",

@@ -61,7 +61,7 @@ type SolanaPaymentToken struct {
 type PSPPaymentConfig struct {
 	// PSPID is the public stable account selector used by saved-method setup.
 	PSPID PSPID `json:"psp_id"`
-	// Key is the checkout payment.rail selector.
+	// Key is the PSP's key, the checkout payment.psp selector.
 	Key string `json:"key"`
 	// Rail is the gateway kind: nmi, ccbill, stripe or solana.
 	Rail string `json:"rail"`

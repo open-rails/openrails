@@ -7,7 +7,7 @@ import (
 	"unicode/utf8"
 )
 
-// MaxEntitlementKeyBytes bounds an opaque entitlement key in current APIs.
+// MaxEntitlementKeyBytes bounds one opaque entitlement key.
 const MaxEntitlementKeyBytes = 256
 
 // MaxProductEntitlements bounds the keys one product grants, so one bundle
@@ -15,8 +15,8 @@ const MaxEntitlementKeyBytes = 256
 const MaxProductEntitlements = 10000
 
 // NormalizeEntitlements validates opaque entitlement names and sorts a copy.
-// Names retain their exact spelling. Nil remains nil; an empty list remains an
-// explicit empty list, so accepted snapshots can distinguish missing benefits.
+// Names retain their exact spelling. Nil stays nil and an empty list stays an
+// explicit empty list, so callers can tell an omitted list from none.
 func NormalizeEntitlements(entitlements []string) ([]string, error) {
 	seen := make(map[string]struct{}, len(entitlements))
 	for _, name := range entitlements {

@@ -9,7 +9,7 @@ import (
 
 // Provider obligations reserve customer capacity for one provider operation and
 // settle it from immutable provider observations. Amounts are native units of
-// the authorization's currency, USD for now. Callers never supply a rated
+// the authorization's currency (only USD). Callers never supply a rated
 // customer amount: OpenRails qualifies the evidence, rates it, and posts the
 // one final settlement.
 
@@ -49,9 +49,9 @@ const (
 
 // OpenProviderOperationParams is exact host-authored authority for one
 // provider operation, reserving Amount of the customer's capacity in
-// Currency (USD is the only currency accepted for now). OperationID is also
-// the provider operation's idempotency identity. OpenRails verifies the
-// digest but never parses AuthorizationBody.
+// Currency (only USD is accepted). OperationID is also the provider
+// operation's idempotency identity. OpenRails verifies the digest but never
+// parses AuthorizationBody.
 //
 // OverdraftAmount lets a prepaid customer's capacity reach below zero: the hold
 // is granted while balance - holds - owed - Amount >= -OverdraftAmount. Spend past

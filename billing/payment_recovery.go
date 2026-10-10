@@ -4,7 +4,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// PaymentRecovery describes a payer-owned resource's current recovery state.
+// PaymentRecovery describes a customer-owned resource's current recovery state.
 // It is a view, not permission to charge: acceptance checks the same facts
 // again under the resource lock.
 type PaymentRecovery struct {

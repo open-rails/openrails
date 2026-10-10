@@ -57,7 +57,7 @@ const (
 )
 
 // RatePrice is a charge model: Model names the one block that is set.
-// Amounts are micros of Currency.
+// Amounts are native units of Currency.
 type RatePrice struct {
 	Model    Model  `json:"model"`
 	Currency string `json:"currency,omitempty"`

@@ -40,8 +40,8 @@ const (
 
 // ScheduledChange is the one change waiting for a subscription's renewal: a
 // price, a seat count, or both. It applies at the first renewal on or after
-// EffectiveAt and charges nothing before then. DELETE
-// /v1/admin/subscriptions/{id}/scheduled-change removes it.
+// EffectiveAt and charges nothing before then. A change back to the
+// subscription's current price and seats removes it.
 type ScheduledChange struct {
 	// PriceID is the price billed from then on; a seat change keeps the
 	// subscription's.

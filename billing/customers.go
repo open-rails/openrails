@@ -6,11 +6,9 @@ import (
 
 // Customer is one merchant-scoped billing record. Its ID is the host's stable
 // subject UUID; the same UUID under another merchant is a different customer.
-// Contact is who the customer is, from the merchant's directory; null when the
-// directory holds no contact for it. The rest summarizes its billing: its
-// settings, and per currency its balance and the card that pays its invoices.
-// Every growing list (subscriptions, payments, cards, entitlements, product
-// access) is its own paginated route.
+// Contact comes from the merchant's directory, null when it holds none. Each
+// growing list (subscriptions, payments, cards, entitlements, product access)
+// is its own paginated route.
 type Customer struct {
 	ID         CustomerID       `json:"id"`
 	Contact    *CustomerContact `json:"contact"`

@@ -3,7 +3,7 @@ package billing
 // Refusals for member actions on provider-owned (legacy NMI-billed)
 // subscriptions. Each is a 409 and changes nothing locally or at the provider.
 const (
-	// CodeProviderCancelHeld: cancelling would delete the provider's billing
+	// CodeProviderCancelHeld: canceling would delete the provider's billing
 	// schedule, and destructive provider actions are not armed for this
 	// merchant. Nothing changed; an operator finding records the request.
 	CodeProviderCancelHeld = "provider_cancel_held"

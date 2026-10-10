@@ -100,8 +100,8 @@ func TestExportedIdentifiersAreDocumented(t *testing.T) {
 	}
 }
 
-// TestConfigIsPlainData keeps the ruling that Config is data: anything that
-// reaches outside the process, or is code, belongs in Deps.
+// TestConfigIsPlainData keeps Config data: anything that reaches outside the
+// process, or is code, belongs in Deps.
 func TestConfigIsPlainData(t *testing.T) {
 	seen := map[reflect.Type]bool{}
 	var walk func(path string, typ reflect.Type)

@@ -1,14 +1,14 @@
 package billing
 
-// CheckoutRoutingRule is one processor-preference rule (or#288). Rules are
-// evaluated in declaration order and the FIRST whose Match accepts the routing
-// inputs wins — no scoring, no second pass. Prefer is that rule's ranked
-// candidate list AND its whitelist: a PSP the winning rule does not name is not
-// eligible, so a rule can constrain a product to one rail.
+// CheckoutRoutingRule is one processor-preference rule. Rules are evaluated in
+// declaration order and the first whose Match accepts the routing inputs wins.
+// Prefer is that rule's ranked candidate list and its whitelist: a PSP the
+// winning rule does not name is not eligible, so a rule can constrain a
+// product to one rail.
 type CheckoutRoutingRule struct {
 	Match CheckoutRoutingMatch `json:"match,omitempty"`
-	// Prefer are checkout selectors in preference order — PSP keys ("mobius"),
-	// or a rail kind where the #848 wire accepts one (exactly one armed PSP).
+	// Prefer are checkout selectors in preference order: PSP keys ("mobius"),
+	// or a rail kind, which resolves to that rail's one armed PSP.
 	Prefer []string `json:"prefer"`
 }
 
@@ -19,7 +19,7 @@ type CheckoutRoutingMatch struct {
 	Product  string `json:"product,omitempty"`  // product key
 	Price    string `json:"price,omitempty"`    // price key
 	Mode     string `json:"mode,omitempty"`     // one_off | subscription
-	Country  string `json:"country,omitempty"`  // payer country, ISO-3166-1 alpha-2
+	Country  string `json:"country,omitempty"`  // customer country, ISO-3166-1 alpha-2
 }
 
 // IsCatchAll reports a match with no conditions — it accepts every input, so

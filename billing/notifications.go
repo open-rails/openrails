@@ -34,7 +34,7 @@ type NotificationData struct {
 	Reason  string `json:"reason,omitempty"`
 	Message string `json:"message,omitempty"`
 	// Source names the emitter when it is not the lifecycle itself
-	// (admin_manual, fetch_converge, converge_notify).
+	// (admin_manual, converge_notify).
 	Source    string     `json:"source,omitempty"`
 	ProductID ProductID  `json:"product_id,omitzero"`
 	EndedAt   *time.Time `json:"ended_at,omitempty"`
