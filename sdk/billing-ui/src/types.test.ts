@@ -4,8 +4,8 @@ import { fixtureSession } from "./fixtures"
 import canonical from "./test/fixtures/checkout_session.json"
 import { checkoutSessionSchema, payResultSchema } from "./types"
 
-// OpenRails' canonical checkout session fixture (testdata/wire/
-// checkout_session.json, pinned there by wire_fixtures_test.go).
+// A copy of OpenRails' canonical checkout session fixture
+// (testdata/wire/checkout_session.json, pinned by wire_fixtures_test.go).
 describe("checkoutSessionSchema", () => {
   it("decodes the canonical OpenRails fixture with int64 boundary money", () => {
     const parsed = checkoutSessionSchema.parse(canonical)

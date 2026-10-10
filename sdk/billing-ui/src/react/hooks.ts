@@ -271,7 +271,6 @@ export interface PaymentMethodsState {
   adding: boolean
   add: (card: NewCard) => ActionResult
   remove: (paymentMethodId: string) => ActionResult
-  /** Makes the card the one that collects one currency's invoices. */
   /** Makes the card the default for the currency. */
   setDefault: (paymentMethodId: string, currency: string) => ActionResult
 }

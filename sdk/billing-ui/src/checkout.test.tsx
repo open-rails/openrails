@@ -1202,9 +1202,9 @@ describe("one card panel", () => {
   })
 })
 
-// #1129: a PSP whose card_entry is server is advertised with driver card. The
-// page renders plain card inputs, loads no gateway script and posts the card
-// to OpenRails.
+// A PSP whose card_entry is server is advertised with driver card. The page
+// renders plain card inputs, loads no gateway script and posts the card to
+// OpenRails.
 describe("server card entry", () => {
   const cardRail: PaymentOption = {
     id: "option_nmi",

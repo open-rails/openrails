@@ -36,9 +36,9 @@ function lineItems(
   ]
 }
 
-// dueToday is the host's figure when it sends one; otherwise the exact sum of
-// the line items and tax. An int64 overflow (null) is refused by the
-// formatter, never rounded.
+// dueToday is the session's due_today when sent, else the exact sum of the
+// line items and tax. An int64 overflow (null) is refused by the formatter,
+// never rounded.
 function dueToday(session: CheckoutSession, m: Translator): Amount | null {
   if (session.due_today !== undefined) return session.due_today
   return addAmounts(

@@ -178,8 +178,8 @@ describe("PSP flows", () => {
     ])
   })
 
-  // #1129: a PSP whose card_entry is server takes the card in plain inputs;
-  // it goes to OpenRails, and no gateway script is loaded.
+  // A PSP whose card_entry is server takes the card in plain inputs; it goes
+  // to OpenRails, and no gateway script is loaded.
   it("saves a card with OpenRails itself for a server card-entry PSP", async () => {
     const calls: { path: string; body: unknown }[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {

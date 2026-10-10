@@ -1,8 +1,7 @@
 // Wire types for the checkout session surface, validated at runtime with zod
 // so a drifting API fails loudly at the boundary instead of rendering garbage.
 // OpenRails serves the session (GET /v1/checkout-sessions/{id}) and pins its
-// shape in a canonical fixture (testdata/wire/checkout_session.json) that
-// src/types.test.ts decodes.
+// shape in testdata/wire/checkout_session.json; src/types.test.ts decodes a copy.
 import { z } from "zod"
 
 import { isAmount, isUnitDecimals, MAX_UNIT_DECIMALS } from "./lib/money"
@@ -22,8 +21,8 @@ export const amountSchema = z
   .string()
   .refine(isAmount, "amount must be an int64 decimal string")
 
-// The currency's registered scale from OpenRails' currency registry
-// (openrails.LookupCurrency / GET /v1/config), stamped by the host.
+// The currency's scale from OpenRails' currency registry
+// (billing.LookupCurrency / GET /v1/config).
 export const unitDecimalsSchema = z
   .number()
   .refine(
@@ -123,7 +122,7 @@ export const nextActionSchema = z.discriminatedUnion("type", [
 export type NextAction = z.infer<typeof nextActionSchema>
 
 // A card the session's customer has already stored with this merchant. Display
-// data only — paying with one sends its id, which the host resolves.
+// data only — paying with one sends its id, which OpenRails resolves.
 export const savedPaymentMethodSchema = z.object({
   id: z.string(),
   option_id: z.string(),

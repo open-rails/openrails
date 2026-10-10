@@ -219,12 +219,9 @@ export function useCollectJS(config: {
         setLoadError(undefined)
         setValidity({})
       })
-      // The hosted iframes cannot inherit the page theme; hand them the
-      // container's resolved colors so dark mode reaches inside the fields.
-      // Chrome serializes computed colors in their authored space (oklch),
-      // which the gateway's CSS sanitizer drops — normalize through a canvas
-      // fillStyle round-trip to a format it accepts. (Resolved once per
-      // configure — an in-place OS theme flip re-themes on the next load.)
+      // The hosted iframes cannot inherit the page theme: hand them the
+      // container's resolved colors, normalized by toPlainColor for the
+      // gateway's CSS sanitizer. Resolved once per configure.
       const probe = document.querySelector<HTMLElement>(number)
       const probeStyle = probe ? window.getComputedStyle(probe) : undefined
       const probeBackground = toPlainColor(probeStyle?.backgroundColor)

@@ -172,7 +172,7 @@ describe("createBillingClient", () => {
   })
 })
 
-// #1088: server errors surface at once; only a GET retries, once, briefly.
+// Server errors surface at once; only a GET retries, once, briefly.
 describe("server errors", () => {
   const ok = () => new Response("{}", { status: 200 })
   const status = (code: number, headers?: Record<string, string>) =>

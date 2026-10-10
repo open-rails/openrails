@@ -5,10 +5,9 @@ import { isolateCheckoutCss } from "./isolate.ts"
 const STYLE_ELEMENT_ID = "billing-ui-styles"
 
 /**
- * Vite extracts library CSS instead of retaining the source import. Installing
- * the isolated result from the JavaScript entry lets consumers import the
- * component alone; the emitted stylesheet remains available for SSR or manual
- * loading.
+ * Vite extracts library CSS, so the JavaScript entry installs the isolated
+ * stylesheet itself and a component import works alone; the emitted
+ * stylesheet stays available for SSR or manual loading.
  */
 export function renderStyleInstaller(css: string): string {
   return `

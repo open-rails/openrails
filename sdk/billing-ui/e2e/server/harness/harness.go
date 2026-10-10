@@ -26,8 +26,8 @@ const (
 	BillingSchema = "billing"
 	Audience      = "billing-ui-e2e"
 	MerchantSlug  = "billing-ui-e2e"
-	// Imported facts are attributed to a credential-less, declared-only PSP.
-	// NMI: its cancel defers the remote delete, so resume is exercisable.
+	// PSPKey is the credential-less, declared-only NMI PSP imported facts are
+	// attributed to; its cancel defers the remote delete, so resume is exercisable.
 	PSPKey       = "nmi"
 	PSPRail      = "nmi"
 	PSPAccountID = "billing-ui-e2e"
@@ -92,7 +92,7 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 		Merchant: openrails.MerchantDeclaration{
 			Slug: MerchantSlug, DisplayName: "billing-ui e2e", Settings: billing.MerchantSettings{CheckoutRouting: &checkoutRouting},
 			PSPs: map[string]openrails.PSPConfig{
-				// An armed Solana PSP on devnet: checkout offers it (#1078).
+				// An armed Solana PSP on devnet: checkout offers it.
 				SolanaPSPKey: openrails.SolanaPSP{
 					PrivateKey:  signer.String(),
 					RPCProvider: "public",

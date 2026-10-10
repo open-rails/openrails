@@ -1,6 +1,6 @@
 // Catalog, plan-change and Solana calls. Bodies mirror the Go wire types
-// (billing.Product, billing.Price, billing.SubscriptionChange*Response,
-// handlers.SolanaRuntimeConfigResponse).
+// (billing.Product, billing.Price, billing.SubscriptionChange*,
+// billing.PublicConfig, handlers.SupportedTokensResponse).
 import { describe, expect, it, vi } from "vitest"
 
 import currenciesFixture from "../test/fixtures/wire/currencies.json"

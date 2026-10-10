@@ -35,10 +35,7 @@ export class BillingError extends Error {
 export const isBillingError = (value: unknown): value is BillingError =>
   value instanceof BillingError
 
-/**
- * A server failure (HTTP 5xx) from any client or host source that carries a
- * numeric `status`. It is surfaced at once, never retried behind the caller.
- */
+/** A server failure (HTTP 5xx) from any client or host source that carries a numeric `status`. */
 export const isServerError = (value: unknown): boolean => {
   const status = (value as { status?: unknown } | null)?.status
   return typeof status === "number" && status >= 500 && status < 600

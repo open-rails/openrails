@@ -1,17 +1,14 @@
-// Checkout — the entire flow as one self-contained component. Hosts render
-// it inline on any page; CheckoutModal wraps it in a dialog; the hosted page
-// is another thin host. Its only inputs are a CheckoutSource (data), an
-// appearance (theming), and lifecycle callbacks. The container query is the
-// mode switch: wide containers get the split layout, narrow ones the compact
-// stack.
+// Checkout — the whole purchase flow as one self-contained component, rendered
+// inline or inside the thin hosts CheckoutModal and CheckoutPage. Its inputs
+// are a CheckoutSource, an appearance and lifecycle callbacks; a container
+// query picks the split or the compact layout.
 //
-// Cards are one panel: the saved cards for the checkout PSP, an inline new
-// card, and one button that is the payer's explicit confirmation of the
-// displayed terms. With a BillingProvider, a new card is saved to the
-// customer's account first and the payment charges it by id; a decline keeps
-// the buyer on the panel to pick another card and retry. A rail whose driver
-// is card takes the card in plain inputs and posts it to OpenRails: no
-// gateway script is loaded.
+// Cards are one panel: the checkout PSP's saved cards, an inline new card, and
+// one button that is the payer's explicit confirmation of the displayed terms.
+// With a BillingProvider a new card is saved to the customer first and paid by
+// id; a decline keeps the buyer on the panel to retry. A driver-card rail
+// takes the card in plain inputs, posts it to OpenRails and loads no gateway
+// script.
 import * as React from "react"
 
 import {
@@ -109,8 +106,8 @@ export interface CheckoutProps {
 
 const POLL_INTERVAL_MS = 3_000
 const DECLINED = "Your card was declined. Try another card."
-// A 5xx is shown at once. Hosts replay a retried payment under the same
-// idempotency identity, so trying again cannot charge twice.
+// A 5xx is shown at once. Paying again replays the session's attempt under the
+// same idempotency key, so it cannot charge twice.
 const SERVER_FAILED =
   "Payment service error. The payment was not confirmed. Try again in a moment."
 const STATUS_UNAVAILABLE =
@@ -258,8 +255,8 @@ export function Checkout({
     }
   }, [])
 
-  // Card rails that save a card in the page need the customer's billing
-  // client; without one (a hosted page) only token rails are offered.
+  // Stripe Elements saves a card through the customer's billing client;
+  // without one (a hosted page) it is not offered.
   const usable = React.useCallback(
     (rails: PaymentOption[]) =>
       supportedOptions(rails).filter(
@@ -365,9 +362,9 @@ export function Checkout({
       }
     )
   }, [active, addedCards, session])
-  // Until the customer chooses, the most recent card stands pre-selected. Paying always sends the selected card's id; nothing
-  // is implied server-side. Derived so it applies when the session arrives
-  // after first render.
+  // The most recent card is pre-selected until the customer chooses; paying
+  // always sends the selected card's id. Derived, so it applies when the
+  // session arrives after first render.
   const [savedChoice, setSavedChoice] = React.useState<string>()
   const savedMethodID =
     savedChoice &&
@@ -578,7 +575,7 @@ export function Checkout({
       }
       if (active.driver === "solana_pay") {
         // supportedOptions only offers Solana options with a bound token, so
-        // the symbol the host bound is the one we pay with — never a default.
+        // we pay with that token — never a default.
         request = {
           option_id: active.id,
           token_symbol: solanaToken(active)?.symbol,

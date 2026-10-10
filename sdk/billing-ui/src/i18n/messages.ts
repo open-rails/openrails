@@ -127,7 +127,7 @@ export interface Translator {
    * category, then `<key>.other`. `{count}` is locale-formatted.
    */
   plural(key: PluralKey, count: number, vars?: MessageVars): string
-  /** Message for an billing error, error code, or thrown value. */
+  /** Message for a billing error, error code, or thrown value. */
   error(error: unknown, vars?: MessageVars): string
 }
 

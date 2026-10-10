@@ -1,8 +1,7 @@
-// Exact money. Every amount the host serves is a signed int64 decimal string
-// of the plan currency's native unit; plan.unit_decimals is that currency's
-// registered scale (OpenRails' currency registry, GET /v1/config). Nothing
-// here converts an amount to a JS number: values are scaled with BigInt and
-// only the exact major-unit decimal is handed to Intl.
+// Exact money. Every amount OpenRails serves is a signed int64 decimal string
+// of the plan currency's native unit, at plan.unit_decimals (the currency
+// registry's scale). Amounts are scaled with BigInt, never a JS number; only
+// the exact major-unit decimal reaches Intl.
 
 // Amount is an int64 decimal string, e.g. "99000000" (99 USD at 6 decimals).
 export type Amount = string

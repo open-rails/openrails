@@ -1,5 +1,5 @@
-// CCBill credit-card hand-off uses the compact billing identity below. Name
-// stays canonical; the server binds verified email/IP and projects the provider.
+// CCBill hand-off fields: name, country and postal code. The server binds the
+// verified email and IP.
 import {
   BillingTextField,
   CountryField,

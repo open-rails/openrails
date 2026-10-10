@@ -90,7 +90,6 @@ export interface ListOptions {
   signal?: AbortSignal
 }
 
-/** A cursor list read: pass the previous page's `next_cursor` for the next. */
 /**
  * A subscription change: another price of its tier group, other seats of a
  * per-seat price, or both. A quantity for a price that is not per seat is
@@ -413,11 +412,10 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      * Moves the subscription to another price of its tier group, to other
      * seats of a per-seat price, or both. An upgrade and more seats charge
      * the saved card now; a downgrade and fewer seats apply at period end.
-     * `idempotencyKey` identifies this attempt; reuse it until the change
-     * resolves (`processing`, a `subscription_change_in_flight` refusal or a
-     * lost response) so the stored result replays instead of charging twice.
-     * A wallet next action (Solana) is completed with `signWalletAction` and
-     * the change repeated with `signature`.
+     * Reuse `idempotencyKey` until the change resolves (`processing`, a
+     * `subscription_change_in_flight` refusal or a lost response) so the
+     * stored result replays instead of charging twice. A Solana wallet next
+     * action is completed with `signWalletAction`, then repeated with `signature`.
      */
     changeSubscription(
       subscriptionId: string,

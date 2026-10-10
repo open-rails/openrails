@@ -1,7 +1,7 @@
-// The packaged Checkout renders exactly what OpenRails advertises (#1078):
-// with a Solana PSP configured, Solana is offered for one-time and recurring
-// prices, and selecting it opens a Solana Pay request from the real engine.
-// The app frames the payment page on another origin (#1124).
+// The packaged Checkout renders exactly what OpenRails advertises: with a
+// Solana PSP configured, Solana is offered for one-time and recurring prices,
+// and selecting it opens a Solana Pay request from the real engine. The app
+// frames the payment page on another origin.
 import { expect, test } from "@playwright/test"
 
 import { createUser } from "./api"
@@ -61,8 +61,8 @@ for (const [name, key, mode] of [
       })
     )
 
-    // Solana is the only armed rail here, so its Solana Pay request opens at
-    // once: a real engine session, rendered as a QR code in DUSD.
+    // Solana is the only rail these prices route to, so its Solana Pay request
+    // opens at once: a real engine session, rendered as a QR code in DUSD.
     const checkout = page.frameLocator('iframe[title="Secure checkout"]')
     await expect(checkout.getByText("Scan with a Solana wallet")).toBeVisible()
     await expect(

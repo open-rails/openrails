@@ -22,20 +22,17 @@ export const RAIL_META: Record<string, RailMeta> = {
   nmi: { label: "Card" },
   stripe: { label: "Stripe", hint: "Opens Stripe" },
   ccbill: { label: "CCBill", hint: "Opens CCBill" },
-  // The Solana hint is not static: it names the token the host bound to the
-  // option (see solanaToken), so the buyer sees the mint they will actually pay
-  // with, on the network the host is actually on.
+  // Solana's hint is per option: its bound token and network (solanaHint).
   solana: { label: "Crypto" },
 }
 
-// The Solana token the host bound to an option, read from its public_config:
+// The Solana token bound to an option, read from its public_config:
 // - token_symbol — required; the SPL mint the price is bound to (USDC, USD1…).
 // - token_name   — optional buyer-facing name ("USD Coin").
-// - network      — optional Solana cluster ("mainnet-beta", "devnet",
-//                  "testnet"); anything but mainnet-beta is named in the UI so a
-//                  test-network payment is never mistaken for a real one.
-// The package never assumes a token: an option without token_symbol is not
-// offered (supportedOptions) — a rail the UI cannot execute must not be shown.
+// - network      — optional Solana cluster; anything but mainnet-beta is named
+//                  in the UI so a test-network payment is never mistaken for a
+//                  real one.
+// An option without token_symbol is not offered (supportedOptions).
 export interface SolanaToken {
   symbol: string
   name?: string

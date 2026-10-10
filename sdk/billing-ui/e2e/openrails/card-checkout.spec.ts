@@ -1,8 +1,7 @@
-// A new card entered in the payment page subscribes in one click (#1085): the
-// app frames the page on another origin (#1124), the page pays its session and
-// OpenRails saves the card, accepts the displayed terms and charges it. The
-// loopback NMI gateway (nmimock) declines cards ending 0002; Collect.js is a
-// stand-in served in its place.
+// A new card entered in the payment page subscribes in one click: the app
+// frames the page on another origin, the page pays its session and OpenRails
+// saves the card, accepts the displayed terms and charges it. The loopback NMI
+// gateway (nmimock) declines cards ending 0002; Collect.js is a stand-in.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 
 import { createUser, type TestUser } from "./api"
@@ -168,8 +167,8 @@ test("a new card pays a one-time price inline", async ({ page, request }) => {
   expect(held.subscriptions).toHaveLength(0)
 })
 
-// A server error is shown at once (#1088); nothing retries behind the buyer,
-// and paying again under the same attempt completes.
+// A server error is shown at once; nothing retries behind the buyer, and
+// paying again under the same attempt completes.
 test("a server error is shown at once and paying again succeeds", async ({
   page,
   request,

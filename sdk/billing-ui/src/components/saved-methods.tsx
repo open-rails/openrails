@@ -1,8 +1,6 @@
-// Reuse of a card the customer already stored with this merchant. Selecting
-// one skips gateway tokenization entirely — the pay request carries the
-// stored method's id instead of a fresh token. Rows stay surfaceless like the
-// rail list above them; the brand plate and ink shift carry selection, so the
-// containment budget still belongs to the host.
+// Cards the customer already stored with this merchant. Selecting one skips
+// gateway tokenization: the pay request carries the stored method's id. Rows
+// stay surfaceless like the rail list; the brand plate and ink carry selection.
 import { HugeiconsIcon } from "@hugeicons/react"
 import { Add01Icon } from "@hugeicons/core-free-icons"
 import { CardBrandPlate } from "#orck/components/card-brands"
@@ -14,8 +12,7 @@ import type { SavedPaymentMethod } from "#orck/types"
 
 export const NEW_CARD_VALUE = "new"
 
-// Brand plates carry the network's own wordmark treatment at small size:
-// recognizable at a glance without shipping licensed logo art.
+// Text plates for brands CardBrandPlate has no mark for.
 const BRAND_PLATE: Record<string, string> = {
   visa: "VISA",
   mastercard: "MC",
