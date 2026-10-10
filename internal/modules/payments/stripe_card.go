@@ -29,6 +29,8 @@ type StripeCardDetails struct {
 	ExpMonth    int    `json:"exp_month"`
 	ExpYear     int    `json:"exp_year"`
 	Fingerprint string `json:"fingerprint"`
+	// Country is the issuing country, ISO 3166-1 alpha-2.
+	Country string `json:"country"`
 }
 
 // NormalizeStripeCard returns nil when there is no usable card (no last4).

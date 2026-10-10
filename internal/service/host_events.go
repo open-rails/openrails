@@ -26,7 +26,7 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 	}
 	switch req.Type {
 	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged,
-		billing.HostEventOrderPaid, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired:
+		billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired:
 	default:
 		return billing.ListPage[billing.HostEvent]{}, invalidHostEventRequest("unknown host event type")
 	}
@@ -133,18 +133,19 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			}
 			payload.ProductID = billing.ProductID(row.SubjectID)
 			event.ProductEntitlements = &payload
-		case billing.HostEventOrderPaid, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired:
+		case billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired:
 			var payload struct {
-				CustomerID uuid.UUID `json:"customer_id"`
-				Status     string    `json:"status"`
-				Number     *string   `json:"number"`
-				PaymentID  *string   `json:"payment_id"`
+				CustomerID    uuid.UUID `json:"customer_id"`
+				Status        string    `json:"status"`
+				PaymentStatus string    `json:"payment_status"`
+				Number        *string   `json:"number"`
+				PaymentID     *string   `json:"payment_id"`
 			}
 			if err := json.Unmarshal(row.Data, &payload); err != nil {
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
 			order := &billing.OrderHostEvent{OrderID: billing.OrderID(row.SubjectID), CustomerID: billing.CustomerID(payload.CustomerID),
-				Status: billing.OrderStatus(payload.Status), Currency: derefString(row.Currency), Number: payload.Number}
+				Status: billing.OrderStatus(payload.Status), PaymentStatus: billing.OrderPaymentStatus(payload.PaymentStatus), Currency: derefString(row.Currency), Number: payload.Number}
 			if row.Amount != nil {
 				order.Total = *row.Amount
 			}

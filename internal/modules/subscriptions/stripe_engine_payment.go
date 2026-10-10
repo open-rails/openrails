@@ -29,6 +29,9 @@ type StripeEnginePaymentParams struct {
 	// OneTime is a customer-present purchase on a saved card: on-session, no
 	// recurring agreement anchor and no future-usage setup.
 	OneTime bool
+	// SavesNewCard, with OneTime, is a card just entered that the charge
+	// saves: its storing transaction.
+	SavesNewCard bool
 	// MerchantInitiated is an initial-membership change staff charge at the
 	// customer's request: off-session, under the card's recurring agreement.
 	MerchantInitiated bool
@@ -86,6 +89,9 @@ func (p StripeEnginePaymentParams) validate() error {
 	if p.OneTime && (p.Initial || p.CustomerInitiated) {
 		return errors.New("one-time purchase cannot be a recurring payment")
 	}
+	if p.SavesNewCard && (!p.OneTime || p.Instrument.Mandate != nil) {
+		return errors.New("only a one-time purchase saves a new card")
+	}
 	if p.MerchantInitiated && (!p.Initial || !StripeAgreementRef(p.Instrument.Mandate)) {
 		return errors.New("a merchant-initiated change requires the card's recurring agreement")
 	}
@@ -125,6 +131,8 @@ func (p StripeEnginePaymentParams) flow() charge.Context {
 		return charge.Merchant(charge.AgreementRecurring, p.Instrument.Mandate)
 	case p.Initial:
 		return charge.Customer(charge.AgreementRecurring, p.Instrument.Mandate)
+	case p.OneTime && p.SavesNewCard:
+		return charge.Customer(charge.AgreementCardOnFile, nil)
 	case p.OneTime && p.Instrument.Mandate == nil:
 		// A saved card Stripe stored before OpenRails tracked it.
 		return charge.Purchase()
@@ -137,15 +145,13 @@ func (p StripeEnginePaymentParams) flow() charge.Context {
 }
 
 // StripeFlags derives a PaymentIntent's session and future-usage flags from
-// a charge's flow; callers never set them. Stripe sends the network
-// references of a card it saved itself.
+// a charge's flow; callers never set them. A storing charge saves the card
+// off session, so its later merchant-initiated charges may use it. Stripe
+// sends the network references of a card it saved itself.
 func StripeFlags(c charge.Context) map[string]string {
 	flags := map[string]string{"off_session": strconv.FormatBool(c.Initiator == charge.InitiatorMerchant)}
 	if c.Storing() {
 		flags["setup_future_usage"] = "off_session"
-		if c.Agreement == charge.AgreementCardOnFile {
-			flags["setup_future_usage"] = "on_session"
-		}
 	}
 	return flags
 }
@@ -281,7 +287,7 @@ func (pi stripeEngineIntent) matches(p StripeEnginePaymentParams) error {
 	// A canceled or unpaid PI can drop its method (Stripe clears it with the
 	// last error on cancel); it moves no money, and a paid PI must name it.
 	methodMismatch := method != p.Instrument.RailMethodRef && (method != "" || pi.Status == "succeeded")
-	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || methodMismatch || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || p.Initial && !p.MerchantInitiated && pi.SetupFutureUsage != "off_session" {
+	if !stripeEngineID(pi.ID, "pi_") || rawID(pi.Customer) != p.Instrument.RailCustomerRef || methodMismatch || pi.Amount != int64(p.AmountMinor) || !strings.EqualFold(pi.Currency, p.Currency) || pi.CaptureMethod != "automatic" || pi.ConfirmationMethod != "automatic" || (p.Initial && !p.MerchantInitiated || p.SavesNewCard) && pi.SetupFutureUsage != "off_session" {
 		return errors.New("Stripe engine payment does not match frozen terms")
 	}
 	expected := p.metadata()

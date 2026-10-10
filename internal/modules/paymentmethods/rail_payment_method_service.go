@@ -598,6 +598,9 @@ func nmiNameParts(firstName, lastName, nameOnCard string) (string, string) {
 
 // vaultedCard is the saved card's display facts: the card itself when the
 // server received it, else what the gateway reports for the vault entry.
+// VaultedCard is a vault entry's card as NMI reports it.
+func VaultedCard(reported nmi.V5BillingCardData) models.Card { return vaultedCard(reported, nil) }
+
 func vaultedCard(reported nmi.V5BillingCardData, entered *cardguard.Card) models.Card {
 	brand := firstNonEmpty(strings.TrimSpace(reported.CardType), nmi.CardBrandFromMaskedPAN(reported.CardNumber))
 	card := models.ParseCard(brand, reported.CardNumber, reported.CardExp)

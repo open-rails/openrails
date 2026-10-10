@@ -81,6 +81,8 @@ type CustomerVaultError struct {
 	TransactionID string
 	// ResponseText is the gateway's responsetext.
 	ResponseText string
+	// CustomerVaultID is a vault the refused sale created anyway.
+	CustomerVaultID string
 }
 
 func (e *CustomerVaultError) Error() string {
@@ -248,15 +250,16 @@ func newSaleError(rawResponse string, output url.Values) error {
 	responseCode := parseMobiusResponseCode(output)
 
 	rejection := &CustomerVaultError{
-		Message:        message,
-		ResponseCode:   responseCode,
-		LocalizationID: decline.NMILocalizationID(responseCode),
-		Detail:         decline.NMIMessage(responseCode),
-		RawResponse:    rawResponse,
-		AVSResponse:    strings.TrimSpace(output.Get("avsresponse")),
-		CVVResponse:    strings.TrimSpace(output.Get("cvvresponse")),
-		TransactionID:  strings.TrimSpace(output.Get("transactionid")),
-		ResponseText:   strings.TrimSpace(output.Get("responsetext")),
+		Message:         message,
+		ResponseCode:    responseCode,
+		LocalizationID:  decline.NMILocalizationID(responseCode),
+		Detail:          decline.NMIMessage(responseCode),
+		RawResponse:     rawResponse,
+		AVSResponse:     strings.TrimSpace(output.Get("avsresponse")),
+		CVVResponse:     strings.TrimSpace(output.Get("cvvresponse")),
+		TransactionID:   strings.TrimSpace(output.Get("transactionid")),
+		ResponseText:    strings.TrimSpace(output.Get("responsetext")),
+		CustomerVaultID: strings.TrimSpace(output.Get("customer_vault_id")),
 	}
 	if strings.TrimSpace(output.Get("response")) != "2" {
 		unknown := ambiguous(fmt.Errorf("NMI outcome requires verification (response code %d)", responseCode))

@@ -81,7 +81,7 @@ func TestReplicasEmailAReceiptOnce(t *testing.T) {
 
 	gate.armed.Store(true)
 	paid := c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(25_000_000), "payment": map[string]any{"payment_method_id": card}})
-	require.Equal(t, "paid", paid.body["status"], "%v", paid.body)
+	require.Equal(t, "complete", paid.body["status"], "%v", paid.body)
 	require.Eventually(t, func() bool { return gate.count() > 0 }, 20*time.Second, 10*time.Millisecond, "the receipt's own job is sending it")
 
 	var sweeps []pass

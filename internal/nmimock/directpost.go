@@ -61,6 +61,9 @@ func (m *Mock) resolveCard(form url.Values) (*Vault, *Card, string) {
 
 func (m *Mock) sale(form url.Values) string {
 	m.attempts = append(m.attempts, form)
+	if form.Get("payment_token") != "" {
+		return m.tokenSale(form)
+	}
 	v, charged, bad := m.resolveCard(form)
 	if bad != "" {
 		return rejected(bad)
@@ -112,6 +115,50 @@ func (m *Mock) sale(form url.Values) string {
 		s.ScheduleID = id
 		fields = append(fields, "subscription_id", id)
 	}
+	return answer(fields...)
+}
+
+// tokenSale charges a Collect.js token; customer_vault=add_customer stores
+// the card in a new vault when the sale is approved.
+func (m *Mock) tokenSale(form url.Values) string {
+	c, ok := m.cardOf(form.Get("payment_token"))
+	if !ok {
+		return rejected("Invalid Payment Token")
+	}
+	order, amount, currency := form.Get("orderid"), form.Get("amount"), strings.ToUpper(form.Get("currency"))
+	s := &Sale{TransactionID: m.next("tx"), OrderID: order, OrderDescription: form.Get("order_description"), Amount: amount, Currency: currency,
+		InitiatedBy: form.Get("initiated_by"), Indicator: form.Get("stored_credential_indicator"), Initial: form.Get("initial_transaction_id"), Card: c, At: m.now()}
+	if c.Decline != "" && c.Decline != "vault" {
+		s.Declined = c.Decline
+		m.sales = append(m.sales, s)
+		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
+			"orderid", order, "type", "sale", "response_code", c.Decline)
+	}
+	if m.duplicate > 0 {
+		m.duplicate--
+		return rejected("Duplicate transaction REFID:3187654321")
+	}
+	if !m.unsupportedDuplicateCheck && m.duplicateOf(c, amount) {
+		return rejected("Duplicate transaction REFID:3187654322")
+	}
+	fields := []string{"response", "1", "responsetext", "SUCCESS", "authcode", "123456", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
+		"orderid", order, "type", "sale", "response_code", "100"}
+	if form.Get("customer_vault") == "add_customer" {
+		if c.Decline == "vault" {
+			m.refusedSaves++
+			return rejected("Card refused REFID:3187654326")
+		}
+		v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+		m.vaults[v.ID] = v
+		s.Vault, s.BillingID = v.ID, v.BillingID
+		fields = append(fields, "customer_vault_id", v.ID)
+	}
+	if m.hide > 0 {
+		m.hide--
+		s.Hidden = true
+	}
+	m.sales = append(m.sales, s)
+	m.remember(c, amount)
 	return answer(fields...)
 }
 

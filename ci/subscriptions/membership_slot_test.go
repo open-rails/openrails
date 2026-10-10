@@ -47,7 +47,7 @@ func TestUnpaidOrderHoldsMembershipSlot(t *testing.T) {
 
 	require.Equal(t, 1, w.charges(), "the customer pays for the membership once")
 	requireSlotHeld(t, enrolled)
-	require.Equal(t, "paid", paid.body["status"], "%v", paid.body)
+	require.Equal(t, "complete", paid.body["status"], "%v", paid.body)
 	require.Len(t, w.memberships(c), 1)
 }
 
@@ -108,7 +108,7 @@ func TestPendingProviderStopHoldsSlotAgainstOrders(t *testing.T) {
 
 	failing.Store(false)
 	w.until(func() bool { return w.subscription(remote, l.sub).DeletionScheduledAt == nil }, "the verified stop releases the slot")
-	require.Equal(t, "paid", buy().body["status"])
+	require.Equal(t, "complete", buy().body["status"])
 	require.Len(t, w.nmi.Ledger(""), before+1, "one charge for the new membership")
 }
 
@@ -131,6 +131,6 @@ func TestUnpaidOrderHoldsLifetimeProduct(t *testing.T) {
 
 	require.Equal(t, 1, w.charges(), "the customer pays for the product once")
 	requireSlotHeld(t, bought)
-	require.Equal(t, "paid", paid.body["status"], "%v", paid.body)
+	require.Equal(t, "complete", paid.body["status"], "%v", paid.body)
 	require.True(t, c.entitled("slot:lifetime"))
 }

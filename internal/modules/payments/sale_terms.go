@@ -63,18 +63,53 @@ type NMISalePayload struct {
 	// card for a recurring agreement.
 	Recurring bool `json:"recurring,omitempty"`
 	// NewCard: the sale saved its card from the buyer's token, so a decline
-	// removes it.
+	// removes it. On an order it is a card just entered: the charge saves it
+	// and is its storing transaction (Token on NMI, Instrument's pm_ on
+	// Stripe), and PaymentMethodID names the method its success creates.
 	NewCard bool `json:"new_card,omitempty"`
+	// Token is an order's NMI Collect.js token; Billing the vault's details.
+	Token   string          `json:"token,omitempty"`
+	Billing *NewCardBilling `json:"billing,omitempty"`
+	// Card and Fingerprint are a new Stripe card as Stripe reported it.
+	Card        *models.Card `json:"card,omitempty"`
+	Fingerprint string       `json:"fingerprint,omitempty"`
+	// Reuse: the customer keeps the order's new card for one-click buys.
+	// PurchaseScoped: a new card kept for this purchase only (one-time lines,
+	// no Reuse): no stored-credential agreement, and nothing is saved.
+	Reuse          bool `json:"reuse,omitempty"`
+	PurchaseScoped bool `json:"purchase_scoped,omitempty"`
+}
+
+// NewCardBilling is who a new NMI card bills, for its vault.
+type NewCardBilling struct {
+	FirstName string `json:"first_name,omitempty"`
+	LastName  string `json:"last_name,omitempty"`
+	Address1  string `json:"address1,omitempty"`
+	Address2  string `json:"address2,omitempty"`
+	City      string `json:"city,omitempty"`
+	State     string `json:"state,omitempty"`
+	Zip       string `json:"zip,omitempty"`
+	Country   string `json:"country,omitempty"`
+	Phone     string `json:"phone,omitempty"`
+	Email     string `json:"email,omitempty"`
 }
 
 // Agreement is the stored-credential agreement the sale charges under: a
-// recurring one for an order with a recurring line, else the card's
-// card-on-file reuse.
+// recurring one for an order with a recurring line, none for a
+// purchase-scoped card, else the card's card-on-file reuse.
 func (p NMISalePayload) Agreement() charge.Agreement {
-	if p.Recurring {
+	switch {
+	case p.Recurring:
 		return charge.AgreementRecurring
+	case p.PurchaseScoped:
+		return charge.AgreementNone
 	}
 	return charge.AgreementCardOnFile
+}
+
+// SavesCard reports a new card the order's charge stores.
+func (p NMISalePayload) SavesCard() bool {
+	return p.OrderID != uuid.Nil && p.NewCard && !p.PurchaseScoped
 }
 
 func DecodeNMISalePayload(in gen.BillingProviderIntent) (NMISalePayload, error) {
@@ -145,7 +180,9 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 	if err := p.Instrument.Validate(); err != nil {
 		return err
 	}
-	if p.Instrument.CustodianHeld() || p.Provider != in.Rail || p.Instrument.RailCustomerRef == "" || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" {
+	nmiToken := in.Rail != "stripe" && p.NewCard
+	if p.Instrument.CustodianHeld() || p.Provider != in.Rail || (p.Instrument.RailCustomerRef == "") != nmiToken || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" ||
+		(p.Token != "") != nmiToken || p.PurchaseScoped != (p.NewCard && !p.Recurring && !p.Reuse) || p.Reuse && !p.NewCard || p.NewCard && p.Instrument.Mandate != nil {
 		return errors.New("order sale instrument contradicts its order")
 	}
 	_, err = moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)

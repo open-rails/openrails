@@ -52,6 +52,9 @@ type collectedTerms struct {
 	Instrument          charge.FrozenInstrument
 	ProviderCustomerRef string
 	OrderReference      string
+	// NewVault: an NMI token sale that saves its card names the vault it
+	// made; NoVault: one that saves nothing names none.
+	NewVault, NoVault bool
 }
 
 func decodeCollectedTerms(in gen.BillingProviderIntent) (collectedTerms, error) {
@@ -62,31 +65,33 @@ func decodeCollectedTerms(in gen.BillingProviderIntent) (collectedTerms, error) 
 			return collectedTerms{}, err
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
-		return collectedTerms{in.Rail, p.Currency, minor, p.Instrument, p.Instrument.RailCustomerRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
+		token := p.Token != ""
+		return collectedTerms{Rail: in.Rail, Currency: p.Currency, AmountMinor: minor, Instrument: p.Instrument, ProviderCustomerRef: p.Instrument.RailCustomerRef,
+			OrderReference: payments.NMISaleOrderReference(in.ID, p.E2ERunID), NewVault: token && !p.PurchaseScoped, NoVault: token && p.PurchaseScoped}, err
 
 	case "invoice_collection":
 		p, err := DecodeInvoiceCollectionPayload(in)
-		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String()}, err
+		return collectedTerms{p.Rail, p.Currency, p.AmountMinor, p.Instrument, p.ProviderCustomerRef, in.ID.String(), false, false}, err
 	case subscriptions.TypeInitialMembership:
 		p, err := subscriptions.DecodeInitialMembershipPayload(in)
 		if err != nil {
 			return collectedTerms{}, err
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Terms.Currency, p.Terms.Amount)
-		return collectedTerms{in.Rail, p.Terms.Currency, minor, p.Instrument, p.Instrument.RailCustomerRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID)}, err
+		return collectedTerms{in.Rail, p.Terms.Currency, minor, p.Instrument, p.Instrument.RailCustomerRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID), false, false}, err
 	case subscriptions.TypeNMIUpgrade:
 		p, err := subscriptions.DecodeNMIUpgradePayload(in)
 		if err != nil {
 			return collectedTerms{}, err
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.ProrationAmount)
-		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String()}, err
+		return collectedTerms{"nmi", p.Currency, minor, p.Instrument, "", in.ID.String(), false, false}, err
 	case subscriptions.TypeSubscriptionCollection:
 		p, err := subscriptions.DecodeSubscriptionCollectionPayload(in)
-		return collectedTerms{in.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, p.Instrument.RailCustomerRef, p.OrderReference}, err
+		return collectedTerms{in.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, p.Instrument.RailCustomerRef, p.OrderReference, false, false}, err
 	case subscriptions.TypeManualRebill:
 		p, err := subscriptions.DecodeManualRebillPayload(in)
-		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference}, err
+		return collectedTerms{p.Rail, p.Renewal.Currency, p.AmountMinor, p.Instrument, "", p.OrderReference, false, false}, err
 	default:
 		return collectedTerms{}, errors.New("operation kind has no collected-receipt contract")
 	}
@@ -214,11 +219,28 @@ func (r CollectedReceipt) Validate(in gen.BillingProviderIntent) error {
 		if facts.TransactionID == "" || facts.OrderReference != p.OrderReference || !facts.Approved || facts.Amount != p.AmountMinor || !strings.EqualFold(facts.Currency, p.Currency) {
 			return fmt.Errorf("%w: sale does not match frozen operation", nmi.ErrReceiptMismatch)
 		}
-		if !p.Instrument.CustodianHeld() && (p.Instrument.RailCustomerRef == "" || facts.CustomerVaultID != p.Instrument.RailCustomerRef) {
+		switch {
+		case p.NewVault:
+			if facts.CustomerVaultID == "" {
+				return fmt.Errorf("%w: the sale saved no card", nmi.ErrReceiptMismatch)
+			}
+		case p.NoVault:
+			if facts.CustomerVaultID != "" {
+				return fmt.Errorf("%w: a purchase-scoped sale saved its card", nmi.ErrReceiptMismatch)
+			}
+		case !p.Instrument.CustodianHeld() && (p.Instrument.RailCustomerRef == "" || facts.CustomerVaultID != p.Instrument.RailCustomerRef):
 			return fmt.Errorf("%w: sale does not match frozen vault", nmi.ErrReceiptMismatch)
 		}
 	}
 	return nil
+}
+
+// NMICustomerVaultID is the vault an NMI sale charged, or created.
+func (r CollectedReceipt) NMICustomerVaultID() string {
+	if r.data.NMI != nil {
+		return r.data.NMI.CustomerVaultID
+	}
+	return ""
 }
 
 func (r CollectedReceipt) TransactionID() string {

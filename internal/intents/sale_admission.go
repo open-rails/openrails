@@ -92,18 +92,21 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 				return err
 			}
 		}
-		method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: terms.PaymentMethodID})
-		if err != nil {
-			return err
-		}
-		if method.CustomerID != customer || method.Rail != p.Provider || !paymentmethods.Chargeable(method) {
-			return apperr.Conflictf("sale instrument changed before admission")
-		}
-		if err := terms.Instrument.Matches(method); err != nil {
-			return err
-		}
-		if err := mandates.Recheck(ctx, d.Gen(ctx), p.MerchantID, terms.Instrument.Mandate); err != nil {
-			return err
+		// An order's new card is saved by the sale itself: no method exists yet.
+		if !order || !terms.NewCard {
+			method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: p.MerchantID, ID: terms.PaymentMethodID})
+			if err != nil {
+				return err
+			}
+			if method.CustomerID != customer || method.Rail != p.Provider || !paymentmethods.Chargeable(method) {
+				return apperr.Conflictf("sale instrument changed before admission")
+			}
+			if err := terms.Instrument.Matches(method); err != nil {
+				return err
+			}
+			if err := mandates.Recheck(ctx, d.Gen(ctx), p.MerchantID, terms.Instrument.Mandate); err != nil {
+				return err
+			}
 		}
 		row, err = store.enqueue(ctx, p)
 		if err != nil {

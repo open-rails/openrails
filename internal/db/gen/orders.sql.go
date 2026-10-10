@@ -43,12 +43,12 @@ func (q *Queries) ClaimOwnership(ctx context.Context, arg ClaimOwnershipParams) 
 
 const closeOrder = `-- name: CloseOrder :execrows
 UPDATE billing.orders
-SET status = $1::text,
+SET status = $1::text, payment_status = 'requires_payment_method',
     canceled_at = CASE WHEN $1::text = 'canceled' THEN $2::timestamptz ELSE canceled_at END,
     expired_at = CASE WHEN $1::text = 'expired' THEN $2::timestamptz ELSE expired_at END,
     updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND status IN ('open', 'requires_action') AND $1::text IN ('canceled', 'expired')
+  AND status = 'open' AND $1::text IN ('canceled', 'expired')
 `
 
 type CloseOrderParams struct {
@@ -74,13 +74,13 @@ func (q *Queries) CloseOrder(ctx context.Context, arg CloseOrderParams) (int64, 
 const createOrder = `-- name: CreateOrder :exec
 
 INSERT INTO billing.orders (
-    merchant_id, id, customer_id, origin, status, currency, total,
+    merchant_id, id, customer_id, origin, status, payment_status, currency, total,
     idempotency_key, request_digest, expires_at, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::text,
-    $5::text, $6::text, $7::bigint,
-    $8::text, $9::bytea, $10::timestamptz,
-    $11::timestamptz, $11::timestamptz
+    'open', 'requires_payment_method', $5::text, $6::bigint,
+    $7::text, $8::bytea, $9::timestamptz,
+    $10::timestamptz, $10::timestamptz
 )
 `
 
@@ -89,7 +89,6 @@ type CreateOrderParams struct {
 	ID             uuid.UUID
 	CustomerID     uuid.UUID
 	Origin         string
-	Status         string
 	Currency       string
 	Total          int64
 	IdempotencyKey *string
@@ -105,7 +104,6 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) error 
 		arg.ID,
 		arg.CustomerID,
 		arg.Origin,
-		arg.Status,
 		arg.Currency,
 		arg.Total,
 		arg.IdempotencyKey,
@@ -281,7 +279,7 @@ func (q *Queries) EnqueueOrderHostEvent(ctx context.Context, arg EnqueueOrderHos
 }
 
 const getCustomerOrder = `-- name: GetCustomerOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, paid_at, canceled_at, expired_at, created_at, updated_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND id = $3::uuid
 `
 
@@ -311,17 +309,18 @@ func (q *Queries) GetCustomerOrder(ctx context.Context, arg GetCustomerOrderPara
 		&i.PaymentID,
 		&i.LastPaymentError,
 		&i.ExpiresAt,
-		&i.PaidAt,
+		&i.CompletedAt,
 		&i.CanceledAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentStatus,
 	)
 	return i, err
 }
 
 const getOrder = `-- name: GetOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, paid_at, canceled_at, expired_at, created_at, updated_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
@@ -350,11 +349,12 @@ func (q *Queries) GetOrder(ctx context.Context, arg GetOrderParams) (BillingOrde
 		&i.PaymentID,
 		&i.LastPaymentError,
 		&i.ExpiresAt,
-		&i.PaidAt,
+		&i.CompletedAt,
 		&i.CanceledAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentStatus,
 	)
 	return i, err
 }
@@ -403,7 +403,7 @@ func (q *Queries) GetOrderAttempt(ctx context.Context, arg GetOrderAttemptParams
 }
 
 const getOrderByIdempotencyKey = `-- name: GetOrderByIdempotencyKey :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, paid_at, canceled_at, expired_at, created_at, updated_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status FROM billing.orders
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND idempotency_key = $3::text
 `
@@ -434,11 +434,12 @@ func (q *Queries) GetOrderByIdempotencyKey(ctx context.Context, arg GetOrderById
 		&i.PaymentID,
 		&i.LastPaymentError,
 		&i.ExpiresAt,
-		&i.PaidAt,
+		&i.CompletedAt,
 		&i.CanceledAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentStatus,
 	)
 	return i, err
 }
@@ -580,7 +581,7 @@ func (q *Queries) HandOverOwnershipClaim(ctx context.Context, arg HandOverOwners
 
 const listExpiredOrders = `-- name: ListExpiredOrders :many
 SELECT id FROM billing.orders
-WHERE merchant_id = $1::uuid AND status IN ('open', 'requires_action')
+WHERE merchant_id = $1::uuid AND status = 'open'
   AND expires_at <= $2::timestamptz
 ORDER BY expires_at
 LIMIT $3::int
@@ -736,7 +737,7 @@ func (q *Queries) ListOrderLines(ctx context.Context, arg ListOrderLinesParams) 
 const listOrderSweepMerchants = `-- name: ListOrderSweepMerchants :many
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
-    WHERE status IN ('open', 'requires_action') AND expires_at <= $1::timestamptz
+    WHERE status = 'open' AND expires_at <= $1::timestamptz
     UNION
     SELECT merchant_id FROM billing.orders
     WHERE status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
@@ -774,7 +775,7 @@ func (q *Queries) ListOrderSweepMerchants(ctx context.Context, arg ListOrderSwee
 }
 
 const listOrdersByIDs = `-- name: ListOrdersByIDs :many
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, paid_at, canceled_at, expired_at, created_at, updated_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
 ORDER BY created_at DESC, id DESC
 `
@@ -811,11 +812,12 @@ func (q *Queries) ListOrdersByIDs(ctx context.Context, arg ListOrdersByIDsParams
 			&i.PaymentID,
 			&i.LastPaymentError,
 			&i.ExpiresAt,
-			&i.PaidAt,
+			&i.CompletedAt,
 			&i.CanceledAt,
 			&i.ExpiredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PaymentStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -828,7 +830,7 @@ func (q *Queries) ListOrdersByIDs(ctx context.Context, arg ListOrdersByIDsParams
 }
 
 const listOrdersPage = `-- name: ListOrdersPage :many
-SELECT o.merchant_id, o.id, o.customer_id, o.origin, o.status, o.currency, o.total, o.number, o.idempotency_key, o.request_digest, o.payment_method_id, o.psp_id, o.attempt_id, o.payment_id, o.last_payment_error, o.expires_at, o.paid_at, o.canceled_at, o.expired_at, o.created_at, o.updated_at FROM billing.orders o
+SELECT o.merchant_id, o.id, o.customer_id, o.origin, o.status, o.currency, o.total, o.number, o.idempotency_key, o.request_digest, o.payment_method_id, o.psp_id, o.attempt_id, o.payment_id, o.last_payment_error, o.expires_at, o.completed_at, o.canceled_at, o.expired_at, o.created_at, o.updated_at, o.payment_status FROM billing.orders o
 WHERE o.merchant_id = $1::uuid
   AND ($2::uuid IS NULL OR o.customer_id = $2::uuid)
   AND ($3::text IS NULL OR o.status = $3::text)
@@ -887,11 +889,12 @@ func (q *Queries) ListOrdersPage(ctx context.Context, arg ListOrdersPageParams) 
 			&i.PaymentID,
 			&i.LastPaymentError,
 			&i.ExpiresAt,
-			&i.PaidAt,
+			&i.CompletedAt,
 			&i.CanceledAt,
 			&i.ExpiredAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PaymentStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -945,7 +948,7 @@ func (q *Queries) ListOwnershipClaims(ctx context.Context, arg ListOwnershipClai
 }
 
 const lockOrder = `-- name: LockOrder :one
-SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, paid_at, canceled_at, expired_at, created_at, updated_at FROM billing.orders
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status FROM billing.orders
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -975,11 +978,12 @@ func (q *Queries) LockOrder(ctx context.Context, arg LockOrderParams) (BillingOr
 		&i.PaymentID,
 		&i.LastPaymentError,
 		&i.ExpiresAt,
-		&i.PaidAt,
+		&i.CompletedAt,
 		&i.CanceledAt,
 		&i.ExpiredAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentStatus,
 	)
 	return i, err
 }
@@ -1061,11 +1065,41 @@ func (q *Queries) SetOrderAttemptStatus(ctx context.Context, arg SetOrderAttempt
 	return result.RowsAffected(), nil
 }
 
+const setOrderComplete = `-- name: SetOrderComplete :execrows
+UPDATE billing.orders
+SET status = 'complete', payment_status = 'succeeded', number = $1::text, payment_id = $2::uuid,
+    completed_at = $3::timestamptz, last_payment_error = NULL, updated_at = $3::timestamptz
+WHERE merchant_id = $4::uuid AND id = $5::uuid AND status <> 'complete'
+`
+
+type SetOrderCompleteParams struct {
+	Number     string
+	PaymentID  *uuid.UUID
+	Now        time.Time
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) SetOrderComplete(ctx context.Context, arg SetOrderCompleteParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOrderComplete,
+		arg.Number,
+		arg.PaymentID,
+		arg.Now,
+		arg.MerchantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setOrderDeclined = `-- name: SetOrderDeclined :execrows
 UPDATE billing.orders
-SET status = 'open', last_payment_error = $1::jsonb, updated_at = $2::timestamptz
+SET status = 'open', payment_status = 'requires_payment_method', last_payment_error = $1::jsonb,
+    updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND attempt_id = $5::uuid AND status IN ('open', 'requires_action', 'processing')
+  AND attempt_id = $5::uuid AND status IN ('open', 'processing')
 `
 
 type SetOrderDeclinedParams struct {
@@ -1092,7 +1126,7 @@ func (q *Queries) SetOrderDeclined(ctx context.Context, arg SetOrderDeclinedPara
 
 const setOrderLatePayment = `-- name: SetOrderLatePayment :execrows
 UPDATE billing.orders
-SET payment_id = $1::uuid, updated_at = $2::timestamptz
+SET payment_id = $1::uuid, payment_status = 'succeeded', updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
   AND status IN ('canceled', 'expired') AND payment_id IS NULL
 `
@@ -1143,25 +1177,23 @@ func (q *Queries) SetOrderLineProduced(ctx context.Context, arg SetOrderLineProd
 	return err
 }
 
-const setOrderPaid = `-- name: SetOrderPaid :execrows
+const setOrderPaymentMethod = `-- name: SetOrderPaymentMethod :execrows
 UPDATE billing.orders
-SET status = 'paid', number = $1::text, payment_id = $2::uuid,
-    paid_at = $3::timestamptz, last_payment_error = NULL, updated_at = $3::timestamptz
-WHERE merchant_id = $4::uuid AND id = $5::uuid AND status <> 'paid'
+SET payment_method_id = $1::uuid, updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid
 `
 
-type SetOrderPaidParams struct {
-	Number     string
-	PaymentID  *uuid.UUID
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
+type SetOrderPaymentMethodParams struct {
+	PaymentMethodID uuid.UUID
+	Now             time.Time
+	MerchantID      uuid.UUID
+	ID              uuid.UUID
 }
 
-func (q *Queries) SetOrderPaid(ctx context.Context, arg SetOrderPaidParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setOrderPaid,
-		arg.Number,
-		arg.PaymentID,
+// The card a new card's charge saved, once it exists.
+func (q *Queries) SetOrderPaymentMethod(ctx context.Context, arg SetOrderPaymentMethodParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setOrderPaymentMethod,
+		arg.PaymentMethodID,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,
@@ -1174,24 +1206,27 @@ func (q *Queries) SetOrderPaid(ctx context.Context, arg SetOrderPaidParams) (int
 
 const setOrderPending = `-- name: SetOrderPending :execrows
 UPDATE billing.orders
-SET status = $1::text, updated_at = $2::timestamptz
+SET payment_status = $1::text,
+    status = CASE $1::text WHEN 'processing' THEN 'processing' ELSE 'open' END,
+    updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid
-  AND attempt_id = $5::uuid AND status IN ('open', 'requires_action', 'processing')
+  AND attempt_id = $5::uuid AND status IN ('open', 'processing')
   AND $1::text IN ('requires_action', 'processing')
 `
 
 type SetOrderPendingParams struct {
-	Status     string
-	Now        time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-	AttemptID  uuid.UUID
+	PaymentStatus string
+	Now           time.Time
+	MerchantID    uuid.UUID
+	ID            uuid.UUID
+	AttemptID     uuid.UUID
 }
 
-// The live attempt awaits the customer or the provider.
+// The live attempt awaits the customer (the order stays open) or the
+// provider (the order is processing).
 func (q *Queries) SetOrderPending(ctx context.Context, arg SetOrderPendingParams) (int64, error) {
 	result, err := q.db.Exec(ctx, setOrderPending,
-		arg.Status,
+		arg.PaymentStatus,
 		arg.Now,
 		arg.MerchantID,
 		arg.ID,
@@ -1205,9 +1240,9 @@ func (q *Queries) SetOrderPending(ctx context.Context, arg SetOrderPendingParams
 
 const startOrderAttempt = `-- name: StartOrderAttempt :execrows
 UPDATE billing.orders
-SET status = 'open', attempt_id = $1::uuid, payment_method_id = $2::uuid,
+SET payment_status = 'requires_payment_method', attempt_id = $1::uuid, payment_method_id = $2::uuid,
     psp_id = $3::uuid, last_payment_error = NULL, updated_at = $4::timestamptz
-WHERE merchant_id = $5::uuid AND id = $6::uuid AND status IN ('open', 'requires_action')
+WHERE merchant_id = $5::uuid AND id = $6::uuid AND status = 'open'
 `
 
 type StartOrderAttemptParams struct {
@@ -1219,7 +1254,7 @@ type StartOrderAttemptParams struct {
 	ID              uuid.UUID
 }
 
-// An attempt starts on an order that takes payment: open, or awaiting the
+// An attempt starts on an open order: one that takes payment, or awaits the
 // customer's action on an attempt that has since ended.
 func (q *Queries) StartOrderAttempt(ctx context.Context, arg StartOrderAttemptParams) (int64, error) {
 	result, err := q.db.Exec(ctx, startOrderAttempt,

@@ -6,20 +6,30 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// OrderStatus is where an order is in paying.
+// OrderStatus is where an order stands, as Stripe's Order: open (it takes
+// payment or awaits the customer's action), processing (the provider has its
+// payment), complete (paid and fulfilled), canceled or expired.
 type OrderStatus string
 
 const (
-	// OrderOpen takes payment; a declined attempt leaves it open with
-	// LastPaymentError.
-	OrderOpen OrderStatus = "open"
-	// OrderRequiresAction waits for the customer: NextAction says how.
-	OrderRequiresAction OrderStatus = "requires_action"
-	// OrderProcessing waits for the provider's outcome.
+	OrderOpen       OrderStatus = "open"
 	OrderProcessing OrderStatus = "processing"
-	OrderPaid       OrderStatus = "paid"
+	OrderComplete   OrderStatus = "complete"
 	OrderCanceled   OrderStatus = "canceled"
 	OrderExpired    OrderStatus = "expired"
+)
+
+// OrderPaymentStatus is where an order's payment stands, as a Stripe
+// PaymentIntent's: a decline returns it to requires_payment_method with
+// LastPaymentError.
+type OrderPaymentStatus string
+
+const (
+	OrderPaymentRequiresPaymentMethod OrderPaymentStatus = "requires_payment_method"
+	// OrderPaymentRequiresAction waits for the customer: NextAction says how.
+	OrderPaymentRequiresAction OrderPaymentStatus = "requires_action"
+	OrderPaymentProcessing     OrderPaymentStatus = "processing"
+	OrderPaymentSucceeded      OrderPaymentStatus = "succeeded"
 )
 
 // OrderOrigin says who created an order.
@@ -42,9 +52,18 @@ type OrderLineParams struct {
 	Quantity *int    `json:"quantity,omitempty"`
 }
 
-// OrderPayment names how to pay: a saved card of the customer's.
-type OrderPayment struct {
-	PaymentMethodID PaymentMethodID `json:"payment_method_id"`
+// OrderPaymentParams names how to pay: exactly one of a saved card
+// (PaymentMethodID) or a card just entered (Token).
+type OrderPaymentParams struct {
+	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
+	// Token is the single-use output of the PSP's own card fields: a Stripe
+	// pm_ from Elements, an NMI Collect.js payment_token. The card is saved and
+	// charged in the same call; the charge is its storing transaction.
+	Token string `json:"token,omitempty"`
+	// PSPID is the PSP whose fields made Token; optional while one payment
+	// option takes new cards.
+	PSPID          *PSPID          `json:"psp_id,omitempty"`
+	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 }
 
 // PreviewOrderParams prices lines without creating an order.
@@ -54,17 +73,21 @@ type PreviewOrderParams struct {
 
 // CreateOrderParams creates an order and, with Payment, pays it in the same
 // call. ExpectedTotal is required with Payment: a different total refuses
-// the order with order_total_changed.
+// the order with order_total_changed. Reusable keeps a new card for one-click
+// buys where that needs the customer's opt-in (billing or card country in the
+// EEA or the UK); elsewhere every new card is kept.
 type CreateOrderParams struct {
-	Lines         []OrderLineParams `json:"lines"`
-	ExpectedTotal *int64            `json:"expected_total,omitempty,string"`
-	Payment       *OrderPayment     `json:"payment,omitempty"`
+	Lines         []OrderLineParams   `json:"lines"`
+	ExpectedTotal *int64              `json:"expected_total,omitempty,string"`
+	Payment       *OrderPaymentParams `json:"payment,omitempty"`
+	Reusable      *bool               `json:"reusable,omitempty"`
 }
 
-// PayOrderParams pays an open order.
+// PayOrderParams pays an open order; Reusable as in CreateOrderParams.
 type PayOrderParams struct {
-	Payment       OrderPayment `json:"payment"`
-	ExpectedTotal int64        `json:"expected_total,string"`
+	Payment       OrderPaymentParams `json:"payment"`
+	ExpectedTotal int64              `json:"expected_total,string"`
+	Reusable      *bool              `json:"reusable,omitempty"`
 }
 
 // Order is one purchase: frozen lines and total. It is read and paid by its
@@ -74,25 +97,33 @@ type Order struct {
 	CustomerID CustomerID  `json:"customer_id"`
 	Origin     OrderOrigin `json:"origin"`
 	Status     OrderStatus `json:"status"`
-	// Number is the document number, given when the order is paid.
-	Number   *string     `json:"number"`
-	Currency string      `json:"currency"`
-	Total    int64       `json:"total,string"`
-	Lines    []OrderLine `json:"lines"`
-	// NextAction is what the customer completes while status is
+	// Number is the document number, given when the order completes.
+	Number   *string      `json:"number"`
+	Currency string       `json:"currency"`
+	Total    int64        `json:"total,string"`
+	Lines    []OrderLine  `json:"lines"`
+	Payment  OrderPayment `json:"payment"`
+	// PaymentOptions are the PSPs that can take this order while it is open.
+	PaymentOptions []OrderPaymentOption `json:"payment_options"`
+	ExpiresAt      time.Time            `json:"expires_at"`
+	CompletedAt    *time.Time           `json:"completed_at"`
+	CanceledAt     *time.Time           `json:"canceled_at"`
+	ExpiredAt      *time.Time           `json:"expired_at"`
+	CreatedAt      time.Time            `json:"created_at"`
+}
+
+// OrderPayment is an order's payment, as a Stripe PaymentIntent reads.
+type OrderPayment struct {
+	Status OrderPaymentStatus `json:"status"`
+	// NextAction is what the customer completes while Status is
 	// requires_action.
 	NextAction *NextAction `json:"next_action"`
-	// LastPaymentError is why the latest attempt was declined.
+	// LastPaymentError is why the latest attempt failed.
 	LastPaymentError *PaymentFailure `json:"last_payment_error"`
-	// PaymentOptions are the PSPs that can take this order while it is open.
-	PaymentOptions  []OrderPaymentOption `json:"payment_options"`
-	PaymentMethodID *PaymentMethodID     `json:"payment_method_id"`
-	PaymentID       *PaymentID           `json:"payment_id"`
-	ExpiresAt       time.Time            `json:"expires_at"`
-	PaidAt          *time.Time           `json:"paid_at"`
-	CanceledAt      *time.Time           `json:"canceled_at"`
-	ExpiredAt       *time.Time           `json:"expired_at"`
-	CreatedAt       time.Time            `json:"created_at"`
+	// PaymentMethodID is the card the latest attempt charged.
+	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
+	// PaymentID is the money that moved.
+	PaymentID *PaymentID `json:"payment_id"`
 }
 
 // OrderLine is one line of an order, and what paying it produced.

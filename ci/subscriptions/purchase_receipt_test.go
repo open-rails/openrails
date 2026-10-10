@@ -147,15 +147,16 @@ func TestOrderReceiptArrivesBySMTP(t *testing.T) {
 	card := c.saveCard("nmi", visa)
 	w.nmi.SetDecline(visa.Last4, "202")
 	declined := c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(25_000_000), "payment": map[string]any{"payment_method_id": card}})
-	require.Equal(t, "open", declined.body["status"], "%v", declined.body)
+	require.Equal(t, http.StatusPaymentRequired, declined.status, "%v", declined.body)
+	require.Equal(t, "open", orderOf(declined)["status"], "%v", declined.body)
 	w.mailSettled()
 	require.Empty(t, srv.Messages(), "a declined charge has no receipt")
 
 	good := c.saveCard("nmi", mastercard)
-	id, key := declined.body["id"].(string), "pay-"+uuid.NewString()
+	id, key := orderOf(declined)["id"].(string), "pay-"+uuid.NewString()
 	body := map[string]any{"payment": map[string]any{"payment_method_id": good}, "expected_total": micros(25_000_000)}
 	paid := c.order(http.MethodPost, "/orders/"+id+"/pay", key, body)
-	require.Equal(t, "paid", paid.body["status"], "%v", paid.body)
+	require.Equal(t, "complete", paid.body["status"], "%v", paid.body)
 	number := paid.body["number"].(string)
 
 	m := srv.Wait(t, 1, 20*time.Second)[0]

@@ -27,6 +27,9 @@ type StripePaymentMethodState struct {
 	CustomerID  string
 	Card        *models.Card
 	Fingerprint string
+	// CardCountry is the issuing country; BillingCountry the billing
+	// address's (ISO 3166-1 alpha-2, "" unknown).
+	CardCountry, BillingCountry string
 }
 
 // StripeSubscriptionPaymentState is the effective card selection for one
@@ -216,9 +219,14 @@ func (r *HTTPStripePaymentStateReader) listSubscriptions(ctx context.Context, cu
 // ParseStripePaymentMethodState reads a Stripe PaymentMethod body.
 func ParseStripePaymentMethodState(body []byte) (*StripePaymentMethodState, error) {
 	var paymentMethod struct {
-		ID       string            `json:"id"`
-		Customer json.RawMessage   `json:"customer"`
-		Card     StripeCardDetails `json:"card"`
+		ID             string            `json:"id"`
+		Customer       json.RawMessage   `json:"customer"`
+		Card           StripeCardDetails `json:"card"`
+		BillingDetails struct {
+			Address struct {
+				Country string `json:"country"`
+			} `json:"address"`
+		} `json:"billing_details"`
 	}
 	if err := json.Unmarshal(body, &paymentMethod); err != nil {
 		return nil, err
@@ -232,6 +240,7 @@ func ParseStripePaymentMethodState(body []byte) (*StripePaymentMethodState, erro
 		CustomerID:  stripeObjectID(paymentMethod.Customer),
 		Card:        NormalizeStripeCard(paymentMethod.Card),
 		Fingerprint: strings.TrimSpace(paymentMethod.Card.Fingerprint),
+		CardCountry: strings.ToUpper(strings.TrimSpace(paymentMethod.Card.Country)), BillingCountry: strings.ToUpper(strings.TrimSpace(paymentMethod.BillingDetails.Address.Country)),
 	}, nil
 }
 
