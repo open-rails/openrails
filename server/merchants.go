@@ -39,7 +39,7 @@ func (s *Server) RestoreMerchant(ctx context.Context, id billing.MerchantID) (*b
 }
 
 // RenameMerchant renames an active merchant; its former name forwards to it
-// under Config.Auth.Naming. With req.ActorUserID, the user renaming their
+// under Config.Naming. With req.ActorUserID, the user renaming their
 // own merchant, the name also answers to Config.MerchantCreation's reserved
 // names and pattern and to the rename interval (*billing.MerchantRenameTooSoonError).
 func (s *Server) RenameMerchant(ctx context.Context, id billing.MerchantID, req billing.RenameMerchantParams) (*billing.MerchantName, error) {

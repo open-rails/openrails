@@ -12,6 +12,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/server"
 )
@@ -34,7 +35,7 @@ func TestAuthKitLimits(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			edit := func(cfg *server.Config, _ *server.Deps) {
-				cfg.AuthRateLimits = map[string]server.AuthRateLimit{"password_login": {Limit: 3, Window: time.Hour}}
+				cfg.Auth.HTTP.RateLimits = map[string]authkit.RateLimit{"password_login": {Limit: 3, Window: time.Hour}}
 				if tc.redis != "" {
 					cfg.Engine.Redis = &openrails.RedisConfig{Addr: tc.redis}
 				}

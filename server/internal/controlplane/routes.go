@@ -3,6 +3,7 @@ package controlplane
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 
 	"github.com/open-rails/authkit/iam"
@@ -27,15 +28,25 @@ var registrationRouteGroups = []iam.RouteGroup{
 	iam.RoutePermissionGroups, iam.RouteDeviceKeys,
 }
 
-// MountedRouteGroups is the explicit list of AuthKit route groups this control
-// plane mounts (a nil list would mount AuthKit's default surface plus browser
-// OIDC).
-func (c *ControlPlane) MountedRouteGroups() []iam.RouteGroup {
-	if !c.registers() {
-		return append([]iam.RouteGroup(nil), IntentionalRouteGroups...)
+// routeGroups is the explicit list of AuthKit route groups a control plane
+// with mode mounts when auth.http.groups names none (a nil list would mount
+// AuthKit's default surface plus browser OIDC). A resource server also
+// serves its trusted issuers: the token endpoint their applications'
+// assertions are redeemed at (RFC 7523) and the directory they push users
+// to (SCIM).
+func routeGroups(mode iam.RegistrationMode, resource bool) []iam.RouteGroup {
+	out := append([]iam.RouteGroup(nil), IntentionalRouteGroups...)
+	if mode != "" && mode != iam.RegistrationModeClosed {
+		out = append([]iam.RouteGroup(nil), registrationRouteGroups...)
 	}
-	return append([]iam.RouteGroup(nil), registrationRouteGroups...)
+	if resource {
+		out = append(out, trustedIssuerRouteGroups...)
+	}
+	return out
 }
+
+// trustedIssuerRouteGroups serve a resource server's trusted issuers.
+var trustedIssuerRouteGroups = []iam.RouteGroup{iam.RouteAuthorizationServer, iam.RouteSCIM}
 
 // AuthKit's routes live beneath the issuer's path, AuthKit's base path, or
 // beneath /auth when the issuer is an origin. JWKS is served at the issuer
@@ -82,14 +93,14 @@ func (c *ControlPlane) AuthAPIBase() string {
 
 // AuthRoutes is the mounted AuthKit route catalog, each served by AuthHandler.
 // A GET route's pattern also serves HEAD. Without local sign-in only the
-// issuer's JWKS is served.
+// issuer's JWKS and what trusted issuers call are served.
 func (c *ControlPlane) AuthRoutes() []iam.Route {
 	if c == nil || c.client == nil {
 		return nil
 	}
 	var out []iam.Route
 	for _, route := range c.client.Routes() {
-		if route.Method == http.MethodHead || (!c.localSignIn && !strings.HasSuffix(route.Path, iam.JWKSPath)) {
+		if route.Method == http.MethodHead || (!c.localSignIn && !strings.HasSuffix(route.Path, iam.JWKSPath) && !slices.Contains(trustedIssuerRouteGroups, route.Group)) {
 			continue
 		}
 		out = append(out, route)

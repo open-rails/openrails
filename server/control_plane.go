@@ -2,35 +2,18 @@ package server
 
 import (
 	"context"
-	"errors"
-	"net/http"
-	"strings"
 
 	"github.com/open-rails/authkit/iam"
-	helpersauth "github.com/open-rails/helpers/auth"
-
-	"github.com/open-rails/openrails"
+	"github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/staffperm"
+	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
 // Control-plane operations, for hosted products: merchant provisioning, the
-// user's merchants and authority, fleet aggregates and retirement.
-
-// AuthenticateUser verifies a session of the server's own accounts on r.
-func (s *Server) AuthenticateUser(r *http.Request) (openrails.Identity, error) {
-	authenticator := s.cp.UserAuthenticator()
-	if authenticator == nil {
-		return openrails.Identity{}, openrails.ErrUnauthenticated
-	}
-	user, err := authenticator.Authenticate(r.Context(), r)
-	if err != nil {
-		return openrails.Identity{}, err
-	}
-	return s.identity(user.UserID, user.SessionID, user.Email, user.Username, user.EmailVerified)
-}
+// AuthKit scope each merchant is, fleet aggregates and retirement. Who a
+// request is, and what it may do, is AuthKit's: AuthKit().Authenticator().
 
 // ProvisionMerchant returns the merchant a name resolves to, or creates one
 // claiming it, bound to a new merchant permission group owned by
@@ -54,39 +37,12 @@ func (s *Server) ListMerchantsForSubject(ctx context.Context, subject string) ([
 	return operator.ListMerchantsForSubject(ctx, s.cp, subject)
 }
 
-// ListUserMerchants returns the live merchants the user r authenticates as
-// may act on, with their role there: by a session of the server's accounts,
-// the merchants they hold a role in (the sign-in checked live); by a trusted
-// issuer's access token, the merchants it reaches. Customer relationships
-// are a separate listing.
-func (s *Server) ListUserMerchants(ctx context.Context, r *http.Request) ([]billing.UserMerchant, error) {
-	if r == nil {
-		return nil, openrails.ErrUnauthenticated
-	}
-	if fields := strings.Fields(r.Header.Get("Authorization")); len(fields) == 2 && credential.LooksLikeResourceToken(fields[1]) {
-		user, err := s.cp.ResolveResourceUser(r.WithContext(ctx))
-		if err != nil {
-			return nil, err
-		}
-		return user.Merchants, nil
-	}
-	core := s.cp.Core()
-	claims, err := core.VerifyRequest(r.WithContext(ctx))
-	if err != nil {
-		return nil, err
-	}
-	if !claims.IsUser() || claims.IsResourceToken() {
-		return nil, openrails.ErrUnauthenticated
-	}
-	// Listing memberships takes a user ID, unlike Can's session-bound identity.
-	// Check the verified session explicitly before crossing that boundary.
-	if err := core.CheckSession(ctx, claims); err != nil {
-		if errors.Is(err, iam.ErrSessionRevoked) {
-			err = errors.Join(err, helpersauth.ErrRevoked)
-		}
-		return nil, err
-	}
-	return s.cp.ListUserMerchants(ctx, claims.UserID)
+// ListUserMerchants returns the live merchants the server's user userID
+// holds a role in, with that role and its permissions: a hosted product's
+// merchant list for a user AuthKit authenticated. Customer relationships are
+// a separate listing.
+func (s *Server) ListUserMerchants(ctx context.Context, userID string) ([]billing.UserMerchant, error) {
+	return s.cp.ListUserMerchants(ctx, userID)
 }
 
 // ListActiveMerchantIDs pages the live merchants, newest first, for host
@@ -114,25 +70,26 @@ const (
 	MerchantEventsRead       = staffperm.EventsRead
 )
 
-// ResolveAuthorizedMerchant captures the merchant behind ref (the user's sole
-// merchant when empty), then checks live that the user r authenticates as
-// holds permission on it (one of the Merchant* permissions). The
-// slug is display metadata; carry the ID.
-func (s *Server) ResolveAuthorizedMerchant(ctx context.Context, r *http.Request, ref, permission string) (billing.MerchantID, string, error) {
-	return s.cp.ResolveAuthorizedMerchant(ctx, r, ref, permission)
+// MerchantRoles are the roles a merchant's team members and API keys hold
+// in its AuthKit group, least privilege first: viewer, support, owner.
+func MerchantRoles() []iam.Role { return controlplane.MerchantRoles() }
+
+// MerchantRole is the merchant role named name ("viewer").
+func MerchantRole(name string) (iam.Role, bool) { return controlplane.MerchantRole(name) }
+
+// MerchantScope is where merchant id's staff and credentials hold their
+// permissions: its AuthKit group, whose id is the merchant's. A hosted
+// product asks a request's AuthKit Verified Can(scope, MerchantBillingRead) there.
+// billing.ErrMerchantUnresolved when the merchant is not live.
+func (s *Server) MerchantScope(ctx context.Context, id billing.MerchantID) (auth.Scope, error) {
+	return s.cp.MerchantScope(ctx, id)
 }
 
-// ResolveMerchantForGroup captures the merchant ID and canonical slug behind a
-// group reference, without an authority check.
-func (s *Server) ResolveMerchantForGroup(ctx context.Context, ref string) (billing.MerchantID, string, error) {
-	return s.cp.ResolveMerchantForGroup(ctx, ref)
-}
-
-// HasRootPermission checks live whether the user r authenticates as holds
-// permission in the root group (billing.RootMerchantsRead and the other
-// root: permissions), for a hosted product's operator pages.
-func (s *Server) HasRootPermission(ctx context.Context, r *http.Request, permission string) (bool, error) {
-	return s.cp.HasRootPermission(ctx, r, permission)
+// MerchantByName is the live merchant a current or former name resolves to,
+// with its current name, without an authority check.
+// billing.ErrMerchantUnresolved for none.
+func (s *Server) MerchantByName(ctx context.Context, name string) (billing.MerchantID, string, error) {
+	return s.cp.MerchantByName(ctx, name)
 }
 
 // EnsureCustomerPermissionGroup idempotently creates the customer's portal

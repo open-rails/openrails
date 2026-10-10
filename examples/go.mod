@@ -5,8 +5,8 @@ go 1.26.9
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.17.0
-	github.com/open-rails/helpers v1.6.0
+	github.com/open-rails/authkit v1.18.0
+	github.com/open-rails/helpers v1.7.0
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.37.0

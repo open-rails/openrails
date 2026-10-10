@@ -9,11 +9,11 @@ OAuth issuer the server trusts. The walkthrough is the root README's
 
 | File | What it is |
 |---|---|
-| `main.go` | the app's AuthKit (users verify their email; it mints the browser's and the backend's tokens for the server and pushes users to it over SCIM) and the billing client, `NewRemote` |
+| `main.go` | the app's AuthKit (users verify their email; it mints the browser's and the backend's tokens for the server and pushes users to the server's AuthKit over SCIM) and the billing client, `NewRemote` |
 | `content.go`, `web/src/pages.tsx`, `catalog.yaml`, `media/` | the embedded example's, unchanged |
 | `web/src/clients.ts` | the browser's clients: AuthKit's, which trades the session for a DPoP-bound token to the server, and billing-ui's, which calls the server directly with it |
-| `openrails/config.yaml` | the server's configuration: database, Redis, its own AuthKit, the trusted issuer, route groups, SMTP |
-| `openrails/merchant.example.yaml` | the merchant the server serves and its NMI PSP; copy it to `merchant.yaml` |
+| `openrails/config.yaml` | the server's configuration: database, Redis, its own AuthKit (a resource server), route groups, SMTP |
+| `openrails/merchant.example.yaml` | the merchant the server serves, the app's AuthKit as its trusted issuer, and its NMI PSP; copy it to `merchant.yaml` |
 | `compose.yaml` | the stack: PostgreSQL, Redis, Mailpit, the server, a one-shot `apply-catalog`, and the app |
 | `compose.e2e.yaml`, `e2e-seed.mjs` | the same stack with NMI played by the server's fake gateway, running `web/e2e` in a browser |
 | `Dockerfile`, `postgres-init.sql` | the app's image; the app's database beside the server's |
@@ -60,9 +60,9 @@ in memory), applies the catalog with
 - `TestGatedContent`, `TestCourseList`, `TestMediaURLs`: the embedded
   example's, with each purchase made at the server with a DPoP-bound token,
   as billing-ui does.
-- `TestServerSetup`: a user who signs up and proves their email reaches the
-  server over SCIM with it; the backend's read-only token reads them and is
-  refused a write; their purchase emails a receipt; a signed NMI webhook is
+- `TestServerSetup`: a user who signs up and proves their email buys and is
+  emailed a receipt; the backend's read-only token reads them, with the email
+  AuthKit pushed over SCIM, and is refused a write; a signed NMI webhook is
   accepted and a forged one refused.
 - `TestBrowser`: `web/e2e` in Chromium against the app and the server.
 

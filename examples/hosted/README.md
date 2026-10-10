@@ -14,14 +14,16 @@ app code they share is [Sell Your Content](../../README.md#sell-your-content).
 ## Run it
 
 Connect the app to your merchant first (the root README's walkthrough): its
-API host, the platform's resource identifier, a service token, and this
-app's AuthKit registered as the merchant's signing application. Then
+API host, the platform's resource identifier, this app's AuthKit registered
+as the merchant's signing application, a service token bound to that
+registration, and the platform's directory for its users. Then
 
 ```sh
 (cd web && pnpm install && pnpm build)
 DATABASE_URL=postgres://… EMAIL_SMTP_HOST=… \
 OPENRAILS_API_HOST=https://api.onlydemo.openrails.dev OPENRAILS_RESOURCE=https://openrails.dev \
-OPENRAILS_SERVICE_TOKEN=openrails_st_… PUBLIC_URL=https://courses.example go run .
+OPENRAILS_SERVICE_TOKEN=openrails_st_… OPENRAILS_DIRECTORY=https://openrails.dev/directory/scim/v2 \
+PUBLIC_URL=https://courses.example go run .
 ```
 
 AuthKit keeps its signing key in `AUTH_KEYS_PATH` (default `.dev/auth`): the
@@ -31,7 +33,7 @@ platform trusts that key, so keep it across restarts.
 
 `go test -tags integration .` against a platform this app is connected to,
 with `OPENRAILS_E2E_DSN` naming a PostgreSQL 18 server for the app's own
-database and `OPENRAILS_HOSTED_API_HOST`, `_RESOURCE`, `_SERVICE_TOKEN`,
+database and `OPENRAILS_HOSTED_API_HOST`, `_RESOURCE`, `_SERVICE_TOKEN`, `_DIRECTORY`,
 `_APP_URL` (the issuer the platform registered), `_KEYS` (its signing key),
 `_MAILPIT` and `_SMTP_PORT` (the inbox the app's and the platform's mail
 reach). The tests are the standalone example's, run at the platform:

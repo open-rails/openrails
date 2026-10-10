@@ -43,7 +43,7 @@ services:
     command: [run-server, --config, /etc/openrails/config.yaml, --merchant-manifest, /etc/openrails/merchant.yaml]
     volumes:
       - ./openrails:/etc/openrails:ro
-      - openrails-keys:/vault/auth # the server's signing key (auth.keys_path)
+      - openrails-keys:/vault/auth # the server's signing key (auth.keys.path)
     ports:
       - 127.0.0.1:3053:3053 # the server
       - 127.0.0.1:8080:8080 # the app, in this network namespace

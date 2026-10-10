@@ -12,7 +12,7 @@ import (
 // and must be able to act without the source.
 func TestRetiredConfigFamiliesRefuseBoot(t *testing.T) {
 	const issuers = "auth.issuers / auth.expected_audience config was removed (#521/#527): declare each merchant's host-app trust under merchants[].remote_application in the merchant config manifest; delete the keys and AUTH_ISSUERS / AUTH_EXPECTED_AUDIENCE env vars"
-	const controlPlane = "auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars"
+	const controlPlane = "auth.control_plane config was removed (#521): use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars"
 	for _, row := range []struct {
 		env, value, yaml, want string
 	}{
@@ -69,6 +69,9 @@ func TestRetiredAndUnknownInputsRefuseBoot(t *testing.T) {
 		{"CLICKHOUSE_HTTP_ADDR", "http://ch.example:8123", []string{"clickhouse config was removed (#735)"}},
 		{"DB_TYPO_FIELD", "x", []string{"unknown keys refuse boot", "typo_field"}},
 		{"CATALOG_RECONCILIATION_INTERVAL", "30minutes", []string{"catalog_reconciliation_interval"}},
+		{"AUTH_ISSUER", "https://x", []string{"auth.issuer was removed (#1185)", "auth.token.issuer"}},
+		{"AUTH_REQUEST_ORIGIN", "https://x", []string{"auth.resource.public_url"}},
+		{"AUTHKIT_KEYS_PATH", "/vault/auth", []string{"AUTH_KEYS_PATH"}},
 	} {
 		t.Run("env "+row.env, func(t *testing.T) {
 			bootEnv(t)
@@ -105,6 +108,8 @@ func TestRetiredAndUnknownInputsRefuseBoot(t *testing.T) {
 		"clickhouse:\n  addr: x\n":                  "clickhouse config was removed",
 		"merchant_cors:\n  - https://a.test\n":      "merchant_cors was removed",
 		"auth:\n  control_plane:\n    enabled: 1\n": "auth.control_plane.enabled was removed",
+		"auth:\n  mint_disabled: true\n":            "auth.keys.verify_only",
+		"resource_server:\n  identifier: x\n":       "auth.resource",
 	} {
 		t.Run("yaml "+yaml, func(t *testing.T) {
 			bootEnv(t)

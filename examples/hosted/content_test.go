@@ -255,7 +255,7 @@ func startStack(t *testing.T) *stack {
 	require.NoError(t, err)
 	s := settings{
 		PublicURL: env("APP_URL"), APIHost: env("API_HOST"), Merchant: cmpOr(env("MERCHANT"), "onlydemo"),
-		Resource: env("RESOURCE"), ServiceToken: env("SERVICE_TOKEN"), SCIMInterval: time.Second, KeysPath: env("KEYS"),
+		Resource: env("RESOURCE"), ServiceToken: env("SERVICE_TOKEN"), Directory: env("DIRECTORY"), SCIMInterval: time.Second, KeysPath: env("KEYS"),
 		SMTP: smtp.Server{Host: inbox.Hostname(), Port: smtpPort, From: "OnlyDemo <hello@onlydemo.example>"},
 	}
 	db, err := pgxpool.New(ctx, freshDatabase(t, dsn))

@@ -31,19 +31,15 @@ import (
 type Dependencies struct {
 	Config  *config.Config
 	Runtime *app.Runtime
-	// Authenticator is the framework-neutral auth boundary; billingauth.Optional
-	// wraps it as the best-effort global middleware (#282/#670).
-	Authenticator billingauth.SessionAuthenticator
 	// ControlPlane is the standalone server's control plane over its own
-	// AuthKit. Required: the server selectively mounts the intentional AuthKit
-	// route groups (never DefaultAPI in locked-down mode).
+	// AuthKit, whose Authenticator says who every request is. Required: the
+	// server selectively mounts the intentional AuthKit route groups (never
+	// DefaultAPI in locked-down mode).
 	ControlPlane *controlplane.ControlPlane
-	// Issuer is the control plane's issuer: its users' and API keys'.
-	Issuer string
-	// ResourceServer is the trusted issuers the admin API accepts, and
-	// ConsoleIssuer the one of them the admin console signs staff in at.
-	ResourceServer *hostconfig.ResourceServerConfig
-	ConsoleIssuer  *hostconfig.ConsoleIssuer
+	// Resource is AuthKit's resource identifier, and ConsoleIssuer the
+	// trusted issuer the admin console signs staff in at.
+	Resource      string
+	ConsoleIssuer *hostconfig.ConsoleIssuer
 	// ConsoleAssets is the built admin console SPA (#754: the engine ships no
 	// frontend bytes; whoever builds the binary owns the embed). nil = absent.
 	// The console mounts only when this is present AND admin_console.enabled;
@@ -60,19 +56,14 @@ type Server struct {
 	runtime *app.Runtime
 	// draining fails readiness while the process stops (Drain).
 	draining atomic.Bool
-	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
-	// there is no gin auth provider any more; every surface uses this directly).
-	authenticator billingauth.SessionAuthenticator
-	controlPlane  *controlplane.ControlPlane
-	issuer        string
-	// resourceServer and consoleIssuer are Dependencies'.
-	resourceServer *hostconfig.ResourceServerConfig
-	consoleIssuer  *hostconfig.ConsoleIssuer
-	// customerResolver replaces the control plane's openrails:self token
-	// verification (tests).
-	customerResolver httproutes.ResourceCustomerResolver
-	captchaStore     *captcha.ChallengeStore
-	adminLimiter     *middleware.AdminOperationLimiter
+	// auth is AuthKit's Authenticator: who every request is.
+	auth         billingauth.Authenticator
+	controlPlane *controlplane.ControlPlane
+	// resource and consoleIssuer are Dependencies'.
+	resource      string
+	consoleIssuer *hostconfig.ConsoleIssuer
+	captchaStore  *captcha.ChallengeStore
+	adminLimiter  *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
 	adminConsole  *config.ConsoleMount
@@ -87,15 +78,11 @@ type Server struct {
 	// (#469: the control plane is mandatory on this surface).
 	merchants *merchants.Service
 
-	// browserTierRoutes tracks which registered patterns belong to the
-	// permissive-CORS browser tier (#765: checkout + self-service)
-	// — populated as registerUserRoutesAt/
-	// registerSelfServiceRoutes mount their routes, consulted by
-	// wrapPublicHandler's PermissiveCORSHTTP. Never nil once New() has run.
+	// browserTierRoutes tracks which registered patterns get the static
+	// permissive CORS policy (#765): every API route a browser calls with a
+	// bearer credential, the admin API's included. Never nil once New() has
+	// run.
 	browserTierRoutes *middleware.BrowserTierRoutes
-	// merchantTierRoutes are the admin API's patterns, which trusted
-	// issuers' origins may call cross-origin (#1140).
-	merchantTierRoutes *middleware.BrowserTierRoutes
 
 	// publicHandler is the single "full surface" HTTP handler: health + user +
 	// self/customer + merchant + control-plane auth + webhook routes AND the
@@ -133,21 +120,6 @@ func (s *Server) recordBrowserRoute(pattern string) {
 		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
 	}
 	s.browserTierRoutes.Add(pattern)
-}
-
-// recordMerchantRoute is recordRoute for a admin API route: trusted
-// issuers' origins may call it cross-origin (#1140).
-func (s *Server) recordMerchantRoute(pattern string) {
-	s.recordRoute(pattern)
-	if s.merchantTierRoutes == nil {
-		s.merchantTierRoutes = middleware.NewBrowserTierRoutes()
-	}
-	s.merchantTierRoutes.Add(pattern)
-}
-
-// allowedIssuerOrigin reports whether a trusted issuer declared origin.
-func (s *Server) allowedIssuerOrigin(origin string) bool {
-	return s != nil && s.controlPlane != nil && s.controlPlane.AllowedOrigin(origin)
 }
 
 // RouteTable returns the registered route surface (guard tests).
@@ -224,10 +196,7 @@ func New(deps Dependencies) (*Server, error) {
 	if deps.Runtime.RiverProducer == nil {
 		return nil, fmt.Errorf("server runtime river producer is required")
 	}
-	if deps.Authenticator == nil {
-		return nil, fmt.Errorf("authenticator is required")
-	}
-	if deps.ControlPlane == nil {
+	if deps.ControlPlane == nil || deps.ControlPlane.Core() == nil {
 		return nil, fmt.Errorf("control plane is required")
 	}
 	if deps.ControlPlane.Pool() == nil {
@@ -235,21 +204,19 @@ func New(deps Dependencies) (*Server, error) {
 	}
 
 	s := &Server{
-		cfg:                deps.Config,
-		runtime:            deps.Runtime,
-		authenticator:      deps.Authenticator,
-		controlPlane:       deps.ControlPlane,
-		issuer:             deps.Issuer,
-		resourceServer:     deps.ResourceServer,
-		consoleIssuer:      deps.ConsoleIssuer,
-		captchaStore:       deps.Runtime.CaptchaStore,
-		adminLimiter:       middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
-		consoleAssets:      deps.ConsoleAssets,
-		adminConsole:       deps.AdminConsole,
-		groups:             deps.RouteGroups,
-		permissions:        permissionsFor(deps.RouteGroups),
-		browserTierRoutes:  middleware.NewBrowserTierRoutes(),
-		merchantTierRoutes: middleware.NewBrowserTierRoutes(),
+		cfg:               deps.Config,
+		runtime:           deps.Runtime,
+		auth:              deps.ControlPlane.Core().Authenticator(),
+		controlPlane:      deps.ControlPlane,
+		resource:          deps.Resource,
+		consoleIssuer:     deps.ConsoleIssuer,
+		captchaStore:      deps.Runtime.CaptchaStore,
+		adminLimiter:      middleware.NewAdminOperationLimiter(deps.Runtime.AbuseState),
+		consoleAssets:     deps.ConsoleAssets,
+		adminConsole:      deps.AdminConsole,
+		groups:            deps.RouteGroups,
+		permissions:       permissionsFor(deps.RouteGroups),
+		browserTierRoutes: middleware.NewBrowserTierRoutes(),
 	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
@@ -365,19 +332,13 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		middleware.RecoverHTTP(),
 		middleware.RequestLogHTTP("/health/live", "/health/ready"),
 		middleware.SecurityHeadersHTTP(),
-		// CORS is browser transport policy, not API authorization; real request
-		// security is always JWT signature/issuer/audience/permissions plus
-		// merchant ownership, which a browser preflight can't even carry (no
-		// JWT on OPTIONS). #765: since every accepted request is a bearer JWT
-		// (never an ambient cookie), an origin allow-list protects nothing —
-		// a stolen token is replayed from curl, where CORS doesn't exist — so
-		// the policy is a static, non-configurable `*` grant on exactly the
-		// browser-tier routes (checkout + self-service,
-		// tracked in browserTierRoutes as they register) and NO CORS headers
-		// anywhere else (admin/platform/merchant-API/webhooks/auth), so a
-		// browser refuses cross-origin script access to those by default.
-		middleware.PermissiveCORSHTTP(browser),
-		middleware.IssuerOriginCORSHTTP(func(r *http.Request) bool { return s.merchantTierRoutes.Match(r) }, s.allowedIssuerOrigin),
+		// CORS is browser transport policy, not API authorization (#765):
+		// every accepted request carries a bearer credential, never an
+		// ambient cookie, so an origin allow-list protects nothing. The API
+		// routes get a static `*` grant without credentials, with the
+		// headers AuthKit's credentials travel in; webhooks, AuthKit's own
+		// routes and the console get none.
+		middleware.PermissiveCORSHTTP(browser, s.auth),
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 		s.billingCredentialsHTTP,
 		// Resolve the merchant / billing namespace before authorization and before any
@@ -393,36 +354,8 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		// is authoritative over any process-wide configured merchant. A Host with no
 		// api_host configured for any merchant is a no-op — behavior is unchanged.
 		middleware.ResolveMerchantFromHostHTTP(s.hostMerchantResolver),
-		// Best-effort auth so the rate limiter can key by user, not only IP.
-		middleware.HTTPMiddleware(billingauth.Optional(s.authenticator)),
 		limiter,
 	)
-}
-
-// staffAuth is the standalone server's Authenticator for the admin API and
-// the programmatic routes: its API keys, trusted issuers' access tokens and
-// control-plane users' sessions (AuthKit's Authenticator).
-func (s *Server) staffAuth() *httproutes.StandaloneAuth {
-	auth := &httproutes.StandaloneAuth{Issuer: s.issuer}
-	if s.controlPlane != nil {
-		auth.ResourceTokenResolver, auth.ServiceCredentialResolver, auth.Directory = s.controlPlane, s.controlPlane, s.controlPlane
-		if core := s.controlPlane.Core(); core != nil {
-			auth.Sessions = core.Authenticator()
-		}
-	}
-	return auth
-}
-
-// customerAuth is the standalone server's Authenticator for /v1/me: trusted
-// issuers' openrails:self access tokens.
-func (s *Server) customerAuth() httproutes.StandaloneCustomers {
-	if s.customerResolver != nil {
-		return httproutes.StandaloneCustomers{Resolver: s.customerResolver}
-	}
-	if s.controlPlane == nil {
-		return httproutes.StandaloneCustomers{}
-	}
-	return httproutes.StandaloneCustomers{Resolver: s.controlPlane}
 }
 
 // hostMerchantResolver is the standalone #734 Host->merchant resolver: the

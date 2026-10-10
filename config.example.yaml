@@ -51,40 +51,40 @@ redis:
   # ca_cert: |          # PEM CA bundle; implies TLS (env REDIS_CA_CERT)
   #   -----BEGIN CERTIFICATE-----
 
+# The server's AuthKit: its own configuration, by AuthKit's keys
+# (github.com/open-rails/authkit). It decides who every request is: the
+# server's own accounts and API keys, and the access tokens trusted issuers
+# mint for auth.resource.id. Env AUTH_<KEY> sets auth.<key> (AUTH_TOKEN_ISSUER,
+# AUTH_SIGN_IN_DPOP).
 auth:
-  allow_loopback_http: true # explicit local issuer exception
-  allow_missing_senders: true # no email delivery in this local example
-  allow_ephemeral_signing_key: true # disposable local signing key
-  request_origin: http://localhost:3053 # public HTTP origin, no billing mount path
-  issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
-  # Declare only when AuthKit receives direct client connections.
-  # Behind proxies, configure top-level trusted_proxies instead.
-  direct_peer_ip: true
-  # schema: profiles # the server's AuthKit tables; defaults to 'profiles' (env AUTH_SCHEMA)
-  # Site naming policy for merchant names and usernames (shown defaults).
-  naming:
-    enabled: true
-    rename_interval: 72h
-    former_names:
-      mode: finite # finite | forever | immediate; omit duration for the latter two
-      duration: 2160h # 90 days
-  # signing keys are loaded by AuthKit from env or <keys_path>/keys.json
-  # (default /vault/auth); allow_ephemeral_signing_key generates development
-  # keys.json and totp.key there
+  token:
+    issuer: http://localhost:3053 # issuer URL; JWKS is served under this authority
+  keys:
+    allow_ephemeral_dev_keys: true # disposable local signing key; else keys.path or AUTHKIT_ACTIVE_PRIVATE_KEY_PEM
+  registration:
+    allow_missing_senders: true # no email delivery in this local example
+  http:
+    # Declare only when AuthKit receives direct client connections. Behind
+    # proxies, the top-level trusted_proxies apply.
+    direct_peer_ip: true
+  # database:
+  #   schema: profiles # the server's AuthKit tables
+  # Accept the RFC 9068 access tokens trusted issuers mint for this
+  # deployment: their users call the API directly. Each merchant's trusted
+  # issuers are AuthKit remote applications in its group.
+  # resource:
+  #   id: https://openrails.example.com # the tokens' aud
+  # sign_in:
+  #   dpop: optional # optional | required: how this instance issues tokens to its own users
 
-# Access tokens (RFC 9068 at+jwt) that your identity provider mints for this
-# deployment: its users call the admin API directly, and OpenRails holds no
-# accounts for them. Permissions come from the token, within the ceiling.
-# resource_server:
-#   identifier: https://openrails.example.com  # the tokens' aud
-#   dpop_nonce_key: ""        # >= 32 bytes, same on every replica; env RESOURCE_SERVER_DPOP_NONCE_KEY
-#   trusted_issuers:
-#     - name: example
-#       issuer: https://example.com/auth      # exact iss; keys from <issuer>/.well-known/jwks.json
-#       merchants: [example]                  # the merchants its tokens act for
-#       permissions: ["merchant:*"]           # the ceiling
-#       allowed_origins: [https://admin.example.com]
-#       # group_roles: {billing-admins: owner}  # only for issuers that cannot mint permissions
+# The rename policy for merchant names (shown defaults); usernames follow
+# auth.username.
+naming:
+  enabled: true
+  rename_interval: 72h
+  former_names:
+    mode: finite # finite | forever | immediate; omit duration for the latter two
+    duration: 2160h # 90 days
 
 # Sign-in to OpenRails' own accounts (password, passwordless, registration).
 # Off, the default: people sign in at a trusted issuer, and the console with it
@@ -197,7 +197,7 @@ route_groups:
 admin_console:
   enabled: false
   # path: /admin             # e.g. /billing/admin when /admin is taken
-  # issuer:                  # staff sign in at a trusted issuer (one of resource_server's)
+  # issuer:                  # staff sign in at a merchant's trusted issuer
   #   url: https://example.com/auth
   #   client_id: openrails-console   # public client, redirect URI <console path>/callback
   #   # name: Example        # sign-in button; default the trusted issuer's name

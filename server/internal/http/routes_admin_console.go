@@ -44,7 +44,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		Extensions:  s.adminConsole.Extensions,
 	}
 	cfg.Assistants(s.cfg.LLM, s.groups.Catalog, s.groups.Metrics)
-	issuer, err := consoleIssuer(s.consoleIssuer, s.resourceServer)
+	issuer, err := consoleIssuer(s.consoleIssuer, s.resource)
 	if err != nil {
 		return err
 	}
@@ -64,13 +64,13 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	return nil
 }
 
-// consoleIssuer resolves the console's issuer against the resource server:
-// nil without one.
-func consoleIssuer(console *hostconfig.ConsoleIssuer, rs *hostconfig.ResourceServerConfig) (*adminconsole.Issuer, error) {
+// consoleIssuer is the console's issuer, asked for tokens for resource:
+// nil without one. AuthKit refuses its tokens unless it is trusted.
+func consoleIssuer(console *hostconfig.ConsoleIssuer, resource string) (*adminconsole.Issuer, error) {
 	if console == nil {
 		return nil, nil
 	}
-	url, name, resource, err := hostconfig.ResolveConsoleIssuer(console, rs)
+	url, name, err := hostconfig.ResolveConsoleIssuer(console, resource)
 	if err != nil {
 		return nil, err
 	}
@@ -78,5 +78,5 @@ func consoleIssuer(console *hostconfig.ConsoleIssuer, rs *hostconfig.ResourceSer
 	if scope == "" {
 		scope = hostconfig.ConsoleScope
 	}
-	return &adminconsole.Issuer{URL: url, ClientID: strings.TrimSpace(console.ClientID), Name: name, Resource: resource, Scope: scope}, nil
+	return &adminconsole.Issuer{URL: url, ClientID: strings.TrimSpace(console.ClientID), Name: name, Resource: strings.TrimSpace(resource), Scope: scope}, nil
 }

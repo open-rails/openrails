@@ -27,10 +27,9 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 
 	owner := newAccount(t, cp)
 	shop := uniqueName("credit")
-	_, err = cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
+	provisioned, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
 	require.NoError(t, err)
-	mid, _, err := cp.ResolveMerchantForGroup(ctx, shop)
-	require.NoError(t, err)
+	mid := provisioned.MerchantID
 	ownerSession := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
 
 	support := newAccount(t, cp)
@@ -40,11 +39,7 @@ func TestSecurityOnlyStaffWritesMintCredit(t *testing.T) {
 	require.NoError(t, err)
 	supportSession := authtest.SignIn(t, cp.AuthKit(), support).AccessToken
 
-	apiKey := func(role string) string {
-		key, err := cp.CreateMerchantAPIKey(ctx, userActor(t, cp, ownerSession), mid, billing.CreateAPIKeyParams{Name: role + " key", Role: role})
-		require.NoError(t, err)
-		return key.Secret
-	}
+	apiKey := func(role string) string { return merchantKey(t, cp, mid, role).Secret }
 	type caller struct{ token, selector string }
 	callers := map[string]caller{
 		"support member":  {supportSession, shop},

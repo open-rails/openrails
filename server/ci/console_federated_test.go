@@ -17,23 +17,24 @@ import (
 	"github.com/open-rails/openrails/server"
 )
 
-// A self-hosted OpenRails without local sign-in: its console is the trusted
-// issuer's OAuth 2.0 public client, the token that flow mints is all the
-// admin API needs, and the control plane serves no sign-in of its own.
+// A self-hosted OpenRails without local sign-in: its console is a trusted
+// issuer's OAuth 2.0 client, the token that flow mints is all the admin API
+// needs, and the server's AuthKit serves no sign-in of its own.
 func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	f := newFixture(t)
 	roles := authkit.NewRoles()
 	merchant := roles.Persona("merchant")
-	merchant.Permission("operations", "read")
+	merchant.Permission("billing", "read")
 	admin := roles.Root.Role("admin", merchant.All())
 	const console, callback = "openrails-console", "http://127.0.0.1/admin/callback"
+	secret := strings.Repeat("c", 48)
 	as := authtest.NewAuthorizationServer(t,
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
 		authtest.WithConfig(func(c *authkit.Config) {
 			c.Roles = roles
 			c.AuthorizationServer = authkit.AuthorizationServerConfig{
 				Resources: []authkit.ResourceServerConfig{{ID: resourceID, Scopes: []string{billing.ScopeMerchant}, Permissions: []string{"merchant:*"}}},
-				Clients: []authkit.OAuthClientConfig{{ID: console, RedirectURIs: []string{callback}, Resources: []string{resourceID},
+				Clients: []authkit.OAuthClientConfig{{ID: console, SecretSHA256: authtest.ClientSecretSHA256(secret), RedirectURIs: []string{callback}, Resources: []string{resourceID},
 					GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode, authkit.GrantRefreshToken}}},
 			}
 		}))
@@ -49,23 +50,22 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 		pinned = append(pinned, iam.RemoteApplicationKey{KID: k.Kid, JWK: &k})
 	}
 
-	shop := uniqueName("console-idp")
-	federated := func(issuer *server.ConsoleIssuer) func(*server.Config, *server.Deps) {
+	federated := func(resource string, issuer *server.ConsoleIssuer) func(*server.Config, *server.Deps) {
 		return func(cfg *server.Config, deps *server.Deps) {
 			cfg.LocalSignIn = false
-			cfg.ResourceServer = &server.ResourceServerConfig{
-				Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-				TrustedIssuers: []server.TrustedIssuerConfig{{
-					Name: "Example ID", Issuer: as.URL, Keys: pinned, Merchants: []string{shop}, Permissions: []string{"merchant:*"},
-				}},
+			cfg.Auth.Resource = authkit.ResourceConfig{ID: resource}
+			if resource != "" {
+				cfg.Auth.Resource.PublicURL = rsOrigin
 			}
 			cfg.AdminConsole, cfg.ConsoleIssuer = &server.AdminConsole{}, issuer
 			deps.Engine.ConsoleAssets = consoleBuild("federated")
 		}
 	}
-	cp := f.newServer(t, federated(&server.ConsoleIssuer{URL: as.URL, ClientID: console}))
-	provision(t, cp, shop)
-	handler, err := standaloneHandler(cp)
+	srv := f.newServer(t, federated(resourceID, &server.ConsoleIssuer{URL: as.URL, ClientID: console, Name: "Example ID"}))
+	shop := uniqueName("console-idp")
+	owner, _ := server.MerchantRole("owner")
+	trust(t, srv, provision(t, srv, shop), iam.RemoteApplication{Issuer: as.URL, Mode: iam.RemoteApplicationModeStatic, PublicKeys: pinned, Enabled: true, Role: owner})
+	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
 
 	var boot struct {
@@ -85,35 +85,29 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	require.NotNil(t, boot.Issuer)
 	require.Equal(t, as.URL, boot.Issuer.URL)
 	require.Equal(t, console, boot.Issuer.ClientID)
-	require.Equal(t, "Example ID", boot.Issuer.Name, "the trusted issuer's name")
-	require.Equal(t, resourceID, boot.Issuer.Resource)
+	require.Equal(t, "Example ID", boot.Issuer.Name)
+	require.Equal(t, resourceID, boot.Issuer.Resource, "auth.resource.id")
 	require.Contains(t, strings.Fields(boot.Issuer.Scope), billing.ScopeMerchant)
 
 	require.Equal(t, http.StatusNotFound, get(handler, "/"+f.schema+"/v1/capabilities").Code, "no local sign-in surface")
 	require.Equal(t, http.StatusOK, get(handler, "/"+f.schema+iam.JWKSPath).Code, "the issuer's keys stay published")
 
-	owner := authtest.NewUser(t, as.Client)
-	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(owner.ID), admin)
-	flow := authtest.CodeFlow{ClientID: console, RedirectURI: callback, Resource: boot.Issuer.Resource, Scopes: strings.Fields(boot.Issuer.Scope)}
-	tokens := as.Authorize(t, owner, flow)
-	w = dpopServe(t, userMerchants(cp), tokens, rsRequest{path: "/hosted/merchants"})
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	list := merchantList(t, w)
-	require.Len(t, list, 1)
-	require.Equal(t, shop, list[0].Slug)
-	require.Equal(t, "owner", list[0].Role)
-	require.Equal(t, http.StatusNotFound, dpopServe(t, handler, tokens, rsRequest{path: "/v1/merchants"}).Code, "the console's merchants come from the host")
-
-	renewed := as.Refresh(t, console, "", tokens)
-	require.Equal(t, http.StatusOK, dpopServe(t, handler, renewed, rsRequest{path: "/v1/admin/findings"}).Code, "the console's refreshed token")
-
+	user := authtest.NewUser(t, as.Client)
+	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(user.ID), admin)
+	flow := authtest.CodeFlow{ClientID: console, ClientSecret: secret, RedirectURI: callback, Resource: boot.Issuer.Resource, Scopes: strings.Fields(boot.Issuer.Scope)}
+	tokens := as.Authorize(t, user, flow)
+	findings := func(token, selector string) int {
+		return serve(handler, rsRequest{path: "/v1/admin/findings", authorization: "Bearer " + token, selector: selector}).Code
+	}
+	require.Equal(t, http.StatusOK, findings(tokens.AccessToken, shop), "the console names the merchant its issuer is trusted by")
+	require.Equal(t, http.StatusNotFound, serve(handler, rsRequest{path: "/v1/merchants", authorization: "Bearer " + tokens.AccessToken}).Code, "the console's merchants come from the host")
+	renewed := as.Refresh(t, console, secret, tokens)
+	require.Equal(t, http.StatusOK, findings(renewed.AccessToken, ""), "the console's refreshed token")
 	stranger := as.Authorize(t, authtest.NewUser(t, as.Client), flow)
-	w = dpopServe(t, userMerchants(cp), stranger, rsRequest{path: "/hosted/merchants"})
-	require.Equal(t, http.StatusOK, w.Code)
-	require.Empty(t, merchantList(t, w), "the console shows the empty state")
+	require.Equal(t, http.StatusForbidden, findings(stranger.AccessToken, ""), "a user the issuer grants nothing")
 
-	_, err = f.buildServer(t, federated(nil))
+	_, err = f.buildServer(t, federated(resourceID, nil))
 	require.ErrorContains(t, err, "no sign-in method")
-	_, err = f.buildServer(t, federated(&server.ConsoleIssuer{URL: "https://elsewhere.e2e.test", ClientID: console}))
-	require.ErrorContains(t, err, "not one of resource_server.trusted_issuers")
+	_, err = f.buildServer(t, federated("", &server.ConsoleIssuer{URL: as.URL, ClientID: console}))
+	require.ErrorContains(t, err, "auth.resource.id")
 }

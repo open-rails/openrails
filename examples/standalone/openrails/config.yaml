@@ -16,34 +16,32 @@ public_billing_base_url: http://localhost:3053 # where browsers and PSPs reach t
 
 db:
   url: postgres://openrails:openrails@postgres:5432/openrails?sslmode=disable
-redis: # optional for one server; replicas share rate limits and DPoP proofs through it
+redis: # optional for one server; replicas share rate limits and spent proofs through it
   addr: redis:6379
 
-# The server's own AuthKit: its tables (schema profiles) and signing key. Its
-# sign-in stays off: people sign in at the app, the trusted issuer below.
+# The server's own AuthKit, by AuthKit's keys: its signing key, and the
+# resource server it is. Its sign-in stays off: people sign in at the app,
+# which merchant.yaml declares the merchant's trusted issuer.
 auth:
-  issuer: http://localhost:3053
-  request_origin: http://localhost:3053 # the origin DPoP proofs name
-  keys_path: /vault/auth
-  direct_peer_ip: true                  # clients connect directly; behind a proxy, set trusted_proxies
-  allow_loopback_http: true             # local only: http://localhost as issuer and origin
-  allow_ephemeral_signing_key: true     # local only: generates its key under keys_path
-  allow_missing_senders: true           # it sends no sign-in mail of its own
-
-# OpenRails is an OAuth resource server: it accepts the app's AuthKit tokens.
-resource_server:
-  identifier: http://localhost:3053   # the tokens' aud
-  dpop_nonce_key: local-dpop-nonce-key-at-least-32-bytes # the same on every replica
-  trusted_issuers:
-    - name: courses
-      issuer: http://localhost:8080   # the app's AuthKit; keys from its /.well-known/jwks.json
-      merchants: [onlydemo]           # its tokens act for this merchant only
-      permissions: ["merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read"] # the most its tokens may grant
+  token:
+    issuer: http://localhost:3053
+    allow_private_network_jwks: true # local only: the app's keys at http://localhost:8080
+  keys:
+    path: /vault/auth
+    allow_ephemeral_dev_keys: true   # local only: generates its key under keys.path
+  http:
+    direct_peer_ip: true             # clients connect directly; behind a proxy, set trusted_proxies
+  registration:
+    allow_missing_senders: true      # it sends no sign-in mail of its own
+  # OpenRails is an OAuth resource server: it accepts the tokens its
+  # merchants' trusted issuers mint for it.
+  resource:
+    id: http://localhost:3053        # the tokens' aud, and where DPoP proofs point
 
 # Route groups beyond the public, customer (/v1/me) and webhook routes.
 route_groups:
   admin: true        # customer support; the app's backend reads customers with merchant:billing:read
-  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read), offers (merchant:catalog:read), and SCIM
+  programmatic: true # /v1/app: the backend's entitlement checks (merchant:entitlements:read) and offers (merchant:catalog:read)
 
 # Receipts and payment notices, sent from the merchant's from_email.
 email_smtp:

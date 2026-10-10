@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/open-rails/authkit"
 	billing "github.com/open-rails/openrails/internal/config"
 )
 
@@ -17,13 +18,17 @@ import (
 // engine's, the server's AuthKit and the listener.
 type Config struct {
 	*billing.Config
-	Auth *AuthConfig
-	// ResourceServer accepts trusted issuers' access tokens on the merchant
-	// API (resource_server).
-	ResourceServer *ResourceServerConfig
+	// Auth is the auth section: AuthKit's configuration, by AuthKit's keys.
+	Auth authkit.Config
+	// SigningKey is AuthKit's inline signing key (AUTHKIT_ACTIVE_KEY_ID,
+	// AUTHKIT_ACTIVE_PRIVATE_KEY_PEM, AUTHKIT_PUBLIC_KEYS); without one
+	// AuthKit reads auth.keys.path.
+	SigningKey SigningKey
 	// LocalSignIn serves sign-in to the server's own accounts
 	// (local_sign_in); off, people sign in at a trusted issuer.
 	LocalSignIn bool
+	// Naming is the rename policy for merchant names (naming).
+	Naming billing.NamingConfig
 	// Host and Port are the HTTP listener (default 0.0.0.0:3053).
 	Host string
 	Port int
@@ -109,10 +114,12 @@ type fileConfig struct {
 	HyperSwitch         *billing.HyperSwitchConfig     `koanf:"hyperswitch"`
 	EngineAdmissionHold bool                           `koanf:"engine_admission_hold"`
 
-	Auth *AuthConfig `koanf:"auth"`
-
-	ResourceServer *ResourceServerConfig `koanf:"resource_server"`
-	LocalSignIn    bool                  `koanf:"local_sign_in"`
+	// Auth is AuthKit's configuration, decoded by AuthKit's own keys
+	// (authConfig).
+	Auth        map[string]any       `koanf:"auth"`
+	SigningKey  SigningKey           `koanf:"signing_key"`
+	LocalSignIn bool                 `koanf:"local_sign_in"`
+	Naming      billing.NamingConfig `koanf:"naming"`
 }
 
 // defaults is the file before any source is read: the listener and the
@@ -131,7 +138,6 @@ func defaults() *fileConfig {
 		Logger:          &billing.LoggerConfig{Level: "info"},
 		RateLimits:      billing.DefaultRateLimits(),
 		Captcha:         billing.DefaultCaptcha(),
-		Auth:            &AuthConfig{},
 	}
 }
 
@@ -229,6 +235,10 @@ func (f *fileConfig) config() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	auth, err := authConfig(f.Auth)
+	if err != nil {
+		return nil, err
+	}
 	smtp, err := f.EmailSMTP.config()
 	if err != nil {
 		return nil, err
@@ -260,9 +270,10 @@ func (f *fileConfig) config() (*Config, error) {
 			HyperSwitch:                       f.HyperSwitch,
 			EngineAdmissionHold:               f.EngineAdmissionHold,
 		},
-		Auth:                     f.Auth,
-		ResourceServer:           f.ResourceServer,
+		Auth:                     auth,
+		SigningKey:               f.SigningKey,
 		LocalSignIn:              f.LocalSignIn,
+		Naming:                   f.Naming,
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		PrivatePort:              int(f.PrivatePort),
@@ -331,9 +342,5 @@ func Validate(cfg *Config) error {
 			return err
 		}
 	}
-	if err := ValidateAuthTransport(cfg.Auth); err != nil {
-		return err
-	}
-	allowLoopback := cfg.Auth != nil && cfg.Auth.AllowLoopbackHTTP
-	return ValidateResourceServer(cfg.ResourceServer, allowLoopback)
+	return nil
 }

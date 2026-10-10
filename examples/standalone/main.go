@@ -1,8 +1,8 @@
 // Command standalone is the embedded example's course site with OpenRails run
 // as its own server (openrails/ holds the server's files). The app keeps its
 // AuthKit, which is now also the OAuth issuer the server trusts: it mints the
-// browser's DPoP-bound tokens for /v1/me, the backend's client-credentials
-// tokens, and pushes its users to the server over SCIM. newBilling builds the
+// browser's tokens for /v1/me, the backend's client-credentials
+// tokens, and pushes its users to the server's AuthKit over SCIM. newBilling builds the
 // client with NewRemote; content.go and web/src/pages.tsx are the embedded
 // example's, unchanged.
 //
@@ -47,7 +47,7 @@ import (
 // the secret its backend authenticates with, and its mail server.
 type settings struct {
 	PublicURL    string        // this app: AuthKit's issuer and the browser's origin
-	OpenRailsURL string        // the server, and its resource identifier (resource_server.identifier)
+	OpenRailsURL string        // the server, and its resource identifier (auth.resource.id)
 	Merchant     string        // the merchant the server serves for this app (its merchant.yaml)
 	ClientSecret string        // the backend client's secret
 	SCIMInterval time.Duration // how often AuthKit pushes user changes to the server
@@ -81,10 +81,13 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 		// OpenRails is a resource server this AuthKit mints tokens for.
 		AuthorizationServer: authkit.AuthorizationServerConfig{
 			Resources: []authkit.ResourceServerConfig{{
-				ID:            s.OpenRailsURL,                                                                           // the tokens' aud
-				Scopes:        []string{"openrails:self", "openrails:merchant"},                                         // a customer's own billing; the merchant API
-				Permissions:   []string{"merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read"}, // the most a token may carry
-				ContactClaims: true,                                                                                     // the user's email in every token: a receipt reaches a brand-new buyer
+				ID: s.OpenRailsURL, // the tokens' aud
+				// A customer's own billing; the merchant API.
+				Scopes: []string{"openrails:self", "openrails:merchant"},
+				// The most a token may carry.
+				Permissions: []string{"merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read", "merchant:directory:manage"},
+				// The user's email in every token: a receipt reaches a brand-new buyer.
+				ContactClaims: true,
 			}},
 			Clients: []authkit.OAuthClientConfig{{
 				ID:         webClient, // public: the browser proves a DPoP key instead of a secret
@@ -95,19 +98,20 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 				ID:           backendClient, // confidential: this server and the SCIM pushes
 				SecretSHA256: hex.EncodeToString(secret[:]),
 				Resources:    []string{s.OpenRailsURL},
-				Permissions:  []string{"merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read"}, // customer support's reads; the content gate; offers
-				GrantTypes:   []authkit.OAuthGrantType{authkit.GrantClientCredentials},
+				// Customer support's reads, the content gate, offers, and the SCIM pushes.
+				Permissions: []string{"merchant:billing:read", "merchant:entitlements:read", "merchant:catalog:read", "merchant:directory:manage"},
+				GrantTypes:  []authkit.OAuthGrantType{authkit.GrantClientCredentials},
 			}},
 		},
 
-		// Customer contacts: every user, pushed to the server's SCIM routes
-		// with the backend client's tokens, so receipts and the admin
-		// customer read have each email.
+		// Customer contacts: every user, pushed to the merchant's directory in
+		// the server's AuthKit with the backend client's tokens, so receipts
+		// and the admin customer read have each email.
 		Provisioning: authkit.ProvisioningConfig{
 			Interval: s.SCIMInterval,
 			Targets: []authkit.ProvisioningTarget{{
 				Name:              "openrails",
-				URL:               s.OpenRailsURL + "/v1/app/scim/v2",
+				URL:               s.OpenRailsURL + "/directory/scim/v2",
 				ClientCredentials: backendCredentials(s),
 			}},
 		},

@@ -8,16 +8,13 @@ import (
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 )
 
-// registerSelfServiceRoutes mounts the browser-direct self-service billing
-// surface under /v1/me/*. A trusted issuer mints a short-lived, DPoP-bound
-// access token (scope openrails:self) for the signed-in end user; the browser
-// calls OpenRails directly with it. Every operation is scoped to the token's
-// customer and resolved merchant.
+// registerSelfServiceRoutes mounts the customer surface under /v1/me/*: a
+// customer is a trusted issuer's user, whose credential is bound to its
+// issuer's merchant, calling OpenRails directly from the browser.
 func (s *Server) registerSelfServiceRoutes(mux router.Registrar) {
-	// Browser tier: self-service patterns get the static permissive CORS policy.
 	httproutes.RegisterCustomerRoutes(
 		router.NewMuxRecorded(mux, StandaloneV1Prefix+httproutes.SelfRoutePrefix, s.runtime, s.recordBrowserRoute),
-		s.runtime, httproutes.CustomerMount{Auth: s.customerAuth(), ResolveMerchant: httproutes.CredentialOnly, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
+		s.runtime, httproutes.CustomerMount{Auth: s.auth, ResolveMerchant: s.resolveMerchant, Scope: s.scope, Providers: embedhttp.ProviderRoutesForRuntime(s.runtime, nil)})
 
 	log.WithField("prefix", StandaloneV1Prefix+httproutes.SelfRoutePrefix).
 		Info("self-service API routes registered on public handler")

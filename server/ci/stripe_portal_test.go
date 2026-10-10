@@ -16,9 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/staffperm"
 	"github.com/open-rails/openrails/internal/stripemock"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/server"
@@ -36,15 +37,13 @@ func TestStripePortalIsAStripeMerchantsRoute(t *testing.T) {
 	vault := vaultfake.New("e2e-root")
 	t.Cleanup(vault.Close)
 	host := newIssuerKey(t, "https://portal-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
+	plainHost := newIssuerKey(t, "https://portal-plain-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
 	shop, plain := uniqueName("portal-stripe"), uniqueName("portal-plain")
 	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.Vault = &openrails.VaultConfig{Address: vault.URL(), Token: vault.Token}
 		deps.Engine.StripeTransport = stripe
-		cfg.ResourceServer = &server.ResourceServerConfig{
-			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop, plain}, Permissions: []string{staffperm.BillingRead}}},
-		}
+		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 	})
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
 	require.NoError(t, os.WriteFile(manifest, []byte(fmt.Sprintf(`version: 1
@@ -65,14 +64,23 @@ merchants:
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 
-	browser := newBrowserKey(t)
-	token := host.mint(t, func(c jwt.MapClaims) {
-		c["sub"], c["scope"], c["cnf"] = uuid.NewString(), billing.ScopeSelf, map[string]string{"jkt": browser.jkt}
-		delete(c, "permissions")
-	})
+	m, err := graph.Runtime.Merchants.GetBySlug(t.Context(), shop)
+	require.NoError(t, err)
+	p, err := graph.Runtime.Merchants.GetBySlug(t.Context(), plain)
+	require.NoError(t, err)
+	trust(t, cp, m.ID, host.app(t, "viewer", nil))
+	trust(t, cp, p.ID, plainHost.app(t, "viewer", nil))
+
+	customerToken := func(k issuerKey) string {
+		return k.mint(t, func(c jwt.MapClaims) {
+			c["sub"], c["scope"] = uuid.NewString(), billing.ScopeSelf
+			delete(c, "permissions")
+		})
+	}
+	tokens := map[string]string{shop: customerToken(host), plain: customerToken(plainHost)}
 	me := func(merchant, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
-		return staticDPoPServe(t, handler, browser, token, rsRequest{method: http.MethodPost, path: "/v1/me" + path, selector: merchant, body: body, idempotencyKey: uuid.NewString()})
+		return serve(handler, rsRequest{method: http.MethodPost, path: "/v1/me" + path, authorization: "Bearer " + tokens[merchant], selector: merchant, body: body, idempotencyKey: uuid.NewString()})
 	}
 	const portal = "/stripe/billing-portal-sessions"
 
@@ -80,8 +88,6 @@ merchants:
 	require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 	require.Equal(t, billing.CodeResourceNotFound, errorCode(t, w), "served, but the customer has no Stripe customer yet")
 
-	m, err := graph.Runtime.Merchants.GetBySlug(t.Context(), shop)
-	require.NoError(t, err)
 	psps, err := cp.Client().ListPSPs(t.Context(), billing.PSPListParams{}, openrails.ForMerchantID(m.ID))
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)

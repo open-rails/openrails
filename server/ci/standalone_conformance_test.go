@@ -13,15 +13,13 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/http/routes"
 	"github.com/open-rails/openrails/openrailstest"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/controlplane"
-	"github.com/open-rails/openrails/server/internal/operator"
 )
 
-// The standalone server's own Authenticator passes the conformance kit a
-// host runs, in a merchant's scope (its permission group): the owner's
+// The standalone server's Authenticator, AuthKit's, passes the conformance
+// kit a host runs, in a merchant's scope (its AuthKit group): the owner's
 // session holding the merchant permissions there and nowhere else, a viewer
 // holding only the reads, a user holding none, a stale sign-in, the
 // merchant's owner API key, and the owner signed out last.
@@ -29,22 +27,19 @@ func TestStandaloneAuthPassesCheckAuth(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, reserving())
 	ctx := t.Context()
-	_, plane := operator.Of(cp)
 	ak := cp.AuthKit()
 	owner, viewer, stranger, gone := newAccount(t, cp), newAccount(t, cp), newAccount(t, cp), newAccount(t, cp)
 	provisioned, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("conform"), OwnerUserID: owner.ID})
 	require.NoError(t, err)
 	mid := provisioned.MerchantID
-	key, err := cp.CreateMerchantAPIKey(ctx, server.OperatorActor(), mid, billing.CreateAPIKeyParams{Name: "backend", Role: "owner"})
-	require.NoError(t, err)
+	key := merchantKey(t, cp, mid, "owner")
 	signedOut := authtest.SignIn(t, ak, gone).AccessToken
 	_, err = ak.RevokeAccountSessions(ctx, iam.UserIdentity(gone.ID), gone.ID)
 	require.NoError(t, err)
 
 	root, err := ak.Scope(ctx, iam.RootGroup())
 	require.NoError(t, err)
-	sa := &routes.StandaloneAuth{Issuer: root.Authority, Sessions: ak.Authenticator(), ServiceCredentialResolver: plane, ResourceTokenResolver: plane, Directory: plane}
-	scope, err := sa.Scope(ctx, mid)
+	scope, err := cp.MerchantScope(ctx, mid)
 	require.NoError(t, err)
 	require.NotEqual(t, root, scope, "a merchant's scope is its own group")
 	reads, ok := controlplane.MerchantRole("viewer")
@@ -56,7 +51,7 @@ func TestStandaloneAuthPassesCheckAuth(t *testing.T) {
 	}
 	session := authtest.SignIn(t, ak, owner).AccessToken
 	openrailstest.CheckAuth(t, openrails.Routes{
-		Auth: sa, Scope: scope, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
+		Auth: ak.Authenticator(), Scope: scope, RouteGroups: openrails.RouteGroups{Admin: true, Programmatic: true},
 		Permissions: openrails.Permissions{AdminRead: perm(server.MerchantBillingRead), AdminUpdate: perm(server.MerchantBillingManage)},
 	}, helpersauthtest.Cases{
 		Staff:       request(session),

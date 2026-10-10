@@ -93,22 +93,20 @@ services:
       PROVIDER_WRITE_MODE: "${PROVIDER_WRITE_MODE:-full}"
       PORT: "3053"
       PUBLIC_BILLING_BASE_URL: "${PUBLIC_BILLING_BASE_URL:-http://localhost:3053}"
-      AUTH_ALLOW_LOOPBACK_HTTP: "true"
-      AUTH_ALLOW_MISSING_SENDERS: "true"
-      AUTH_ALLOW_EPHEMERAL_SIGNING_KEY: "true"
-      AUTH_DIRECT_PEER_IP: "true"
-      AUTH_REQUEST_ORIGIN: "${AUTH_REQUEST_ORIGIN:-http://localhost:3053}"
-      AUTH_ISSUER: "${AUTH_ISSUER:-http://localhost:3053}"
-      # AuthKit signing keys for OpenRails' own issuer (read once at
-      # config.Load, never by the authkit library itself — #712/#231; names
-      # AUTHKIT_-prefixed since ak#266/or#917, matching the authkit binary):
+      # The server's AuthKit, by AuthKit's keys (AUTH_<KEY> is auth.<key>).
+      AUTH_REGISTRATION_ALLOW_MISSING_SENDERS: "true"
+      AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS: "true"
+      AUTH_HTTP_DIRECT_PEER_IP: "true"
+      AUTH_TOKEN_ISSUER: "${AUTH_TOKEN_ISSUER:-http://localhost:3053}"
+      # AuthKit signing keys for the server's issuer, read once at
+      # config.Load, never by the authkit library itself:
       #   1. AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
       #      AUTHKIT_PUBLIC_KEYS envs, or
-      #   2. AUTHKIT_KEYS_PATH/keys.json injected by Vault/External Secrets, or
-      #   3. development keys (AUTH_ALLOW_EPHEMERAL_SIGNING_KEY): AuthKit writes
-      #      keys.json and totp.key to the openrails_auth_keys volume, so
-      #      restarts keep sessions and authenticator enrollments.
-      AUTHKIT_KEYS_PATH: "${AUTHKIT_KEYS_PATH:-/vault/auth}"
+      #   2. AUTH_KEYS_PATH/keys.json injected by Vault/External Secrets, or
+      #   3. development keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS): AuthKit
+      #      writes keys.json and totp.key to the openrails_auth_keys volume,
+      #      so restarts keep sessions and authenticator enrollments.
+      AUTH_KEYS_PATH: "${AUTH_KEYS_PATH:-/vault/auth}"
       AUTHKIT_ACTIVE_KEY_ID: "${AUTHKIT_ACTIVE_KEY_ID:-}"
       AUTHKIT_ACTIVE_PRIVATE_KEY_PEM: "${AUTHKIT_ACTIVE_PRIVATE_KEY_PEM:-}"
       AUTHKIT_PUBLIC_KEYS: "${AUTHKIT_PUBLIC_KEYS:-}"

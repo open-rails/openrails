@@ -59,13 +59,14 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 	signedIn := func(token string) error {
 		r := httptest.NewRequest(http.MethodPost, "/", nil)
 		r.Header.Set("Authorization", "Bearer "+token)
-		return cp.CheckRecentSignIn(t.Context(), r)
+		v, err := cp.AuthKit().Authenticator().Authenticate(r)
+		require.NoError(t, err)
+		return v.(helpersauth.RecentSignInChecker).CheckRecentSignIn(t.Context())
 	}
-	require.ErrorIs(t, signedIn(stale), helpersauth.ErrStepUpRequired)
+	require.ErrorIs(t, signedIn(stale), helpersauth.ErrStepUpRequired, "a hosted product asks AuthKit")
 	require.NoError(t, signedIn(fresh))
 
-	minted, err := cp.CreateMerchantAPIKey(t.Context(), userActor(t, cp, fresh), m.MerchantID, billing.CreateAPIKeyParams{Name: "owner key", Role: "owner"})
-	require.NoError(t, err)
+	minted := merchantKey(t, cp, m.MerchantID, "owner")
 	w = call(t, handler, minted.Secret, http.MethodPatch, "/v1/admin/customers/"+uuid.NewString(), "", map[string]any{})
 	require.Equal(t, http.StatusOK, w.Code, "an API key carries no sign-in to step up: %s", w.Body.String())
 }

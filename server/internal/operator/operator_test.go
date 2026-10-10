@@ -6,40 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-rails/authkit/authtest"
-	"github.com/open-rails/authkit/iam"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 )
-
-func TestOptionsPasswordlessPolicy(t *testing.T) {
-	outbox := new(authtest.Outbox)
-	emailSender, smsSender := outbox.Email(), outbox.SMS()
-	for name, tc := range map[string]struct {
-		opts    Options
-		wantErr bool
-	}{
-		"disabled":                        {Options{}, false},
-		"login with email":                {Options{LocalSignIn: true, PasswordlessLogin: true, EmailSender: emailSender}, false},
-		"login with sms only":             {Options{LocalSignIn: true, PasswordlessLogin: true, SMSSender: smsSender}, false},
-		"open auto-registration":          {Options{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, false},
-		"auto-registration without login": {Options{LocalSignIn: true, Registration: iam.RegistrationModeOpen, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration closed":        {Options{LocalSignIn: true, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"auto-registration invite-only":   {Options{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, PasswordlessLogin: true, PasswordlessAutoRegistration: true, EmailSender: emailSender}, true},
-		"login without sender":            {Options{LocalSignIn: true, PasswordlessLogin: true}, true},
-		"open without sender":             {Options{LocalSignIn: true, Registration: iam.RegistrationModeOpen}, true},
-		"invite-only with sender":         {Options{LocalSignIn: true, Registration: iam.RegistrationModeInviteOnly, SMSSender: smsSender}, false},
-		"closed without sender":           {Options{LocalSignIn: true, Registration: iam.RegistrationModeClosed}, false},
-		"unknown mode":                    {Options{LocalSignIn: true, Registration: "sometimes"}, true},
-		"open without local sign-in":      {Options{Registration: iam.RegistrationModeOpen, EmailSender: emailSender}, true},
-		"passwordless without local":      {Options{PasswordlessLogin: true, EmailSender: emailSender}, true},
-	} {
-		_, err := ControlPlaneOptions(tc.opts)
-		require.Equal(t, tc.wantErr, err != nil, "%s: %v", name, err)
-	}
-}
 
 // An unanswerable admission question refuses.
 func TestMerchantCreationAdmissionRefusesWithoutAnswers(t *testing.T) {

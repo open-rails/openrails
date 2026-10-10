@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
 	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails"
@@ -58,10 +59,12 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 	t.Helper()
 	// Each test's AuthKit has its own schema, as its billing tables do: its
 	// accounts, and the sign-in limits AuthKit counts per device, are its own.
-	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: server.AuthConfig{
-		Issuer: "http://127.0.0.1/" + f.schema, AllowMissingSenders: true,
-		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
-		Schema: f.authSchema(),
+	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: authkit.Config{
+		Token:        authkit.TokenConfig{Issuer: "http://127.0.0.1/" + f.schema},
+		Keys:         authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
+		Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
+		Database:     authkit.DatabaseConfig{Schema: f.authSchema()},
 	}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}
 	deps := server.Deps{Engine: openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}}
 	if edit != nil {
@@ -178,7 +181,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	renamed := uniqueName("acme")
 	require.NoError(t, operatorRename(ctx, cp, created.MerchantID, renamed))
 	for _, ref := range []string{acme, renamed} {
-		mid, current, err := cp.ResolveMerchantForGroup(ctx, ref)
+		mid, current, err := cp.MerchantByName(ctx, ref)
 		require.NoError(t, err, ref)
 		require.Equal(t, created.MerchantID, mid, "the former name forwards")
 		require.Equal(t, renamed, current)
@@ -192,7 +195,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	require.Equal(t, "merchant_slug_aliases_pkey", pgErr.ConstraintName)
 	require.ErrorIs(t, operatorRename(ctx, cp, platform.MerchantID, acme), billing.ErrMerchantNameTaken)
 	require.NoError(t, operatorRename(ctx, cp, created.MerchantID, acme), "a merchant takes its own former name back")
-	mid, current, err := cp.ResolveMerchantForGroup(ctx, renamed)
+	mid, current, err := cp.MerchantByName(ctx, renamed)
 	require.NoError(t, err)
 	require.Equal(t, []any{created.MerchantID, acme}, []any{mid, current})
 
@@ -200,7 +203,7 @@ func TestMerchantNamesAreOwnedByOpenRails(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, result.Retired)
 	for _, released := range []string{acme, renamed} {
-		_, _, err := cp.ResolveMerchantForGroup(ctx, released)
+		_, _, err := cp.MerchantByName(ctx, released)
 		require.ErrorIs(t, err, billing.ErrMerchantUnresolved, released)
 		reclaimed, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: released, OwnerUserID: other})
 		require.NoError(t, err)
@@ -246,7 +249,7 @@ func TestMerchantOwnRename(t *testing.T) {
 	require.True(t, tooSoon.NextRenameAt.After(time.Now()))
 	require.Equal(t, http.StatusOK, call(t, handler, token, http.MethodGet, "/v1/admin/findings", shop, nil).Code, "the former name still selects the merchant")
 	require.Equal(t, http.StatusNotFound, call(t, handler, token, http.MethodPut, "/v1/merchant/name", shop, map[string]string{"name": uniqueName("shop")}).Code)
-	mid, current, err := cp.ResolveMerchantForGroup(ctx, next)
+	mid, current, err := cp.MerchantByName(ctx, next)
 	require.NoError(t, err)
 	require.Equal(t, []any{m.MerchantID, next}, []any{mid, current})
 }

@@ -1,12 +1,12 @@
 package hostconfig
 
 import (
-	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/open-rails/authkit"
 	billing "github.com/open-rails/openrails/internal/config"
 	"github.com/stretchr/testify/require"
 )
@@ -32,12 +32,19 @@ func TestFileReachesConfig(t *testing.T) {
 			field.Set(reflect.ValueOf([]string{"x"}))
 		case reflect.Pointer:
 			field.Set(reflect.New(field.Type().Elem()))
+		case reflect.Map:
+			field.Set(reflect.ValueOf(map[string]any{"token": map[string]any{"issuer": "https://auth.example"}}))
 		case reflect.Struct:
 			for j := range field.NumField() {
-				if sub := field.Field(j); sub.Kind() == reflect.Bool {
+				switch sub := field.Field(j); sub.Kind() {
+				case reflect.Bool:
 					sub.SetBool(true)
-				} else {
+				case reflect.String:
 					sub.SetString("sandbox")
+				case reflect.Pointer:
+					sub.Set(reflect.New(sub.Type().Elem()))
+				case reflect.Struct:
+					sub.Field(0).SetString("finite")
 				}
 			}
 		default:
@@ -93,50 +100,46 @@ func TestConfigExampleLoads(t *testing.T) {
 	require.Equal(t, 3053, cfg.Port)
 	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 	require.Equal(t, billing.ProviderWriteModeFull, cfg.ProviderWriteMode)
-	require.Equal(t, "http://localhost:3053", cfg.Auth.Issuer)
-	require.True(t, cfg.Auth.AllowEphemeralSigningKey)
-	require.Equal(t, 2160*time.Hour, *cfg.Auth.Naming.FormerNames.Duration)
+	require.Equal(t, "http://localhost:3053", cfg.Auth.Token.Issuer)
+	require.True(t, cfg.Auth.Keys.AllowEphemeralDevKeys)
+	require.True(t, cfg.Auth.HTTP.DirectPeerIP)
+	require.Equal(t, 2160*time.Hour, *cfg.Naming.FormerNames.Duration)
 	require.Equal(t, 1200, (*cfg.RateLimits)["webhook"].RequestsPerMinute)
 	require.Contains(t, cfg.DB.URL, "@localhost:5434/openrails_db")
 }
 
-// resource_server reaches the control plane's trusted issuers, keys and all.
-func TestResourceServerLoads(t *testing.T) {
-	example, err := os.ReadFile(filepath.Join("..", "..", "..", "config.example.yaml"))
-	require.NoError(t, err)
+// auth is AuthKit's configuration, decoded by AuthKit's own keys: the
+// resource, the issuance DPoP mode and trusted issuers reach it whole, and an
+// AUTH_* variable sets the key it names.
+func TestAuthSectionLoads(t *testing.T) {
 	bootEnv(t)
-	path := filepath.Join(t.TempDir(), "config.yaml")
-	require.NoError(t, os.WriteFile(path, append(example, []byte(`
-resource_server:
-  identifier: https://openrails.example.com
-  dpop_nonce_key: 0123456789abcdef0123456789abcdef
-  trusted_issuers:
-    - name: example
-      issuer: https://example.com/auth
-      merchants: [example]
-      permissions: ["merchant:*"]
-      allowed_origins: [https://admin.example.com]
-      group_roles: {billing-admins: owner}
-      keys:
-        - kid: k1
-          jwk: {kty: EC, crv: P-256, x: abc, y: def}
-`)...), 0o600))
-	cfg, err := Load(path)
+	t.Setenv("AUTH_SIGN_IN_DPOP", "required")
+	t.Setenv("AUTH_RESOURCE_PUBLIC_URL", "https://api.openrails.example.com")
+	path := writeFile(t, filepath.Join(t.TempDir(), "config.yaml"), `
+auth:
+  token:
+    issuer: https://openrails.example.com/auth
+    access_token_duration: 10m
+  resource:
+    id: https://openrails.example.com
+  remote_applications:
+    - issuer: https://example.com/auth
+      role: root:owner
+      role_map: {billing-admins: root:owner}
+`)
+	loaded, err := Load(path)
 	require.NoError(t, err)
-	rs := cfg.ResourceServer
-	require.NotNil(t, rs)
-	require.Equal(t, "https://openrails.example.com", rs.Identifier)
-	require.Len(t, rs.TrustedIssuers, 1)
-	is := rs.TrustedIssuers[0]
-	require.Equal(t, "https://example.com/auth", is.Issuer)
-	require.Equal(t, []string{"example"}, is.Merchants)
-	require.Equal(t, []string{"merchant:*"}, is.Permissions)
-	require.Equal(t, []string{"https://admin.example.com"}, is.AllowedOrigins)
-	require.Equal(t, map[string]string{"billing-admins": "owner"}, is.GroupRoles)
-	require.Equal(t, "k1", is.Keys[0].KID)
-	require.Equal(t, "P-256", is.Keys[0].JWK.Crv)
-	require.NoError(t, Validate(cfg))
+	a := loaded.Auth
+	require.Equal(t, "https://openrails.example.com", a.Resource.ID)
+	require.Equal(t, "https://api.openrails.example.com", a.Resource.PublicURL, "env merges into the section")
+	require.Equal(t, authkit.DPoPRequired, a.SignIn.DPoP)
+	require.Equal(t, 10*time.Minute, a.Token.AccessTokenDuration)
+	require.Equal(t, "https://openrails.example.com/auth", a.Token.Issuer)
+	require.Len(t, a.RemoteApplications, 1)
+	require.Equal(t, "root:owner", a.RemoteApplications[0].Role.String())
+	require.Equal(t, "root:owner", a.RemoteApplications[0].RoleMap["billing-admins"].String())
 
-	rs.DPoPNonceKey = "short"
-	require.ErrorContains(t, Validate(cfg), "dpop_nonce_key")
+	t.Setenv("AUTH_NOT_A_KEY", "x")
+	_, err = Load(path)
+	require.ErrorContains(t, err, "not_a_key", "an AUTH_ variable AuthKit does not know refuses boot")
 }

@@ -14,8 +14,7 @@ import (
 )
 
 // The merchant roles' authority is AuthKit's running catalog, not a copy:
-// support and viewer hold no owner authority, and a non-user
-// credential hands out only a role its grants cover.
+// support and viewer hold no owner authority.
 func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 	f := newFixture(t)
 	_, cp := operator.Of(f.newServer(t, nil))
@@ -40,29 +39,10 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 			staffperm.CatalogManage, staffperm.ConfigManage, staffperm.MetricsRead, staffperm.CredentialsManage, staffperm.MembersRead, staffperm.MembersManage,
 			staffperm.EntitlementsRead, staffperm.CatalogRead, staffperm.UsageManage, staffperm.CostsManage, staffperm.EventsRead,
 		} {
-			require.False(t, (&controlplane.ResolvedServiceCredential{Permissions: grants}).HasPermission(p), "%s must not hold %s", role, p)
+			require.NotContains(t, grants, p, "%s must not hold %s", role, p)
 		}
-	}
-
-	support, viewer := held(controlplane.MerchantSupport), held(controlplane.MerchantViewer)
-	for _, tc := range []struct {
-		role   iam.Role
-		grants []string
-		want   bool
-	}{
-		{controlplane.MerchantOwner, []string{"merchant:*"}, true},
-		{controlplane.MerchantSupport, []string{"merchant:*"}, true},
-		{controlplane.MerchantViewer, []string{"merchant:*:read"}, true},
-		{controlplane.MerchantSupport, []string{"merchant:*:read"}, false},
-		{controlplane.MerchantOwner, support, false},
-		{controlplane.MerchantViewer, support, true},
-		{controlplane.MerchantSupport, viewer, false},
-		{controlplane.MerchantViewer, viewer, true},
-		{controlplane.MerchantOwner, []string{"root:*"}, false},
-		{controlplane.MerchantViewer, nil, false},
-	} {
-		covered, err := cp.RoleCoveredBy(tc.role, tc.grants)
-		require.NoError(t, err)
-		require.Equal(t, tc.want, covered, "%s by %v", tc.role, tc.grants)
+		for _, g := range grants {
+			require.NotContains(t, g, "*", "%s holds no pattern", role)
+		}
 	}
 }

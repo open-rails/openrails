@@ -3,14 +3,17 @@
 package ci_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/authkit/iam"
+	"github.com/open-rails/openrails"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/server"
@@ -38,8 +41,8 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			issuer := "http://127.0.0.1/reg-" + uuid.NewString()[:8]
 			srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
-				cfg.Auth.Issuer = issuer
-				cfg.Registration = tc.mode
+				cfg.Auth.Token.Issuer = issuer
+				cfg.Auth.Registration.NativeUserMode = tc.mode
 				if tc.mode == iam.RegistrationModeOpen || tc.mode == iam.RegistrationModeInviteOnly {
 					deps.Engine.Email = &outbox{}
 				}
@@ -77,15 +80,30 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 	t.Run("refuses", func(t *testing.T) {
 		for mode, want := range map[iam.RegistrationMode]string{
 			"sometimes":                    "not one of open, invite_only, closed",
-			iam.RegistrationModeOpen:       "requires an email or SMS sender",
-			iam.RegistrationModeInviteOnly: "requires an email or SMS sender",
+			iam.RegistrationModeOpen:       "no email or SMS sender is configured",
+			iam.RegistrationModeInviteOnly: "no email or SMS sender is configured",
 		} {
 			_, err := f.buildServer(t, func(cfg *server.Config, _ *server.Deps) {
-				cfg.Auth.Issuer = "http://127.0.0.1/reg-" + uuid.NewString()[:8]
-				cfg.Auth.AllowMissingSenders = false
-				cfg.Registration = mode
+				cfg.Auth.Token.Issuer = "http://127.0.0.1/reg-" + uuid.NewString()[:8]
+				cfg.Auth.Registration.AllowMissingSenders = false
+				cfg.Auth.Registration.NativeUserMode = mode
 			})
 			require.ErrorContains(t, err, want, mode)
 		}
 	})
 }
+
+// outbox is an engine email sender that keeps what it sends.
+type outbox struct {
+	mu   sync.Mutex
+	sent []openrails.Email
+}
+
+func (o *outbox) Send(_ context.Context, m openrails.Email) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.sent = append(o.sent, m)
+	return nil
+}
+
+func (*outbox) CheckHealth(context.Context) error { return nil }

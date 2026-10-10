@@ -142,9 +142,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 		return shop{m.MerchantID, slug, authtest.SignIn(t, cp.AuthKit(), owner).AccessToken}
 	}
 	victim, squatter := provision("victim"), provision("squatter")
-	key, err := cp.CreateMerchantAPIKey(ctx, server.OperatorActor(), victim.id, billing.CreateAPIKeyParams{Name: "backend", Role: "owner"})
-	require.NoError(t, err)
-	victimKey := key.Secret
+	victimKey := merchantKey(t, cp, victim.id, "owner").Secret
 	works := func(host string, s shop) int {
 		t.Helper()
 		return on(host, s.session, http.MethodGet, "/v1/admin/findings", s.slug, nil).Code
@@ -196,7 +194,7 @@ func TestSecurityAPIHostNeedsProofOfControl(t *testing.T) {
 	require.Nil(t, bound.Claim)
 	require.Equal(t, http.StatusOK, works(domain, victim))
 	require.Equal(t, http.StatusOK, on(domain, victimKey, http.MethodGet, "/v1/admin/findings", "", nil).Code)
-	require.Equal(t, http.StatusForbidden, works(domain, squatter), "the proven host routes to its merchant only")
+	require.Equal(t, http.StatusConflict, works(domain, squatter), "the proven host routes to its merchant only")
 
 	// Even with its token in the record, a squatter cannot take a held host.
 	dns.publish(record, squatterClaim.DNSRecord.Value)

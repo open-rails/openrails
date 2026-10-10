@@ -49,8 +49,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.Equal(t, billing.CredentialPostureSandbox, cfg.TestMode)
 	require.Equal(t, billing.DefaultSchema, cfg.Database.Schema)
 	require.Equal(t, testDatabaseURL, cfg.DB.URL)
-	require.NotNil(t, cfg.Auth)
-	require.Empty(t, cfg.Auth.Issuer, "no URL setting supplies an issuer fallback")
+	require.Empty(t, cfg.Auth.Token.Issuer, "no URL setting supplies an issuer fallback")
 
 	unsetenv(t, "DB_URL")
 	for key, value := range map[string]string{
@@ -60,7 +59,7 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 		"PROVIDER_WRITE_MODE": "limited", "CATALOG_RECONCILIATION_INTERVAL": "30m", "PROVIDER_BILLING_QUIESCENCE_INTERVAL": "36h",
 		"TRUSTED_PROXIES":       `["10.0.0.0/8"]`,
 		"AUTHKIT_ACTIVE_KEY_ID": "kid-1", "AUTHKIT_ACTIVE_PRIVATE_KEY_PEM": "-----BEGIN PRIVATE KEY-----", "AUTHKIT_PUBLIC_KEYS": `{"kid-0":"pem"}`,
-		"AUTH_ISSUER": "https://billing.example.com/", "AUTH_DIRECT_PEER_IP": "true",
+		"AUTH_TOKEN_ISSUER": "https://billing.example.com/", "AUTH_HTTP_DIRECT_PEER_IP": "true",
 	} {
 		t.Setenv(key, value)
 	}
@@ -86,11 +85,11 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 36*time.Hour, quiet)
 	require.Equal(t, []string{"10.0.0.0/8"}, cfg.TrustedProxies)
-	require.Equal(t, "kid-1", cfg.Auth.ActiveKeyID)
-	require.Equal(t, "-----BEGIN PRIVATE KEY-----", cfg.Auth.ActivePrivateKeyPEM)
-	require.Equal(t, `{"kid-0":"pem"}`, cfg.Auth.PublicKeysJSON, "public keys stay a JSON string, never decoded")
-	require.Equal(t, "https://billing.example.com/", cfg.Auth.Issuer)
-	require.True(t, cfg.Auth.DirectPeerIP)
+	require.Equal(t, "kid-1", cfg.SigningKey.ActiveKeyID)
+	require.Equal(t, "-----BEGIN PRIVATE KEY-----", cfg.SigningKey.ActivePrivateKeyPEM)
+	require.Equal(t, `{"kid-0":"pem"}`, cfg.SigningKey.PublicKeysJSON, "public keys stay a JSON string, never decoded")
+	require.Equal(t, "https://billing.example.com/", cfg.Auth.Token.Issuer)
+	require.True(t, cfg.Auth.HTTP.DirectPeerIP)
 
 	t.Setenv("DB_URL", "postgres://u:p@localhost:5432/db?sslmode=disable")
 	cfg, err = Load("")
@@ -108,24 +107,28 @@ func TestLoadDefaultsAndEnvironmentMapping(t *testing.T) {
 
 func TestEnvKeyRouting(t *testing.T) {
 	for env, key := range map[string]string{
-		"PUBLIC_BILLING_BASE_URL":           "public_billing_base_url", // #710: multi-word top-level scalar
-		"SECRET_BACKEND":                    "",
-		"CATALOG_EDITS":                     "",
-		"DB_URL":                            "db.url",
-		"db_url":                            "db.url",
-		"VAULT_ADDR":                        "vault.address",
-		"VAULT_AUTH_MOUNT":                  "vault.auth_mount",
-		"AUTHKIT_ACTIVE_KEY_ID":             "auth.active_key_id",
-		"AUTHKIT_KEYS_PATH":                 "auth.keys_path",
-		"AUTH_NAMING_FORMER_NAMES_DURATION": "auth.naming.former_names.duration",
-		"PROVIDER_SANDBOX_NMI_GATEWAY_URL":  "provider_sandbox.nmi_gateway_url",
-		"EMAIL_SMTP_PASSWORD":               "email_smtp.password",
-		"SENDGRID_API_KEY":                  "",
-		"CATALOG_SOURCE":                    "",
-		"MERCHANT_SOURCE":                   "",
-		"MERCHANT_CONFIG_SOURCE":            "",
-		"PATH":                              "",
-		"DB_":                               "",
+		"PUBLIC_BILLING_BASE_URL":          "public_billing_base_url", // #710: multi-word top-level scalar
+		"SECRET_BACKEND":                   "",
+		"CATALOG_EDITS":                    "",
+		"DB_URL":                           "db.url",
+		"db_url":                           "db.url",
+		"VAULT_ADDR":                       "vault.address",
+		"VAULT_AUTH_MOUNT":                 "vault.auth_mount",
+		"AUTHKIT_ACTIVE_KEY_ID":            "signing_key.active_key_id",
+		"AUTH_KEYS_PATH":                   "auth.keys.path",
+		"AUTH_SIGN_IN_DPOP":                "auth.sign_in.dpop",
+		"AUTH_RESOURCE_PUBLIC_URL":         "auth.resource.public_url",
+		"AUTH_HTTP_DIRECT_PEER_IP":         "auth.http.direct_peer_ip",
+		"AUTH_ISSUER":                      "auth.issuer",
+		"NAMING_FORMER_NAMES_DURATION":     "naming.former_names.duration",
+		"PROVIDER_SANDBOX_NMI_GATEWAY_URL": "provider_sandbox.nmi_gateway_url",
+		"EMAIL_SMTP_PASSWORD":              "email_smtp.password",
+		"SENDGRID_API_KEY":                 "",
+		"CATALOG_SOURCE":                   "",
+		"MERCHANT_SOURCE":                  "",
+		"MERCHANT_CONFIG_SOURCE":           "",
+		"PATH":                             "",
+		"DB_":                              "",
 	} {
 		require.Equal(t, key, envKeyToConfigKey(env), env)
 	}
@@ -196,7 +199,7 @@ func TestLoadDatabaseIgnoresServerConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "postgres://env.invalid/db", cfg.DB.URL)
 	require.Equal(t, "archive_test", cfg.Database.Schema)
-	require.Nil(t, cfg.Auth, "never a server configuration")
+	require.Zero(t, cfg.Auth, "never a server configuration")
 	require.Nil(t, cfg.Redis)
 	cfg, err = LoadDatabase(path, WithOverride("db.url", "postgres://flag.invalid/db"))
 	require.NoError(t, err)
@@ -210,7 +213,7 @@ func TestLoadDatabaseIgnoresServerConfiguration(t *testing.T) {
 	}
 }
 
-func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
+func TestNamingDefaultsAndExplicitZero(t *testing.T) {
 	bootEnv(t)
 	for name, row := range map[string]struct {
 		values   map[string]any
@@ -220,9 +223,9 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 		duration time.Duration
 	}{
 		"defaults":              {nil, true, 72 * time.Hour, billing.FormerNamesFinite, 90 * 24 * time.Hour},
-		"disabled zero forever": {map[string]any{"auth.naming.enabled": false, "auth.naming.rename_interval": "0s", "auth.naming.former_names.mode": "forever"}, false, 0, billing.FormerNamesForever, 0},
-		"finite duration":       {map[string]any{"auth.naming.former_names.duration": "240h"}, true, 72 * time.Hour, billing.FormerNamesFinite, 240 * time.Hour},
-		"immediate":             {map[string]any{"auth.naming.former_names.mode": "immediate"}, true, 72 * time.Hour, billing.FormerNamesImmediate, 0},
+		"disabled zero forever": {map[string]any{"naming.enabled": false, "naming.rename_interval": "0s", "naming.former_names.mode": "forever"}, false, 0, billing.FormerNamesForever, 0},
+		"finite duration":       {map[string]any{"naming.former_names.duration": "240h"}, true, 72 * time.Hour, billing.FormerNamesFinite, 240 * time.Hour},
+		"immediate":             {map[string]any{"naming.former_names.mode": "immediate"}, true, 72 * time.Hour, billing.FormerNamesImmediate, 0},
 	} {
 		var opts []LoadOption
 		for key, value := range row.values {
@@ -230,68 +233,30 @@ func TestAuthNamingDefaultsAndExplicitZero(t *testing.T) {
 		}
 		cfg, err := Load("", opts...)
 		require.NoError(t, err, name)
-		policy, err := billing.NormalizeNaming(cfg.Auth.Naming)
+		policy, err := billing.NormalizeNaming(cfg.Naming)
 		require.NoError(t, err, name)
 		require.Equal(t, row.enabled, policy.Enabled, name)
 		require.Equal(t, row.interval, policy.RenameInterval, name)
 		require.Equal(t, row.mode, policy.FormerNames, name)
 		require.Equal(t, row.duration, policy.FormerNameRetention, name)
 	}
-	_, err := Load("", WithOverride("auth.naming.rename_interval", "999999999999999999999h"))
+	_, err := Load("", WithOverride("naming.rename_interval", "999999999999999999999h"))
 	require.Error(t, err, "duration overflow must not become an immediate rename")
 
 	// Explicit false/0 from env must survive as set values, not read as unset.
-	t.Setenv("AUTH_NAMING_ENABLED", "false")
-	t.Setenv("AUTH_NAMING_RENAME_INTERVAL", "0s")
-	t.Setenv("AUTH_NAMING_FORMER_NAMES_MODE", "finite")
-	t.Setenv("AUTH_NAMING_FORMER_NAMES_DURATION", "0s")
+	t.Setenv("NAMING_ENABLED", "false")
+	t.Setenv("NAMING_RENAME_INTERVAL", "0s")
+	t.Setenv("NAMING_FORMER_NAMES_MODE", "finite")
+	t.Setenv("NAMING_FORMER_NAMES_DURATION", "0s")
 	cfg, err := Load("")
 	require.NoError(t, err)
-	require.NotNil(t, cfg.Auth.Naming.Enabled)
-	require.False(t, *cfg.Auth.Naming.Enabled)
-	require.NotNil(t, cfg.Auth.Naming.RenameInterval)
-	require.Zero(t, *cfg.Auth.Naming.RenameInterval)
-	policy, err := billing.NormalizeNaming(cfg.Auth.Naming)
+	require.NotNil(t, cfg.Naming.Enabled)
+	require.False(t, *cfg.Naming.Enabled)
+	require.NotNil(t, cfg.Naming.RenameInterval)
+	require.Zero(t, *cfg.Naming.RenameInterval)
+	policy, err := billing.NormalizeNaming(cfg.Naming)
 	require.NoError(t, err)
 	require.Equal(t, billing.FormerNamesImmediate, policy.FormerNames)
-}
-
-// Sandbox posture never relaxes auth transport; only the explicit loopback
-// exception admits HTTP, and only to a loopback host.
-func TestAuthTransportIsExplicit(t *testing.T) {
-	f := defaults()
-	f.TestMode, f.ProviderWriteMode = "sandbox", billing.ProviderWriteModeFull
-	f.DB.URL = testDatabaseURL
-	cfg, err := f.config()
-	require.NoError(t, err)
-	require.NoError(t, Validate(cfg))
-
-	for _, row := range []struct {
-		issuer, origin string
-		loopback       bool
-		want           string
-	}{
-		{"https://auth.example.com", "", false, ""},
-		{"http://auth.internal:8080", "", false, "must use HTTPS"},
-		{"http://127.0.0.1:3053", "", false, "must use HTTPS"},
-		{"http://127.0.0.1:3053", "", true, ""},
-		{"http://localhost:3053", "http://localhost:3053", true, ""},
-		{"http://10.0.0.2", "", true, "must use HTTPS"},
-		{"https://user:pw@auth.example.com", "", false, "without credentials"},
-		{"https://auth.example.com?x=1", "", false, "without credentials, query or fragment"},
-		{"https://issuer.example", "https://billing.example/billing", false, "without a path"},
-		{"https://issuer.example", "https://billing.example/", false, ""},
-	} {
-		cfg.Auth.Issuer, cfg.Auth.RequestOrigin, cfg.Auth.AllowLoopbackHTTP = row.issuer, row.origin, row.loopback
-		err := Validate(cfg)
-		if row.want == "" {
-			require.NoError(t, err, row.issuer)
-		} else {
-			require.ErrorContains(t, err, row.want, row.issuer)
-		}
-	}
-	require.False(t, cfg.Auth.AllowPrivateNetworkJWKS || cfg.Auth.AllowMissingSenders || cfg.Auth.AllowEphemeralSigningKey)
-	require.ErrorContains(t, Validate(&Config{}), "standalone config is required")
 }
 
 // No database is assumed: without one every loader refuses and names the

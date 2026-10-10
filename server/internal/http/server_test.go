@@ -12,13 +12,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
@@ -41,20 +40,16 @@ func captchaServer(provider string, store *captcha.ChallengeStore) *Server {
 }
 
 // Captcha discovery is mounted under each surface prefix, reports a pending
-// challenge for the caller's address or user, and never serves the secret.
+// challenge for the caller's address, and never serves the secret.
 func TestCaptchaDiscoveryRoutes(t *testing.T) {
 	store := captcha.NewChallengeStore(abusestate.New(nil))
 	store.MarkChallenged(context.Background(), "ip:203.0.113.50", time.Minute)
-	store.MarkChallenged(context.Background(), "user:user_1", time.Minute)
 
-	status := func(s *Server, prefix, remote, user string) string {
+	status := func(s *Server, prefix, remote string) string {
 		mux := http.NewServeMux()
 		s.registerUserRoutesAt(mux, prefix)
 		req := httptest.NewRequest(http.MethodGet, prefix+"/captcha/status", nil)
 		req.RemoteAddr = remote
-		if user != "" {
-			req = req.WithContext(billingauth.SetUserContext(req.Context(), billingauth.UserContext{UserID: user}))
-		}
 		w := serve(t, mux, req)
 		require.Equal(t, http.StatusOK, w.Code)
 		require.NotContains(t, w.Body.String(), "key")
@@ -65,11 +60,10 @@ func TestCaptchaDiscoveryRoutes(t *testing.T) {
 		return string(b)
 	}
 	on := captchaServer(config.CaptchaProviderTurnstile, store)
-	require.JSONEq(t, body(true, true, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.50:1234", ""))
-	require.JSONEq(t, body(true, true, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.51:1234", "user_1"))
-	require.JSONEq(t, body(true, false, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.51:1234", "user_2"))
-	require.JSONEq(t, body(true, false, EmbeddedV1Prefix), status(on, EmbeddedV1Prefix, "203.0.113.51:1234", ""))
-	require.JSONEq(t, body(false, false, StandaloneV1Prefix), status(captchaServer("", store), StandaloneV1Prefix, "203.0.113.50:1234", ""))
+	require.JSONEq(t, body(true, true, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.50:1234"))
+	require.JSONEq(t, body(true, false, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.51:1234"))
+	require.JSONEq(t, body(true, false, EmbeddedV1Prefix), status(on, EmbeddedV1Prefix, "203.0.113.51:1234"))
+	require.JSONEq(t, body(false, false, StandaloneV1Prefix), status(captchaServer("", store), StandaloneV1Prefix, "203.0.113.50:1234"))
 
 	for _, tc := range []struct {
 		provider string
@@ -140,18 +134,24 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	}
 }
 
-type proofRejectingResolver struct{ origin string }
+// challenging is an Authenticator that refuses every credential with its
+// own challenge, and advertises the headers its credentials travel in.
+type challenging struct{ origin string }
 
-func (r *proofRejectingResolver) ResolveResourceCustomer(req *http.Request) (*credential.ResolvedDelegated, error) {
-	r.origin = req.Header.Get("Origin")
-	return nil, credential.ChallengeError{Code: billing.CodeSenderProofRequired}
+func (a *challenging) Authenticate(r *http.Request) (auth.Verified, error) {
+	a.origin = r.Header.Get("Origin")
+	return nil, &auth.Challenge{Err: auth.ErrSenderProofRequired, Header: http.Header{"Www-Authenticate": {`Proof error="use_nonce"`}, "Proof-Nonce": {"n1"}}}
 }
 
-// #469: the self-service surface is always mounted; its customer tokens must
-// carry sender proof even from a CORS-allowed origin.
+func (*challenging) AllowedHeaders() []string { return []string{"Authorization", "Proof"} }
+func (*challenging) ExposedHeaders() []string { return []string{"WWW-Authenticate", "Proof-Nonce"} }
+
+// #469: the self-service surface is always mounted. Its CORS names the
+// headers AuthKit's credentials travel in; a refused credential is a generic
+// 401 whose challenge passes through unread.
 func TestSelfServiceAuthentication(t *testing.T) {
-	resolver := &proofRejectingResolver{}
-	s := &Server{cfg: &config.Config{}, customerResolver: resolver}
+	a := &challenging{}
+	s := &Server{cfg: &config.Config{}, auth: a}
 	mux := http.NewServeMux()
 	s.registerSelfServiceRoutes(mux)
 	ts := httptest.NewServer(s.wrapPublicHandler(mux))
@@ -161,6 +161,8 @@ func TestSelfServiceAuthentication(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, preflight.StatusCode)
 	require.Equal(t, "*", preflight.Header.Get("Access-Control-Allow-Origin"))
 	require.Empty(t, preflight.Header.Get("Access-Control-Allow-Credentials"))
+	require.Contains(t, preflight.Header.Get("Access-Control-Allow-Headers"), "Proof")
+	require.Contains(t, preflight.Header.Get("Access-Control-Expose-Headers"), "Proof-Nonce")
 
 	req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/me", nil)
 	require.NoError(t, err)
@@ -171,8 +173,10 @@ func TestSelfServiceAuthentication(t *testing.T) {
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
 	require.Equal(t, http.StatusUnauthorized, resp.StatusCode)
-	require.Contains(t, string(body), "sender_proof_required")
-	require.Equal(t, "https://evil.example", resolver.origin)
+	require.Contains(t, string(body), "authentication_required")
+	require.Equal(t, `Proof error="use_nonce"`, resp.Header.Get("WWW-Authenticate"))
+	require.Equal(t, "n1", resp.Header.Get("Proof-Nonce"))
+	require.Equal(t, "https://evil.example", a.origin)
 }
 
 func corsPreflight(t *testing.T, ts *httptest.Server, path, origin string) *http.Response {

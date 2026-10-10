@@ -18,6 +18,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/authkit"
+	hostKeys "github.com/open-rails/authkit/keys"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
@@ -44,11 +47,13 @@ func TestServersShareOneDatabase(t *testing.T) {
 	_, _ = rand.Read(totp)
 	require.NoError(t, os.WriteFile(filepath.Join(keys, "totp.key"), []byte(hex.EncodeToString(totp)), 0o600))
 	vault := vaulttest.New(t)
-	shared := func(cfg *server.Config, _ *server.Deps) {
+	source, err := hostKeys.StaticFromPEM("e2e-shared", signing, nil)
+	require.NoError(t, err)
+	shared := func(cfg *server.Config, deps *server.Deps) {
 		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.Redis = &openrails.RedisConfig{Addr: redis}
-		cfg.Auth.AllowEphemeralSigningKey = false
-		cfg.Auth.ActiveKeyID, cfg.Auth.ActivePrivateKeyPEM, cfg.Auth.KeysPath = "e2e-shared", signing, keys
+		cfg.Auth.Keys = authkit.KeysConfig{Path: keys}
+		deps.Auth.KeySource = source
 	}
 
 	servers := make([]*server.Server, 2)
@@ -79,15 +84,13 @@ func TestServersShareOneDatabase(t *testing.T) {
 	member, token := newOwner(t, a)
 	shop, err := a.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("shared"), DisplayName: "Shared Shop", OwnerUserID: member})
 	require.NoError(t, err)
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Authorization", "Bearer "+token)
-	listed, err := b.ListUserMerchants(t.Context(), r)
-	require.NoError(t, err, "the other server verifies the token")
-	require.Len(t, listed, 1)
-	require.Equal(t, shop.MerchantID, listed[0].ID, "and reads the merchant the first one created")
+	other, err := standaloneHandler(b)
+	require.NoError(t, err)
+	w := call(t, other, token, http.MethodGet, "/v1/admin/findings", "id:"+shop.MerchantID.String(), nil)
+	require.Equal(t, http.StatusOK, w.Code, "the other server verifies the token and reads the merchant the first one created: %s", w.Body.String())
 
 	for i, srv := range servers {
-		w := httptest.NewRecorder()
+		w = httptest.NewRecorder()
 		srv.PrivateHandler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 		require.Equal(t, http.StatusOK, w.Code, "server %d metrics", i)
 		require.Contains(t, w.Body.String(), `openrails_dependency_up{dependency="redis",class="optional"} 1`)

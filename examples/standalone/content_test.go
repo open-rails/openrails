@@ -157,9 +157,9 @@ func TestCourseList(t *testing.T) {
 }
 
 // The server's setup, exercised: a user who signs up and proves their email
-// reaches the server over SCIM with it, the backend's read-only token reads
-// them and is refused a write, their purchase emails them a receipt, and the
-// PSP's signed webhooks are accepted while a forged one is refused.
+// buys and is emailed a receipt, the backend's read-only token reads them
+// with the email AuthKit pushed and is refused a write, and the PSP's signed
+// webhooks are accepted while a forged one is refused.
 func TestServerSetup(t *testing.T) {
 	app := startStack(t)
 	ctx := context.Background()
@@ -182,20 +182,21 @@ func TestServerSetup(t *testing.T) {
 	erin, err := billing.ParseCustomerID(signedIn.User.ID)
 	require.NoError(t, err)
 
-	// AuthKit's next SCIM push makes her a customer, with her email.
+	// Her purchase makes her a customer, receipted to that address.
+	app.buy(t, app.customer(t, signedIn.User.ID, signedIn.TokenSet.AccessToken), "course-101", "purchase")
+	app.mailTo(t, "erin@example.com", func(m smtptest.Message) bool { return strings.Contains(m.Text, "4.99 USD") })
+
+	// AuthKit's SCIM push keeps her contact in the merchant's directory at
+	// the server: the admin customer read shows it.
 	require.Eventually(t, func() bool {
 		c, err := app.bill.GetCustomer(ctx, erin)
 		return err == nil && c.Contact != nil && c.Contact.Email != nil && *c.Contact.Email == "erin@example.com"
-	}, 30*time.Second, 250*time.Millisecond, "the admin customer read shows the email SCIM pushed")
+	}, 30*time.Second, 250*time.Millisecond, "the admin customer read shows her email")
 
 	// The backend's token carries merchant:billing:read: support's writes
 	// (merchant:billing:manage) are refused.
 	_, err = app.bill.UpdateCustomer(ctx, erin, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 1_000_000}}})
 	require.ErrorIs(t, err, billing.ErrDenied)
-
-	// Her purchase is receipted to that address.
-	app.buy(t, app.customer(t, signedIn.User.ID, signedIn.TokenSet.AccessToken), "course-101", "purchase")
-	app.mailTo(t, "erin@example.com", func(m smtptest.Message) bool { return strings.Contains(m.Text, "4.99 USD") })
 
 	// NMI posts to /v1/webhooks/nmi/{gateway id}, signed with the PSP's webhook_signing_secret.
 	body := []byte(`{"event_id":"evt-1","event_type":"transaction.sale.success","event_body":{"merchant":{"id":"000000"},"transaction_id":"1"}}`)
@@ -277,6 +278,7 @@ func startStack(t *testing.T) *stack {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), config, 0o600))
 	manifest, err := os.ReadFile("openrails/merchant.example.yaml")
 	require.NoError(t, err)
+	manifest = bytes.ReplaceAll(manifest, []byte("localhost:8080"), []byte(strings.TrimPrefix(appURL, "http://")))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "merchant.yaml"), manifest, 0o600))
 	catalogFile, err := filepath.Abs("catalog.yaml")
 	require.NoError(t, err)

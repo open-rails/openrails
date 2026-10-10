@@ -5,10 +5,10 @@ package ci_test
 import (
 	"context"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/open-rails/authkit/authtest"
+	"github.com/open-rails/authkit/iam"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
 	"github.com/stretchr/testify/require"
@@ -49,11 +49,10 @@ func TestMerchantCreationPolicy(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, created.Created)
 	ownerToken := authtest.SignIn(t, cp.AuthKit(), account).AccessToken
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Authorization", "Bearer "+ownerToken)
-	mine, err := cp.ListUserMerchants(ctx, r)
+	roles, err := cp.AuthKit().GroupRoles(ctx, iam.GroupByID(created.MerchantID.String()), []iam.Subject{iam.UserSubject(owner)})
 	require.NoError(t, err)
-	require.Equal(t, []billing.UserMerchant{{ID: created.MerchantID, Slug: shop, DisplayName: "Shop One", Role: "owner", Permissions: []string{"merchant:*"}}}, mine)
+	require.Equal(t, "owner", roles[iam.UserSubject(owner)].Name(), "the creator owns the merchant's group")
+	require.Equal(t, "Shop One", *displayName(created.MerchantID))
 
 	repaired, err := create(owner, shop)
 	require.NoError(t, err, "an owned name is the idempotent repair, past the allowance")

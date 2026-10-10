@@ -6,6 +6,7 @@ import (
 	"net"
 	"strconv"
 
+	"github.com/open-rails/authkit"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
@@ -22,11 +23,8 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 	if h.Config == nil {
 		return server.Config{}, fmt.Errorf("config not loaded")
 	}
-	if h.Auth == nil {
-		return server.Config{}, fmt.Errorf("auth is required: the standalone server runs its own AuthKit")
-	}
 	cfg := server.Config{
-		Engine: *h.Config, Auth: *h.Auth, ResourceServer: h.ResourceServer, LocalSignIn: h.LocalSignIn,
+		Engine: *h.Config, Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: h.Naming,
 		RouteGroups: h.RouteGroups, AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
 		Addr:       net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
 		DrainDelay: h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
@@ -43,7 +41,11 @@ func openServer(ctx context.Context, deps openrails.Deps) (*server.Server, *app.
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	srv, err := server.New(ctx, cfg, server.Deps{Engine: deps})
+	key, err := hostconfig.FromContext(ctx).SigningKey.Source()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	srv, err := server.New(ctx, cfg, server.Deps{Engine: deps, Auth: authkit.Deps{KeySource: key}})
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("bootstrap server: %w", err)
 	}

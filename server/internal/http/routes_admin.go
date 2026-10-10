@@ -38,21 +38,24 @@ func permissionsFor(groups config.RouteGroups) httproutes.Permissions {
 	return p
 }
 
-func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
-	auth := s.staffAuth()
-	opts := httproutes.Options{
-		Auth:            auth,
-		Scope:           auth.Scope,
-		ResolveMerchant: auth.ResolveMerchant,
+// routeOptions mount the engine's routes behind AuthKit, as any host does,
+// with each merchant's AuthKit group as its scope.
+func (s *Server) routeOptions() httproutes.Options {
+	return httproutes.Options{
+		Auth:            s.auth,
+		Scope:           s.scope,
+		ResolveMerchant: s.resolveMerchant,
 		AdminLimiter:    s.adminLimiter,
 		Capabilities:    s.capabilities(),
 		Permissions:     s.permissions,
 	}
-	httproutes.RegisterStaffRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, opts)
+}
+
+func (s *Server) registerMerchantActionRoutesAt(mux router.Registrar, apiPrefix string) {
+	opts := s.routeOptions()
+	httproutes.RegisterStaffRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, opts)
 	if s.groups.Programmatic {
-		// SCIM provisioning included: the server keeps the pushed copy of
-		// each merchant's users.
-		httproutes.RegisterAppRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordMerchantRoute), s.runtime, opts)
+		httproutes.RegisterAppRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, opts)
 	}
 }
 

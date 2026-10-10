@@ -4,6 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+
 	"github.com/go-viper/mapstructure/v2"
 	"github.com/joho/godotenv"
 	"github.com/knadh/koanf/parsers/yaml"
@@ -13,10 +18,6 @@ import (
 	"github.com/knadh/koanf/v2"
 	billing "github.com/open-rails/openrails/internal/config"
 	log "github.com/sirupsen/logrus"
-	"os"
-	"path/filepath"
-	"reflect"
-	"strings"
 )
 
 func loadConfigIfExists(k *koanf.Koanf, path string) error {
@@ -97,29 +98,23 @@ func envKeyToConfigKey(s string) string {
 
 	// AUTHKIT_ACTIVE_KEY_ID / AUTHKIT_ACTIVE_PRIVATE_KEY_PEM /
 	// AUTHKIT_PUBLIC_KEYS are AuthKit's canonical inline-key env names
-	// (mirrored by cmd/authkit-server; ak#266/v0.89.0 prefixed them, or#917
-	// follows); the mechanical split would look for a nonexistent "authkit"
-	// top-level prefix, so these are dead without the special case. The
-	// unprefixed names are poison — Load refuses boot on them.
+	// (mirrored by cmd/authkit-server). The unprefixed names are poison — Load
+	// refuses boot on them.
 	switch s {
-	case "auth_direct_peer_ip":
-		return "auth.direct_peer_ip"
-	case "auth_naming_enabled":
-		return "auth.naming.enabled"
-	case "auth_naming_rename_interval":
-		return "auth.naming.rename_interval"
-	case "auth_naming_former_names_mode":
-		return "auth.naming.former_names.mode"
-	case "auth_naming_former_names_duration":
-		return "auth.naming.former_names.duration"
+	case "naming_former_names_mode":
+		return "naming.former_names.mode"
+	case "naming_former_names_duration":
+		return "naming.former_names.duration"
 	case "authkit_active_key_id":
-		return "auth.active_key_id"
+		return "signing_key.active_key_id"
 	case "authkit_active_private_key_pem":
-		return "auth.active_private_key_pem"
+		return "signing_key.active_private_key_pem"
 	case "authkit_public_keys":
-		return "auth.public_keys"
-	case "authkit_keys_path":
-		return "auth.keys_path"
+		return "signing_key.public_keys"
+	}
+	// AUTH_* is AuthKit's configuration, by AuthKit's keys.
+	if rest, ok := strings.CutPrefix(s, "auth_"); ok && rest != "" {
+		return "auth." + authPath(rest)
 	}
 
 	if envTopLevelScalarKeys[s] || envTopLevelNestedKeys[s] {
@@ -229,11 +224,10 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 
 		v := strings.TrimSpace(value)
 
-		// auth.public_keys is a JSON STRING field ({kid: PEM}, parsed by the
-		// control plane at construction), not structured config — decoding it
-		// here would hand the strict unmarshal a map for a string field and
-		// refuse boot (or#917).
-		if mapped == "auth.public_keys" {
+		// signing_key.public_keys is a JSON STRING field ({kid: PEM}),
+		// not structured config — decoding it here would hand the strict
+		// unmarshal a map for a string field and refuse boot (or#917).
+		if mapped == "signing_key.public_keys" {
 			return mapped, v
 		}
 
@@ -426,6 +420,16 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		os.Getenv("AUTH_CONTROL_PLANE_TOKEN_PREFIX") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_BOOTSTRAP_ADMIN_SERVICE_TOKEN_NAME") != "" ||
 		os.Getenv("AUTH_CONTROL_PLANE_PLATFORM_ADMIN_USER_ID") != ""
+	// HARD CUT (#1185): auth is AuthKit's own configuration, by AuthKit's
+	// keys; the server's former auth keys name their replacements.
+	if _, present := os.LookupEnv("AUTHKIT_KEYS_PATH"); present {
+		return nil, fmt.Errorf("AUTHKIT_KEYS_PATH was renamed (#1185): set AUTH_KEYS_PATH (auth.keys.path)")
+	}
+	for old, now := range retiredAuthKeys {
+		if k.Exists(old) {
+			return nil, fmt.Errorf("%s was removed (#1185): auth is AuthKit's configuration; set %s", old, now)
+		}
+	}
 	if retiredStoreConfig {
 		return nil, fmt.Errorf("store config was removed (#520): seed merchant profile fields with openrails push-merchant-config under merchants[].profile; delete the store yaml key and STORE_* env vars")
 	}
@@ -445,7 +449,7 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 		return nil, fmt.Errorf("rails config was removed (#521): seed merchant PSPs and secrets with openrails push-merchant-config under merchants[].psps; delete the rails yaml key and RAILS_* env vars")
 	}
 	if retiredControlPlaneLegacy {
-		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.issuer (env AUTH_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
+		return nil, fmt.Errorf("auth.control_plane config was removed (#521): use auth.token.issuer (env AUTH_TOKEN_ISSUER) — audiences are fixed to openrails, standalone public hosted registration is unavailable in this repo, and platform-superadmin belongs in the hosted product; delete the auth.control_plane keys and AUTH_CONTROL_PLANE_* env vars")
 	}
 
 	// Unmarshal into fileConfig (overlay onto defaults). Strict (or#915,
@@ -506,4 +510,24 @@ func hasEnvPrefix(prefix string) bool {
 		}
 	}
 	return false
+}
+
+// retiredAuthKeys are the server's former auth keys and their replacements.
+var retiredAuthKeys = map[string]string{
+	"auth.issuer":                      "auth.token.issuer (AUTH_TOKEN_ISSUER)",
+	"auth.schema":                      "auth.database.schema (AUTH_DATABASE_SCHEMA)",
+	"auth.keys_path":                   "auth.keys.path (AUTH_KEYS_PATH)",
+	"auth.mint_disabled":               "auth.keys.verify_only (AUTH_KEYS_VERIFY_ONLY)",
+	"auth.allow_ephemeral_signing_key": "auth.keys.allow_ephemeral_dev_keys (AUTH_KEYS_ALLOW_EPHEMERAL_DEV_KEYS)",
+	"auth.allow_private_network_jwks":  "auth.token.allow_private_network_jwks (AUTH_TOKEN_ALLOW_PRIVATE_NETWORK_JWKS)",
+	"auth.allow_missing_senders":       "auth.registration.allow_missing_senders (AUTH_REGISTRATION_ALLOW_MISSING_SENDERS)",
+	"auth.direct_peer_ip":              "auth.http.direct_peer_ip (AUTH_HTTP_DIRECT_PEER_IP)",
+	"auth.request_origin":              "auth.resource.public_url (AUTH_RESOURCE_PUBLIC_URL)",
+	"auth.naming":                      "naming (NAMING_*) for merchant names, auth.username for usernames",
+	"auth.allow_loopback_http":         "nothing: AuthKit admits http only on a loopback host",
+	"auth.allow_memory":                "nothing: AuthKit keeps its limits and proofs in Redis or memory",
+	"auth.active_key_id":               "signing_key.active_key_id (AUTHKIT_ACTIVE_KEY_ID)",
+	"auth.active_private_key_pem":      "signing_key.active_private_key_pem (AUTHKIT_ACTIVE_PRIVATE_KEY_PEM)",
+	"auth.public_keys":                 "signing_key.public_keys (AUTHKIT_PUBLIC_KEYS)",
+	"resource_server":                  "auth.resource (id, public_url) and each merchant's trusted issuers in AuthKit",
 }

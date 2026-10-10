@@ -24,58 +24,38 @@ import (
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
-// A staff member's changes to the team and keys act as their own sign-in: a
-// session revoked after its token was minted is refused at the next change,
-// not an outage. Merchant credentials are minted and revoked through AuthKit,
-// by the user themselves or, for a credential carrying its own permissions,
-// by the system after OpenRails' no-escalation check. The keys reach the
-// admin API with their role.
-func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
+// A merchant's API keys are AuthKit's, in its group: each reaches the admin
+// API with its role, at its own merchant only, and a revoked key
+// authenticates nothing. No OpenRails route manages them.
+func TestMerchantAPIKeysAreAuthKits(t *testing.T) {
 	f := newFixture(t)
-	cp := f.newServer(t, reserving())
+	srv := f.newServer(t, nil)
 	ctx := t.Context()
-	handler, err := standaloneHandler(cp)
+	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	owner := newAccount(t, cp)
-	shop := uniqueName("staff")
-	provisioned, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: shop, OwnerUserID: owner.ID})
-	require.NoError(t, err)
-	mid := provisioned.MerchantID
-	session := authtest.SignIn(t, cp.AuthKit(), owner).AccessToken
-	ownerActor := userActor(t, cp, session)
-
-	team, err := cp.ListMerchantTeam(ctx, mid)
-	require.NoError(t, err)
-	require.Len(t, team, 1)
-	require.Equal(t, "owner", team[0].Role)
-	ownerKey, err := cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "owner key", Role: "owner"})
-	require.NoError(t, err)
-	require.True(t, strings.HasPrefix(ownerKey.Prefix, "openrails_st_"))
-	viewerKey, err := cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantBillingRead, server.MerchantBillingManage, server.MerchantConfigManage}), mid, billing.CreateAPIKeyParams{Name: "viewer key", Role: "viewer"})
-	require.NoError(t, err, "a credential mints within its own authority")
-	_, err = cp.CreateMerchantAPIKey(ctx, server.CredentialActor([]string{server.MerchantBillingRead}), mid, billing.CreateAPIKeyParams{Name: "escalated", Role: "owner"})
-	require.ErrorIs(t, err, server.ErrRoleEscalation)
-	_, err = cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "x", Role: "admin"})
-	require.ErrorIs(t, err, server.ErrUnknownMerchantRole)
-	keys, err := cp.ListMerchantAPIKeys(ctx, mid)
-	require.NoError(t, err)
-	require.Len(t, keys, 2)
-
-	findings := func(token string) int {
-		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", "", nil).Code
+	owner := newAccount(t, srv)
+	provision := func(name string) billing.MerchantID {
+		p, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName(name), OwnerUserID: owner.ID})
+		require.NoError(t, err)
+		return p.MerchantID
 	}
-	require.Equal(t, http.StatusOK, findings(viewerKey.Secret))
+	mid, other := provision("keys"), provision("other")
+	ownerKey, viewerKey := merchantKey(t, srv, mid, "owner"), merchantKey(t, srv, mid, "viewer")
+	require.True(t, strings.HasPrefix(ownerKey.Secret, "openrails_st_"))
+
+	findings := func(token, selector string) int {
+		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", selector, nil).Code
+	}
+	require.Equal(t, http.StatusOK, findings(viewerKey.Secret, ""), "a key names its merchant")
 	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code, "a viewer reads no merchant configuration")
 	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", "", nil).Code)
+	require.Equal(t, http.StatusConflict, findings(ownerKey.Secret, "id:"+other.String()), "a key acts at its own merchant only")
+	require.Equal(t, http.StatusOK, findings(merchantKey(t, srv, other, "viewer").Secret, ""))
 	check := map[string]any{"customer_id": billing.CustomerID(uuid.New()).String(), "entitlements": []string{"content:any"}}
 	w := call(t, handler, viewerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", "", check)
 	require.Equal(t, http.StatusForbidden, w.Code, "a viewer key holds no programmatic permission: %s", w.Body.String())
 	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodPost, "/v1/app/entitlements/check", "", check).Code, "the owner's merchant:* holds merchant:entitlements:read")
-	attempt := billing.CheckoutAttemptID(uuid.New()).String()
 	for _, route := range []struct{ method, path string }{
-		{http.MethodPost, "/v1/admin/checkout-attempts"},
-		{http.MethodGet, "/v1/admin/checkout-attempts/" + attempt},
-		{http.MethodPost, "/v1/admin/checkout-attempts/" + attempt + "/confirm"},
 		{http.MethodGet, "/v1/merchant/team"},
 		{http.MethodPost, "/v1/merchant/api-keys"},
 		{http.MethodGet, "/v1/merchants"},
@@ -83,29 +63,20 @@ func TestMerchantCredentialsActAsTheirSession(t *testing.T) {
 		w := call(t, handler, ownerKey.Secret, route.method, route.path, "", map[string]any{})
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s is not mounted: %s", route.method, route.path, w.Body.String())
 	}
-	require.NoError(t, cp.RevokeMerchantAPIKey(ctx, ownerActor, mid, viewerKey.ID))
-	require.Equal(t, http.StatusUnauthorized, findings(viewerKey.Secret), "a revoked key authenticates nothing")
-	require.ErrorIs(t, cp.RevokeMerchantAPIKey(ctx, ownerActor, mid, viewerKey.ID+"x"), billing.ErrNotFound)
-
-	_, err = cp.InviteMerchantTeamMember(ctx, ownerActor, mid, billing.InviteTeamMemberParams{Email: uniqueName("nobody") + "@e2e.test", Role: "viewer"})
-	require.ErrorIs(t, err, server.ErrTeamInvitesDisabled, "self-hosted registration is closed")
-	require.False(t, cp.TeamInvitesEnabled())
-
-	_, err = cp.AuthKit().RevokeAccountSessions(ctx, iam.UserIdentity(owner.ID), owner.ID)
-	require.NoError(t, err)
-	_, err = cp.CreateMerchantAPIKey(ctx, ownerActor, mid, billing.CreateAPIKeyParams{Name: "late", Role: "viewer"})
-	require.ErrorIs(t, err, iam.ErrSessionRevoked)
-	require.Equal(t, http.StatusOK, findings(ownerKey.Secret), "control: the owner's API key is not the revoked session")
+	require.NoError(t, srv.AuthKit().RevokeAPIKey(ctx, iam.SystemIdentity(), iam.GroupByID(mid.String()), viewerKey.APIKey.ID))
+	require.Equal(t, http.StatusUnauthorized, findings(viewerKey.Secret, ""), "a revoked key authenticates nothing")
+	require.Equal(t, http.StatusOK, findings(ownerKey.Secret, ""))
 }
 
-// userActor is the server account a bearer token signs in.
-func userActor(t *testing.T, srv *server.Server, token string) server.Actor {
+// merchantKey is an API key of merchant mid's AuthKit group holding the
+// merchant role role.
+func merchantKey(t *testing.T, srv *server.Server, mid billing.MerchantID, role string) iam.APIKeyCreated {
 	t.Helper()
-	r := httptest.NewRequest(http.MethodGet, "/", nil)
-	r.Header.Set("Authorization", "Bearer "+token)
-	actor, err := srv.UserActor(r)
+	r, ok := server.MerchantRole(role)
+	require.True(t, ok, role)
+	created, err := srv.AuthKit().CreateAPIKey(t.Context(), iam.SystemIdentity(), iam.GroupByID(mid.String()), iam.NewAPIKey{Name: role, Role: r})
 	require.NoError(t, err)
-	return actor
+	return created
 }
 
 // newAccount creates an account with a verified email and a password, which
@@ -165,4 +136,39 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.NoError(t, err)
 	_, err = cp.AuthKit().ApplyBootstrapManifest(ctx, manifest, iam.BootstrapOptions{DryRun: true})
 	require.NoError(t, err)
+}
+
+// A person names the merchant they act on (its API host or the
+// OpenRails-Merchant selector, as the console does); holding roles in
+// several, or one, never picks it for them. Their permission is asked of
+// AuthKit in that merchant's group.
+func TestStaffNameTheirMerchant(t *testing.T) {
+	f := newFixture(t)
+	srv := f.newServer(t, nil)
+	ctx := t.Context()
+	handler, err := standaloneHandler(srv)
+	require.NoError(t, err)
+	member, token := newOwner(t, srv)
+	mine, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("mine"), OwnerUserID: member})
+	require.NoError(t, err)
+	theirs, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("theirs"), OwnerUserID: newAccount(t, srv).ID})
+	require.NoError(t, err)
+
+	findings := func(selector string) *httptest.ResponseRecorder {
+		return call(t, handler, token, http.MethodGet, "/v1/admin/findings", selector, nil)
+	}
+	w := findings("")
+	require.Equal(t, http.StatusForbidden, w.Code, "no merchant named: %s", w.Body.String())
+	require.Contains(t, w.Body.String(), "merchant_unresolved")
+	require.Equal(t, http.StatusOK, findings("id:"+mine.MerchantID.String()).Code)
+	w = findings("id:" + theirs.MerchantID.String())
+	require.Equal(t, http.StatusForbidden, w.Code, "a merchant they hold no role in: %s", w.Body.String())
+	require.Contains(t, w.Body.String(), "permission_required")
+
+	listed, err := srv.ListUserMerchants(ctx, member)
+	require.NoError(t, err)
+	require.Len(t, listed, 1, "a hosted product's list for a user AuthKit authenticated")
+	require.Equal(t, mine.MerchantID, listed[0].ID)
+	require.Equal(t, "owner", listed[0].Role)
+	require.Equal(t, []string{"merchant:*"}, listed[0].Permissions)
 }

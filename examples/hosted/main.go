@@ -47,7 +47,8 @@ type settings struct {
 	APIHost      string        // the merchant's API host on the platform
 	Merchant     string        // the merchant's name on the platform
 	Resource     string        // the platform's resource identifier: its tokens' aud
-	ServiceToken string        // the console's service token for this app
+	ServiceToken string        // the console's service token for this app, bound to its registration
+	Directory    string        // the platform's directory for this app's users (its AuthKit's /directory/scim/v2)
 	SCIMInterval time.Duration // how often AuthKit pushes user changes to the platform
 	SMTP         smtp.Server   // AuthKit's mail: the codes that prove each user's email
 	KeysPath     string        // AuthKit's signing key, kept across restarts: the platform trusts it
@@ -89,13 +90,13 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 			}},
 		},
 
-		// Customer contacts: every user, pushed to the merchant's SCIM routes
-		// with the service token.
+		// Customer contacts: every user, pushed to the merchant's directory on
+		// the platform with the service token.
 		Provisioning: authkit.ProvisioningConfig{
 			Interval: s.SCIMInterval,
 			Targets: []authkit.ProvisioningTarget{{
 				Name:        "openrails",
-				URL:         s.APIHost + "/v1/app/scim/v2",
+				URL:         s.Directory,
 				BearerToken: s.ServiceToken,
 			}},
 		},
@@ -167,6 +168,7 @@ func run(ctx context.Context) error {
 		Merchant:     cmp.Or(os.Getenv("OPENRAILS_MERCHANT"), "onlydemo"),
 		Resource:     os.Getenv("OPENRAILS_RESOURCE"),
 		ServiceToken: os.Getenv("OPENRAILS_SERVICE_TOKEN"),
+		Directory:    os.Getenv("OPENRAILS_DIRECTORY"),
 		SCIMInterval: 30 * time.Second,
 		KeysPath:     cmp.Or(os.Getenv("AUTH_KEYS_PATH"), ".dev/auth"),
 		SMTP: smtp.Server{
@@ -175,8 +177,8 @@ func run(ctx context.Context) error {
 			From: "OnlyDemo <hello@onlydemo.example>",
 		},
 	}
-	if s.APIHost == "" || s.Resource == "" || s.ServiceToken == "" {
-		return errors.New("OPENRAILS_API_HOST, OPENRAILS_RESOURCE and OPENRAILS_SERVICE_TOKEN are required: see README.md")
+	if s.APIHost == "" || s.Resource == "" || s.ServiceToken == "" || s.Directory == "" {
+		return errors.New("OPENRAILS_API_HOST, OPENRAILS_RESOURCE, OPENRAILS_SERVICE_TOKEN and OPENRAILS_DIRECTORY are required: see README.md")
 	}
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {

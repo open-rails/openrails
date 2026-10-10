@@ -21,7 +21,6 @@ import (
 	"github.com/open-rails/authkit/iam"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/credential"
 	"github.com/open-rails/openrails/internal/staffperm"
 )
 
@@ -75,36 +74,13 @@ var catalogPerms = func() map[string]iam.Perm {
 
 func declared(perm string) iam.Perm { return catalogPerms[perm] }
 
+// APIKeyPrefix is the fixed OpenRails API-key marker.
+const APIKeyPrefix = "openrails"
+
 var (
 	supportGrants = []string{staffperm.BillingRead, staffperm.BillingManage}
 	viewerGrants  = []string{staffperm.BillingRead}
 )
-
-// merchantRoleGrants are a merchant role's permissions as wire strings, for
-// mapping an issuer's roles onto OpenRails merchant roles.
-func merchantRoleGrants(name string) ([]string, bool) {
-	switch name {
-	case MerchantOwner.Name():
-		return []string{staffperm.All}, true
-	case MerchantSupport.Name():
-		return supportGrants, true
-	case MerchantViewer.Name():
-		return viewerGrants, true
-	}
-	return nil, false
-}
-
-// merchantRoleFor names the merchant role whose grants are exactly perms;
-// any other set is "custom".
-func merchantRoleFor(perms []string) string {
-	for _, role := range []iam.Role{MerchantOwner, MerchantSupport, MerchantViewer} {
-		grants, _ := merchantRoleGrants(role.Name())
-		if credential.EquivalentPermissions(grants, perms) {
-			return role.Name()
-		}
-	}
-	return "custom"
-}
 
 func merchantRole(name string, perms ...string) iam.Role {
 	grants := make([]iam.Grant, 0, len(perms))
@@ -138,40 +114,4 @@ func RoleNames(roles []iam.Role) []string {
 		out[i] = role.Name()
 	}
 	return out
-}
-
-// RoleCoveredBy reports whether grants cover every permission role confers in
-// the running catalog: a non-user principal may hand out only authority it
-// holds.
-func (c *ControlPlane) RoleCoveredBy(role iam.Role, grants []string) (bool, error) {
-	perms, err := c.client.RolePermissions(role)
-	if err != nil {
-		return false, err
-	}
-	return coveredAll(perms, grants), nil
-}
-
-// coveredAll reports whether grants cover every one of perms, and perms is
-// not empty.
-func coveredAll(perms []iam.Perm, grants []string) bool {
-	if len(perms) == 0 {
-		return false
-	}
-	for _, perm := range perms {
-		if !covered(perm, grants) {
-			return false
-		}
-	}
-	return true
-}
-
-// covered reports whether some grant authorizes perm (iam.Perm.Matches).
-func covered(perm iam.Perm, grants []string) bool {
-	for _, text := range grants {
-		var grant iam.Perm
-		if grant.UnmarshalText([]byte(strings.TrimSpace(text))) == nil && perm.Matches(grant) {
-			return true
-		}
-	}
-	return false
 }

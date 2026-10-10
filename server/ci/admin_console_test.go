@@ -61,7 +61,7 @@ func requireConsoleAt(t *testing.T, handler http.Handler, mount, marker string) 
 // is issuer.
 func standaloneConsole(issuer string, c *server.AdminConsole) func(*server.Config, *server.Deps) {
 	return func(cfg *server.Config, deps *server.Deps) {
-		cfg.Auth.Issuer = issuer
+		cfg.Auth.Token.Issuer = issuer
 		cfg.AdminConsole = c
 		deps.Engine.ConsoleAssets = consoleBuild("standalone")
 	}

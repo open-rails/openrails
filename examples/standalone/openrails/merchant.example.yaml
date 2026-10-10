@@ -7,6 +7,9 @@ merchants:
   onlydemo: # your merchant's name: lowercase letters, digits and hyphens
     display_name: OnlyDemo
     api_host: localhost # the Host its public routes (the catalog, checkout) answer on
+    remote_application: # the app's AuthKit: its tokens act for this merchant only
+      issuer: http://localhost:8080
+      jwks_uri: http://localhost:8080/.well-known/jwks.json
     settings:
       profile:
         from_email: billing@onlydemo.example # receipts come from this address

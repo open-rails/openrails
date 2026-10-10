@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/authkit"
+
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/server"
@@ -27,14 +29,11 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 	f := newFixture(t)
 	host := newIssuerKey(t, "https://perms-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
 	shop := uniqueName("perms")
-	trust := func(cfg *server.Config, _ *server.Deps) {
-		cfg.ResourceServer = &server.ResourceServerConfig{
-			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
-			TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{"merchant:*"}}},
-		}
+	resource := func(cfg *server.Config, _ *server.Deps) {
+		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 	}
-	cp := f.newServer(t, trust)
-	provision(t, cp, shop)
+	cp := f.newServer(t, resource)
+	trust(t, cp, provision(t, cp, shop), host.app(t, "owner", nil))
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
 
@@ -94,10 +93,10 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 	// Without route_groups.programmatic, /v1/app is not served at all.
 	other := newFixture(t)
 	staffOnly := other.newServer(t, func(cfg *server.Config, deps *server.Deps) {
-		trust(cfg, deps)
+		resource(cfg, deps)
 		cfg.RouteGroups = openrails.RouteGroups{Admin: true}
 	})
-	provision(t, staffOnly, shop)
+	trust(t, staffOnly, provision(t, staffOnly, shop), host.app(t, "owner", nil))
 	handler, err = standaloneHandler(staffOnly)
 	require.NoError(t, err)
 	for _, route := range routes {
