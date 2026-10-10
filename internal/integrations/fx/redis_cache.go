@@ -159,6 +159,7 @@ func (p *RedisCachedProvider) Refresh(ctx context.Context, currencies []string) 
 func (p *RedisCachedProvider) refresh(ctx context.Context, currencies []string, since time.Time) error {
 	currencies = uniqueCurrencies(currencies)
 	var errs []error
+	tried := 0
 	now := p.now().UTC()
 	for _, from := range currencies {
 		for _, to := range currencies {
@@ -171,6 +172,7 @@ func (p *RedisCachedProvider) refresh(ctx context.Context, currencies []string, 
 			if ok && !since.IsZero() && !current.FetchedAt.Before(since) {
 				continue
 			}
+			tried++
 			if _, err := p.fetch(ctx, from, to, now); err != nil {
 				errs = append(errs, fmt.Errorf("%s -> %s: %w", from, to, err))
 			}
@@ -180,8 +182,10 @@ func (p *RedisCachedProvider) refresh(ctx context.Context, currencies []string, 
 		p.mu.Lock()
 		p.last = now
 		p.mu.Unlock()
+		return nil
 	}
-	return errors.Join(errs...)
+	// One line however many pairs fail: an unreachable upstream fails them all.
+	return fmt.Errorf("%d of %d FX pairs failed; first %w", len(errs), tried, errs[0])
 }
 
 // publish writes the fresh in-memory rates to Redis for the other replicas.

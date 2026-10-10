@@ -358,3 +358,17 @@ func TestExchangeAPIUndatedRateIsStale(t *testing.T) {
 		t.Fatal("an undated rate must not quote")
 	}
 }
+
+// An unreachable upstream fails every pair; the refresh reports it in one
+// line, not one per pair.
+func TestRefreshFailureIsOneLine(t *testing.T) {
+	down := errors.New("upstream unreachable")
+	p := NewRedisCachedProvider(nil, &scriptedProvider{err: down}, time.Hour)
+	err := p.Refresh(context.Background(), []string{"EUR", "USD", "GBP"})
+	if !errors.Is(err, down) {
+		t.Fatalf("the cause is kept: %v", err)
+	}
+	if got, want := err.Error(), "6 of 6 FX pairs failed; first EUR -> USD: upstream unreachable"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}

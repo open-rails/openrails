@@ -142,3 +142,18 @@ func TestOperatorCommandsRefuseMalformedArguments(t *testing.T) {
 		require.ErrorContains(t, err, tc.want, name)
 	}
 }
+
+// A configuration error is reported alone; a malformed command line still
+// gets the usage.
+func TestRuntimeErrorsPrintNoUsage(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("VAULT_SECRETS_PATH", t.TempDir())
+	config := writeTemp(t, "config.yaml", "test_mode: sandbox\nprovider_write_mode: readonly\nredis:\n  typo: x\n")
+	out, err := execute(newRootCmd(), "run-server", "--config", config)
+	require.ErrorContains(t, err, "invalid keys: typo")
+	require.NotContains(t, out, "Usage:")
+
+	out, err = execute(newRootCmd(), "run-server", "--no-such-flag")
+	require.ErrorContains(t, err, "unknown flag")
+	require.Contains(t, out, "Usage:")
+}

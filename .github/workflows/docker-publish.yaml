@@ -86,6 +86,8 @@ jobs:
             fi
           else
             echo "tag=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            # The nearest release, commits since and the commit: v0.234.0-23-g5dd1b9177.
+            echo "version=$(git describe --tags --match 'v[0-9]*' --abbrev=9)" >> "$GITHUB_OUTPUT"
           fi
           echo "date=$(git log -1 --format=%cI)" >> "$GITHUB_OUTPUT"
 
@@ -157,8 +159,9 @@ jobs:
 
       - name: Report version
         run: |
-          docker run --rm "openrails-smoke:${GITHUB_SHA}" version | tee /dev/stderr | grep -q "commit ${GITHUB_SHA}"
-          docker run --rm --platform linux/arm64 "openrails-arm64:${GITHUB_SHA}" version | tee /dev/stderr | grep -q "commit ${GITHUB_SHA}"
+          want="^openrails ${{ needs.verify-source.outputs.version }} (commit ${GITHUB_SHA}, "
+          docker run --rm "openrails-smoke:${GITHUB_SHA}" version | tee /dev/stderr | grep -q "$want"
+          docker run --rm --platform linux/arm64 "openrails-arm64:${GITHUB_SHA}" version | tee /dev/stderr | grep -q "$want"
 
       - name: Migrate smoke database
         run: |

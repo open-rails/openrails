@@ -135,7 +135,6 @@ services:
       REDIS_DB: "0"
     command: ["run-server"]
     volumes:
-      - openrails_spool:/var/lib/openrails/spool
       # A writable volume by default; AUTHKIT_KEYS_HOST_DIR binds a host
       # directory holding keys.json and totp.key instead.
       - ${AUTHKIT_KEYS_HOST_DIR:-openrails_auth_keys}:/vault/auth
@@ -185,7 +184,6 @@ volumes:
   go_mod_cache:
     external: true
     name: go_mod_cache_persistent
-  openrails_spool:
   openrails_auth_keys:
   issuer_postgres_data:
   issuer_runtime_keys:

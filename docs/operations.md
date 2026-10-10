@@ -1026,6 +1026,26 @@ dependency readiness reports, optional ones included. The authenticated
 `/v1/admin/metrics` query and schema routes expose merchant business
 analytics, not Go/process telemetry.
 
+## Network egress
+
+Besides what its configuration names (Postgres, Redis, Vault, the SMTP host,
+trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
+
+| Destination | What for |
+|---|---|
+| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes. Fetched when a quote needs one and cached 5 minutes; with Redis, refreshed in the background every 2 hours. Boot never waits for them: a failed refresh is retried with backoff, and a rate it cannot fetch fails only the quote that needed it. |
+| `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
+| `api.stripe.com` | Stripe PSPs. |
+| `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by `test_mode`. |
+| `api.ccbill.com`, `sandbox-api.ccbill.com`, `datalink.ccbill.com` | CCBill PSPs. |
+| `api.basistheory.com`, `cdn.basistheory.com` | Basis Theory custodians. |
+| `api.mainnet-beta.solana.com`, `api.devnet.solana.com`, `*.helius-rpc.com` | Solana PSPs' RPC (`provider_sandbox.solana_rpc_url` replaces it). |
+| `challenges.cloudflare.com`, `www.google.com`, `hcaptcha.com` | Captcha verification, when `captcha` is set. |
+| `api.anthropic.com`, `api.openai.com` | LLM features, when `llm.api_key` is set and no `llm.base_url`. |
+
+An egress policy that allows only these keeps every feature; one that blocks
+the FX hosts leaves cross-currency quotes failing and nothing else.
+
 ## Operating modes (the safety levers)
 
 Security defaults are independent of provider sandbox/live posture. Declare both

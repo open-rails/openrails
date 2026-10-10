@@ -39,6 +39,8 @@ func newRootCmd() *cobra.Command {
 		Use:   "openrails",
 		Short: "OpenRails server",
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+			// The arguments parsed; a failure from here on is not about usage.
+			cmd.SilenceUsage = true
 			configPath, err := cmd.Flags().GetString("config")
 			if err != nil {
 				return fmt.Errorf("failed to get config flag: %w", err)
