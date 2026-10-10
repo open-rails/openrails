@@ -228,8 +228,8 @@ reads. Writes that move money or remove access also ask for a recent sign-in.
 
 #### Customer contact info
 
-OpenRails stores no copy of your users' emails or names. Your AuthKit is the
-source of truth, and OpenRails asks it whenever it sends a receipt or a
+Your AuthKit is the source of truth for your users' emails and names. Embedded,
+OpenRails keeps no copy: it asks your AuthKit whenever it sends a receipt or a
 failed-payment notice, or shows a customer in the admin routes or console. Pass
 it to `New`:
 
@@ -244,13 +244,15 @@ Without AuthKit, implement `openrails.Contacts` (`Contacts` by ids and
 `SearchContacts` by text) over your own user table. Leave it out and OpenRails
 sends your customers no email; in-app notices and host events still arrive.
 
-A standalone or hosted OpenRails cannot reach into your process, so your
-directory pushes users to it instead, over SCIM 2.0: point AuthKit's
+A standalone or hosted OpenRails cannot reach into your process, so it keeps a
+copy, which your directory pushes to it over SCIM 2.0: point AuthKit's
 `Provisioning` (or Okta, or Entra ID) at `/billing/scim/v2` with the merchant's
-provisioning token. OpenRails keeps what was pushed and when, and AuthKit
-retries and reconciles so the copy stays current. Each customer request also
-brings the user's current email and name in its access token, so someone who
-signs up and buys at once is known before the next push.
+provisioning token. AuthKit sends its changes every 5 minutes and reconciles
+daily, so the copy stays current, and deleting a user erases it. Each customer
+request also brings the user's current email and name in its access token, so
+someone who signs up and buys at once is known before the next push. (Embedded,
+you can choose that pushed copy instead of `Contacts` with
+`Routes.Provisioning: true`.)
 
 #### Using your own auth
 
