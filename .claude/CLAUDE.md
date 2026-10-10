@@ -91,9 +91,10 @@ through `host-four`; these are placeholders, not customer or repository names.
   account-mismatch guard. `account_id` is an opaque, operator-declared label.
 - A merchant declares a PSP as `psps.<key>: {rail: nmi, account_id: …, settings: …}`
   (`openrails.PSPConfig`; `merchants.<slug>.psps.<key>` in a standalone manifest), with
-  credentials under `psps.<key>.secrets`. The merchant-secret name is
-  `psps/<rail>/<environment>/<account_id>/<key>`. The retired manifest keys
-  (`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename error.
+  credentials under `psps.<key>.secrets`. Merchant configuration is that file (read-only)
+  or, with `vault.kv_mount`, Vault: one document per object
+  (`<scope_prefix>/merchants/<merchant-id>/psps/<key>`); never Postgres. The retired
+  manifest keys (`rail_merchant_accounts`, `provider_accounts`) fail loudly with a rename error.
 - Per rail, the declared `account_id` is:
   - **NMI** — the dashboard **"Gateway ID"**, which IS the merchant account id. It is NOT
     the reseller/ISO, and is NOT fetchable from the `security_key`.
@@ -102,8 +103,6 @@ through `host-four`; these are placeholders, not customer or repository names.
   - **CCBill** — `clientAccnum-clientSubacc`, dash-joined like `999999-0000`.
   - **Solana** — DERIVED from the signer public key (a declared `account_id` is ignored
     with a warning); the payout destination is `settings.recipient_wallet`.
-  - Don't derive these from credentials at runtime: `account_id` is a SEGMENT of the
-    secret path, so fetching it needs the credential, which needs the path. Circular.
   - Elsewhere the rule is the opposite: **the less a merchant configures, the better**.
     Where an authoritative source exists, derive from it and delete the knob.
 
@@ -172,6 +171,8 @@ through `host-four`; these are placeholders, not customer or repository names.
   regressions; they need no database. The root's source guards walk `server/` too.
 - `ci/` and `server/ci` are the end-to-end suites (build tags `e2e,integration`;
   `scripts/e2e.sh` runs both with `OPENRAILS_E2E_DSN` naming a disposable PostgreSQL 18).
-  Every test gets its own schema. A deliberate behaviour change must sweep them: `grep`
+  Every test gets its own schema; a test needing Vault gets its own KV v2 mount from
+  `internal/vaulttest` (`OPENRAILS_E2E_VAULT_ADDR`/`_TOKEN`, a dev server; skipped
+  when unset). A deliberate behaviour change must sweep them: `grep`
   `ci/` and `server/ci` for the codes, constants and statuses you changed.
   Green-in-my-package is not green.
