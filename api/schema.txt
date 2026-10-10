@@ -51,6 +51,7 @@ migration 0047_fx_rates_in_memory.up.sql sha256:d0d8e5e0ed5edff4e6508fac80dcc21d
 migration 0048_drop_rate_windows.up.sql sha256:01a6fd529836c146961ab75ce3c57f8ceb83703a2e58faa4edae80dad260d90d
 migration 0049_merchant_config_out_of_postgres.up.sql sha256:c6a990f2d6fc2d5423f6cc1cdc905e265626a2ee06c9e1e896731183915c3ed9
 migration 0050_drop_card_attempt_failures.up.sql sha256:c4c0ac057a2c8b9fa47cf9aa071a20f4b17bb25fa67e465f211dbc400727d759
+migration 0051_authkit_identity.up.sql sha256:71f7acea342dbecbc5d756fc5d46b01fa3040008dc5d227f1027bb0a4b0bd9ff
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -599,6 +600,7 @@ table billing.customers
   column access_version bigint NOT NULL DEFAULT 0
   column billing_policy text
   constraint customers_billing_policy_check CHECK ((billing_policy <> ''::text))
+  constraint customers_issuer_check CHECK (((issuer IS NULL) OR ((issuer = btrim(issuer)) AND (issuer <> ''::text))))
   constraint customers_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint customers_pkey PRIMARY KEY (merchant_id, id)
   index CREATE INDEX customers_billing_policy_idx ON billing.customers USING btree (merchant_id, billing_policy) WHERE (billing_policy IS NOT NULL)
@@ -672,31 +674,6 @@ table billing.failed_usage_windows
   constraint failed_usage_windows_window_key_check CHECK (((window_key <> ''::text) AND (octet_length(window_key) <= 255)))
   index CREATE UNIQUE INDEX failed_usage_windows_pkey ON billing.failed_usage_windows USING btree (merchant_id, customer_id, currency, invoker, window_key, window_start)
   index CREATE INDEX failed_usage_windows_window_end_idx ON billing.failed_usage_windows USING btree (merchant_id, window_end)
-
-table billing.federated_grants
-  column merchant_id uuid NOT NULL
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column email text NOT NULL
-  column role text NOT NULL
-  column issuer text
-  column subject text
-  column accepted_at timestamp with time zone
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint federated_grants_acceptance_check CHECK ((((issuer IS NULL) = (subject IS NULL)) AND ((subject IS NULL) = (accepted_at IS NULL))))
-  constraint federated_grants_email_check CHECK (((email <> ''::text) AND (email = lower(email))))
-  constraint federated_grants_email_key UNIQUE (merchant_id, email)
-  constraint federated_grants_issuer_check CHECK ((issuer <> ''::text))
-  constraint federated_grants_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint federated_grants_pkey PRIMARY KEY (merchant_id, id)
-  constraint federated_grants_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'support'::text, 'viewer'::text])))
-  constraint federated_grants_subject_check CHECK ((subject <> ''::text))
-  constraint federated_grants_subject_key UNIQUE (merchant_id, issuer, subject)
-  index CREATE UNIQUE INDEX federated_grants_email_key ON billing.federated_grants USING btree (merchant_id, email)
-  index CREATE INDEX federated_grants_pending_idx ON billing.federated_grants USING btree (email) WHERE (subject IS NULL)
-  index CREATE UNIQUE INDEX federated_grants_pkey ON billing.federated_grants USING btree (merchant_id, id)
-  index CREATE INDEX federated_grants_subject_idx ON billing.federated_grants USING btree (issuer, subject)
-  index CREATE UNIQUE INDEX federated_grants_subject_key ON billing.federated_grants USING btree (merchant_id, issuer, subject)
 
 table billing.grants
   column id uuid NOT NULL DEFAULT uuidv7()

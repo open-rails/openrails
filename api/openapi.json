@@ -21935,9 +21935,6 @@
       "unsupported_media_type"
     ],
     "tier:application": [
-      "access_token_invalid",
-      "access_token_issuer_unknown",
-      "access_token_merchant_not_bound",
       "application_required",
       "authentication_required",
       "authentication_unavailable",
@@ -21947,23 +21944,15 @@
       "credential_expired",
       "credential_revoked",
       "database_busy",
-      "host_merchant_mismatch",
       "host_principal_invalid",
-      "insufficient_scope",
       "internal_error",
       "merchant_binding_mismatch",
-      "merchant_context_mismatch",
       "merchant_directory_unavailable",
       "merchant_not_found",
       "merchant_selector_invalid",
       "merchant_unresolved",
       "permission_required",
-      "rate_limit_exceeded",
-      "sender_proof_required",
-      "service_credential_invalid",
-      "service_credential_merchant_unresolved",
-      "service_credential_resource_scope_denied",
-      "use_dpop_nonce"
+      "rate_limit_exceeded"
     ],
     "tier:checkout_session": [
       "captcha_invalid",
@@ -21973,34 +21962,6 @@
       "rate_limit_exceeded"
     ],
     "tier:customer": [
-      "access_token_invalid",
-      "access_token_issuer_unknown",
-      "access_token_merchant_not_bound",
-      "authentication_required",
-      "authentication_unavailable",
-      "captcha_invalid",
-      "captcha_required",
-      "credential_expired",
-      "credential_revoked",
-      "database_busy",
-      "host_merchant_mismatch",
-      "insufficient_scope",
-      "internal_error",
-      "invoker_scoped_principal",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
-      "merchant_unresolved",
-      "permission_required",
-      "rate_limit_exceeded",
-      "sender_proof_required",
-      "use_dpop_nonce"
-    ],
-    "tier:merchant": [
-      "access_token_invalid",
-      "access_token_issuer_unknown",
-      "access_token_merchant_not_bound",
       "authentication_required",
       "authentication_unavailable",
       "authorization_unavailable",
@@ -22009,25 +21970,36 @@
       "credential_expired",
       "credential_revoked",
       "database_busy",
-      "host_merchant_mismatch",
+      "internal_error",
+      "invoker_scoped_principal",
+      "merchant_binding_mismatch",
+      "merchant_directory_unavailable",
+      "merchant_not_found",
+      "merchant_selector_invalid",
+      "merchant_unresolved",
+      "permission_required",
+      "rate_limit_exceeded"
+    ],
+    "tier:merchant": [
+      "authentication_required",
+      "authentication_unavailable",
+      "authorization_unavailable",
+      "captcha_invalid",
+      "captcha_required",
+      "credential_expired",
+      "credential_revoked",
+      "database_busy",
       "host_principal_invalid",
-      "insufficient_scope",
       "internal_error",
       "merchant_binding_mismatch",
-      "merchant_context_mismatch",
       "merchant_directory_unavailable",
       "merchant_not_found",
       "merchant_selector_invalid",
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded",
-      "sender_proof_required",
-      "service_credential_invalid",
-      "service_credential_merchant_unresolved",
-      "service_credential_resource_scope_denied",
       "step_up_required",
-      "step_up_unavailable",
-      "use_dpop_nonce"
+      "step_up_unavailable"
     ],
     "tier:provider_signature": [
       "captcha_invalid",
@@ -22059,9 +22031,6 @@
       "rate_limit_exceeded"
     ],
     "tier:signed_in": [
-      "access_token_invalid",
-      "access_token_issuer_unknown",
-      "access_token_merchant_not_bound",
       "authentication_required",
       "authentication_unavailable",
       "authorization_unavailable",
@@ -22070,41 +22039,18 @@
       "credential_expired",
       "credential_revoked",
       "database_busy",
-      "host_merchant_mismatch",
       "host_principal_invalid",
-      "insufficient_scope",
       "internal_error",
       "merchant_binding_mismatch",
-      "merchant_context_mismatch",
       "merchant_directory_unavailable",
       "merchant_not_found",
       "merchant_selector_invalid",
       "merchant_unresolved",
       "permission_required",
-      "rate_limit_exceeded",
-      "sender_proof_required",
-      "service_credential_invalid",
-      "service_credential_merchant_unresolved",
-      "service_credential_resource_scope_denied",
-      "use_dpop_nonce"
+      "rate_limit_exceeded"
     ]
   },
   "x-openrails-error-codes": {
-    "access_token_invalid": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "The access token is invalid, expired or not issued for this deployment."
-    },
-    "access_token_issuer_unknown": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "The access token's issuer is not trusted by this deployment."
-    },
-    "access_token_merchant_not_bound": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The access token's issuer is not trusted for this merchant."
-    },
     "admission_captured": {
       "status": 409,
       "type": "invalid_request_error",
@@ -22285,11 +22231,6 @@
       "type": "authentication_error",
       "meaning": "The credential has expired."
     },
-    "credential_identity_mismatch": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "The credential changed identity during the request."
-    },
     "credential_revoked": {
       "status": 401,
       "type": "authentication_error",
@@ -22385,11 +22326,6 @@
       "type": "invalid_request_error",
       "meaning": "The meter needs a default rate card."
     },
-    "delegated_principal_invalid": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "The host's delegated principal names no usable merchant or subject."
-    },
     "finding_action_failed": {
       "status": 502,
       "type": "api_error",
@@ -22409,11 +22345,6 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The host event does not exist."
-    },
-    "host_merchant_mismatch": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The credential's merchant is not the one this host serves."
     },
     "host_principal_invalid": {
       "status": 401,
@@ -22449,11 +22380,6 @@
       "status": 402,
       "type": "card_error",
       "meaning": "The payment instrument lacks funds."
-    },
-    "insufficient_scope": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The access token was not granted the scope this surface requires."
     },
     "internal_error": {
       "status": 500,
@@ -22544,11 +22470,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The merchant's configuration is read from a file; change the file."
-    },
-    "merchant_context_mismatch": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The authorized merchant is not the one the request resolved."
     },
     "merchant_directory_unavailable": {
       "status": 503,
@@ -22950,30 +22871,10 @@
       "type": "invalid_request_error",
       "meaning": "The subscription already has a scheduled change."
     },
-    "sender_proof_required": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "A sender-constrained token arrived without its DPoP proof."
-    },
     "service_credential_customer_scope_denied": {
       "status": 403,
       "type": "authorization_error",
       "meaning": "The service credential may not act for this customer."
-    },
-    "service_credential_invalid": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "The API key or service token is invalid."
-    },
-    "service_credential_merchant_unresolved": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The service credential's issuer owns no merchant."
-    },
-    "service_credential_resource_scope_denied": {
-      "status": 403,
-      "type": "authorization_error",
-      "meaning": "The service credential is scoped to other resources."
     },
     "service_unavailable": {
       "status": 503,
@@ -23124,11 +23025,6 @@
       "status": 400,
       "type": "invalid_request_error",
       "meaning": "The usage rate card is invalid."
-    },
-    "use_dpop_nonce": {
-      "status": 401,
-      "type": "authentication_error",
-      "meaning": "The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value."
     },
     "webhook_account_mismatch": {
       "status": 400,
