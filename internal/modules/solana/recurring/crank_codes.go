@@ -1,10 +1,7 @@
 package recurring
 
-// Crank failure codes. internal/decline maps them onto the shared
-// decline reasons (rail "solana"); the category is the cranker's own next step.
-
-// CrankCode is a stable failure code the crank maps its on-chain program
-// errors onto, recorded on the subscription failure.
+// CrankCode is a stable crank failure code, recorded on the subscription
+// failure; internal/decline maps it onto the shared decline reasons.
 type CrankCode string
 
 const (

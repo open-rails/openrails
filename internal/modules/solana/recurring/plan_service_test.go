@@ -15,7 +15,7 @@ import (
 )
 
 // testPlanCreatedAt is the cluster clock the fake chain stamps on create_plan;
-// it differs from the service's own clock on purpose (#254 Custom:519).
+// it differs from the service's own clock on purpose (subscribe must echo it).
 const testPlanCreatedAt = int64(1_717_200_000)
 
 type recordingSubmitter struct {
@@ -149,8 +149,8 @@ func TestPublishPlanCreatesPlanAndReceivingATAs(t *testing.T) {
 	}
 }
 
-// #817: the plan amount is immutable on-chain, so the caller's decimals must
-// equal the mint's on-chain decimals; nothing is submitted otherwise.
+// The plan amount is immutable on-chain, so the caller's decimals must equal
+// the mint's on-chain decimals; nothing is submitted otherwise.
 func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
@@ -192,7 +192,7 @@ func TestPublishPlanRequiresOnChainDecimals(t *testing.T) {
 	require.Error(t, err, "no reader armed has no fallback precision")
 }
 
-// #254: an occupied plan PDA with matching terms is an idempotent no-op; any
+// An occupied plan PDA with matching terms is an idempotent no-op; any
 // differing immutable term is refused (publish a new plan_id instead).
 func TestPublishPlanRepublish(t *testing.T) {
 	mint := solanago.MustPublicKeyFromBase58(testDevnetUSDCMint)
@@ -283,7 +283,7 @@ func TestPublishPlanValidatesTermsBeforeSubmit(t *testing.T) {
 	}
 }
 
-// #358: sunset only a plan this merchant owns, echoing its mutable fields.
+// Sunset only a plan this merchant owns, echoing its mutable fields.
 func TestSunsetPlanOwnership(t *testing.T) {
 	svc, sub := newPlanService(t, planChain{mintDecimals: 6})
 	planPDA := randKey(t).PublicKey()

@@ -75,7 +75,7 @@ func NewSolanaPayPoller(database *db.DB, checkout CheckoutSettler, clocks ...clo
 	return &SolanaPayPoller{db: database, checkout: checkout, rpcBuilder: &MerchantRPCBuilder{}, clock: timeutil.FirstClock(clocks...)}
 }
 
-// SetMerchantRPC installs the store-aware per-merchant RPC builder (#728).
+// SetMerchantRPC installs the store-aware per-merchant RPC builder.
 func (p *SolanaPayPoller) SetMerchantRPC(b *MerchantRPCBuilder) {
 	if b != nil {
 		p.rpcBuilder = b

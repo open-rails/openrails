@@ -30,13 +30,12 @@ type subscriptionStore interface {
 }
 
 // EnrollService activates a recurring Solana subscription from its first
-// payment: the atomic [init?, subscribe, transfer_subscription(first period)]
-// bundle a checkout prepared and the merchant co-signed (#286). Activation
-// rests only on that landed transaction, read from the chain by signature: it
-// must be signed by the subscriber, subscribe to the checkout's plan terms,
-// pull the full first period into the merchant's account, carry the checkout's
-// reference and land within the checkout's validity. The payment is then
-// claimed for that one checkout before anything is granted.
+// payment: the atomic [init?, subscribe, transfer_subscription] bundle a
+// checkout prepared and the merchant co-signed. Activation rests only on that
+// landed transaction: subscriber-signed, subscribing to the checkout's terms,
+// pulling the full first period to the merchant, carrying the checkout's
+// reference and landing within its validity. The payment is claimed for that
+// one checkout before anything is granted.
 type EnrollService struct {
 	lifecycle membershipCreator
 	repo      subscriptionStore

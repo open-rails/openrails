@@ -55,9 +55,8 @@ type SolanaPayService struct {
 	eligibilityChecker purchaseEligibilityChecker
 	fxProvider         fx.Provider
 	priceProvider      TokenPriceProvider
-	// mints reads SPL mint decimals from the chain (#817). Late-bound like the
-	// poller's merchant RPC: it needs the per-merchant RPC resolver, which is
-	// armed after service construction. nil = quotes fail closed.
+	// mints reads SPL mint decimals from the chain; armed after construction
+	// (it needs the per-merchant RPC). nil = quotes fail closed.
 	mints MintDecimalsSource
 	// chain reads a mint's current transfer fee (Token-2022) at quote time.
 	chain MintInfoSource
@@ -98,7 +97,7 @@ func NewSolanaPayService(
 	}
 }
 
-// SetMintDecimals arms the on-chain mint-decimals resolver (#817).
+// SetMintDecimals arms the on-chain mint-decimals resolver.
 func (s *SolanaPayService) SetMintDecimals(mints MintDecimalsSource) {
 	s.mints = mints
 }
@@ -133,7 +132,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("token symbol is required")
 	}
 
-	// Check purchase eligibility BEFORE generating the payment URL
 	if s.eligibilityChecker != nil {
 		eligibility, err := s.eligibilityChecker.CheckPurchaseEligibility(ctx, userID, priceID)
 		if err != nil {
@@ -144,14 +142,12 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		case eligibilityBlocked:
 			return nil, fmt.Errorf("purchase blocked: %s", eligibility.Reason)
 		case eligibilityUpgrade, eligibilityDowngrade:
-			// Solana doesn't support subscription upgrades/downgrades
 			return nil, fmt.Errorf("solana does not support subscription tier changes; please cancel existing subscription first")
 		case eligibilityAllowed:
 			// Continue with payment generation
 		}
 	}
 
-	// Validate price
 	price, err := s.priceService.GetByID(ctx, priceID)
 	if err != nil {
 		return nil, fmt.Errorf("price not found: %w", err)
@@ -160,7 +156,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("price is not active")
 	}
 
-	// Validate product
 	if s.productService != nil {
 		product, err := s.productService.GetByID(ctx, price.ProductID)
 		if err != nil {
@@ -171,7 +166,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		}
 	}
 
-	// Validate Solana config
 	solanaProc, err := RequireSolanaRailConfig(ctx, s.rails)
 	if err != nil {
 		return nil, err
@@ -188,7 +182,7 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, err
 	}
 
-	// Decimals come from the MINT on-chain, never from config (#817).
+	// Decimals come from the mint on-chain, never from config.
 	decimals, err := RequireMintDecimals(ctx, s.mints, tokenCfg.Mint)
 	if err != nil {
 		return nil, err
@@ -205,7 +199,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, fmt.Errorf("calculated token amount is zero")
 	}
 
-	// Generate reference for Solana Pay
 	reference, err := solanarpc.GenerateReference()
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate reference: %w", err)
@@ -216,7 +209,6 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		return nil, err
 	}
 
-	// Get token mint
 	tokenMint := tokenCfg.Mint
 
 	expiresAt := now.Add(pendingPaymentTTL)
@@ -238,10 +230,9 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 		}
 	}
 
-	// Build Solana Pay Transfer Request URL. The memo field (#713) stamps the
-	// checkout attempt id on the wallet-built tx: per the Solana Pay spec the
-	// wallet includes it as an SPL Memo instruction BEFORE the transfer.
-	// Discovery hint, never money truth.
+	// The memo stamps the checkout attempt id on the wallet-built tx (an SPL
+	// Memo before the transfer, per the Solana Pay spec): a discovery hint,
+	// never money truth.
 	url := s.buildTransferRequestURL(ctx, recipient, requested, decimals, tokenMint, tokenSymbol, reference, solanarpc.PurchaseMemo(*sessionID))
 
 	return &PayResult{
@@ -264,31 +255,24 @@ func (s *SolanaPayService) GeneratePayment(ctx context.Context, userID string, p
 }
 
 // buildTransferRequestURL constructs the solana: URL per the Solana Pay spec.
-// `decimals` is the caller's already-resolved ON-CHAIN mint precision (#817) —
-// re-reading it here from a map without an ok-check turned an unknown symbol
-// into decimals=0, i.e. the raw base-unit count on the wire (a 10^d overcharge).
+// decimals is the caller's resolved on-chain mint precision; never re-derive it
+// here (a missing entry reads as 0, a 10^d overcharge).
 func (s *SolanaPayService) buildTransferRequestURL(ctx context.Context, recipient string, amount uint64, decimals int, tokenMint, tokenSymbol, reference, memo string) string {
-	// Base URL: solana:<recipient>
 	baseURL := fmt.Sprintf("solana:%s", recipient)
 
-	// Add query params
 	params := fmt.Sprintf("?amount=%s", FormatBaseUnits(amount, decimals))
 
-	// Add spl-token param if not native SOL
 	if tokenMint != "" && tokenSymbol != "SOL" {
 		params += fmt.Sprintf("&spl-token=%s", tokenMint)
 	}
 
-	// Add reference for payment detection
 	params += fmt.Sprintf("&reference=%s", reference)
 
-	// #713 self-recognition memo (SPL Memo instruction, placed by the wallet
-	// before the transfer per spec).
+	// Self-recognition memo: the wallet places an SPL Memo before the transfer.
 	if memo != "" {
 		params += fmt.Sprintf("&memo=%s", url.QueryEscape(memo))
 	}
 
-	// Add label
 	label := "Purchase"
 	if s.db != nil {
 		if cfg, _, err := merchantconfig.NewStore(s.db).Get(ctx); err == nil {

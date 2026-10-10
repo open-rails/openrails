@@ -1,10 +1,6 @@
-// Package recurring holds the OpenRails service layer for Solana recurring
-// subscriptions (issues #254/#255/#256/#257): plan publishing, enrollment, the
-// cyclical pull, and dunning — built on the on-chain instruction builders in
-// internal/integrations/solana/subscriptions and the per-merchant Signer.
-//
-// It is intentionally separate from the one-off Solana Pay flow in
-// internal/modules/solana so the two payment shapes evolve independently.
+// Package recurring is the service layer for Solana recurring subscriptions on
+// the subscriptions program: plan publishing, enrollment, the pull crank and
+// dunning. It is separate from the one-off Solana Pay flow.
 package recurring
 
 import (
@@ -16,29 +12,19 @@ import (
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
 )
 
-// RecurringStablecoins is the launch allowlist of token SYMBOLS eligible to back
-// a recurring Solana subscription.
+// RecurringStablecoins is the allowlist of token symbols that may back a
+// recurring Solana subscription. The subscriptions program rejects mints with
+// ConfidentialTransfer, NonTransferable, PermanentDelegate, TransferHook,
+// TransferFee, MintCloseAuthority or Pausable extensions:
 //
-// Eligibility is determined by the mint's token-program + extension set (the
-// Subscriptions program rejects mints carrying ConfidentialTransfer,
-// NonTransferable, PermanentDelegate, TransferHook, TransferFee,
-// MintCloseAuthority, or Pausable). Verified per token by on-chain mint
-// inspection (and create_plan on devnet for the configured test mint):
+//   - USDC, USD1 (mainnet only), DUSD (devnet test coin): plain SPL Token.
+//   - USDT: plain SPL Token, but no devnet mint to verify create_plan against.
+//   - PYUSD, USDG: Token-2022 with PermanentDelegate+TransferFee, rejected.
+//   - SOL and volatile tokens: plan amounts are immutable, so only a stablecoin
+//     keeps a fixed USD value across cycles.
 //
-//   - USDC  — plain SPL Token, no extensions → eligible (create_plan ACCEPTED on devnet).
-//   - DUSD  — the Host One devnet test stablecoin, plain SPL Token, no extensions.
-//   - USD1  — plain SPL Token, no extensions → eligible (World Liberty Financial USD; mainnet only).
-//   - USDT  — plain SPL Token, so extension-eligible, but NOT allowlisted: no
-//     devnet deployment exists to run create_plan against, so it stays one-off
-//     until that verification is done.
-//   - PYUSD — Token-2022 w/ PermanentDelegate+TransferFee → REJECTED (devnet error 121 mintHasPermanentDelegate).
-//   - USDG  — Token-2022 w/ PermanentDelegate+TransferFee+ConfidentialTransfer+TransferHook → rejected.
-//   - SOL / volatile — excluded: on-chain plan amounts are immutable, so only a
-//     stablecoin keeps a fixed base-unit amount ≈ a fixed USD amount across cycles.
-//
-// Mint extensions are immutable, so a rejected token can never become eligible.
-// One-off purchases are unaffected — they accept the full solanatokens defaults
-// set and FX-quote at purchase time.
+// Mint extensions are immutable, so a rejected token never becomes eligible.
+// One-off purchases are unaffected.
 var RecurringStablecoins = []string{"USDC", "USD1", "DUSD"}
 
 // IsRecurringStablecoinSymbol reports whether symbol is on the recurring allowlist.
@@ -58,20 +44,16 @@ func (e ErrTokenNotRecurringEligible) Error() string {
 		e.Symbol, strings.Join(RecurringStablecoins, ", "))
 }
 
-// ResolveRecurringMint validates that symbol is recurring-eligible and returns
-// its mint for the given network (mainnet/devnet). It fails closed: an unknown
-// token, an off-allowlist token (PYUSD/USDG/SOL), or a token without a
-// configured mint for the network all return an error, so a caller can never
-// publish a plan against an ineligible or misconfigured mint. Decimals are NOT
-// returned — they come from the mint on-chain (#817).
+// ResolveRecurringMint returns an allowlisted symbol's built-in mint for network
+// (mainnet/devnet), failing closed on an unknown, ineligible or unconfigured
+// token. Decimals come from the mint on-chain.
 func ResolveRecurringMint(symbol, network string) (mint string, err error) {
 	return ResolveRecurringMintFromTokens(symbol, solanatokens.ForNetwork(network))
 }
 
-// ResolveRecurringMintFromTokens validates that symbol is recurring-eligible and
-// resolves it from the runtime-configured token map. Production callers must use
-// this so deployed token config is the source of truth; hard-coded network
-// defaults are only used by legacy tests/helpers that call ResolveRecurringMint.
+// ResolveRecurringMintFromTokens is ResolveRecurringMint against the runtime
+// token config, the source of truth for production; the built-in network
+// defaults serve tests only.
 func ResolveRecurringMintFromTokens(symbol string, tokens map[string]config.TokenConfig) (mint string, err error) {
 	sym := strings.ToUpper(strings.TrimSpace(symbol))
 	if sym == "" {

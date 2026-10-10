@@ -17,10 +17,8 @@ import (
 
 const maxPeriodHours = 8760 // 1 year — the program's upper bound for period_hours
 
-// Submitter is the per-merchant Solana submit surface the recurring services use:
-// it resolves the merchant's merchant (cranker) address and signs+submits an
-// instruction set with that merchant's key. Declared here (dependency inversion)
-// so the services are unit-testable without a live signer/RPC.
+// Submitter is the recurring services' per-merchant Solana submit surface: the
+// merchant (cranker) address, and sign+submit with its key.
 type Submitter interface {
 	// MerchantAddress returns the merchant's on-chain merchant/cranker address.
 	MerchantAddress(ctx context.Context, tenantID billing.MerchantID) (solanago.PublicKey, error)
@@ -33,15 +31,13 @@ type publicKeySigner interface {
 	SignMessageForPublicKey(ctx context.Context, tenantID billing.MerchantID, publicKey solanago.PublicKey, message []byte) (solanago.Signature, error)
 }
 
-// RPCResolver arms the merchant's Solana RPC client at use time (#728:
-// store-declared rail-account settings win, boot client as fallback). nil
-// client with nil error = no plane armed.
+// RPCResolver arms the merchant's Solana RPC client at use time. nil client
+// with nil error = not armed.
 type RPCResolver func(ctx context.Context, merchantID billing.MerchantID) (*solanaint.RPCClient, error)
 
-// signerSubmitter is the production Submitter: a per-merchant solana.Signer + RPC,
-// wired through solana.BuildSignSubmit (the verified build/sign/submit path).
-// The RPC resolves PER MERCHANT at submit time when a resolver is set (#728);
-// a fixed client is the boot-only wiring.
+// signerSubmitter is the production Submitter: a per-merchant solana.Signer over
+// solana.BuildSignSubmit, resolving the RPC per merchant at submit time (a fixed
+// client is the fallback).
 type signerSubmitter struct {
 	signer  solanaint.Signer
 	rpc     *solanaint.RPCClient
@@ -54,7 +50,7 @@ func NewSignerSubmitter(signer solanaint.Signer, rpc *solanaint.RPCClient) Submi
 }
 
 // NewSignerSubmitterWithResolver builds the production Submitter with use-time
-// per-merchant RPC resolution (#728).
+// per-merchant RPC resolution.
 func NewSignerSubmitterWithResolver(signer solanaint.Signer, resolve RPCResolver) Submitter {
 	return &signerSubmitter{signer: signer, resolve: resolve}
 }
@@ -89,8 +85,8 @@ func (s *signerSubmitter) Submit(ctx context.Context, tenantID billing.MerchantI
 	return solanaint.BuildSignSubmit(ctx, tenantID, s.signer, rpc, instructions)
 }
 
-// SubmitWithPresubmit persists the signed tx signature via presubmit BEFORE
-// submission (#674).
+// SubmitWithPresubmit persists the signed tx signature via presubmit before
+// submission.
 func (s *signerSubmitter) SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error) {
 	rpc, err := s.rpcFor(ctx, tenantID)
 	if err != nil {
@@ -124,17 +120,14 @@ func (s *signerSubmitter) SubmitForMerchantAddressWithPresubmit(ctx context.Cont
 	return s.SubmitWithPresubmit(ctx, tenantID, instructions, presubmit)
 }
 
-// planReader is the minimal RPC read surface PublishPlan needs for its idempotent
-// re-publish guard: read the (possibly-already-created) Plan PDA back before
-// submitting create_plan. Satisfied by *solanaint.RPCClient. Optional — a nil
-// reader skips the guard and submits create_plan directly (the program then
-// rejects a duplicate PDA on-chain, so correctness is preserved either way).
+// planReader reads the Plan PDA back before create_plan for PublishPlan's
+// idempotent re-publish guard. Optional: without it create_plan is submitted
+// directly and the program rejects a duplicate PDA.
 type planReader interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 }
 
-// PlanService publishes recurring Solana plans on-chain (issue #254). The
-// create_plan path it drives is verified live on devnet.
+// PlanService publishes recurring Solana plans on-chain.
 type PlanService struct {
 	submitter Submitter
 	reader    planReader // optional; enables the idempotent re-publish guard
@@ -159,8 +152,7 @@ func (s *PlanService) MerchantAddress(ctx context.Context, tenantID billing.Merc
 }
 
 // ResolveMint returns the merchant's configured mint for a recurring-eligible
-// symbol. Decimals are NOT returned — they belong to the mint on-chain; call
-// MintDecimals (#817).
+// symbol. Decimals come from the mint on-chain (MintDecimals).
 func (s *PlanService) ResolveMint(symbol string) (string, error) {
 	return ResolveRecurringMintFromTokens(symbol, s.tokens)
 }
@@ -201,14 +193,13 @@ func (s *PlanService) mintDecimals(ctx context.Context, mintStr string) (int, er
 type PublishPlanInput struct {
 	MerchantID      billing.MerchantID
 	PlanID          uint64 // caller-chosen unique id (the plan PDA derives from it)
-	TokenSymbol     string // must be recurring-eligible (USDC/USD1)
+	TokenSymbol     string // must be in RecurringStablecoins
 	AmountBaseUnits uint64 // fixed charge per period, in token base units
 	PeriodHours     uint64 // billing period (0 < h <= 8760)
 
-	// AmountDecimals is the base-unit precision AmountBaseUnits was computed at.
-	// PublishPlan cross-checks it against the mint's ON-CHAIN decimals and
-	// refuses to publish on disagreement (#817): the plan amount is immutable
-	// once created, so a 10^n scale error is unrecoverable.
+	// AmountDecimals is the precision AmountBaseUnits was computed at;
+	// PublishPlan refuses it unless it matches the mint's on-chain decimals,
+	// since the plan amount is immutable once created.
 	AmountDecimals  int
 	ReceivingWallet string // optional cold wallet; sets the plan's destination whitelist
 	MetadataURI     string // optional (<=128 bytes)
@@ -249,30 +240,14 @@ func (h *PlanHandle) ToRailConfig() map[string]string {
 	}
 }
 
-// PublishPlan validates the token + terms, then signs and submits create_plan
-// from the merchant's merchant key, returning the durable plan handle. It fails
-// closed: a non-allowlisted token, an out-of-range period, or a zero amount are
-// rejected before any on-chain action.
-//
-// Immutability reality (issue #254, refined by #357). The deployed
-// solana-program/subscriptions program publishes plans whose CORE TERMS
-// (mint/amount/period) are IMMUTABLE: update_plan (see SunsetPlan) touches only
-// the mutable status/end_ts/pullers/metadata fields, never the terms. So
-// PublishPlan never mutates an existing plan. Instead, when a reader is wired,
-// it is idempotent-or-reject:
-//
-//   - Plan PDA absent            -> submit create_plan (the normal path).
-//   - Plan PDA present, terms MATCH (mint/amount/period) -> idempotent no-op
-//     success: return the existing PlanHandle WITHOUT a second create_plan (a
-//     duplicate would fail on-chain anyway).
-//   - Plan PDA present, terms DIFFER -> reject: plans are immutable, so an
-//     amount/period/mint change must be published under a NEW plan_id (and
-//     subscribers migrated), not mutated in place.
-//
-// Token-2022 rejected-extension validation is N/A here: the recurring mint
-// allowlist (ResolveRecurringMint) admits ONLY classic-SPL USDC/USD1, so no
-// Token-2022 mint (transfer-fee / transfer-hook / etc.) can ever reach this path.
-// The allowlist is the validation — there is nothing further to reject.
+// PublishPlan validates the token and terms, then signs and submits create_plan
+// with the merchant's key, returning the durable plan handle. Plan terms
+// (mint/amount/period) are immutable on-chain (update_plan touches only
+// status/end_ts/pullers/metadata), so with a reader wired a publish is
+// idempotent-or-reject: absent PDA -> create_plan; matching terms -> the
+// existing handle; differing terms -> refused (publish a new plan_id).
+// Token-2022 extension checks are unneeded: the allowlist admits only classic
+// SPL mints.
 func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*PlanHandle, error) {
 	if in.AmountBaseUnits == 0 {
 		return nil, fmt.Errorf("recurring: plan amount must be > 0")
@@ -280,14 +255,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 	if in.PeriodHours == 0 || in.PeriodHours > maxPeriodHours {
 		return nil, fmt.Errorf("recurring: period_hours must be in (0, %d]", maxPeriodHours)
 	}
-	// period_hours <-> billing-cycle consistency: the on-chain period is derived
-	// from a price's BillingIntervalHours (see catalog_provider_solana.go).
-	// When a caller threads that cycle through (PublishPlanInput.BillingCycleHours
-	// > 0), enforce period_hours == BillingCycleHours so an admin call can't
-	// publish a plan whose on-chain period silently disagrees with the price.
-	// TODO(#254): the admin HTTP surface does not yet carry the price's cycle; once
-	// it does, thread BillingCycleHours from there so the check applies to every
-	// publish path, not only callers that already have the cycle in hand.
+	// The on-chain period must match the price's billing cycle when given.
 	if in.BillingCycleHours > 0 {
 		want := uint64(in.BillingCycleHours)
 		if in.PeriodHours != want {
@@ -304,9 +272,8 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: invalid configured mint %q: %w", mintStr, err)
 	}
 
-	// #817: the plan amount is IMMUTABLE once on-chain, so verify the shift the
-	// caller converted at is the shift the mint actually uses. The chain is the
-	// source of truth; a caller that guessed is refused, not tolerated.
+	// The plan amount is immutable on-chain, so the caller's shift must be the
+	// mint's on-chain decimals; a guess is refused.
 	onchainDecimals, err := s.mintDecimals(ctx, mintStr)
 	if err != nil {
 		return nil, err
@@ -336,13 +303,9 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: derive plan pda: %w", err)
 	}
 
-	// Idempotent re-publish guard (issue #254). Plans are IMMUTABLE on-chain, so a
-	// second create_plan on an occupied PDA always fails. When a reader is wired,
-	// read the PDA back FIRST: if it already holds a plan with MATCHING terms,
-	// return the existing handle as a no-op success; if the terms DIFFER, reject
-	// (the operator must publish a NEW plan_id, not mutate this one). A single read
-	// is fine here — this is a pre-submit read of (at most) already-confirmed state,
-	// not a read-after-our-own-write, so there is no slot to gate on.
+	// Idempotent re-publish guard: a matching plan at the PDA returns its
+	// handle; differing terms are refused. One read suffices: this is
+	// already-confirmed state, not our own write, so no slot gate.
 	if s.reader != nil {
 		data, rerr := s.reader.GetAccountData(ctx, planPDA)
 		if rerr != nil {
@@ -382,17 +345,11 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		}
 	}
 
-	// Pullers/destinations are an OPTIONAL hardening whitelist and must be left
-	// EMPTY in the default case: an empty puller list implicitly authorizes the
-	// plan owner (the merchant/cranker) to collect, and an empty destination list
-	// allows the merchant to receive into its own ATA. Setting pullers WITHOUT a
-	// paired destination (or vice-versa) makes the program reject the pull with
-	// InvalidAccountOwner — confirmed on devnet. Only when a separate cold
-	// receiving wallet is configured do we pin both (puller[0]=merchant pulls,
-	// destination[0]=cold wallet), so a compromised cranker key can only pull into
-	// the cold wallet. NOTE: when a cold wallet is set, the cranker must also pull
-	// into the COLD wallet's ATA (tracked separately) — the crank currently targets
-	// the merchant ATA, so a cold-wallet plan needs that wiring before use.
+	// Pullers/destinations stay empty by default: the plan owner (cranker)
+	// pulls into its own ATA. Pinning one without the other fails the pull with
+	// InvalidAccountOwner. A cold receiving wallet pins both (puller[0]=merchant,
+	// destination[0]=cold wallet), but the crank still pulls into the merchant
+	// ATA, so a cold-wallet plan cannot be cranked yet.
 	var destinations, pullers [4]solanago.PublicKey
 	if recv != nil {
 		pullers[0] = merchant
@@ -421,24 +378,16 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		return nil, fmt.Errorf("recurring: submit create_plan: %w", err)
 	}
 
-	// Ensure the receiving ATA(s) exist before the first crank. transfer_subscription
-	// deposits INTO the receiver's associated token account; if that ATA is missing
-	// the pull reverts. The cranker (merchant) signs + pays. A failure here is
-	// retried by the next publish, which finds the plan and re-ensures the ATAs.
+	// transfer_subscription reverts without the receiver ATA, so ensure it
+	// before the first crank; a failure is retried by the next publish.
 	if err := s.ensureReceivingATAs(ctx, in.MerchantID, mint, merchant, recv); err != nil {
 		return nil, err
 	}
 
-	// IMPORTANT (issue #254 / the Custom:519 root cause): create_plan OVERWRITES
-	// terms.created_at with the on-chain cluster clock, so our client-side
-	// `createdAt` (s.now()) is NOT what the program stored — it differs from the
-	// cluster clock by the confirmation delay + skew. subscribe later echoes
-	// created_at as a consent field and the program rejects a mismatch with
-	// PlanTermsMismatch (519). So read the REAL on-chain created_at back from the
-	// just-created plan and return THAT in the handle. The read is a
-	// read-after-our-own-write, so poll until the plan is visible + decodable
-	// (ReadUntilConsistent absorbs RPC read-lag). Fall back to the client value only
-	// if no reader is wired.
+	// create_plan overwrites terms.created_at with the cluster clock, and
+	// subscribe echoes it (a mismatch is PlanTermsMismatch, 519), so return the
+	// on-chain value. This reads our own write: ReadUntilConsistent absorbs RPC
+	// read-lag. The client value is used only without a reader.
 	onchainCreatedAt := createdAt
 	if s.reader != nil {
 		data, rerr := solanaint.ReadUntilConsistent(ctx, solanaint.ReadUntilConsistentOpts{},
@@ -471,18 +420,15 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 	}, nil
 }
 
-// ErrPlanSunsetNotOwned: the plan account at the PDA is owned by a different
-// merchant than this merchant's — sunsetting someone else's plan is refused
-// before any on-chain action (and would fail the program's owner check anyway).
+// ErrPlanSunsetNotOwned: the plan at the PDA belongs to another merchant; the
+// sunset is refused before any on-chain action.
 var ErrPlanSunsetNotOwned = errors.New("recurring: plan is not owned by this merchant's merchant; refusing to sunset")
 
-// SunsetPlan flips an on-chain plan to status=sunset via update_plan (#357/#358):
-// the program then rejects NEW subscribe calls ("Plan is in sunset status")
-// while existing subscriptions keep billing — the exact archive semantics of
-// Stripe's active=false. The caller supplies the CURRENT decoded plan account
-// (it has already verified the plan exists and is not yet sunset); its mutable
-// fields are echoed so the update changes status and nothing else. Signed by
-// the merchant's merchant key, which must equal the plan's owner.
+// SunsetPlan flips an on-chain plan to status=sunset via update_plan: new
+// subscribes are refused while existing subscriptions keep billing (Stripe's
+// active=false). current is the decoded plan account; its mutable fields are
+// echoed so only status changes. Signed by the merchant's key, which must own
+// the plan.
 func (s *PlanService) SunsetPlan(ctx context.Context, tenantID billing.MerchantID, planPDA solanago.PublicKey, current *subscriptions.PlanAccount) (signature string, err error) {
 	if current == nil {
 		return "", fmt.Errorf("recurring: sunset requires the current plan account")

@@ -15,7 +15,7 @@ import (
 )
 
 // SolanaSubscriptionRepo persists the on-chain state of recurring Solana
-// subscriptions (issue #255).
+// subscriptions.
 type SolanaSubscriptionRepo struct {
 	db *db.DB
 }
@@ -224,9 +224,8 @@ type MerchantWallet struct {
 	MerchantAddress string
 }
 
-// ListActiveMerchantWallets returns the distinct cranker (merchant) wallets that
-// have at least one active subscription — the wallets whose SOL float the
-// gas-alert worker monitors (#258).
+// ListActiveMerchantWallets returns the distinct cranker (merchant) wallets with
+// at least one active subscription: the SOL floats the gas-alert worker watches.
 func (r *SolanaSubscriptionRepo) ListActiveMerchantWallets(ctx context.Context) ([]MerchantWallet, error) {
 	if _, ok := merchant.FromContext(ctx); ok {
 		return r.listActiveMerchantWalletsScoped(ctx)
@@ -268,10 +267,9 @@ func (r *SolanaSubscriptionRepo) listActiveMerchantWalletsScoped(ctx context.Con
 	return out, nil
 }
 
-// ListActiveWithSignature returns active subscriptions that have recorded at
-// least one confirmed pull (last_signature set) — the rows the reconciliation
-// worker cross-checks against billing.payments (#258). `limit` caps the batch
-// (0 = no limit).
+// ListActiveWithSignature returns active subscriptions with at least one
+// confirmed pull (last_signature set), which the reconciliation worker checks
+// against billing.payments. `limit` caps the batch (0 = no limit).
 func (r *SolanaSubscriptionRepo) ListActiveWithSignature(ctx context.Context, limit int) ([]*models.SolanaSubscription, error) {
 	if _, ok := merchant.FromContext(ctx); ok {
 		return r.listActiveWithSignatureScoped(ctx, limit)

@@ -8,21 +8,16 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 )
 
-// NormalizeForNetwork applies the #360 Solana token pricing policy to a
-// resolved token set. It NEVER fails — tokens that cannot function are
-// dropped with a loud warning:
+// NormalizeForNetwork applies the Solana token pricing policy to a resolved
+// token set. It never fails; tokens that cannot work are dropped with a loud
+// warning:
 //
-//   - devnet: NO pricing requirements at all — devnet money is fake.
-//   - mainnet, Pyth feed exists for the symbol: feed pricing (for stablecoins
-//     the feed is the depeg failsafe).
-//   - mainnet, known USD-pegged stablecoin mint without a feed: kept, priced
-//     at $1.00 parity, LOUD warning (no depeg protection).
-//   - mainnet, non-USD-pegged stablecoin (e.g. EURC) or unknown token without
-//     a feed: that TOKEN is disabled with a loud warning; everything else
-//     keeps working.
-//
-// Formerly the boot-time configureSolanaRail; #788 moved it to resolution
-// time since the token set is per-merchant armed state, not boot config.
+//   - devnet: no pricing requirements (devnet money is fake).
+//   - mainnet with a Pyth feed: feed pricing (for stablecoins, the depeg
+//     failsafe).
+//   - mainnet, known USD-pegged mint without a feed: $1.00 parity, warned.
+//   - mainnet, non-USD peg (EURC) or unknown token without a feed: that token
+//     is disabled; everything else keeps working.
 func NormalizeForNetwork(network string, tokens map[string]config.TokenConfig) map[string]config.TokenConfig {
 	normalized := make(map[string]config.TokenConfig, len(tokens))
 	for symbol, token := range tokens {
@@ -35,9 +30,8 @@ func NormalizeForNetwork(network string, tokens map[string]config.TokenConfig) m
 			log.Warnf("⚠️  solana token %s has no mint configured; payments in %s unavailable", normalizedSymbol, normalizedSymbol)
 			continue
 		}
-		// Decimals are NOT validated here (#817): they are not configuration.
-		// They are read from the mint on-chain at conversion time, where an
-		// unreadable or unpayable precision fails the charge closed.
+		// Decimals are not configuration: they are read from the mint on-chain
+		// at conversion time, where a bad precision fails the charge closed.
 		if strings.TrimSpace(token.Name) == "" {
 			token.Name = normalizedSymbol
 		}

@@ -11,31 +11,26 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
-// tierChangeRPC is the minimal RPC surface PrepareTierChange needs (satisfied by
-// *solanaint.RPCClient): read the SubscriptionAuthority + a recent blockhash.
+// tierChangeRPC reads the SubscriptionAuthority, the subscriber's balance and a
+// recent blockhash.
 type tierChangeRPC interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
 	GetTokenBalanceForMint(ctx context.Context, owner solanago.PublicKey, mint solanago.PublicKey) (uint64, error)
 }
 
-// PrepareTierChangeService builds the SINGLE ATOMIC on-chain transaction a tier
-// change executes (#272). A Solana plan's terms are immutable + a subscription is
-// bound to one plan PDA, so a tier change is mechanically cancel-old +
-// subscribe-new — and we do it in ONE transaction so it is all-or-nothing:
+// PrepareTierChangeService builds the single atomic tier-change transaction.
+// Plan terms are immutable and a subscription binds one plan, so a tier change
+// is cancel-old + subscribe-new in one all-or-nothing tx:
 //
-//	UPGRADE  = [cancel(old) + subscribe(new) + transfer_subscription(new, prorated)]
-//	           two signers — the subscriber (cancel+subscribe+fee payer) and the
-//	           merchant/cranker (the transfer caller). OpenRails partial-signs the
-//	           cranker slot; the wallet completes + submits. The prorated first pull
-//	           (new_full - old_unused, Model-B) happens atomically with the switch.
-//	DOWNGRADE = [cancel(old) + subscribe(new)]  — subscriber-only, NO immediate
-//	           charge. The first pull is deferred (the cranker sets next_pull_at to
-//	           the old period end), so the user keeps the higher tier until the paid
-//	           period ends, then rebills at the lower tier.
+//	UPGRADE   = [cancel(old) + subscribe(new) + transfer_subscription(new,
+//	            prorated)]; the cranker pre-signs the transfer, the wallet
+//	            completes and submits.
+//	DOWNGRADE = [cancel(old) + subscribe(new)], subscriber-only, no charge; the
+//	            first pull is deferred to the old period end.
 //
-// The subscriber is changing tier on an EXISTING subscription for the same mint,
-// so their SubscriptionAuthority already exists (no init step).
+// The SubscriptionAuthority already exists (same-mint subscription), so there is
+// no init step.
 type PrepareTierChangeService struct {
 	signer  solanaint.Signer // the cranker: provides the merchant address + co-signs upgrades
 	rpc     tierChangeRPC
@@ -73,10 +68,8 @@ type PrepareTierChangeInput struct {
 	// (new_full - old_unused, in token base units). Ignored for downgrades.
 	FirstChargeBaseUnits uint64
 
-	// Reference, when set, attaches a Solana Pay REFERENCE (read-only, non-signer)
-	// to the atomic tx's cancel instruction so the reference poller can detect the
-	// landed tier change via getSignaturesForAddress — letting a Solana Pay
-	// checkout attempt drive a tier change. Empty => no tagging.
+	// Reference, when set, tags the tx with a Solana Pay reference
+	// (referenceTagInstruction) so a checkout attempt can drive the tier change.
 	Reference string
 }
 
@@ -198,11 +191,9 @@ func (s *PrepareTierChangeService) Prepare(ctx context.Context, in PrepareTierCh
 		return result, nil
 	}
 
-	// Pre-flight: an upgrade pulls the prorated first charge NOW (atomically), so
-	// verify the subscriber holds enough USDC before handing them a tx that would
-	// just revert. Same typed InsufficientUSDCError the subscribe pre-flight uses
-	// (-> HTTP 402 insufficient_funds) so the UI can prompt a top-up. Fail-open on a
-	// read error (the atomic tx's all-or-nothing revert is the real guarantee).
+	// Pre-flight: the upgrade pulls the prorated charge now, so an underfunded
+	// wallet gets the same InsufficientUSDCError as subscribe. Fail-open on a
+	// read error: the atomic tx reverts if short.
 	if have, berr := s.rpc.GetTokenBalanceForMint(ctx, subscriber, mint); berr == nil && have < in.FirstChargeBaseUnits {
 		return nil, &InsufficientUSDCError{HaveBaseUnits: have, NeedBaseUnits: in.FirstChargeBaseUnits}
 	}
@@ -258,5 +249,3 @@ func buildTierChangeUnsignedTxBase64(ctx context.Context, rpc tierChangeRPC, pay
 	}
 	return marshalUnsignedTxBase64(tx)
 }
-
-// prepare_subscribe.go and reads offset 98.)

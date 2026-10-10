@@ -45,8 +45,8 @@ func crankRow(t *testing.T) *models.SolanaSubscription {
 }
 
 // The pull signs as the RECORDED merchant address and, with a pull-intent id,
-// is stamped [SPL Memo "openrails:1:<id>", transfer_subscription] — memo first
-// (#713). Without an id it is the bare transfer.
+// is stamped [SPL Memo "openrails:1:<id>", transfer_subscription], memo first.
+// Without an id it is the bare transfer.
 func TestCrankPullShape(t *testing.T) {
 	intentID := uuid.MustParse("6b1f3c2d-9a8e-4b7c-8d5f-0e1a2b3c4d5e")
 	for _, memoID := range []uuid.UUID{intentID, uuid.Nil} {
@@ -100,7 +100,7 @@ func (s *writeAheadSubmitter) SubmitForMerchantAddressWithPresubmit(_ context.Co
 	return sig, nil
 }
 
-// #674: a write-ahead-capable submitter is preferred, and the crank hands the
+// A write-ahead-capable submitter is preferred, and the crank hands the
 // caller's hook the signed signature (as recorded for crash recovery).
 func TestCrankWriteAheadPrecedesSubmit(t *testing.T) {
 	var recorded string

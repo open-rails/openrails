@@ -28,8 +28,8 @@ func (f priceFeed) PriceUSD(_ context.Context, symbol string) (float64, error) {
 	return p, nil
 }
 
-// #817: base units scale with the mint's decimals; below micro precision the
-// divide rounds UP; a >1% depeg scales the charge by the live price.
+// Base units scale with the mint's decimals; below micro precision the divide
+// rounds UP; a >1% depeg scales the charge by the live price.
 func TestFiatMicrosToStablecoinBaseUnits(t *testing.T) {
 	for _, tc := range []struct {
 		micros   moneyutil.Micros
@@ -70,8 +70,7 @@ func TestFiatMicrosToStablecoinBaseUnits(t *testing.T) {
 	}
 }
 
-// #818: the old float chain overcharged 1.19% of whole-cent amounts by one base
-// unit. The peg path must be an exact integer rescale for every whole cent.
+// The peg path must be an exact integer rescale for every whole cent.
 func TestPegConversionIsExactForEveryWholeCent(t *testing.T) {
 	for cents := int64(1); cents <= 200_000; cents++ {
 		micros := moneyutil.Micros(cents * 10_000)
@@ -85,8 +84,8 @@ func TestPegConversionIsExactForEveryWholeCent(t *testing.T) {
 	}
 }
 
-// The one Solana amount formatter (#863): fixed precision, left-zero-padded
-// fraction, no trimming or rounding.
+// The one Solana amount formatter: fixed precision, left-zero-padded fraction,
+// no trimming or rounding.
 func TestFormatBaseUnits(t *testing.T) {
 	for _, tc := range []struct {
 		units    uint64
@@ -139,7 +138,7 @@ func TestSolanaPayTransferURLWirePin(t *testing.T) {
 		{10_000, 6, "USDC", "", "?amount=0.010000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
 		{19_990_000, 9, "USDC", "", "?amount=19.990000000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
 		{19_990_000, 8, "USDC", "", "?amount=19.99000000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
-		// #713: the memo precedes the label, URL-escaped.
+		// The memo precedes the label, URL-escaped.
 		{5_000_000, 6, "USDC", solanarpc.PurchaseMemo(sessionID),
 			"?amount=5.000000&spl-token=" + mint + "&reference=" + reference +
 				"&memo=openrails%3A1%3A0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42&label=Purchase"},

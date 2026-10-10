@@ -14,20 +14,15 @@ const (
 	PythFeedSOLUSD   = "ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d"
 	PythFeedUSDCUSD  = "eaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a"
 	PythFeedPYUSDUSD = "c1da1b73d7f01e7ddd54b3766cf7fcd644395ad14f70aa706ec5384c59e76692"
-	// USD1 (World Liberty Financial USD) — Crypto.USD1/USD. Verified against
-	// Pyth's Hermes feed registry on 2026-06-11:
-	//   https://hermes.pyth.network/v2/price_feeds?query=USD1
-	// (live + publishing; #360).
+	// USD1 (World Liberty Financial USD): Crypto.USD1/USD in Pyth's Hermes
+	// registry (hermes.pyth.network/v2/price_feeds?query=USD1).
 	PythFeedUSD1USD = "0a2425d43486780990d8b63543029e20556be51fd756cca584212f4d539611d4"
-	// USDG (Global Dollar, Paxos) — Crypto.USDG/USD. Verified against Pyth's
-	// Hermes feed registry on 2026-06-11:
-	//   https://hermes.pyth.network/v2/price_feeds?query=USDG
+	// USDG (Global Dollar, Paxos): Crypto.USDG/USD in Pyth's Hermes registry
+	// (hermes.pyth.network/v2/price_feeds?query=USDG).
 	PythFeedUSDGUSD = "daa58c6a3ce7d4b9c46c32a6e646012c17c4a2b24c08dd8c5e476118b855a7da"
-	// USDT (Tether) — Crypto.USDT/USD. Verified against Pyth's Hermes feed
-	// registry on 2026-08-04:
-	//   https://hermes.pyth.network/v2/price_feeds?query=USDT
-	// (note the near-namesakes USDT0/USDTB/OUSDT in that response — this is the
-	// "TETHER / US DOLLAR" entry).
+	// USDT (Tether): the "TETHER / US DOLLAR" entry in Pyth's Hermes registry
+	// (hermes.pyth.network/v2/price_feeds?query=USDT), not the near-namesakes
+	// USDT0/USDTB/OUSDT.
 	PythFeedUSDTUSD = "2b89b9dc8fdf9f34709a5b106b472f0f39bb6ca9ce04b0fd7f2e971688e2e53b"
 )
 
@@ -42,15 +37,11 @@ func DefaultPythPriceFeeds() map[string]string {
 	}
 }
 
-// DefaultSupportedTokens is the MAINNET half of the built-in mint registry
-// (or#881). It is the source of truth for a well-known token's on-chain
-// identity: a merchant SELECTS a symbol and never re-types a mint, because a
-// mint a merchant can type is a mint they can get wrong — and a wrong mint here
-// means accepting payment in a different token than the one being priced.
-//
-// Every address below was verified against the chain on 2026-08-04 (owner
-// program + decimals via getAccountInfo on mainnet-beta); registry_test.go pins
-// the decimals through the mint reader.
+// DefaultSupportedTokens is the mainnet half of the built-in mint registry, the
+// source of truth for a well-known token's on-chain identity. A merchant selects
+// a symbol and never types a mint: a wrong mint would accept payment in a
+// different token than the one priced. registry_test.go pins each mint's
+// decimals.
 func DefaultSupportedTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{
 		"SOL": {
@@ -95,25 +86,13 @@ type StablecoinInfo struct {
 	Peg    string // lowercase ISO code of the peg currency ("usd", "eur")
 }
 
-// knownStablecoins is the hardcoded stablecoin registry (#360). It lives next
-// to DefaultPythPriceFeeds and, together with it, drives the mainnet
-// token-pricing policy (see ClassifyPricing):
-//
-//   - token has a Pyth feed            -> the feed is used. For a stablecoin
-//     the feed IS the depeg protection (see CalculateTokenQuote's failsafe).
-//   - USD-pegged stablecoin, no feed   -> degraded to $1.00 parity with a
-//     LOUD warning (never fatal, never disabled).
-//   - non-USD-pegged stablecoin (EURC), no feed -> the token is DISABLED with
-//     a loud warning: USD parity would silently misprice it, and OpenRails has
-//     no FX feed to derive its peg. Never fatal.
-//   - unknown token, no feed           -> DISABLED with a loud warning.
-//
-// Mint lookups are the trust anchor: parity is only ever granted to a mint in
-// this registry, so a custom token merely NAMED like a stablecoin cannot buy a
-// $1.00 quote for an arbitrary mint.
-// Mints here MUST agree with the mainnet registry above for every shared symbol
-// (registry_test.go asserts it); EURC is deliberately listed without a registry
-// entry — it is a known peg, not an accepted token.
+// knownStablecoins is the stablecoin registry. With DefaultPythPriceFeeds it
+// drives the mainnet pricing policy (ClassifyPricing): a feed is used when one
+// exists (for a stablecoin, the depeg protection); a USD-pegged stablecoin
+// without one gets $1.00 parity; a non-USD peg (EURC) or unknown token without
+// one is disabled. Parity is granted only by mint, so a token merely named like
+// a stablecoin cannot buy a $1.00 quote. Mints must agree with the mainnet
+// registry (registry_test.go); EURC is a known peg, not an accepted token.
 var knownStablecoins = []StablecoinInfo{
 	{Symbol: "USDC", Mint: "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", Peg: "usd"},
 	{Symbol: "USDT", Mint: "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", Peg: "usd"},
@@ -149,8 +128,7 @@ func KnownStablecoinBySymbol(symbol string) (StablecoinInfo, bool) {
 	return StablecoinInfo{}, false
 }
 
-// TokenPricing is the boot-time pricing decision for one configured mainnet
-// token (#360).
+// TokenPricing is the pricing decision for one configured mainnet token.
 type TokenPricing int
 
 const (
@@ -158,11 +136,10 @@ const (
 	// stablecoin depeg failsafe where applicable.
 	TokenPricingFeed TokenPricing = iota
 	// TokenPricingUSDParity: known USD-pegged stablecoin without a feed —
-	// priced at $1.00 parity (no depeg protection); boot warns loudly.
+	// priced at $1.00 parity (no depeg protection), with a loud warning.
 	TokenPricingUSDParity
-	// TokenPricingDisabled: the token cannot be priced (non-USD peg without a
-	// feed, or unknown token without a feed) — it is removed from the
-	// supported-token set with a loud warning. Never a boot failure.
+	// TokenPricingDisabled: the token cannot be priced (non-USD peg or unknown
+	// token without a feed); it is dropped with a loud warning, never an error.
 	TokenPricingDisabled
 )
 
@@ -208,10 +185,8 @@ func IsUSDPeggedToken(symbol, mint string) bool {
 }
 
 // IsFeedlessStablecoin reports whether symbol is a USD-pegged stablecoin with
-// no built-in price feed. Such coins are always priced at the $1.00 peg (their
-// peg cannot be divergence-checked). Derived from the registry + feed map, so
-// adding a feed automatically upgrades a coin to depeg-protected pricing —
-// USD1/USDG graduated this way in #360.
+// no built-in price feed, so always priced at the $1.00 peg. Adding a feed
+// upgrades a coin to depeg-protected pricing automatically.
 func IsFeedlessStablecoin(symbol string) bool {
 	if !IsStablecoin(symbol) {
 		return false
@@ -220,11 +195,9 @@ func IsFeedlessStablecoin(symbol string) bool {
 	return strings.TrimSpace(DefaultPythPriceFeeds()[normalized]) == ""
 }
 
-// DefaultDevnetTokens is the DEVNET half of the registry. Devnet mints are
-// per-deployment artefacts, not canonical addresses, so only the three with a
-// stable, widely-used devnet deployments are pinned here. A registry symbol with
-// no devnet entry (USDT/USD1/USDG) is simply not selectable under test_mode;
-// see ResolveDeclared for the ad-hoc-token escape hatch.
+// DefaultDevnetTokens is the devnet half of the registry. Devnet mints are
+// per-deployment, so only widely used ones are pinned; a registry symbol absent
+// here (USDT/USD1/USDG) is declared as an ad-hoc token (see ResolveDeclared).
 func DefaultDevnetTokens() map[string]config.TokenConfig {
 	return map[string]config.TokenConfig{
 		"SOL": {

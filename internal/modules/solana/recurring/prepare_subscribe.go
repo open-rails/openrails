@@ -17,12 +17,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ErrInsufficientUSDC is the typed, sentinel error returned by the pre-flight
-// balance check (#286 part A) when the subscriber's USDC ATA holds less than the
-// first-period amount. HTTP/checkout callers map this to a clear client-facing
-// "buy USDC" code (it is NOT an internal/RPC failure — it is an actionable user
-// state). Use errors.Is(err, ErrInsufficientUSDC) to detect it. The concrete
-// amounts (have/need) are attached via InsufficientUSDCError for the frontend.
+// ErrInsufficientUSDC: the subscriber's ATA holds less than the first-period
+// amount. An actionable user state, not an RPC failure: callers map it to a
+// "buy USDC" code. InsufficientUSDCError carries the amounts.
 var ErrInsufficientUSDC = errors.New("recurring: insufficient USDC balance for first period")
 
 // InsufficientUSDCError carries the concrete have/need base-unit amounts so the
@@ -41,28 +38,21 @@ func (e *InsufficientUSDCError) Error() string {
 
 func (e *InsufficientUSDCError) Unwrap() error { return ErrInsufficientUSDC }
 
-// subscriptionAuthorityInitIDOffset is the byte offset of the SubscriptionAuthority
-// account's initId field (an i64 LE). The subscribe instruction must echo this
-// value back as ExpectedSubscriptionAuthInitID; it is only knowable AFTER
-// init_subscription_authority has executed and written the account. Proven by
-// the devnet lifecycle test (reads offset 98 between init and subscribe).
+// subscriptionAuthorityInitIDOffset is the byte offset of the
+// SubscriptionAuthority's initId (i64 LE), which a returning subscriber's
+// subscribe echoes as ExpectedSubscriptionAuthInitID.
 const subscriptionAuthorityInitIDOffset = 98
 
-// authorityReadMaxAttempts / defaultAuthorityReadBackoff bound the read-after-write
-// retry on the SubscriptionAuthority account (#274). After init_subscription_authority
-// confirms, the RPC node serving the re-prepare may still lag behind that write,
-// so a single GetAccountData can observe a missing or short account. We retry up
-// to ~10 attempts ~1s apart (capped, context-aware) until the account is present
-// AND long enough to read initId.
+// authorityReadMaxAttempts / defaultAuthorityReadBackoff bound the
+// read-after-write retry on the SubscriptionAuthority: a node may still lag a
+// just-landed write and serve a missing or short account.
 const (
 	authorityReadMaxAttempts    = 10
 	defaultAuthorityReadBackoff = time.Second
 )
 
-// prepareRPC is the minimal RPC surface PrepareSubscribe needs (satisfied by
-// *solanaint.RPCClient): read on-chain account state + a recent blockhash to
-// build unsigned transactions, and read the subscriber's USDC ATA balance for
-// the pre-flight check (#286).
+// prepareRPC reads account state, a recent blockhash and the subscriber's token
+// balance for the pre-flight check.
 type prepareRPC interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
@@ -78,23 +68,14 @@ type accountDataReader interface {
 	GetAccountData(ctx context.Context, address solanago.PublicKey) ([]byte, error)
 }
 
-// PrepareSubscribeService builds the UNSIGNED Subscriptions-Delegation-Program
-// transactions the subscriber's wallet signs to start a recurring subscription
-// (#261). All on-chain instruction encoding stays here (devnet-validated
-// builders); the frontend only signs + sends, then confirms.
-//
-// Two-step on-chain reality (proven by lifecycle_devnet_test): subscribe needs
-// the SubscriptionAuthority initId, only readable AFTER init_subscription_authority
-// runs. So a FIRST-TIME subscriber (no authority for this mint yet) gets the
-// init tx first, signs+sends it, then re-prepares to get the subscribe tx; a
-// RETURNING subscriber (authority already exists) gets the subscribe tx directly.
+// PrepareSubscribeService builds the transaction the subscriber's wallet signs
+// to start a recurring subscription. All instruction encoding stays here; the
+// frontend only signs, sends and confirms.
 type PrepareSubscribeService struct {
 	submitter Submitter // resolves the merchant's merchant (plan owner / cranker) address
-	// signer is the cranker key. The subscribe step (#286) is now an ATOMIC
-	// co-signed bundle [subscribe + transfer_subscription(first period)]; the
-	// transfer requires the cranker as the caller-signer, so this signer pre-signs
-	// that slot via BuildPartiallySignedTx while the wallet completes the
-	// subscribe/fee-payer slot. It MUST be the same key as the cranker/merchant.
+	// signer is the cranker key: it pre-signs the transfer slot of the atomic
+	// [subscribe + transfer_subscription] bundle while the wallet completes the
+	// fee-payer slot. It MUST be the merchant (cranker) key.
 	signer  solanaint.Signer
 	rpc     prepareRPC
 	network string
@@ -104,9 +85,9 @@ type PrepareSubscribeService struct {
 	authorityReadBackoff time.Duration
 }
 
-// NewPrepareSubscribeService builds a PrepareSubscribeService. signer is the
-// cranker key used to pre-sign the atomic subscribe bundle's transfer slot (#286)
-// and MUST be the same key the Submitter resolves as the merchant address.
+// NewPrepareSubscribeService builds a PrepareSubscribeService. signer pre-signs
+// the bundle's transfer slot and MUST be the key the Submitter resolves as the
+// merchant address.
 func NewPrepareSubscribeService(submitter Submitter, signer solanaint.Signer, rpc prepareRPC, network string, tokens ...map[string]config.TokenConfig) *PrepareSubscribeService {
 	return &PrepareSubscribeService{submitter: submitter, signer: signer, rpc: rpc, network: network, tokens: normalizeRecurringTokens(firstTokenMap(tokens))}
 }
@@ -135,15 +116,11 @@ type PrepareSubscribeInput struct {
 type PrepareSubscribeResult struct {
 	// Transactions are base64-encoded unsigned transactions to sign+send in order.
 	Transactions []string
-	// The single transaction is the ATOMIC co-signed bundle [subscribe +
-	// transfer(first period)] (the cranker pre-signed the transfer slot; the
-	// wallet completes the fee-payer slot), prefixed with
-	// initialize_subscription_authority for a first-time subscriber (one-step
-	// signup via the program's UNKNOWN_INIT_ID sentinel). It is the only on-chain
-	// step before confirm and pulls the first period IN THE SAME TX (#286).
+	// The single transaction is the atomic co-signed [subscribe + first-period
+	// transfer] bundle, prefixed with initialize_subscription_authority for a
+	// first-time subscriber (via the UNKNOWN_INIT_ID sentinel).
 	//
-	// AuthorityExists reports whether the SubscriptionAuthority already existed
-	// (returning subscriber → no init instruction in the bundle).
+	// AuthorityExists reports whether the SubscriptionAuthority already existed.
 	AuthorityExists bool
 	MerchantAddress string
 	PlanPDA         string
@@ -152,10 +129,10 @@ type PrepareSubscribeResult struct {
 	Mint            string
 }
 
-// Prepare derives the PDAs, checks whether the subscriber's SubscriptionAuthority
-// for this mint exists, and returns the single transaction to sign: the atomic
-// [subscribe + transfer] bundle, with init_subscription_authority prepended for a
-// first-time subscriber (one signature either way).
+// Prepare derives the PDAs, checks for the subscriber's SubscriptionAuthority on
+// this mint, and returns the one transaction to sign: the atomic [subscribe +
+// transfer] bundle, with initialize_subscription_authority prepended for a
+// first-time subscriber.
 func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscribeInput) (*PrepareSubscribeResult, error) {
 	if in.SubscriberWallet == "" {
 		return nil, fmt.Errorf("recurring: subscriber wallet is required")
@@ -206,21 +183,16 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		Mint:            mint.String(),
 	}
 
-	// Read the authority with a bounded, read-after-write-tolerant retry (#274):
-	// right after a bundle lands, the RPC node may not yet serve the just-written
-	// account, so we retry until it is present and readable rather than racing a
-	// single read. Absent after the retries means first-time subscriber.
+	// Bounded retry: right after a bundle lands the node may not yet serve the
+	// authority. Absent after the retries means first-time subscriber.
 	initID, exists, err := readAuthorityInitIDWithBackoff(ctx, s.authorityBackoff(), s.rpc, saPDA)
 	if err != nil {
 		return nil, err
 	}
 
-	// Pre-flight USDC balance check (#286 part A). The atomic bundle pulls the
-	// FULL first period in the same tx, so an underfunded wallet would produce a tx
-	// that reverts. Catch it server-side BEFORE signing anything and return a typed
-	// insufficient-USDC error the caller maps to a "buy USDC" code. Best-effort: an
-	// RPC blip must not hard-fail the flow (the atomic tx is the real guarantee — it
-	// reverts on chain if the balance is short).
+	// Pre-flight: the bundle pulls the full first period, so an underfunded
+	// wallet gets a typed error before signing. Fail-open on an RPC blip: the
+	// atomic tx reverts on-chain if the balance is short.
 	if err := s.preflightBalance(ctx, subscriber, mint, in.AmountBaseUnits); err != nil {
 		return nil, err
 	}
@@ -230,16 +202,11 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		return nil, fmt.Errorf("recurring: derive event authority: %w", err)
 	}
 
-	// ONE-STEP SIGNUP. A first-time subscriber for this mint has no
-	// SubscriptionAuthority yet, and subscribe must echo the authority's init_id
-	// (its creation slot). Rather than landing init first and reading the id back
-	// (two wallet signatures), bundle initialize_subscription_authority into the
-	// same transaction and pass the program's UNKNOWN_INIT_ID sentinel: the
-	// program then checks the stored init_id against the CURRENT slot, which the
-	// same-tx init satisfies by construction. Everything (init, subscribe, first
-	// pull) lands or reverts together, so there is no half-initialized state.
-	// A returning subscriber's authority already exists: echo its real init_id
-	// and skip the init instruction.
+	// One-step signup: a first-time subscriber has no SubscriptionAuthority, so
+	// initialize_subscription_authority rides the same tx and subscribe passes
+	// UNKNOWN_INIT_ID (the program checks init_id against the current slot,
+	// which the same-tx init satisfies). Init, subscribe and first pull land or
+	// revert together. A returning subscriber echoes its real init_id.
 	expectedInitID := initID
 	var ixs []solanago.Instruction
 	if !exists {
@@ -268,14 +235,10 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 		ExpectedSubscriptionAuthInitID: expectedInitID,
 	})
 
-	// ATOMIC co-signed subscribe (#286 part B). Bundle the first pull
-	// (transfer_subscription, full first-period amount) into the SAME tx as
-	// subscribe — exactly like the upgrade bundle (prepare_tier_change.go). The
-	// transfer requires the merchant/cranker as the caller-signer, so the cranker
-	// pre-signs that slot via BuildPartiallySignedTx and the wallet completes the
-	// subscribe/fee-payer slot. Both land or both revert. The wallet can still
-	// send subscribe on its own, so confirm requires this pull in the landed
-	// transaction (ConfirmEnrollment), never just the subscription account.
+	// Atomic co-signed subscribe: the first pull rides the subscribe tx, as in
+	// the upgrade bundle. The cranker pre-signs the transfer's caller slot; the
+	// wallet completes the fee-payer slot. The wallet could send subscribe alone,
+	// so ConfirmEnrollment requires this pull in the landed tx.
 	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: derive receiver ata: %w", err)
@@ -314,11 +277,9 @@ func (s *PrepareSubscribeService) Prepare(ctx context.Context, in PrepareSubscri
 	return result, nil
 }
 
-// preflightBalance reads the subscriber's USDC ATA balance for mint and returns a
-// typed *InsufficientUSDCError (wrapping ErrInsufficientUSDC) when it is below
-// needBaseUnits. It is read-lag tolerant + fail-open: a transient RPC read error
-// is logged and the flow PROCEEDS (the atomic tx reverts on chain if the balance
-// is truly short, so the on-chain tx — not this check — is the real guarantee).
+// preflightBalance returns *InsufficientUSDCError when the subscriber's balance
+// is below needBaseUnits. Fail-open on a read failure: the atomic tx reverts
+// on-chain if the balance is truly short.
 func (s *PrepareSubscribeService) preflightBalance(ctx context.Context, subscriber, mint solanago.PublicKey, needBaseUnits uint64) error {
 	if needBaseUnits == 0 {
 		return nil
@@ -372,20 +333,10 @@ func readInitID(data []byte) (int64, error) {
 	return v, nil
 }
 
-// readAuthorityInitID reads the SubscriptionAuthority initId with a bounded,
-// read-after-write-tolerant retry (#274). It returns:
-//
-//   - (initId, true, nil)  when the account is present and long enough to read initId;
-//   - (0, false, nil)      when the account is genuinely absent (first-time subscriber:
-//     GetAccountData returns empty across every attempt) — the caller returns the init tx;
-//   - (0, false, err)      on a hard RPC error, or when an account appeared but stayed
-//     too short to read initId after all attempts (a clear "never settled" error).
-//
-// The distinction matters: an empty read is ambiguous (either truly first-time OR
-// the just-written account not yet visible), so we keep retrying empties up to the
-// bound. If it is still empty after the bound, we treat the subscriber as first-time
-// and return the init tx — re-preparing again will retry the read. A present-but-short
-// account is always an error (it should never happen once the account exists).
+// readAuthorityInitID reads the SubscriptionAuthority initId, retrying within a
+// bound because a node may lag a just-landed write. It returns (initId, true,
+// nil) when readable; (0, false, nil) when empty on every attempt (first-time
+// subscriber); an error on an RPC failure or an account that stayed too short.
 func readAuthorityInitID(ctx context.Context, rpc accountDataReader, saPDA solanago.PublicKey) (int64, bool, error) {
 	return readAuthorityInitIDWithBackoff(ctx, defaultAuthorityReadBackoff, rpc, saPDA)
 }
@@ -431,8 +382,7 @@ func readAuthorityInitIDWithBackoff(
 			"recurring: subscription authority never settled (last read %d bytes, need %d) after %d attempts",
 			lastShort, subscriptionAuthorityInitIDOffset+8, authorityReadMaxAttempts)
 	}
-	// Stayed empty across every attempt → treat as a genuinely absent authority
-	// (first-time subscriber): caller returns the init tx.
+	// Empty on every attempt: a first-time subscriber.
 	return 0, false, nil
 }
 

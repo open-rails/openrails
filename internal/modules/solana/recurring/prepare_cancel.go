@@ -10,35 +10,22 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
-// solanaSubscriptionReader is the minimal repo surface PrepareCancel needs:
-// load the stored on-chain identifiers for a lifecycle subscription. Declared
-// here (dependency inversion) so the service is unit-testable without a DB.
+// solanaSubscriptionReader loads a lifecycle subscription's stored on-chain
+// identifiers.
 type solanaSubscriptionReader interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
 }
 
-// cancelPrepareRPC is the minimal RPC surface PrepareCancel needs: a recent
-// blockhash to build the unsigned transaction (satisfied by *solanaint.RPCClient).
+// cancelPrepareRPC supplies a recent blockhash for the unsigned transaction.
 type cancelPrepareRPC interface {
 	GetLatestBlockhash(ctx context.Context) (solanago.Hash, error)
 }
 
-// PrepareCancelService builds the UNSIGNED on-chain cancel transaction the
-// subscriber's wallet signs to cancel one recurring Solana subscription (#266).
-//
-// Model: Solana is the source of truth; the cancel is an ON-CHAIN action the
-// user authorizes, and OpenRails' DB merely mirrors it. There is NO "soft
-// cancel" (DB-only) — the user signs `cancel_subscription` for the specific
-// subscription PDA, OpenRails observes the confirmed transaction and mirrors it
-// (marks the row canceled so the cranker stops). Cancellation is immediate (no
-// NMI-style undo window).
-//
-// Per-subscription cancel uses `cancel_subscription` (NOT an SPL token Revoke):
-// the token delegate is the SubscriptionAuthority, which is shared across ALL of
-// the user's subscriptions for that mint (it is per user+mint), so revoking the
-// delegate would nuke EVERY USDC subscription at once. `cancel_subscription`
-// targets one subscription PDA. (A wallet-level "revoke all access" is a separate
-// nuclear option, not this per-subscription cancel.)
+// PrepareCancelService builds the unsigned cancel_subscription transaction the
+// subscriber's wallet signs; ConfirmCancelService mirrors it once landed. It
+// cancels one subscription PDA, never via an SPL Revoke: the token delegate
+// (SubscriptionAuthority) is per user+mint, so revoking it would end every
+// subscription on that mint.
 type PrepareCancelService struct {
 	repo solanaSubscriptionReader
 	rpc  cancelPrepareRPC
@@ -59,19 +46,15 @@ type PrepareCancelResult struct {
 	SubscriptionPDA string
 }
 
-// Prepare loads the on-chain subscription row linked to the lifecycle
-// subscription and builds the unsigned `cancel_subscription` transaction
-// (subscriber signs + pays gas) for the wallet to sign + send. OpenRails then
-// observes the confirmed cancel and mirrors it (cranker stops).
+// Prepare builds the unsigned cancel_subscription transaction (the subscriber
+// signs and pays gas) for the lifecycle subscription's on-chain row.
 func (s *PrepareCancelService) Prepare(ctx context.Context, subscriptionID uuid.UUID) (*PrepareCancelResult, error) {
 	return s.PrepareWithReference(ctx, subscriptionID, "")
 }
 
-// PrepareWithReference is Prepare with an optional Solana Pay REFERENCE carried
-// in the same transaction (its own read-only, non-signer account on a tag
-// instruction — see referenceTagInstruction) so the reference poller can detect
-// the landed cancel via getSignaturesForAddress — the same mechanism the one-off
-// Solana Pay path uses. An empty reference behaves exactly like Prepare.
+// PrepareWithReference is Prepare with an optional Solana Pay reference on a tag
+// instruction (referenceTagInstruction), so the reference poller finds the
+// landed cancel. An empty reference behaves like Prepare.
 func (s *PrepareCancelService) PrepareWithReference(ctx context.Context, subscriptionID uuid.UUID, reference string) (*PrepareCancelResult, error) {
 	if subscriptionID == uuid.Nil {
 		return nil, fmt.Errorf("recurring: subscription id is required")

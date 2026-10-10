@@ -30,10 +30,8 @@ type tierChangeTransactor interface {
 	MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error
 }
 
-// tierChangeStore is the on-chain state store the mirror reads + writes
-// (satisfied by *solanasubs.SolanaSubscriptionRepo). GetBySubscriptionPDA powers the
-// idempotency/resumability check; SetStatus flips the old row canceled; Upsert
-// writes the new active row.
+// tierChangeStore is the solana_subscriptions store the mirror reads and
+// writes; GetBySubscriptionPDA is the idempotency check.
 type tierChangeStore interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
 	GetBySubscriptionPDA(ctx context.Context, pda string) (*models.SolanaSubscription, error)
@@ -80,13 +78,10 @@ type ConfirmTierChangeInput struct {
 	NewFiatAmount int64
 	NewCurrency   string
 
-	// IsUpgrade selects the next_pull_at policy + the recorded first charge:
-	//   UPGRADE   -> period 1 was pulled atomically in the tx, so the cranker's
-	//                first pull is period 2: next_pull_at = now + new_period.
-	//                The prorated first charge is recorded on the new membership.
-	//   DOWNGRADE -> NO immediate charge; the first pull is DEFERRED to the OLD
-	//                subscription's period end (the user keeps the higher tier
-	//                they already paid for until then).
+	// IsUpgrade selects the first pull and recorded charge: an upgrade pulls
+	// period 1 in the tx (next pull = now + new period, prorated charge
+	// recorded); a downgrade charges nothing and defers the first pull to the
+	// old period end.
 	IsUpgrade bool
 
 	// FirstChargeBaseUnits is the prorated first pull the upgrade must carry.
@@ -109,25 +104,13 @@ type ConfirmTierChangeResult struct {
 	AlreadyConfirmed bool
 }
 
-// ConfirmTierChangeService is the CONFIRM step of the on-chain tier-change loop
-// (#272). Solana is the source of truth: the subscriber signs + sends the single
-// ATOMIC tier-change tx (built by PrepareTierChangeService), then posts its
-// signature here. We read that transaction from the chain and require that it
-// is the tier change: signed by the subscriber, cancelling the old
-// subscription, subscribing to the new plan's terms and, for an upgrade,
-// pulling the co-signed prorated charge into the merchant's account. Only then
-// do we MIRROR it into the DB:
-//
-//   - atomically cancel the OLD membership + mirror row, releasing the
-//     database's live tier-group slot;
-//   - create the NEW membership (rail=solana, rail_subscription_id =
-//     new subscription PDA, recording the prorated first charge for an upgrade /
-//     no charge for a downgrade) + upsert the NEW solana_subscriptions row
-//     (status active) with next_pull_at set per kind (upgrade => now+period;
-//     downgrade => old period end). Any failure rolls the OLD cancellation back.
-//
-// It is idempotent/resumable: if the NEW row already exists (a prior confirm
-// committed), it returns the existing new subscription without re-mirroring.
+// ConfirmTierChangeService confirms the subscriber's atomic tier-change tx
+// (built by PrepareTierChangeService). It proves from the chain that the tx is
+// subscriber-signed, cancels the old subscription, subscribes to the new plan's
+// terms and, for an upgrade, pulls the co-signed prorated charge. Only then
+// does it mirror in one DB transaction: cancel the old membership and row
+// (releasing the tier-group slot), create the new membership and upsert the new
+// active row. Idempotent: an existing new row returns its subscription.
 type ConfirmTierChangeService struct {
 	chain      landedTxReader
 	lifecycle  tierChangeLifecycle
@@ -152,10 +135,9 @@ func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifec
 	}
 }
 
-// Confirm verifies the landed transaction is this tier change and mirrors it
-// into the DB. Returns an error (and does NOT mutate the DB) for any signature
-// that is not a successful, confirmed transaction proving the switch — the
-// chain is the source of truth, so an unproven switch must not touch openrails.
+// Confirm verifies the landed transaction is this tier change and mirrors it.
+// Anything short of a successful, confirmed transaction proving the switch
+// returns an error and leaves the DB untouched.
 func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierChangeInput) (*ConfirmTierChangeResult, error) {
 	if in.OldSubscriptionID == uuid.Nil {
 		return nil, fmt.Errorf("recurring: old subscription id is required")
@@ -177,10 +159,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		return nil, fmt.Errorf("recurring: tier-change transaction manager is required")
 	}
 
-	// Idempotency/resumability: if the NEW row already exists, a prior confirm
-	// already mirrored this tier change. Return the existing new subscription
-	// without re-running the transactional mirror. We look up by the NEW
-	// subscription PDA because the OLD row gets canceled in-place.
+	// Idempotent: a new row means a prior confirm mirrored this change. Keyed
+	// by the new PDA because the old row is canceled in place.
 	if existing, err := s.store.GetBySubscriptionPDA(ctx, in.NewSubscriptionPDA); err == nil && existing != nil && existing.SubscriptionID != uuid.Nil {
 		return &ConfirmTierChangeResult{
 			NewSubscription:  &models.Subscription{ID: existing.SubscriptionID},
@@ -188,9 +168,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		}, nil
 	}
 
-	// Load the OLD on-chain row up front (we need it both to mirror the old-row
-	// cancel and to carry the subscriber/merchant identity forward onto the new
-	// row).
+	// The old row is canceled and carries its identity onto the new row.
 	oldRow, err := s.store.GetBySubscriptionID(ctx, in.OldSubscriptionID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: load old solana subscription: %w", err)
@@ -206,10 +184,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		return nil, err
 	}
 
-	// ---- MIRROR (billing-critical) ----
-	// Create the new membership + mirror and cancel the old membership + mirror
-	// in one database transaction. A failed mirror therefore leaves no partial
-	// state for the idempotency guard to mistake for a completed switch.
+	// Mirror in one DB transaction: a failure leaves no partial state for the
+	// idempotency guard to mistake for a completed switch.
 
 	now := s.now().UTC()
 	newPeriodStart := now
@@ -223,9 +199,8 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		}
 		newPeriodEnd = now.Add(time.Duration(newPeriodHoursI64) * time.Hour)
 	} else {
-		// Downgrade: no immediate charge. The user keeps the (higher-tier) access
-		// they already paid for until the OLD period end; the lower tier rebills
-		// then. The new membership's current period runs to the old period end.
+		// Downgrade: no charge now; the paid higher tier runs to the old
+		// period end, then the lower tier rebills.
 		newPeriodEnd = in.OldPeriodEndsAt.UTC()
 	}
 

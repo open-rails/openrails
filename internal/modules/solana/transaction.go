@@ -52,8 +52,8 @@ func NewSolanaTransactionService(db *db.DB, rpc *solanarpc.RPCClient, cfg *confi
 	}
 }
 
-// SetMerchantRPC installs the store-aware per-merchant RPC builder (#728/#788):
-// transaction builds/verifies arm from the ctx merchant's declared account.
+// SetMerchantRPC installs the store-aware per-merchant RPC builder: builds and
+// verifies arm from the ctx merchant's declared account.
 func (s *SolanaTransactionService) SetMerchantRPC(b *MerchantRPCBuilder) {
 	if b != nil {
 		s.rpcBuilder = b
@@ -85,9 +85,7 @@ func (s *SolanaTransactionService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
 
-// WithRPC returns a shallow copy bound to rpc — the #728 per-merchant-pass
-// seam (the poller verifies each merchant's payments with that merchant's
-// store-armed client). nil-receiver-safe.
+// WithRPC returns a shallow copy bound to rpc. nil-receiver-safe.
 func (s *SolanaTransactionService) WithRPC(rpc *solanarpc.RPCClient) *SolanaTransactionService {
 	if s == nil {
 		return nil
@@ -126,8 +124,7 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		return nil, fmt.Errorf("non-SOL token cannot use native SOL mint")
 	}
 	if req.SessionID == uuid.Nil {
-		// #713: every purchase tx we construct carries the memo stamp; refuse to
-		// build unstamped rather than silently omit it.
+		// Every purchase tx carries the memo stamp; refuse to build unstamped.
 		return nil, fmt.Errorf("checkout attempt id is required (purchase memo local-id)")
 	}
 
@@ -149,9 +146,8 @@ func (s *SolanaTransactionService) BuildPaymentTransactionFromQuote(ctx context.
 		return nil, err
 	}
 
-	// Price validity for the wallet's display, nothing more (xs-007 row 35):
-	// the chain bounds when a built transaction can still land (its
-	// blockhash), and a landing is verified by content, not by this clock.
+	// Price validity for the wallet's display only: the blockhash bounds when
+	// a built transaction can land, and a landing is verified by content.
 	expiresAt := s.now().Add(10 * time.Minute)
 
 	log.WithFields(log.Fields{
@@ -179,8 +175,8 @@ func isNativeTokenSymbol(symbol string) bool {
 }
 
 // ObserveTransfer reads what a landed transaction paid the recipient for a
-// reference. A transfer that landed moved the buyer's money whatever the
-// quote clock says (xs-007 row 35); what it settles is the ledger's decision.
+// reference. A landed transfer moved the buyer's money whatever the quote clock
+// says; what it settles is the ledger's decision.
 func (s *SolanaTransactionService) ObserveTransfer(ctx context.Context, req solanarpc.ObserveTransferRequest) (*solanarpc.TransferObservation, error) {
 	rpc := s.rpcClient(ctx)
 	if rpc == nil {

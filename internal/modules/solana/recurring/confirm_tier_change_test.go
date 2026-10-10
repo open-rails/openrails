@@ -197,10 +197,10 @@ func signedBy(t *testing.T, c *tierChain, payer solanago.PrivateKey, ixs ...sola
 	return signAs(t, tx, payer)
 }
 
-// #272: after the atomic switch lands, the old membership+row are canceled
-// and the new ones created in one DB tx. Upgrade: period 1 was pulled in the
-// tx, so the next pull is now+period. Downgrade: no charge; the first pull is
-// deferred to the OLD period end.
+// After the atomic switch lands, the old membership and row are canceled and
+// the new ones created in one DB tx. Upgrade: period 1 is pulled in the tx, so
+// the next pull is now+period. Downgrade: no charge; the first pull waits for
+// the old period end.
 func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 	for _, upgrade := range []bool{true, false} {
 		c := newTierChain(t)

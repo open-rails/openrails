@@ -146,8 +146,8 @@ func (l *PayLedger) Register(ctx context.Context, kind ReferenceKind, sessionID 
 	if err != nil {
 		return gen.BillingSolanaPayReference{}, err
 	}
-	// SEC-33: a transfer is credited at the quoted amount until the late
-	// window closes; later money is recorded for review, never credited.
+	// A transfer is credited at the quoted amount until the late window
+	// closes; later money is recorded for review, never credited.
 	settle := quoteExpiresAt.Add(solanarpc.LateSettlementWindow)
 	watch := settle
 	if kind == ReferencePurchase {

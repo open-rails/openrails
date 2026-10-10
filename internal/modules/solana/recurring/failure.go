@@ -6,12 +6,9 @@ import (
 	"strings"
 )
 
-// operationalSignatures are substrings (matched case-insensitively against the
-// crank error) that indicate the pull failed for reasons that are NOT the
-// subscriber's fault: RPC/network trouble or the cranker (fee-payer) wallet
-// being out of SOL. These must be retried and must NEVER dun the subscriber
-// (#257) — a SOL-gas outage hits a merchant's entire book at once, so dunning on
-// it would wrongly past-due every subscriber.
+// operationalSignatures are case-insensitive substrings of crank errors that are
+// not the subscriber's fault (RPC trouble, cranker out of SOL). They retry and
+// never dun: a SOL-gas outage would past-due a merchant's whole book.
 var operationalSignatures = []string{
 	// Transport / RPC availability.
 	"connection refused",
@@ -44,12 +41,9 @@ var operationalSignatures = []string{
 }
 
 // IsOperationalFailure reports whether a crank error is operational (retry, do
-// not dun) rather than a subscriber fault (insufficient USDC, revoked
-// delegation, plan mismatch -> dun via the existing dunning machine). Context
-// cancellation/deadline is always operational. Unknown errors default to
-// subscriber-fault: dunning has a grace window and recovers on the next
-// successful pull, so a wrong dun-start is recoverable — whereas wrongly
-// suppressing dunning lets a genuinely-unpaid subscriber keep access for free.
+// not dun). Context cancellation is always operational. Unknown errors count as
+// subscriber faults: a wrong dun recovers within grace, while wrongly skipping
+// dunning gives an unpaid subscriber free access.
 func IsOperationalFailure(err error) bool {
 	if err == nil {
 		return false

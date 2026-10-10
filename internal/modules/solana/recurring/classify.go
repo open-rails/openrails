@@ -5,20 +5,11 @@ import (
 	"strconv"
 )
 
-// On-chain error codes observed live on devnet (#263) for a failed
-// transfer_subscription. NOTE: a Custom code can originate from the
-// subscriptions program OR the SPL token program reached via CPI; the
-// InstructionError does not name the program. Empirically the subscriptions
-// program uses high codes (e.g. 400, 508, 519) and the token program uses low
-// codes (0-9), so the mapping below is keyed on the specific observed values.
-//
-// On-chain code reference (subscriptions program unless noted):
-//
-//	400 AmountExceedsPeriodLimit — per-period cap reached (already paid).
-//	508 SubscriptionCanceled    — pull after expires_at_ts (cancel at period end).
-//	519 PlanTermsMismatch        — ghost/changed plan; pulling is hopeless.
-//	SPL token 1 InsufficientFunds — subscriber balance below the pull amount.
-//	SPL token 4 OwnerMismatch     — subscriber revoked the token delegate.
+// On-chain error codes of a failed transfer_subscription, as observed on
+// devnet. A Custom code may come from the subscriptions program or the SPL
+// token program via CPI (the InstructionError does not say which), so the
+// mapping keys on the observed values: subscriptions codes are high (400, 508,
+// 519), token codes low (0-9).
 const (
 	// onchainCapReached — subscriptions program: amount_pulled_in_period is at the
 	// plan cap. The period is ALREADY paid -> idempotent (do not re-charge or dun).
@@ -26,17 +17,13 @@ const (
 	// onchainTokenInsufficientFunds — SPL token program InsufficientFunds: the
 	// subscriber's USDC balance is below the pull amount -> recoverable (dun).
 	onchainTokenInsufficientFunds = 1
-	// onchainTokenOwnerMismatch — SPL token program OwnerMismatch: the subscriber
-	// revoked the token delegate (the trustless cancel). transfer_subscription can
-	// no longer move funds -> terminal (cancel + stop). cancel_subscription alone
-	// does NOT produce an error (it does not block pulls; #263).
+	// onchainTokenOwnerMismatch — SPL token OwnerMismatch: the subscriber
+	// revoked the token delegate (the trustless cancel), so pulls cannot move
+	// funds -> terminal. cancel_subscription alone does not block pulls.
 	onchainTokenOwnerMismatch = 4
-	// onchainSubscriptionCanceled — subscriptions program SubscriptionCanceled:
-	// the subscription was canceled (cancel_subscription set expires_at_ts to the
-	// end of the current period) and the period has now elapsed, so the pull lands
-	// AFTER expires_at_ts. transfer_subscription rejects this -> terminal: the
-	// cranker must stop and mark the membership canceled, never dun. Together with
-	// the cancel mirror this completes "cancel at period end".
+	// onchainSubscriptionCanceled — the pull is past expires_at_ts, which
+	// cancel_subscription sets to the period end -> terminal: stop and mark the
+	// membership canceled, never dun.
 	onchainSubscriptionCanceled = 508
 	// onchainPlanTermsMismatch — subscriptions program PlanTermsMismatch: the plan
 	// the subscription points at no longer matches its recorded terms (a ghost or

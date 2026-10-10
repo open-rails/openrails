@@ -7,35 +7,25 @@ import (
 )
 
 // DefaultAcceptedSymbol is the token a merchant accepts when they declare
-// nothing (or#881). USDC only — deliberately not the whole registry: it is the
-// one token present on every network AND on the recurring allowlist, so the
-// zero-configuration merchant can take one-off payments and rebill. Accepting
-// more than that is a decision a merchant makes explicitly.
+// nothing. Only USDC: it is on every network and on the recurring allowlist, so
+// a zero-config merchant can take one-off payments and rebill. Anything more is
+// an explicit merchant choice.
 const DefaultAcceptedSymbol = PreferredStablecoin
 
-// ResolveDeclared turns a merchant's DECLARED token map into the accepted token
-// set for network (or#881).
+// ResolveDeclared turns a merchant's declared token map into the accepted token
+// set for network. The declared set IS the accepted set; nothing declared means
+// DefaultAcceptedSymbol. The registry only resolves a known symbol's on-chain
+// identity, never what is accepted.
 //
-// SELECT AND RESTRICT: the declared set IS the accepted set. Declaring
-// `{USDC: {}, SOL: {}}` accepts exactly those two. Declaring nothing accepts
-// DefaultAcceptedSymbol. The registry's only job is resolving a known symbol's
-// on-chain identity — it is a lookup table, never an acceptance list.
+//   - A registry symbol is selected by name (`tokens: {USDC: {}}`) and takes
+//     its mint from ForNetwork. Declaring `mint:` for it is an error even when
+//     it agrees: a typed mint can be wrong and accept a different token than
+//     the one priced.
+//   - A custom symbol requires `mint:`, its identity.
 //
-//   - A registry symbol is SELECTED by name — `tokens: {USDC: {}}`. Its mint
-//     comes from ForNetwork(network). Declaring `mint:` for it is an ERROR even
-//     when the address agrees: a value a merchant can type is a value they can
-//     get wrong, and a wrong mint here accepts payment in a different token than
-//     the one that was priced.
-//   - A custom symbol still REQUIRES `mint:` — there the mint IS the token's
-//     identity, so it is genuinely declared rather than restated.
-//
-// TEST MODE (devnet): the registry has its own devnet column, so USDC/SOL/PYUSD
-// select identically there. Registry symbols with no devnet entry are not
-// registry symbols ON DEVNET — a devnet deployment that needs one declares it
-// like any other ad-hoc token, with an explicit mint. That is deliberate:
-// devnet mints are per-deployment artefacts with no canonical address to
-// protect, and devnet money is fake (the whole #360 pricing policy is skipped
-// there), so the restatement hazard the rule exists to prevent does not apply.
+// On devnet, a registry symbol without a devnet entry is declared like any
+// ad-hoc token, with an explicit mint: devnet mints have no canonical address
+// to protect and devnet money is fake.
 func ResolveDeclared(network string, declared map[string]config.TokenConfig) (map[string]config.TokenConfig, error) {
 	registry := ForNetwork(network)
 	if len(declared) == 0 {

@@ -14,9 +14,9 @@ const (
 	usdcMint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
 )
 
-// #360: a feed wins; otherwise parity is granted only to a registry MINT with a
-// USD peg (a symbol merely named like a stablecoin gets nothing); non-USD pegs
-// and unknown tokens are disabled.
+// A feed wins; otherwise parity is granted only to a registry MINT with a USD
+// peg (a symbol merely named like a stablecoin gets nothing); non-USD pegs and
+// unknown tokens are disabled.
 func TestClassifyPricing(t *testing.T) {
 	for _, tc := range []struct {
 		symbol, mint string
@@ -47,8 +47,8 @@ func TestClassifyPricing(t *testing.T) {
 	require.False(t, IsUSDPeggedToken("EURC", eurcMint))
 }
 
-// #360 degrade-not-die: normalization never fails; it drops what cannot be
-// priced on mainnet and applies no pricing policy on devnet.
+// Normalization never fails: it drops what cannot be priced on mainnet and
+// applies no pricing policy on devnet.
 func TestNormalizeForNetwork(t *testing.T) {
 	out := NormalizeForNetwork("mainnet", map[string]config.TokenConfig{
 		"usdc":   {Mint: usdcMint},
@@ -71,9 +71,9 @@ func TestNormalizeForNetwork(t *testing.T) {
 	}
 }
 
-// or#881 select-and-restrict: the declared set IS the accepted set; registry
-// symbols take the registry mint (restating it is refused, even correctly);
-// custom symbols need their mint; nothing declared means USDC alone.
+// Select-and-restrict: the declared set IS the accepted set; registry symbols
+// take the registry mint (restating it is refused, even correctly); custom
+// symbols need their mint; nothing declared means USDC alone.
 func TestResolveDeclared(t *testing.T) {
 	mainnet, devnet := DefaultSupportedTokens(), DefaultDevnetTokens()
 

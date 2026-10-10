@@ -12,11 +12,9 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 )
 
-// CrankService executes the recurring pull ("cranking") — one
-// transfer_subscription per subscriber per cycle (issue #256). The merchant
-// (cranker) signs and pays the (tiny) gas; funds move from the subscriber's ATA
-// to the merchant/destination ATA. The transfer_subscription path is verified
-// live on devnet.
+// CrankService executes the recurring pull: one transfer_subscription per
+// subscriber per cycle. The merchant (cranker) signs and pays gas; funds move
+// from the subscriber's ATA to the merchant's.
 type CrankService struct {
 	submitter Submitter
 }
@@ -25,10 +23,9 @@ type merchantAddressSubmitter interface {
 	SubmitForMerchantAddress(ctx context.Context, tenantID billing.MerchantID, merchantAddress solanago.PublicKey, instructions []solanago.Instruction) (solanago.Signature, error)
 }
 
-// Presubmit capabilities (#674): the production signerSubmitter persists the
-// signed tx signature via the caller's hook BEFORE submission, so a crash
-// mid-submit is resolvable by a chain read. Optional — fakes without them
-// simply skip the write-ahead.
+// Presubmit capabilities: the production signerSubmitter persists the signed
+// signature via the caller's hook before submission, so a crash mid-submit is
+// resolvable by a chain read. Optional; fakes skip the write-ahead.
 type presubmitSubmitter interface {
 	SubmitWithPresubmit(ctx context.Context, tenantID billing.MerchantID, instructions []solanago.Instruction, presubmit func(solanago.Signature) error) (solanago.Signature, error)
 }
@@ -42,18 +39,16 @@ func NewCrankService(submitter Submitter) *CrankService {
 	return &CrankService{submitter: submitter}
 }
 
-// Crank pulls amountBaseUnits for one subscription. On Solana, an underfunded
-// pull reverts atomically (no partial charge); the caller classifies the error
-// (insufficient USDC -> dunning vs operational -> retry; see #257).
+// Crank pulls amountBaseUnits for one subscription. An underfunded pull reverts
+// atomically (no partial charge); the caller classifies the error.
 func (s *CrankService) Crank(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64) (string, error) {
 	return s.CrankWithPresubmit(ctx, tenantID, sub, amountBaseUnits, uuid.Nil, nil)
 }
 
-// CrankWithPresubmit is Crank with a signature write-ahead hook (#674):
-// presubmit(sig) runs after signing, before submission. nil presubmit = plain
-// Crank. memoLocalID (non-Nil = the durable pull-intent id) stamps the tx with
-// the #713 self-recognition SPL Memo, placed BEFORE the transfer — a discovery
-// hint, never money truth.
+// CrankWithPresubmit is Crank with a signature write-ahead: presubmit(sig) runs
+// after signing, before submission; nil = plain Crank. A non-Nil memoLocalID
+// (the durable pull-intent id) stamps an SPL Memo before the transfer: a
+// discovery hint, never money truth.
 func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.MerchantID, sub *models.SolanaSubscription, amountBaseUnits uint64, memoLocalID uuid.UUID, presubmit func(signature string) error) (string, error) {
 	if sub == nil {
 		return "", fmt.Errorf("recurring: nil subscription")
@@ -91,8 +86,7 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 	if err != nil {
 		return "", fmt.Errorf("recurring: derive delegator ata: %w", err)
 	}
-	// Receiver = the merchant's ATA. (When a plan whitelists a cold destination,
-	// that wallet's ATA is the receiver; tracked as a #258 refinement.)
+	// Receiver = the merchant's ATA.
 	receiverATA, _, err := subscriptions.DeriveATA(merchant, mint, solanago.TokenProgramID)
 	if err != nil {
 		return "", fmt.Errorf("recurring: derive receiver ata: %w", err)
@@ -118,7 +112,7 @@ func (s *CrankService) CrankWithPresubmit(ctx context.Context, tenantID billing.
 
 	instructions := []solanago.Instruction{ix}
 	if memoLocalID != uuid.Nil {
-		// #713: memo BEFORE the transfer (Solana Pay ordering, kept for parity).
+		// Memo before the transfer, as in Solana Pay.
 		memoIx := solanaint.NewMemoInstruction(solanaint.PurchaseMemo(memoLocalID))
 		instructions = []solanago.Instruction{memoIx, ix}
 	}

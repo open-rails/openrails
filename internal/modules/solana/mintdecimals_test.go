@@ -44,7 +44,7 @@ func railsWithTokens(tokens map[string]config.TokenConfig) railresolve.Source {
 	}}
 }
 
-// #817: the decimals shift is read from the mint on-chain, never assumed 6.
+// The decimals shift is read from the mint on-chain, never assumed 6.
 func TestRequireTokenDecimalsIsChainSourced(t *testing.T) {
 	ctx := context.Background()
 	rails := railsWithTokens(map[string]config.TokenConfig{"USDC": {Name: "USD Coin", Mint: usdcMainnetMint}})

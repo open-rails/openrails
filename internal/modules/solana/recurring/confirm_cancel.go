@@ -12,53 +12,33 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// cancelConfirmRPC is the minimal RPC surface ConfirmCancel needs: confirm that a
-// signature the WALLET signed + sent has LANDED on-chain (satisfied by
-// *solanaint.RPCClient). It does NOT assert success — the returned outcome
-// reports the on-chain result via Succeeded()/OnChainError().
+// cancelConfirmRPC watches a wallet-sent signature land. It does not assert
+// success: the outcome reports the on-chain result.
 type cancelConfirmRPC interface {
 	WatchTransaction(ctx context.Context, sig solanago.Signature, commitment rpc.CommitmentType, terminal solanaint.ChainTerminal) (*solanaint.TransactionOutcome, error)
 }
 
-// membershipCanceller is the minimal lifecycle surface ConfirmCancel needs to
-// MIRROR the confirmed on-chain cancel into the DB (satisfied by
-// *subscriptions.SubscriptionLifecycleService). The cascade inside
-// CancelMembership flips the linked solana_subscriptions row to canceled so the
-// cranker stops — that cascade IS the mirror step. We call it with
-// RevokeAccess=false so the local state matches the card "cancel-at-period-end".
+// membershipCanceller mirrors a confirmed on-chain cancel into the DB; its
+// cascade flips the linked solana_subscriptions row to canceled, stopping the
+// cranker.
 type membershipCanceller interface {
 	CancelMembership(ctx context.Context, params *subscriptions.CancelMembershipParams) error
 }
 
-// ConfirmCancelService is the CONFIRM step of the on-chain cancel loop (#271).
-//
-// Model: Solana is the source of truth. A user cancel is an ON-CHAIN action the
-// subscriber signs (the unsigned tx comes from PrepareCancelService); the wallet
-// signs + sends it. OpenRails then CONFIRMS the cancel landed on-chain and only
-// then MIRRORS it into the DB by cancelling the membership (whose cascade flips
-// the solana_subscriptions row to canceled, stopping the cranker). There is NO
-// DB-only "soft cancel": we never mark a Solana subscription canceled in the DB
-// unless we have observed the on-chain cancel succeed.
-//
-// The on-chain cancel_subscription sets the subscription's expires_at_ts to the
-// END of the current billing period (NOT immediate). So the mirror is option A —
-// "cancel at period end": the user keeps the access they already paid for until
-// the current period ends, then it stops. This matches the card rails'
-// scheduled-cancel state (Stripe cancel_at_period_end; NMI deferred delete). We
-// therefore mirror with RevokeAccess=false, which makes CancelMembership set
-// EndedAt = CurrentPeriodEndsAt and preserve entitlements until then — exactly
-// the same local-state mapping the card paths use.
+// ConfirmCancelService confirms a wallet-signed on-chain cancel landed, then
+// mirrors it into the DB. The chain is the source of truth: a Solana
+// subscription is never canceled in the DB without an observed on-chain cancel.
+// cancel_subscription ends it at period end, so the mirror is a scheduled
+// cancel (RevokeAccess=false), as on the card rails.
 type ConfirmCancelService struct {
 	rpc        cancelConfirmRPC
 	canceller  membershipCanceller
 	commitment rpc.CommitmentType
 }
 
-// NewConfirmCancelService builds a ConfirmCancelService. It confirms to the
-// Confirmed commitment (a confirmed cancel will not roll back in practice).
-// The signature was built and sent by the WALLET, so its blockhash — the
-// chain's own terminal — is unknown here: the watch runs until the caller's
-// context ends (xs-007 row 36), never on a clock of this package.
+// NewConfirmCancelService confirms at Confirmed commitment. The wallet built
+// the transaction, so its blockhash is unknown here: the watch runs until the
+// caller's context ends.
 func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCanceller) *ConfirmCancelService {
 	return &ConfirmCancelService{
 		rpc:        rpcClient,
@@ -67,13 +47,9 @@ func NewConfirmCancelService(rpcClient cancelConfirmRPC, canceller membershipCan
 	}
 }
 
-// Confirm verifies the wallet's cancel transaction landed AND executed
-// successfully on-chain, then mirrors it as a SCHEDULED (period-end) membership
-// cancellation. Returns an error (and does NOT cancel) if the signature never
-// confirms or confirmed with an on-chain failure — the source of truth is the
-// chain, so a cancel that did not actually land must not touch the DB.
-//
-// reason is the customer's cancellation reason, recorded with the cancel.
+// Confirm verifies the wallet's cancel transaction landed and succeeded, then
+// mirrors it as a scheduled (period-end) cancellation; a cancel that did not
+// land never touches the DB. reason is recorded with the cancel.
 func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.UUID, signature, reason string) error {
 	if subscriptionID == uuid.Nil {
 		return fmt.Errorf("recurring: subscription id is required")
@@ -97,19 +73,9 @@ func (s *ConfirmCancelService) Confirm(ctx context.Context, subscriptionID uuid.
 		return fmt.Errorf("recurring: cancel transaction did not succeed on-chain: %w", outcome.OnChainError())
 	}
 
-	// Mirror: scheduled (period-end) cancel. RevokeAccess=false makes
-	// CancelMembership keep the membership's tracked CurrentPeriodEndsAt as the
-	// access-until boundary (EndedAt = CurrentPeriodEndsAt) and preserve
-	// entitlements until then — the same local state Stripe/NMI use for a
-	// cancel-at-period-end. We rely on the membership record's own period end
-	// (no on-chain subscription-account decode); it mirrors the chain's
-	// expires_at_ts = end-of-current-period.
-	//
-	// The cascade inside CancelMembership flips the linked solana_subscriptions
-	// row to canceled, stopping the cranker. Independently, once expires_at_ts
-	// passes on-chain the next pull would return Custom:508 (SubscriptionCanceled)
-	// which ClassifyCrankError maps to Terminal — so this mirror plus the 508
-	// classification together give the complete period-end cancel.
+	// Scheduled cancel: access runs to the membership's CurrentPeriodEndsAt,
+	// which mirrors the chain's expires_at_ts. The cascade stops the cranker;
+	// independently, a pull past expires_at_ts fails 508 -> Terminal.
 	params := &subscriptions.CancelMembershipParams{
 		SubscriptionID: &subscriptionID,
 		CancelType:     models.CancelTypeUser,

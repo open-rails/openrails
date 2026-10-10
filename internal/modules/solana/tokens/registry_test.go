@@ -13,9 +13,9 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 )
 
-// verifiedDecimals is each registry mint's on-chain precision, verified
-// 2026-08-04 via getAccountInfo on mainnet-beta/devnet. The runtime never reads
-// it (#817); it exists so a mistyped registry address fails here.
+// verifiedDecimals is each registry mint's on-chain precision, verified via
+// getAccountInfo. The runtime never reads it; it exists so a mistyped registry
+// address fails here.
 var verifiedDecimals = map[string]int{
 	"So11111111111111111111111111111111111111112":  9, // SOL
 	"EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v": 6, // USDC
@@ -40,10 +40,10 @@ func (v verifiedMints) GetAccountData(_ context.Context, addr solanago.PublicKey
 	return data, nil
 }
 
-// or#881: the registry is the one place a mint is written down. Every entry is
-// a verified, payable mint; the peg registry (the $1 parity trust anchor)
-// agrees with it; devnet never reuses a mainnet address except native SOL; and
-// the zero-config default exists on every network as a USD stablecoin.
+// The registry is the one place a mint is written down. Every entry is a
+// verified, payable mint; the peg registry (the $1 parity trust anchor) agrees
+// with it; devnet never reuses a mainnet address except native SOL; and the
+// zero-config default exists on every network as a USD stablecoin.
 func TestRegistryIntegrity(t *testing.T) {
 	mainnet, devnet := DefaultSupportedTokens(), DefaultDevnetTokens()
 	for network, set := range map[string]map[string]config.TokenConfig{"mainnet": mainnet, "devnet": devnet} {

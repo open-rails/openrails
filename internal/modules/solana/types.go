@@ -46,8 +46,8 @@ type PaymentTransactionBuildRequest struct {
 	Recipient   string
 	Amount      int64 // native units of Currency
 	Currency    string
-	// SessionID is the checkout attempt — the #713 memo local-id stamped on the
-	// built transaction (the one field the chain cannot derive). Required.
+	// SessionID is the checkout attempt, stamped on the built transaction as
+	// the memo (the one field the chain cannot derive). Required.
 	SessionID uuid.UUID
 }
 

@@ -10,24 +10,13 @@ import (
 // systemTransferIndex is the System Program's Transfer instruction discriminator.
 const systemTransferIndex uint32 = 2
 
-// referenceTagInstruction returns an instruction whose only job is to make the
-// transaction addressable by a Solana Pay REFERENCE: a System Program transfer
-// of 0 lamports from payer to itself, with the reference appended as a
-// read-only, NON-SIGNER account. That is the mechanism the Solana Pay reference
-// spec (and @solana/pay's own createTransfer) uses for SOL transfers, and it is
-// what lets the reference poller find the landed tx via
-// getSignaturesForAddress(reference).
-//
-// The reference deliberately rides its OWN instruction rather than being
-// appended to a subscriptions-program instruction. The program treats any
-// trailing account as an OPTIONAL PAYER that must sign
-// (initialize_subscription_authority, subscribe: `rem @ ..` +
-// resolve_optional_payer), or destructures an exact account count
-// (cancel_subscription) — so a trailing read-only reference makes those
-// instructions fail (`NotSigner`, code 100, or `NotEnoughAccountKeys`) before
-// they do anything. The System Program ignores accounts beyond the two it uses.
-//
-// An empty reference returns (nil, nil): nothing to tag.
+// referenceTagInstruction makes the transaction findable by a Solana Pay
+// reference (getSignaturesForAddress): a 0-lamport System transfer from payer to
+// itself with the reference as a read-only non-signer account, as @solana/pay's
+// createTransfer does. It is its own instruction because the subscriptions
+// program treats a trailing account as a payer that must sign, or expects an
+// exact account count, and fails (NotSigner, NotEnoughAccountKeys). An empty
+// reference returns (nil, nil).
 func referenceTagInstruction(payer solanago.PublicKey, reference string) (solanago.Instruction, error) {
 	if reference == "" {
 		return nil, nil

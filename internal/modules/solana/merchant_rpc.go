@@ -14,17 +14,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// #728: per-merchant Solana RPC arming for the PROCESS-WIDE services (payment
-// poller, recurring crank, intent verify legs). Precedence per #699/#725:
-// merchant-store rail-account settings (rpc_provider / rpc_api_key) first, the
-// boot-built client as fallback for merchants with no declared solana account.
-// Malformed settings on a DECLARED account fail LOUD — never a silent
-// cross-plane fallback. Nothing is cached across passes: clients are cheap
-// per-pass structs, so a rotated setting takes effect on the next pass.
-
-// MerchantRPCBuilder resolves one merchant's Solana RPC client at use time.
-// MerchantsFn is late-bound (Runtime.Merchants wires after build); a nil
-// fn/service = boot plane only.
+// MerchantRPCBuilder resolves one merchant's Solana RPC client at use time for
+// the process-wide services (poller, crank, intent verify). Nothing is cached,
+// so a rotated setting takes effect on the next pass. MerchantsFn is
+// late-bound; a nil fn or service arms nothing.
 type MerchantRPCBuilder struct {
 	Config      *config.Config
 	MerchantsFn func() *merchants.Service
@@ -44,29 +37,27 @@ func (b *MerchantRPCBuilder) testMode() bool {
 	return b != nil && b.Config != nil && config.IsTestMode(b.Config)
 }
 
-// Resolve arms the merchant's RPC client: a declared solana account's store
-// settings win; a merchant with no declared account falls back to the boot
-// client. nil client with nil error = neither plane armed (caller skips/warns).
-// The scope pick is the pull scope (active for new work, else newest archived
-// for drain — #655), matching the #725 collection resolver.
+// Resolve arms the merchant's RPC client from its declared solana account's
+// settings, picking the pull scope (active, else newest archived for drain).
+// nil client with nil error = no declared account (caller skips/warns).
 func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID) (*solanarpc.RPCClient, error) {
 	if b == nil {
 		return nil, nil
 	}
 	svc := b.merchants()
 	if svc == nil {
-		return nil, nil // nothing arms without the merchants service (#788)
+		return nil, nil // nothing arms without the merchants service
 	}
 	scope, ok, err := svc.PullPSPScope(ctx, mid, "solana", config.ExpectedProviderEnvironment(b.testMode()))
 	if err != nil {
 		return nil, fmt.Errorf("solana: resolve merchant %s rail account: %w", mid.String(), err)
 	}
 	if !ok {
-		return nil, nil // no declared solana account → not armed (#788)
+		return nil, nil // no declared solana account → not armed
 	}
 	settings, err := config.ParseSolanaAccountSettings(scope.Settings)
 	if err != nil {
-		// Fail loud: a declared account never falls back across planes (#699).
+		// Malformed settings fail loud; there is no fallback client.
 		return nil, fmt.Errorf("solana: merchant %s account %s settings: %w", mid.String(), scope.AccountID, err)
 	}
 	network := "mainnet"
@@ -83,9 +74,9 @@ func (b *MerchantRPCBuilder) Resolve(ctx context.Context, mid billing.MerchantID
 	}), nil
 }
 
-// ChainReader adapts the builder to per-intent chain reads (the #674 verify
-// leg): the merchant comes off the intent runner's merchant-scoped ctx.
-// Satisfies riverjobs.SolanaTxReader.
+// ChainReader adapts the builder to the intent verify leg's chain reads: the
+// merchant comes off the intent runner's merchant-scoped ctx. Satisfies
+// riverjobs.SolanaTxReader.
 func (b *MerchantRPCBuilder) ChainReader() *MerchantChainReader {
 	return &MerchantChainReader{builder: b}
 }

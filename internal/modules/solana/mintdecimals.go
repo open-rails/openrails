@@ -14,25 +14,17 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// MintDecimalsSource resolves a mint's base-unit precision. The ONLY legitimate
-// implementation reads it from the SPL mint account on-chain (#817): the chain
-// is the source of truth for decimals, merchants do not declare it. Declared as
-// an interface so callers stay testable without a live cluster.
+// MintDecimalsSource resolves a mint's base-unit precision. The real
+// implementation reads the SPL mint account: decimals come from the chain,
+// never from merchant config.
 type MintDecimalsSource interface {
 	ForMint(ctx context.Context, mint string) (int, error)
 }
 
-// MintDecimals reads SPL mint decimals from the chain and memoizes them.
-//
-// Caching is sound ONLY because `decimals` is written once by InitializeMint and
-// no instruction can change it — the value is immutable for the life of the
-// mint. Do not copy this pattern for a mutable account (balances, plan state):
-// those must be re-read, and re-read with the slot gate when they follow one of
-// our own confirmed writes.
-//
-// Entries are keyed by merchant + mint because the reader is merchant-scoped:
-// two merchants may be armed on different clusters, and a mint address only
-// means one thing within a cluster.
+// MintDecimals reads SPL mint decimals from the chain and memoizes them per
+// merchant + mint (merchants may be armed on different clusters). Caching is
+// sound only because decimals are immutable; mutable accounts (balances, plan
+// state) are re-read, slot-gated after our own confirmed writes.
 type MintDecimals struct {
 	reader solanarpc.MintAccountReader
 
@@ -91,8 +83,7 @@ func (m *MintDecimals) ForMint(ctx context.Context, mint string) (int, error) {
 }
 
 // RequireMintDecimals reads a mint's on-chain decimals through an armed
-// resolver. An unarmed resolver is an error — there is no default to fall back
-// to (#817).
+// resolver. An unarmed resolver is an error; there is no default.
 func RequireMintDecimals(ctx context.Context, mints MintDecimalsSource, mint string) (int, error) {
 	if mints == nil {
 		return 0, fmt.Errorf("solana: no mint-decimals resolver armed (mint %s)", mint)
@@ -101,8 +92,7 @@ func RequireMintDecimals(ctx context.Context, mints MintDecimalsSource, mint str
 }
 
 // ResolveTokenMint returns the merchant's configured mint address for symbol.
-// The MINT is legitimate merchant configuration (which token they accept); its
-// decimals are not (#817).
+// The mint is merchant configuration; its decimals are not.
 func ResolveTokenMint(ctx context.Context, src railresolve.Source, symbol string) (string, error) {
 	sym := strings.ToUpper(strings.TrimSpace(symbol))
 	if sym == "" {

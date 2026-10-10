@@ -39,11 +39,11 @@ func subscribeInput(t *testing.T) PrepareSubscribeInput {
 	}
 }
 
-// #286: one transaction, the co-signed [subscribe + first-period transfer]
-// (cranker pre-signed, wallet completes), with initialize_subscription_authority
-// folded in front for a first-timer using the UNKNOWN_INIT_ID sentinel. A
-// Solana Pay reference rides a trailing tag and never changes program
-// instruction account counts.
+// One transaction, the co-signed [subscribe + first-period transfer] (cranker
+// pre-signed, wallet completes), with initialize_subscription_authority in
+// front for a first-timer using the UNKNOWN_INIT_ID sentinel. A Solana Pay
+// reference rides a trailing tag and never changes program instruction
+// account counts.
 func TestPrepareSubscribeBundle(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -92,7 +92,7 @@ func TestPrepareSubscribeBundle(t *testing.T) {
 	}
 }
 
-// #286 pre-flight: an underfunded wallet gets a typed insufficient error before
+// Pre-flight: an underfunded wallet gets a typed insufficient error before
 // anything is built; a failed balance read fails OPEN (the atomic tx is the
 // real guarantee).
 func TestPrepareSubscribePreflight(t *testing.T) {
@@ -154,7 +154,7 @@ func tierChangeInput(t *testing.T) PrepareTierChangeInput {
 	}
 }
 
-// #272: a tier change is ONE atomic tx. Upgrade = [cancel, subscribe, prorated
+// A tier change is ONE atomic tx. Upgrade = [cancel, subscribe, prorated
 // transfer] co-signed by the cranker; downgrade = [cancel, subscribe] signed by
 // the subscriber alone, no charge.
 func TestPrepareTierChangeBundle(t *testing.T) {
@@ -230,8 +230,8 @@ func (c cancelRows) GetBySubscriptionID(context.Context, uuid.UUID) (*models.Sol
 	return c.row, nil
 }
 
-// #266: a per-subscription cancel_subscription (never a delegate Revoke, which
-// would cancel every subscription on the mint), subscriber-signed and unsigned.
+// A per-subscription cancel_subscription (never a delegate Revoke, which would
+// cancel every subscription on the mint), subscriber-signed and unsigned.
 func TestPrepareCancel(t *testing.T) {
 	row := &models.SolanaSubscription{
 		SubscriberWallet: randAddr(t),
@@ -277,9 +277,9 @@ func (f *laggingAuthority) GetAccountData(context.Context, solanago.PublicKey) (
 	return f.data, nil
 }
 
-// #274: the authority read tolerates read-after-write lag: empties retry up to
-// the bound and then mean first-timer; a present-but-short account never
-// settles and errors; hard RPC errors and cancellation surface.
+// The authority read tolerates read-after-write lag: empties retry up to the
+// bound and then mean first-timer; a present-but-short account never settles
+// and errors; hard RPC errors and cancellation surface.
 func TestReadAuthorityInitID(t *testing.T) {
 	authority := func(id int64) []byte {
 		b := make([]byte, subscriptionAuthorityInitIDOffset+8)

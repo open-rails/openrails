@@ -13,7 +13,7 @@ import (
 )
 
 // Only plain-SPL stablecoins can back an immutable on-chain plan amount; the
-// zero-config accepted token (or#881) must be one, or that merchant can't rebill.
+// zero-config accepted token must be one, or that merchant can't rebill.
 func TestRecurringAllowlist(t *testing.T) {
 	for sym, want := range map[string]bool{
 		"USDC": true, " usdc ": true, "USD1": true, "DUSD": true,
@@ -43,10 +43,10 @@ func TestRecurringAllowlist(t *testing.T) {
 	require.Error(t, err)
 }
 
-// #257/#263: an operational failure (transport, liveness, cranker out of SOL)
-// retries and never duns; subscriber faults and unknowns dun (recoverable);
-// cap-reached means already paid; revoked delegate, canceled-at-period-end
-// and ghost plans are terminal.
+// An operational failure (transport, liveness, cranker out of SOL) retries and
+// never duns; subscriber faults and unknowns dun (recoverable); cap-reached
+// means already paid; revoked delegate, canceled-at-period-end and ghost plans
+// are terminal.
 func TestClassifyCrankError(t *testing.T) {
 	type want struct {
 		code CrankCode

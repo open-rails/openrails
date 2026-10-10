@@ -24,13 +24,10 @@ import (
 // price is used as a failsafe — 1%, rarely triggered.
 const stablecoinPegTolerance = 0.01
 
-// stablecoinPriceUSD returns the USD price for a stablecoin plus whether the $1
-// peg holds. pegged=true means "use the peg verbatim" — the caller then converts
-// with pure integer arithmetic, no rate involved. pegged=false is the depeg
-// failsafe: a feed shows divergence beyond stablecoinPegTolerance, so the live
-// price is returned (a $0.95 USDC yields a ~5% higher token charge so the
-// merchant still nets the USD amount). Feedless stablecoins, a nil provider, or
-// an unavailable/invalid feed all hold the peg.
+// stablecoinPriceUSD returns a stablecoin's USD price and whether the $1 peg
+// holds. pegged=true: the caller converts by pure integer arithmetic. pegged=false
+// is the depeg failsafe: the live price is returned so the merchant still nets
+// the USD amount. Feedless stablecoins, a nil provider or a bad feed hold the peg.
 func stablecoinPriceUSD(ctx context.Context, symbol string, priceProvider TokenPriceProvider) (priceUSD float64, pegged bool) {
 	if priceProvider == nil || solanatokens.IsFeedlessStablecoin(symbol) {
 		return 1.0, true
@@ -94,11 +91,9 @@ func ratFromRate(rate float64, what string) (*big.Rat, error) {
 }
 
 // FiatMicrosToBaseUnitsAtPeg converts micro-USD into base units of a $1-pegged
-// token with `decimals` base-unit precision. At the peg this is a pure integer
-// rescale — micros * 10^(decimals-6) — and an exact CEILING divide when
-// decimals < 6, so a fractional base unit never under-charges. No float touches
-// this path: float64(micros)/1e6*1e6 is not the identity in IEEE-754 and
-// overcharged 1.19% of whole-cent amounts by one base unit (#818 V2).
+// token: micros * 10^(decimals-6), an exact CEILING divide when decimals < 6 so
+// a fractional base unit never under-charges. No float: float64(micros)/1e6*1e6
+// is not the identity in IEEE-754.
 func FiatMicrosToBaseUnitsAtPeg(micros moneyutil.Micros, symbol string, decimals int) (uint64, error) {
 	if err := config.ValidateTokenDecimals(symbol, decimals); err != nil {
 		return 0, err
@@ -142,11 +137,10 @@ func nativeToBaseUnitsAtRate(amount int64, nativeDecimals int, symbol string, de
 	return baseUnitsToUint64(ceilRat(q), symbol)
 }
 
-// FiatMicrosToStablecoinBaseUnits converts a micro-USD amount into base units of
-// a $1-pegged token with the merchant's configured `decimals` precision (#817 —
-// hardcoding 6 undercharged a 9-decimal mint 1000x). At the peg the conversion
-// is an exact integer rescale; the depeg failsafe rounds UP so a fractional base
-// unit never under-charges the merchant.
+// FiatMicrosToStablecoinBaseUnits converts micro-USD into base units of a
+// $1-pegged token at the mint's on-chain decimals. At the peg it is an exact
+// integer rescale; the depeg failsafe rounds UP so a fractional base unit never
+// under-charges the merchant.
 func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micros, symbol string, decimals int, priceProvider TokenPriceProvider) (uint64, error) {
 	if err := config.ValidateTokenDecimals(symbol, decimals); err != nil {
 		return 0, err
@@ -161,13 +155,11 @@ func FiatMicrosToStablecoinBaseUnits(ctx context.Context, micros moneyutil.Micro
 	return nativeToBaseUnitsAtRate(int64(micros), microDecimals, symbol, decimals, 1.0, priceUSD)
 }
 
-// FormatBaseUnits renders base units as a fixed-point decimal string with
-// `decimals` fractional digits. Pure integer, no float rounding. This is the
-// ONLY Solana amount formatter (#863 collapsed pay.go's trailing-zero-trimming
-// twin into it): it reaches the Solana Pay `amount=` wire as well as display.
-// Fixed precision is deliberate — it states the scale on the wire, so a wrong
-// `decimals` makes the wallet reject the URL (decimal places > mint decimals)
-// instead of silently transferring a 10^n-wrong amount.
+// FormatBaseUnits renders base units as a fixed-point decimal with `decimals`
+// fractional digits, pure integer. It is the only Solana amount formatter and
+// reaches the Solana Pay `amount=` wire. Fixed precision states the scale, so a
+// wrong `decimals` makes the wallet reject the URL instead of transferring a
+// 10^n-wrong amount.
 func FormatBaseUnits(units uint64, decimals int) string {
 	if decimals <= 0 {
 		return strconv.FormatUint(units, 10)
@@ -177,9 +169,8 @@ func FormatBaseUnits(units uint64, decimals int) string {
 	return fmt.Sprintf("%s.%0*s", whole.String(), decimals, frac.String())
 }
 
-// RequireSolanaRailConfig resolves the ctx merchant's armed Solana rail
-// account (Layer C, #788): the psps row's settings
-// materialized into the runtime Solana config. Unarmed fails closed.
+// RequireSolanaRailConfig resolves the ctx merchant's armed Solana PSP: the
+// psps row's settings as runtime Solana config. Unarmed fails closed.
 func RequireSolanaRailConfig(ctx context.Context, src railresolve.Source) (*config.ResolvedPSP, error) {
 	if src == nil {
 		return nil, fmt.Errorf("solana not configured")
@@ -198,10 +189,8 @@ func IsNativeSOLMint(tokenMint string) bool {
 	return mint == "" || mint == WrappedSOLMint
 }
 
-// TokenQuote represents a complete quote for converting fiat to a Solana token.
-// It includes all the information needed to audit and verify the quote.
-// Units is the authoritative amount; Amount is its display rendering. Only the
-// RATES are floats — every amount here is an integer.
+// TokenQuote is an auditable fiat-to-token quote. Units is authoritative;
+// Amount is its display rendering. Only the rates are floats.
 type TokenQuote struct {
 	Units         uint64  // base units to transfer (authoritative)
 	Amount        string  // display only: Units at the token's decimals
@@ -216,13 +205,9 @@ type TokenPriceProvider interface {
 }
 
 // CalculateTokenQuote converts registered native currency units to token base
-// units. Token-denominated prices pay exactly in that token; fiat prices use
-// the existing FX and token-price quote. quotedAt is supplied by the owning
-// checkout clock; external feed freshness is checked by the feed providers.
-//
-// `decimals` is the mint's ON-CHAIN base-unit precision (#817) and is an
-// explicit parameter so no caller can fall back to an assumed 6; resolve it via
-// MintDecimals.ForMint.
+// units. Token-denominated prices pay exactly in that token; fiat prices use FX
+// and the token price. quotedAt comes from the owning checkout clock. decimals
+// is the mint's on-chain precision (MintDecimals.ForMint), never an assumed 6.
 func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals int, amountMicros moneyutil.Micros, currency string, fxProvider fx.Provider, priceProvider TokenPriceProvider, quotedAt time.Time) (*TokenQuote, error) {
 	if quotedAt.IsZero() {
 		return nil, fmt.Errorf("token quote requires its creation time")
@@ -236,10 +221,8 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 		return nil, err
 	}
 
-	// #830: never invent a currency. The FX leg and the resulting on-chain charge
-	// both key off it, so an absent code is a caller bug — not a "usd" default.
-	// Validated against the money registry so an unregistered code cannot reach
-	// the FX provider or the persisted quote.
+	// Never invent a currency: the FX leg and the on-chain charge key off it,
+	// so an absent or unregistered code is an error, not a "usd" default.
 	currency = money.NormalizeCurrency(currency)
 	if currency == "" {
 		return nil, fmt.Errorf("token quote requires a currency (refusing to default)")
@@ -277,12 +260,10 @@ func CalculateTokenQuote(ctx context.Context, tokenSymbol, mint string, decimals
 	if strings.TrimSpace(mint) == "" {
 		return nil, fmt.Errorf("token %s missing mint configuration", tokenSymbol)
 	}
-	// USD-pegged stablecoins are treated as $1.00 (no sub-penny price noise). A
-	// divergence failsafe (rarely triggered) consults the price feed when one
-	// exists: if the stablecoin has depegged beyond the tolerance, the live price
-	// is used so the charge compensates. The check is mint-aware (#360) so a
-	// custom-symbol token pointing at a known USD-pegged mint still gets parity
-	// pricing. Everything else (SOL, EURC, ...) always requires a live price.
+	// USD-pegged stablecoins are $1.00 unless the feed shows a depeg beyond
+	// tolerance, then the live price compensates. The check is mint-aware, so a
+	// custom symbol on a known USD-pegged mint gets parity pricing. Everything
+	// else (SOL, EURC, ...) requires a live price.
 	var tokenPriceUSD float64
 	atPeg := false
 	if solanatokens.IsUSDPeggedToken(tokenSymbol, mint) {
