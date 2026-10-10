@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/config"
 )
 
 // A checkout session's payment claims its attempt's key in PostgreSQL.
@@ -26,7 +27,11 @@ func TestReplicasCheckoutIdempotency(t *testing.T) {
 	for _, rail := range rails {
 		t.Run(rail, func(t *testing.T) {
 			t.Parallel()
-			f := newFleet(t, 2)
+			// Sixteen pays of one session from one address are past its rate
+			// limits, which both replicas count together.
+			f := startFleet(t, 2, false, nil, func(w *world) {
+				w.cfg = func(c *config.Config) { c.RateLimitsDisabled = true }
+			})
 			a, b := f.replicas[0], f.replicas[1]
 			price := a.permanent("content:post")
 			charges := func() int {

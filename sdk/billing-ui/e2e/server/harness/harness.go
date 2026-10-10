@@ -107,6 +107,9 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 			},
 		},
 		Checkout: checkoutConfig(baseURL, pageURL),
+		// Every browser of the suite is one address, 127.0.0.1, which one
+		// checkout limit would soon refuse.
+		RateLimitsDisabled: true,
 	}
 	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 	if err != nil {
