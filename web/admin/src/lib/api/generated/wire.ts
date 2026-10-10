@@ -613,16 +613,14 @@ export type CreatePaymentMethodParams = {
   billing_details?: BillingDetails
 }
 
-export type CreatePlanMigrationParams = {
-  source_price?: string
-  source_product_key?: string
-  target_price?: string
-  target_product_key?: string
+export type CreatePriceMigrationParams = {
+  from_price_id?: string
+  product_key?: string
+  price_key?: string
+  to_price_id?: string
   effective_at?: string
-  notice_days?: number
-  immediate?: boolean
   acknowledge_short_notice?: boolean
-  fallback_policy?: string
+  fallback_policy?: "cancel_at_period_end" | "keep_grandfathered"
   archive_source?: boolean
 }
 
@@ -679,13 +677,6 @@ export type CreateProductParams = {
 
 export type CreateProvisioningTokenParams = {
   name?: string
-}
-
-export type CreateRepriceBatchParams = {
-  product_key: string
-  price_key: string
-  effective_at: string
-  acknowledge_short_notice: boolean
 }
 
 export type CreatedAPIKey = {
@@ -1805,35 +1796,6 @@ export type PerUnitPrice = {
   matrix?: Matrix
 }
 
-export type PlanMigrationOutcome = {
-  subscription_id: string
-  reprice_id: string | null
-  rail: string
-  disposition: string
-  reason: string | null
-}
-
-export type PlanMigrationRailCounts = {
-  auto: number
-  requires_action: number
-  skipped: number
-}
-
-export type PlanMigrationResult = {
-  batch_id: string | null
-  source_price_id: string
-  target_price_id: string
-  effective_at: string
-  fallback_policy: string
-  matched: number
-  scheduled: number
-  skipped: number
-  blocked: number
-  by_rail: Record<string, PlanMigrationRailCounts | null> | null
-  outcomes: PlanMigrationOutcome[]
-  source_archived: boolean
-}
-
 export type PlatformMerchant = {
   id: string
   slug: string
@@ -1854,11 +1816,6 @@ export type PreviewPSPRoutingParams = {
   price_id?: string
   country?: string
   psp?: string
-}
-
-export type PreviewRepriceBatchParams = {
-  product_key?: string
-  price_key?: string
 }
 
 export type Price = {
@@ -1889,13 +1846,61 @@ export type PriceChangeDraft = {
   affected_count: number
   review_text: string
   create_price: CreatePriceParams
-  reprice: CreateRepriceBatchParams | null
+  migration: CreatePriceMigrationParams | null
 }
 
 export type PriceKeyMovement = {
   effective_at: string
   archived: boolean
   price: Price
+}
+
+export type PriceMigration = {
+  id: string
+  from_price_id: string | null
+  product_key: string | null
+  price_key: string | null
+  to_price_id: string
+  effective_at: string
+  fallback_policy: "cancel_at_period_end" | "keep_grandfathered"
+  matched: number
+  skipped: number
+  scheduled: number
+  applied: number
+  canceled: number
+  blocked: number
+  created_at: string
+  canceled_at: string | null
+}
+
+export type PriceMigrationCancel = {
+  price_migration: PriceMigration
+  canceled: number
+  rail_release_required: string[]
+}
+
+export type PriceMigrationOutcome = {
+  subscription_id: string
+  rail: string
+  disposition: "applied" | "blocked" | "scheduled" | "skipped"
+  reason: string | null
+}
+
+export type PriceMigrationPreview = {
+  to_price_id: string | null
+  effective_at: string
+  matched: number
+  scheduled: number
+  skipped: number
+  blocked: number
+  by_rail: Record<string, PriceMigrationRailCounts | null> | null
+  outcomes: PriceMigrationOutcome[]
+}
+
+export type PriceMigrationRailCounts = {
+  auto: number
+  requires_action: number
+  skipped: number
 }
 
 export type Product = {
@@ -2188,67 +2193,6 @@ export type ReportWastedSpendParams = {
   reason?: string
 }
 
-export type Reprice = {
-  id: string
-  subscription_id: string
-  from_price_id: string
-  to_price_id: string
-  effective_at: string
-  status: "applied" | "blocked" | "canceled" | "scheduled"
-  kind: "plan_change" | "reprice"
-  blocked_reason: string | null
-  reprice_batch_id: string | null
-  acknowledged_short_notice: boolean
-  created_at: string
-  applied_at: string | null
-  canceled_at: string | null
-}
-
-export type RepriceBatch = {
-  id: string
-  kind: "plan_change" | "reprice"
-  price_key: string | null
-  source_price_id: string | null
-  to_price_id: string
-  effective_at: string
-  fallback_policy: string | null
-  matched: number
-  skipped: number
-  scheduled: number
-  applied: number
-  canceled: number
-  blocked: number
-  created_at: string
-}
-
-export type RepriceBatchCancel = {
-  canceled: number
-  rail_release_required: string[]
-  warning: string | null
-}
-
-export type RepriceBatchPreview = {
-  product_key: string
-  price_key: string
-  to_price_id: string
-  matched: number
-}
-
-export type RepriceBatchResult = {
-  batch_id: string
-  to_price_id: string
-  matched: number
-  scheduled: RepriceOutcome[]
-  skipped: RepriceOutcome[]
-}
-
-export type RepriceOutcome = {
-  subscription_id: string
-  reprice_id: string | null
-  reason: string | null
-  acknowledged_short_notice: boolean
-}
-
 export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
@@ -2273,6 +2217,17 @@ export type RetrySubscriptionNowParams = {
 
 export type RevokeCreditGrantParams = {
   reason?: string
+}
+
+export type ScheduledChange = {
+  price_id: string
+  quantity: number | null
+  effective_at: string
+  source: "change" | "migration"
+  price_migration_id: string | null
+  created_at: string
+  price?: Price
+  product?: ProductSummary
 }
 
 export type SetAPIHostParams = {
@@ -2399,7 +2354,7 @@ export type Subscription = {
   rail: string
   rail_subscription_id: string | null
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
-  scheduled_price_id?: string
+  scheduled_change: ScheduledChange | null
   payment_method_id: string | null
   started_at: string
   ended_at: string | null
@@ -2413,8 +2368,6 @@ export type Subscription = {
   cancel_mode: string
   price?: Price
   product?: ProductSummary
-  scheduled_price?: Price
-  scheduled_product?: ProductSummary
   card?: CardDetails
   cancel_portal_url?: string
   access?: SubscriptionAccess

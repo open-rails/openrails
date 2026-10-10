@@ -320,7 +320,8 @@ export const adminQueries = {
         "price-migrations",
         { productKey, priceKey, limit },
       ],
-      queryFn: ({ signal }) => listPriceMigrations(productKey!, priceKey!, limit, signal),
+      queryFn: ({ signal }) =>
+        listPriceMigrations(productKey!, priceKey!, limit, signal),
       enabled: Boolean(productKey && priceKey),
     }),
   catalogRevision: () =>

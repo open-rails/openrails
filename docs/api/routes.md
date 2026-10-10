@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (233), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (228), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `user` (any signed-in user), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `operator` (a root-group session), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
@@ -110,16 +110,11 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | POST | `/v1/admin/subscriptions/{id}/change-tier` | merchant | `AdminWrite` | `ChangeTierParams` | 200 `TierChange`<br>202 `TierChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
 | POST | `/v1/admin/subscriptions/{id}/change-tier/preview` | merchant | `AdminRead` | `ChangeTierParams` | 200 `TierChangePreview` |  |
 | PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `AdminWrite` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
-| POST | `/v1/admin/reprice-batches` | merchant | `AdminWrite` | `CreateRepriceBatchParams` | 201 `RepriceBatchResult` | sensitive |
-| POST | `/v1/admin/reprice-batches/preview` | merchant | `AdminRead` | `PreviewRepriceBatchParams` | 200 `RepriceBatchPreview` |  |
-| GET | `/v1/admin/reprice-batches` | merchant | `AdminRead` | — | 200 `ListPage<RepriceBatch>` |  |
-| GET | `/v1/admin/reprice-batches/{id}` | merchant | `AdminRead` | — | 200 `RepriceBatch` |  |
-| POST | `/v1/admin/reprice-batches/{id}/cancel` | merchant | `AdminWrite` | — | 200 `RepriceBatchCancel` | sensitive |
-| POST | `/v1/admin/plan-migrations` | merchant | `AdminWrite` | `CreatePlanMigrationParams` | 201 `PlanMigrationResult` | sensitive |
-| POST | `/v1/admin/plan-migrations/preview` | merchant | `AdminRead` | `CreatePlanMigrationParams` | 200 `PlanMigrationResult` |  |
-| GET | `/v1/admin/reprices` | merchant | `AdminRead` | — | 200 `ListPage<Reprice>` |  |
-| GET | `/v1/admin/reprices/{id}` | merchant | `AdminRead` | — | 200 `Reprice` |  |
-| POST | `/v1/admin/reprices/{id}/cancel` | merchant | `AdminWrite` | — | 200 `Reprice` | sensitive |
+| POST | `/v1/admin/price-migrations` | merchant | `AdminWrite` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive |
+| POST | `/v1/admin/price-migrations/preview` | merchant | `AdminRead` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
+| GET | `/v1/admin/price-migrations` | merchant | `AdminRead` | — | 200 `ListPage<PriceMigration>` |  |
+| GET | `/v1/admin/price-migrations/{id}` | merchant | `AdminRead` | — | 200 `PriceMigration` |  |
+| POST | `/v1/admin/price-migrations/{id}/cancel` | merchant | `AdminWrite` | — | 200 `PriceMigrationCancel` | sensitive |
 | GET | `/v1/admin/customers/{customer_id}/entitlements` | merchant | `AdminRead` | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/admin/entitlements/{entitlement}/customers` | merchant | `AdminRead` | — | 200 `ListPage<string>` |  |
 | POST | `/v1/admin/customers/{customer_id}/entitlements/check` | merchant | `AdminRead` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |

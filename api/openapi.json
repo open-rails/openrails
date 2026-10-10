@@ -3218,13 +3218,13 @@
           "payment_duplicate_refused",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
           "rebill_terms_committed",
-          "reprice_already_scheduled",
-          "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
+          "scheduled_change_exists",
           "service_unavailable",
           "subscription_not_active",
           "subscription_not_found",
@@ -3296,9 +3296,9 @@
           "invalid_param",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
-          "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable",
@@ -3383,7 +3383,7 @@
         ]
       }
     },
-    "/v1/admin/reprice-batches": {
+    "/v1/admin/price-migrations": {
       "post": {
         "tags": [
           "admin"
@@ -3392,7 +3392,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CreateRepriceBatchParams"
+                "$ref": "#/components/schemas/CreatePriceMigrationParams"
               }
             }
           }
@@ -3403,7 +3403,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RepriceBatchResult"
+                  "$ref": "#/components/schemas/PriceMigration"
                 }
               }
             }
@@ -3422,14 +3422,11 @@
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
-          "rebill_terms_committed",
-          "reprice_already_scheduled",
-          "reprice_cross_currency",
-          "reprice_cross_product",
-          "reprice_inactive_price",
-          "reprice_not_scheduled",
-          "reprice_notice_window_violation",
-          "reprice_price_key_not_found"
+          "price_change_currency_mismatch",
+          "price_change_target_archived",
+          "price_key_not_found",
+          "price_not_found",
+          "product_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -3495,7 +3492,7 @@
                     "data": {
                       "type": "array",
                       "items": {
-                        "$ref": "#/components/schemas/RepriceBatch"
+                        "$ref": "#/components/schemas/PriceMigration"
                       }
                     },
                     "next_cursor": {
@@ -3526,6 +3523,7 @@
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
           "invalid_cursor",
+          "invalid_param",
           "invalid_query"
         ],
         "x-openrails-error-sets": [
@@ -3534,7 +3532,7 @@
         ]
       }
     },
-    "/v1/admin/reprice-batches/preview": {
+    "/v1/admin/price-migrations/preview": {
       "post": {
         "tags": [
           "admin"
@@ -3543,7 +3541,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/PreviewRepriceBatchParams"
+                "$ref": "#/components/schemas/CreatePriceMigrationParams"
               }
             }
           }
@@ -3554,7 +3552,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RepriceBatchPreview"
+                  "$ref": "#/components/schemas/PriceMigrationPreview"
                 }
               }
             }
@@ -3572,7 +3570,11 @@
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
           "invalid_param",
-          "reprice_price_key_not_found"
+          "price_change_currency_mismatch",
+          "price_change_target_archived",
+          "price_key_not_found",
+          "price_not_found",
+          "product_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -3580,7 +3582,7 @@
         ]
       }
     },
-    "/v1/admin/reprice-batches/{id}": {
+    "/v1/admin/price-migrations/{id}": {
       "get": {
         "tags": [
           "admin"
@@ -3601,7 +3603,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RepriceBatch"
+                  "$ref": "#/components/schemas/PriceMigration"
                 }
               }
             }
@@ -3619,14 +3621,14 @@
         "x-openrails-permission": "AdminRead",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found"
+          "price_migration_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
       }
     },
-    "/v1/admin/reprice-batches/{id}/cancel": {
+    "/v1/admin/price-migrations/{id}/cancel": {
       "post": {
         "tags": [
           "admin"
@@ -3647,7 +3649,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RepriceBatchCancel"
+                  "$ref": "#/components/schemas/PriceMigrationCancel"
                 }
               }
             }
@@ -3666,312 +3668,8 @@
         "x-openrails-sensitive": true,
         "x-openrails-errors": [
           "invalid_param",
-          "rebill_terms_committed",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/plan-migrations": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePlanMigrationParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Created",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlanMigrationResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param",
-          "rebill_terms_committed",
-          "reprice_already_scheduled",
-          "reprice_cross_currency",
-          "reprice_inactive_price",
-          "reprice_not_scheduled",
-          "reprice_notice_window_violation",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/plan-migrations/preview": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreatePlanMigrationParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PlanMigrationResult"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "reprice_already_scheduled",
-          "reprice_cross_currency",
-          "reprice_inactive_price",
-          "reprice_notice_window_violation",
-          "resource_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/reprices": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ids",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "reprice_batch_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "subscription_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Reprice"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/reprices/{id}": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Reprice"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "reprice_not_found"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/reprices/{id}/cancel": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Reprice"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-errors": [
-          "invalid_param",
-          "rebill_terms_committed",
-          "reprice_not_found",
-          "reprice_not_scheduled"
+          "price_migration_not_found",
+          "rebill_terms_committed"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -4426,13 +4124,13 @@
           "payment_duplicate_refused",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
           "rebill_terms_committed",
-          "reprice_already_scheduled",
-          "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
+          "scheduled_change_exists",
           "service_unavailable",
           "solana_rpc_unavailable",
           "solana_transaction_refused",
@@ -4504,9 +4202,9 @@
           "invalid_param",
           "payment_method_stale",
           "payment_provider_rejected",
+          "price_change_currency_mismatch",
           "price_not_found",
           "product_not_found",
-          "reprice_cross_currency",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable",
@@ -16331,36 +16029,34 @@
           }
         }
       },
-      "CreatePlanMigrationParams": {
+      "CreatePriceMigrationParams": {
         "type": "object",
         "properties": {
-          "source_price": {
+          "from_price_id": {
             "type": "string"
           },
-          "source_product_key": {
+          "product_key": {
             "type": "string"
           },
-          "target_price": {
+          "price_key": {
             "type": "string"
           },
-          "target_product_key": {
+          "to_price_id": {
             "type": "string"
           },
           "effective_at": {
             "type": "string",
             "format": "date-time"
           },
-          "notice_days": {
-            "type": "integer"
-          },
-          "immediate": {
-            "type": "boolean"
-          },
           "acknowledge_short_notice": {
             "type": "boolean"
           },
           "fallback_policy": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "cancel_at_period_end",
+              "keep_grandfathered"
+            ]
           },
           "archive_source": {
             "type": "boolean"
@@ -16562,30 +16258,6 @@
             "type": "string"
           }
         }
-      },
-      "CreateRepriceBatchParams": {
-        "type": "object",
-        "properties": {
-          "product_key": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "acknowledge_short_notice": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "product_key",
-          "price_key",
-          "effective_at",
-          "acknowledge_short_notice"
-        ]
       },
       "CreatedAPIKey": {
         "type": "object",
@@ -21758,149 +21430,6 @@
           }
         }
       },
-      "PlanMigrationOutcome": {
-        "type": "object",
-        "properties": {
-          "subscription_id": {
-            "type": "string"
-          },
-          "reprice_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "rail": {
-            "type": "string"
-          },
-          "disposition": {
-            "type": "string"
-          },
-          "reason": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "subscription_id",
-          "reprice_id",
-          "rail",
-          "disposition",
-          "reason"
-        ]
-      },
-      "PlanMigrationRailCounts": {
-        "type": "object",
-        "properties": {
-          "auto": {
-            "type": "integer"
-          },
-          "requires_action": {
-            "type": "integer"
-          },
-          "skipped": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "auto",
-          "requires_action",
-          "skipped"
-        ]
-      },
-      "PlanMigrationResult": {
-        "type": "object",
-        "properties": {
-          "batch_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source_price_id": {
-            "type": "string"
-          },
-          "target_price_id": {
-            "type": "string"
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "fallback_policy": {
-            "type": "string"
-          },
-          "matched": {
-            "type": "integer"
-          },
-          "scheduled": {
-            "type": "integer"
-          },
-          "skipped": {
-            "type": "integer"
-          },
-          "blocked": {
-            "type": "integer"
-          },
-          "by_rail": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/PlanMigrationRailCounts"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "outcomes": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PlanMigrationOutcome"
-            }
-          },
-          "source_archived": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "batch_id",
-          "source_price_id",
-          "target_price_id",
-          "effective_at",
-          "fallback_policy",
-          "matched",
-          "scheduled",
-          "skipped",
-          "blocked",
-          "by_rail",
-          "outcomes",
-          "source_archived"
-        ]
-      },
       "PlatformMerchant": {
         "type": "object",
         "properties": {
@@ -21993,17 +21522,6 @@
             "type": "string"
           },
           "psp": {
-            "type": "string"
-          }
-        }
-      },
-      "PreviewRepriceBatchParams": {
-        "type": "object",
-        "properties": {
-          "product_key": {
-            "type": "string"
-          },
-          "price_key": {
             "type": "string"
           }
         }
@@ -22152,10 +21670,10 @@
           "create_price": {
             "$ref": "#/components/schemas/CreatePriceParams"
           },
-          "reprice": {
+          "migration": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/CreateRepriceBatchParams"
+                "$ref": "#/components/schemas/CreatePriceMigrationParams"
               },
               {
                 "type": "null"
@@ -22172,7 +21690,7 @@
           "affected_count",
           "review_text",
           "create_price",
-          "reprice"
+          "migration"
         ]
       },
       "PriceKeyMovement": {
@@ -22193,6 +21711,252 @@
           "effective_at",
           "archived",
           "price"
+        ]
+      },
+      "PriceMigration": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "from_price_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "product_key": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "price_key": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "to_price_id": {
+            "type": "string"
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fallback_policy": {
+            "type": "string",
+            "enum": [
+              "cancel_at_period_end",
+              "keep_grandfathered"
+            ]
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "scheduled": {
+            "type": "integer"
+          },
+          "applied": {
+            "type": "integer"
+          },
+          "canceled": {
+            "type": "integer"
+          },
+          "blocked": {
+            "type": "integer"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "canceled_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "from_price_id",
+          "product_key",
+          "price_key",
+          "to_price_id",
+          "effective_at",
+          "fallback_policy",
+          "matched",
+          "skipped",
+          "scheduled",
+          "applied",
+          "canceled",
+          "blocked",
+          "created_at",
+          "canceled_at"
+        ]
+      },
+      "PriceMigrationCancel": {
+        "type": "object",
+        "properties": {
+          "price_migration": {
+            "$ref": "#/components/schemas/PriceMigration"
+          },
+          "canceled": {
+            "type": "integer"
+          },
+          "rail_release_required": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "price_migration",
+          "canceled",
+          "rail_release_required"
+        ]
+      },
+      "PriceMigrationOutcome": {
+        "type": "object",
+        "properties": {
+          "subscription_id": {
+            "type": "string"
+          },
+          "rail": {
+            "type": "string"
+          },
+          "disposition": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "blocked",
+              "scheduled",
+              "skipped"
+            ]
+          },
+          "reason": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subscription_id",
+          "rail",
+          "disposition",
+          "reason"
+        ]
+      },
+      "PriceMigrationPreview": {
+        "type": "object",
+        "properties": {
+          "to_price_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "matched": {
+            "type": "integer"
+          },
+          "scheduled": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          },
+          "blocked": {
+            "type": "integer"
+          },
+          "by_rail": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/PriceMigrationRailCounts"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcomes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PriceMigrationOutcome"
+            }
+          }
+        },
+        "required": [
+          "to_price_id",
+          "effective_at",
+          "matched",
+          "scheduled",
+          "skipped",
+          "blocked",
+          "by_rail",
+          "outcomes"
+        ]
+      },
+      "PriceMigrationRailCounts": {
+        "type": "object",
+        "properties": {
+          "auto": {
+            "type": "integer"
+          },
+          "requires_action": {
+            "type": "integer"
+          },
+          "skipped": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "auto",
+          "requires_action",
+          "skipped"
         ]
       },
       "Product": {
@@ -23468,319 +23232,6 @@
           }
         }
       },
-      "Reprice": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "subscription_id": {
-            "type": "string"
-          },
-          "from_price_id": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "applied",
-              "blocked",
-              "canceled",
-              "scheduled"
-            ]
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "plan_change",
-              "reprice"
-            ]
-          },
-          "blocked_reason": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reprice_batch_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "acknowledged_short_notice": {
-            "type": "boolean"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "applied_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "canceled_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "id",
-          "subscription_id",
-          "from_price_id",
-          "to_price_id",
-          "effective_at",
-          "status",
-          "kind",
-          "blocked_reason",
-          "reprice_batch_id",
-          "acknowledged_short_notice",
-          "created_at",
-          "applied_at",
-          "canceled_at"
-        ]
-      },
-      "RepriceBatch": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "plan_change",
-              "reprice"
-            ]
-          },
-          "price_key": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "source_price_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "effective_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "fallback_policy": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "matched": {
-            "type": "integer"
-          },
-          "skipped": {
-            "type": "integer"
-          },
-          "scheduled": {
-            "type": "integer"
-          },
-          "applied": {
-            "type": "integer"
-          },
-          "canceled": {
-            "type": "integer"
-          },
-          "blocked": {
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "id",
-          "kind",
-          "price_key",
-          "source_price_id",
-          "to_price_id",
-          "effective_at",
-          "fallback_policy",
-          "matched",
-          "skipped",
-          "scheduled",
-          "applied",
-          "canceled",
-          "blocked",
-          "created_at"
-        ]
-      },
-      "RepriceBatchCancel": {
-        "type": "object",
-        "properties": {
-          "canceled": {
-            "type": "integer"
-          },
-          "rail_release_required": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "warning": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "canceled",
-          "rail_release_required",
-          "warning"
-        ]
-      },
-      "RepriceBatchPreview": {
-        "type": "object",
-        "properties": {
-          "product_key": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "matched": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "product_key",
-          "price_key",
-          "to_price_id",
-          "matched"
-        ]
-      },
-      "RepriceBatchResult": {
-        "type": "object",
-        "properties": {
-          "batch_id": {
-            "type": "string"
-          },
-          "to_price_id": {
-            "type": "string"
-          },
-          "matched": {
-            "type": "integer"
-          },
-          "scheduled": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RepriceOutcome"
-            }
-          },
-          "skipped": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/RepriceOutcome"
-            }
-          }
-        },
-        "required": [
-          "batch_id",
-          "to_price_id",
-          "matched",
-          "scheduled",
-          "skipped"
-        ]
-      },
-      "RepriceOutcome": {
-        "type": "object",
-        "properties": {
-          "subscription_id": {
-            "type": "string"
-          },
-          "reprice_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reason": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "acknowledged_short_notice": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "subscription_id",
-          "reprice_id",
-          "reason",
-          "acknowledged_short_notice"
-        ]
-      },
       "ResolveFindingParams": {
         "type": "object",
         "properties": {
@@ -23852,6 +23303,63 @@
             "type": "string"
           }
         }
+      },
+      "ScheduledChange": {
+        "type": "object",
+        "properties": {
+          "price_id": {
+            "type": "string"
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "effective_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "change",
+              "migration"
+            ]
+          },
+          "price_migration_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "price": {
+            "$ref": "#/components/schemas/Price"
+          },
+          "product": {
+            "$ref": "#/components/schemas/ProductSummary"
+          }
+        },
+        "required": [
+          "price_id",
+          "quantity",
+          "effective_at",
+          "source",
+          "price_migration_id",
+          "created_at"
+        ]
       },
       "SetAPIHostParams": {
         "type": "object",
@@ -24303,8 +23811,15 @@
               "unverified"
             ]
           },
-          "scheduled_price_id": {
-            "type": "string"
+          "scheduled_change": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ScheduledChange"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "payment_method_id": {
             "oneOf": [
@@ -24399,12 +23914,6 @@
           "product": {
             "$ref": "#/components/schemas/ProductSummary"
           },
-          "scheduled_price": {
-            "$ref": "#/components/schemas/Price"
-          },
-          "scheduled_product": {
-            "$ref": "#/components/schemas/ProductSummary"
-          },
           "card": {
             "$ref": "#/components/schemas/CardDetails"
           },
@@ -24448,6 +23957,7 @@
           "rail",
           "rail_subscription_id",
           "status",
+          "scheduled_change",
           "payment_method_id",
           "started_at",
           "ended_at",
@@ -26538,6 +26048,21 @@
       "type": "authorization_error",
       "meaning": "The credential lacks the permission the route requires."
     },
+    "price_change_currency_mismatch": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The target price must be in the subscription's currency."
+    },
+    "price_change_target_archived": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "The target price is archived."
+    },
+    "price_increase_notice_too_short": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "effective_at is inside the merchant's notice window for a price increase."
+    },
     "price_key_cadence_conflict": {
       "status": 409,
       "type": "invalid_request_error",
@@ -26547,6 +26072,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No price holds this key."
+    },
+    "price_migration_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "The price migration does not exist."
     },
     "price_not_found": {
       "status": 404,
@@ -26698,51 +26228,6 @@
       "type": "invalid_request_error",
       "meaning": "Merchant renames are disabled."
     },
-    "reprice_already_scheduled": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The subscription already has a scheduled reprice."
-    },
-    "reprice_cross_currency": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The target price must be in the same currency."
-    },
-    "reprice_cross_product": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The target price must be on the same product."
-    },
-    "reprice_inactive_price": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "The target price must be active."
-    },
-    "reprice_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The reprice does not exist."
-    },
-    "reprice_not_scheduled": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The reprice is no longer scheduled."
-    },
-    "reprice_notice_window_violation": {
-      "status": 422,
-      "type": "invalid_request_error",
-      "meaning": "effective_at is inside the merchant's notice window for a price increase."
-    },
-    "reprice_price_key_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The reprice names a price key that does not exist."
-    },
-    "reprice_target_price_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The reprice's target price does not exist."
-    },
     "request_body_too_large": {
       "status": 413,
       "type": "invalid_request_error",
@@ -26772,6 +26257,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No route matches the path."
+    },
+    "scheduled_change_exists": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The subscription already has a scheduled change."
     },
     "sender_proof_required": {
       "status": 401,

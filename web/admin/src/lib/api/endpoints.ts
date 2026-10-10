@@ -534,7 +534,12 @@ export const createPriceMigration = (
 ) =>
   api<PriceMigration>("/admin/price-migrations", {
     method: "POST",
-    body: { product_key: productKey, price_key: priceKey, to_price_id: toPriceId, effective_at: effectiveAt },
+    body: {
+      product_key: productKey,
+      price_key: priceKey,
+      to_price_id: toPriceId,
+      effective_at: effectiveAt,
+    },
   })
 
 // listPriceMigrations lists a price key's migrations, newest first.

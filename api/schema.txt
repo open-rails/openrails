@@ -34,6 +34,7 @@ migration 0030_card_brand_changes.up.sql sha256:f5d63b5b32aabcbdd80d7dc757f2280f
 migration 0031_write_posture.up.sql sha256:37d271c1cae114b18051d36cd73e3355cbd3791b64574179be0e99e087799948
 migration 0032_mandates.up.sql sha256:944db393b19078e1d44d1c0c7816189152d23c04ee4c2571b64472bbbe972ad9
 migration 0033_customer_contacts.up.sql sha256:a55bddd0d2832d76f7758c8127452b7dd48f783ec1e06b9b3ce6da7a110b2cec
+migration 0034_price_migrations.up.sql sha256:735de097e54d63bbbe0f019648714ce9516c07e888a1ae6933efd20a42860f3c
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1660,6 +1661,34 @@ table billing.price_key_movements
   index CREATE UNIQUE INDEX price_key_movements_pkey ON billing.price_key_movements USING btree (merchant_id, id)
   index CREATE INDEX price_key_movements_price_id_idx ON billing.price_key_movements USING btree (merchant_id, price_id)
 
+table billing.price_migrations
+  column merchant_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column from_price_id uuid
+  column from_product_id uuid
+  column from_price_key text
+  column to_price_id uuid NOT NULL
+  column effective_at timestamp with time zone NOT NULL
+  column fallback_policy text NOT NULL
+  column subscriptions_matched integer NOT NULL
+  column subscriptions_skipped integer NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column canceled_at timestamp with time zone
+  constraint price_migrations_counts_check CHECK (((subscriptions_matched >= 0) AND ((subscriptions_skipped >= 0) AND (subscriptions_skipped <= subscriptions_matched))))
+  constraint price_migrations_fallback_policy_check CHECK ((fallback_policy = ANY (ARRAY['keep_grandfathered'::text, 'cancel_at_period_end'::text])))
+  constraint price_migrations_from_price_id_fkey FOREIGN KEY (merchant_id, from_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
+  constraint price_migrations_from_price_key_check CHECK ((from_price_key <> ''::text))
+  constraint price_migrations_from_product_id_fkey FOREIGN KEY (merchant_id, from_product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
+  constraint price_migrations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint price_migrations_pkey PRIMARY KEY (merchant_id, id)
+  constraint price_migrations_source_check CHECK ((((from_price_id IS NULL) = (from_price_key IS NOT NULL)) AND ((from_product_id IS NULL) = (from_price_key IS NULL))))
+  constraint price_migrations_to_price_id_fkey FOREIGN KEY (merchant_id, to_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
+  index CREATE INDEX price_migrations_created_at_id_idx ON billing.price_migrations USING btree (merchant_id, created_at DESC, id DESC)
+  index CREATE INDEX price_migrations_from_key_created_at_id_idx ON billing.price_migrations USING btree (merchant_id, from_product_id, from_price_key, created_at DESC, id DESC) WHERE (from_price_key IS NOT NULL)
+  index CREATE INDEX price_migrations_from_price_id_idx ON billing.price_migrations USING btree (merchant_id, from_price_id) WHERE (from_price_id IS NOT NULL)
+  index CREATE UNIQUE INDEX price_migrations_pkey ON billing.price_migrations USING btree (merchant_id, id)
+  index CREATE INDEX price_migrations_to_price_id_idx ON billing.price_migrations USING btree (merchant_id, to_price_id)
+
 table billing.price_psp_bindings
   column merchant_id uuid NOT NULL
   column price_id uuid NOT NULL
@@ -2122,29 +2151,41 @@ table billing.reconciliation_state
   constraint reconciliation_state_pkey PRIMARY KEY (merchant_id, source_domain)
   index CREATE UNIQUE INDEX reconciliation_state_pkey ON billing.reconciliation_state USING btree (merchant_id, source_domain)
 
-table billing.reprice_batches
-  column id uuid NOT NULL DEFAULT uuidv7()
+table billing.scheduled_changes
   column merchant_id uuid NOT NULL
-  column price_key text
-  column to_price_id uuid NOT NULL
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column subscription_id uuid NOT NULL
+  column from_price_id uuid NOT NULL
+  column price_id uuid NOT NULL
+  column quantity integer
   column effective_at timestamp with time zone NOT NULL
-  column subscriptions_matched integer NOT NULL
-  column subscriptions_skipped integer NOT NULL
+  column source text NOT NULL
+  column price_migration_id uuid
+  column status text NOT NULL
+  column blocked_reason text
+  column acknowledged_short_notice boolean NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column kind text NOT NULL DEFAULT 'reprice'::text
-  column source_price_id uuid
-  column fallback_policy text
-  constraint reprice_batches_fallback_check CHECK ((fallback_policy = ANY (ARRAY['keep_grandfathered'::text, 'cancel_at_period_end'::text])))
-  constraint reprice_batches_kind_check CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text])))
-  constraint reprice_batches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint reprice_batches_pkey PRIMARY KEY (merchant_id, id)
-  constraint reprice_batches_source_price_id_fkey FOREIGN KEY (merchant_id, source_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
-  constraint reprice_batches_to_price_id_fkey FOREIGN KEY (merchant_id, to_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
-  index CREATE INDEX reprice_batches_created_at_id_idx ON billing.reprice_batches USING btree (merchant_id, created_at DESC, id DESC)
-  index CREATE UNIQUE INDEX reprice_batches_pkey ON billing.reprice_batches USING btree (merchant_id, id)
-  index CREATE INDEX reprice_batches_price_key_created_at_id_idx ON billing.reprice_batches USING btree (merchant_id, price_key, created_at DESC, id DESC) WHERE (price_key IS NOT NULL)
-  index CREATE INDEX reprice_batches_source_price_id_idx ON billing.reprice_batches USING btree (merchant_id, source_price_id) WHERE (source_price_id IS NOT NULL)
-  index CREATE INDEX reprice_batches_to_price_id_idx ON billing.reprice_batches USING btree (merchant_id, to_price_id)
+  column applied_at timestamp with time zone
+  column canceled_at timestamp with time zone
+  constraint scheduled_changes_applied_check CHECK (((status = 'applied'::text) = (applied_at IS NOT NULL)))
+  constraint scheduled_changes_blocked_check CHECK ((((status = 'blocked'::text) = (blocked_reason IS NOT NULL)) AND ((status <> 'blocked'::text) OR (source = 'migration'::text)) AND (blocked_reason <> ''::text)))
+  constraint scheduled_changes_canceled_check CHECK (((status = 'canceled'::text) = (canceled_at IS NOT NULL)))
+  constraint scheduled_changes_from_price_id_fkey FOREIGN KEY (merchant_id, from_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
+  constraint scheduled_changes_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint scheduled_changes_pkey PRIMARY KEY (merchant_id, id)
+  constraint scheduled_changes_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
+  constraint scheduled_changes_price_migration_id_fkey FOREIGN KEY (merchant_id, price_migration_id) REFERENCES billing.price_migrations(merchant_id, id) ON DELETE RESTRICT
+  constraint scheduled_changes_quantity_check CHECK (((quantity IS NULL) OR (quantity >= 1)))
+  constraint scheduled_changes_source_check CHECK (((source = ANY (ARRAY['change'::text, 'migration'::text])) AND ((source = 'migration'::text) = (price_migration_id IS NOT NULL))))
+  constraint scheduled_changes_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
+  constraint scheduled_changes_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
+  index CREATE INDEX scheduled_changes_from_price_id_idx ON billing.scheduled_changes USING btree (merchant_id, from_price_id)
+  index CREATE UNIQUE INDEX scheduled_changes_pkey ON billing.scheduled_changes USING btree (merchant_id, id)
+  index CREATE INDEX scheduled_changes_price_id_idx ON billing.scheduled_changes USING btree (merchant_id, price_id)
+  index CREATE INDEX scheduled_changes_price_migration_id_idx ON billing.scheduled_changes USING btree (merchant_id, price_migration_id) WHERE (price_migration_id IS NOT NULL)
+  index CREATE INDEX scheduled_changes_redrive_idx ON billing.scheduled_changes USING btree (merchant_id, created_at) WHERE ((status = 'blocked'::text) AND (blocked_reason ~~ 'rail_push_failed:%'::text))
+  index CREATE INDEX scheduled_changes_subscription_id_idx ON billing.scheduled_changes USING btree (merchant_id, subscription_id)
+  index CREATE UNIQUE INDEX scheduled_changes_subscription_id_key ON billing.scheduled_changes USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text)
 
 table billing.solana_pay_receipts
   column merchant_id uuid NOT NULL
@@ -2233,42 +2274,6 @@ table billing.solana_subscriptions
   index CREATE INDEX solana_subscriptions_subscription_id_idx ON billing.solana_subscriptions USING btree (merchant_id, subscription_id)
   index CREATE UNIQUE INDEX solana_subscriptions_subscription_pda_key ON billing.solana_subscriptions USING btree (subscription_pda)
 
-table billing.subscription_reprices
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column merchant_id uuid NOT NULL
-  column subscription_id uuid NOT NULL
-  column from_price_id uuid NOT NULL
-  column to_price_id uuid NOT NULL
-  column effective_at timestamp with time zone NOT NULL
-  column status text NOT NULL DEFAULT 'scheduled'::text
-  column reprice_batch_id uuid
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column applied_at timestamp with time zone
-  column canceled_at timestamp with time zone
-  column acknowledged_short_notice boolean NOT NULL DEFAULT false
-  column kind text NOT NULL
-  column blocked_reason text
-  constraint subscription_reprices_applied_has_timestamp_check CHECK (((status <> 'applied'::text) OR (applied_at IS NOT NULL)))
-  constraint subscription_reprices_blocked_has_reason_check CHECK (((status <> 'blocked'::text) OR (blocked_reason IS NOT NULL)))
-  constraint subscription_reprices_blocked_reason_check CHECK ((blocked_reason <> ''::text))
-  constraint subscription_reprices_canceled_has_timestamp_check CHECK (((status <> 'canceled'::text) OR (canceled_at IS NOT NULL)))
-  constraint subscription_reprices_from_price_id_fkey FOREIGN KEY (merchant_id, from_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
-  constraint subscription_reprices_kind_check CHECK ((kind = ANY (ARRAY['reprice'::text, 'plan_change'::text])))
-  constraint subscription_reprices_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint subscription_reprices_pkey PRIMARY KEY (merchant_id, id)
-  constraint subscription_reprices_reprice_batch_id_fkey FOREIGN KEY (merchant_id, reprice_batch_id) REFERENCES billing.reprice_batches(merchant_id, id) ON DELETE SET NULL (reprice_batch_id)
-  constraint subscription_reprices_status_check CHECK ((status = ANY (ARRAY['scheduled'::text, 'applied'::text, 'canceled'::text, 'blocked'::text])))
-  constraint subscription_reprices_subscription_id_fkey FOREIGN KEY (merchant_id, subscription_id) REFERENCES billing.subscriptions(merchant_id, id) ON DELETE RESTRICT
-  constraint subscription_reprices_to_price_id_fkey FOREIGN KEY (merchant_id, to_price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE RESTRICT
-  index CREATE INDEX subscription_reprices_created_at_id_idx ON billing.subscription_reprices USING btree (merchant_id, created_at DESC, id DESC)
-  index CREATE INDEX subscription_reprices_from_price_id_idx ON billing.subscription_reprices USING btree (merchant_id, from_price_id)
-  index CREATE INDEX subscription_reprices_merchant_id_idx ON billing.subscription_reprices USING btree (merchant_id) WHERE ((status = 'blocked'::text) AND (kind = 'plan_change'::text))
-  index CREATE UNIQUE INDEX subscription_reprices_pkey ON billing.subscription_reprices USING btree (merchant_id, id)
-  index CREATE INDEX subscription_reprices_reprice_batch_id_idx ON billing.subscription_reprices USING btree (merchant_id, reprice_batch_id) WHERE (reprice_batch_id IS NOT NULL)
-  index CREATE INDEX subscription_reprices_subscription_id_idx ON billing.subscription_reprices USING btree (merchant_id, subscription_id)
-  index CREATE UNIQUE INDEX subscription_reprices_subscription_id_key ON billing.subscription_reprices USING btree (merchant_id, subscription_id) WHERE (status = 'scheduled'::text)
-  index CREATE INDEX subscription_reprices_to_price_id_idx ON billing.subscription_reprices USING btree (merchant_id, to_price_id)
-
 table billing.subscription_status_transitions
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -2319,7 +2324,6 @@ table billing.subscriptions
   column started_at timestamp with time zone NOT NULL
   column ended_at timestamp with time zone
   column grace_ends_at timestamp with time zone
-  column scheduled_price_id uuid
   column last_retry_at timestamp with time zone
   column retry_attempts integer DEFAULT 0
   column next_retry_at timestamp with time zone
@@ -2366,7 +2370,6 @@ table billing.subscriptions
   constraint subscriptions_quantity_check CHECK ((quantity >= 1))
   constraint subscriptions_quantity_engine_check CHECK (((quantity = 1) OR ((collection_policy = 'engine'::text) AND (rail = ANY (ARRAY['nmi'::text, 'stripe'::text])))))
   constraint subscriptions_rail_subscription_id_check CHECK ((rail_subscription_id <> ''::text))
-  constraint subscriptions_scheduled_price_id_fkey FOREIGN KEY (merchant_id, scheduled_price_id) REFERENCES billing.prices(merchant_id, id)
   constraint subscriptions_status_check CHECK ((status = ANY (ARRAY['pending'::text, 'active'::text, 'past_due'::text, 'awaiting_method'::text, 'canceled'::text, 'unverified'::text])))
   constraint subscriptions_stop_pending_canceled_check CHECK (((status = 'canceled'::text) OR (deletion_scheduled_at IS NULL)))
   constraint subscriptions_transient_retries_check CHECK ((transient_retries >= 0))
@@ -2395,7 +2398,6 @@ table billing.subscriptions
   index CREATE INDEX subscriptions_psp_id_idx ON billing.subscriptions USING btree (merchant_id, psp_id)
   index CREATE UNIQUE INDEX subscriptions_psp_id_rail_subscription_id_key ON billing.subscriptions USING btree (merchant_id, psp_id, rail_subscription_id) WHERE ((rail_subscription_id IS NOT NULL) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_rail_rail_subscription_id_idx ON billing.subscriptions USING btree (rail, rail_subscription_id)
-  index CREATE INDEX subscriptions_scheduled_price_id_idx ON billing.subscriptions USING btree (merchant_id, scheduled_price_id) WHERE (scheduled_price_id IS NOT NULL)
   index CREATE INDEX subscriptions_started_at_idx ON billing.subscriptions USING btree (merchant_id, started_at)
   index CREATE INDEX subscriptions_status_idx ON billing.subscriptions USING btree (status)
   trigger CREATE TRIGGER subscriptions_collection_policy_immutable BEFORE UPDATE OF collection_policy ON billing.subscriptions FOR EACH ROW EXECUTE FUNCTION billing.preserve_subscription_collection_policy()
@@ -3051,6 +3053,7 @@ function billing.guard_billing_restore_receipt()
                     'payment_methods',
                     'payments',
                     'price_key_movements',
+                    'price_migrations',
                     'price_psp_bindings',
                     'prices',
                     'product_archive_operations',
@@ -3065,11 +3068,10 @@ function billing.guard_billing_restore_receipt()
                     'rebill_cycles',
                     'reconciliation_findings',
                     'reconciliation_state',
-                    'reprice_batches',
+                    'scheduled_changes',
                     'solana_pay_receipts',
                     'solana_pay_references',
                     'solana_subscriptions',
-                    'subscription_reprices',
                     'subscription_status_transitions',
                     'subscription_verifications',
                     'subscriptions',
@@ -3468,7 +3470,10 @@ function billing.products_guard_tier_group()
           WHERE s.merchant_id = OLD.merchant_id AND s.product_id = OLD.id
             AND s.deleted_at IS NULL
             AND s.status IN ('active', 'pending', 'past_due', 'awaiting_method', 'unverified')
-            AND (s.scheduled_price_id IS NOT NULL OR EXISTS (
+            AND (EXISTS (
+                  SELECT 1 FROM billing.scheduled_changes c
+                  WHERE c.merchant_id = s.merchant_id AND c.subscription_id = s.id AND c.status = 'scheduled')
+              OR EXISTS (
                   SELECT 1 FROM billing.provider_intents i
                   WHERE i.merchant_id = s.merchant_id AND i.subscription_id = s.id
                     AND i.intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')
