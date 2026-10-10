@@ -6,6 +6,7 @@ on:
     branches: [master]
     paths:
       - sdk/billing-ui/**
+      - examples/**
       - "**/*.go"
       - "**/*.sql"
       - go.mod
@@ -65,4 +66,56 @@ jobs:
         with:
           name: billing-ui-playwright
           path: sdk/billing-ui/test-results/
+          retention-days: 7
+
+  # The embedded example's gate and buy pages, over HTTP and in Chromium,
+  # against this commit's OpenRails and billing-ui (NMI is nmimock).
+  embedded-example:
+    name: embedded example
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+        with:
+          package_json_file: examples/embedded/web/package.json
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: |
+            sdk/billing-ui/pnpm-lock.yaml
+            examples/embedded/web/pnpm-lock.yaml
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: examples/go.mod
+          cache-dependency-path: |
+            go.sum
+            examples/go.sum
+      - name: PostgreSQL 18
+        run: |
+          docker run -d --name example-postgres -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:18-alpine
+          timeout 60 bash -c 'until docker exec example-postgres pg_isready -h 127.0.0.1 -U postgres; do sleep 1; done'
+      - name: billing-ui
+        working-directory: sdk/billing-ui
+        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build
+      - name: The React app
+        working-directory: examples/embedded/web
+        run: |
+          pnpm install --frozen-lockfile --ignore-scripts
+          pnpm build
+          pnpm exec playwright install --with-deps chromium
+      - name: Gated content and the buy pages
+        working-directory: examples
+        env:
+          OPENRAILS_E2E_DSN: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+        run: go test -tags integration -count=1 -v ./embedded/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: embedded-example-playwright
+          path: examples/embedded/web/test-results/
           retention-days: 7

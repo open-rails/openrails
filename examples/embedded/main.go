@@ -1,9 +1,12 @@
 // Command embedded is the README's "How to Install (Embedded)" program: a
 // creator site where users sign in with AuthKit, buy courses individually or
 // as a bundle, and buy a monthly or yearly channel membership. newBilling and
-// run are the README's code; newAuth is a development AuthKit.
+// the mount are the README's code; newAuth is a development AuthKit. The
+// server gates the courses and members-only pages by entitlement (content.go)
+// and serves the React app in web/, whose buy pages sell with billing-ui.
 //
-// Run it from this directory with DATABASE_URL. It reads catalog.yaml and
+// Run it from this directory with DATABASE_URL, after building the app
+// (cd web && pnpm install && pnpm build). It reads catalog.yaml and
 // merchant.yaml: copy merchant.example.yaml to merchant.yaml and fill in your
 // NMI gateway's IDs and keys (merchant.yaml is git-ignored). ADDR is the
 // listen address (default :8080); EXAMPLE_CHECK_ONLY=1 boots, checks
@@ -28,7 +31,6 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailsgin "github.com/open-rails/openrails/adapters/gin"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 )
 
@@ -41,7 +43,7 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, rbac *authkit.Roles) (*authk
 		Token:        authkit.TokenConfig{Issuer: "http://localhost:8080", IssuedAudiences: []string{"onlydemo"}},
 		Keys:         authkit.KeysConfig{AllowEphemeralDevKeys: true}, // the README's Path: "/vault/auth" in production
 		Roles:        rbac,
-		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true},
+		HTTP:         &authkit.HTTPConfig{DirectPeerIP: true, RefreshCookie: true}, // the React app keeps its session in an HttpOnly cookie
 		Registration: authkit.RegistrationConfig{NativeUserMode: iam.RegistrationModeOpen, Verification: iam.RegistrationVerificationNone},
 		TwoFactor:    authkit.TwoFactorConfig{Mode: iam.TwoFactorDisabled},
 	}, authkit.Deps{Postgres: db}) // the same pool OpenRails uses
@@ -149,37 +151,8 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	// Which entitlement unlocks each video. Buying course-101 or the bundle grants
-	// course:101; either membership price grants channel:membership.
-	contentAccess := map[string]string{
-		"css-101":      "course:101",
-		"tailwind-102": "course:102",
-		"members-qa":   "channel:membership",
-	}
-	r.GET("/videos/:id", authkitgin.Required(ak), func(c *gin.Context) {
-		id := c.Param("id")
-		entitlement, exists := contentAccess[id]
-		if !exists {
-			c.AbortWithStatus(http.StatusNotFound)
-			return
-		}
-		claims, _ := ak.VerifyRequest(c.Request)
-		customer, err := billing.ParseCustomerID(claims.UserID) // each AuthKit user is their own customer
-		if err != nil {
-			c.AbortWithStatus(http.StatusUnauthorized)
-			return
-		}
-		held, err := bill.ListEntitlements(c, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customer}, Entitlements: []string{entitlement}})
-		if err != nil {
-			c.AbortWithStatus(http.StatusServiceUnavailable)
-			return
-		}
-		if len(held.Items) == 0 { // a key not listed is not held
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
-			return
-		}
-		c.File("videos/" + id + ".mp4")
-	})
+	gateContent(r, ak, bill) // the courses and members-only pages, by entitlement
+	serveApp(r, "web/dist")  // the React app: content pages and their buy pages
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
 		return bill.Ready(ctx)
