@@ -2767,6 +2767,7 @@
       "fmt": "fmt",
       "gen": "github.com/open-rails/openrails/internal/db/gen",
       "models": "github.com/open-rails/openrails/internal/db/models",
+      "providerposture": "github.com/open-rails/openrails/internal/providerposture",
       "railresolve": "github.com/open-rails/openrails/internal/railresolve",
       "strings": "strings",
       "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",

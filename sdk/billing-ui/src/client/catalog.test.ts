@@ -3,7 +3,7 @@
 // billing.PublicConfig, handlers.SupportedTokensResponse).
 import { describe, expect, it, vi } from "vitest"
 
-import currenciesFixture from "../test/fixtures/wire/currencies.json"
+import currenciesFixture from "../../../../testdata/wire/currencies.json"
 import { apiError, json, product } from "../test/billing-server"
 import { createBillingClient } from "./client"
 
@@ -110,15 +110,9 @@ describe("catalog", () => {
       json(200, { capabilities, currencies: currenciesFixture, payment: null }),
       json(200, { currencies: currenciesFixture })
     )
-    expect(await client.getConfig()).toEqual({
-      capabilities,
-      currencies: [
-        { code: "EUR", decimals: 6, minor_decimals: 2 },
-        { code: "JPY", decimals: 4, minor_decimals: 0 },
-        { code: "USD", decimals: 6, minor_decimals: 2 },
-      ],
-      payment: null,
-    })
+    const config = await client.getConfig()
+    expect(config).toEqual({ capabilities, currencies: currenciesFixture, payment: null })
+    expect(config.currencies).toContainEqual({ code: "JPY", decimals: 4, minor_decimals: 0 })
     expect(request().url).toBe("/billing/v1/config")
     expect(request().headers.get("Authorization")).toBeNull()
     await expect(client.getConfig()).rejects.toMatchObject({

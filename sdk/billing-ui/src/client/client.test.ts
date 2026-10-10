@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 
-import errorFixture from "../test/fixtures/wire/error_envelope.json"
-import subscriptionFixture from "../test/fixtures/wire/subscription.json"
+import errorFixture from "../../../../testdata/wire/error_envelope.json"
+import subscriptionFixture from "../../../../testdata/wire/subscription.json"
 import { fakeBilling, json, price, product, subscription } from "../test/billing-server"
 import {
   createBillingClient,
@@ -25,23 +25,19 @@ describe("wire fixtures", () => {
     const parsed = subscriptionSchema.parse(subscriptionFixture)
     expect(parsed).toMatchObject({
       id: "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-      status: "active",
+      status: "past_due",
       cancel_mode: "reversible",
       price: { unit_amount: "9223372036854775807", currency: "USD" },
       product: { display_name: "Pro" },
       card: { brand: "visa", last4: "4242" },
+      dunning: {
+        attempts: 2,
+        retries_left: 3,
+        next_retry_at: "2026-09-16T00:00:00.123456789Z",
+        waiting_for_new_card: false,
+        last_failure_reason: "insufficient_funds",
+      },
     })
-    const dunning = {
-      attempts: 2,
-      retries_left: 3,
-      next_retry_at: "2026-09-18T00:00:00Z",
-      final_retry_at: "2026-09-29T00:00:00Z",
-      waiting_for_new_card: false,
-      last_failure_reason: "insufficient_funds",
-    }
-    expect(
-      subscriptionSchema.parse({ ...subscriptionFixture, status: "past_due", dunning }).dunning
-    ).toEqual(dunning)
   })
 
   it("decodes the error envelope", async () => {

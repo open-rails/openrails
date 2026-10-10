@@ -472,11 +472,6 @@ func (c *NMIClient) EditRecurringPlan(ctx context.Context, planID, planName stri
 	return nil
 }
 
-// centsToDollarString renders cents as a fixed two-decimal dollar string.
-func centsToDollarString(cents moneyutil.Cents) string {
-	return string(centsJSONAmount(cents))
-}
-
 // RecurringPlanDetail is one NMI recurring plan from GetRecurringPlanDetailByID.
 // Found=false means no plan matched the id. DayFrequency is the interval in
 // days, 0 for a month-based plan.

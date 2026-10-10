@@ -69,12 +69,9 @@ type ResolvedDelegated struct {
 	// Permissions is the token's grant; a customer token carries none.
 	Permissions []string
 	// Email and Username are the token's contact claims, never authority.
-	Email                string
-	EmailVerified        bool
-	Username             string
-	SolanaAddress        string
-	SolanaPrimarySNSName string
-	SolanaVerifiedAt     string
+	Email         string
+	EmailVerified bool
+	Username      string
 }
 
 // HasPermission reports whether the token grants perm, by AuthKit's

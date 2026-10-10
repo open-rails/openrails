@@ -1,7 +1,7 @@
 // Wire types of the OpenRails customer surface (`/billing/v1/me/*`) and public
 // catalog, validated at the boundary. Money is an int64 string in the
 // currency's native unit; its scale comes from GET /config's currencies.
-// Fixtures: src/test/fixtures/wire.
+// Fixtures: the repository's canonical testdata/wire.
 import { z } from "zod"
 
 import { pspConfigSchema } from "../psp"

@@ -168,10 +168,11 @@ func (c *DataLinkClient) ViewSubscriptionStatus(ctx context.Context, subscriptio
 // CancelSubscription stops future rebills for one subscription (access runs
 // through the paid period). Error classes:
 //
-//	ErrProviderReadOnly — not attempted (readonly mode)
-//	ErrDataLinkAuth     — explicit authentication/access rejection
-//	ErrCancelRejected   — provider answered a definite non-success (verify)
-//	anything else       — the request MAY have executed (verify, never assume)
+//	ErrProviderReadOnly         — not attempted (readonly mode)
+//	providerposture.ErrDisarmed — not attempted (sandbox posture unproven)
+//	ErrDataLinkAuth             — explicit authentication/access rejection
+//	ErrCancelRejected           — provider answered a definite non-success (verify)
+//	anything else               — the request MAY have executed (verify, never assume)
 func (c *DataLinkClient) CancelSubscription(ctx context.Context, subscriptionID string) (CancelResult, error) {
 	subscriptionID = strings.TrimSpace(subscriptionID)
 	if subscriptionID == "" {

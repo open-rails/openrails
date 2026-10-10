@@ -2,8 +2,8 @@
 // fixtures. Real-server coverage lives in the Playwright e2e suite.
 import { vi, type Mock } from "vitest"
 
-import currenciesFixture from "./fixtures/wire/currencies.json"
-import subscriptionFixture from "./fixtures/wire/subscription.json"
+import currenciesFixture from "../../../../testdata/wire/currencies.json"
+import subscriptionFixture from "../../../../testdata/wire/subscription.json"
 
 export const json = (status: number, body?: unknown) =>
   new Response(body === undefined ? null : JSON.stringify(body), {
@@ -25,6 +25,8 @@ const walletStep = {
 export function subscription(overrides: Partial<Row> = {}): Row {
   return {
     ...subscriptionFixture,
+    status: "active",
+    dunning: null,
     payments: undefined,
     cancel_portal_url: undefined,
     current_period_ends_at: "2036-09-16T12:00:00Z",

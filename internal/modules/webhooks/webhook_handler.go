@@ -185,11 +185,9 @@ func mapStripeEventType(t string) WebhookEventType {
 	}
 }
 
-// NMIWebhookHandler verifies + normalizes NMI webhooks. The secret is the
-// message's (the routed account's); SecretFor resolves one by rail otherwise.
-type NMIWebhookHandler struct {
-	SecretFor func(rail string) string
-}
+// NMIWebhookHandler verifies + normalizes NMI webhooks with the message's
+// secret: the routed account's.
+type NMIWebhookHandler struct{}
 
 func (NMIWebhookHandler) Rail() string { return "nmi" }
 
@@ -198,10 +196,7 @@ func (h NMIWebhookHandler) Verify(msg *WebhookMessage) error {
 		return fmt.Errorf("nil webhook message")
 	}
 	secret := strings.TrimSpace(msg.SigningSecret)
-	if secret == "" && h.SecretFor != nil {
-		secret = h.SecretFor(msg.Rail)
-	}
-	if strings.TrimSpace(secret) == "" {
+	if secret == "" {
 		return fmt.Errorf("nmi webhook secret not configured")
 	}
 	// Delegate to the canonical verifier with tolerance 0: the queued re-verify

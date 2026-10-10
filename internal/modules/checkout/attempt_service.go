@@ -1076,7 +1076,7 @@ func (s *CheckoutAttemptService) ConfirmSession(ctx context.Context, sessionID u
 	}
 	rail := strings.ToLower(strings.TrimSpace(req.Payment.Rail))
 	if rail == "" {
-		return nil, fmt.Errorf("%w: payment.rail is required", ErrCheckoutAttemptValidation)
+		return nil, fmt.Errorf("%w: the payment's rail is required", ErrCheckoutAttemptValidation)
 	}
 	if rail != strings.ToLower(string(session.Rail)) {
 		return nil, fmt.Errorf("%w: rail mismatch", ErrCheckoutAttemptValidation)

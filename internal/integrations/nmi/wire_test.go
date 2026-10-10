@@ -42,7 +42,7 @@ func TestWireAmountRendersMinorUnitsAtCurrencyScale(t *testing.T) {
 			require.NoError(t, err, wire)
 			require.Equal(t, cents, back, "%s round trip of %d via %q", currency, cents, wire)
 			if currency != "JPY" {
-				require.Equal(t, centsToDollarString(cents), wire, "enrollment and plan amounts share one rendering")
+				require.Equal(t, string(centsJSONAmount(cents)), wire, "enrollment and plan amounts share one rendering")
 			}
 		}
 	}

@@ -85,16 +85,6 @@ func (s *SolanaTransactionService) SetClock(c clockwork.Clock) {
 	s.clock = timeutil.FirstClock(c)
 }
 
-// WithRPC returns a shallow copy bound to rpc. nil-receiver-safe.
-func (s *SolanaTransactionService) WithRPC(rpc *solanarpc.RPCClient) *SolanaTransactionService {
-	if s == nil {
-		return nil
-	}
-	cp := *s
-	cp.rpc = rpc
-	return &cp
-}
-
 func (s *SolanaTransactionService) Clock() clockwork.Clock {
 	return s.clock
 }

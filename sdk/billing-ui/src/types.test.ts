@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 
 import { fixtureSession } from "./fixtures"
-import canonical from "./test/fixtures/checkout_session.json"
+import canonical from "../../../testdata/wire/checkout_session.json"
 import { checkoutSessionSchema, payResultSchema } from "./types"
 
-// A copy of OpenRails' canonical checkout session fixture
+// OpenRails' canonical checkout session fixture
 // (testdata/wire/checkout_session.json, pinned by wire_fixtures_test.go).
 describe("checkoutSessionSchema", () => {
   it("decodes the canonical OpenRails fixture with int64 boundary money", () => {
@@ -21,7 +21,7 @@ describe("checkoutSessionSchema", () => {
       "stripe_elements",
     ])
     expect(parsed.options[2].psp_id).toBe(
-      "77777777-7777-4777-8777-777777777777"
+      "psp_77777777-7777-4777-8777-777777777777"
     )
     expect(parsed.next_action?.type).toBe("solana_pay")
     expect(parsed.operation?.status).toBe("pending")

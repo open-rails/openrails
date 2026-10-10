@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/ccbill"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 )
@@ -127,6 +128,9 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 		switch {
 		case errors.Is(err, ccbill.ErrProviderReadOnly):
 			return Parked("ccbill provider writes blocked (mode=readonly)")
+		case errors.Is(err, providerposture.ErrDisarmed):
+			// Refused before the wire: nothing executed, nothing to verify.
+			return Parked("ccbill cancel held by sandbox posture gate: " + err.Error())
 		case errors.Is(err, ccbill.ErrDataLinkAuth):
 			// An explicit HTTP/authentication rejection did not execute the action.
 			if ccbillDenialExhausted(intent.Attempts) {
