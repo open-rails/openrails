@@ -12,38 +12,25 @@ import (
 	"testing"
 )
 
-// The #674 enforcement guard, in two halves that are only total together.
+// The provider-write enforcement guard, in two halves that are only total together.
 //
 // GUARD B (TestProviderWriteSurfaceIsClassified) inventories the provider
 // client's exported surface and demands every method be classified read or
 // write. GUARD A (TestProviderWritesStayBehindIntents) then enforces that every
 // call site of a WRITE is either an intent handler or an allowlisted exception.
+// Guard A alone sees only the write methods someone remembered to name.
 //
-// Why two: on its own, a call-site guard only ever sees the write methods
-// someone remembered to name. Adding `func (c *NMIClient) ChargeNow(...)` used
-// to be invisible to it forever. Guard B makes a new or renamed method fail CI
-// until it is classified, at which point Guard A starts policing its callers.
+// This is enforcement by test, not by construction: Go has no friend
+// visibility, and moving the write client under internal/intents/internal/…
+// would break the legitimate non-intent callers allowlisted below.
 //
-// HONEST LIMIT (GAP-11 residual). This is enforcement by test, not by
-// construction. Go has no friend visibility: the only way to make a bypass a
-// COMPILE error would be to move the write client under internal/intents/
-// internal/…, which the legitimate non-intent callers below (reactive
-// user/admin cancels, decline cleanup, the checkout upgrade saga) make a large
-// refactor. A test, not a structural guarantee.
+// The AST match catches method values (`f := client.RunSale`), a second call
+// inside an allowlisted file (entries are file:function), interface dispatch
+// and renamed imports.
 //
-// What the AST form does close, versus the previous textual grep:
-//   - METHOD VALUES. `f := client.RunSale` has no "(" after the name; the
-//     regex could not see it. A selector match does.
-//   - WRAPPERS INSIDE ALLOWLISTED FILES. The allowlist is keyed by
-//     file:function, not by file, so a second call added anywhere in an
-//     already-trusted file fails.
-//   - INTERFACE DISPATCH. A call through an interface that declares the same
-//     method name is a selector like any other.
-//   - RENAMED IMPORTS. Method calls do not name the package at all.
-//
-// Stripe writes are deliberately NOT scanned here: they are choked
-// architecturally through internal/integrations/stripeapi, whose readonly
-// transport blocks writes before bytes reach the network (IDEM-8, strength S).
+// Stripe writes are not scanned here: they go through
+// internal/integrations/stripeapi, whose readonly transport blocks writes
+// before bytes reach the network.
 
 // providerWriteSurface classifies every exported method on the NMI client.
 // "write" = the call mutates provider state or moves money. Adding a method to
@@ -56,7 +43,7 @@ var providerWriteSurface = map[string]string{
 	"AddRecurringSubscription":        "write", // creates a remote billing schedule
 	"UpdateRecurringSubscription":     "write", // mutates a remote billing schedule
 	"UpdateRecurringSubscriptionPlan": "write", // moves a remote billing schedule to another named plan
-	"DeleteRecurringSubscription":     "write", // IRREVERSIBLE (DES-1)
+	"DeleteRecurringSubscription":     "write", // IRREVERSIBLE
 	"AttemptManualRebill":             "write", // charges a card off a schedule
 	"UpdateSubscriptionPaymentSource": "write", // repoints a live schedule at another card
 	"AddRecurringPlan":                "write", // creates a remote plan
@@ -67,8 +54,8 @@ var providerWriteSurface = map[string]string{
 	"DeleteCustomerVault":             "write", // IRREVERSIBLE: destroys the stored card
 	"DeleteCustomerBillingEntry":      "write", // IRREVERSIBLE: shared-vault scoped delete
 	"AddCustomerBillingEntry":         "write", // stages a card in an existing vault
-	"CreateCustomerVaultFromCard":     "write", // stores a card the server received (#1129)
-	"AddCustomerBillingFromCard":      "write", // stages a card the server received in an existing vault (#1129)
+	"CreateCustomerVaultFromCard":     "write", // stores a card the server received
+	"AddCustomerBillingFromCard":      "write", // stages a card the server received in an existing vault
 	"ReadVerificationByOrderID":       "read",
 
 	// --- reads ----------------------------------------------------------
@@ -105,7 +92,7 @@ var providerWriteSurface = map[string]string{
 	"GetCustomer":                  "read",
 	"ListRecurringPlans":           "read",
 	"ListSubscriptionsPage":        "read",
-	"ProbeCredentials":             "read", // #812: bounded transaction-search probe; creates nothing
+	"ProbeCredentials":             "read", // bounded transaction-search probe; creates nothing
 	"ProbeSalesByOrderID":          "read",
 	"ProbeSalesBySubscriptionID":   "read",
 	"ReadSchedules":                "read",
@@ -196,11 +183,10 @@ func repoRoot(t *testing.T) string {
 	return root
 }
 
-// TestProviderWriteSurfaceIsClassified is GUARD B. Every exported method on the
+// TestProviderWriteSurfaceIsClassified is GUARD B: every exported method on the
 // NMI client, and every exported sign-and-submit entry point in the Solana
-// integration, must be classified read or write. A new method — or a rename of
-// an existing one — fails here until someone decides which it is, which is what
-// stops a wire call from being added under a name no guard knows.
+// integration, must be classified read or write, so a new or renamed method
+// fails until someone classifies it.
 func TestProviderWriteSurfaceIsClassified(t *testing.T) {
 	root := repoRoot(t)
 
@@ -286,9 +272,8 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 			switch {
 			case strings.HasPrefix(d.Name(), "."), d.Name() == "node_modules", d.Name() == "vendor":
 				return filepath.SkipDir
-			// internal/integrations/nmi IS the client — its own methods calling
-			// each other are not bypasses. probe.go is scanned explicitly via
-			// its allowlist entry because a probe still charges a real card.
+			// The Solana integration is the submitter itself: its internal
+			// calls are not bypasses.
 			case rel == "internal/integrations/solana":
 				return filepath.SkipDir
 			}
@@ -297,14 +282,8 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 		if !strings.HasSuffix(rel, ".go") || strings.HasSuffix(rel, "_test.go") {
 			return nil
 		}
-		// or#865: the walk used to cover only internal/ and pkg/, so cmd/,
-		// tests/, embed/, config/ and the repo root could reach a provider
-		// write unseen. Widened to the whole module — it costs nothing, there
-		// are zero violations outside internal//pkg/ today, and a guard that
-		// only looks where nobody would cheat is not a guard.
-		//
-		// _test.go files stay out on purpose: the live-sandbox suites call
-		// writes directly BY DESIGN, and that is the point of them.
+		// The walk covers the whole module. _test.go files stay out: the
+		// live-sandbox suites call writes directly by design.
 		fset := token.NewFileSet()
 		file, perr := parser.ParseFile(fset, path, nil, 0)
 		if perr != nil {
@@ -383,9 +362,7 @@ func TestProviderWritesStayBehindIntents(t *testing.T) {
 		t.Error(v)
 	}
 
-	// A stale allowlist entry means the call moved and is now unguarded.
-	// (Only checked for entries whose file still exists — a deleted file is a
-	// legitimate removal that the entry should be cleaned up for anyway.)
+	// An allowlist entry whose file is gone must be deleted.
 	for key := range allowedWriteCallers {
 		parts := strings.SplitN(key, ":", 2)
 		if _, err := os.Stat(filepath.Join(root, parts[0])); err != nil {

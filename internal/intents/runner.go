@@ -42,13 +42,10 @@ type ledger interface {
 
 const (
 	// DefaultLease is the silence an executor is allowed before its claim is
-	// treated as abandoned. It is NOT how long a handler may run: the claim is
-	// renewed every lease/4 for as long as the handler is executing
-	// (renewClaimWhile, xs-007 row 32), so a lapsed lease means an executor
-	// that stopped beating — dead, partitioned, or wedged — never a refund or
-	// charge that is simply taking its time at the provider. Before the beat,
-	// a refund still in flight at t=2m was handed to a second executor with
-	// only the per-type verify-before-write between that and a double move.
+	// treated as abandoned, not how long a handler may run: the claim is
+	// renewed every lease/4 while the handler executes (renewClaimWhile), so a
+	// lapsed lease means a dead, partitioned or wedged executor, never a slow
+	// provider call.
 	DefaultLease = 2 * time.Minute
 	// DefaultBatchSize bounds one run's claim.
 	DefaultBatchSize = 50
@@ -65,12 +62,10 @@ const (
 
 // LedgerWriteContext detaches a ledger write from the caller's cancellation
 // (db.DetachedWriteContext). The caller's deadline governs the provider call;
-// once that call has been made its result must reach the ledger regardless. A
-// synchronous caller that timed out mid-send otherwise lost the unknown mark and
-// the handler's evidence, and the row sat in_flight until lease expiry handed it
-// back to the executor instead of the verifier. Handlers use it for the same
-// reason when they persist a provider receipt mid-flight. Merchant and PSP
-// survive, and a request connection the cancellation closed is re-pinned.
+// once made, its result must reach the ledger regardless, or a timed-out
+// caller leaves the row in_flight until lease expiry hands it to the executor
+// instead of the verifier. Handlers also use it to persist a provider receipt
+// mid-flight. Merchant and PSP survive; a closed request connection is re-pinned.
 func LedgerWriteContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	return db.DetachedWriteContext(ctx, ledgerWriteTimeout)
 }
@@ -85,18 +80,15 @@ type Runner struct {
 	Store    ledger
 	Logger   MutationLogger
 	Registry *Registry
-	// Config gates execution by origin x operating mode. nil FAILS CLOSED
-	// (or#865): every intent parks rather than executing, because a runner that
-	// cannot tell which mode it is in must not attempt a provider write. A
-	// missing Config is a wiring bug, not a test convenience.
+	// Config gates execution by origin x operating mode. nil fails closed:
+	// every intent parks, since a runner that cannot tell its mode must not
+	// attempt a provider write.
 	Config ModeView
 	// Breaker halts destructive intent execution on merchant-level volume
-	// anomalies (#679). nil = ungated (unit tests, non-destructive-only runners).
+	// anomalies. nil = ungated (unit tests, non-destructive-only runners).
 	Breaker *VolumeBreaker
-	// Destructive is the #836 DB-backed operator kill switch, checked before
-	// every destructive intent so an operator can halt in-flight provider
-	// deletes with one UPDATE instead of a deploy. Same convention as Breaker:
-	// nil = ungated (unit tests); production wiring always sets it.
+	// Destructive is the DB-backed operator kill switch, checked before every
+	// destructive intent. nil = ungated (unit tests); production always sets it.
 	Destructive DestructiveGate
 	Clock       clockwork.Clock
 	Lease       time.Duration
@@ -144,7 +136,7 @@ type Stats struct {
 }
 
 // Add folds one merchant's pass into the deployment-wide totals the executor
-// and verifier workers log (or#862: a pass is now per-merchant).
+// and verifier workers log.
 func (s *Stats) Add(o Stats) {
 	s.Claimed += o.Claimed
 	s.Succeeded += o.Succeeded
@@ -156,11 +148,9 @@ func (s *Stats) Add(o Stats) {
 	s.Expired += o.Expired
 }
 
-// RunExecuteOnce is retained for legacy regression fixtures; production uses
-// per-operation River dispatch. It expires overdue intents and executes them
-// through their registered handlers. Intent-level problems are recorded on
-// the intent (never returned); the returned error is reserved for
-// infrastructure failure (claim query failed).
+// RunExecuteOnce expires overdue intents and executes them through their
+// handlers; production uses per-operation River dispatch instead. Intent-level
+// problems are recorded on the intent; the error is for infrastructure failure.
 func (r *Runner) RunExecuteOnce(ctx context.Context) (Stats, error) {
 	var stats Stats
 	now := r.now()
@@ -194,13 +184,11 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 	})
 	now := r.now()
 
-	// Pin the intent's merchant so handler execution (and any merchant-scoped DB
-	// write it triggers, e.g. membership renewal) resolves it (#336).
+	// Pin the intent's merchant so handler execution and any merchant-scoped
+	// write it triggers resolve it.
 	ctx = merchant.WithID(ctx, billing.MerchantID(intent.MerchantID))
-	// or#893: and its PSP. The intent row records the account this write is
-	// addressed to, so every mirror row the handler creates — the charge, the
-	// subscription, the vaulted method — inherits that provenance instead of
-	// having to re-resolve (or fail to).
+	// And its PSP: every mirror row the handler creates (charge, subscription,
+	// vaulted method) inherits the account the intent is addressed to.
 	ctx = pinIntentAddress(ctx, intent)
 
 	handler := r.Registry.Lookup(intent.IntentType)
@@ -242,9 +230,9 @@ func (r *Runner) executeOne(ctx context.Context, intent gen.BillingProviderInten
 		}
 	}
 
-	// #679 volume breaker: destructive types park (stay pending) while the
-	// merchant is over its rolling execution budget or an operator finding is
-	// open. Fails closed — a breaker error parks rather than executing unexamined.
+	// Volume breaker: destructive types park while the merchant is over its
+	// rolling execution budget or an operator finding is open. Fails closed:
+	// a breaker error parks rather than executing unexamined.
 	attemptLogged := false
 	if r.Breaker != nil && IsDestructiveIntentType(intent.IntentType) {
 		held, reason, err := r.Breaker.Check(ctx, intent, now, func(ctx context.Context, d *db.DB) error {
@@ -287,20 +275,13 @@ func (r *Runner) record(ctx context.Context, logEntry *log.Entry, stats *Stats, 
 	r.apply(ctx, logEntry, stats, handler, intent, outcome, verifying)
 }
 
-// EnqueueAndExecute records the intent and immediately claims + executes THAT
-// intent through the identical gate/execute/classify pipeline the scheduled
-// executor runs (same lease mechanics, same outcome classification). The
-// returned row is the canonical post-execution state; callers branch on its
-// Status: succeeded (result_evidence says how), pending (gate/kill-switch
-// parked it — the reason is last_failure_reason, NOT an error),
-// unknown_needs_verify, failed_*. Anything not finished inline is drained
-// later by the scheduled executor/verifier — the caller's process dying
-// mid-call loses nothing.
-//
-// When the idempotency key conflicts with a row that is not claimable
-// (succeeded, terminal, mid-lease, expired) the row is returned UNTOUCHED so
-// the caller can act on the durable prior outcome (e.g. the dunning worker's
-// repair-from-successful-rebill path).
+// EnqueueAndExecute records the intent and immediately claims and executes it
+// through the same gate/execute/classify pipeline as the scheduled executor.
+// Callers branch on the returned row's Status: succeeded, pending (parked; the
+// reason is last_failure_reason, not an error), unknown_needs_verify or
+// failed_*. Whatever does not finish inline is drained later, so a dying
+// caller loses nothing. A key that conflicts with an unclaimable row
+// (succeeded, terminal, mid-lease, expired) returns that row untouched.
 func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.BillingProviderIntent, error) {
 	row, err := r.Store.Enqueue(ctx, p)
 	if err != nil {
@@ -361,9 +342,8 @@ func (r *Runner) ExecuteByID(ctx context.Context, id uuid.UUID) (gen.BillingProv
 	return r.Store.Get(ctx, row.ID)
 }
 
-// RunVerifyOnce is retained for legacy regression fixtures; production uses
-// per-operation River dispatch. It claims unknown_needs_verify intents via
-// the handlers' read-only Verify.
+// RunVerifyOnce claims unknown_needs_verify intents and resolves them via the
+// handlers' read-only Verify; production uses per-operation River dispatch.
 func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 	var stats Stats
 	now := r.now()
@@ -376,9 +356,8 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 
 	for _, intent := range claimed {
 		progress.Mark(ctx, "intent verify "+intent.ID.String())
-		// Pin the intent's merchant for merchant-scoped verify/repair writes
-		// (#336) and its PSP for their provenance (or#893) — a verifier's repair
-		// writes the same mirror rows the executor would have.
+		// Pin the intent's merchant and PSP: a verifier's repair writes the
+		// same mirror rows the executor would have.
 		ctx := merchant.WithID(ctx, billing.MerchantID(intent.MerchantID))
 		ctx = pinIntentAddress(ctx, intent)
 		logEntry := log.WithContext(ctx).WithFields(log.Fields{
@@ -407,13 +386,12 @@ func (r *Runner) RunVerifyOnce(ctx context.Context) (Stats, error) {
 }
 
 // renewClaimWhile attaches the run's claim to ctx and beats its lease every
-// lease/4 until the returned stop is called (the webhook pending-lease
-// heartbeat shape, #678). A beat renews only the claim this run holds; one that
-// matches nothing means the lease lapsed or another executor claimed the row,
-// so the claim is marked lost and every later provider charge of this run is
-// refused (RequireClaim). The handler's outcome is still recorded, guarded by
-// the next executor's verify-before-write. Renewal errors (DB unreachable) are
-// logged and retried on the next beat.
+// lease/4 until the returned stop is called. A beat renews only the claim this
+// run holds; one that matches nothing means the lease lapsed or another
+// executor claimed the row, so the claim is marked lost and every later
+// provider charge of this run is refused (RequireClaim). The handler's outcome
+// is still recorded, guarded by the next executor's verify-before-write.
+// Renewal errors (DB unreachable) are logged and retried on the next beat.
 func (r *Runner) renewClaimWhile(ctx context.Context, logEntry *log.Entry, in gen.BillingProviderIntent) (context.Context, func()) {
 	ctx, held := withClaim(ctx, in)
 	lease := r.lease()
@@ -462,14 +440,13 @@ func (r *Runner) newTicker(d time.Duration) clockwork.Ticker {
 	return clockwork.NewRealClock().NewTicker(d)
 }
 
-// apply writes one classified outcome back to the ledger, detached from the
-// caller's cancellation (LedgerWriteContext). verifying selects the verifier's
-// interpretation of OutcomeAmbiguous (still inconclusive -> backoff the next
-// verify) vs the executor's (fresh ambiguity -> first verify soon).
 // terminalCommitter is internal to the runner contract. Only converted handlers
 // opt in; the marker never bypasses durable-state readback.
 type terminalCommitter interface{ CommitsTerminalOutcome() bool }
 
+// apply writes one classified outcome to the ledger, detached from the
+// caller's cancellation. verifying selects how OutcomeAmbiguous is read: still
+// inconclusive (back off the next verify) or fresh (first verify soon).
 func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, handler Handler, intent gen.BillingProviderIntent, outcome Outcome, verifying bool) {
 	ctx, cancel := LedgerWriteContext(ctx)
 	defer cancel()
@@ -578,17 +555,11 @@ func (r *Runner) apply(ctx context.Context, logEntry *log.Entry, stats *Stats, h
 	}
 }
 
-// prunePolicy lets a handler keep the heavy columns the prune (#607) would
-// otherwise drop from its succeeded tombstone. A handler implements it ONLY
-// when something reads the column AFTER success:
-//   - keepPayload: the refund producer reads reservation_id off the durable
-//     succeeded row to detect a double-refund conflict (admin_payments.go).
-//   - keepEvidence: the catalog status view renders verification booleans off
-//     succeeded archive/sunset rows (internal/service/catalog_extras.go).
-//
-// Handlers whose only post-success reader is the pointer-key path (dunning's
-// transaction_id/response_code, the admin operations view) need not implement
-// it: the default slims evidence to those keys and drops the payload.
+// prunePolicy lets a handler keep the heavy columns the prune would otherwise
+// drop from its succeeded tombstone. Implement it only when something reads
+// the column after success: archive replay of the payload, or the catalog
+// status view's verification booleans (internal/service/catalog_extras.go).
+// The default drops the payload and slims evidence to pruneEvidenceKeys.
 type prunePolicy interface {
 	PrunePolicy() (keepPayload, keepEvidence bool)
 }
@@ -697,7 +668,7 @@ func mutationLogEvidence(intent gen.BillingProviderIntent, evidence map[string]a
 	return out
 }
 
-// DestructiveGate is the #836 operator kill switch as the runner needs it.
+// DestructiveGate is the operator kill switch as the runner needs it.
 // internal/destructive.Gate implements it; the indirection keeps intents free
 // of a database dependency it does not otherwise have.
 type DestructiveGate interface {
@@ -707,10 +678,10 @@ type DestructiveGate interface {
 }
 
 // pinIntentAddress puts the account the intent is addressed to on the context,
-// so every mirror row a handler or verifier writes inherits the provenance the
-// intent row already recorded instead of re-resolving it (or#893). An intent
-// names a PSP, a custodian, or — for a custodian-proxy write — both;
-// provider_intents_addressed_check guarantees at least one.
+// so every mirror row a handler or verifier writes inherits the intent's
+// provenance instead of re-resolving it. An intent names a PSP, a custodian,
+// or both (custodian-proxy write); provider_intents_addressed_check
+// guarantees at least one.
 func pinIntentAddress(ctx context.Context, intent gen.BillingProviderIntent) context.Context {
 	ctx = db.WithPSPID(ctx, derefUUID(intent.PspID))
 	return db.WithCustodianID(ctx, derefUUID(intent.CustodianID))

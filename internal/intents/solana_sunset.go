@@ -22,11 +22,9 @@ import (
 )
 
 // TypeSolanaSunsetPlan flips an on-chain Subscriptions-program plan to
-// status=sunset via update_plan (#357/#358 phase D) — the program's exact
-// archive semantics: new subscribe calls are rejected ("Plan is in sunset
-// status") while existing subscriptions keep openrails. Produced by the
-// `push-merchant-catalog --prune` sweep for plans whose local price is no
-// longer purchasable.
+// status=sunset via update_plan: new subscribe calls are rejected while
+// existing subscriptions keep billing. ArchiveCatalogExtras produces it for
+// plans the local catalog no longer sells.
 const TypeSolanaSunsetPlan = "solana_sunset_plan"
 
 // SolanaSunsetIdempotencyKey content-addresses one logical sunset: the intent
@@ -70,15 +68,13 @@ type planSunsetter interface {
 
 // SolanaSunsetPlanHandler implements verify-then-execute sunsetting:
 //
-//   - relevance: the sunset applies while NO purchasable local price references
-//     the plan PDA. A price referencing it going active again (the plan
-//     "rejoined the local catalog") supersedes the intent.
-//   - execute: read the plan account first — absent or already sunset IS
-//     success with evidence; else update_plan(status=sunset) signed by the
-//     merchant's merchant key. A submit error is ambiguous (the verifier
-//     re-reads the account's status).
-//   - unconfigured Solana stack (no RPC / no plan service) parks the intent
-//     pending with the reason recorded, never failed.
+//   - relevance: applies while no purchasable local price references the
+//     plan PDA; a price referencing it going active again supersedes it.
+//   - execute: read the plan account first; absent or already sunset is
+//     success. Else update_plan(status=sunset), signed by the merchant's key.
+//     A submit error is ambiguous (the verifier re-reads the status).
+//   - an unconfigured Solana stack (no RPC / no plan service) parks the
+//     intent, never fails it.
 type SolanaSunsetPlanHandler struct {
 	Reader      planAccountReader
 	Plans       planSunsetter
@@ -87,9 +83,8 @@ type SolanaSunsetPlanHandler struct {
 }
 
 // NewSolanaSunsetPlanHandler wires the handler from runtime dependencies.
-// reader and plans may be nil (Solana unconfigured) — intents then park until
-// the deployment grows the capability. reader is typically the #728
-// merchant-resolving chain reader (solana.MerchantRPCBuilder.ChainReader()).
+// reader and plans may be nil (Solana unconfigured): intents then park. reader
+// is typically the merchant-resolving MerchantRPCBuilder.ChainReader().
 func NewSolanaSunsetPlanHandler(d *db.DB, plans *recurring.PlanService, reader planAccountReader, _ clockwork.Clock) *SolanaSunsetPlanHandler {
 	h := &SolanaSunsetPlanHandler{
 		LoadCatalog: dbCatalogRowsLoader(d),
@@ -106,10 +101,9 @@ func NewSolanaSunsetPlanHandler(d *db.DB, plans *recurring.PlanService, reader p
 
 func (h *SolanaSunsetPlanHandler) Type() string { return TypeSolanaSunsetPlan }
 
-// PrunePolicy keeps the result_evidence on a succeeded sunset tombstone
-// (#607): the catalog status view renders its verification booleans
-// (sunset/already_sunset/verified_sunset/...) off the succeeded row
-// (internal/service/catalog_extras.go). The payload (plan PDA) is dropped.
+// PrunePolicy keeps the result_evidence on a succeeded sunset tombstone: the
+// catalog status view renders its verification booleans off the succeeded
+// row (internal/service/catalog_extras.go). The payload is dropped.
 func (h *SolanaSunsetPlanHandler) PrunePolicy() (keepPayload, keepEvidence bool) {
 	return false, true
 }

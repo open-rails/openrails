@@ -16,17 +16,16 @@ import (
 )
 
 // NMIClientResolver arms the store-scoped NMI client for one intent merchant
-// (the #725 credential plane; satisfied by money.MerchantCollectionAdapterBuilder).
-// ok=false with nil err = no declared NMI account; err = declared but not
-// armable (fail closed).
+// (satisfied by money.MerchantCollectionAdapterBuilder). ok=false with nil
+// err = no declared NMI account; err = declared but not armable (fail closed).
 type NMIClientResolver interface {
 	ResolveNMIClient(ctx context.Context, merchantID uuid.UUID, stampedAccountID *uuid.UUID) (*nmi.NMIClient, bool, error)
 }
 
 // resolveIntentNMIClient arms the intent merchant's NMI client from the armed
-// rail state (#788 Layer C): the stamped provenance account when present,
-// else the merchant's pull scope. ok=false = no declared NMI account; err =
-// declared but not armable (fail closed — the caller parks, never charges).
+// rail state: the stamped provenance account when present, else the
+// merchant's pull scope. ok=false = no declared NMI account; err = declared
+// but not armable (fail closed: the caller parks, never charges).
 func resolveIntentNMIClient(ctx context.Context, r NMIClientResolver, intent gen.BillingProviderIntent) (*nmi.NMIClient, bool, error) {
 	if r == nil {
 		return nil, false, errors.New("nmi client resolver is not configured")
@@ -55,9 +54,9 @@ func resolveReceiptNMIClient(ctx context.Context, r NMIClientResolver, intent ge
 }
 
 // ccbillDataLinkForMerchant arms the ctx merchant's CCBill DataLink client
-// from the armed rail state (#788 Layer C). Fail closed: an unarmed rail or
-// missing datalink credentials error (the caller parks/retries).
-// endpointOverride is a test seam for fake DataLink servers.
+// from the armed rail state. Fail closed: an unarmed rail or missing datalink
+// credentials error (the caller parks/retries). endpointOverride is a test
+// seam for fake DataLink servers.
 func ccbillDataLinkForMerchant(ctx context.Context, cfg *config.Config, src railresolve.Source, endpointOverride string) (*ccbill.DataLinkClient, error) {
 	if src == nil {
 		return nil, errors.New("ccbill rail resolution is not configured")

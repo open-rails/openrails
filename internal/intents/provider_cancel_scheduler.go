@@ -19,17 +19,17 @@ import (
 )
 
 // ProviderCancelScheduler implements subscriptions.ProviderCancelScheduler on
-// the provider intent ledger: every provider-owned schedule OpenRails ends
-// locally is stopped by a durable intent enqueued in the same transaction —
-// the NMI deferred delete, the CCBill DataLink cancel, the Stripe cancel. Each
-// is idempotent per subscription. The DeletionScheduledAt marker, set here and
-// cleared only by the intent's verified stop, holds the customer's slot while
-// the provider may still bill.
+// the intent log: every provider-owned schedule OpenRails ends locally is
+// stopped by a durable intent enqueued in the same transaction (the NMI
+// deferred delete, the CCBill DataLink cancel, the Stripe cancel), idempotent
+// per subscription. The DeletionScheduledAt marker, set here and cleared only
+// by the intent's verified stop, holds the customer's slot while the provider
+// may still bill.
 //
 // origin distinguishes who asked: user-origin intents execute under
 // mode=limited; system-origin intents (dunning exhaustion, unknown-resolution)
-// require mode=full — see GateExecution. Queuing is UNCONDITIONAL (#679): mode
-// gates execution only.
+// require mode=full (see GateExecution). Queuing is unconditional; mode gates
+// execution only.
 type ProviderCancelScheduler struct {
 	db     *db.DB
 	store  *Store
@@ -38,8 +38,8 @@ type ProviderCancelScheduler struct {
 }
 
 // NewProviderCancelScheduler builds the scheduler. ceiling (may be nil) is the
-// #732 rate ceiling; user/admin-origin schedulers must pass it so self-service
-// and admin cancels are gated.
+// rate ceiling; user/admin-origin schedulers must pass it so self-service and
+// admin cancels are gated.
 func NewProviderCancelScheduler(d *db.DB, ceiling *RateCeiling, origin Origin, reason string) *ProviderCancelScheduler {
 	return &ProviderCancelScheduler{db: d, store: NewStoreGated(d, ceiling), origin: origin, reason: reason}
 }
@@ -91,8 +91,8 @@ func (s *ProviderCancelScheduler) ScheduleProviderCancel(ctx context.Context, su
 	}
 }
 
-// enqueue writes one remote-cancel intent, addressed (or#893) to the PSP
-// account that holds the subscription.
+// enqueue writes one remote-cancel intent, addressed to the PSP account that
+// holds the subscription.
 func (s *ProviderCancelScheduler) enqueue(ctx context.Context, sub *models.Subscription, intentType, key string, payload any, due time.Time) error {
 	scope, err := merchant.Require(ctx)
 	if err != nil {
@@ -121,10 +121,9 @@ func (s *ProviderCancelScheduler) ScheduleNMIDelete(ctx context.Context, userID 
 	if s == nil || s.db == nil {
 		return fmt.Errorf("intent ledger unavailable for deferred delete scheduling")
 	}
-	// The subscription row carries the merchant, provider and — or#893 — the PSP
-	// the intent must execute against. The delete is addressed to the SAME
-	// gateway account that holds the schedule; anything else would fire against
-	// a sibling account's book.
+	// The subscription row carries the merchant, provider and PSP the intent
+	// must execute against: the gateway account that holds the schedule, never
+	// a sibling account.
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
 		return scopeErr

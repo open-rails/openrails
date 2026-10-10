@@ -277,8 +277,8 @@ func (h *ManualRebillHandler) finalizeNotExecuted(ctx context.Context, in gen.Bi
 	return outcome
 }
 
-// recordRebillAttempt records an OpenRails rebill's answer for its cycle
-// (#1111) in the completion transaction.
+// recordRebillAttempt records an OpenRails rebill's answer for its cycle in
+// the completion transaction.
 func recordRebillAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p subscriptions.ManualRebillPayload, sub *models.Subscription, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, p.Renewal.CustomerID, p.Instrument.PSPID, p.Rail
 	a.Kind, a.Owner, a.At, a.Step = attempts.RebillKind(p.Initiator == charge.InitiatorCustomer, p.FailureCount), attempts.OwnerOf(sub.CollectionPolicy), at, "charge"

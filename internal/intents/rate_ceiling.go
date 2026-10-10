@@ -20,68 +20,43 @@ import (
 	"github.com/open-rails/openrails/internal/shared/cadence"
 )
 
-// #732 anti-credential-compromise rate ceiling — the ULTIMATE hardcoded
-// safeguard against a stolen provider credential or token-signing key. If an
-// attacker can mint auth tokens (or reaches a destructive path some other way),
-// they must NOT be able to cancel/refund/delete-payment-method for thousands of
-// users in seconds. Cap destructive billing ops to a HANDFUL per rolling hour —
-// per-merchant and per-actor — so operators have time to NOTICE and ROTATE the
-// bad credential before most users are harmed.
+// Rate ceiling against a stolen provider credential or token-signing key: an
+// attacker who reaches a destructive path must not cancel, refund or delete
+// payment methods for thousands of users in seconds. Destructive ops are
+// capped to a handful per rolling hour, per merchant and per actor, so
+// operators can notice and rotate the credential.
 //
-// This is a TIGHTER sibling of the #679 per-merchant volume breaker at the SAME
-// chokepoint (the intents producer): #679 catches slow mass-drift over a day,
-// #732 catches the fast credential-abuse burst over minutes. #679 stays; these
-// two gates compose with it. It consumes the SAME destructive type set
-// (DestructiveIntentTypes) — never a private copy.
-//
-// Constants, NEVER config: a knob an attacker can raise is not a safeguard. The
-// counter is the durable provider_intents ledger itself (#674) — every destructive
-// op posts a row BEFORE it executes, so the rolling-hour count already exists as
-// queryable durable state; there is no parallel Redis counter to flush, evict,
-// or lose on restart, and the gate + the op SHARE FATE (Postgres-down ⇒ the op
-// can't post an intent anyway, so there is no fail-open gap).
+// It gates the producer against fast bursts; the volume breaker gates
+// execution against slow drift over a day. Both use DestructiveIntentTypes.
+// Constants, never config: a knob an attacker can raise is not a safeguard.
+// The counter is provider_intents itself: every destructive op posts its row
+// before executing, so the gate and the op share fate (no fail-open gap).
 const (
 	// RateCeilingWindow is the rolling window both ceilings count over.
 	RateCeilingWindow = time.Hour
 	// PerActorHourlyCeiling caps ONE authenticated principal (admin user id or
 	// self-service customer id). Root/owner INCLUDED — no bypass, deliberately.
 	PerActorHourlyCeiling = 5
-	// PerMerchantHourlyCeiling caps ONE merchant's human-originated
-	// (user/admin) destructive ops per rolling hour — the frying-protection
-	// wall that holds even when many actor identities are forged.
-	//
-	// PER MERCHANT, not deployment-wide (or#887). The number is right; the
-	// scope was not. A shared deployment budget means merchant A's ordinary
-	// customer cancellations exhaust it and merchant B's next cancellation is
-	// refused — cross-tenant denial of service on a platform built for
-	// thousands of merchants, where the first busy tenant permanently denies
-	// everyone else. Scoping to the merchant keeps the anti-theft property (a
-	// forged-identity burst is still walled at 15 inside the merchant it
-	// targets, and the per-actor leg below still follows one credential ACROSS
-	// merchants) while confining the blast radius to the tenant it came from.
+	// PerMerchantHourlyCeiling caps one merchant's human-originated
+	// (user/admin) destructive ops per rolling hour; it holds even when many
+	// actor identities are forged. Per merchant, not deployment-wide, so one
+	// busy merchant cannot deny every other merchant's cancellations.
 	PerMerchantHourlyCeiling = 15
-	// PerMerchantSystemHourlyCeiling caps ONE merchant's AUTOMATED
-	// (origin='system') destructive queueing per rolling hour (or#842).
-	//
-	// 50/h sits deliberately above any legitimate automated burst: every
-	// convergence pass is already capped at 25 cancellations
-	// (reconcile.DefaultMaxCancelsPerPass, all-or-nothing), so two full passes
-	// in an hour still clear it, while thousands-in-seconds cannot. #679's
-	// per-merchant volume breaker remains the slower, daily control at the
-	// executor; this one stops the QUEUE from filling in the first place.
+	// PerMerchantSystemHourlyCeiling caps one merchant's automated
+	// (origin='system') destructive queueing per rolling hour: above any
+	// legitimate burst (a convergence pass cancels at most
+	// reconcile.DefaultMaxCancelsPerPass), far below thousands in seconds.
 	PerMerchantSystemHourlyCeiling = 50
-	// perActorWarnThreshold / perMerchantWarnThreshold /
-	// systemMerchantWarnThreshold are the running op counts (prior ops + this
-	// one) at which an op first crosses 50% of a ceiling. An op in the warning
-	// band raises an EARLY-WARNING finding — operators see the burst building
-	// BEFORE it hits the wall, which is what buys the notice-and-rotate time.
+	// The warn thresholds are the running op counts (prior ops + this one) at
+	// which an op crosses 50% of a ceiling and raises an early-warning finding,
+	// so operators see a burst before it hits the wall.
 	perActorWarnThreshold       = 3  // ceil(PerActorHourlyCeiling * 0.5)
 	perMerchantWarnThreshold    = 8  // ceil(PerMerchantHourlyCeiling * 0.5)
 	systemMerchantWarnThreshold = 25 // ceil(PerMerchantSystemHourlyCeiling * 0.5)
 )
 
-// Finding types the ceiling raises on the operator dashboard (the same
-// reconciliation_findings surface #679's held_bulk breaker uses). Must satisfy
+// Finding types the ceiling raises on the operator dashboard (the
+// reconciliation_findings surface the volume breaker also uses). Must satisfy
 // reconciliation_findings' type regex: (pull|derive|life|consistency).seg[.seg].
 const (
 	RateCeilingTrippedFindingType = "life.destructive_rate.tripped"
@@ -116,11 +91,9 @@ var antiTheftOrigins = []string{string(OriginUser), string(OriginAdmin)}
 // HTTP boundary can map it to 429 without depending on the concrete type.
 var ErrRateCeilingTripped = errors.New("destructive operation rate limit reached")
 
-// RateCeilingError is the typed hard refusal returned when a destructive op
-// would breach a ceiling. Message is client-safe; the fields are operator
-// forensics. Fail-closed by construction: the caller (Store.Enqueue) never
-// creates the write-ahead intent when this is returned, so the destructive op
-// simply does not happen.
+// RateCeilingError is the typed refusal when a destructive op would breach a
+// ceiling. Message is client-safe; the fields are operator forensics.
+// Store.Enqueue never creates the intent when this is returned.
 type RateCeilingError struct {
 	Ceiling             ceilingKind
 	Actor               string
@@ -160,19 +133,14 @@ type CheckParams struct {
 	Origin     Origin
 }
 
-// Check admits or refuses one destructive op BEFORE its write-ahead intent is
-// created. Returns:
-//   - nil: allowed (may have raised an early-warning finding as a side effect).
-//   - *RateCeilingError: a ceiling tripped — hard refuse (op must not happen).
-//   - other error: the gate itself could not evaluate — FAIL CLOSED (the caller
-//     must refuse; a compromised path must never sail through a broken gate).
+// Check admits or refuses one destructive op before its write-ahead intent is
+// created: nil allows it (possibly raising an early-warning finding);
+// *RateCeilingError refuses it; any other error means the gate could not
+// evaluate, and the caller must refuse (fail closed).
 //
-// Every destructive (DestructiveIntentTypes) op is gated, on the ceiling shape
-// its origin calls for: user/admin ops on the anti-theft ceilings (per-actor
-// across merchants + per-merchant), system ops on the per-merchant automation
-// ceiling (or#842 — the gate used to return nil for system origin, i.e. it was
-// absent for exactly the paths that queue the most irreversible work).
-// Non-destructive types and unknown origins return nil immediately.
+// User/admin ops count against the anti-theft ceilings (per actor across
+// merchants, and per merchant); system ops against the per-merchant automation
+// ceiling. Non-destructive types pass; an unknown origin fails closed.
 func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) error {
 	// Non-gated ops always pass — never fail them closed on a gate misconfig.
 	if !IsDestructiveIntentType(p.IntentType) {
@@ -190,8 +158,7 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	if c == nil || c.db == nil {
 		return fmt.Errorf("rate ceiling: db not configured") // fail closed
 	}
-	// Same fail-closed reason as the system leg (or#887): the wall is now the
-	// merchant's window, and an op with no merchant has no window to count in.
+	// An op with no merchant has no window to count in: fail closed.
 	if p.MerchantID == uuid.Nil {
 		return fmt.Errorf("rate ceiling: destructive op has no merchant to scope its ceiling to") // fail closed
 	}
@@ -242,16 +209,13 @@ func (c *RateCeiling) Check(ctx context.Context, p CheckParams, now time.Time) e
 	return nil
 }
 
-// checkSystem is the origin='system' leg: ONE merchant's automated destructive
-// queueing per rolling hour, on its OWN window (disjoint origin set), so
-// automation never burns the anti-theft budget and vice versa. No actor exists
-// on these paths (no principal produced them), so the per-actor ceiling has
-// nothing to key on; the merchant IS the blast radius, so it is the window.
+// checkSystem is the origin='system' leg: one merchant's automated destructive
+// queueing per rolling hour, on its own window, so automation and the
+// anti-theft budget never burn each other. No principal produced these ops, so
+// there is no per-actor leg.
 func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.Time) error {
-	// FAIL CLOSED, same as the anti-theft legs: a destructive automated op must
-	// never sail through a gate that cannot evaluate. An unscoped op has no
-	// window to count in, and counting it deployment-wide would be the flat wall
-	// this ceiling exists to avoid.
+	// Fail closed like the anti-theft legs. An unscoped op has no window to
+	// count in; counting it deployment-wide is what this ceiling avoids.
 	if c == nil || c.db == nil {
 		return fmt.Errorf("rate ceiling: db not configured") // fail closed
 	}
@@ -259,8 +223,7 @@ func (c *RateCeiling) checkSystem(ctx context.Context, p CheckParams, now time.T
 		return fmt.Errorf("rate ceiling: system-origin destructive op has no merchant to scope its ceiling to") // fail closed
 	}
 
-	// The same definer reader the anti-theft leg uses, with the system origin
-	// set (migration 0028 generalized 0024's system-only function). It takes the
+	// The anti-theft leg's query with the system origin set. It takes the
 	// merchant as an argument, so the root pool needs no openrails.merchant_id.
 	count, err := c.db.GenDirectory().CountDestructiveIntentsForMerchantSince(ctx,
 		gen.CountDestructiveIntentsForMerchantSinceParams{
@@ -339,12 +302,10 @@ func (c *RateCeiling) warn(ctx context.Context, p CheckParams, which ceilingKind
 	}
 }
 
-// subjectKey keeps ONE standing finding per (merchant, type, subject): per-actor
-// events key on the actor, the two merchant-wide walls on the merchant (they are
-// separate subjects — a human burst and a runaway automation are different
-// investigations). The merchant-wide anti-theft key was the literal "global"
-// while the wall was deployment-wide; migration 0028 re-keys the findings that
-// carry it, so no operator alert is orphaned by the rename (or#887).
+// subjectKey keeps ONE standing finding per (merchant, type, subject):
+// per-actor events key on the actor, the two merchant-wide walls on the
+// merchant as separate subjects (a human burst and a runaway automation are
+// different investigations).
 func (c *RateCeiling) subjectKey(which ceilingKind, p CheckParams) string {
 	switch which {
 	case ceilingPerActor:

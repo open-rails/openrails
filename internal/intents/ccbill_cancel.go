@@ -26,11 +26,10 @@ const ccbillDenialMaxAttempts = 3
 
 func ccbillDenialExhausted(attempts int32) bool { return attempts >= ccbillDenialMaxAttempts }
 
-// TypeCCBillCancelSubscription is the merchant-initiated CCBill cancel intent
-// (#696): stop future rebills via DataLink's SMS cancelSubscription; CCBill
-// keeps the subscriber's access through the paid period on its own side, and
-// the local cancel (recorded in the SAME tx as this enqueue) already carries
-// the #691 paid-runway closure.
+// TypeCCBillCancelSubscription is the merchant-initiated CCBill cancel intent:
+// stop future rebills via DataLink's SMS cancelSubscription. CCBill keeps the
+// subscriber's access through the paid period, and the local cancel (recorded
+// in the same tx as this enqueue) already closes the paid runway.
 const TypeCCBillCancelSubscription = "ccbill_cancel_subscription"
 
 // CCBillCancelPayload is the stored payload. The rail subscription id is
@@ -51,17 +50,16 @@ func CCBillCancelIdempotencyKey(subscriptionID uuid.UUID) string {
 //
 //   - relevance: applies while the local subscription is still canceled; a
 //     reactivation (CCBill UserReactivation, admin repair) supersedes it.
-//   - execute: viewSubscriptionStatus FIRST — already not-rebilling IS success
-//     (cancels are idempotent by observation); rebilling -> cancelSubscription.
-//     Any definite reject or transport failure after the send is ambiguous:
-//     the verifier re-reads (verify-not-decline, #674).
-//   - mode: the runner's origin x mode gate parks first; the client-level
-//     ReadOnly transport gate is the backstop (parked, never failed).
+//   - execute: viewSubscriptionStatus first; already not-rebilling is success.
+//     Rebilling -> cancelSubscription. Any definite reject or transport failure
+//     after the send is ambiguous: the verifier re-reads.
+//   - mode: the runner's origin x mode gate parks first; the client's ReadOnly
+//     transport gate is the backstop (parked, never failed).
 type CCBillCancelHandler struct {
 	DB     *db.DB
 	Config *config.Config
 	// Rails arms the intent merchant's DataLink client from the armed rail
-	// state at drain time (#788).
+	// state at drain time.
 	Rails railresolve.Source
 	// DataLinkBaseURL overrides the DataLink endpoint (test seam).
 	DataLinkBaseURL string
@@ -116,9 +114,8 @@ func (h *CCBillCancelHandler) Execute(ctx context.Context, intent gen.BillingPro
 	// Verify-then-execute: already not-rebilling = success.
 	rebilling, status, err := h.rebilling(ctx, client, psid)
 	if err != nil {
-		// Read failed cleanly — no write attempted. Covers auth failures and
-		// the (Phase-0-uncaptured) unknown-subscription answer: retried, never
-		// resolved off a guess.
+		// Read failed cleanly, no write attempted (auth failures, an unknown
+		// subscription): retried, never resolved off a guess.
 		return Retryable("provider read before cancel failed: " + err.Error())
 	}
 	if !rebilling {
@@ -180,8 +177,8 @@ func (h *CCBillCancelHandler) Verify(ctx context.Context, intent gen.BillingProv
 	return Retryable("subscription still rebilling at provider; cancel verified not executed")
 }
 
-// rebilling reads the provider state. An unrecognized status vocabulary value
-// is an error (#651: undecidable, never guessed).
+// rebilling reads the provider state. An unrecognized status value is an
+// error: undecidable, never guessed.
 func (h *CCBillCancelHandler) rebilling(ctx context.Context, client *ccbill.DataLinkClient, psid string) (bool, ccbill.SubscriptionStatusResult, error) {
 	status, err := client.ViewSubscriptionStatus(ctx, psid)
 	if err != nil {
@@ -204,8 +201,8 @@ func verifiedEvidence(psid string, status ccbill.SubscriptionStatusResult, viaVe
 		ev["via_verifier"] = true
 	}
 	if exp, ok := status.ExpiresAt(); ok {
-		// CCBill's own final paid-through instant — forensics for the #691
-		// runway, recorded verbatim, never written onto the local row here.
+		// CCBill's own final paid-through instant, recorded verbatim as evidence;
+		// never written onto the local row here.
 		ev["provider_expires_at"] = exp.Format(time.RFC3339)
 	}
 	return ev

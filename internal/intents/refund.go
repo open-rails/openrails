@@ -30,12 +30,10 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Refund intent types (#358 phase B). The provider-side money movement of an
-// admin refund flows through the ledger; the local reservation flow around it
-// is unchanged: the producer reserves (negative pending payment row), the
-// handler's finalize completes the reservation with the provider refund id on
-// success — owning completion so the async drain repairs a producer that died
-// mid-call — and releases it (status=failed) on a terminal refusal.
+// Refund intent types. The producer reserves a negative pending payment row;
+// the handler's finalize completes it with the provider refund id on success
+// (so the async drain repairs a producer that died mid-call) or releases it
+// (status=failed) on a terminal refusal.
 const (
 	TypeNMIRefund    = "nmi_refund"
 	TypeStripeRefund = "stripe_refund"
@@ -48,8 +46,8 @@ type RefundPayload struct {
 	// ReservationID is the local negative pending payment row the finalize
 	// completes (provider id recorded) or releases (terminal refusal).
 	ReservationID uuid.UUID `json:"reservation_id"`
-	// AmountCents is provider minor units (typed CENTS, #671) — converted
-	// exactly from the payment-currency native amount at the admin boundary.
+	// AmountCents is provider minor units (typed Cents), converted exactly
+	// from the payment-currency native amount at the admin boundary.
 	AmountCents  moneyutil.Cents `json:"amount_cents"`
 	Currency     string          `json:"currency"`
 	Reason       string          `json:"reason,omitempty"`
@@ -159,7 +157,7 @@ func (r refundReservations) finalize(ctx context.Context, p RefundPayload, provi
 				return err
 			}
 		}
-		// SEC-33: a provider notice recorded this refund first; keep that row and
+		// A provider notice recorded this refund first; keep that row and
 		// release the reservation instead of colliding on the transaction id.
 		original, err := svc.GetByID(ctx, p.OriginalPaymentID)
 		if err != nil {
@@ -304,10 +302,6 @@ func (r refundReservations) terminally(ctx context.Context, p RefundPayload, rea
 	return TerminalWithEvidence(reason, evidence)
 }
 
-// ============================================================================
-// NMI
-// ============================================================================
-
 // NMIRefundHandler executes refunds against NMI-backed rails. NMI has no
 // request-level idempotency, so effectively-once rests on the ledger: one
 // intent per caller operation, never blind-retried — any outcome that
@@ -316,7 +310,7 @@ func (r refundReservations) terminally(ctx context.Context, p RefundPayload, rea
 type NMIRefundHandler struct {
 	refundReservations
 	// Resolver arms the intent merchant's NMI client from the armed rail
-	// state at drain time (#788).
+	// state at drain time.
 	Resolver NMIClientResolver
 	Policy   BackoffPolicy
 }
@@ -435,10 +429,6 @@ func (h *NMIRefundHandler) Resolve(ctx context.Context, intent gen.BillingProvid
 	}
 	return Succeeded(map[string]any{"provider_refund_id": resolution.ProviderReference}), nil
 }
-
-// ============================================================================
-// Stripe
-// ============================================================================
 
 // stripeRefundAPI is the StripeRefundService slice the handler drives
 // (interface for unit tests).
@@ -566,10 +556,6 @@ func (h *StripeRefundHandler) Verify(ctx context.Context, intent gen.BillingProv
 	}
 	return h.settle(ctx, p, result.ID, map[string]any{"refund_status": result.Status, "verified_existing": true})
 }
-
-// ============================================================================
-// CCBill
-// ============================================================================
 
 // CCBillRefundHandler retains unresolved reservations created by earlier builds.
 // The provider's subscription-level API cannot establish the requested charge,

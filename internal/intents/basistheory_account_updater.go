@@ -23,22 +23,18 @@ import (
 )
 
 // TypeAccountUpdaterBatchSubmit is the durable submit half of the batch
-// account updater (or#795). Creating the job and uploading the token CSV are
-// provider WRITES — a paid one — so they go through the intent ledger like
-// every other outbound mutation (#674) instead of being fired from a worker
-// loop that a restart repeats.
+// account updater. Creating the job and uploading the token CSV are paid
+// provider writes, so they go through the intent log.
 //
-// Effectively-once rests on two things, not on hope:
+// Effectively-once rests on two things:
 //
-//   - the durable batch row (billing.account_updater_batches) is written
-//     BEFORE the provider is touched and records the job id the moment the
-//     create is confirmed, so a resumed attempt polls that job;
-//   - the create carries an intent-derived BT-IDEMPOTENCY-KEY, so even a
-//     create whose RESPONSE was lost returns the same job on retry. That is
-//     why a failed create is Retryable rather than Ambiguous: there is no
-//     ambiguity left for a verifier to resolve. The intent's relevance window
-//     is the vendor's idempotency window, so it expires rather than outliving
-//     the guarantee it depends on.
+//   - the batch row (billing.account_updater_batches) is written before the
+//     provider is touched and records the job id once the create is confirmed,
+//     so a resumed attempt polls that job;
+//   - the create carries an intent-derived BT-IDEMPOTENCY-KEY, so a create
+//     whose response was lost returns the same job. A failed create is
+//     therefore Retryable, not Ambiguous. The intent's relevance window is the
+//     vendor's idempotency window.
 const TypeAccountUpdaterBatchSubmit = "bt_account_updater_batch"
 
 // AccountUpdaterIdempotencyWindow is how long BT caches an idempotency-key
@@ -235,10 +231,8 @@ func (h *AccountUpdaterBatchHandler) Execute(ctx context.Context, intent gen.Bil
 	})
 }
 
-// Verify exists because the interface demands it. There is nothing ambiguous
-// to resolve: the create is idempotent per intent key and the upload is a
-// repeatable write of identical bytes, so every failure above is Retryable and
-// this never runs in practice.
+// Verify never runs in practice: the create is idempotent per intent key and
+// the upload rewrites identical bytes, so every failure above is Retryable.
 func (h *AccountUpdaterBatchHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) Outcome {
 	p, err := decodeAccountUpdaterBatchPayload(intent)
 	if err != nil {
@@ -307,9 +301,8 @@ func (h *AccountUpdaterBatchHandler) markSubmitted(ctx context.Context, id uuid.
 	})
 }
 
-// client arms the merchant's custodian client from the CUSTODIAN (or#880) —
-// not from a PSP, since one custodian may back several and an account-updater
-// job is about the instruments, not a gateway.
+// client arms the merchant's custodian client from the custodian, not a PSP:
+// one custodian may back several, and the job concerns instruments, not a gateway.
 func (h *AccountUpdaterBatchHandler) client(ctx context.Context, p AccountUpdaterBatchPayload) (*basistheory.Client, Outcome, bool) {
 	if h.Rails == nil {
 		return nil, Parked("custodian resolution is not configured"), false

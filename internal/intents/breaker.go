@@ -17,31 +17,22 @@ import (
 )
 
 // Destructive intent types irreversibly destroy provider-side billing state.
-// The volume breaker (#679) gates ONLY these; add future destructive types here.
+// The volume breaker gates only these.
 var destructiveIntentTypes = map[string]struct{}{
 	TypeNMIDeleteSubscription:    {},
-	TypeCCBillCancelSubscription: {}, // #696: stops rebilling irreversibly (no resume API)
-	// #674 tail: deleting a vaulted card destroys the stored instrument
-	// irreversibly (only the cardholder can re-enter it) — mass vault deletion
-	// is exactly the #679 threat model. Held user deletes stay pending and
-	// complete after operator ack; decline-cleanup deletes bypass the ledger
-	// entirely (paymentmethods.CleanupPaymentMethodBestEffort) so card-testing floods
-	// cannot burn this budget.
-	//
-	// or#870: this type is USER-INITIATED ONLY — no dunning, cancellation or
-	// reconcile path produces it. It stays gated anyway: the breaker exists for
-	// the case where something starts producing these in bulk, which under the
-	// standing rule would itself be the incident.
+	TypeCCBillCancelSubscription: {}, // stops rebilling irreversibly (no resume API)
+	// Deleting a vaulted card is irreversible (only the cardholder can re-enter
+	// it). Held deletes stay pending until operator ack. Decline-cleanup deletes
+	// bypass the intent log (paymentmethods.CleanupPaymentMethodBestEffort), so
+	// card-testing floods cannot burn this budget. Only an explicit delete
+	// request produces this type; bulk production would itself be the incident.
 	TypeNMIPaymentMethodDelete:  {},
 	TypeHyperSwitchMethodDelete: {},
-	// TypeNMIPaymentSourceUpdate is deliberately NOT listed: repointing which
-	// vaulted card a subscription bills destroys nothing (both vaults survive;
-	// swap back any time), so it doesn't fit the #679 mass-destruction threat
-	// model and must not burn the destructive budget.
+	// TypeNMIPaymentSourceUpdate is not listed: repointing a subscription's
+	// vaulted card destroys nothing (both vaults survive).
 	//
-	// TypeStripeCancelSubscription is NOT listed either: it only follows a
-	// revoke of access, and holding it would leave Stripe billing a member
-	// who has none.
+	// TypeStripeCancelSubscription is not listed: it only follows a revoke of
+	// access, and holding it would leave Stripe billing a member who has none.
 }
 
 // IsDestructiveIntentType reports whether the type is breaker-gated.
@@ -60,9 +51,9 @@ func DestructiveIntentTypes() []string {
 	return out
 }
 
-// #679 breaker budget: per merchant, at most max(floor, pct% of active
+// Breaker budget: per merchant, at most max(floor, pct% of active
 // subscriptions) destructive executions per rolling window. Constants, not
-// config knobs — routine churn stays automatic, mass deletion is an incident.
+// config: routine churn stays automatic, mass deletion is an incident.
 const (
 	DestructiveWindow          = 24 * time.Hour
 	DestructiveBudgetFloor     = 25
@@ -88,12 +79,11 @@ func DestructiveBudget(activeSubscriptions int64) int64 {
 }
 
 // VolumeBreaker halts destructive intent execution for a merchant when the
-// rolling-window execution count exceeds the budget (#679). Tripping upserts
-// ONE requires_review finding per merchant; execution stays halted while that
-// finding is OPEN. Operator ack (fixed) resumes — the count window restarts at
-// the resolution instant, so the rolling window decides if it trips again.
-// Operator dismiss (ignored) silences the breaker for the merchant (findings
-// semantics: an ignored identity stays ignored).
+// rolling-window execution count exceeds the budget. Tripping upserts ONE
+// requires_review finding per merchant; execution stays halted while that
+// finding is open. Operator ack (fixed) resumes, with the count window
+// restarting at the resolution instant. Operator dismiss (ignored) silences
+// the breaker for the merchant.
 type VolumeBreaker struct {
 	db *db.DB
 }
@@ -110,12 +100,8 @@ func (b *VolumeBreaker) Check(ctx context.Context, intent gen.BillingProviderInt
 	if b == nil || b.db == nil {
 		return false, "", fmt.Errorf("volume breaker: db not configured")
 	}
-	// or#862: under the since-removed RLS both counts below (provider_intents,
-	// subscriptions) came back 0 and 0 on a connection with no openrails.merchant_id,
-	// giving budget = max(25, 1% × 0) = 25 against executed = 0 — a breaker
-	// that could never hold, on exactly the unattended plane it exists
-	// to guard. Assert the pin instead of reading zeros; Check's contract is
-	// fail-closed, so the caller parks the intent.
+	// Fail closed on an unpinned or wrong-merchant connection: the caller parks
+	// the intent.
 	if err := b.db.AssertMerchantScope(ctx, "destructive-volume breaker"); err != nil {
 		return false, "", err
 	}
@@ -174,9 +160,9 @@ func (b *VolumeBreaker) check(ctx context.Context, d *db.DB, intent gen.BillingP
 		return false, "", nil
 	}
 
-	// Over budget: raise/refresh the operator finding, then hold. The #692
-	// structured recommendation (ack_resume) lets the findings queue approve
-	// mechanically — resolution alone re-arms the breaker.
+	// Over budget: raise or refresh the operator finding, then hold. The
+	// ack_resume recommendation lets the findings queue approve mechanically;
+	// resolution alone re-arms the breaker.
 	evidence, merr := json.Marshal(map[string]any{
 		"provider":             intent.Rail,
 		"intent_type":          intent.IntentType,

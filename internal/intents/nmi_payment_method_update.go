@@ -44,7 +44,7 @@ func NMIPaymentMethodUpdateIdempotencyKey(paymentMethodID uuid.UUID, paymentToke
 }
 
 // NMIPaymentMethodCardUpdateIdempotencyKey keys a replacement whose card the
-// server received (#1129) by the caller's attempt key: a card is never hashed.
+// server received by the caller's attempt key: a card is never hashed.
 func NMIPaymentMethodCardUpdateIdempotencyKey(paymentMethodID uuid.UUID, attemptKey string) string {
 	digest := sha256.Sum256([]byte(strings.TrimSpace(attemptKey)))
 	return fmt.Sprintf("%s:%s:card:%s", TypeNMIPaymentMethodUpdate, paymentMethodID, hex.EncodeToString(digest[:16]))
@@ -79,8 +79,8 @@ type NMIPaymentMethodUpdatePayload struct {
 	// card itself; empty for a token, whose card only NMI reports.
 	TargetCard nmiCard `json:"target_card"`
 
-	// CardEntry: the server received the replacement card itself (#1129). The
-	// request that carried it stages it; the intent keeps only TargetCard.
+	// CardEntry: the server received the replacement card itself. The request
+	// that carried it stages it; the intent keeps only TargetCard.
 	CardEntry  bool   `json:"card_entry,omitempty"`
 	AttemptKey string `json:"attempt_key,omitempty"`
 }
@@ -351,7 +351,7 @@ func (h *NMIPaymentMethodUpdateHandler) advance(ctx context.Context, intent gen.
 	if ref == "" {
 		order := verificationOrderID(intent.ID)
 		var refused *nmi.Verification
-		var answer decline.Evidence // the refusal as NMI answered it (#1110)
+		var answer decline.Evidence // the refusal as NMI answered it
 		if progress.VerificationSubmitted {
 			v, found, err := client.ReadVerificationByOrderID(ctx, order)
 			if err != nil {
@@ -788,7 +788,7 @@ func (h *NMIPaymentMethodUpdateHandler) dataGap(ctx context.Context, intent gen.
 	return Terminal(errNMICardDataGap.Error())
 }
 
-// recordVerification records a refused replacement card verification (#1110).
+// recordVerification records a refused replacement card verification.
 func (h *NMIPaymentMethodUpdateHandler) recordVerification(ctx context.Context, intent gen.BillingProviderIntent, payload NMIPaymentMethodUpdatePayload, a attempts.Attempt) error {
 	customer, err := uuid.Parse(payload.UserID)
 	if err != nil {

@@ -24,7 +24,7 @@ type initialMembershipRefusal struct {
 	StripePaymentIntentID string         `json:"stripe_payment_intent_id,omitempty"`
 	StripeFailureCode     string         `json:"stripe_failure_code,omitempty"`
 	StripeDeclineCode     string         `json:"stripe_decline_code,omitempty"`
-	// The gateway's answer, kept for the attempt ledger (#1110).
+	// The gateway's answer, kept for the attempt ledger.
 	TransactionID string `json:"transaction_id,omitempty"`
 	AVS           string `json:"avs,omitempty"`
 	CVV           string `json:"cvv,omitempty"`

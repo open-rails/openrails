@@ -50,7 +50,7 @@ func TestBackoffDoublesToCapAndDefendsInputs(t *testing.T) {
 	assert.Equal(t, time.Hour, BackoffPolicy{}.Delay(30))
 }
 
-// IDEM-9: origin x mode, and an unknown origin or mode parks.
+// Origin x mode, and an unknown origin or mode parks.
 func TestGateExecutionFailsClosed(t *testing.T) {
 	origins := []Origin{OriginUser, OriginAdmin, OriginSystem}
 	for _, tc := range []struct {
@@ -168,7 +168,7 @@ func TestOperatorResolutionNeedsAttributionAndExactlyOneEvidence(t *testing.T) {
 	assert.Equal(t, "txn_1", got.Record(anchor)["provider_reference"])
 }
 
-// IDEM-3: keys are content-addressed, stable, and separate distinct operations.
+// Keys are content-addressed, stable, and separate distinct operations.
 func TestIdempotencyKeysAreContentAddressed(t *testing.T) {
 	a, b := uuid.New(), uuid.New()
 	assert.Equal(t, NMIDeleteIdempotencyKey(a, b, "t"), NMIDeleteIdempotencyKey(a, b, "t"))

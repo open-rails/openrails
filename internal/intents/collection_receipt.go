@@ -262,7 +262,7 @@ func LoadCollectedReceipt(in gen.BillingProviderIntent) (CollectedReceipt, bool,
 		return r, true, err
 	}
 	// A receipt is not usable custody when the same operation also claims
-	// definitive refusal/nonexecution, including legacy contradictory rows.
+	// definitive refusal/nonexecution (a contradictory row).
 	if _, exists := evidence[qualifiedInitialRefusalKey]; exists {
 		return r, true, errors.New("collected receipt contradicts retained initial refusal")
 	}

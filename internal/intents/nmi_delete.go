@@ -20,9 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// TypeNMIDeleteSubscription is the deferred NMI delete_subscription intent
-// (issue 216 / #344), migrated onto the ledger in #358 phase A. It replaces
-// the NMIDeleteSubscription River job + boot rescan.
+// TypeNMIDeleteSubscription is the deferred NMI delete_subscription intent.
 const TypeNMIDeleteSubscription = "nmi_delete_subscription"
 
 var errNMIDeleteTargetChanged = errors.New("NMI delete target binding changed; historical target requires explicit resolution")
@@ -59,21 +57,19 @@ func acceptedNMIDeleteTarget(in gen.BillingProviderIntent) (NMIDeletePayload, er
 // NMIDeleteHandler implements verify-then-execute deletion of an NMI
 // recurring subscription:
 //
-//   - relevance: the delete applies only while the subscription is still
-//     canceled with its DeletionScheduledAt marker set; a resume (status
-//     active again) or an already-finalized delete supersedes the intent.
-//   - execute: query the subscription at NMI first — absent IS success
-//     (deletes are idempotent by observation); present -> delete. Any error
-//     after the delete was sent is ambiguous (the verifier re-reads).
-//   - kill switch (#344) and read-only clients park the intent pending with
-//     the reason recorded, never failed.
-//   - on success the DeletionScheduledAt read model is cleared (the
-//     cancellation becomes destructive), exactly like the retired worker.
+//   - relevance: applies only while the subscription is canceled with its
+//     DeletionScheduledAt marker set; a resume or a finalized delete
+//     supersedes the intent.
+//   - execute: query NMI first; absent is success, present -> delete. Any
+//     error after the delete was sent is ambiguous (the verifier re-reads).
+//   - the kill switch and read-only clients park the intent, never fail it.
+//   - success clears the DeletionScheduledAt marker (the cancellation becomes
+//     final).
 type NMIDeleteHandler struct {
 	DB     *db.DB
 	Config *config.Config
 	// Resolver arms the intent merchant's NMI client from the armed rail
-	// state at drain time (#788).
+	// state at drain time.
 	Resolver NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
@@ -94,10 +90,10 @@ func (h *NMIDeleteHandler) now() time.Time {
 	return time.Now().UTC()
 }
 
-// CheckRelevance: the deferred delete is applicable while the subscription is
-// still canceled with a pending deferred delete. This re-check at execution
-// time is the AUTHORITATIVE resume guard (a missed advisory supersede on
-// resume cannot cause an erroneous delete), mirroring the retired worker.
+// CheckRelevance: the deferred delete applies while the subscription is still
+// canceled with a pending deferred delete. This execution-time re-check is the
+// authoritative resume guard: a missed advisory supersede cannot cause an
+// erroneous delete.
 func (h *NMIDeleteHandler) CheckRelevance(ctx context.Context, intent gen.BillingProviderIntent) (Relevance, error) {
 	sub, err := h.loadSubscription(ctx, intent)
 	if err != nil {

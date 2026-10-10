@@ -18,21 +18,16 @@ type ModeView interface {
 
 // GateExecution decides whether an intent of the given origin may attempt a
 // provider write for merchantID under its posture. blocked=true parks the
-// intent with the returned reason — posture is a reason an intent stays
-// pending, never an error.
-//
-// The matrix (origin x posture):
+// intent with the returned reason; posture is never an error.
 //
 //	            full      limited   readonly
 //	user        execute   execute   park
 //	admin       execute   execute   park
 //	system      execute   park      park
 //
-// user/admin-origin intents are reactive completions of something a human
-// asked for (their cancel's deferred delete, an admin refund) and execute
-// under limited. system-origin intents (dunning charges, proactive deletes)
-// require full. Nothing attempts a provider write under readonly: the wire
-// chokes are the backstop, the executor checks first and parks politely.
+// user/admin intents are reactive completions of a human request (a cancel's
+// deferred delete, an admin refund); system intents (dunning charges,
+// proactive deletes) need full. The wire chokes are the readonly backstop.
 func GateExecution(ctx context.Context, mode ModeView, merchantID uuid.UUID, origin Origin) (blocked bool, reason string) {
 	// A missing ModeView means we cannot tell which posture we are in. That is
 	// a wiring bug, and a fail-closed gate must never answer "go ahead" when it

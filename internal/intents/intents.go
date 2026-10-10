@@ -1,19 +1,6 @@
-// Package intents implements the financial authorization and evidence ledger.
-// Every accepted provider mutation records immutable terms in provider_intents and
-// atomically inserts its own River job. Inline attempts and River dispatch use
-// the same claim/submission fences. River wakes one operation at a time; the
-// ledger classifies its outcome:
-//
-//   - succeeded:            done; result_evidence records how
-//   - retryable failure:    re-scheduled with the type's backoff
-//   - ambiguous:            parked as unknown_needs_verify; the verifier
-//     resolves it via provider READS before any retry
-//   - terminal failure:     failed_terminal (surfaces in reconcile, #107)
-//   - parked:               deliberately not attempted (mode, kill switch,
-//     unconfigured client) — stays pending with the reason recorded;
-//     the queue drains when the blocker lifts
-//
-// Failure reasons are recorded on the intent, never raised as errors.
+// Package intents is the durable provider-write ledger: each mutation records
+// immutable terms in provider_intents, atomically with its River job, before
+// executing. An ambiguous outcome is resolved by provider reads before any retry.
 package intents
 
 import (
@@ -37,9 +24,9 @@ const (
 )
 
 // Origin identifies who wanted the mutation; it gates execution under the
-// operating modes (#346): user/admin-origin intents are reactive completions
-// and execute under mode=limited, system-origin intents require mode=full,
-// and NOTHING executes under mode=readonly.
+// operating modes: user/admin-origin intents are reactive completions and
+// execute under mode=limited, system-origin intents require mode=full, and
+// NOTHING executes under mode=readonly.
 type Origin string
 
 const (
@@ -178,8 +165,7 @@ func NewRegistry(handlers ...Handler) *Registry {
 	return r
 }
 
-// Register adds a handler. Registering two handlers for one type is a wiring
-// bug and panics (mirrors river.AddWorker semantics).
+// Register adds a handler. Registering two handlers for one type panics.
 func (r *Registry) Register(h Handler) {
 	if h == nil {
 		panic("intents: Register(nil handler)")

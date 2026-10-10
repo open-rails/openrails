@@ -21,7 +21,7 @@ import (
 // account and custody: submission requires the method to still match it, and
 // verification and operator resolution judge receipts only against it.
 // payment_method_id also pins the method against custody remap while the
-// operation is unresolved (or#297).
+// operation is unresolved.
 type InvoiceCollectionPayload struct {
 	Initiator           charge.Initiator           `json:"initiator"`
 	InvoiceID           uuid.UUID                  `json:"invoice_id"`

@@ -151,8 +151,8 @@ func (f *fakeStripeRefunds) FindRefundByIdempotencyKey(context.Context, string, 
 	return f.result, f.found, f.findErr
 }
 
-// IDEM-5/IDEM-6: Stripe refunds carry the intent key and classify so that
-// only a provably-unexecuted refund is retried.
+// Stripe refunds carry the intent key and classify so that only a
+// provably-unexecuted refund is retried.
 func TestStripeRefundClassification(t *testing.T) {
 	rails := railresolve.FixedSet{"stripe": {Rail: models.RailStripe, Stripe: &config.StripeRailConfig{SecretKey: "sk_test_123"}}}
 	apiErr := func(code int) error { return &subscriptions.StripeAPICallError{StatusCode: code, Message: "x"} }

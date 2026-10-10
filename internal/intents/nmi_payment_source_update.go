@@ -24,22 +24,19 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// TypeNMIPaymentSourceUpdate is the durable NMI payment-source swap (#674):
+// TypeNMIPaymentSourceUpdate is the durable NMI payment-source swap:
 // repointing a recurring subscription's billing at a different customer vault.
-// A transport-ambiguous update is the nastiest split in the payment-method
-// flow — local says new card, NMI keeps rebilling the old one (or vice versa)
-// until dunning surfaces it weeks later — so the swap is write-through: durable
-// intent → inline execute → confirm; ambiguity ⇒ pending_verify and the
-// verifier converges local and remote off the recurring record's CURRENT vault.
+// An ambiguous update would split local and NMI (local says new card, NMI
+// rebills the old one), so the swap is write-through: durable intent, inline
+// execute, confirm. Ambiguity goes to the verifier, which converges off the
+// recurring record's current vault.
 const TypeNMIPaymentSourceUpdate = "nmi_payment_source_update"
 
 // NMIPaymentSourceUpdateIdempotencyKey is the logical identity of "the swap of
 // this subscription onto this vault". priorSwaps is the durable count of
-// SUCCEEDED swap intents for the subscription (the #672/#673 attempt-count-key
-// pattern): a retry while the current swap is unresolved recomputes the same
-// count ⇒ same key ⇒ maps onto the same intent, while a NEW wish after any
-// completed swap advances the count — so a later A→B→A cycle can never be
-// falsely answered from an old succeeded tombstone.
+// SUCCEEDED swap intents for the subscription: a retry while the current swap
+// is unresolved recomputes the same key, while a new wish after any completed
+// swap advances it, so an A→B→A cycle is never answered from an old tombstone.
 func NMIPaymentSourceUpdateIdempotencyKey(subscriptionID uuid.UUID, newRailCustomerRef string, priorSwaps int64) string {
 	return fmt.Sprintf("%s:%s:%s:swap%d", TypeNMIPaymentSourceUpdate, subscriptionID, newRailCustomerRef, priorSwaps)
 }
@@ -48,8 +45,7 @@ func NMIPaymentSourceUpdateIdempotencyKey(subscriptionID uuid.UUID, newRailCusto
 // target payment method are re-read at execution time; the vault-id copies are
 // forensics plus the verifier's old/new comparison anchors. NewPspID freezes
 // the provider account that vaulted the target when the swap was produced, so
-// a re-attribution after enqueue (#297 custody remap) is detectable at the
-// seam that emits provider traffic (#657).
+// a custody remap after enqueue is detectable where provider traffic is sent.
 type NMIPaymentSourceUpdatePayload struct {
 	UserID             string     `json:"user_id"`
 	RailSubscriptionID string     `json:"rail_subscription_id,omitempty"`
@@ -77,30 +73,24 @@ const EvidenceCodePSPMismatch = "psp_mismatch"
 //   - relevance: applicable while the subscription still rebills (active/
 //     past_due) and still points at the intent's old (or already new) payment
 //     method; a later swap that moved the row elsewhere supersedes it.
-//   - provider account: before any provider traffic (execute and verify), the
-//     subscription, the intent's addressed PSP, the frozen target PSP and the
-//     target method's CURRENT PSP must be one account, re-read under the
-//     target's shared row lock (serialized against the #297 custody remap).
-//     A mismatch is terminal with evidence code psp_mismatch — a cross-PSP
-//     swap is never sent, never retried (#657).
-//   - execute: read the recurring record first — already billing the new vault
-//     IS success (crash-after-write recovery costs one read, zero writes);
-//     otherwise send the update. Transport-ambiguous outcomes go to the
-//     verifier; parsed clean rejections are TERMINAL (immediate user-facing
-//     failure — a definite refusal never re-pushes in the background). The update is an absolute set
-//     (customer_vault_id=<new>), so a re-send after a lost-response attempt is
-//     harmless by construction.
-//   - verify: read the record's CURRENT vault — new ⇒ done (finalize local),
-//     old ⇒ verified not executed (executor re-sends), record gone or a vault
-//     matching neither ⇒ terminal with a repair note (never stomp out-of-band
-//     provider state from the verifier).
-//   - finalize: point the local row at the new payment method — local commits
-//     only AFTER the provider is confirmed, and the intent row is the durable
-//     source of truth for repairing every crash/timeout ordering in between.
+//   - provider account: before any provider traffic, the subscription, the
+//     intent's PSP, the frozen target PSP and the target method's current PSP
+//     must be one account, re-read under the target's shared row lock
+//     (serialized against custody remap). A mismatch is terminal with evidence
+//     code psp_mismatch: never sent, never retried.
+//   - execute: read the recurring record first; already billing the new vault
+//     is success. Otherwise send the update, an absolute set
+//     (customer_vault_id=<new>) that is safe to re-send. Ambiguous outcomes go
+//     to the verifier; clean rejections are terminal (no background re-push).
+//   - verify: the record's current vault decides: new = done (finalize local),
+//     old = not executed (executor re-sends), gone or neither = terminal with
+//     a repair note (never stomp out-of-band provider state).
+//   - finalize: local commits only after the provider is confirmed; the intent
+//     row is the durable source of truth for repairing any crash in between.
 type NMIPaymentSourceUpdateHandler struct {
 	DB *db.DB
 	// Resolver arms the subscription merchant's NMI client from the armed
-	// rail state at drain time (#788).
+	// rail state at drain time.
 	Resolver NMIClientResolver
 	Clock    clockwork.Clock
 	Policy   BackoffPolicy
@@ -238,11 +228,9 @@ func (h *NMIPaymentSourceUpdateHandler) Execute(ctx context.Context, intent gen.
 			// The update MAY have landed; the verifier resolves via reads.
 			return Ambiguous("payment-source update outcome unknown: " + err.Error())
 		default:
-			// Parsed clean rejection: NMI understood the request and refused
-			// (bad vault id, dead subscription). It will not fix itself — the
-			// user gets an immediate terminal error, never a background
-			// re-push (Paul 2026-07-02: definite failures fail NOW; only
-			// ambiguity earns system-driven repair).
+			// Parsed clean rejection (bad vault id, dead subscription): it will
+			// not fix itself, so the user gets an immediate terminal error, never a
+			// background re-push. Only ambiguity earns system-driven repair.
 			return Terminal("payment-source update rejected cleanly: " + err.Error())
 		}
 	}
@@ -321,8 +309,8 @@ func (h *NMIPaymentSourceUpdateHandler) loadSubscription(ctx context.Context, in
 }
 
 // resolveClient resolves the account-aware NMI client for the subscription
-// (rows pinned to a PSP resolve by account key, #641/#655).
-// ok=false carries the Parked outcome to return.
+// (rows pinned to a PSP resolve by account key). ok=false carries the Parked
+// outcome to return.
 func (h *NMIPaymentSourceUpdateHandler) resolveClient(ctx context.Context, intent gen.BillingProviderIntent, sub *models.Subscription) (*nmi.NMIClient, Outcome, bool) {
 	client, key, ok, err := subscriptions.NMIClientForExistingSubscription(ctx, h.Resolver, sub)
 	if err != nil {
@@ -342,18 +330,17 @@ type providerAccountPin struct {
 	newRailCustomerRef string
 }
 
-// pinProviderAccount re-establishes the same-PSP invariant at the seam that
-// emits provider traffic. Under FOR SHARE on the target method (conflicting
-// with the #297 custody remap's FOR UPDATE, so the two serialize) it re-reads
-// the subscription and the target and requires
+// pinProviderAccount re-establishes the same-PSP invariant where provider
+// traffic is sent. Under FOR SHARE on the target method (conflicting with the
+// custody remap's FOR UPDATE, so the two serialize) it re-reads the
+// subscription and the target and requires
 //
 //	subscription.psp_id == intent.psp_id == payload.new_psp_id == target.psp_id
 //
 // refused carries the terminal outcome (psp_mismatch evidence, or a target
 // with no vault ref); err is a read failure the caller classifies. A target
-// row deleted out-of-band after a provider write may already have landed is
-// backstopped by the frozen payload: its PSP was proven at enqueue and cannot
-// be re-attributed once gone, so the swap still converges.
+// row deleted after a provider write may have landed is backstopped by the
+// frozen payload: its PSP was proven at enqueue, so the swap still converges.
 func (h *NMIPaymentSourceUpdateHandler) pinProviderAccount(ctx context.Context, intent gen.BillingProviderIntent, p NMIPaymentSourceUpdatePayload) (pin providerAccountPin, refused *Outcome, err error) {
 	if intent.SubscriptionID == nil || *intent.SubscriptionID == uuid.Nil {
 		return pin, ptr(Terminal("intent has no subscription_id")), nil
@@ -455,10 +442,8 @@ func (h *NMIPaymentSourceUpdateHandler) finalize(ctx context.Context, intent gen
 }
 
 // ErrPaymentSourceUpdateProcessing: the durable swap intent could not confirm
-// the provider update inline (transport-ambiguous outcome, parked provider).
-// The intent ledger converges local and remote out-of-band; a retried request
-// maps onto the SAME intent (and an inline retry resolves it via the read-first
-// execute). Never a silent split, never a lost swap.
+// the provider update inline (ambiguous outcome, parked provider). The intent
+// log converges local and remote; a retried request maps onto the same intent.
 var ErrPaymentSourceUpdateProcessing = errors.New("payment method update is processing; retry the same request to check the result")
 
 // PaymentSourceUpdateOutcome mirrors the durable intent's post-execution state
@@ -475,9 +460,7 @@ type PaymentSourceUpdateOutcome struct {
 }
 
 // PaymentSourceUpdateThrough posts the durable nmi_payment_source_update
-// intent and executes it inline (#674 write-through). Wired by the composition
-// root; both the HTTP handler and the embedded internal/service twin route through
-// it.
+// intent and executes it inline (write-through).
 type PaymentSourceUpdateThrough struct {
 	Runner *Runner
 	DB     *db.DB
@@ -492,12 +475,10 @@ func (t *PaymentSourceUpdateThrough) ExecutePaymentSourceUpdate(ctx context.Cont
 	if sub == nil || newPM == nil {
 		return PaymentSourceUpdateOutcome{}, errors.New("subscription and payment method are required")
 	}
-	// The account boundary at the durable side-effect seam, whatever the HTTP
-	// caller already checked: the target is re-read under its shared row lock,
-	// so a #297 custody remap in flight commits first and is seen here (a remap
-	// landing after this check is caught by the executor's pin). A target on
-	// another PSP never becomes an intent; cross-account migration is the
-	// report-only card re-entry plan (#657).
+	// Check the account boundary here, whatever the HTTP caller checked: the
+	// target is re-read under its shared row lock, so a custody remap in flight
+	// commits first and is seen (a later remap is caught by the executor's
+	// pin). A target on another PSP never becomes an intent.
 	var params EnqueueParams
 	err := t.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		row, lerr := gen.New(tx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: sub.MerchantID, ID: newPM.ID})

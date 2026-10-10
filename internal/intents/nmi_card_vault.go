@@ -23,10 +23,10 @@ import (
 )
 
 // TypeNMICardVault vaults a card the server itself received (card_entry:
-// server, #1129). The card is never stored, so the write cannot be replayed:
-// the request that carried the card sends it once, and every later look at
-// the operation settles it by reading the vault the intent names. A card
-// whose vaulting cannot be established is entered again.
+// server). The card is never stored, so the write cannot be replayed: the
+// request that carried the card sends it once, and every later look at the
+// operation settles it by reading the vault the intent names. A card whose
+// vaulting cannot be established is entered again.
 const TypeNMICardVault = "nmi_card_vault"
 
 // cardVaultSettle is how long a vault the gateway does not show may still be

@@ -30,27 +30,23 @@ import (
 // the Runner's claims and transitions run on the worker pool.
 type Store struct {
 	db *db.DB
-	// ceiling is the #732 anti-credential-compromise rate ceiling. When set,
-	// Enqueue passes every destructive user/admin intent through it BEFORE the
-	// write-ahead row is created (the producer chokepoint). nil ⇒ ungated (unit
-	// tests, and system-only Stores where the gate is inert anyway). The gate
-	// carries its OWN root pool DB, so it survives tx-rebind (WithTx).
+	// ceiling, when set, gates every destructive enqueue before the write-ahead
+	// row is created. nil = ungated (unit tests). It carries its own root pool
+	// DB, so it survives tx-rebind (withTxDB).
 	ceiling *RateCeiling
 }
 
 func NewStore(d *db.DB) *Store { return &Store{db: d} }
 
-// NewStoreGated builds a Store whose destructive user/admin enqueues are gated
-// by the #732 rate ceiling. The ceiling references the ROOT pool DB and is
-// preserved across tx-rebinds (withTxDB).
+// NewStoreGated builds a Store whose destructive enqueues pass the rate
+// ceiling, preserved across tx-rebinds (withTxDB).
 func NewStoreGated(d *db.DB, ceiling *RateCeiling) *Store {
 	return &Store{db: d, ceiling: ceiling}
 }
 
-// withTxDB rebinds this Store onto a tx-scoped DB while PRESERVING the rate
-// ceiling (whose own pool-backed DB is independent of the tx). Producers that
-// commit the enqueue atomically with their local write (ccbill/nmi cancel
-// schedulers) use this so the gate is not lost on rebind.
+// withTxDB rebinds this Store onto a tx-scoped DB, keeping the rate ceiling
+// (whose pool-backed DB is independent of the tx), so an enqueue committed
+// with the caller's write stays gated.
 func (s *Store) withTxDB(txdb *db.DB) *Store {
 	return &Store{db: txdb, ceiling: s.ceiling}
 }
@@ -68,14 +64,13 @@ type EnqueueParams struct {
 	SubscriptionID *uuid.UUID
 	PaymentID      *uuid.UUID
 	PriceID        *uuid.UUID
-	// PspID is the PSP the outbound write is addressed to. Required (or#893)
-	// unless the intent is CUSTODIAN-addressed: an intent nobody can attribute
-	// cannot be executed against the right credentials.
+	// PspID is the PSP the outbound write is addressed to. Required unless the
+	// intent is custodian-addressed: an intent nobody can attribute cannot be
+	// executed against the right credentials.
 	PspID uuid.UUID
-	// CustodianID addresses the write to a custodian instead (or#795's batch
-	// account updater uploads one token batch to a custodian that backs many
-	// PSPs, so no single psp_id names it). Exactly the provider_intents_addressed_check
-	// constraint: one of the two must be set.
+	// CustodianID addresses the write to a custodian instead (the batch account
+	// updater uploads to a custodian that backs many PSPs). Per
+	// provider_intents_addressed_check, one of the two must be set.
 	CustodianID    uuid.UUID
 	Payload        any
 	IdempotencyKey string
@@ -83,9 +78,9 @@ type EnqueueParams struct {
 	Origin         Origin
 	OriginReason   string
 	// Actor is the authenticated principal id (admin user id / self-service
-	// customer id) that produced this intent, stamped on the row and used by the
-	// #732 per-actor ceiling. Empty ⇒ resolved from the ambient principal on the
-	// context (auth middleware); system/background paths carry none.
+	// customer id) that produced this intent, stamped on the row and keying the
+	// per-actor ceiling. Empty = resolved from the admitted principal on the
+	// context; system/background paths carry none.
 	Actor     string
 	ExpiresAt *time.Time
 }
@@ -310,12 +305,10 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if p.IntentType == "" || p.IdempotencyKey == "" {
 		return gen.BillingProviderIntent{}, fmt.Errorf("intents: enqueue requires intent_type and idempotency_key")
 	}
-	// or#893/or#795 (provider_intents_addressed_check): the intent names the account it
-	// will execute against — a PSP, or a custodian for the writes addressed to
-	// one. An explicit value wins; otherwise the PSP the caller already routed
-	// to and pinned on ctx (checkout's stampPSP, the webhook plane) is the
-	// answer. Nothing else is: an intent nobody can attribute cannot be executed
-	// against the right credentials.
+	// The intent names the account it will execute against: a PSP, or a
+	// custodian for writes addressed to one. An explicit value wins; otherwise
+	// the PSP the caller already pinned on ctx. An intent nobody can attribute
+	// cannot be executed against the right credentials.
 	if p.CustodianID == uuid.Nil {
 		p.CustodianID = db.CustodianIDFromContext(ctx)
 	}
@@ -339,19 +332,17 @@ func (s *Store) enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		originReason = &p.OriginReason
 	}
 	// Resolve the actor (explicit override, else the admitted invoker) up
-	// front: it is both stamped on the row and the #732 per-invoker ceiling
-	// key. The subject and credential it acted with are audit only.
+	// front: it is stamped on the row and keys the per-invoker ceiling. The
+	// subject and credential it acted with are audit only.
 	actor := ResolveActor(ctx, p.Actor)
 	var subject, credential *string
 	if who, ok := admitted(ctx); ok {
 		subject, credential = textOrNil(who.Subject), textOrNil(billingauth.CredentialName(who))
 	}
 
-	// #732 anti-credential-compromise rate ceiling: destructive user/admin ops
-	// pass through the gate BEFORE the write-ahead intent is created. A trip
-	// returns a typed refusal (no row created ⇒ the op does not happen); a gate
-	// evaluation error FAILS CLOSED (also refuses). The gate is inert for
-	// non-destructive types and system-origin ops.
+	// The rate ceiling gates destructive ops before the write-ahead intent is
+	// created: a trip or an evaluation error refuses, and with no row the op
+	// does not happen.
 	if s.ceiling != nil {
 		if err := s.ceiling.Check(ctx, CheckParams{
 			Actor:      actor,
@@ -452,12 +443,8 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (gen.BillingProviderInten
 	return s.db.Gen(ctx).GetProviderIntent(ctx, gen.GetProviderIntentParams{MerchantID: scopeMerchantID.UUID(), ID: id})
 }
 
-// ClaimDue leases up to batch due executable intents (SKIP LOCKED).
-//
-// or#862: this MUST run on a merchant-pinned connection; it claims only that
-// merchant's intents. Under the since-removed RLS a bare-context claim leased
-// ZERO intents — silently, with no error — which is how the entire outbound
-// provider-mutation plane came to be inert while its tests passed.
+// ClaimDue leases up to batch due executable intents (SKIP LOCKED). It must
+// run on a merchant-pinned connection and claims only that merchant's intents.
 func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
@@ -474,9 +461,9 @@ func (s *Store) ClaimDue(ctx context.Context, now, leaseUntil time.Time, batch i
 	})
 }
 
-// RenewClaim extends a live lease the caller still owns (xs-007 row 32): the
-// row must still carry the claim's status and attempts. false means the lease
-// lapsed or another executor claimed the row; this one must send nothing more.
+// RenewClaim extends a live lease the caller still owns: the row must still
+// carry the claim's status and attempts. false means the lease lapsed or
+// another executor claimed the row; this one must send nothing more.
 func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, attempts int32, now, leaseUntil time.Time) (bool, error) {
 	ctx, release, err := s.db.WithIndependentMerchantConn(ctx)
 	if err != nil {
@@ -498,7 +485,7 @@ func (s *Store) RenewClaim(ctx context.Context, id uuid.UUID, status string, att
 }
 
 // ClaimDueVerify leases up to batch due unknown_needs_verify intents. Same
-// merchant-pin requirement as ClaimDue (or#862).
+// merchant-pin requirement as ClaimDue.
 func (s *Store) ClaimDueVerify(ctx context.Context, now, leaseUntil time.Time, batch int64) ([]gen.BillingProviderIntent, error) {
 	scopeMerchantID, scopeErr := merchant.Require(ctx)
 	if scopeErr != nil {
@@ -555,9 +542,9 @@ func (s *Store) ReleaseUnknownClaim(ctx context.Context, id uuid.UUID) (bool, er
 	return rows == 1 && err == nil, err
 }
 
-// ExpireOverdue expires every live intent whose relevance window elapsed —
-// except destructive intents whose merchant has an OPEN held_bulk finding
-// (#679): breaker-held intents never expire out from under the operator.
+// ExpireOverdue expires every live intent whose relevance window elapsed,
+// except destructive intents whose merchant has an open held_bulk finding:
+// breaker-held intents never expire out from under the operator.
 func (s *Store) ExpireOverdue(ctx context.Context, now time.Time) (int64, error) {
 	if err := s.db.AssertMerchantScope(ctx, "intent expiry sweep"); err != nil {
 		return 0, err
@@ -597,31 +584,17 @@ func (s *Store) MarkSucceeded(ctx context.Context, id uuid.UUID, now time.Time, 
 }
 
 // pruneEvidenceKeys are the result-pointer keys a slim succeeded tombstone
-// retains by default — the dunning repair path reads them back off
-// result_evidence (internal/river/jobs_dunning.go: transaction_id for the
-// lifecycle repair, response_code for hard/soft decline classification; the
-// admin operations view also surfaces transaction_id). Everything else is
-// forensic and was already durably logged to provider_mutation_logs before the
-// success transition, so it is safe to drop from the intent row — UNLESS the handler asks to
-// keep its evidence (PrunePolicy), which the catalog archive/sunset handlers do
-// because internal/service/catalog_extras.go renders their verification booleans.
+// keeps by default. The rest of the evidence is already in
+// provider_mutation_logs, unless the handler's PrunePolicy keeps it.
 var pruneEvidenceKeys = []string{"transaction_id", "response_code"}
 
-// PruneSucceeded slims a just-succeeded intent down to a dedupe tombstone:
-// the heavy payload is dropped and result_evidence is reduced to the pointer
-// keys downstream readers still need. The ROW ITSELF IS RETAINED — it is the
-// effectively-once tombstone (UNIQUE on merchant_id+idempotency_key); deleting
-// it would let a re-enqueue re-run the provider mutation (a double charge).
-//
-// keepPayload/keepEvidence are the handler's PrunePolicy: a handler whose
-// payload is read AFTER success (the refund producer's conflict detection reads
-// reservation_id off the durable succeeded row — admin_payments.go) sets
-// keepPayload; a handler whose result_evidence is read after success (catalog
-// archive/sunset detail — catalog_extras.go) sets keepEvidence.
-//
-// The WHERE status='succeeded' guard makes this a no-op on anything not (still)
-// succeeded. Best-effort by design: a prune failure leaves the full row in
-// place, which is correct — just larger — and never weakens the dedupe.
+// PruneSucceeded slims a just-succeeded intent to a dedupe tombstone: the
+// payload is dropped and result_evidence reduced to pruneEvidenceKeys, unless
+// the handler's PrunePolicy keeps them. The row itself stays: it is the
+// effectively-once tombstone (UNIQUE merchant_id+idempotency_key), and
+// deleting it would let a re-enqueue re-run the provider mutation. A no-op
+// unless the row is still succeeded; a failed prune leaves the full row, which
+// is safe.
 func (s *Store) PruneSucceeded(ctx context.Context, id uuid.UUID, evidence map[string]any, keepPayload, keepEvidence bool) error {
 	if err := refuseCustodyKeys(evidence); err != nil {
 		return err
@@ -682,10 +655,10 @@ func slimEvidence(evidence map[string]any) map[string]any {
 	return slim
 }
 
-// RecordProgress merges keys into result_evidence on a LIVE (non-terminal)
-// intent — handlers use it to durably pin provider references (e.g. a signed
-// Solana tx signature) BEFORE the side effect is sent (#674), so a crash
-// mid-send resolves via a provider read keyed on the recorded reference.
+// RecordProgress merges keys into result_evidence on a live (non-terminal)
+// intent. Handlers use it to pin provider references (e.g. a signed Solana tx
+// signature) before the side effect is sent, so a crash mid-send resolves via
+// a provider read keyed on the recorded reference.
 func (s *Store) RecordProgress(ctx context.Context, id uuid.UUID, keys map[string]any) error {
 	if _, ok := keys["initial_submitted"]; ok {
 		return errors.New("initial submission fence is write-once")

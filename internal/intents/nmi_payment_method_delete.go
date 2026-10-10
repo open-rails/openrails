@@ -23,31 +23,21 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 )
 
-// TypeNMIPaymentMethodDelete is the durable NMI customer-vault delete (#674 tail): a
-// user-initiated payment-method delete posts this write-ahead intent and
-// executes it inline. Once accepted, the delete can never be lost — a crash or
-// transport-ambiguous response routes through the verifier, whose read answers
-// "vault (or billing entry) absent at the provider ⇒ done" (the
-// tombstone-reads-as-gone pattern from nmi_delete.go).
+// TypeNMIPaymentMethodDelete is the durable NMI customer-vault delete: a
+// payment-method delete request posts this intent and executes it inline. A
+// crash or ambiguous response routes through the verifier, whose read treats
+// an absent vault (or billing entry) as done.
 //
-// or#870 — THE STANDING RULE, and why this type is USER-ONLY.
-// OpenRails never deletes a stored payment method. Not on expiry, not on a
-// stolen card, not on cancellation, not ever. Only the end user does. This
-// intent has exactly ONE producer — PaymentMethodDeleteThrough, reached only from the
-// authenticated DELETE /payment-methods/:id route after an ownership check —
-// and it must keep exactly one. If you are adding a caller because a
-// subscription died, you are looking for TypeNMIDeleteSubscription, which
-// cancels the recurring SCHEDULE at the rail and leaves the instrument alone so
-// the customer can update or remove it themselves.
+// OpenRails never deletes a stored payment method on its own: not on expiry,
+// a stolen card or cancellation. The only producer is
+// PaymentMethodDeleteThrough, reached from the customer's or staff's
+// payment-method DELETE route after an ownership check. A dead subscription
+// wants TypeNMIDeleteSubscription, which cancels the rail schedule and leaves
+// the instrument alone.
 //
-// The only other remote-vault deletes in the codebase roll back a vault minted
-// MILLISECONDS earlier in the same request — creation that failed to persist
-// locally, or a checkout whose very first charge was declined. They are gated
-// on `createdVault` and can never reach an instrument the customer has saved.
-// See paymentmethods.CleanupPaymentMethodBestEffort.
-// The VALUE is deliberately unchanged: it is persisted in
-// provider_intents.intent_type, and renaming a symbol must never rewrite history
-// (or#871 — `vault` is reserved for HashiCorp, but a stored row is evidence).
+// The only other remote-vault deletes roll back a vault created moments
+// earlier in the same request (paymentmethods.CleanupPaymentMethodBestEffort).
+// The value is persisted in provider_intents.intent_type, so it never changes.
 const TypeNMIPaymentMethodDelete = "nmi_vault_delete"
 
 // NMIPaymentMethodDeleteIdempotencyKey is the logical identity of "the delete of this
@@ -148,8 +138,8 @@ func (h *NMIPaymentMethodDeleteHandler) Execute(ctx context.Context, intent gen.
 
 	shared := p.BillingEntryOnly
 	if shared && strings.TrimSpace(pm.RailMethodRef) == "" {
-		// Cannot identify WHICH billing entry is this card — refuse rather than
-		// destroy the siblings (#682 shared-vault contract).
+		// Cannot identify which billing entry is this card: refuse rather than
+		// destroy its siblings in the shared vault.
 		return Parked(fmt.Sprintf("vault %s is shared by other stored payment methods and this row carries no billing id to scope the delete", vaultID))
 	}
 
