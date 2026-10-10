@@ -13,8 +13,11 @@ Once per loaded credential set, never per payment:
   merchant.
 - When a credential is created or rotated through the admin API (the write
   is refused on anything but a simulated verdict).
-- At the first mutation of a credential set this process has not verified yet
-  (for example one rotated by another process).
+- When a PSP's configuration changes, on every instance as it reloads the
+  merchant: an edit through any instance, or one made in Vault directly. A PSP
+  disarmed at startup is offered again once its credential is fixed, without a
+  restart.
+- At the first mutation of a credential set this process has not verified yet.
 
 A verdict is keyed by rail, merchant, PSP, account, endpoint and credential
 fingerprint: any change is a fresh verification.
@@ -28,7 +31,7 @@ are sent; reads work. The engine still starts and stays ready, and the
 unverified or disarmed. `unknown` is verified again in the background and on
 the next mutation with capped backoff (at most 30 seconds), so a provider
 outage never needs a restart. `live` and `mismatched` hold until the
-credential is reloaded.
+PSP's configuration changes.
 
 ## Signals
 

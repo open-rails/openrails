@@ -138,8 +138,9 @@ whichever replica leads schedules them.
 
 Outside River, every instance runs the Solana Pay poller, which shares
 references through leased claims, and verifies its own PSP credentials at
-start. From its first cross-currency quote until it closes, an instance reads
-FX rates into its own memory every 2 hours, whether or not it calls `Start`.
+start and whenever a PSP's configuration changes. From its first cross-currency
+quote until it closes, an instance reads FX rates into its own memory every 2
+hours, whether or not it calls `Start`.
 
 ### Caches
 
@@ -154,7 +155,7 @@ is a file or Vault, cached per instance. Per-instance caches:
 | Solana keypair signer | 60 seconds |
 | FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
-| PSP posture verdicts | the instance's next start: restart every instance after fixing a PSP that started disarmed |
+| PSP posture verdicts | at once, when the PSP's configuration changes |
 
 ### What scales
 

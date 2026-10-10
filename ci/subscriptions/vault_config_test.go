@@ -3,16 +3,20 @@
 package subscriptions_test
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/vaulttest"
@@ -37,6 +41,54 @@ func TestVaultEditReachesEveryReplica(t *testing.T) {
 		got, err := sibling.client.GetMerchantConfiguration(ctx)
 		return err == nil && got.Revision == updated.Revision && got.Settings.ArrearsGraceDays != nil && *got.Settings.ArrearsGraceDays == 9
 	}, 5*time.Second, 50*time.Millisecond, "the other replica reloads on the announcement, well inside the recheck")
+}
+
+// A PSP armed through one replica is offered by another's checkout without
+// a restart: each replica verifies a PSP again when its document changes.
+func TestPSPArmedOnOneReplicaServesOnAnother(t *testing.T) {
+	t.Parallel()
+	w := prepareWorld(t, 12)
+	w.vault = vaulttest.New(t)
+	const liveKey = "live-nmi-key"
+	w.declare = func(psps map[string]openrails.PSPConfig) {
+		nmi := psps["nmi"]
+		nmi.Secrets["security_key"] = liveKey
+		clear(psps)
+		psps["nmi"] = nmi
+	}
+	// The gateway declines the test-mode probe for liveKey: a live account.
+	w.nmi.Intercept(func(r *http.Request) bool {
+		return strings.HasSuffix(r.URL.Path, "/payments/auth") && r.Header.Get("Authorization") == liveKey
+	}, func(r *http.Request, _ func() *http.Response) (*http.Response, error) {
+		body := `{"object":"transaction","id":"probe-live","response":"2","response_code":"200","response_text":"DECLINE"}`
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(body)), Request: r}, nil
+	})
+	t.Cleanup(w.nmi.ClearIntercepts)
+	w.start()
+	ctx := t.Context()
+	other := w.sibling()
+	nmi := w.psp["nmi"]
+	require.Eventually(t, func() bool { return engine.Graph(other.rt).Runtime.PSPPostureDisarmed(nmi.UUID()) },
+		10*time.Second, 50*time.Millisecond, "a live account is disarmed in a sandbox deployment")
+
+	product, err := w.client[embedded].CreateProduct(ctx, billing.CreateProductParams{Key: "armed", DisplayName: "Armed", Entitlements: []string{"content:armed"}})
+	require.NoError(t, err)
+	price, err := w.client[embedded].CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "armed-usd", UnitAmount: 1_000_000, Currency: "USD"})
+	require.NoError(t, err)
+	checkout := func() error {
+		_, err := other.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
+			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "armed@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/return",
+		})
+		return err
+	}
+	require.ErrorIs(t, checkout(), billing.ErrInvalid, "nothing sells through a disarmed PSP")
+
+	psp, err := w.client[embedded].GetPSP(ctx, nmi)
+	require.NoError(t, err)
+	_, err = w.client[embedded].UpdatePSP(ctx, nmi, billing.UpdatePSPParams{ExpectedRevision: &psp.Revision, Credentials: map[string]string{"security_key": "e2e-nmi-key"}})
+	require.NoError(t, err)
+	require.Eventually(t, func() bool { return checkout() == nil }, 10*time.Second, 50*time.Millisecond, "the other replica sells through the armed PSP")
+	require.False(t, engine.Graph(other.rt).Runtime.PSPPostureDisarmed(nmi.UUID()))
 }
 
 // Rotating one PSP's credential writes that PSP's document alone.

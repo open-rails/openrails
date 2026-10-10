@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/merchantdocs"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/providerposture"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -29,8 +31,9 @@ import (
 // full-jitter backoff until each is known. Construction never waits on a
 // provider. A PSP not proven to match the posture stays disarmed (its
 // mutations are refused) while reads and other PSPs keep working; Ready
-// reports it as degraded. Credentials loaded later are verified when written
-// or on their first mutation.
+// reports it as degraded. A PSP whose configuration changes later is verified
+// again as each replica reloads it (followPSPPosture), or at its first
+// mutation.
 //
 // Under live posture every NMI account must prove it is not in test mode
 // (SEC-33): an account left in test mode approves without moving money.
@@ -155,7 +158,7 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 	default:
 		return true
 	}
-	r.providerPosture.AddPSP(pspID, status.Key, check)
+	r.providerPosture.AddPSP(mid.UUID(), pspID, status.Key, check)
 	switch {
 	case status.Armed():
 		log.WithContext(ctx).WithFields(fields).Info("provider posture: credentials verified; PSP armed")
@@ -165,6 +168,56 @@ func (r *Runtime) verifyPSPPosture(ctx context.Context, mid billing.MerchantID, 
 		log.WithContext(ctx).WithError(status.Error()).WithFields(fields).Error("provider posture: credentials not verified; PSP disarmed")
 	}
 	return status.Verdict != providerposture.Unknown
+}
+
+// followPSPPosture keeps the verified PSPs in step with a merchant's
+// configuration as this replica loads it: a PSP no longer live is forgotten,
+// and one whose document changed is verified again, so checkout on every
+// replica serves the current credentials without a restart.
+func (r *Runtime) followPSPPosture(mid billing.MerchantID, previous, current merchantdocs.Set) {
+	if r == nil || r.Config == nil || config.IsProviderReadOnly(r.Config) || r.DB == nil || r.Merchants == nil {
+		return
+	}
+	changed := map[string]bool{}
+	for key, doc := range current.PSPs {
+		if before, ok := previous.PSPs[key]; !ok || !reflect.DeepEqual(before.Value, doc.Value) {
+			changed[key] = true
+		}
+	}
+	for key := range previous.PSPs {
+		if _, ok := current.PSPs[key]; !ok {
+			changed[key] = true
+		}
+	}
+	if len(changed) == 0 {
+		return
+	}
+	live := !config.IsTestMode(r.Config)
+	r.Go("provider posture follow", func(ctx context.Context) {
+		ctx = merchant.WithID(ctx, mid)
+		scopes, err := r.Merchants.LivePSPScopes(ctx, mid, r.Merchants.Environment())
+		if err != nil {
+			if ctx.Err() == nil {
+				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("provider posture: cannot read merchant PSPs")
+			}
+			return
+		}
+		verify := map[uuid.UUID]bool{}
+		unchanged := map[uuid.UUID]bool{}
+		for _, scope := range scopes {
+			if !changed[strings.ToLower(scope.Key)] {
+				unchanged[scope.ID] = true
+			} else if !live || scope.Rail == string(models.RailNMI) {
+				verify[scope.ID] = true
+			}
+		}
+		r.providerPosture.ForgetPSPs(mid.UUID(), func(id uuid.UUID) bool { return unchanged[id] })
+		for id := range verify {
+			vctx, cancel := context.WithTimeout(ctx, postureCheckTimeout)
+			r.verifyPSPPosture(vctx, mid, id)
+			cancel()
+		}
+	})
 }
 
 // PSPPostureDisarmed reports whether pspID failed its posture verification.

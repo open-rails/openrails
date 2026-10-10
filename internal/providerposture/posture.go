@@ -275,7 +275,12 @@ func (r *Registry) Lookup(k Key) (Status, bool) {
 type Tracked struct {
 	mu     sync.Mutex
 	checks map[Key]Check
-	psps   map[uuid.UUID]Key
+	psps   map[uuid.UUID]trackedPSP
+}
+
+type trackedPSP struct {
+	merchant uuid.UUID
+	key      Key
 }
 
 // Add records k as loaded by this runtime.
@@ -288,39 +293,59 @@ func (t *Tracked) Add(k Key, check Check) {
 	t.checks[k] = check
 }
 
-// AddPSP records k as the verified credential of pspID, replacing any prior.
-func (t *Tracked) AddPSP(pspID uuid.UUID, k Key, check Check) {
-	t.Add(k, check)
+// AddPSP records k as the verified credential of the merchant's pspID,
+// replacing any prior.
+func (t *Tracked) AddPSP(merchantID, pspID uuid.UUID, k Key, check Check) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.psps == nil {
-		t.psps = map[uuid.UUID]Key{}
+	if t.checks == nil {
+		t.checks = map[Key]Check{}
 	}
-	t.psps[pspID] = k
+	if t.psps == nil {
+		t.psps = map[uuid.UUID]trackedPSP{}
+	}
+	if prior, ok := t.psps[pspID]; ok && prior.key != k {
+		delete(t.checks, prior.key)
+	}
+	t.checks[k] = check
+	t.psps[pspID] = trackedPSP{merchant: merchantID, key: k}
+}
+
+// ForgetPSPs drops the merchant's recorded PSPs keep refuses: no longer live,
+// or about to be verified again with changed credentials.
+func (t *Tracked) ForgetPSPs(merchantID uuid.UUID, keep func(pspID uuid.UUID) bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for id, p := range t.psps {
+		if p.merchant == merchantID && !keep(id) {
+			delete(t.psps, id)
+			delete(t.checks, p.key)
+		}
+	}
 }
 
 // PSPDisarmed reports whether pspID's recorded verdict definitively refuses
 // mutations. Unverified PSPs and transient Unknown verdicts are not disarmed.
 func (t *Tracked) PSPDisarmed(r *Registry, pspID uuid.UUID) bool {
 	t.mu.Lock()
-	k, ok := t.psps[pspID]
+	p, ok := t.psps[pspID]
 	t.mu.Unlock()
 	if !ok {
 		return false
 	}
-	s, done := r.Lookup(k)
+	s, done := r.Lookup(p.key)
 	return done && s.Verdict != Unknown && !s.Armed()
 }
 
 // PSPStatus returns pspID's recorded status, if it has one.
 func (t *Tracked) PSPStatus(r *Registry, pspID uuid.UUID) (Status, bool) {
 	t.mu.Lock()
-	k, ok := t.psps[pspID]
+	p, ok := t.psps[pspID]
 	t.mu.Unlock()
 	if !ok {
 		return Status{}, false
 	}
-	return r.Lookup(k)
+	return r.Lookup(p.key)
 }
 
 // Unarmed returns every tracked key that is not armed, from cached verdicts

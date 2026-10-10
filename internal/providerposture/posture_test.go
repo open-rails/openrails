@@ -151,7 +151,7 @@ func TestTrackedReportsCachedStateAndRecoversAfterBackoff(t *testing.T) {
 	var tracked Tracked
 	pspID := uuid.New()
 	r.Verify(ctx, k, check)
-	tracked.AddPSP(pspID, k, check)
+	tracked.AddPSP(uuid.New(), pspID, k, check)
 	tracked.Add(Key{Rail: "stripe", Credential: Fingerprint("d")}, fixed(Simulated, nil))
 	require.Len(t, tracked.Unarmed(r), 1, "an unverified key is not reported; the unknown one is")
 	require.EqualValues(t, 1, calls.Load(), "reading state never probes")

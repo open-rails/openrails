@@ -61,7 +61,13 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 	if r.NMIClients != nil {
 		svc.WithNMIWire(r.NMIClients.Wire)
 	}
-	cache.SetSync(r.syncMerchantConfig)
+	cache.SetSync(func(ctx context.Context, id billing.MerchantID, previous, loaded merchantdocs.Set) (merchantdocs.Set, error) {
+		set, err := r.syncMerchantConfig(ctx, id, previous, loaded)
+		if err == nil {
+			r.followPSPPosture(id, previous, set)
+		}
+		return set, err
+	})
 	cache.SetAnnounce(r.announceMerchantConfig)
 	r.DB.SetMerchantConfig(svc)
 	r.ArmMerchantsService(svc)
