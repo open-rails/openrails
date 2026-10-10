@@ -4299,6 +4299,7 @@
       "fnv": "hash/fnv",
       "log": "github.com/sirupsen/logrus",
       "math": "math",
+      "providerrecovery": "github.com/open-rails/openrails/internal/providerrecovery",
       "solanago": "github.com/gagliardetto/solana-go",
       "solanaint": "github.com/open-rails/openrails/internal/integrations/solana",
       "solanatokens": "github.com/open-rails/openrails/internal/modules/solana/tokens",

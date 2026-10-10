@@ -120,33 +120,22 @@ func ensuredATAOwners(t *testing.T, sub *recordingSubmitter) []solanago.PublicKe
 	return owners
 }
 
-// A fresh publish submits create_plan, provisions every receiving ATA (a pull
+// A fresh publish submits create_plan, provisions the receiving ATA (a pull
 // into a missing ATA reverts), and returns the CHAIN's created_at, which
 // subscribe must echo exactly.
-func TestPublishPlanCreatesPlanAndReceivingATAs(t *testing.T) {
+func TestPublishPlanCreatesPlanAndReceivingATA(t *testing.T) {
 	amount := [2]uint64{10_000_000, 720}
-	cold := randKey(t).PublicKey()
-	for _, receiving := range []string{"", cold.String()} {
-		svc, sub := newPlanService(t, planChain{mintDecimals: 6, created: &amount})
-		in := planInput(10_000_000, 6)
-		in.ReceivingWallet = receiving
-
-		h, err := svc.PublishPlan(context.Background(), in)
-		require.NoError(t, err)
-		planPDA, _, _ := subscriptions.DerivePlanPDA(sub.merchantPub, 7)
-		require.Equal(t, planPDA.String(), h.PlanPDA)
-		require.Equal(t, testPlanCreatedAt, h.CreatedAt)
-		require.Equal(t, uint64(10_000_000), h.AmountBaseUnits)
-		require.Equal(t, "USDC", h.MintSymbol)
-		require.NotEmpty(t, h.Signature)
-		require.True(t, sub.submits[0][0].ProgramID().Equals(subscriptions.ProgramID), "create_plan first")
-
-		want := []solanago.PublicKey{sub.merchantPub}
-		if receiving != "" {
-			want = append(want, cold)
-		}
-		require.Equal(t, want, ensuredATAOwners(t, sub))
-	}
+	svc, sub := newPlanService(t, planChain{mintDecimals: 6, created: &amount})
+	h, err := svc.PublishPlan(context.Background(), planInput(10_000_000, 6))
+	require.NoError(t, err)
+	planPDA, _, _ := subscriptions.DerivePlanPDA(sub.merchantPub, 7)
+	require.Equal(t, planPDA.String(), h.PlanPDA)
+	require.Equal(t, testPlanCreatedAt, h.CreatedAt)
+	require.Equal(t, uint64(10_000_000), h.AmountBaseUnits)
+	require.Equal(t, "USDC", h.MintSymbol)
+	require.NotEmpty(t, h.Signature)
+	require.True(t, sub.submits[0][0].ProgramID().Equals(subscriptions.ProgramID), "create_plan first")
+	require.Equal(t, []solanago.PublicKey{sub.merchantPub}, ensuredATAOwners(t, sub))
 }
 
 // The plan amount is immutable on-chain, so the caller's decimals must equal
@@ -227,52 +216,39 @@ func TestPublishPlanRepublish(t *testing.T) {
 }
 
 // A publish whose create_plan landed but whose ATA creation failed is retried:
-// the retry finds the plan and creates the missing receiving ATAs, once.
-func TestPublishPlanRetryEnsuresReceivingATAs(t *testing.T) {
-	cold := randKey(t).PublicKey()
-	for _, receiving := range []string{"", cold.String()} {
-		t.Run("receiving="+receiving, func(t *testing.T) {
-			created := [2]uint64{10_000_000, 720}
-			sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey(), failATA: true}
-			chain := planChain{mintDecimals: 6, created: &created, atas: map[solanago.PublicKey]bool{}, sub: sub}
-			svc := NewPlanServiceWithReader(sub, chain, "devnet", testTokens())
-			in := planInput(10_000_000, 6)
-			in.ReceivingWallet = receiving
+// the retry finds the plan and creates the missing receiving ATA, once.
+func TestPublishPlanRetryEnsuresReceivingATA(t *testing.T) {
+	created := [2]uint64{10_000_000, 720}
+	sub := &recordingSubmitter{merchantPub: randKey(t).PublicKey(), failATA: true}
+	chain := planChain{mintDecimals: 6, created: &created, atas: map[solanago.PublicKey]bool{}, sub: sub}
+	svc := NewPlanServiceWithReader(sub, chain, "devnet", testTokens())
+	in := planInput(10_000_000, 6)
 
-			_, err := svc.PublishPlan(context.Background(), in)
-			require.ErrorContains(t, err, "ensure receiving ata")
-			require.Len(t, sub.submits, 1, "create_plan landed")
+	_, err := svc.PublishPlan(context.Background(), in)
+	require.ErrorContains(t, err, "ensure receiving ata")
+	require.Len(t, sub.submits, 1, "create_plan landed")
 
-			sub.failATA = false
-			h, err := svc.PublishPlan(context.Background(), in)
-			require.NoError(t, err)
-			require.Equal(t, testPlanCreatedAt, h.CreatedAt)
-			want := []solanago.PublicKey{sub.merchantPub}
-			if receiving != "" {
-				want = append(want, cold)
-			}
-			require.Equal(t, want, ensuredATAOwners(t, sub))
-			for _, owner := range want {
-				ata, _, _ := subscriptions.DeriveATA(owner, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), solanago.TokenProgramID)
-				chain.atas[ata] = true
-			}
+	sub.failATA = false
+	h, err := svc.PublishPlan(context.Background(), in)
+	require.NoError(t, err)
+	require.Equal(t, testPlanCreatedAt, h.CreatedAt)
+	require.Equal(t, []solanago.PublicKey{sub.merchantPub}, ensuredATAOwners(t, sub))
+	ata, _, _ := subscriptions.DeriveATA(sub.merchantPub, solanago.MustPublicKeyFromBase58(testDevnetUSDCMint), solanago.TokenProgramID)
+	chain.atas[ata] = true
 
-			submitted := len(sub.submits)
-			_, err = svc.PublishPlan(context.Background(), in)
-			require.NoError(t, err)
-			require.Len(t, sub.submits, submitted, "existing ATAs submit nothing")
-		})
-	}
+	submitted := len(sub.submits)
+	_, err = svc.PublishPlan(context.Background(), in)
+	require.NoError(t, err)
+	require.Len(t, sub.submits, submitted, "an existing ATA submits nothing")
 }
 
 func TestPublishPlanValidatesTermsBeforeSubmit(t *testing.T) {
 	for name, mutate := range map[string]func(*PublishPlanInput){
-		"zero amount":              func(in *PublishPlanInput) { in.AmountBaseUnits = 0 },
-		"zero period":              func(in *PublishPlanInput) { in.PeriodHours = 0 },
-		"period over a year":       func(in *PublishPlanInput) { in.PeriodHours = maxPeriodHours + 1 },
-		"billing cycle mismatch":   func(in *PublishPlanInput) { in.BillingCycleHours = 744 },
-		"ineligible token":         func(in *PublishPlanInput) { in.TokenSymbol = "PYUSD" },
-		"invalid receiving wallet": func(in *PublishPlanInput) { in.ReceivingWallet = "not-base58!" },
+		"zero amount":            func(in *PublishPlanInput) { in.AmountBaseUnits = 0 },
+		"zero period":            func(in *PublishPlanInput) { in.PeriodHours = 0 },
+		"period over a year":     func(in *PublishPlanInput) { in.PeriodHours = maxPeriodHours + 1 },
+		"billing cycle mismatch": func(in *PublishPlanInput) { in.BillingCycleHours = 744 },
+		"ineligible token":       func(in *PublishPlanInput) { in.TokenSymbol = "PYUSD" },
 	} {
 		svc, sub := newPlanService(t, planChain{mintDecimals: 6})
 		in := planInput(10_000_000, 6)

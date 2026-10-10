@@ -2,7 +2,8 @@ package reconcile
 
 import "fmt"
 
-// NeverRollbackableTables lists the tables no rollback may restore, with why:
+// NeverRollbackableTables lists the tables no rollback may restore, with why;
+// PlanUndoRun refuses a run that would restore one:
 // the money spine, the grant log every derived effect is recomputed from, the
 // lifecycle audit trail, the provider mutation record and webhook dedup. A
 // rollback restores state wrongly destroyed; it never retracts value wrongly
@@ -28,7 +29,6 @@ var NeverRollbackableTables = map[string]string{
 // (pending/failed_retryable -> superseded), a forward transition. Deleting one
 // or rewriting one that executed stays forbidden; the supersede query's status
 // predicate holds that line.
-const providerIntentsForwardOnlyReason = "forward lifecycle transition only: pending/failed_retryable -> superseded. Never deleted, never rewritten once it has executed"
 
 // UnrecoverableRunKinds are destructive-run kinds whose damage no local undo can
 // reverse, mapped to what the operator must reach for instead. Refusing them by

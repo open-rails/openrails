@@ -21,6 +21,7 @@ import (
 	solanaint "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	solanatokens "github.com/open-rails/openrails/internal/modules/solana/tokens"
+	"github.com/open-rails/openrails/internal/providerrecovery"
 )
 
 // Solana on-chain subscription lifecycle events (no money movement): the
@@ -484,13 +485,13 @@ const solanaDiscoveryCadence = 24 * time.Hour
 // windows, so each plan's turn comes once a day. A hash-of-plan-id slot needs
 // no stored state (MerchantFetcherBuilder builds a fresh fetcher every tick)
 // and spreads plans across the day instead of one getProgramAccounts spike.
-const solanaDiscoverySlotWidth = 4 * time.Hour
+// A slot spans two refresh cycles, so a refresh lands in it however the
+// scheduler staggers the merchant: a plan is enumerated once or twice a day.
+const solanaDiscoverySlotWidth = 2 * providerrecovery.RefreshInterval
 
-// planDiscoveryDue reports whether planPDA's slow-cadence discovery pass
-// falls in `now`'s slot: true on exactly one call window per
-// solanaDiscoveryCadence (hash(planPDA) assigns the slot permanently, so the
-// same plan recurs on the same slot every cadence period with no stored
-// state).
+// planDiscoveryDue reports whether `now` falls in planPDA's slot of the
+// day. hash(planPDA) assigns the slot permanently, so the same plan recurs on
+// the same slot every cadence period with no stored state.
 func planDiscoveryDue(planPDA string, now time.Time) bool {
 	slots := int64(solanaDiscoveryCadence / solanaDiscoverySlotWidth)
 	slot := now.UTC().UnixNano() / int64(solanaDiscoverySlotWidth)

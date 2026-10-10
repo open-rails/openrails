@@ -182,6 +182,11 @@ func PlanUndoRun(ctx context.Context, database *db.DB, runID uuid.UUID) (UndoPla
 		plan.AccessToInvalidate = c.AccessToInvalidate
 		plan.SubscriptionsTombstoned, plan.SubscriptionsChanged = c.SubscriptionsTombstoned, c.SubscriptionsChanged
 	}
+	for table := range plan.Restorable {
+		if why, never := NeverRollbackableTables[table]; never {
+			return plan, fmt.Errorf("destructive run %s would restore %s, which no rollback may restore: %s", runID, table, why)
+		}
+	}
 
 	manifest, err := q.ListProviderIntentsForRun(ctx, gen.ListProviderIntentsForRunParams{MerchantID: mid, RunID: runID})
 	if err != nil {

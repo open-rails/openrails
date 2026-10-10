@@ -200,10 +200,9 @@ type PublishPlanInput struct {
 	// AmountDecimals is the precision AmountBaseUnits was computed at;
 	// PublishPlan refuses it unless it matches the mint's on-chain decimals,
 	// since the plan amount is immutable once created.
-	AmountDecimals  int
-	ReceivingWallet string // optional cold wallet; sets the plan's destination whitelist
-	MetadataURI     string // optional (<=128 bytes)
-	EndTs           int64  // 0 = perpetual
+	AmountDecimals int
+	MetadataURI    string // optional (<=128 bytes)
+	EndTs          int64  // 0 = perpetual
 
 	// BillingCycleHours, when > 0, is the source price's billing cycle. PublishPlan
 	// then enforces period_hours == BillingCycleHours so the on-chain period can
@@ -285,15 +284,6 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 			in.AmountBaseUnits, in.AmountDecimals, symbol, mintStr, onchainDecimals)
 	}
 
-	var recv *solanago.PublicKey
-	if in.ReceivingWallet != "" {
-		pk, err := solanago.PublicKeyFromBase58(in.ReceivingWallet)
-		if err != nil {
-			return nil, fmt.Errorf("recurring: invalid receiving wallet %q: %w", in.ReceivingWallet, err)
-		}
-		recv = &pk
-	}
-
 	merchant, err := s.submitter.MerchantAddress(ctx, in.MerchantID)
 	if err != nil {
 		return nil, fmt.Errorf("recurring: resolve merchant merchant address: %w", err)
@@ -321,7 +311,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 				existing.PeriodHours == in.PeriodHours {
 				// Terms match: no second create_plan. A publish that failed after
 				// create_plan landed still lacks its receiving ATAs, so ensure them.
-				if err := s.ensureReceivingATAs(ctx, in.MerchantID, mint, merchant, recv); err != nil {
+				if err := s.ensureReceivingATA(ctx, in.MerchantID, merchant, mint); err != nil {
 					return nil, err
 				}
 				return &PlanHandle{
@@ -345,16 +335,9 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 		}
 	}
 
-	// Pullers/destinations stay empty by default: the plan owner (cranker)
-	// pulls into its own ATA. Pinning one without the other fails the pull with
-	// InvalidAccountOwner. A cold receiving wallet pins both (puller[0]=merchant,
-	// destination[0]=cold wallet), but the crank still pulls into the merchant
-	// ATA, so a cold-wallet plan cannot be cranked yet.
+	// Pullers and destinations stay empty: the plan owner (the cranker) pulls
+	// into its own ATA.
 	var destinations, pullers [4]solanago.PublicKey
-	if recv != nil {
-		pullers[0] = merchant
-		destinations[0] = *recv
-	}
 
 	createdAt := s.now().UTC().Unix()
 	ix, err := subscriptions.BuildCreatePlan(subscriptions.CreatePlanParams{
@@ -380,7 +363,7 @@ func (s *PlanService) PublishPlan(ctx context.Context, in PublishPlanInput) (*Pl
 
 	// transfer_subscription reverts without the receiver ATA, so ensure it
 	// before the first crank; a failure is retried by the next publish.
-	if err := s.ensureReceivingATAs(ctx, in.MerchantID, mint, merchant, recv); err != nil {
+	if err := s.ensureReceivingATA(ctx, in.MerchantID, merchant, mint); err != nil {
 		return nil, err
 	}
 
@@ -456,18 +439,6 @@ func (s *PlanService) SunsetPlan(ctx context.Context, tenantID billing.MerchantI
 		return "", fmt.Errorf("recurring: submit update_plan (sunset): %w", err)
 	}
 	return sig.String(), nil
-}
-
-// ensureReceivingATAs provisions the merchant's receiving ATA and, for a cold
-// wallet plan, the receiving wallet's too.
-func (s *PlanService) ensureReceivingATAs(ctx context.Context, tenantID billing.MerchantID, mint, merchant solanago.PublicKey, recv *solanago.PublicKey) error {
-	if err := s.ensureReceivingATA(ctx, tenantID, merchant, mint); err != nil {
-		return err
-	}
-	if recv == nil {
-		return nil
-	}
-	return s.ensureReceivingATA(ctx, tenantID, *recv, mint)
 }
 
 // ensureReceivingATA idempotently provisions owner's associated token account for
