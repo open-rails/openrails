@@ -39,7 +39,7 @@ guards() {
 # These builds embed only web/admin/dist/.gitkeep: Go must build without a
 # console build.
 build() {
-  in_modules go build ./...
+  in_modules go build -o /dev/null ./...
 }
 
 go_tests() {
