@@ -45,11 +45,12 @@ through `host-four`; these are placeholders, not customer or repository names.
   request, responses and error codes. The catalog mounts the route and generates
   `api/openapi.json`, the TypeScript wire types of billing-ui and the console, and
   `docs/api/routes.md` / `error-codes.md`.
-- Bundles: public, customer (`/v1/me`) and webhooks are always mounted; under
-  `/v1/admin` the admin routes (`Permissions.AdminRead` for reads, `AdminUpdate` for
-  writes), catalog edits (`Catalog`) and the merchant's own configuration
-  (`MerchantConfig`) mount only with the host's permission; `AdminUpdate` needs
-  `AdminRead`. No route registers a merchant or manages a
+- Route groups: public, customer (`/v1/me`) and webhooks are always mounted. The staff
+  groups (`Routes.RouteGroups`: `Admin`, `Catalog`, `MerchantConfig`, `Metrics`) are off
+  unless the host turns them on, and each needs its permission in `Routes.Scope`
+  (`Permissions.AdminRead`, plus `AdminUpdate` for admin changes; `Catalog`;
+  `MerchantConfig`; `Metrics`); `Programmatic` (`/v1/app`) admits applications. No
+  route registers a merchant or manages a
   team, API keys or the merchant directory: those are `server` Go methods and
   the `openrails` CLI; a hosted product builds its own routes on them.
 - OpenRails names no staff permissions: the host passes its own in
@@ -108,7 +109,9 @@ through `host-four`; these are placeholders, not customer or repository names.
 
 ## Catalog
 - One document model, `catalog.Application` (`catalog.ParseApplicationYAML`); a host
-  whose file is the truth sets `Config.Catalog`, and `New` applies it.
+  with a catalog file sets `Config.Catalog`, and `New` applies it on every start. Files
+  and console edits share fields by ownership: a field an edit changed last is not
+  overwritten by the file, and the conflict is reported.
 - The **pull** reconciliation job (`internal/river/jobs_catalog_reconciliation.go`) is
   ALERT-ONLY: it never mutates providers.
 - The **push** path is the provider adapter, e.g. `AutoCreate` in
