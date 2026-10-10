@@ -2,6 +2,7 @@ package recurring
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -29,7 +30,7 @@ type tierLifecycle struct {
 
 func (l *tierLifecycle) CreateMembershipTx(_ context.Context, _ *db.DB, p *submod.CreateMembershipParams) (*models.Subscription, []*models.NotificationQueue, error) {
 	l.creates = append(l.creates, p)
-	return &models.Subscription{ID: l.newID}, nil, nil
+	return &models.Subscription{ID: l.newID, CurrentPeriodEndsAt: p.CurrentPeriodEndsAt}, nil, nil
 }
 
 func (l *tierLifecycle) CancelMembershipTx(_ context.Context, _ *db.DB, p *submod.CancelMembershipParams) (*submod.CancelMembershipTxResult, error) {
@@ -47,7 +48,7 @@ func (inlineTx) MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx)
 
 type tierStore struct {
 	oldRow    *models.SolanaSubscription
-	byNewPDA  *models.SolanaSubscription
+	receipt   *models.SolanaTierChangeReceipt
 	statusErr error
 	statuses  []string
 	upserted  []*models.SolanaSubscription
@@ -57,8 +58,18 @@ func (s *tierStore) GetBySubscriptionID(context.Context, uuid.UUID) (*models.Sol
 	return s.oldRow, nil
 }
 
-func (s *tierStore) GetBySubscriptionPDA(context.Context, string) (*models.SolanaSubscription, error) {
-	return s.byNewPDA, nil
+func (s *tierStore) GetByID(context.Context, uuid.UUID) (*models.Subscription, error) {
+	metadata, err := json.Marshal(map[string]any{"solana_tier_change_receipt": s.receipt})
+	return &models.Subscription{Status: models.StatusActive, Rail: models.RailSolana, CustomerID: uuid.MustParse("00000000-0000-0000-0000-000000000001"), Metadata: metadata}, err
+}
+
+func (s *tierStore) LockTierChangeTx(ctx context.Context, _ *db.DB, id uuid.UUID) (*models.Subscription, error) {
+	return s.GetByID(ctx, id)
+}
+
+func (s *tierStore) SaveSolanaTierChangeTx(_ context.Context, _ *db.DB, _ uuid.UUID, receipt *models.SolanaTierChangeReceipt) error {
+	s.receipt = receipt
+	return nil
 }
 
 func (s *tierStore) UpsertTx(_ context.Context, _ *db.DB, row *models.SolanaSubscription) error {
@@ -140,7 +151,7 @@ func (c *tierChain) prepare(t *testing.T, upgrade bool) (ConfirmTierChangeInput,
 	require.NoError(t, err)
 	oldEnd := c.now.Add(14 * 24 * time.Hour)
 	return ConfirmTierChangeInput{
-		OldSubscriptionID: c.old.SubscriptionID, UserID: "user-1", NewPriceID: uuid.New(),
+		OldSubscriptionID: c.old.SubscriptionID, UserID: "00000000-0000-0000-0000-000000000001", NewPriceID: uuid.New(),
 		NewSubscriptionPDA: res.NewSubscriptionPDA, NewPlanID: 99, NewMintSymbol: "USDC",
 		NewAmountBaseUnits: 50_000_000, NewPeriodHours: 720, NewPlanCreatedAt: 1_700_000_000,
 		NewFiatAmount: 50_000_000, NewCurrency: "USD", IsUpgrade: upgrade, FirstChargeBaseUnits: tierCharge,
@@ -165,7 +176,7 @@ func (c *tierChain) land(t *testing.T, tx *solanago.Transaction) solanago.Signat
 }
 
 func (c *tierChain) service(life *tierLifecycle, store *tierStore) *ConfirmTierChangeService {
-	svc := NewConfirmTierChangeService(c.rpc, life, store, inlineTx{}, "devnet", testTokens())
+	svc := NewConfirmTierChangeService(c.rpc, life, store, store, inlineTx{}, "devnet", testTokens())
 	svc.now = func() time.Time { return c.now }
 	return svc
 }
@@ -216,7 +227,7 @@ func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 		svc.now = func() time.Time { return c.now.Add(72 * time.Hour) }
 		res, err := svc.Confirm(context.Background(), in)
 		require.NoError(t, err)
-		require.Equal(t, life.newID, res.NewSubscription.ID)
+		require.Equal(t, life.newID, res.Receipt.SubscriptionID)
 		require.False(t, res.AlreadyConfirmed)
 
 		require.Len(t, life.cancels, 1)
@@ -380,21 +391,29 @@ func (c *chainUnread) GetTransaction(context.Context, solanago.Signature) (*rpc.
 	return nil, errors.New("unexpected chain read")
 }
 
-// Re-confirming a tier change already mirrored (new row exists) returns the
-// existing subscription without touching the chain or the DB.
+// Exact confirmation retries use the committed receipt without reading the chain.
 func TestConfirmTierChangeIsIdempotent(t *testing.T) {
 	c := newTierChain(t)
 	in, _ := c.change(t, true)
 	existing := uuid.New()
 	chain := &chainUnread{}
-	store := &tierStore{oldRow: c.old, byNewPDA: &models.SolanaSubscription{SubscriptionID: existing}}
+	store := &tierStore{oldRow: c.old, receipt: &models.SolanaTierChangeReceipt{Signature: in.Signature, PriceID: in.NewPriceID, SubscriptionID: existing}}
 	life := &tierLifecycle{}
 
-	res, err := NewConfirmTierChangeService(chain, life, store, inlineTx{}, "devnet", testTokens()).Confirm(context.Background(), in)
+	res, err := NewConfirmTierChangeService(chain, life, store, store, inlineTx{}, "devnet", testTokens()).Confirm(context.Background(), in)
 	require.NoError(t, err)
 	require.True(t, res.AlreadyConfirmed)
-	require.Equal(t, existing, res.NewSubscription.ID)
+	require.Equal(t, existing, res.Receipt.SubscriptionID)
 	require.Zero(t, chain.reads)
 	require.Empty(t, life.cancels)
 	require.Empty(t, life.creates)
+	for _, changed := range []ConfirmTierChangeInput{
+		{OldSubscriptionID: in.OldSubscriptionID, UserID: in.UserID, NewPriceID: uuid.New(), Signature: in.Signature},
+		{OldSubscriptionID: in.OldSubscriptionID, UserID: in.UserID, NewPriceID: in.NewPriceID, Signature: "another-signature"},
+		{OldSubscriptionID: in.OldSubscriptionID, UserID: uuid.NewString(), NewPriceID: in.NewPriceID, Signature: in.Signature},
+	} {
+		_, err := NewConfirmTierChangeService(chain, life, store, store, inlineTx{}, "devnet", testTokens()).Confirm(context.Background(), changed)
+		require.ErrorIs(t, err, ErrPaymentUnverified)
+	}
+	require.Zero(t, chain.reads)
 }

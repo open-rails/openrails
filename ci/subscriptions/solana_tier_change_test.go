@@ -3,6 +3,8 @@
 package subscriptions_test
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -12,9 +14,11 @@ import (
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -23,6 +27,11 @@ import (
 func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
+	// This journey deliberately sends multiple confirmation retries in one burst.
+	w.cfg = func(c *config.Config) {
+		c.RateLimits = config.DefaultRateLimits()
+		(*c.RateLimits)["subscribe"].RequestsPerMinute = 50
+	}
 	fake, merchantKey := withSolana(t, w)
 	w.start()
 	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetDUSDMint)
@@ -82,6 +91,8 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	sub := done.SubscriptionID.String()
 	w.advance(time.Minute)
 	require.True(t, b.entitled("basic-"+sfx))
+	var firstPath string
+	var firstRequest, firstResult map[string]any
 
 	// The ungrouped product is refused on every route, and grants nothing.
 	status, out := b.call(http.MethodPost, "/subscriptions/"+sub+"/change", "tc-"+uuid.NewString(), map[string]any{"price_id": price("vip")})
@@ -127,7 +138,41 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 			require.Zero(t, fake.Balance(b.wallet.PublicKey(), mint), "confirmation must not prepare another charge against the now-empty wallet")
 			w.advance(time.Hour)
 		}
-		confirmed := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/change", "tc-"+uuid.NewString(), map[string]any{"price_id": price(tc.target), "signature": signature}))
+		path := "/subscriptions/" + sub + "/change"
+		body := map[string]any{"price_id": price(tc.target), "signature": signature}
+		// Race two confirmations, including the no-payment downgrade.
+		raw, err := json.Marshal(body)
+		require.NoError(t, err)
+		var confirmations [2]map[string]any
+		var group errgroup.Group
+		for i := range confirmations {
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, w.server.URL+mountPrefix+"/v1/me"+path, bytes.NewReader(raw))
+			require.NoError(t, err)
+			req.Header.Set("Authorization", "Bearer "+b.token)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Idempotency-Key", "tc-"+uuid.NewString())
+			group.Go(func() error {
+				res, err := http.DefaultClient.Do(req)
+				if err != nil {
+					return err
+				}
+				defer res.Body.Close()
+				if err := json.NewDecoder(res.Body).Decode(&confirmations[i]); err != nil {
+					return err
+				}
+				if res.StatusCode != http.StatusOK {
+					return fmt.Errorf("confirmation: %d %v", res.StatusCode, confirmations[i])
+				}
+				return nil
+			})
+		}
+		require.NoError(t, group.Wait())
+		confirmed := unwrap(confirmations[0])
+		require.Equal(t, confirmed, unwrap(confirmations[1]))
+		require.Equal(t, confirmed, unwrap(b.must(http.MethodPost, path, "tc-"+uuid.NewString(), body)))
+		if firstPath == "" {
+			firstPath, firstRequest, firstResult = path, body, confirmed
+		}
 		require.Equal(t, "succeeded", confirmed["status"])
 		require.Equal(t, prep["amount_due_now"], confirmed["amount_due_now"], "confirmation preserves the agreed quote")
 		sub = confirmed["subscription_id"].(string)
@@ -146,4 +191,17 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 			fake.Fund(b.wallet.PublicKey(), mint, 500_000_000)
 		}
 	}
+	// The first successor has since been canceled; replay still returns its original terms.
+	require.Equal(t, firstResult, unwrap(b.must(http.MethodPost, firstPath, "tc-"+uuid.NewString(), firstRequest)))
+	for _, body := range []map[string]any{
+		{"price_id": price("premium"), "signature": firstRequest["signature"]},
+		{"price_id": firstRequest["price_id"], "signature": solanago.Signature{}.String()},
+	} {
+		status, out := b.call(http.MethodPost, firstPath, "tc-"+uuid.NewString(), body)
+		require.Equal(t, http.StatusBadRequest, status, "%v", out)
+	}
+	other := w.newCustomer()
+	status, out = other.call(http.MethodPost, firstPath, "tc-"+uuid.NewString(), firstRequest)
+	require.Equal(t, http.StatusNotFound, status, "%v", out)
+	require.Len(t, w.payments(embedded, b.id), 4)
 }

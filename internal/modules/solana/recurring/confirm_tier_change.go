@@ -33,13 +33,16 @@ type tierChangeTransactor interface {
 	MerchantTx(ctx context.Context, fn func(context.Context, pgx.Tx) error) error
 }
 
-// tierChangeStore is the solana_subscriptions store the mirror reads and
-// writes; GetBySubscriptionPDA is the idempotency check.
 type tierChangeStore interface {
 	GetBySubscriptionID(ctx context.Context, subscriptionID uuid.UUID) (*models.SolanaSubscription, error)
-	GetBySubscriptionPDA(ctx context.Context, pda string) (*models.SolanaSubscription, error)
 	UpsertTx(ctx context.Context, txDB *db.DB, s *models.SolanaSubscription) error
 	SetStatusTx(ctx context.Context, txDB *db.DB, id uuid.UUID, status string) error
+}
+
+type tierChangeMembershipStore interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*models.Subscription, error)
+	LockTierChangeTx(ctx context.Context, txDB *db.DB, id uuid.UUID) (*models.Subscription, error)
+	SaveSolanaTierChangeTx(ctx context.Context, txDB *db.DB, id uuid.UUID, receipt *models.SolanaTierChangeReceipt) error
 }
 
 // ConfirmTierChangeInput describes a confirmed on-chain tier change to mirror.
@@ -98,11 +101,23 @@ type ConfirmTierChangeInput struct {
 
 // ConfirmTierChangeResult is the mirrored new subscription.
 type ConfirmTierChangeResult struct {
-	// NewSubscription is the new lifecycle membership.
-	NewSubscription *models.Subscription
-	// AlreadyConfirmed is true when a prior confirm already mirrored this tier
-	// change (idempotent re-confirm returns the existing new subscription).
+	Receipt          *models.SolanaTierChangeReceipt
 	AlreadyConfirmed bool
+}
+
+// ReplayTierChange accepts only the exact operation previously committed.
+func ReplayTierChange(sub *models.Subscription, priceID uuid.UUID, signature string) (*ConfirmTierChangeResult, error) {
+	receipt, err := sub.SolanaTierChangeReceipt()
+	if err != nil {
+		return nil, fmt.Errorf("read tier-change receipt: %w", err)
+	}
+	if receipt == nil {
+		return nil, nil
+	}
+	if receipt.Signature != signature || receipt.PriceID != priceID {
+		return nil, fmt.Errorf("%w: subscription already changed by a different transaction", ErrPaymentUnverified)
+	}
+	return &ConfirmTierChangeResult{Receipt: receipt, AlreadyConfirmed: true}, nil
 }
 
 // ConfirmTierChangeService confirms the subscriber's atomic tier-change tx
@@ -111,28 +126,30 @@ type ConfirmTierChangeResult struct {
 // terms and, for an upgrade, pulls the co-signed prorated charge. Only then
 // does it mirror in one DB transaction: cancel the old membership and row
 // (releasing the tier-group slot), create the new membership and upsert the new
-// active row. Idempotent: an existing new row returns its subscription.
+// active row. Retries return the receipt saved with the old membership.
 type ConfirmTierChangeService struct {
-	chain      landedTxReader
-	lifecycle  tierChangeLifecycle
-	store      tierChangeStore
-	transactor tierChangeTransactor
-	network    string
-	tokens     map[string]config.TokenConfig
-	now        func() time.Time
+	chain       landedTxReader
+	lifecycle   tierChangeLifecycle
+	store       tierChangeStore
+	memberships tierChangeMembershipStore
+	transactor  tierChangeTransactor
+	network     string
+	tokens      map[string]config.TokenConfig
+	now         func() time.Time
 }
 
 // NewConfirmTierChangeService builds a ConfirmTierChangeService. network
 // ("mainnet"/"devnet") resolves the recurring mint for the new row.
-func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, transactor tierChangeTransactor, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
+func NewConfirmTierChangeService(chain landedTxReader, lifecycle tierChangeLifecycle, store tierChangeStore, memberships tierChangeMembershipStore, transactor tierChangeTransactor, network string, tokens ...map[string]config.TokenConfig) *ConfirmTierChangeService {
 	return &ConfirmTierChangeService{
-		chain:      chain,
-		lifecycle:  lifecycle,
-		store:      store,
-		transactor: transactor,
-		network:    network,
-		tokens:     normalizeRecurringTokens(firstTokenMap(tokens)),
-		now:        time.Now,
+		chain:       chain,
+		lifecycle:   lifecycle,
+		store:       store,
+		memberships: memberships,
+		transactor:  transactor,
+		network:     network,
+		tokens:      normalizeRecurringTokens(firstTokenMap(tokens)),
+		now:         time.Now,
 	}
 }
 
@@ -146,6 +163,16 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	if in.Signature == "" {
 		return nil, fmt.Errorf("recurring: signature is required")
 	}
+	oldSub, err := s.memberships.GetByID(ctx, in.OldSubscriptionID)
+	if err != nil {
+		return nil, fmt.Errorf("load tier-change membership: %w", err)
+	}
+	if oldSub.Rail != models.RailSolana || oldSub.CustomerID.String() != in.UserID {
+		return nil, fmt.Errorf("%w: old subscription does not belong to this subscriber", ErrPaymentUnverified)
+	}
+	if result, err := ReplayTierChange(oldSub, in.NewPriceID, in.Signature); result != nil || err != nil {
+		return result, err
+	}
 	if in.NewSubscriptionPDA == "" {
 		return nil, fmt.Errorf("recurring: new subscription pda is required")
 	}
@@ -158,15 +185,6 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 
 	if s.transactor == nil {
 		return nil, fmt.Errorf("recurring: tier-change transaction manager is required")
-	}
-
-	// Idempotent: a new row means a prior confirm mirrored this change. Keyed
-	// by the new PDA because the old row is canceled in place.
-	if existing, err := s.store.GetBySubscriptionPDA(ctx, in.NewSubscriptionPDA); err == nil && existing != nil && existing.SubscriptionID != uuid.Nil {
-		return &ConfirmTierChangeResult{
-			NewSubscription:  &models.Subscription{ID: existing.SubscriptionID},
-			AlreadyConfirmed: true,
-		}, nil
 	}
 
 	// The old row is canceled and carries its identity onto the new row.
@@ -250,11 +268,25 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 
 	var (
-		newSub        *models.Subscription
+		result        *ConfirmTierChangeResult
 		notifications []*models.NotificationQueue
 	)
 	err = s.transactor.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		txDB := db.NewWithPgxTx(tx)
+		locked, err := s.memberships.LockTierChangeTx(ctx, txDB, in.OldSubscriptionID)
+		if err != nil {
+			return err
+		}
+		if locked.Rail != models.RailSolana || locked.CustomerID.String() != in.UserID {
+			return fmt.Errorf("%w: old subscription does not belong to this subscriber", ErrPaymentUnverified)
+		}
+		result, err = ReplayTierChange(locked, in.NewPriceID, in.Signature)
+		if result != nil || err != nil {
+			return err
+		}
+		if locked.Status != models.StatusActive {
+			return fmt.Errorf("%w: old subscription is not active for this subscriber", ErrPaymentUnverified)
+		}
 		if in.CheckoutAttemptID != uuid.Nil {
 			if err := settlement.ClaimCheckout(ctx, txDB, in.CheckoutAttemptID, in.Signature); err != nil {
 				return err
@@ -279,8 +311,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 			}
 		}
 
-		var createNotifications []*models.NotificationQueue
-		newSub, createNotifications, err = s.lifecycle.CreateMembershipTx(ctx, txDB, createParams)
+		newSub, createNotifications, err := s.lifecycle.CreateMembershipTx(ctx, txDB, createParams)
 		if err != nil {
 			return fmt.Errorf("recurring: create new membership: %w", err)
 		}
@@ -298,6 +329,15 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		if err := s.store.UpsertTx(ctx, txDB, newRow); err != nil {
 			return fmt.Errorf("recurring: persist new solana subscription: %w", err)
 		}
+		receipt := &models.SolanaTierChangeReceipt{
+			Signature: in.Signature, PriceID: in.NewPriceID, SubscriptionID: newSub.ID,
+			AmountDueNow: chargeAmount, Currency: in.NewCurrency, NextChargeAmount: in.NewFiatAmount,
+			NextChargeDate: *newSub.CurrentPeriodEndsAt, IsUpgrade: in.IsUpgrade,
+		}
+		if err := s.memberships.SaveSolanaTierChangeTx(ctx, txDB, in.OldSubscriptionID, receipt); err != nil {
+			return fmt.Errorf("persist tier-change receipt: %w", err)
+		}
+		result = &ConfirmTierChangeResult{Receipt: receipt}
 
 		notifications = append(notifications, createNotifications...)
 		if cancelResult != nil {
@@ -310,7 +350,7 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	}
 	s.lifecycle.DispatchNotifications(ctx, notifications)
 
-	return &ConfirmTierChangeResult{NewSubscription: newSub}, nil
+	return result, nil
 }
 
 // verifyLanded proves the landed tier-change transaction

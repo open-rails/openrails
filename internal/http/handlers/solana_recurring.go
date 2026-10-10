@@ -23,6 +23,7 @@ import (
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -51,10 +52,7 @@ type solanaResolvedPlanTerms struct {
 	createdAt  int64
 }
 
-// resolveSolanaTierChange authorizes ownership and resolves everything the
-// prepare/confirm endpoints share. A refusal is an *api.APIError or a checkout
-// refusal; writeChangeTierError answers either.
-func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, newPriceIDStr string, quoteUpgrade bool) (*resolvedTierChange, error) {
+func authorizeSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID) (*models.Subscription, error) {
 	if r.State.SubscriptionService == nil || r.State.PriceService == nil || r.State.ProductService == nil {
 		return nil, api.Coded(billing.CodeServiceUnavailable, "subscriptions are not configured")
 	}
@@ -77,6 +75,11 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	if oldSub.Rail != models.RailSolana {
 		return nil, api.Coded(billing.CodeSubscriptionChangeUnsupportedOnRail, "subscription is not a Solana subscription")
 	}
+	return oldSub, nil
+}
+
+func resolveSolanaTierChange(r *httprequest.Request, oldSub *models.Subscription, newPriceIDStr string, quoteUpgrade bool) (*resolvedTierChange, error) {
+	subscriptionID := oldSub.ID
 
 	// Load the OLD on-chain row (subscriber/merchant identifiers for the atomic tx).
 	oldRow, err := solanasubs.NewSolanaSubscriptionRepo(r.State.DB).GetBySubscriptionID(r.Request.Context(), subscriptionID)
@@ -225,7 +228,28 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		r.ErrorCode(billing.CodeServiceUnavailable, "Solana recurring billing is not configured")
 		return
 	}
-	resolved, err := resolveSolanaTierChange(r, subscriptionID, priceID, signature == "")
+	oldSub, err := authorizeSolanaTierChange(r, subscriptionID)
+	if err != nil {
+		writeChangeTierError(r, err)
+		return
+	}
+	if signature != "" {
+		target, err := billing.ParsePriceID(priceID)
+		if err != nil || target.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "invalid price_id").WithParam("price_id"))
+			return
+		}
+		result, err := recurring.ReplayTierChange(oldSub, target.UUID(), signature)
+		if err != nil {
+			r.APIError(solanaClientError(err))
+			return
+		}
+		if result != nil {
+			r.SuccessJSON(solanaTierChangeResponse(result.Receipt))
+			return
+		}
+	}
+	resolved, err := resolveSolanaTierChange(r, oldSub, priceID, signature == "")
 	if err != nil {
 		writeChangeTierError(r, err)
 		return
@@ -315,6 +339,7 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		r.State.SolanaRPCResolver.ChainReader(),
 		r.State.SubscriptionLifecycleService,
 		solanasubs.NewSolanaSubscriptionRepo(r.State.DB),
+		subscriptions.NewSubscriptionRepo(r.State.DB),
 		r.State.DB,
 		network,
 		tokens,
@@ -339,21 +364,19 @@ func solanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, priceID,
 		r.APIError(solanaClientError(err))
 		return
 	}
-	newSub, err := r.State.SubscriptionService.GetByID(ctx, result.NewSubscription.ID)
-	if err != nil {
-		r.InternalError("load changed subscription", err)
-		return
+	r.SuccessJSON(solanaTierChangeResponse(result.Receipt))
+}
+
+func solanaTierChangeResponse(receipt *models.SolanaTierChangeReceipt) billing.SubscriptionChange {
+	id := billing.SubscriptionID(receipt.SubscriptionID)
+	out := billing.SubscriptionChange{
+		Status: "succeeded", Effective: "period_end", PriceID: billing.PriceID(receipt.PriceID),
+		Rail: string(models.RailSolana), SubscriptionID: &id, Currency: receipt.Currency,
+		AmountDueNow: receipt.AmountDueNow, NextChargeAmount: receipt.NextChargeAmount,
+		NextChargeDate: &receipt.NextChargeDate,
 	}
-	out.NextChargeDate = newSub.CurrentPeriodEndsAt
-	if resolved.isUpgrade {
-		payment, err := r.State.PaymentService.GetByPSPTransactionID(ctx, models.RailSolana, signature)
-		if err != nil {
-			r.InternalError("load tier-change charge", err)
-			return
-		}
-		out.AmountDueNow = payment.Amount
+	if receipt.IsUpgrade {
+		out.Effective = "now"
 	}
-	next := billing.SubscriptionID(result.NewSubscription.ID)
-	out.Status, out.SubscriptionID = "succeeded", &next
-	r.SuccessJSON(out)
+	return out
 }
