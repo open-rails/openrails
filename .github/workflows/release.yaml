@@ -1,14 +1,19 @@
 name: Release
 
 # A v* tag publishes the GitHub Release (.goreleaser.yaml): binaries, checksums,
-# SBOMs, generated notes, the @openrails/billing-ui tarball and build
-# provenance; the same tarball is then published to npm. scripts/release cuts
-# one: vX.Y.Z and server/vX.Y.Z on one master commit. The binary is built from
-# the server module.
+# SBOMs, generated notes and build provenance; then @openrails/billing-ui to npm.
+# scripts/release cuts one: vX.Y.Z and server/vX.Y.Z on one master commit. The
+# binary is built from the server module.
 # Pull requests that change the release build run it as a snapshot.
+# workflow_dispatch publishes an older release's attached billing-ui tarball.
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release whose attached billing-ui tarball to publish to npm (e.g. v0.230.0)
+        required: true
   pull_request:
     branches: [master]
     paths:
@@ -31,6 +36,7 @@ concurrency:
 jobs:
   goreleaser:
     name: GoReleaser
+    if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -85,32 +91,47 @@ jobs:
       - name: List artifacts
         run: cat dist/checksums.txt
 
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name == 'push'
+        with:
+          name: billing-ui
+          path: build/billing-ui/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
   npm:
     name: Publish @openrails/billing-ui to npm
     needs: goreleaser
-    if: github.event_name == 'push'
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.goreleaser.result == 'success')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
       contents: read
-      id-token: write # npm trusted publishing; npm adds provenance
+      id-token: write # npm trusted publishing
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      PKG: '@openrails/billing-ui'
     steps:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
-      - name: Publish the release's tarball
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: github.event_name == 'push'
+        with:
+          name: billing-ui
+      - name: Download the release's tarball
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
-          PKG: '@openrails/billing-ui'
+        run: gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "openrails-billing-ui-${TAG#v}.tgz"
+      - name: Publish
         run: |
           v="${TAG#v}"
           if npm view "$PKG@$v" version >/dev/null 2>&1; then
             echo "$PKG@$v is already on npm"
             exit 0
           fi
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "openrails-billing-ui-$v.tgz"
           latest="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
           if [[ "$v" == *-* ]]; then
             dist_tag=next
@@ -119,4 +140,7 @@ jobs:
           else
             dist_tag=latest
           fi
-          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag"
+          # Provenance names this run's commit, so only a tarball built in it gets one.
+          provenance=true
+          [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && provenance=false
+          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag" --provenance="$provenance"

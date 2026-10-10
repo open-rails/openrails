@@ -48,16 +48,12 @@ archives:
 
 checksum:
   name_template: checksums.txt
-  extra_files:
-    - glob: build/billing-ui/*.tgz
 
 sboms:
   - artifacts: archive
 
 release:
   prerelease: auto
-  extra_files:
-    - glob: build/billing-ui/*.tgz
   footer: |
     **Docker:** `docker.io/openrails/openrails:{{ .Tag }}` · `ghcr.io/open-rails/openrails:{{ .Tag }}`
     **Go:** `go get github.com/open-rails/openrails@{{ .Tag }}` (embedded) · `go get github.com/open-rails/openrails/server@{{ .Tag }}` (standalone) · `go install github.com/open-rails/openrails/server/cmd/openrails@{{ .Tag }}`

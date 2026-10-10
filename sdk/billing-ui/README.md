@@ -22,12 +22,10 @@ request schema.
 
 The package lives in the OpenRails repository and shares its version: each
 OpenRails release `vX.Y.Z` publishes `@openrails/billing-ui@X.Y.Z` to npm, with
-provenance, and attaches the same tarball as `openrails-billing-ui-X.Y.Z.tgz`.
+provenance.
 
 ```sh
 pnpm add @openrails/billing-ui@X.Y.Z
-# or from the release
-pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
 ```
 
 ## Checkout
