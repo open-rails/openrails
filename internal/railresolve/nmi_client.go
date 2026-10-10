@@ -33,9 +33,9 @@ type NMIEndpoints struct {
 	QueryURL      string
 }
 
-// NMIArmer is the store-armed NMIClientResolver (#725/#788): per merchant,
-// at decision time, from the armed rail state. Nothing is cached, so a
-// rotated credential takes effect on the next call. MerchantsFn is late-bound.
+// NMIArmer is the store-armed NMIClientResolver: per merchant, at decision
+// time, from the armed rail state. Nothing is cached, so a rotated credential
+// takes effect on the next call. MerchantsFn is late-bound.
 type NMIArmer struct {
 	Config      *config.Config
 	DB          *db.DB
@@ -57,7 +57,7 @@ func (a *NMIArmer) merchants() *merchants.Service {
 
 func (a *NMIArmer) testMode() bool { return a != nil && a.Config != nil && config.IsTestMode(a.Config) }
 
-// Environment is the deployment's PSP environment (#681).
+// Environment is the deployment's PSP environment.
 func (a *NMIArmer) Environment() string { return config.ExpectedProviderEnvironment(a.testMode()) }
 
 // ResolveNMIClient arms the client for the stamped provenance account when
@@ -120,8 +120,8 @@ func (a *NMIArmer) factory() *NMIFactory {
 	return &NMIFactory{Config: a.Config, Endpoints: a.Endpoints}
 }
 
-// Secret loads one scoped secret honouring the PSP row's rotation floor
-// (or#812). found=false with nil err = genuinely absent.
+// Secret loads one scoped secret honouring the PSP row's rotation floor.
+// found=false with nil err = genuinely absent.
 func (a *NMIArmer) Secret(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope, key string) (string, bool, error) {
 	svc := a.merchants()
 	if svc == nil || svc.Secrets() == nil {

@@ -1,12 +1,7 @@
-// Package merchant carries the resolved merchant through a request (#480).
-//
-// A merchant is a dumb billing bucket — it answers "whose books does this row go
-// on?", never "who are you / what may you do" (auth is AuthKit's job). One shared
-// app/DB serves many merchants, and a single-merchant / self-hosted install runs
-// the SAME code paths as its OWN explicitly-registered merchant. There is no
-// "default merchant" — every merchant-owned DB access must be scoped by a
-// merchant id resolved BEFORE any merchant-owned query runs, and a missing
-// merchant is an error, never a silent fallback.
+// Package merchant carries the resolved merchant through a request. A
+// merchant is a billing bucket ("whose books?"), never an identity or an
+// authority. There is no default merchant: every merchant-owned query needs a
+// merchant resolved first, and a missing one is an error, never a fallback.
 package merchant
 
 import (
@@ -100,10 +95,8 @@ func FromContext(ctx context.Context) (billing.MerchantID, bool) {
 	return id, true
 }
 
-// Require returns the resolved merchant id or ErrNoMerchant when none is present.
-// This is the single accessor for merchant-owned code paths: there is no default
-// merchant to fall back to, so a missing merchant surfaces as an error at the
-// call site instead of silently attributing the work to the wrong merchant.
+// Require returns the resolved merchant id, or ErrNoMerchant: there is no
+// default merchant to fall back to.
 func Require(ctx context.Context) (billing.MerchantID, error) {
 	if id, ok := FromContext(ctx); ok {
 		return id, nil

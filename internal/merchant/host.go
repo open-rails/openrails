@@ -6,32 +6,21 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// HostResolver resolves the merchant that owns an inbound request Host header
-// (#734) — shared by the Host-based merchant-scoped route resolution and the
-// Host-routed webhook mount. Browser CORS no longer uses this
-// (#765: CORS is a static per-route-tier policy, not sourced from Host/merchant
-// resolution). Implementations MUST resolve LIVE per call: OpenRails never
-// builds a boot-time host->merchant map, so a
-// merchant registered (or reconfigured) on any node resolves immediately on
-// every other node/process sharing the same database — no restart, no cache
-// refresh required. Returns a zero id and a non-nil error when host maps to no
-// active merchant (unknown/disabled/ambiguous host) — callers MUST fail closed
-// on error, never fall back to a default merchant.
+// HostResolver resolves the merchant that owns a request's Host header. It
+// resolves live per call (no boot-time map), so a merchant registered on any
+// node resolves at once everywhere. An unknown, disabled or ambiguous host is
+// a zero id and an error; callers fail closed, never falling back to a
+// default merchant.
 type HostResolver func(ctx context.Context, host string) (billing.MerchantID, error)
 
-// hostMerchantCtxKey is the unexported context key for the Host-pinned
-// merchant. Deliberately distinct from the general "configured merchant"
-// WithID/FromContext key: HTTP Host resolution sets both together, but only
-// THIS key lets the JWT-issuer resolution path (server/internal/controlplane)
-// positively detect "a Host resolver ran and pinned merchant X for this
-// request" so it can enforce X == the token's own issuer-resolved merchant.
+// hostMerchantCtxKey is distinct from WithID's key: Host resolution sets both,
+// but only this one lets the token path (server/internal/controlplane) see
+// that a Host pinned merchant X and require the token's merchant to be X.
 type hostMerchantCtxKey struct{}
 
-// WithHostMerchant pins the merchant a HostResolver resolved from the
-// request's Host header. A deployment that never configures Host resolution
-// never sets this key, so any check gated on HostMerchant is a pure no-op —
-// single-merchant self-hosters see no behavior change without opting in
-// (#734).
+// WithHostMerchant pins the merchant a HostResolver resolved from the Host
+// header. Without Host resolution the key is never set, so checks on
+// HostMerchant are no-ops.
 func WithHostMerchant(ctx context.Context, id billing.MerchantID) context.Context {
 	return context.WithValue(ctx, hostMerchantCtxKey{}, id)
 }

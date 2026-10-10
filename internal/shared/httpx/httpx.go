@@ -10,23 +10,17 @@ import (
 	"io"
 )
 
-// DefaultMaxResponseBytes is a conservative cap for JSON responses from external
-// providers whose payloads are small, fixed-shape documents (FX quotes, price
-// oracle reads, captcha siteverify results). 1 MiB is far larger than any
-// legitimate response while still bounding memory use.
+// DefaultMaxResponseBytes caps the small fixed-shape JSON responses of external
+// providers (FX quotes, oracle reads, captcha siteverify).
 const DefaultMaxResponseBytes int64 = 1 << 20 // 1 MiB
 
 // ErrResponseTooLarge is returned when an upstream body exceeds the cap.
 var ErrResponseTooLarge = errors.New("httpx: response body exceeds maximum allowed size")
 
-// DecodeJSONLimited reads at most maxBytes from r, then JSON-decodes the result
-// into v. It exists so callers never hand an unbounded io.Reader (such as
-// http.Response.Body) straight to json.NewDecoder: a compromised, MITM'd, or
-// simply buggy upstream could otherwise stream an arbitrarily large or
-// never-ending body and exhaust process memory.
-//
-// If maxBytes <= 0, DefaultMaxResponseBytes is used. When the body is larger
-// than the limit, ErrResponseTooLarge is returned rather than a partial decode.
+// DecodeJSONLimited JSON-decodes at most maxBytes of r into v, so an upstream
+// cannot exhaust memory with an unbounded body. maxBytes <= 0 means
+// DefaultMaxResponseBytes; a larger body is ErrResponseTooLarge, never a
+// partial decode.
 func DecodeJSONLimited(r io.Reader, maxBytes int64, v any) error {
 	if r == nil {
 		return errors.New("httpx: nil reader")

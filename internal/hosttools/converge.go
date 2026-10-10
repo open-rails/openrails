@@ -30,19 +30,10 @@ type ConvergeMerchantResult struct {
 	AdminRequired     int
 }
 
-// ConvergeMerchant runs ONE merchant-wide convergence pass (DERIVE → LIFE → CON,
-// Customer=nil) on demand — the operator-triggerable "full reconcile" for the
-// post-migration cutover (#637). It is the same idempotent engine the scheduled
-// converge_sweep and the inline AfterMutation path use, so calling it right after
-// a legacy migration materializes every derive-1 grant + entitlement immediately
-// instead of waiting for the next sweep interval. Re-runnable / no-op when clean.
-//
-// Cutover note (#637): a from-scratch migration that stops writing
-// entitlements) produces NO orphan entitlements, so this pass derives everything
-// cleanly with grant provenance. An IN-PLACE cutover over data migrated by the OLD
-// code must first revoke the migrate-written orphan entitlements (grant_id IS NULL)
-// — otherwise derive-1's overlap-skip leaves them live-but-grant-less (access is
-// preserved, provenance is not). Prefer re-migrating from scratch.
+// ConvergeMerchant runs one merchant-wide convergence pass on demand: the same
+// idempotent engine as the scheduled sweep and the inline AfterMutation path,
+// so after a legacy import it materializes every grant and entitlement without
+// waiting for the sweep. A no-op when clean.
 func ConvergeMerchant(ctx context.Context, opts ConvergeMerchantOptions) (ConvergeMerchantResult, error) {
 	var res ConvergeMerchantResult
 	if ctx == nil {

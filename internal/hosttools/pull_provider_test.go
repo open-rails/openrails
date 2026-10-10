@@ -119,7 +119,7 @@ func TestUndoRunPrintsRunnableCommands(t *testing.T) {
 }
 
 // A CLI pull queues the provider cancel of a terminal decision exactly as the
-// worker's pull does (#1102): its decision applier carries the system-origin
+// worker's pull does: its decision applier carries the system-origin
 // provider-cancel scheduler, never nil.
 func TestPullEngineQueuesProviderCancels(t *testing.T) {
 	eng := newPullEngine(&pullProviderRuntime{}, nil)

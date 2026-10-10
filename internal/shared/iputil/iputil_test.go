@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// #746: proxy trust is opt-in; an untrusted peer's X-Forwarded-For has no effect.
+// Proxy trust is opt-in; an untrusted peer's X-Forwarded-For has no effect.
 // Every X-Forwarded-For line counts, in order.
 func TestClientIPTrustsOnlyConfiguredProxies(t *testing.T) {
 	lb := []string{"10.0.0.0/8", " fd00::/8 "}
@@ -62,8 +62,8 @@ func TestSourceAllowlists(t *testing.T) {
 	require.False(t, IPInAnyCIDR("nope", cidrs))
 }
 
-// A card is accepted in live posture only over HTTPS (#1129): the proxy's
-// word counts only when the socket peer is a trusted proxy.
+// A card is accepted in live posture only over HTTPS: the proxy's word counts
+// only when the socket peer is a trusted proxy.
 func TestForwardedHTTPSTrustsOnlyConfiguredProxies(t *testing.T) {
 	proxies := ParseTrustedProxies([]string{"10.0.0.0/8"})
 	for name, tc := range map[string]struct {

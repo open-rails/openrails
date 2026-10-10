@@ -11,15 +11,15 @@ type reasonSpec struct {
 }
 
 // reasons is the policy for each public reason; the buyer's copy lives with
-// the reason (billing.DeclineReason.Failure). Actions follow #1108 decision 2:
-//   - retry: issuer soft/generic declines (Visa category 2/4: retries allowed)
-//     and our or the gateway's errors;
+// the reason (billing.DeclineReason.Failure). Actions:
+//   - retry: issuer soft/generic declines (Visa category 2/4) and our or the
+//     gateway's errors;
 //   - fix_payment_method: bad card data, and codes that forbid re-attempts on
 //     the same card number (Visa category 1, Mastercard MAC 03/21); a new card
 //     from the customer or the account updater resumes dunning;
 //   - non_recoverable: stolen, fraud, and a revoked recurring mandate.
 //
-// 250/251 wait for a new card by owner decision (or#870): losing a wallet must
+// Pick-up and lost cards (250/251) wait for a new card: losing a wallet must
 // not cost a subscription.
 var reasons = map[billing.DeclineReason]reasonSpec{
 	billing.DeclineGeneric:           {category: IssuerSoft, action: Retry},

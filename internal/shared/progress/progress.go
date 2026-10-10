@@ -1,11 +1,7 @@
-// Package progress carries the observed-progress handle for a unit of
-// long-running work (xs-007). It is a leaf package so any layer — a River
-// worker, the intent runner, the reconcile engine — can report progress on
-// the context it was given without knowing who is watching.
-//
-// The watcher (riverjobs.JobLivenessMiddleware) decides whether work is
-// wedged from these marks, never from elapsed time: "a clock reading is not
-// a death certificate" (jobs_dunning.go); silence is.
+// Package progress carries the observed-progress handle for long-running
+// work, a leaf package any layer can mark through its context. The watcher
+// (riverjobs.JobLivenessMiddleware) judges work wedged from these marks,
+// never from elapsed time.
 package progress
 
 import (

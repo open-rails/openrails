@@ -1,5 +1,5 @@
-// Package email holds OpenRails' built-in email sender: any SMTP server, so
-// the provider (SendGrid, ZeptoMail, a self-hosted server) is configuration.
+// Package email is OpenRails' built-in email sender: any SMTP server, so the
+// provider is configuration.
 package email
 
 import (

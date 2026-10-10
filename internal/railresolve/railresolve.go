@@ -1,16 +1,10 @@
-// Package railresolve is the ONE Layer-C rail resolution seam (#788).
+// Package railresolve is the one decision-time rail resolution seam: whether
+// a rail is armed for a merchant, its credentials, its client. It reads active
+// psps rows plus scoped secrets, so how they were written (manifest
+// convergence or API writes) is invisible here and a new ingestion path never
+// adds a resolution path.
 //
-// Every decision-time question — "is rail X armed for this merchant?", "give
-// me its credentials", "build me a rail client" — resolves an active
-// psps row (Layer B) plus scoped secrets through the
-// merchant secret-store interface. How the armed state got there (MODE 1
-// manifest convergence or MODE 2 API writes — Layer A) is invisible here:
-// both converge the same rows and the same secret names, so a new ingestion
-// path can never create a new resolution path.
-//
-// Consumers hold a Source. Production wires Merchants (backed by
-// merchants.Service); unit tests may wire FixedSet, a static in-memory stand-in
-// for Layer B.
+// Production wires MerchantsSource; unit tests may wire FixedSet.
 package railresolve
 
 import (
@@ -45,15 +39,14 @@ type Source interface {
 	Armed(ctx context.Context, rail string) (bool, error)
 	// RailConfig resolves the armed account for rail into the typed
 	// credential shape the rail integrations consume. accountID "" resolves
-	// the ACTIVE account for new work; non-empty pins a declared account
-	// (inbound webhook routing #641 — may address archived accounts).
-	// Returns ErrRailNotArmed (wrapped) when nothing is armed.
+	// the active account for new work; non-empty pins a declared account
+	// (inbound webhook routing; may be archived). Returns ErrRailNotArmed
+	// (wrapped) when nothing is armed.
 	RailConfig(ctx context.Context, rail string, accountID string) (*config.ResolvedPSP, error)
-	// CustodianConfig resolves a declared custodian by its VENDOR identity
-	// (kind + custodian-native account id) for the ctx merchant (or#880).
-	// Custody is not a rail, so a custodian's own webhooks cannot resolve
-	// through RailConfig — and one custodian may back several PSPs, so
-	// picking "the" PSP was never a well-defined answer.
+	// CustodianConfig resolves a declared custodian by its vendor identity
+	// (kind + custodian-native account id) for the ctx merchant. Custody is
+	// not a rail and one custodian may back several PSPs, so its webhooks
+	// cannot resolve through RailConfig.
 	CustodianConfig(ctx context.Context, kind string, accountID string) (*config.ResolvedCustodian, error)
 }
 
@@ -80,8 +73,8 @@ func (s *MerchantsSource) service() *merchants.Service {
 	return s.MerchantsFn()
 }
 
-// environment is the deployment's PSP environment: test under
-// test_mode, live otherwise (#681).
+// environment is the deployment's PSP environment: test under test_mode,
+// live otherwise.
 func (s *MerchantsSource) environment() string {
 	return config.ExpectedProviderEnvironment(s.Config != nil && config.IsTestMode(s.Config))
 }
@@ -146,8 +139,8 @@ func (s *MerchantsSource) secret(ctx context.Context, mid billing.MerchantID, sc
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
 	}
-	// or#812: the version floor recorded on the PSP row makes a credential
-	// rotated on another node effective here at once, not one cache TTL later.
+	// The version floor on the PSP row makes a credential rotated on another
+	// node effective here at once, not one cache TTL later.
 	ref, err := scope.SecretRef(key)
 	if err != nil {
 		return "", false, err
@@ -191,8 +184,8 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 		Rail:      models.Rail(scope.Rail),
 		AccountID: scope.AccountID,
 	}
-	// #1129: stored settings are an ingestion plane too; a card_entry no
-	// boot would accept never arms.
+	// Stored settings are an ingestion plane too: a card_entry no boot would
+	// accept never arms.
 	if _, err := config.CardEntry(scope.Rail, scope.Settings, scope.CustodianID != nil); err != nil {
 		return nil, fmt.Errorf("%s account %s: %w", scope.Rail, scope.AccountID, err)
 	}
@@ -216,8 +209,8 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 			WebhookSigningSecretThin: thin,
 		}
 	case models.RailCCBill:
-		// Identity is the dash-joined account_id (#697); validated by
-		// ToCCBillConfig's SplitCCBillAccountID at client-build time.
+		// Identity is the dash-joined account_id, split at client-build time
+		// (ToCCBillConfig).
 		salt, err := s.requireSecret(ctx, mid, scope, "salt")
 		if err != nil {
 			return nil, err
@@ -272,8 +265,8 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 	default:
 		return nil, fmt.Errorf("rail %s has no typed credential shape", scope.Rail)
 	}
-	// Custody rides on TOP of the rail block (or#879): the gateway credentials
-	// above charge the card, these say who holds it and how to detokenize it.
+	// Custody rides on top of the rail block: the gateway credentials above
+	// charge the card; these say who holds it and how to detokenize it.
 	custody, err := s.resolveCustody(ctx, mid, scope)
 	if err != nil {
 		return nil, err
@@ -288,9 +281,8 @@ func (s *MerchantsSource) RailConfig(ctx context.Context, rail, accountID string
 // downgrade to "no custody" — that would charge the card as though the gateway
 // held it, which is the wrong charge and not a degraded one.
 func (s *MerchantsSource) resolveCustody(ctx context.Context, mid billing.MerchantID, scope merchants.PSPScope) (*config.ResolvedCustodian, error) {
-	// or#880: an inline custody block on a PSP is a retired shape. It must
-	// fail here too, not only at manifest push: a stored settings blob is an
-	// ingestion plane of its own (mode 2).
+	// An inline custody block on a PSP is refused here too, not only at
+	// manifest push: stored settings are an ingestion plane of their own.
 	if err := config.RejectRetiredCustodySettings(scope.Settings); err != nil {
 		return nil, fmt.Errorf("psp %s/%s: %w", scope.Rail, scope.AccountID, err)
 	}
@@ -361,9 +353,8 @@ func (s *MerchantsSource) custodianSecret(ctx context.Context, mid billing.Merch
 	if svc == nil || svc.Secrets() == nil {
 		return "", false, nil
 	}
-	// or#812: custodial credentials ride the same version floor as every other
-	// provider credential — a rotation on another node is effective here at
-	// once, not one cache TTL later.
+	// Custodial credentials ride the same version floor as every provider
+	// credential: a rotation on another node is effective here at once.
 	ref, err := custodian.SecretRef(key)
 	if err != nil {
 		return "", false, err
@@ -403,13 +394,10 @@ func (s *MerchantsSource) CustodianConfig(ctx context.Context, kind, accountID s
 }
 
 // SolanaRailConfigFromSettings materializes the runtime Solana config from a
-// rail account's declared settings: network derives from test_mode alone
-// (#349), the token set is exactly what the merchant declared — USDC alone when
-// they declared nothing (or#881 select-and-restrict; a built-in symbol is
-// SELECTED and its mint is never restated) — and the #360 pricing policy then
-// drops tokens that cannot function (degrade-not-die). A misdeclared token set
-// is fail-closed: the PSP does not arm rather than arming against a mint nobody
-// vouched for.
+// rail account's declared settings: the network follows test_mode, the token
+// set is exactly what was declared (USDC when nothing is), and the pricing
+// policy then drops tokens that cannot function. A misdeclared token set fails
+// closed: the PSP does not arm.
 func SolanaRailConfigFromSettings(settings config.SolanaAccountSettings, testMode bool) (*config.SolanaRailConfig, error) {
 	network := "mainnet"
 	if testMode {
@@ -486,7 +474,7 @@ func withPSPKey(proc *config.ResolvedPSP, key string) *config.ResolvedPSP {
 	out.Key = strings.ToLower(strings.TrimSpace(key))
 	if out.ID == uuid.Nil {
 		// A fixture PSP still has a stable identity: provider clients are
-		// never built without one (#1055).
+		// never built without one.
 		out.ID = uuid.NewSHA1(uuid.NameSpaceURL, []byte("openrails:fixed-psp:"+string(out.EffectiveRail(key))+":"+out.EffectiveAccountID()))
 	}
 	return &out

@@ -2,7 +2,7 @@
 // (snapshot, event) to (next snapshot, effects). Nothing here reads a clock,
 // a database or a provider. Callers load the row under its lock, apply one
 // event, persist the next snapshot and carry out the effects in the same
-// transaction (#1089 design §3).
+// transaction.
 //
 // Rules the table encodes:
 //   - only a payment fact extends the paid period or restores an unpaid one;
@@ -36,7 +36,7 @@ func (s Status) Live() bool {
 	return s == Active || s == PastDue || s == AwaitingMethod || s == Unverified
 }
 
-// Owner is who charges renewals and who retries declines (design §2).
+// Owner is who charges renewals and who retries declines.
 type Owner string
 
 const (
@@ -61,7 +61,7 @@ type Snapshot struct {
 	CancelKind CancelKind
 }
 
-// Bucket is the decline doctrine's answer (or#870, decline.Action).
+// Bucket is the decline doctrine's answer (decline.Action).
 type Bucket int
 
 const (
@@ -108,7 +108,7 @@ type RenewalDeclined struct {
 
 // RenewalSkipped is proof from NMI's records that its schedule passed the
 // period starting at PeriodStart without charging it: OpenRails collects the
-// period instead (#1113).
+// period instead.
 type RenewalSkipped struct{ PeriodStart time.Time }
 
 // Reinstate reactivates a canceled subscription with a paid period on an
@@ -200,7 +200,7 @@ type QueueProviderCancel struct{}
 // ReopenAccess reopens access a period-end cancellation had bounded.
 type ReopenAccess struct{}
 
-// ProbeProvider reads the provider now to resolve an unverified row (§12).
+// ProbeProvider reads the provider now to resolve an unverified row.
 type ProbeProvider struct{}
 
 // Notify tells the customer.

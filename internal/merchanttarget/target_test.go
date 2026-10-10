@@ -92,8 +92,8 @@ func TestResolvedAliasKeepsCanonicalTargetAndOriginalSelector(t *testing.T) {
 	requireGate(t, Assert(r, target), 409)
 }
 
-// The stored name is the merchant's current name (#1106): ID selection
-// presents it without another lookup.
+// The stored name is the merchant's current name: ID selection presents it
+// without another lookup.
 func TestIDSelectionPresentsTheStoredName(t *testing.T) {
 	id := billing.MerchantID(uuid.New())
 	group := uuid.NewString()

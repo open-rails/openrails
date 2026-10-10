@@ -43,7 +43,7 @@ func TestGuardsRefuseZeroIdentifiers(t *testing.T) {
 }
 
 // Wire spellings: blank parses to the zero id (then refused above); an explicit
-// zero UUID is refused at parse (#479).
+// zero UUID is refused at parse.
 func TestWireIdentifierSpellingsNeverYieldAUsableZero(t *testing.T) {
 	for prefix, parse := range map[string]func(string) (bool, error){
 		"sub_": func(s string) (bool, error) { id, err := billing.ParseSubscriptionID(s); return id.IsZero(), err },

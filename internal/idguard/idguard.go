@@ -1,13 +1,7 @@
 // Package idguard refuses blank and zero identifiers at engine entry points,
-// before any lookup or provider consideration.
-//
-// A zero UUID is not "unset": it is a value the caller supplied. Treating it as
-// absent makes an explicit zero mean "use the default" (a planner silently
-// re-targeting the subscription's own account), and letting it reach the
-// database turns it into a "not found" probe — both answer a malformed request
-// with something other than "that parameter is invalid". #479 already refuses
-// uuid.Nil when parsing a prefixed wire id; these guards give plain-UUID and
-// durable-payload inputs the same treatment.
+// before any lookup. A zero UUID is a supplied value, not "unset": treated as
+// absent it silently selects a default, and sent to the database it becomes a
+// "not found" probe; either way a malformed request escapes "invalid".
 package idguard
 
 import (

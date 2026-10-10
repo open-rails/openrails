@@ -11,17 +11,9 @@ import (
 	"time"
 )
 
-// #SEC-21: any URL a merchant (or any request) supplies and we then FETCH is an
-// SSRF primitive — it makes OpenRails issue HTTP from its own network position.
-// Policy enforces one rule set in one place:
-//
-//   - the check runs at the DIALER, on the RESOLVED address, so a hostname that
-//     resolves internally — including a DNS-rebinding record that flips between
-//     retries — is blocked at connect time, not merely at parse time;
-//   - every redirect hop is re-validated, so a public host cannot 302 into
-//     link-local;
-//   - callers must not surface the raw dial error, which is an internal-network
-//     oracle. Use FailureDetail.
+// Any URL OpenRails fetches on a merchant's or request's behalf is an SSRF
+// primitive; Policy is the one guard for it (see ValidateURL, Client and
+// FailureDetail).
 
 // ErrBlockedAddress is returned when a connection targets a non-public address.
 var ErrBlockedAddress = errors.New("httpx: destination address is not publicly routable")

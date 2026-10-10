@@ -6,15 +6,11 @@ import (
 	"github.com/open-rails/openrails/internal/custodymigration"
 )
 
-// or#297 Phase C: the vault-import + token-remap seam. An operator hands over
-// the manifest the custodian produced after ingesting a PSP vault export, and
-// OpenRails flips each instrument's CUSTODY on the same payment_method_id —
-// the move that makes a de-platformed card book chargeable again through a
-// different processor, without touching a single subscription.
-//
-// Implementation and full doctrine live in internal/custodymigration (shared
-// with the HTTP surface without an import cycle); these aliases are the stable
-// embedded vocabulary.
+// Custody migration: an operator hands over the manifest a custodian produced
+// from a PSP vault export, and OpenRails flips each instrument's custody on the
+// same payment_method_id, so the card is chargeable through another processor
+// without touching any subscription. The implementation is
+// internal/custodymigration; these aliases are the embedded vocabulary.
 type (
 	VaultExport   = custodymigration.VaultExport
 	ImportedToken = custodymigration.ImportedToken
@@ -42,7 +38,7 @@ const (
 )
 
 // MigrateCustody plans or applies one custodian vault-export manifest. Custody
-// flips are merchant-scoped writes (or#885).
+// flips are merchant-scoped writes.
 func MigrateCustody(ctx context.Context, opts CustodyMigrationOptions) (CustodyMigrationResult, error) {
 	database, err := openEmbeddedDB(ctx, opts.Config, opts.PGXPool)
 	if err != nil {

@@ -1,7 +1,6 @@
-// Package decline is the one table for payment refusals (#1109). Every rail
-// code maps to one billing.DeclineReason; this package fixes each reason's
-// category and dunning action, and the public type what the buyer is told.
-// Nothing else in OpenRails maps a decline code.
+// Package decline is the one table for payment refusals: every rail code maps
+// to one billing.DeclineReason, and this package fixes each reason's category
+// and dunning action. Nothing else in OpenRails maps a decline code.
 package decline
 
 import (
@@ -34,8 +33,8 @@ const (
 	Unknown     Category = "unknown"
 )
 
-// Action is the dunning decision (or#870). The zero value retries: missing
-// evidence never costs a customer their subscription.
+// Action is the dunning decision. The zero value retries: missing evidence
+// never costs a customer their subscription.
 type Action string
 
 const (

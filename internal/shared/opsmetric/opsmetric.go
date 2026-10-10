@@ -1,14 +1,6 @@
-// Package opsmetric emits operational measurements as structured log lines.
-//
-// OpenRails ships no Prometheus/OTel exporter, and internal/modules/metrics is
-// the MERCHANT-facing analytics layer (SQL over business tables) — neither is a
-// home for "how did this pass behave". The operator's telemetry substrate is the
-// log stream, so an operational metric is a line carrying a stable `metric` name
-// plus its fields, which log-based alerting can threshold on without a new
-// dependency.
-//
-// The names live here rather than at the call sites: a metric an alert rule
-// references is a contract, and a contract spelled out inline drifts.
+// Package opsmetric emits operational measurements as structured log lines
+// carrying a stable `metric` name for log-based alerting. The names are a
+// contract with alert rules, so they live here, not at call sites.
 package opsmetric
 
 import (
@@ -18,10 +10,8 @@ import (
 )
 
 const (
-	// MetricRosterRatio is emitted on EVERY absence-capable reconcile pass —
-	// not only when the breaker trips. `tripped=false` with a ratio sliding
-	// toward the threshold is the signal that matters; a metric that only
-	// exists at the moment of failure cannot be trended (or#837).
+	// MetricRosterRatio is emitted on every absence-capable reconcile pass, not
+	// only when the breaker trips, so the ratio can be trended.
 	MetricRosterRatio = "reconcile.roster_ratio"
 
 	// MetricCancellationsPerPass is the planned-vs-allowed cancellation count

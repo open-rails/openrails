@@ -17,15 +17,15 @@ import (
 // selected merchant's provider accounts. Storage/read failures are distinct.
 var ErrInvalidPSPReference = apperr.New(http.StatusBadRequest, "invalid_psp_reference", "invalid PSP reference")
 
-// pspResolver turns a declared PSPRef into a real billing.psps id, against the
-// merchant's own catalog. or#893: an import that cannot attribute a row is
-// REFUSED — writing it unattributed is what made a legacy row invisible to a
-// PSP-scoped prune and collidable with a sibling account's provider ids.
+// pspResolver turns a declared PSPRef into a billing.psps id from the
+// merchant's own catalog. A row it cannot attribute is refused: unattributed,
+// it would be invisible to a PSP-scoped prune and collide with a sibling
+// account's provider ids.
 type pspResolver struct {
 	byID  map[uuid.UUID]gen.BillingPsp
 	byKey map[string]gen.BillingPsp // "<rail>\x1f<key>"
-	// fallback is the book's DEFAULT_PSP. It is a declared value, not a guess:
-	// nothing here ever infers a PSP from "the merchant only has one".
+	// fallback is the book's default_psp: declared, never inferred from
+	// "the merchant only has one".
 	fallback PSPRef
 	known    []string
 }

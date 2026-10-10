@@ -6,7 +6,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// ID-7: natural-key ids are a pure, injective function of (namespace, parts).
+// Natural-key ids are a pure, injective function of (namespace, parts).
 func TestDeterministicIDIsStableAndInjective(t *testing.T) {
 	a := DeterministicID(DeterministicNamespace, "merchant-abc", "premium")
 	if a != DeterministicID(DeterministicNamespace, "merchant-abc", "premium") || a.Version() != 5 || a == uuid.Nil {

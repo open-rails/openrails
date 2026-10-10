@@ -33,8 +33,8 @@ func TestTablesAreComplete(t *testing.T) {
 	}
 }
 
-// The dunning policy per NMI code (#1108 decision 2) is pinned: a moved row
-// changes who keeps being charged or who is canceled.
+// The dunning policy per NMI code is pinned: a moved row changes who keeps
+// being charged or who is canceled.
 func TestNMIActions(t *testing.T) {
 	want := map[Action][]int{
 		Retry:            {200, 201, 202, 203, 240, 260, 264, 300, 400, 410, 411, 420, 421, 430, 440, 441, 460},

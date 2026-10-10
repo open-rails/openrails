@@ -6,30 +6,19 @@ import (
 	"strings"
 )
 
-// TrustedProxies is the ONE proxy-aware client-IP resolver (#746). Every
-// consumer that needs "the request's real client IP" — rate-limit subject
-// keys, abuse tracking, webhook IPAddress recording, the CCBill webhook IP
-// allowlist — resolves through an instance of this built from the SAME
-// config.Config.TrustedProxies list, so proxy trust is enforced identically
-// everywhere instead of each call site trusting (or not trusting)
-// X-Forwarded-For on its own.
+// TrustedProxies is the one proxy-aware client-IP resolver, built from the
+// configured trusted proxies, so rate limits, abuse tracking, webhook IP
+// recording and the CCBill allowlist all trust proxies identically.
 //
-// Semantics: a nil/empty TrustedProxies trusts NOTHING — every resolution
-// returns the raw socket peer, so a spoofed X-Forwarded-For has zero effect.
-// When the immediate socket peer falls inside a trusted CIDR,
-// ClientIP walks X-Forwarded-For right-to-left, skipping trusted
-// hops, to the first untrusted address — the standard reverse-proxy
-// algorithm: everything to the right of that address was appended by a
-// proxy we trust, so it is the closest honest claim of "who is the client".
+// Empty trusts nothing: every resolution returns the socket peer. When the
+// peer is trusted, ClientIP walks X-Forwarded-For right-to-left past trusted
+// hops to the first untrusted address.
 type TrustedProxies struct {
 	nets []*net.IPNet
 }
 
-// ParseTrustedProxies builds a resolver from configured CIDR strings.
-// Malformed entries are silently skipped here — config.Validate is
-// responsible for rejecting them at boot (a typo must never boot into a
-// partially-trusting state); this constructor stays permissive so a resolver
-// built from an already-validated config is always usable.
+// ParseTrustedProxies builds a resolver from CIDR strings. Malformed entries
+// are skipped: config.Validate rejects them at boot.
 func ParseTrustedProxies(cidrs []string) *TrustedProxies {
 	tp := &TrustedProxies{}
 	for _, raw := range cidrs {
@@ -94,9 +83,7 @@ func (t *TrustedProxies) resolve(remoteAddr, forwardedFor string) string {
 			return hops[i]
 		}
 	}
-	// Every hop (including the direct peer) is a trusted proxy — no
-	// untrusted address was ever observed on the wire; the direct peer is
-	// the best available answer.
+	// Every hop is trusted: the direct peer is the best answer.
 	return peer
 }
 

@@ -15,21 +15,15 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
-// remap is the custody flip for ONE instrument.
-//
-// Everything happens in a single merchant-scoped transaction holding the
-// instrument's row lock, so no concurrent charge site can read the instrument
-// half-moved. Inside the lock the decision is re-made — a charge that went
-// in-flight between the plan read and this moment must still refuse.
-//
-// The flip itself is a compare-and-swap on the CURRENT custodian: two runs of
-// the same manifest cannot both apply.
+// remap is the custody flip for one instrument, in one merchant-scoped
+// transaction holding its row lock so no charge site reads it half-moved. The
+// decision is re-made under the lock, and the flip is a compare-and-swap on the
+// current custodian, so two runs of one manifest cannot both apply.
 func (p *planner) remap(ctx context.Context, tk ImportedToken, existing *gen.BillingPaymentMethod, out RowResult) (RowResult, error) {
 	token := strings.TrimSpace(tk.Token)
 
-	// The plan leg stops here: it has performed every read the apply leg makes
-	// its decision from, EXCEPT the in-flight check, which is the one thing
-	// that can change under it. Run it too, so the plan's counts are honest.
+	// The in-flight check is the one plan read that can change before apply;
+	// run it in the plan leg too so the plan's counts are honest.
 	blockedReason, err := p.instrumentPinned(ctx, existing.ID)
 	if err != nil {
 		return out, err

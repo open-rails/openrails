@@ -13,10 +13,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// NMIFactory is the only way OpenRails builds an NMI client for a PSP (#1055):
-// checkout, payment methods, vault, rebills, refunds, subscriptions, cutover,
-// provider pulls, catalog and startup posture all come through here. The client
-// is bound to the exact merchant + PSP + account, the PSP's own versioned
+// NMIFactory is the only way OpenRails builds an NMI client for a PSP. The
+// client is bound to the exact merchant, PSP and account, the PSP's versioned
 // security key and its declared endpoint_deployment, so its posture key is the
 // one startup verified. There is no bare-key path.
 type NMIFactory struct {

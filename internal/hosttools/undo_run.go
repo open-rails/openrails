@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 )
 
-// UndoRunOptions mirrors `openrails undo-run` (or#859 §5.2).
+// UndoRunOptions mirrors `openrails undo-run`.
 type UndoRunOptions struct {
 	Config     *config.Config
 	PGXPool    *pgxpool.Pool
@@ -33,19 +33,14 @@ type UndoRunOptions struct {
 	Out        io.Writer
 }
 
-// UndoRun reverses one destructive run of any reversible kind, or — by default —
-// prints exactly what reversing it would do.
+// UndoRun reverses one destructive run of any reversible kind or, by default,
+// prints what reversing it would do. One verb covers the run ledger: a prune
+// reverses by clearing tombstones, a converge-enforce pass from captured
+// before-images, and an operator should not need to know which.
 //
-// One verb over the whole run ledger on purpose. A prune destroys rows and
-// reverses by clearing tombstones; a converge-enforce pass destroys row VALUES
-// and reverses from captured before-images. An operator holding a run id during
-// an incident should not have to know which, and must not be able to discover
-// the difference by running the wrong verb and being told a reversal succeeded
-// when it restored nothing.
-//
-// A rollback is not a complete operation — `rollback → pull → converge` is. The
-// derive half runs here; the provider pull is the operator's next step and is
-// advisory until enforcement is re-armed by hand.
+// A complete rollback is rollback → pull → converge. The derive half runs
+// here; the provider pull is the operator's next step and is advisory until
+// enforcement is re-armed by hand.
 func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 	if ctx == nil {
 		ctx = context.Background()
@@ -88,9 +83,8 @@ func UndoRun(ctx context.Context, opts UndoRunOptions) error {
 
 	var res reconcile.UndoResult
 	if err := database.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		// Class D is invalidated by a converge reversal, so the re-derivation is
-		// part of the SAME command rather than a follow-up the operator might
-		// forget: until it runs, the restored subscriptions carry no access.
+		// A converge reversal invalidates Class D, so the re-derivation runs in
+		// this command: until it does, restored subscriptions carry no access.
 		recompute := func(ctx context.Context) error {
 			_, cerr := converge.NewConvergeEngine(database).Converge(ctx, converge.Scope{Merchant: merchantID})
 			return cerr
@@ -156,9 +150,8 @@ func printUndoPlan(w io.Writer, plan reconcile.UndoPlan, merchantID billing.Merc
 		fmt.Fprintf(w, "  this reversal will NOT be complete: %d provider write(s) already reached the rail.\n",
 			len(plan.IntentsIrreversible)+len(plan.IntentsAmbiguous))
 	}
-	// or#893: PlanUndoRun refuses before returning if this is ever non-zero, so
-	// reaching here means the invariant held. Print it anyway — an operator
-	// reading a rollback plan should see the coverage proof, not infer it.
+	// PlanUndoRun refuses when this is non-zero; printed so the operator sees
+	// the coverage proof.
 	fmt.Fprintf(w, "  coverage: every live provider row is PSP-attributed (unattributed=%d)\n", plan.Unattributed.Total())
 	fmt.Fprintf(w, "\nTo apply, confirm the row count:\n"+
 		"  openrails undo-run --merchant %s --run %s --apply --expect-rows %d\n",

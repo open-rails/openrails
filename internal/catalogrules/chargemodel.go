@@ -9,19 +9,14 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-// This file is the shared pricing engine behind both #638 (metered resource
-// rating) and #639/#640 (variable credit-purchase quoting). A ChargeModel turns
-// an aggregated quantity (in the meter's unit, or a credit quantity) into a cost
-// in micros. It is deliberately YAML-independent: the loader builds a ChargeModel
-// from a RatePrice, and both the usage rater and the credit quoter evaluate it.
+// A ChargeModel is the shared pricing engine for metered usage rating and
+// variable credit-purchase quoting: it turns an aggregated quantity into a
+// cost in micros.
 //
-// Why a divisor instead of fractional per-unit rates: OpenRails money is INTEGER
-// micros, so $0.00595/hour cannot be a per-second rate (1.65 micros/sec is not an
-// integer). Instead we keep the rate at its natural granularity (e.g. micros per
-// hour) and DIVIDE the aggregate once: cost = round(quantity * unit_amount /
-// divide_by). This pro-rates exactly (DO bills per-second) and rounds money once —
-// it does NOT round usage up to whole units. For block / round-up-to-next-unit
-// pricing use the package model.
+// Money is integer micros, so a rate keeps its natural granularity (micros per
+// hour) and the aggregate is divided once: cost = round(quantity * unit_amount
+// / divide_by). This pro-rates exactly and rounds money once; it never rounds
+// usage up to whole units (use the package model for that).
 
 // ChargeModel is a normalized, YAML-independent pricing rule.
 type ChargeModel struct {
@@ -44,8 +39,8 @@ type ChargeModel struct {
 	PackageAmount int64
 	FreeUnits     int64
 
-	// cap applied to the computed cost, after the model (0 = uncapped). There is
-	// no per-line floor — minimums are an account commitment, not pricing (#642).
+	// cap applied to the computed cost (0 = uncapped). There is no per-line
+	// floor: minimums are an account commitment, not pricing.
 	MaximumAmount int64
 }
 
@@ -56,10 +51,9 @@ type ChargeTier struct {
 	FlatAmount int64  // flat micros added once when the band is reached
 }
 
-// Rate computes the cost in micros for `quantity` units under the charge model.
-// quantity must be >= 0. The
-// function is non-decreasing in quantity for flat/per_unit/package/graduated, so
-// cumulative band charges are monotonic; volume rates may have tier cliffs.
+// Rate computes the cost in micros for quantity >= 0 units. It is
+// non-decreasing in quantity for flat/per_unit/package/graduated; volume rates
+// may have tier cliffs.
 func (cm ChargeModel) Rate(quantity int64) (int64, error) {
 	if quantity < 0 {
 		return 0, fmt.Errorf("quantity must be >= 0")

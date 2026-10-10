@@ -143,8 +143,8 @@ func psp(rail, key string) gen.BillingPsp {
 	return gen.BillingPsp{ID: uuid.New(), Rail: rail, Key: key}
 }
 
-// or#893: every provider row is attributed to a PSP the merchant owns on the same
-// rail — per-row ref, else the declared book default, else a refusal (never inferred).
+// Every provider row is attributed to a PSP the merchant owns on the same rail:
+// per-row ref, else the book default, else a refusal (never inferred).
 func TestPSPResolution(t *testing.T) {
 	mobius, paykings, stripe := psp("nmi", "mobius"), psp("nmi", "paykings"), psp("stripe", "main")
 	foreign, nilID := uuid.New(), uuid.Nil

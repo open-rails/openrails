@@ -1,12 +1,8 @@
-// Package billingimport is the #737 DeclaredBilling import seam: a host (or a
-// hosted merchant over HTTP) hands over its legacy billing book as FACTS and
-// OpenRails classifies them through the same decider pipeline the
-// pull/probe/webhook planes use, evaluated at the declared AsOf horizon.
-// Admin comps ride the same book (AdminGrants): SourceID idempotency,
-// per-source result lists, one merchant-scoped transaction.
-//
-// The wire vocabulary (POST /v1/admin/billing-import and Client.ImportBilling) is
-// defined on the root openrails package; this package aliases it.
+// Package billingimport imports a host's legacy billing book as facts and
+// classifies them through the same decider the pull, probe and webhook paths
+// use, at the declared AsOf. Admin comps ride the same book. The wire
+// vocabulary (billing.DeclaredBilling, POST /v1/admin/billing-import) is
+// aliased here.
 package billingimport
 
 import (
@@ -56,9 +52,9 @@ type (
 	Result                = billing.BillingImportResult
 )
 
-// Options retains the runtime database and its bound River producer. Import
-// borrows them and never opens or closes resources. MerchantID is the already resolved or authorized
-// immutable merchant UUID; imports never interpret a public name.
+// Options borrows the runtime database; Import never opens or closes
+// resources. MerchantID is already resolved: imports never interpret a public
+// name.
 type Options struct {
 	DB         *db.DB
 	MerchantID billing.MerchantID
@@ -67,14 +63,12 @@ type Options struct {
 	Clock clockwork.Clock
 }
 
-// Import lands a host-declared billing book. Explicitly-canceled facts
-// are written directly (settled history, faithful cancel_type/dates); the
-// ambiguous cohort is seeded `unknown` and resolved by the #665 decider against
-// the declared snapshot at AsOf — park-as-unknown and cancellation-last-resort
-// hold server-side by construction. Charges land idempotently by
-// (rail, transaction_id). Runs in a single merchant-scoped transaction:
-// infrastructure failures roll back the whole declared book, while per-source
-// business blocks remain ordinary committed outcomes for the other rows.
+// Import lands a host-declared billing book. Explicitly canceled facts are
+// written directly; the ambiguous cohort is seeded `unknown` and resolved by
+// the decider against the declared snapshot at AsOf. Charges land idempotently
+// by (rail, transaction_id). One merchant-scoped transaction: infrastructure
+// failures roll back the whole book; per-source business refusals stay
+// ordinary outcomes for the other rows.
 func Import(ctx context.Context, opts Options) (Result, error) {
 	res := Result{Reasons: map[string]string{}}
 	if ctx == nil {
@@ -104,17 +98,15 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		qx := txdb.Qx(ctx)
 		q := txdb.Gen(ctx)
 
-		// Lifecycle clock pinned at AsOf: every lifecycle write (ended_at, grace,
-		// updated_at) is dated at the horizon — deterministic re-runs. The service
-		// and deferred-delete scheduler share this transaction so subscription,
-		// evidence, payment and intent writes cannot partially commit.
+		// Lifecycle clock pinned at AsOf so re-runs are deterministic. The
+		// service and deferred-delete scheduler share this transaction so no
+		// write partially commits.
 		lc := subscriptions.NewSubscriptionLifecycleService(txdb, nil, nil, nil, nil, nil, clockwork.NewFakeClockAt(asOf))
 		deferDelete := intents.NewProviderCancelScheduler(txdb, nil, intents.OriginUser, "billing-import terminal cancel, remote may be alive")
 		lc.SetProviderCancelScheduler(deferDelete)
 
-		// or#893: every provider-bound row the import writes carries a PSP.
-		// Resolve the merchant's catalog ONCE, then attribute each declared row
-		// from its own PSP ref, falling back to the whole-import default.
+		// Every provider-bound row carries a PSP: its own ref, else the book
+		// default.
 		psps, err := newPSPResolver(ctx, q, merchantID.UUID(), opts.Book.DefaultPSP)
 		if err != nil {
 			return err
@@ -241,8 +233,7 @@ func Import(ctx context.Context, opts Options) (Result, error) {
 		}
 
 		// The first approved sale of each NMI schedule is its customer-initiated
-		// recurring signup: the stored-credential anchor OpenRails' dunning
-		// retries reference (Paul, 2026-09-25: every NMI schedule is dunned).
+		// recurring signup: the stored-credential anchor dunning retries cite.
 		firstScheduleSale := map[string]reconcile.RemoteTransaction{}
 		for _, t := range txns {
 			if t.SubscriptionID == "" || !t.Success || t.Type != reconcile.TransactionTypeSale || t.TransactionID == "" {

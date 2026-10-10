@@ -31,7 +31,7 @@ func TestDecodeJSONLimited(t *testing.T) {
 	require.False(t, errors.Is(err, ErrResponseTooLarge))
 }
 
-// #SEC-21: only publicly routable unicast destinations are reachable.
+// Only publicly routable unicast destinations are reachable.
 func TestIsBlockedIP(t *testing.T) {
 	for _, s := range []string{
 		"127.0.0.1", "::1", "10.0.0.1", "172.16.0.1", "192.168.1.1",

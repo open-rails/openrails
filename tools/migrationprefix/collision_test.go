@@ -28,11 +28,8 @@ func scriptPath(t *testing.T) string {
 	return abs
 }
 
-// cleanEnv is os.Environ() with every GITHUB_* variable stripped. Without it the
-// tests inherit the runner's own GITHUB_STEP_SUMMARY and append their fixture
-// verdicts to the real job summary — and any future event-keyed branch in the
-// script would read the runner's event instead of the fixture's. A test whose
-// behaviour depends on where it runs is not evidence.
+// cleanEnv is os.Environ() without GITHUB_* variables, so a test never writes
+// to the runner's real job summary or reads the runner's event.
 func cleanEnv(extra ...string) []string {
 	out := make([]string, 0, len(os.Environ())+len(extra))
 	for _, kv := range os.Environ() {
@@ -186,11 +183,9 @@ func (res result) mustContain(t *testing.T, needles ...string) {
 	}
 }
 
-// TestLiveIncidentReplay is the or#908/or#911 outage as it actually happened:
-// the lane branched when 0004 was the tip and drafted its own 0005; while it
-// sat open, the sibling merged ITS 0005 to master. Both PRs read CLEAN. The
-// point of the case is that the lane repository is never told — the script has
-// to go and find out.
+// TestLiveIncidentReplay: the lane branched at 0004 and drafted its own 0005;
+// while it sat open a sibling merged its 0005 to master, and both PRs read
+// clean. The lane is never told, so the script has to find out.
 func TestLiveIncidentReplay(t *testing.T) {
 	origin := newOrigin(t,
 		"0001_schema.up.sql",
@@ -202,7 +197,7 @@ func TestLiveIncidentReplay(t *testing.T) {
 	lane.migration("0005_spend_delegation_provenance.up.sql")
 	lane.commit("or#911: spend delegation provenance")
 
-	// Green before the sibling lands — the state every collided PR was in.
+	// Green before the sibling lands.
 	if res := lane.run(); res.code != 0 {
 		t.Fatalf("expected a clean verdict before the sibling merged, got %d:\n%s", res.code, res.out)
 	}
@@ -264,10 +259,9 @@ func TestNoMigrationsPassesTrivially(t *testing.T) {
 	res.mustContain(t, "no migrations in this tree")
 }
 
-// TestUnchangedMigrationsPass: a PR that touches no migration at all, in a repo
-// that HAS them, and where master has since gained one. Every number the tree
-// holds is master's own, so there is nothing to report — the second-most common
-// shape, and the one a naive "compare the sets" check gets wrong.
+// TestUnchangedMigrationsPass: a PR touching no migration, in a repo that has
+// them, where master has since gained one. Every number the tree holds is
+// master's own; a naive "compare the sets" check gets this wrong.
 func TestUnchangedMigrationsPass(t *testing.T) {
 	origin := newOrigin(t, "0001_schema.up.sql", "0004_grants_credit_deposit_once.up.sql")
 	lane := clone(t, origin)
@@ -298,12 +292,10 @@ func TestUpDownPairIsOneMigration(t *testing.T) {
 	}
 }
 
-// TestDuplicatePrefixRepairPasses is hotfix PR #278's exact shape: master's own
-// chain already holds one number twice (or#908 and or#911 merged it from stale
-// bases) and this change is the repair, renaming one of them to the next free
-// number. The file that KEEPS its number is still one of master's own files, so
-// a check written as "master's slug differs from mine" would fail the very
-// change that fixes master. This is why the rule is set membership.
+// TestDuplicatePrefixRepairPasses: master's chain already holds one number
+// twice and this change renames one of them to the next free number. The file
+// that keeps its number is master's own, so a "master's slug differs from
+// mine" check would fail the fix; hence the rule is set membership.
 func TestDuplicatePrefixRepairPasses(t *testing.T) {
 	origin := newOrigin(t,
 		"0001_schema.up.sql",
@@ -349,10 +341,8 @@ func TestUnreachableMasterIsUnverified(t *testing.T) {
 	}
 }
 
-// TestChainSquashIsNotApplicable: a chain squash (or#893 is this repo's
-// precedent) rewrites every number by design, so comparing numbers with master
-// answers a question nobody asked. Reviewing the squash is the PR reviewer's
-// job; this gate stands down rather than adding a second opinion.
+// TestChainSquashIsNotApplicable: a chain squash rewrites every number by
+// design, so the gate stands down and leaves the squash to the PR review.
 func TestChainSquashIsNotApplicable(t *testing.T) {
 	origin := newOrigin(t,
 		"0001_schema.up.sql",

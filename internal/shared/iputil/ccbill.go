@@ -7,12 +7,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// DefaultCCBillIPRanges are CCBill's documented webhook source ranges.
-// Source: https://ccbill.com/doc/webhooks
-//
-// This IS the allowlist (#710): CCBill sends every merchant's webhooks from
-// these provider-wide ranges, so there is nothing per-deployment or
-// per-merchant to declare. A range rotation ships as a code change.
+// DefaultCCBillIPRanges are CCBill's documented webhook source ranges
+// (https://ccbill.com/doc/webhooks). They are provider-wide, so this is the
+// whole allowlist; a rotation ships as a code change.
 var DefaultCCBillIPRanges = []string{
 	"64.38.212.0/24", // 64.38.212.1 - 64.38.212.254
 	"64.38.215.0/24", // 64.38.215.1 - 64.38.215.254
