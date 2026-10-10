@@ -147,6 +147,7 @@ func TestPermissiveCORSHTTP(t *testing.T) {
 			require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
 			require.Contains(t, w.Header().Get("Access-Control-Allow-Headers"), "Authorization")
 			require.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "X-Captcha-Required")
+			require.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "DPoP-Nonce", "a browser retries use_dpop_nonce with it")
 		} else {
 			require.Empty(t, w.Header().Get("Access-Control-Allow-Origin"), "%s %s", tc.method, tc.path)
 		}

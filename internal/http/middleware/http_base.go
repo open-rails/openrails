@@ -155,7 +155,7 @@ func PermissiveCORSHTTP(match func(*http.Request) bool) HTTPMiddleware {
 	const (
 		allowHeaders  = "Origin,Content-Length,Content-Type,Authorization,DPoP,OpenRails-Merchant,X-Request-ID,X-Forwarded-For,X-Real-IP,Idempotency-Key,X-E2E-Run-ID,X-Captcha-Token,Accept-Language"
 		allowMethods  = "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-		exposeHeaders = "WWW-Authenticate,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
+		exposeHeaders = "WWW-Authenticate,DPoP-Nonce,X-Request-ID,X-RateLimit-Remaining,X-RateLimit-Reset,X-Captcha-Required"
 	)
 	maxAge := strconv.Itoa(int((12 * time.Hour).Seconds()))
 

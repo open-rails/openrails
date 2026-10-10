@@ -322,7 +322,9 @@ resource_server:
 - A token bound to a DPoP key (`cnf.jkt`) is accepted only with
   `Authorization: DPoP <token>` and a fresh proof carrying the server nonce; the
   first proof without one is answered `401 use_dpop_nonce` with a `DPoP-Nonce`
-  header to retry with.
+  header to retry with. The proof names `auth.request_origin` (else the
+  issuer's origin) plus the path, so browsers call the server at that origin:
+  a proof for any other host, a merchant's API host included, is refused.
 - Browsers on `allowed_origins` may call the admin API across origins.
   Credentials mode stays off: tokens travel in the `Authorization` and `DPoP`
   headers, never cookies.
@@ -370,7 +372,8 @@ for merchant A is rejected on merchant B's host even though it verifies.
 
 **CORS** is a fixed, engine-wide policy — not configurable, no origin
 registration: browser-facing tiers (checkout, `/v1/me/*`)
-answer `Access-Control-Allow-Origin: *` (never with credentials — OpenRails
+answer `Access-Control-Allow-Origin: *` and expose `WWW-Authenticate` and
+`DPoP-Nonce`, so a browser can answer a nonce challenge (never with credentials — OpenRails
 issues no cookies; every browser call is an explicit bearer token), and every
 other surface (admin API, webhooks, admin) emits no CORS headers at all.
 

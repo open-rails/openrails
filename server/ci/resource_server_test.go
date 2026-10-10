@@ -288,7 +288,15 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 			})
 		}
 		token := customer(nil)
-		w := staticDPoPServe(t, handler, browser, token, rsRequest{path: me})
+		// A shop's page calls /v1/me across origins: it can read the nonce
+		// the challenge carries, and retry with it.
+		w := serve(handler, rsRequest{path: me, authorization: "DPoP " + token, dpop: browser.proof(t, http.MethodGet, me, token, ""), origin: "https://shop.e2e.test"})
+		require.Equal(t, http.StatusUnauthorized, w.Code, w.Body.String())
+		require.Equal(t, billing.CodeDPoPNonceRequired, errorCode(t, w))
+		require.NotEmpty(t, w.Header().Get("DPoP-Nonce"))
+		require.Equal(t, "*", w.Header().Get("Access-Control-Allow-Origin"))
+		require.Contains(t, w.Header().Get("Access-Control-Expose-Headers"), "DPoP-Nonce")
+		w = staticDPoPServe(t, handler, browser, token, rsRequest{path: me})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 		var customers int
 		require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+pgx.Identifier{f.schema, "customers"}.Sanitize()+" WHERE merchant_id = (SELECT id FROM "+pgx.Identifier{f.schema, "merchants"}.Sanitize()+" WHERE slug = $1)", shop).Scan(&customers))

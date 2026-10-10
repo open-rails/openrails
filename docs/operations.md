@@ -1420,7 +1420,7 @@ route tier:
   catalog/checkout, `/v1/me/*`, and their embedded
   equivalents) answer every preflight and response with
   `Access-Control-Allow-Origin: *`, the methods/headers those routes need,
-  and a 12h `Access-Control-Max-Age` — from ANY origin, zero configuration;
+  `WWW-Authenticate` and `DPoP-Nonce` exposed, and a 12h `Access-Control-Max-Age` — from ANY origin, zero configuration;
   `Access-Control-Allow-Credentials` is NEVER set. A merchant frontend calls
   OpenRails directly with no origin-registration step.
 - **Every other surface** (admin console, platform directory,
