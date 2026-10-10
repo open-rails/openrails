@@ -36,28 +36,29 @@ import (
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
 
-// A customer without access, signed out included, gets 402 and where to buy
-// it; buying through the routes billing-ui's Buy calls (a checkout session for
-// the catalog price, paid with a new card) gets them the course's signed
-// video URL.
+// A visitor without a key that unlocks a video, signed out included, gets
+// 402 with those keys and its buy page. Buying through the routes billing-ui
+// calls (a checkout session for the catalog price) gets the signed video URL:
+// a course for its buyers, every video for members.
 func TestGatedContent(t *testing.T) {
 	app := startApp(t)
-	const css, tailwind, qa = "/api/courses/css-101", "/api/courses/tailwind-102", "/api/members/qa"
+	const css, tailwind, qa = "/api/courses/css-101", "/api/courses/tailwind-102", "/api/courses/live-qa"
+	cssKeys, tailwindKeys, qaKeys := []string{"course:101", "channel:membership"}, []string{"course:102", "channel:membership"}, []string{"channel:membership"}
 
 	t.Run("signed out", func(t *testing.T) {
-		app.requireBuy(t, "", css, "course:101", "/courses/css-101/buy")
-		app.requireBuy(t, "", qa, "channel:membership", "/join")
+		app.requireBuy(t, "", css, cssKeys, "/courses/css-101/buy")
+		app.requireBuy(t, "", qa, qaKeys, "/courses/live-qa/buy")
 	})
 	t.Run("an unknown course", func(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, app.get(t, "", "/api/courses/no-such-course").StatusCode)
 	})
 	t.Run("a course bought alone", func(t *testing.T) {
 		alice := app.signUp(t, "alice")
-		app.requireBuy(t, alice, css, "course:101", "/courses/css-101/buy")
+		app.requireBuy(t, alice, css, cssKeys, "/courses/css-101/buy")
 		app.buy(t, alice, "course-101", "purchase")
 		app.requireVideo(t, alice, css, "media/courses/css-101.mp4")
-		app.requireBuy(t, alice, tailwind, "course:102", "/courses/tailwind-102/buy")
-		app.requireBuy(t, alice, qa, "channel:membership", "/join")
+		app.requireBuy(t, alice, tailwind, tailwindKeys, "/courses/tailwind-102/buy")
+		app.requireBuy(t, alice, qa, qaKeys, "/courses/live-qa/buy")
 	})
 	t.Run("a rental", func(t *testing.T) {
 		dave := app.signUp(t, "dave")
@@ -69,12 +70,14 @@ func TestGatedContent(t *testing.T) {
 		app.buy(t, bob, "course-bundle", "purchase")
 		app.requireVideo(t, bob, css, "media/courses/css-101.mp4")
 		app.requireVideo(t, bob, tailwind, "media/courses/tailwind-102.mp4")
+		app.requireBuy(t, bob, qa, qaKeys, "/courses/live-qa/buy")
 	})
-	t.Run("a member", func(t *testing.T) {
+	t.Run("a member watches every video", func(t *testing.T) {
 		carol := app.signUp(t, "carol")
 		app.buy(t, carol, "channel-membership", "monthly")
-		app.requireQuestions(t, carol, qa)
-		app.requireBuy(t, carol, css, "course:101", "/courses/css-101/buy")
+		app.requireVideo(t, carol, css, "media/courses/css-101.mp4")
+		app.requireVideo(t, carol, tailwind, "media/courses/tailwind-102.mp4")
+		app.requireVideo(t, carol, qa, "media/courses/live-qa.mp4")
 	})
 }
 
@@ -97,14 +100,15 @@ func TestMediaURLs(t *testing.T) {
 // The course list pages over the host's courses. Each page joins in its
 // products' live prices and what the user owns with one product read and one
 // entitlement read, never one per course; signed out, it reads no
-// entitlements at all.
+// entitlements at all. A members-only video is sold with the membership.
 func TestCourseList(t *testing.T) {
 	app := startApp(t)
 	type price struct{ Key, Amount, Currency, Terms string }
 	type row struct {
 		Slug, Title string
-		ProductKey  string `json:"product_key"`
+		MembersOnly bool `json:"members_only"`
 		Owned       bool
+		ProductKey  string `json:"product_key"`
 		Prices      []price
 	}
 	var page struct {
@@ -121,22 +125,31 @@ func TestCourseList(t *testing.T) {
 		require.Equal(t, entitlementReads, app.queries.count("ListValidEntitlementCaches"), "entitlement reads per page")
 	}
 	cssPrices := []price{{"rent", "1990000", "USD", "for 3 days"}, {"purchase", "4990000", "USD", "to keep"}}
+	membershipPrices := []price{{"monthly", "10000000", "USD", "every 30 days"}, {"yearly", "99000000", "USD", "every 365 days"}}
 
 	read("", "limit=1", 0)
-	require.Equal(t, []row{{"css-101", "Intro to CSS", "course-101", false, cssPrices}}, page.Data)
-	require.NotNil(t, page.NextCursor)
+	require.Equal(t, []row{{"css-101", "Intro to CSS", false, false, "course-101", cssPrices}}, page.Data)
 	read("", "limit=1&cursor="+*page.NextCursor, 0)
-	require.Len(t, page.Data, 1)
 	require.Equal(t, "tailwind-102", page.Data[0].Slug)
+	read("", "limit=1&cursor="+*page.NextCursor, 0)
+	require.Equal(t, []row{{"live-qa", "Live Q&A", true, false, "channel-membership", membershipPrices}}, page.Data)
 	require.Nil(t, page.NextCursor)
 
+	owned := func() []bool {
+		var out []bool
+		for _, r := range page.Data {
+			out = append(out, r.Owned)
+		}
+		return out
+	}
 	alice := app.signUp(t, "alice")
 	app.buy(t, alice, "course-101", "purchase")
 	read(alice, "", 1)
-	require.Len(t, page.Data, 2)
-	require.True(t, page.Data[0].Owned, "she bought css-101")
-	require.False(t, page.Data[1].Owned)
-	require.Nil(t, page.NextCursor)
+	require.Equal(t, []bool{true, false, false}, owned(), "her course only")
+	carol := app.signUp(t, "carol")
+	app.buy(t, carol, "channel-membership", "yearly")
+	read(carol, "", 1)
+	require.Equal(t, []bool{true, true, true}, owned(), "a member owns every video")
 
 	require.Equal(t, http.StatusBadRequest, app.get(t, "", "/api/courses?limit=0").StatusCode)
 }
@@ -340,15 +353,18 @@ func (a *app) buy(t *testing.T, token, product, price string) {
 	require.Equal(t, "succeeded", paid.Status)
 }
 
-// requireBuy: path answers 402 naming the entitlement and the buy page.
-func (a *app) requireBuy(t *testing.T, token, path, entitlement, buy string) {
+// requireBuy: path answers 402 naming the keys that unlock it and the buy page.
+func (a *app) requireBuy(t *testing.T, token, path string, unlock []string, buy string) {
 	t.Helper()
 	res := a.get(t, token, path)
 	require.Equal(t, http.StatusPaymentRequired, res.StatusCode, path)
-	var body struct{ Error, Entitlement, Buy string }
+	var body struct {
+		Error, Buy string
+		Unlock     []string
+	}
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	require.Equal(t, "access_required", body.Error)
-	require.Equal(t, entitlement, body.Entitlement)
+	require.Equal(t, unlock, body.Unlock)
 	require.Equal(t, buy, body.Buy)
 }
 
@@ -381,16 +397,6 @@ func (a *app) requireVideo(t *testing.T, token, path, file string) {
 	part, err := io.ReadAll(ranged.Body)
 	require.NoError(t, err)
 	require.Equal(t, want[:100], part)
-}
-
-// requireQuestions: path serves the members' Q&A.
-func (a *app) requireQuestions(t *testing.T, token, path string) {
-	t.Helper()
-	res := a.get(t, token, path)
-	require.Equal(t, http.StatusOK, res.StatusCode, path)
-	var body struct{ Questions []string }
-	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
-	require.Contains(t, body.Questions, "How do I center a div?")
 }
 
 // get requests path without following redirects.

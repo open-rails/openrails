@@ -6,6 +6,7 @@ import * as React from "react"
 import { cn } from "cn"
 
 import type { CheckoutAppearance } from "#orck/appearance"
+import { checkoutOf } from "#orck/client/checkout"
 import { isBillingError, toBillingError } from "#orck/client/errors"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
@@ -24,6 +25,15 @@ export interface BuyButtonProps {
   price: string
   /** The button's text; by default the price's amount and terms, from the catalog. */
   label?: string
+  /**
+   * A customer-chosen deposit, in the price currency's native units, for a
+   * price with `customer_amount`; the checkout charges exactly this.
+   */
+  amount?: string
+  /** false buys a recurring price's first term only; default: renews. */
+  autoRenew?: boolean
+  /** Where a redirect rail (Stripe's hosted page) returns the buyer: one of the app's return origins. */
+  successUrl?: string
   /**
    * The purchase succeeded. A hint: the host's own gate decides access, so
    * send the buyer to the content it guards.
@@ -70,6 +80,9 @@ function Purchase({
   product,
   price,
   label,
+  amount,
+  autoRenew,
+  successUrl,
   onPaid,
   onSignInRequired,
   signedIn,
@@ -89,7 +102,7 @@ function Purchase({
     () =>
       session
         ? // The customer's surface: their saved cards pay too.
-          client.checkoutSource(session, {
+          checkoutOf(client).checkoutSource(session, {
             customerBase: `${client.baseUrl}/me`,
           })
         : null,
@@ -101,9 +114,12 @@ function Purchase({
     setFailure(undefined)
     setStarting(true)
     try {
-      const { id } = await client.createCheckoutSession({
+      const { id } = await checkoutOf(client).createCheckoutSession({
         productKey: product,
         priceKey: price,
+        amount,
+        autoRenew,
+        successUrl,
       })
       setSession(id)
     } catch (err) {

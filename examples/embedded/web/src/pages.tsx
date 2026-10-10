@@ -3,23 +3,25 @@ import { Link, useNavigate, useParams } from "react-router-dom"
 import { SignInDialog } from "@openrails/auth-ui"
 import { createAuthClient } from "@openrails/auth-ui/client"
 import { useAuth } from "@openrails/auth-ui/react"
-import { createBillingClient, formatAmount } from "@openrails/billing-ui/client"
-import { BuyButton, Offers } from "@openrails/billing-ui"
+import { BuyButton, createBillingClient, formatAmount, Offers } from "@openrails/billing-ui"
 
 export const auth = createAuthClient() // AuthKit's browser client, at /api/v1: authFetch attaches the signed-in user's token
 export const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
-// A course as the app's API lists it: the host's own, priced by OpenRails.
+// A course as the app's API lists it: the host's own, priced by OpenRails. A
+// members-only one is sold with the membership's prices.
 type Course = {
   slug: string
   title: string
-  product_key: string
+  members_only: boolean
   owned: boolean
+  product_key: string
   prices: { key: string; amount: string; currency: string; terms: string }[]
 }
 
 // StorePage lists the courses a page at a time: Watch for those the user
-// owns, a BuyButton per price for the rest.
+// owns, a BuyButton per price for the rest (the membership's, for a
+// members-only video).
 export function StorePage() {
   const navigate = useNavigate()
   const { signedIn } = useAuth()
@@ -42,6 +44,7 @@ export function StorePage() {
       {pages.flatMap((page) => page.data).map((course) => (
         <section key={course.slug}>
           <h2>{course.title}</h2>
+          {course.members_only && <p>Members only</p>}
           {course.owned ? (
             <Link to={`/courses/${course.slug}`}>Watch</Link>
           ) : (
@@ -60,68 +63,70 @@ export function StorePage() {
         </section>
       ))}
       {next && <button onClick={() => setCursor(next)}>Load more</button>}
-      <Link to="/members/qa">Members-only Q&A</Link>
       <SignInDialog open={signingIn} onOpenChange={setSigningIn} />
     </>
   )
 }
 
-// CoursePage plays the course: the API answers its signed video URL, or 402
-// and where to buy it.
+// CoursePage plays the course, if it's theirs.
 export function CoursePage() {
   const { course = "" } = useParams()
   const navigate = useNavigate()
   const [videoURL, setVideoURL] = useState<string>()
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
     auth.authFetch(`/api/courses/${course}`).then(async (res) => {
-      const body = await res.json()
-      if (res.status === 402) navigate(body.buy, { replace: true }) // no access: go buy it
-      else if (res.ok) setVideoURL(body.video_url)
+      switch (res.status) {
+        case 200: // theirs: the server answers a short-lived video URL
+          setVideoURL((await res.json()).video_url)
+          break
+        case 402: // not theirs yet: the server says where to buy it
+          navigate((await res.json()).buy, { replace: true })
+          break
+        default: // unknown course, or the server is unavailable
+          setFailed(true)
+      }
     })
   }, [course, navigate])
-  return videoURL ? <video src={videoURL} controls /> : null
+  if (failed) return <p>Couldn't load this course.</p>
+  if (!videoURL) return <p>Loading…</p>
+  return <video src={videoURL} controls />
 }
 
-export function MembersQAPage() {
-  const navigate = useNavigate()
-  const [questions, setQuestions] = useState<string[]>()
-  useEffect(() => {
-    auth.authFetch("/api/members/qa").then(async (res) => {
-      const body = await res.json()
-      if (res.status === 402) navigate(body.buy, { replace: true })
-      else if (res.ok) setQuestions(body.questions)
-    })
-  }, [navigate])
-  return <ul>{questions?.map((question) => <li key={question}>{question}</li>)}</ul>
-}
-
+// CourseBuyPage asks the course what unlocks it and offers everything on sale
+// that grants any of those keys: the course, the bundle, the membership. Paid,
+// the buyer goes back to the course, which now lets them in.
 export function CourseBuyPage() {
   const { course = "" } = useParams()
-  return <BuyPage api={`/api/courses/${course}`} back={`/courses/${course}`} />
-}
-
-export function JoinPage() {
-  return <BuyPage api="/api/members/qa" back="/members/qa" />
-}
-
-// BuyPage asks api what unlocks it (its 402 names the entitlement) and offers
-// everything on sale that grants it: the course, a bundle, a membership.
-// Paid, the buyer goes back, which now lets them in.
-function BuyPage({ api, back }: { api: string; back: string }) {
   const navigate = useNavigate()
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
-  const [entitlement, setEntitlement] = useState<string>()
+  const [unlock, setUnlock] = useState<string[]>()
+  const [failed, setFailed] = useState(false)
   useEffect(() => {
-    auth.authFetch(api).then(async (res) => {
-      if (res.status === 402) setEntitlement((await res.json()).entitlement)
-      else if (res.ok) navigate(back, { replace: true }) // already theirs
+    auth.authFetch(`/api/courses/${course}`).then(async (res) => {
+      switch (res.status) {
+        case 200: // already theirs: back to it
+          navigate(`/courses/${course}`, { replace: true })
+          break
+        case 402: // not theirs yet: the server names the keys that unlock it
+          setUnlock((await res.json()).unlock)
+          break
+        default: // unknown course, or the server is unavailable
+          setFailed(true)
+      }
     })
-  }, [api, back, navigate])
-  if (!entitlement) return null
+  }, [course, navigate])
+  if (failed) return <p>Couldn't load this course.</p>
+  if (!unlock) return <p>Loading…</p>
   return (
     <>
-      <Offers entitlement={entitlement} signedIn={signedIn} onSignInRequired={() => setSigningIn(true)} onPaid={() => navigate(back)} />
+      <Offers
+        entitlements={unlock}
+        signedIn={signedIn}
+        onSignInRequired={() => setSigningIn(true)}
+        onPaid={() => navigate(`/courses/${course}`)}
+      />
       <SignInDialog open={signingIn} onOpenChange={setSigningIn} />
     </>
   )

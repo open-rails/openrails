@@ -10,6 +10,7 @@ import {
   WalletRejectedError,
 } from "./client"
 import { fixtureSession } from "../fixtures"
+import { checkoutOf } from "./checkout"
 import { BillingError, isServerError } from "./errors"
 import { priceSchema, productSchema, subscriptionSchema } from "./types"
 
@@ -250,7 +251,7 @@ describe("checkout sessions", () => {
   ])("rejects incomplete or ambiguous price selectors before making a request: %j", async (input) => {
     const fetch = vi.fn()
     const client = createBillingClient({ fetch })
-    await expect(client.createCheckoutSession(input)).rejects.toMatchObject({
+    await expect(checkoutOf(client).createCheckoutSession(input)).rejects.toMatchObject({
       code: "invalid_request",
     })
     expect(fetch).not.toHaveBeenCalled()
@@ -262,7 +263,7 @@ describe("checkout sessions", () => {
       url: "https://pay.example/checkout#ocs_x",
       expires_at: "2026-10-03T00:00:00Z",
     }, { status: 201 }))
-    await createBillingClient({ fetch }).createCheckoutSession({ priceId: "price_1" })
+    await checkoutOf(createBillingClient({ fetch })).createCheckoutSession({ priceId: "price_1" })
     const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     expect(JSON.parse(String(init.body))).toEqual({ price_id: "price_1" })
   })
@@ -271,7 +272,7 @@ describe("checkout sessions", () => {
     const fetch = vi.fn().mockResolvedValue(Response.json({
       id: `ocs_${"a".repeat(64)}`, url: null, expires_at: "2026-10-03T00:00:00Z",
     }, { status: 201 }))
-    await createBillingClient({ fetch }).createCheckoutSession({ priceId: "price_1", autoRenew })
+    await checkoutOf(createBillingClient({ fetch })).createCheckoutSession({ priceId: "price_1", autoRenew })
     const [, init] = fetch.mock.calls[0] as unknown as [string, RequestInit]
     const body = JSON.parse(String(init.body))
     expect(body).toEqual(autoRenew === undefined ? { price_id: "price_1" } : { price_id: "price_1", auto_renew: autoRenew })
@@ -288,7 +289,7 @@ describe("checkout sessions", () => {
         { status: 201 }
       )
     )
-    await createBillingClient({ fetch }).createCheckoutSession({
+    await checkoutOf(createBillingClient({ fetch })).createCheckoutSession({
       productKey: "api-credits",
       priceKey: "deposit",
       amount: "100000000",
@@ -321,13 +322,13 @@ describe("checkout sessions", () => {
         return replies.shift()!
       },
     })
-    const link = await client.createCheckoutSession({
+    const link = await checkoutOf(client).createCheckoutSession({
       productKey: "premium",
       priceKey: "monthly",
       successUrl: "https://host-one.example/welcome",
     })
     expect(link.url).toBe("https://pay.example/checkout#ocs_x")
-    const paid = await client
+    const paid = await checkoutOf(client)
       .checkoutSource(link.id)
       .pay({ option_id: "option_1" })
     expect(paid.status).toBe("succeeded")
@@ -358,7 +359,7 @@ describe("checkout sessions", () => {
         return replies.shift()!
       },
     })
-    const source = client.checkoutSource("ocs_1", {
+    const source = checkoutOf(client).checkoutSource("ocs_1", {
       customerBase: "/api/v1/merchants/acme/billing/me/",
     })
     expect((await source.getSession()).id).toBe("ocs_1")
@@ -408,16 +409,16 @@ describe("checkout sessions", () => {
     ] as const) {
       const client = createBillingClient({ fetch: async () => reply })
       await expect(
-        client.checkoutSource("ocs_1").pay({ option_id: "o" })
+        checkoutOf(client).checkoutSource("ocs_1").pay({ option_id: "o" })
       ).resolves.toEqual(want)
     }
     const busy = createBillingClient({
       fetch: async () => refusal(409, "checkout_payment_in_progress"),
     })
     await expect(
-      busy.checkoutSource("ocs_1").pay({ option_id: "o" })
+      checkoutOf(busy).checkoutSource("ocs_1").pay({ option_id: "o" })
     ).rejects.toMatchObject({ status: 409 })
-    await expect(busy.createCheckoutSession({})).rejects.toMatchObject({
+    await expect(checkoutOf(busy).createCheckoutSession({})).rejects.toMatchObject({
       code: "invalid_request",
     })
   })
@@ -432,9 +433,9 @@ describe("listProducts", () => {
       ],
     })
     const client = createBillingClient({ fetch: server.fetch })
-    const page = await client.listProducts({ entitlement: "course:101", keys: ["a", "c"] })
+    const page = await client.listProducts({ entitlements: ["course:101", "course:102"], keys: ["a", "c"] })
     expect(page.data.map((p) => p.key)).toEqual(["a"])
     const [url] = server.fetch.mock.calls[0]!
-    expect(String(url)).toBe("/billing/v1/catalog/products?entitlement=course%3A101&keys=a&keys=c&limit=100")
+    expect(String(url)).toBe("/billing/v1/catalog/products?entitlement=course%3A101&entitlement=course%3A102&keys=a&keys=c&limit=100")
   })
 })

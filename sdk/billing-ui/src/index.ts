@@ -1,10 +1,17 @@
-// @openrails/billing-ui — styled OpenRails checkout and account billing.
-// `Checkout`/`CheckoutModal` are the purchase flow; the account panels manage
-// what was bought. `BillingProvider` (also in `./react`, without styles) gives
-// them the client, appearance and words. The entry installs its isolated
+// @openrails/billing-ui — styled OpenRails buying and account billing.
+// `BuyButton`/`Offers` are the purchase; the account panels manage what was
+// bought. `BillingProvider` (also in `./react`, without styles) gives them the
+// client, appearance and words; the client and money formatting are here too,
+// so a React app imports from one place. The entry installs its isolated
 // stylesheet once in browser environments.
 import "./styles.css"
 
+export {
+  createBillingClient,
+  type BillingClient,
+  type BillingClientOptions,
+  type ProductListOptions,
+} from "./client/client"
 export {
   BillingProvider,
   type BillingProviderProps,
@@ -69,8 +76,7 @@ export {
   type Translator,
 } from "./i18n"
 
-export { Checkout, type CheckoutLayout, type CheckoutProps } from "./checkout"
-export { CheckoutModal, type CheckoutModalProps } from "./modal"
+export type { CheckoutLayout } from "./checkout"
 export { BuyButton, type BuyButtonProps } from "./buy-button"
 export { Offers, type OffersProps } from "./offers"
 export { CheckoutPage, type CheckoutPageProps } from "./checkout-page"
@@ -78,8 +84,6 @@ export { CheckoutFrame, type CheckoutFrameProps } from "./checkout-frame"
 export type { CheckoutFrameTheme } from "./frame"
 export { CardBrandPlate } from "./components/card-brands"
 export { resolveCardBrand, type CardBrand } from "./lib/card-brands"
-export type { CheckoutSource } from "./source"
-export { createFixtureSource, fixtureSession } from "./fixtures"
 export { browserCountry, initialCountry } from "./lib/billing"
 export {
   addAmounts,

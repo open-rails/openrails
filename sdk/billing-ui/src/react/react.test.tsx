@@ -174,7 +174,7 @@ describe("plan change", () => {
         product({ id: "prod_other", entitlements: ["other"] }),
       ],
     })
-    const { result } = setup(() => useProducts({ entitlement: "plus" }), server)
+    const { result } = setup(() => useProducts({ entitlements: ["plus"] }), server)
     await waitFor(() => expect(result.current.products).toHaveLength(2))
     expect(result.current.nextCursor).toBeNull()
     expect(result.current.products![0].prices[0]).toMatchObject({

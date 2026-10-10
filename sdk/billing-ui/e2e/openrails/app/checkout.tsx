@@ -1,15 +1,16 @@
-// The app selling through hosted checkout: the signed-in customer mints a
-// session and frames the shared payment page, or renders Checkout itself
-// (#mode=inline, the single-site case).
+// The checkout behind BuyButton, driven directly: the signed-in customer
+// mints a session and frames the shared payment page, or renders Checkout
+// itself (#mode=inline, the single-site case). Checkout and the checkout
+// calls are internal, so this test page imports them from src.
 import { createRoot } from "react-dom/client"
 
-import {
-  BillingProvider,
-  Checkout,
-  CheckoutFrame,
-  type CheckoutFrameTheme,
-} from "../../../dist/index.js"
-import { createBillingClient } from "../../../dist/client.js"
+import "../../../dist/styles.css"
+import { Checkout } from "../../../src/checkout"
+import { CheckoutFrame } from "../../../src/checkout-frame"
+import { checkoutOf } from "../../../src/client/checkout"
+import { createBillingClient } from "../../../src/client/client"
+import type { CheckoutFrameTheme } from "../../../src/frame"
+import { BillingProvider } from "../../../src/react/provider"
 
 const params = new URLSearchParams(location.hash.slice(1))
 const token = params.get("token")
@@ -21,7 +22,7 @@ Object.assign(window, { checkoutCompleted: completed })
 const client = createBillingClient({ getToken: () => token })
 
 async function main() {
-  const session = await client.createCheckoutSession({
+  const session = await checkoutOf(client).createCheckoutSession({
     priceId: params.get("price") ?? "",
   })
   Object.assign(window, { checkoutSession: session })
@@ -30,7 +31,7 @@ async function main() {
       <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
         {inline || !session.url ? (
           <Checkout
-            source={client.checkoutSource(session.id)}
+            source={checkoutOf(client).checkoutSource(session.id)}
             onComplete={(result) => completed.push(result.status)}
           />
         ) : (

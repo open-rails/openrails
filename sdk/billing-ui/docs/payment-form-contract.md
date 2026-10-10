@@ -112,12 +112,12 @@ a fresh card token and payment. Tokenization/field validation errors before
 submission remain editable. Explicit `failed` results are definitive host
 responses; they must not represent an unknown provider result.
 
-`client.checkoutSource(id)` is the source of every checkout: it reads and pays
-the OpenRails session. `getSession` is a read, never another payment. With the
-session id alone it sends no bearer, so it pays with a new card only. A
-signed-in customer pays with a saved card through a customer surface:
-`client.checkoutSource(id, { customerBase: "/billing/v1/me" })` reads and pays
-at that surface's `/checkout-sessions/{id}` with the client's credential.
+A checkout source reads and pays the OpenRails session; `getSession` is a
+read, never another payment. With the session id alone (the shared payment
+page) it sends no bearer, so it pays with a new card only. `<BuyButton>` pays
+as the signed-in customer through the customer surface, at
+`/billing/v1/me/checkout-sessions/{id}` with the client's credential, so saved
+cards pay too.
 
 ## Separate NMI card setup
 

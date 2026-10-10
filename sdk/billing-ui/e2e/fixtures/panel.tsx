@@ -3,8 +3,12 @@
 import { createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { CheckoutModal, fixtureSession } from "../../src/index"
-import type { CheckoutSource } from "../../src/index"
+// The checkout is internal (apps buy through BuyButton), so the preview
+// imports it, and the stylesheet, directly.
+import "../../src/styles.css"
+import { fixtureSession } from "../../src/fixtures"
+import { CheckoutModal } from "../../src/modal"
+import type { CheckoutSource } from "../../src/source"
 
 const params = new URLSearchParams(location.search)
 const renews = params.get("renews") !== "0"

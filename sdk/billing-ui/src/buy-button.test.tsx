@@ -156,6 +156,33 @@ describe("BuyButton", () => {
     expect(onPaid).toHaveBeenCalledExactlyOnceWith({ status: "succeeded" })
   })
 
+  it("buys a customer-chosen deposit for exactly its amount", async () => {
+    const server = fakeBilling({ products: [] })
+    const { tree, rerender } = mount(server)
+    rerender(
+      tree(
+        <BuyButton
+          product="api-credits"
+          price="deposit"
+          amount="100000000"
+          label="Add credits"
+          onPaid={vi.fn()}
+          onSignInRequired={vi.fn()}
+        />
+      )
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Add credits" }))
+    await screen.findByRole("dialog")
+    const mint = server.fetch.mock.calls.find(
+      ([, init]) => init?.method === "POST"
+    )!
+    expect(JSON.parse(String(mint[1]!.body))).toEqual({
+      product_key: "api-credits",
+      price_key: "deposit",
+      amount: "100000000",
+    })
+  })
+
   it("keeps one checkout source while the tree re-renders", async () => {
     modals.length = 0
     const server = fakeBilling({ products: [] })

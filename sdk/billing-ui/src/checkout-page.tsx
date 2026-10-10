@@ -7,6 +7,7 @@ import * as React from "react"
 
 import type { CheckoutAppearance } from "#orck/appearance"
 import { Checkout, type CheckoutLayout } from "#orck/checkout"
+import { checkoutOf } from "#orck/client/checkout"
 import { createBillingClient, type BillingClient } from "#orck/client/client"
 import { TerminalView } from "#orck/components/states"
 import {
@@ -65,7 +66,7 @@ export function CheckoutPage({
 
   const source = React.useMemo<CheckoutSource | null>(() => {
     if (!sessionId) return null
-    const inner = billing.checkoutSource(sessionId, { customerBase })
+    const inner = checkoutOf(billing).checkoutSource(sessionId, { customerBase })
     return {
       async getSession() {
         const session = await inner.getSession()

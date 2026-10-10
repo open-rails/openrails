@@ -10,9 +10,9 @@ billing (subscriptions, saved cards, payment history).
 | `@openrails/billing-ui`           | `BillingProvider`, styled checkout and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
 
-The checkout owns the browser payment flow. OpenRails holds the checkout
-session: the signed-in customer mints one for a price, and its `ocs_` id alone
-reads and pays it. Card data is tokenized in NMI-hosted Collect.js iframes and
+The checkout owns the browser payment flow, behind `<BuyButton>` and
+`<Offers>`. OpenRails holds the checkout session: the signed-in customer mints
+one for a price, and its `ocs_` id alone reads and pays it. Card data is tokenized in NMI-hosted Collect.js iframes and
 never enters the host application, unless the PSP takes cards on OpenRails
 itself (`card_entry: server`, driver `card`).
 
@@ -28,35 +28,57 @@ provenance.
 pnpm add @openrails/billing-ui@X.Y.Z
 ```
 
-## Checkout
+## Buying
+
+A React app imports from one place:
 
 ```tsx
-import { createBillingClient } from "@openrails/billing-ui/client"
-import { Checkout, CheckoutFrame } from "@openrails/billing-ui"
-import "@openrails/billing-ui/styles.css"
+import { BillingProvider, BuyButton, Offers, createBillingClient, formatAmount } from "@openrails/billing-ui"
 
-const billing = createBillingClient({ fetch: auth.authFetch })
-const session = await billing.createCheckoutSession({
-  productKey: "pro",
-  priceKey: "monthly",
-})
+// auth-ui's authFetch attaches the bearer and retries once after a refresh;
+// `getToken: () => token` works for any other auth.
+const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
-// A shared payment page (Config.Checkout.PageURL) answers with a url:
-<CheckoutFrame url={session.url} theme="dark" onComplete={() => refetchAccess()} />
-// Without one, the app renders the checkout itself:
-<Checkout source={billing.checkoutSource(session.id)} onComplete={() => refetchAccess()} />
+<BillingProvider client={billing} appearance={{ theme: "auto" }}>
+  <App />
+</BillingProvider>
 ```
 
-`onComplete` is a hint: confirm access from your own authenticated API before
-granting anything. Pass `successUrl` to return the buyer from a redirect step
-(Stripe's hosted page); it must be on one of your app's return origins. A
-server that starts checkout itself mints the session with the Go
-`Client.CreateCheckoutSession` and hands the browser its `id` and `url`.
+`<BuyButton>` buys one price, `<Offers>` everything on sale that grants any of
+some entitlements (a course, and the membership that also unlocks it): a
+`BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
+"$10.00 every 30 days"). The purchase is theirs from start to payment, so the
+app never handles a checkout session: today a button opens one in a checkout
+dialog; when orders take a new card it will create an order instead,
+and apps won't change. Signing in is the host's: with `signedIn={false}`, or
+when OpenRails answers 401, they call `onSignInRequired` instead. `onPaid`
+follows a successful payment only; it is a hint, so confirm access from your
+own API (your gate) before granting anything.
 
-For prepaid credits, a fixed pack is another product/price selection. A
-`customer_amount` price also accepts `amount` when minting. Collect the amount
-on your product page before opening checkout; the resulting session shows and
-charges that exact amount, and its payment form cannot change it:
+```tsx
+<BuyButton
+  product="course-101"
+  price="rent" // labelled from the catalog unless you pass label
+  signedIn={signedIn}
+  onSignInRequired={() => openSignIn()}
+  onPaid={() => navigate("/courses/css-101")} // your gate now admits them
+/>
+
+<Offers
+  entitlements={["course:101", "channel:membership"]} // or products={...} from your server's Client.ListOffers
+  signedIn={signedIn}
+  onSignInRequired={() => openSignIn()}
+  onPaid={() => navigate("/courses/css-101")}
+/>
+```
+
+`successUrl` returns the buyer from a redirect step (Stripe's hosted page); it
+must be on one of your app's return origins. `autoRenew={false}` buys a
+recurring price's first term only.
+
+For prepaid credits, a fixed pack is another product/price. A
+`customer_amount` price takes the buyer's `amount`: collect it on your product
+page, and the checkout charges exactly that:
 
 ```tsx
 import { decimalToAmount } from "@openrails/billing-ui/client"
@@ -65,30 +87,33 @@ import { decimalToAmount } from "@openrails/billing-ui/client"
 // `enteredAmount` is the text from an <input inputMode="decimal">, e.g. "100".
 const amount = decimalToAmount(enteredAmount, currency.decimals)
 const bounds = depositPrice.customer_amount
-if (
-  !amount ||
-  !bounds ||
-  BigInt(amount) < BigInt(bounds.min_amount) ||
-  BigInt(amount) > BigInt(bounds.max_amount)
-) {
-  throw new Error("Choose an amount within the deposit limits")
-}
-const session = await billing.createCheckoutSession({
-  priceId: depositPrice.id,
-  amount, // USD 100 becomes "100000000"; no floating-point conversion
-})
+const valid = amount && bounds && BigInt(amount) >= BigInt(bounds.min_amount) && BigInt(amount) <= BigInt(bounds.max_amount)
+
+<BuyButton product="api-credits" price="deposit" amount={valid ? amount : undefined} label="Add credits" {...handlers} />
 ```
 
 OpenRails validates the bounds and whole currency minor units before accepting
 payment. Fixed prices reject `amount`; their pack benefit can be greater than
 the purchase price for a bulk discount. Customer-selected deposits currently
-use NMI or Stripe. Changing the selected amount requires minting a new session.
+use NMI or Stripe.
 
 A rail's own step is the pay result's `next_action`: `redirect_to_url` (an
 https page, opened in the top window) or `solana_pay` (a `solana:` link shown
 as a QR code). A card challenge is its `operation`, authenticated in the page.
-Stripe Elements needs the buyer's billing client (`<Checkout>` inside a
-`BillingProvider`): the shared payment page offers token rails only.
+
+### A shared payment page
+
+Several sites selling for one merchant can share one payment page
+(`Config.Checkout.PageURL`). A server mints the session with the Go
+`Client.CreateCheckoutSession` and hands the browser its `url`, which the site
+frames:
+
+```tsx
+<CheckoutFrame url={session.url} theme="dark" onComplete={() => refetchAccess()} />
+```
+
+Stripe Elements needs the buyer's own client, so the shared page offers token
+rails only.
 
 The payment host serves `<CheckoutPage>` from one HTML entry at `PageURL`,
 behind its adapter's `CheckoutFramePolicy` (only the sites in
@@ -118,12 +143,9 @@ client, the appearance and the words. `@openrails/billing-ui/react` exports the
 same provider for an app that uses only the hooks; it loads no stylesheet.
 
 ```tsx
-import { createBillingClient } from "@openrails/billing-ui/client"
-import { AccountBilling, BillingProvider } from "@openrails/billing-ui"
+import { AccountBilling, BillingProvider, createBillingClient } from "@openrails/billing-ui"
 import { de } from "@openrails/billing-ui/locales/de"
 
-// auth-ui's authFetch attaches the bearer and retries once after a refresh;
-// `getToken: () => token` works for any other auth.
 const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
 <BillingProvider
@@ -149,34 +171,6 @@ card PSPs are temporarily unavailable; amounts use its currency registry over
 the pinned copy. `useConfig()` and `useCurrencyScales()` read the same copy
 for host components.
 
-## Buying
-
-`<BuyButton>` buys one price, `<Offers>` everything on sale that grants an
-entitlement: a `BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
-"$10.00 every 30 days"). Both need a `BillingProvider` with a client. The
-purchase is theirs from start to payment, so the app never handles a checkout
-session: today a button opens one in `CheckoutModal`; when orders take a new
-card (#1168) it will create an order instead, and apps won't change. Signing
-in is the host's: with `signedIn={false}`, or when OpenRails answers 401, they
-call `onSignInRequired` instead. `onPaid` follows a successful payment only.
-
-```tsx
-<BuyButton
-  product="course-101"
-  price="rent" // labelled from the catalog unless you pass label
-  signedIn={signedIn}
-  onSignInRequired={() => openSignIn()}
-  onPaid={() => navigate("/courses/css-101")} // your gate now admits them
-/>
-
-<Offers
-  entitlement="course:101" // or products={...} from your server's Client.ListOffers
-  signedIn={signedIn}
-  onSignInRequired={() => openSignIn()}
-  onPaid={() => navigate("/courses/css-101")}
-/>
-```
-
 ## Catalog and plan changes
 
 The client also reads the public catalog and changes a subscription's plan.
@@ -185,7 +179,7 @@ mounts OpenRails' checkout routes; `GET /config` is always served.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts({ entitlement?, keys? })`: the products on sale granting `entitlement` and named by `keys` (one is required), each with its prices; `useProducts` reads the same | `GET /catalog/products` |
+| `listProducts({ entitlements?, keys? })`: the products on sale granting any of `entitlements` and named by `keys` (one is required), each with its prices; `useProducts` reads the same | `GET /catalog/products` |
 | `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
 | `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |
@@ -232,9 +226,8 @@ provider:
   an inline new card and one Pay/Subscribe button, which is the customer's
   confirmation of the displayed terms. No provider chooser with one rail.
 - Inside a `BillingProvider` with a client, a new card is always saved to the
-  account first and the source is paid with `payment_method_id`, so pay
-  through the customer surface: `client.checkoutSource(id, { customerBase:
-  "/billing/v1/me" })`; `requires_action` results
+  account first and the session is paid with `payment_method_id` on the
+  customer surface; `requires_action` results
   carrying an `operation` run 3-D Secure in the page. A `failed` result stays
   on the panel with `failure.message` next to its `field`, so the buyer can
   pick another card; the host gives each new attempt a new idempotency key.
@@ -246,10 +239,8 @@ provider:
   `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
 - `authenticatePayment(client, operationId, psp)` completes a pending
   payment's 3-D Secure challenge when `canAuthenticatePayment(psp)`.
-- `defaultCountry` (Checkout, SavePaymentMethod, AccountBilling) preselects
-  the billing country, else the browser locale's region.
-- `CheckoutModal gate={<SignIn />}` renders host content (e.g. sign-in) in
-  the modal instead of the checkout until cleared.
+- `defaultCountry` (CheckoutPage, SavePaymentMethod, AccountBilling)
+  preselects the billing country, else the browser locale's region.
 
 - Panels: `SubscriptionsPanel` (cancel, resume, change card),
   `PaymentMethodsPanel`, `PaymentHistory`, `BillingStatusBadge`,

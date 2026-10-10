@@ -71,6 +71,8 @@ async function buildHostApp() {
     configFile: false,
     logLevel: "warn",
     plugins: [react()],
+    // The checkout test page imports billing-ui's internals from src.
+    resolve: { alias: { "#orck": path.join(root, "src") } },
     root: path.join(root, "e2e/openrails/app"),
     build: {
       outDir: path.join(root, "e2e/openrails/fixtures/app"),

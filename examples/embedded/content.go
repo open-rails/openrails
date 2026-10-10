@@ -24,17 +24,37 @@ import (
 )
 
 // course is the host's own: what it shows, the catalog product that sells
-// it, the entitlement that unlocks it, and its video under media/.
+// it and the entitlement that product grants, and its video under media/. A
+// members-only video has no product: only the membership unlocks it.
 type course struct {
 	Slug, Title, Product, Entitlement, Video string
+	MembersOnly                              bool
 }
 
 var courses = []course{
-	{"css-101", "Intro to CSS", "course-101", "course:101", "courses/css-101.mp4"},
-	{"tailwind-102", "Intro to Tailwind", "course-102", "course:102", "courses/tailwind-102.mp4"},
+	{Slug: "css-101", Title: "Intro to CSS", Product: "course-101", Entitlement: "course:101", Video: "courses/css-101.mp4"},
+	{Slug: "tailwind-102", Title: "Intro to Tailwind", Product: "course-102", Entitlement: "course:102", Video: "courses/tailwind-102.mp4"},
+	{Slug: "live-qa", Title: "Live Q&A", Video: "courses/live-qa.mp4", MembersOnly: true},
 }
 
-var membersQA = []string{"Grid or flexbox?", "How do I center a div?"} // members-only
+// The channel membership unlocks every video, members-only ones included.
+const membership, membershipProduct = "channel:membership", "channel-membership"
+
+// unlock lists the entitlements that unlock c: any one will do.
+func (c course) unlock() []string {
+	if c.MembersOnly {
+		return []string{membership}
+	}
+	return []string{c.Entitlement, membership}
+}
+
+// product is the catalog product the store sells c with.
+func (c course) product() string {
+	if c.MembersOnly {
+		return membershipProduct
+	}
+	return c.Product
+}
 
 // held asks OpenRails which of entitlements the signed-in user holds, in one
 // read. Each AuthKit user is their own customer. A signed-out visitor holds
@@ -56,7 +76,7 @@ func held(c *gin.Context, bill *openrails.Client, entitlements ...string) (map[s
 }
 
 // courseRoutes are the app's API: the course list, with prices and what the
-// user owns; each course, gated; and the media its signed URLs play.
+// user owns; each video, gated; and the media its signed URLs play.
 func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, media mediaKey) {
 	// GET /api/courses?cursor=&limit= pages over the host's courses. Each page
 	// costs one product read and one entitlement read, never one per course.
@@ -68,9 +88,12 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			return
 		}
 		page := courses[min(from, len(courses)):min(from+limit, len(courses))]
-		var keys, entitlements []string
+		keys, entitlements := []string{}, []string{membership} // the membership unlocks every course
 		for _, course := range page {
-			keys, entitlements = append(keys, course.Product), append(entitlements, course.Entitlement)
+			keys = append(keys, course.product())
+			if !course.MembersOnly {
+				entitlements = append(entitlements, course.Entitlement)
+			}
 		}
 		offers, err := bill.ListOffers(c, billing.OfferListParams{Keys: keys, PageRequest: billing.PageRequest{Limit: len(keys)}})
 		if err != nil {
@@ -90,7 +113,8 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 		}
 		data := []gin.H{}
 		for _, course := range page {
-			data = append(data, gin.H{"slug": course.Slug, "title": course.Title, "product_key": course.Product, "owned": owned[course.Entitlement], "prices": prices[course.Product]})
+			data = append(data, gin.H{"slug": course.Slug, "title": course.Title, "members_only": course.MembersOnly,
+				"owned": anyHeld(owned, course.unlock()), "product_key": course.product(), "prices": prices[course.product()]})
 		}
 		var next any // null on the last page
 		if from+limit < len(courses) {
@@ -99,8 +123,8 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 		c.JSON(http.StatusOK, gin.H{"data": data, "next_cursor": next})
 	})
 
-	// A course: its video's signed URL to a holder, 402 and where to buy it to
-	// anyone else, signed out included.
+	// A video: its signed URL to whoever holds any key that unlocks it, 402
+	// with those keys and where to buy one to anyone else, signed out included.
 	r.GET("/api/courses/:course", authkitgin.Optional(ak), func(c *gin.Context) {
 		i := slices.IndexFunc(courses, func(course course) bool { return course.Slug == c.Param("course") })
 		if i < 0 {
@@ -108,26 +132,14 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			return
 		}
 		course := courses[i]
-		owned, err := held(c, bill, course.Entitlement)
+		owned, err := held(c, bill, course.unlock()...)
 		switch {
 		case err != nil:
 			c.AbortWithStatus(http.StatusServiceUnavailable)
-		case owned[course.Entitlement]:
+		case anyHeld(owned, course.unlock()):
 			c.JSON(http.StatusOK, gin.H{"video_url": media.url(course.Video)})
 		default:
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "entitlement": course.Entitlement, "buy": "/courses/" + course.Slug + "/buy"})
-		}
-	})
-
-	r.GET("/api/members/qa", authkitgin.Optional(ak), func(c *gin.Context) {
-		owned, err := held(c, bill, "channel:membership")
-		switch {
-		case err != nil:
-			c.AbortWithStatus(http.StatusServiceUnavailable)
-		case owned["channel:membership"]:
-			c.JSON(http.StatusOK, gin.H{"questions": membersQA})
-		default:
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "entitlement": "channel:membership", "buy": "/join"})
+			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "unlock": course.unlock(), "buy": "/courses/" + course.Slug + "/buy"})
 		}
 	})
 
@@ -169,6 +181,11 @@ func (k mediaKey) sign(path, expires string) string {
 	mac := hmac.New(sha256.New, k)
 	mac.Write([]byte(path + "\n" + expires))
 	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// anyHeld reports whether owned holds any of keys.
+func anyHeld(owned map[string]bool, keys []string) bool {
+	return slices.ContainsFunc(keys, func(k string) bool { return owned[k] })
 }
 
 // terms says how a price renews, or how long it grants access.

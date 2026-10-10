@@ -3,7 +3,8 @@
 import { createElement } from "react"
 import { createRoot } from "react-dom/client"
 
-import { CheckoutPage, fixtureSession } from "../../src/index"
+import { fixtureSession } from "../../src/fixtures"
+import { CheckoutPage } from "../../src/index"
 import { createBillingClient } from "../../src/client"
 
 const redirectURL = "https://merchant.example/ccbill/complete"

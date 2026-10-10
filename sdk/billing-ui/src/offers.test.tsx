@@ -69,7 +69,10 @@ const catalog = () => [
 
 function mount(ui: ReactNode, server: FakeBilling) {
   return render(
-    <BillingProvider locale="en-US" client={createBillingClient({ fetch: server.fetch })}>
+    <BillingProvider
+      locale="en-US"
+      client={createBillingClient({ fetch: server.fetch })}
+    >
       {ui}
     </BillingProvider>
   )
@@ -80,7 +83,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlement="course:101"
+        entitlements={["course:101"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -104,11 +107,33 @@ describe("Offers", () => {
     )
   })
 
+  it("offers everything granting any of its entitlements, in one read", async () => {
+    const server = fakeBilling({ products: catalog() })
+    mount(
+      <Offers
+        entitlements={["course:101", "channel:membership"]}
+        onPaid={vi.fn()}
+        onSignInRequired={vi.fn()}
+      />,
+      server
+    )
+    expect(await screen.findAllByTestId("offer")).toHaveLength(3)
+    expect(
+      screen.getByRole("heading", { name: "Membership" })
+    ).toBeInTheDocument()
+    const reads = server.fetch.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/catalog/products"))
+    expect(reads).toEqual([
+      "/billing/v1/catalog/products?entitlement=course%3A101&entitlement=channel%3Amembership&limit=100",
+    ])
+  })
+
   it("labels a recurring price with its cadence", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlement="channel:membership"
+        entitlements={["channel:membership"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -124,7 +149,7 @@ describe("Offers", () => {
     const onPaid = vi.fn()
     mount(
       <Offers
-        entitlement="course:101"
+        entitlements={["course:101"]}
         onPaid={onPaid}
         onSignInRequired={vi.fn()}
       />,
@@ -155,7 +180,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
-        entitlement="course:101"
+        entitlements={["course:101"]}
         signedIn={false}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
@@ -177,7 +202,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
-        entitlement="course:101"
+        entitlements={["course:101"]}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
       />,
@@ -199,7 +224,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
-        entitlement="course:101"
+        entitlements={["course:101"]}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
       />,
@@ -233,7 +258,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlement="course:999"
+        entitlements={["course:999"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,

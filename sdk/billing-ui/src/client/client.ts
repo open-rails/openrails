@@ -1,6 +1,7 @@
 import type { z } from "zod"
 
 import type { CheckoutSource } from "../source"
+import { registerCheckout, type CheckoutSourceOptions } from "./checkout"
 import {
   checkoutSessionSchema,
   payResultSchema,
@@ -71,24 +72,13 @@ export interface BillingClientOptions {
   currencies?: CurrencyScales
 }
 
-export interface CheckoutSourceOptions {
-  /**
-   * A customer surface's base: its `/me` prefix, such as `/billing/v1/me` or
-   * a host's own `/api/v1/merchants/acme/billing/me`. The session is read and
-   * paid there with this client's credential, which proves the session's
-   * customer, so its saved cards pay. Default: the session id alone, at
-   * `{baseUrl}/checkout-sessions`.
-   */
-  customerBase?: string
-}
-
 /**
- * The public catalog's filters, one required: `entitlement` keeps the
- * products granting that key, `keys` those products; given both, a product
- * must match both.
+ * The public catalog's filters, one required: `entitlements` keeps the
+ * products granting any of those keys, `keys` those products; given both, a
+ * product must match both.
  */
 export interface ProductListOptions {
-  entitlement?: string
+  entitlements?: string[]
   keys?: string[]
   limit?: number
   /** The previous page's `next_cursor`. */
@@ -327,7 +317,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   })
   const productPage = pageSchema(productSchema)
 
-  return {
+  const client = {
     baseUrl: base,
 
     /** One page of the customer's subscriptions, newest first. */
@@ -583,7 +573,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     listProducts(opts: ProductListOptions = {}): Promise<Page<Product>> {
       return json(productPage, "/catalog/products", {
         query: {
-          entitlement: opts.entitlement,
+          entitlement: opts.entitlements,
           keys: opts.keys,
           limit: opts.limit ?? 100,
           cursor: opts.cursor,
@@ -592,11 +582,44 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       })
     },
 
+    /**
+     * The deployment's public configuration: what the mount serves, the
+     * currency registry and the merchant's payment setup. React components
+     * share one copy through `useConfig()`.
+     */
+    getConfig(signal?: AbortSignal): Promise<PublicConfig> {
+      return json(publicConfigSchema, "/config", { signal, anonymous: true })
+    },
 
     /**
+     * Accepted tokens with live prices. `priceId` adds each token's `quote`;
+     * `wallet` adds its `balance`.
+     */
+    async listSolanaTokens(
+      opts: {
+        priceId?: string
+        wallet?: string
+        signal?: AbortSignal
+      } = {}
+    ): Promise<SolanaToken[]> {
+      const { tokens } = await json(solanaTokensSchema, "/solana/tokens", {
+        query: {
+          price_id: opts.priceId,
+          wallet: opts.wallet,
+        },
+        signal: opts.signal,
+      })
+      return tokens
+    },
+
+    /** Currency code (upper case) to native-unit decimals. */
+    currencies,
+  }
+  // The purchase calls stay billing-ui's own: apps buy through <BuyButton>.
+  registerCheckout(client, {
+    /**
      * Mints a hosted checkout session for the signed-in customer and one
-     * price. Render it with `<CheckoutFrame url>` when the session has a
-     * `url`, else with `<Checkout source={client.checkoutSource(id)}>`.
+     * price; BuyButton renders it.
      * Select a price by `priceId`, or by both `productKey` and `priceKey`.
      * `successUrl` brings the buyer back from a redirect rail; it must be on
      * one of this app's return origins.
@@ -675,40 +698,8 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         },
       }
     },
-
-    /**
-     * The deployment's public configuration: what the mount serves, the
-     * currency registry and the merchant's payment setup. React components
-     * share one copy through `useConfig()`.
-     */
-    getConfig(signal?: AbortSignal): Promise<PublicConfig> {
-      return json(publicConfigSchema, "/config", { signal, anonymous: true })
-    },
-
-    /**
-     * Accepted tokens with live prices. `priceId` adds each token's `quote`;
-     * `wallet` adds its `balance`.
-     */
-    async listSolanaTokens(
-      opts: {
-        priceId?: string
-        wallet?: string
-        signal?: AbortSignal
-      } = {}
-    ): Promise<SolanaToken[]> {
-      const { tokens } = await json(solanaTokensSchema, "/solana/tokens", {
-        query: {
-          price_id: opts.priceId,
-          wallet: opts.wallet,
-        },
-        signal: opts.signal,
-      })
-      return tokens
-    },
-
-    /** Currency code (upper case) to native-unit decimals. */
-    currencies,
-  }
+  })
+  return client
 }
 
 function normalizeScales(scales: CurrencyScales): CurrencyScales {

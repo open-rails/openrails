@@ -248,19 +248,19 @@ export interface ProductsState {
 /** The catalog's filters and page size: `ProductListOptions`. */
 export type ProductsOptions = Pick<
   ProductListOptions,
-  "entitlement" | "keys" | "limit"
+  "entitlements" | "keys" | "limit"
 >
 
 /**
  * The catalog: products on sale with their active prices, those granting
- * `entitlement` or named by `keys` when given.
+ * any of `entitlements` or named by `keys` when given.
  */
 export function useProducts(options: ProductsOptions = {}): ProductsState {
   const { client } = useBillingContext()
-  const { entitlement, keys } = options
+  const { entitlements, keys } = options
   const limit = options.limit ?? 100
-  const remote = useRemote(JSON.stringify([entitlement, keys, limit]), (signal) =>
-    client.listProducts({ entitlement, keys, limit, signal })
+  const remote = useRemote(JSON.stringify([entitlements, keys, limit]), (signal) =>
+    client.listProducts({ entitlements, keys, limit, signal })
   )
   return {
     products: remote.data?.data ?? null,

@@ -1,5 +1,17 @@
 # Changelog
 
+## Apps buy through BuyButton and Offers
+
+- `Checkout` and `CheckoutModal` (and their props), the fixture sources and
+  the `CheckoutSource` type are no longer exported; the client no longer has
+  `createCheckoutSession` or `checkoutSource`. Buy with `<BuyButton>` (it takes
+  `amount`, `autoRenew` and `successUrl`) or `<Offers>`. `CheckoutPage` and
+  `CheckoutFrame` stay, for the shared payment page.
+- The main entry also exports `createBillingClient` (with `BillingClient`,
+  `BillingClientOptions` and `ProductListOptions`) beside `formatAmount`, so a
+  React app imports from `@openrails/billing-ui` alone; `./client` and
+  `./react` are unchanged.
+
 ## One provider
 
 - `BillingProvider` takes what `BillingUiProvider` took (`appearance`,
@@ -7,19 +19,18 @@
   `BillingUiProvider` is gone. The main entry exports it; `./react` exports the
   same component for hook-only apps, without the stylesheet. `client` is
   optional: leave it out where no customer signs in, such as `CheckoutPage`.
-- A checkout inside a provider with a client saves a new card to the customer
-  first, so its source must be the customer's:
-  `client.checkoutSource(id, { customerBase: "/billing/v1/me" })`.
+- Inside a provider with a client, the checkout saves a new card to the
+  customer first and pays on the customer surface.
 
 ## Offers sell an entitlement
 
 - `<BuyButton product price onPaid onSignInRequired>` buys one price, labelled
   from the catalog unless given `label`. The app never touches a checkout
   session: when orders take a new card (#1168) it creates an order instead.
-- `<Offers entitlement onPaid onSignInRequired>` lists every product on sale
-  granting the entitlement, a `BuyButton` per price; `products` feeds it from
-  the host's server instead.
-- `listProducts({ entitlement, keys })` and `useProducts({ entitlement, keys })`
+- `<Offers entitlements onPaid onSignInRequired>` lists every product on sale
+  granting any of the entitlements, a `BuyButton` per price; `products` feeds
+  it from the host's server instead.
+- `listProducts({ entitlements, keys })` and `useProducts({ entitlements, keys })`
   filter the public catalog. One of them is required: OpenRails no longer
   lists the whole catalog publicly.
 

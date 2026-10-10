@@ -582,10 +582,9 @@ export type NewCard = NewCardFields &
   )
 
 /**
- * A minted checkout session. `id` reads and pays it with no other credential
- * (`client.checkoutSource(id)`); hand it to this customer's browser only.
- * `url` is the shared payment page (`<CheckoutFrame url>`), null when the app
- * renders `<Checkout>` itself.
+ * A minted checkout session. `id` reads and pays it with no other credential;
+ * hand it to this customer's browser only. `url` is the shared payment page
+ * (`<CheckoutFrame url>`), null when BuyButton renders the checkout itself.
  */
 export const checkoutSessionLinkSchema = z.object({
   id: z.string().startsWith("ocs_"),

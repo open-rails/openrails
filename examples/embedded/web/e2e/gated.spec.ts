@@ -85,14 +85,20 @@ test("the store lists courses with their prices and what the user owns", async (
   await expect(css.getByRole("button")).toHaveCount(0)
   const tailwind = page.locator("section").filter({ has: page.getByRole("heading", { name: "Intro to Tailwind" }) })
   await expect(tailwind.getByRole("button", { name: "$4.99 to keep", exact: true })).toBeVisible()
+  // A members-only video is sold with the membership.
+  const qa = page.locator("section").filter({ has: page.getByRole("heading", { name: "Live Q&A" }) })
+  await expect(qa.getByText("Members only")).toBeVisible()
+  await expect(qa.getByRole("button", { name: "$10.00 every 30 days", exact: true })).toBeVisible()
 })
 
 test("a course page sends a visitor without access to buy it", async ({ page }) => {
   await page.goto("/courses/css-101")
   await expect(page).toHaveURL("/courses/css-101/buy")
-  // Everything on sale that unlocks it, named and priced by the catalog.
+  // Everything on sale that unlocks it, named and priced by the catalog: the
+  // course, the bundle and the membership.
   await expect(page.getByRole("heading", { name: "Course 101 — Intro to CSS" })).toBeVisible()
   await expect(page.getByRole("heading", { name: "CSS courses 101 and 102" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Channel membership" })).toBeVisible()
   await expect(button(page, "Rent for 3 days, $1.99")).toBeVisible()
 
   await signIn(page, button(page, "$4.99"), alice)
@@ -118,12 +124,23 @@ test("the bundle unlocks both courses", async ({ page }) => {
   await expect(page).toHaveURL("/courses/css-101")
 })
 
-test("a member reads the members-only Q&A", async ({ page }) => {
-  await page.goto("/members/qa")
-  await expect(page).toHaveURL("/join")
+test("the membership unlocks members-only videos and every course", async ({ page }) => {
+  await page.goto("/courses/live-qa")
+  await expect(page).toHaveURL("/courses/live-qa/buy")
+  await expect(page.getByRole("heading", { name: "Channel membership" })).toBeVisible()
+  await expect(page.getByTestId("offer")).toHaveCount(1)
   await expect(button(page, "$99.00 every 365 days")).toBeVisible()
   await signIn(page, button(page, "$10.00 every 30 days"), carol)
   await pay(page, button(page, "$10.00 every 30 days"), /^Subscribe for/)
-  await expect(page).toHaveURL("/members/qa")
-  await expect(page.getByRole("listitem").filter({ hasText: "How do I center a div?" })).toBeVisible()
+  await expect(page).toHaveURL("/courses/live-qa")
+  await expectVideo(page)
+
+  await page.goto("/courses/css-101")
+  await expectVideo(page)
+  await expect(page).toHaveURL("/courses/css-101")
+})
+
+test("an unknown course says it couldn't load", async ({ page }) => {
+  await page.goto("/courses/no-such-course")
+  await expect(page.getByText("Couldn't load this course.")).toBeVisible()
 })
