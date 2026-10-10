@@ -754,6 +754,41 @@ func (q *Queries) GetRefundByAdminIdempotencyKey(ctx context.Context, arg GetRef
 	return i, err
 }
 
+const getSolanaPeriodPaidAmount = `-- name: GetSolanaPeriodPaidAmount :one
+SELECT COALESCE(sum(p.amount), 0)::bigint AS amount
+FROM billing.payments p
+WHERE p.merchant_id = $1::uuid
+  AND p.psp_id = $2::uuid
+  AND p.subscription_id = $3::uuid
+  AND p.currency = $4::text
+  AND p.metadata ->> 'period_start' = $5::text
+  AND p.channel = 'rail' AND p.rail = 'solana' AND p.money_movement = 'rail'
+  AND p.status = 'succeeded' AND p.amount > 0
+  AND p.refunded_payment_id IS NULL AND p.reversal_kind IS NULL
+  AND p.deleted_at IS NULL
+`
+
+type GetSolanaPeriodPaidAmountParams struct {
+	MerchantID     uuid.UUID
+	PspID          uuid.UUID
+	SubscriptionID uuid.UUID
+	Currency       string
+	PeriodStart    string
+}
+
+func (q *Queries) GetSolanaPeriodPaidAmount(ctx context.Context, arg GetSolanaPeriodPaidAmountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, getSolanaPeriodPaidAmount,
+		arg.MerchantID,
+		arg.PspID,
+		arg.SubscriptionID,
+		arg.Currency,
+		arg.PeriodStart,
+	)
+	var amount int64
+	err := row.Scan(&amount)
+	return amount, err
+}
+
 const getStripeAliasCardSnapshot = `-- name: GetStripeAliasCardSnapshot :one
 SELECT card_brand, card_last4 FROM billing.payments
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid

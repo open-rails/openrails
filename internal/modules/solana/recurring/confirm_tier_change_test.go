@@ -83,7 +83,10 @@ type tierChain struct {
 	now        time.Time
 }
 
-const tierCharge = 31_330_000
+const (
+	tierCharge     = 31_330_000
+	tierFiatCharge = 30_000_000
+)
 
 func newTierChain(t *testing.T) *tierChain {
 	t.Helper()
@@ -132,6 +135,7 @@ func (c *tierChain) prepare(t *testing.T, upgrade bool) (ConfirmTierChangeInput,
 		OldPlanPDA: c.old.PlanPDA, OldSubscriptionPDA: c.old.SubscriptionPDA,
 		NewPlanID: 99, NewAmountBaseUnits: 50_000_000, NewPeriodHours: 720, NewPlanCreatedAt: 1_700_000_000,
 		IsUpgrade: upgrade, FirstChargeBaseUnits: tierCharge,
+		FirstChargeMicros: tierFiatCharge, Currency: "USD",
 	})
 	require.NoError(t, err)
 	oldEnd := c.now.Add(14 * 24 * time.Hour)
@@ -208,7 +212,9 @@ func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 		store := &tierStore{oldRow: c.old}
 		life := &tierLifecycle{newID: uuid.New()}
 
-		res, err := c.service(life, store).Confirm(context.Background(), in)
+		svc := c.service(life, store)
+		svc.now = func() time.Time { return c.now.Add(72 * time.Hour) }
+		res, err := svc.Confirm(context.Background(), in)
 		require.NoError(t, err)
 		require.Equal(t, life.newID, res.NewSubscription.ID)
 		require.False(t, res.AlreadyConfirmed)
@@ -226,7 +232,13 @@ func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 		require.Len(t, life.creates, 1)
 		created := life.creates[0]
 		require.Equal(t, in.NewSubscriptionPDA, *created.RailSubscriptionID)
-		require.Equal(t, sig.String(), created.TransactionID)
+		if upgrade {
+			require.Equal(t, sig.String(), created.TransactionID)
+			require.Equal(t, int64(tierFiatCharge), created.Amount, "the signed fiat quote need not equal token base units")
+		} else {
+			require.Empty(t, created.TransactionID)
+			require.Zero(t, created.Amount)
+		}
 		require.Equal(t, wantNext, *created.CurrentPeriodEndsAt)
 		require.Equal(t, wantMeta, created.PaymentMetadata)
 
@@ -239,6 +251,13 @@ func TestConfirmTierChangeMirrorsSwitch(t *testing.T) {
 		require.Equal(t, testDevnetUSDCMint, row.Mint)
 		require.Equal(t, c.old.SubscriberWallet, row.SubscriberWallet)
 		require.Equal(t, models.SolanaSubscriptionActive, row.Status)
+		if upgrade {
+			require.Equal(t, sig.String(), *row.LastSignature)
+			require.Equal(t, c.now, *row.LastPulledPeriodStartsAt)
+		} else {
+			require.Nil(t, row.LastSignature, "the reconciliation worker only checks payment signatures")
+			require.Nil(t, row.LastPulledPeriodStartsAt)
+		}
 	}
 }
 
@@ -274,6 +293,27 @@ func TestConfirmTierChangeNeverMirrorsUnprovenSwitch(t *testing.T) {
 		{"a charge other than the quote", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {
 			in, _ := c.change(t, true)
 			in.FirstChargeBaseUnits = tierCharge + 1
+			return in
+		}, nil, ErrPaymentUnverified},
+		{"a quote in another currency", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {
+			in, _ := c.change(t, true)
+			in.NewCurrency = "EUR"
+			return in
+		}, nil, ErrPaymentUnverified},
+		{"a quote above the full price", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {
+			in, _ := c.change(t, true)
+			in.NewFiatAmount = tierFiatCharge - 1
+			return in
+		}, nil, ErrPaymentUnverified},
+		{"a charge without a signed fiat quote", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {
+			in, tx := c.prepare(t, true)
+			tx.Message.Instructions = tx.Message.Instructions[:3]
+			message, err := tx.Message.MarshalBinary()
+			require.NoError(t, err)
+			require.Equal(t, c.merchant, tx.Message.AccountKeys[1])
+			tx.Signatures[1], err = c.signer.SignMessage(t.Context(), testMerchantID, message)
+			require.NoError(t, err)
+			in.Signature = c.land(t, signAs(t, tx, c.subscriber)).String()
 			return in
 		}, nil, ErrPaymentUnverified},
 		{"a checkout change without the checkout's reference", func(t *testing.T, c *tierChain) ConfirmTierChangeInput {

@@ -3,6 +3,8 @@ package recurring
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	safecast "github.com/ccoveille/go-safecast/v2"
@@ -15,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/solana/settlement"
 	submod "github.com/open-rails/openrails/internal/modules/subscriptions"
+	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 // tierChangeLifecycle is the membership surface the mirror drives (satisfied by
@@ -73,8 +76,7 @@ type ConfirmTierChangeInput struct {
 	NewPeriodHours     uint64
 	NewPlanCreatedAt   int64
 
-	// NewFiatAmount/NewCurrency are price.Amount (micros) + currency recorded on
-	// the new membership.
+	// NewFiatAmount is the full price; the signed first-charge quote cannot exceed it.
 	NewFiatAmount int64
 	NewCurrency   string
 
@@ -85,9 +87,8 @@ type ConfirmTierChangeInput struct {
 	IsUpgrade bool
 
 	// FirstChargeBaseUnits is the prorated first pull the upgrade must carry.
-	// 0 accepts the amount the merchant co-signed at prepare time (the
-	// subscription route re-quotes at confirm and cannot reproduce it). The
-	// pulled amount is recorded on the new membership. Ignored for downgrades.
+	// Zero accepts the merchant-co-signed pull; its signed fiat quote is recorded
+	// on the payment. Ignored for downgrades.
 	FirstChargeBaseUnits uint64
 
 	// OldPeriodEndsAt is the OLD lifecycle subscription's CurrentPeriodEndsAt — the
@@ -179,15 +180,29 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 
 	// The switch (cancel-old + subscribe-new [+ transfer]) is all-or-nothing
 	// on-chain, so one landed transaction proving every part proves the change.
-	charged, err := s.verifyLanded(ctx, oldRow, in)
+	payment, err := fetchLanded(ctx, s.chain, in.Signature)
 	if err != nil {
 		return nil, err
+	}
+	charged, err := s.verifyLanded(payment, oldRow, in)
+	if err != nil {
+		return nil, err
+	}
+	var chargeAmount int64
+	if in.IsUpgrade {
+		chargeAmount, err = payment.tierChangeCharge(in.NewCurrency, in.NewFiatAmount)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// Mirror in one DB transaction: a failure leaves no partial state for the
 	// idempotency guard to mistake for a completed switch.
 
 	now := s.now().UTC()
+	if landedAt := payment.landedAt(); landedAt != nil {
+		now = *landedAt
+	}
 	newPeriodStart := now
 	var newPeriodEnd time.Time
 	if in.IsUpgrade {
@@ -223,13 +238,15 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		PriceID:               in.NewPriceID,
 		Rail:                  models.RailSolana,
 		RailSubscriptionID:    &newPDA,
-		TransactionID:         in.Signature,
-		Amount:                in.NewFiatAmount,
+		Amount:                chargeAmount,
 		AmountProvided:        true,
 		Currency:              in.NewCurrency,
 		CurrentPeriodStartsAt: &newPeriodStart,
 		CurrentPeriodEndsAt:   &newPeriodEnd,
 		PaymentMetadata:       paymentMeta,
+	}
+	if in.IsUpgrade {
+		createParams.TransactionID = in.Signature
 	}
 
 	var (
@@ -274,6 +291,10 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 		if buildErr != nil {
 			return buildErr
 		}
+		if in.IsUpgrade {
+			newRow.LastSignature = &in.Signature
+			newRow.LastPulledPeriodStartsAt = &newPeriodStart
+		}
 		if err := s.store.UpsertTx(ctx, txDB, newRow); err != nil {
 			return fmt.Errorf("recurring: persist new solana subscription: %w", err)
 		}
@@ -292,14 +313,11 @@ func (s *ConfirmTierChangeService) Confirm(ctx context.Context, in ConfirmTierCh
 	return &ConfirmTierChangeResult{NewSubscription: newSub}, nil
 }
 
-// verifyLanded reads the tier-change transaction from the chain and proves it
+// verifyLanded proves the landed tier-change transaction
 // switched this subscriber from the old subscription to the new plan's terms,
 // returning the upgrade's pulled amount (0 for a downgrade).
-func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
-	payment, err := fetchLanded(ctx, s.chain, in.Signature)
-	if err != nil {
-		return 0, err
-	}
+func (s *ConfirmTierChangeService) verifyLanded(payment *landedTx, oldRow *models.SolanaSubscription, in ConfirmTierChangeInput) (uint64, error) {
+	var err error
 	if in.CheckoutAttemptID != uuid.Nil {
 		if err := payment.references(in.Reference); err != nil {
 			return 0, err
@@ -333,6 +351,34 @@ func (s *ConfirmTierChangeService) verifyLanded(ctx context.Context, oldRow *mod
 		return 0, nil
 	}
 	return payment.pulls(terms, in.FirstChargeBaseUnits)
+}
+
+func (l *landedTx) tierChangeCharge(currency string, maximum int64) (int64, error) {
+	var amount int64
+	found := false
+	for _, ix := range l.tx.Message.Instructions {
+		program, err := l.tx.ResolveProgramIDIndex(ix.ProgramIDIndex)
+		if err != nil || !program.Equals(solanago.MemoProgramID) {
+			continue
+		}
+		quote, ok := strings.CutPrefix(string(ix.Data), tierChangeQuotePrefix)
+		if !ok {
+			continue
+		}
+		quotedCurrency, value, ok := strings.Cut(quote, ":")
+		if found || !ok || quotedCurrency != moneyutil.NormalizeCurrency(currency) {
+			return 0, fmt.Errorf("%w: invalid tier-change quote", ErrPaymentUnverified)
+		}
+		amount, err = strconv.ParseInt(value, 10, 64)
+		if err != nil || amount < 0 || amount > maximum {
+			return 0, fmt.Errorf("%w: invalid tier-change charge", ErrPaymentUnverified)
+		}
+		found = true
+	}
+	if !found {
+		return 0, fmt.Errorf("%w: missing signed tier-change quote", ErrPaymentUnverified)
+	}
+	return amount, nil
 }
 
 // newMint resolves the new plan's mint, falling back to the old row's mint

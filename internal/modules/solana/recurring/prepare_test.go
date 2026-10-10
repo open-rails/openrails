@@ -151,6 +151,8 @@ func tierChangeInput(t *testing.T) PrepareTierChangeInput {
 		NewAmountBaseUnits: 50_000_000,
 		NewPeriodHours:     720,
 		NewPlanCreatedAt:   1_700_000_000,
+		FirstChargeMicros:  31_330_000,
+		Currency:           "USD",
 	}
 }
 
@@ -164,8 +166,8 @@ func TestPrepareTierChangeBundle(t *testing.T) {
 		reference bool
 		want      txShape
 	}{
-		{"upgrade", true, false, txShape{3, 2, 1, []int{5, 8, 10}}},
-		{"upgrade with reference", true, true, txShape{4, 2, 1, []int{5, 8, 10}}},
+		{"upgrade", true, false, txShape{4, 2, 1, []int{5, 8, 10}}},
+		{"upgrade with reference", true, true, txShape{5, 2, 1, []int{5, 8, 10}}},
 		{"downgrade", false, false, txShape{2, 1, 0, []int{5, 8}}},
 		{"downgrade with reference", false, true, txShape{3, 1, 0, []int{5, 8}}},
 	} {

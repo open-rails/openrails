@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
@@ -699,6 +700,23 @@ func (r *PaymentRepo) GetLatestChargeBySubscriptionID(ctx context.Context, subsc
 		return nil, err
 	}
 	return models.PaymentFromGen(row)
+}
+
+// GetSolanaPeriodPaidAmount reads real charges for this subscription's paid period.
+// A no-transfer period has no charge rows and returns zero, never a list price.
+func (r *PaymentRepo) GetSolanaPeriodPaidAmount(ctx context.Context, subscriptionID uuid.UUID, periodStart time.Time, currency string) (int64, error) {
+	queryMerchant, err := merchant.Require(ctx)
+	if err != nil {
+		return 0, err
+	}
+	pspID, err := db.RequirePSPID(ctx)
+	if err != nil {
+		return 0, err
+	}
+	return r.db.Gen(ctx).GetSolanaPeriodPaidAmount(ctx, gen.GetSolanaPeriodPaidAmountParams{
+		MerchantID: queryMerchant.UUID(), PspID: pspID, SubscriptionID: subscriptionID,
+		PeriodStart: periodStart.UTC().Format(time.RFC3339), Currency: moneyutil.NormalizeCurrency(currency),
+	})
 }
 
 func (r *PaymentRepo) MarkFailed(ctx context.Context, id uuid.UUID) error {

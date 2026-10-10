@@ -18,14 +18,8 @@ import (
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
-// A Solana tier change takes effect at once: a downgrade grants the new plan
-// for the rest of the paid period with no payment. So it stays inside the
-// subscription's tier group, and its direction comes from what the plans
-// cost per hour, never from rank alone. A product with no tier group, priced
-// ten times the current plan, is refused on change and as a checkout; a
-// pricier plan of lower rank is an upgrade whose transaction pulls the
-// difference, and a cheaper plan of higher rank is a downgrade that pulls
-// nothing. The wallet's transaction is change's next action.
+// Tier changes settle the signed quote. Later credit comes from actual paid
+// periods, not list prices or a no-transfer downgrade.
 func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
@@ -45,6 +39,8 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		{"vip", "", 0, 50_000_000},
 		{"plus", "membership", 1, 60_000_000},
 		{"lite", "membership", 3, 3_000_000},
+		{"higher", "membership", 4, 90_000_000},
+		{"premium", "membership", 5, 120_000_000},
 	}
 	var doc strings.Builder
 	doc.WriteString("schema_version: 1\nproducts:\n")
@@ -77,7 +73,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	price := func(key string) string { return priceID(t, w, key+"-"+sfx, key+"-"+sfx+"-monthly") }
 
 	b := &solanaBuyer{customer: w.newCustomer(), wallet: solanago.NewWallet().PrivateKey}
-	fake.Fund(b.wallet.PublicKey(), mint, 500_000_000)
+	fake.Fund(b.wallet.PublicKey(), mint, 60_000_000)
 	shop := &solanaShop{w: w, fake: fake, merchant: merchantKey, mint: mint, option: w.options(billing.CheckoutOptionListParams{ProductKey: "basic-" + sfx, PriceKey: "basic-" + sfx + "-monthly"})["solana"], price: price("basic"), key: "basic-" + sfx}
 	c := shop.checkout(t, b, b.wallet.PublicKey())
 	done, err := b.confirm(c, shop.land(t, signAs(t, c.bundle, b.wallet), w.clock.Now()))
@@ -99,11 +95,16 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	for _, tc := range []struct {
 		target, effective string
 		pulls             int
+		amount            int64
+		payments          int
 	}{
-		{"plus", "now", 1},
-		{"lite", "period_end", 0},
+		{"plus", "now", 1, 55_000_000, 2},
+		{"higher", "now", 1, 35_070_000, 3},
+		{"lite", "period_end", 0, 0, 3},
+		{"premium", "now", 1, 120_000_000, 4},
 	} {
 		prep := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/change", "tc-"+uuid.NewString(), map[string]any{"price_id": price(tc.target)}))
+		require.Equal(t, fmt.Sprint(tc.amount), prep["amount_due_now"])
 		require.Equal(t, tc.effective, prep["effective"], "%s: direction comes from the price per hour", tc.target)
 		require.Equal(t, "requires_action", prep["status"])
 		next := prep["next_action"].(map[string]any)
@@ -117,5 +118,29 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 			}
 		}
 		require.Equal(t, tc.pulls, pulls, "%s: pulls in the switch", tc.target)
+		landedAt := w.clock.Now()
+		signature := shop.land(t, signAs(t, tx, b.wallet), landedAt)
+		if tc.target == "plus" {
+			require.Zero(t, fake.Balance(b.wallet.PublicKey(), mint), "confirmation must not prepare another charge against the now-empty wallet")
+			w.advance(time.Hour)
+		}
+		confirmed := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/change", "tc-"+uuid.NewString(), map[string]any{"price_id": price(tc.target), "signature": signature}))
+		require.Equal(t, "succeeded", confirmed["status"])
+		require.Equal(t, prep["amount_due_now"], confirmed["amount_due_now"], "confirmation preserves the agreed quote")
+		sub = confirmed["subscription_id"].(string)
+		payments := w.payments(embedded, b.id)
+		require.Len(t, payments, tc.payments, "only signup and upgrades transfer money")
+		if tc.pulls == 1 {
+			require.Equal(t, prep["amount_due_now"], fmt.Sprint(payments[0].Amount), "record the quoted charge, not the plan's full price")
+		}
+		id, err := billing.ParseSubscriptionID(sub)
+		require.NoError(t, err)
+		membership := w.subscription(embedded, id)
+		require.Equal(t, landedAt, *membership.CurrentPeriodStartsAt)
+		require.Equal(t, membership.CurrentPeriodEndsAt.Format(time.RFC3339), confirmed["next_charge_date"])
+		require.True(t, b.entitled(tc.target+"-"+sfx))
+		if tc.target == "plus" {
+			fake.Fund(b.wallet.PublicKey(), mint, 500_000_000)
+		}
 	}
 }
