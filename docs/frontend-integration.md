@@ -268,7 +268,12 @@ collects its own customer and billing fields.
 (`name`, `email`, `phone`, `address` with `line1`, `line2`, `city`, `state`,
 `postal_code`, `country`) and creates an NMI vault record. `PUT` on the method replaces an NMI
 card with a new `payment_token` or `card`. OpenRails reads the saved card's brand, last
-four and expiry from the PSP; the browser never states them. Checkout with a fresh `payment_token` also persists a payment method
+four and expiry from the PSP; the browser never states them. `PATCH` edits the card in
+place: `exp_month` with `exp_year`, `billing_details`, and `reusable` (kept for one-click
+buys). A method's `status` is `active`, `closed` (the bank closed it), `replaced` or
+`removed`; only an active one is charged. When its issuer reissues it under another brand,
+its `mandates` turn `requires_reconsent` and `POST /v1/me/payment-methods/{id}/verify`, with
+the customer present, restores them. Checkout with a fresh `payment_token` also persists a payment method
 automatically. `payment_method_id`s can only be used by their owner — using someone
 else's is a 403.
 

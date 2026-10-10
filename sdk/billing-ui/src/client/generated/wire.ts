@@ -278,6 +278,26 @@ export type InvoicePayNow = {
   replayed: boolean
 }
 
+export type Mandate = {
+  id: string
+  customer_id: string
+  payment_method_id: string | null
+  psp_id: string
+  kind: "card_on_file" | "recurring" | "unscheduled"
+  subscription_id: string | null
+  currency: string | null
+  status: "active" | "ended" | "requires_reconsent" | "revoked"
+  end_reason: "brand_changed" | "closed" | "customer_revoked" | "payment_method_removed" | "replaced" | "subscription_ended" | null
+  ended_at: string | null
+  card_brand: string | null
+  initial_transaction_id: string | null
+  network_transaction_id: string | null
+  transaction_link_id: string | null
+  storing_attempt_id: string | null
+  accepted_at: string
+  created_at: string
+}
+
 export type MarkNotificationsReadParams = {
   notification_ids?: string[]
 }
@@ -511,9 +531,14 @@ export type PaymentMethod = {
   customer_id: string
   rail: string
   psp_id: string | null
+  status: "active" | "closed" | "removed" | "replaced"
+  replaced_by: string | null
   card: CardDetails | null
   billing_details: BillingDetails | null
   health: PaymentMethodHealth
+  contact_cardholder_at: string | null
+  reusable: boolean
+  mandates: Mandate[]
   subscriptions: PaymentMethodSubscription[]
   collection_currencies: string[]
   created_at: string
@@ -861,6 +886,13 @@ export type TokenQuote = {
   fx_currency: string
   quoted_at: string
   expires_at: string
+}
+
+export type UpdatePaymentMethodParams = {
+  exp_month?: number
+  exp_year?: number
+  billing_details?: BillingDetails
+  reusable?: boolean
 }
 
 export type Usage = {

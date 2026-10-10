@@ -45,11 +45,11 @@ func (w *world) agreements(method string) (recurring, unscheduled string) {
 	return lineage("recurring"), lineage("unscheduled,card_on_file")
 }
 
-// methodUpdates is a stored card's recorded updates, as source/kind.
-func (w *world) methodUpdates(method string) []string {
+// methodVersions is a stored card's versions, oldest first, as source/kind.
+func (w *world) methodVersions(method string) []string {
 	w.t.Helper()
-	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT source || '/' || kind FROM billing.payment_method_updates
-		WHERE payment_method_id = $1 ORDER BY occurred_at, id`), strings.TrimPrefix(method, "pm_"))
+	rows, err := w.pool.Query(w.t.Context(), w.q(`SELECT source || '/' || kind FROM billing.payment_method_versions
+		WHERE payment_method_id = $1 ORDER BY created_at, id`), strings.TrimPrefix(method, "pm_"))
 	require.NoError(w.t, err)
 	defer rows.Close()
 	var out []string
@@ -228,9 +228,10 @@ func TestReplacedCardDropsUnscheduledAgreement(t *testing.T) {
 }
 
 // NMI's Account Updater reissues a member's card. A same-brand reissue keeps
-// billing on the same card. A reissue under another brand voids the card's
-// agreements: the member is asked to act, the renewal is not sent, and the
-// customer's verification of the card anchors the agreement renewals name.
+// billing on the same card. A reissue under another brand holds the card's
+// agreements for reconsent: the member is asked to act, the renewal is not
+// sent, and the customer's verification of the same card anchors the
+// agreement renewals name (#1168).
 func TestNMIAccountUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -247,7 +248,7 @@ func TestNMIAccountUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 
 	w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Card.Brand, v.Card.Last4 = "mastercard", "5100" })
 	require.Equal(t, http.StatusOK, w.deliver("nmi", acuNotice("automaticallyupdated", vault)))
-	require.Equal(t, []string{"nmi_acu/updated", "nmi_acu/brand_changed"}, w.cardUpdates(vault))
+	require.Equal(t, []string{"customer_save/saved", "nmi_acu/updated", "nmi_acu/brand_changed"}, w.cardVersions(vault))
 	require.Equal(t, "mastercard", w.methodRow(e.method, "card_brand"))
 	r, u := w.agreements(e.method)
 	require.Equal(t, []string{"", ""}, []string{r, u}, "another brand voids the card's agreements")
@@ -259,9 +260,14 @@ func TestNMIAccountUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	require.Len(t, w.nmi.Attempts(), sent, "no renewal without the customer's agreement")
 	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, e.sub).Status)
 
-	e.replaceCard(mastercard)
+	require.Equal(t, []string{"card_on_file/requires_reconsent", "recurring/requires_reconsent"}, w.mandateStates(e.method))
+	validations := len(w.nmi.Validations(vault))
+	verified := e.c.must(http.MethodPost, "/payment-methods/"+e.method+"/verify", uuid.NewString(), nil)
+	require.Len(t, w.nmi.Validations(vault), validations+2, "one verification declaring recurring, one for reuse")
+	require.Equal(t, true, verified["reusable"])
 	recurring, _ = w.agreements(e.method)
 	require.NotEmpty(t, recurring, "the customer's verification anchors the agreement")
+	require.Equal(t, []string{"card_on_file/ended/brand_changed", "recurring/ended/brand_changed", "card_on_file/active", "recurring/active"}, w.mandateStates(e.method))
 	w.runRenewals()
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
 	require.Equal(t, []string{"merchant", "used", recurring}, credentialFields(w.nmi.LastSale()))
@@ -301,13 +307,13 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 		w.methodRow(e.method, "card_exp_month::text"), w.methodRow(e.method, "card_exp_year::text"), w.methodRow(e.method, "fingerprint")}, "the same method takes Stripe's card")
 	kept, _ := w.agreements(e.method)
 	require.Equal(t, recurring, kept, "a same-brand reissue keeps its agreement")
-	require.Equal(t, []string{"stripe_card_updater/updated"}, w.methodUpdates(e.method))
+	require.Equal(t, []string{"customer_save/saved", "stripe_updater/updated"}, w.methodVersions(e.method))
 
 	reissued("mastercard", "5100", "fp_mastercard")
 	require.Equal(t, "mastercard", w.methodRow(e.method, "card_brand"))
 	r, u := w.agreements(e.method)
 	require.Equal(t, []string{"", ""}, []string{r, u}, "another brand voids the card's agreements")
-	require.Equal(t, []string{"stripe_card_updater/updated", "stripe_card_updater/brand_changed"}, w.methodUpdates(e.method))
+	require.Equal(t, []string{"customer_save/saved", "stripe_updater/updated", "stripe_updater/brand_changed"}, w.methodVersions(e.method))
 	require.Equal(t, 1, e.c.notificationCount("payment_method_update_required"), "the member is asked to act")
 
 	sent := e.providerAttempts()
@@ -323,4 +329,16 @@ func TestStripeCardUpdaterBrandChangeNeedsTheCustomer(t *testing.T) {
 	w.runRenewals()
 	require.Equal(t, sent, e.providerAttempts(), "no off-session renewal without the customer's agreement")
 	require.Equal(t, billing.SubscriptionAwaitingMethod, w.subscription(embedded, e.sub).Status)
+
+	// The customer verifies the same card: a SetupIntent confirmed with them
+	// present is the new agreement, and the renewal is collected.
+	e.c.must(http.MethodPost, "/payment-methods/"+e.method+"/verify", uuid.NewString(), nil)
+	setups := w.stripe.mutations("/v1/setup_intents")
+	require.Equal(t, "true", setups[len(setups)-1].Form.Get("confirm"))
+	require.Equal(t, pm, setups[len(setups)-1].Form.Get("payment_method"))
+	recurring, _ = w.agreements(e.method)
+	require.True(t, strings.HasPrefix(recurring, "seti_"), "the agreement cites the customer's setup, got %q", recurring)
+	w.runRenewals()
+	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, e.sub).Status)
+	require.Empty(t, w.stripe.unexpected())
 }

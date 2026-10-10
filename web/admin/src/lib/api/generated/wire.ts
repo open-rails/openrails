@@ -1640,9 +1640,14 @@ export type PaymentMethod = {
   customer_id: string
   rail: string
   psp_id: string | null
+  status: "active" | "closed" | "removed" | "replaced"
+  replaced_by: string | null
   card: CardDetails | null
   billing_details: BillingDetails | null
   health: PaymentMethodHealth
+  contact_cardholder_at: string | null
+  reusable: boolean
+  mandates: Mandate[]
   subscriptions: PaymentMethodSubscription[]
   collection_currencies: string[]
   created_at: string
@@ -2409,6 +2414,13 @@ export type UpdatePSPParams = {
   settings?: Record<string, unknown> | null
   credentials?: Record<string, string> | null
   retire_webhook_overlap?: boolean
+}
+
+export type UpdatePaymentMethodParams = {
+  exp_month?: number
+  exp_year?: number
+  billing_details?: BillingDetails
+  reusable?: boolean
 }
 
 export type UpdatePriceParams = {

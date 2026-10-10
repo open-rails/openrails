@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -154,7 +155,7 @@ func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProv
 		if err != nil {
 			return err
 		}
-		if method.CustomerID.String() != p.UserID || method.ParkReason != nil {
+		if method.CustomerID.String() != p.UserID || !paymentmethods.Chargeable(method) {
 			return errors.New("sale method changed before submission")
 		}
 		if err := p.Instrument.Matches(method); err != nil {

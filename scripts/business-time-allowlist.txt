@@ -47,6 +47,7 @@ internal/modules/paymentmethods/rail_payment_method_service.go|startedAt := time
 internal/modules/payments/payment.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/payments/rail_customer_service.go|now := time.Now().UTC()|db_audit_timestamp|Provider customer creation audit timestamp|1
 internal/modules/payments/stripe_card.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
+internal/modules/payments/stripe_payment_reconcile.go|now := time.Now().UTC()|business_time_boundary|Default immediately overridden by the supplied business clock|1
 internal/modules/productaccess/product_access_service.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/solana/pay.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/solana/solanasubs/subscription_repo.go|UpdatedAt:                time.Now().UTC(),|db_audit_timestamp|On-chain mirror creation and update audit timestamp|1
@@ -66,6 +67,7 @@ internal/modules/subscriptions/user_service.go|return time.Now()|business_time_b
 internal/modules/subscriptions/user_service.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhookhealth/recorder.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/basistheory.go|CompletedAt:  time.Now().UTC(),|external_protocol_time|Account updater completion receipt timestamp|1
+internal/modules/webhooks/basistheory.go|return time.Now().UTC()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/ccbill.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/converge_nmi.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1
 internal/modules/webhooks/converge_stripe.go|return time.Now()|business_time_boundary|Explicit default clock boundary; supplied business clock takes precedence|1

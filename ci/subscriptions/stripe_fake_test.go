@@ -355,7 +355,50 @@ func (f *stripeFake) route(r *http.Request, form url.Values) (int, any) {
 			"payment_method_types": []string{"card"}, "livemode": false, "metadata": metadataOf(form)}
 		s["client_secret"] = s["id"].(string) + "_secret_gf"
 		f.setups[s["id"].(string)] = s
+		if pm := form.Get("payment_method"); pm != "" && form.Get("confirm") == "true" {
+			// A server-confirmed setup of an attached card, its customer present.
+			s["payment_method"] = pm
+			switch decline := f.declines[pm]; decline {
+			case "":
+				s["status"] = "succeeded"
+			case "auth":
+				s["status"] = "requires_action"
+			default:
+				s["status"], s["payment_method"] = "requires_payment_method", nil
+				return 402, obj{"error": obj{"type": "card_error", "code": "card_declined", "decline_code": decline, "setup_intent": s}}
+			}
+		}
 		return 200, s
+	case r.Method == http.MethodPost && seg[0] == "setup_intents" && len(seg) == 3 && seg[2] == "cancel":
+		s, ok := f.setups[seg[1]]
+		if !ok {
+			return 404, stripeErr("resource_missing")
+		}
+		s["status"] = "canceled"
+		return 200, s
+	case r.Method == http.MethodPost && seg[0] == "payment_methods" && len(seg) == 2:
+		m, ok := f.methods[seg[1]]
+		if !ok {
+			return 404, stripeErr("resource_missing")
+		}
+		c := m["card"].(obj)
+		for _, field := range []string{"exp_month", "exp_year"} {
+			if v := form.Get("card[" + field + "]"); v != "" {
+				n, _ := strconv.Atoi(v)
+				c[field] = n
+			}
+		}
+		details, _ := m["billing_details"].(obj)
+		if details == nil {
+			details = obj{}
+		}
+		for key, values := range form {
+			if field, ok := strings.CutPrefix(key, "billing_details["); ok {
+				details[strings.TrimSuffix(field, "]")] = values[0]
+			}
+		}
+		m["billing_details"] = details
+		return 200, m
 	case r.Method == http.MethodGet && seg[0] == "setup_intents" && len(seg) == 2:
 		if s, ok := f.setups[seg[1]]; ok {
 			return 200, s

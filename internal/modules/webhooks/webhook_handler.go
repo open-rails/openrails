@@ -190,7 +190,7 @@ func mapStripeEventType(t string) WebhookEventType {
 		return WebhookEventRefund
 	case "charge.dispute.created", "charge.dispute.closed":
 		return WebhookEventChargeback
-	case "payment_method.attached", "payment_method.automatically_updated":
+	case "payment_method.attached", "payment_method.automatically_updated", "payment_method.updated":
 		return WebhookEventCustomerUpdated
 	default:
 		return WebhookEventUnknown

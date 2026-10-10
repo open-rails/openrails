@@ -9239,6 +9239,65 @@
           "request"
         ]
       },
+      "patch": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePaymentMethodParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethod"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "card_requires_https",
+          "invalid_param",
+          "payment_method_not_usable",
+          "payment_method_update_unsupported",
+          "payment_provider_rejected",
+          "provider_outcome_unknown",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      },
       "delete": {
         "tags": [
           "customer"
@@ -9276,6 +9335,66 @@
           "payment_method_delete_unsupported",
           "rate_limit_exceeded",
           "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
+    "/v1/me/payment-methods/{id}/verify": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethod"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "card_attempts_blocked",
+          "card_declined",
+          "insufficient_funds",
+          "invalid_param",
+          "payment_method_not_usable",
+          "payment_method_update_unsupported",
+          "payment_provider_rejected",
+          "provider_outcome_unknown",
           "resource_not_found",
           "service_unavailable"
         ],
@@ -19101,6 +19220,25 @@
               }
             ]
           },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "closed",
+              "removed",
+              "replaced"
+            ]
+          },
+          "replaced_by": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "card": {
             "oneOf": [
               {
@@ -19124,6 +19262,26 @@
           "health": {
             "$ref": "#/components/schemas/PaymentMethodHealth"
           },
+          "contact_cardholder_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reusable": {
+            "type": "boolean"
+          },
+          "mandates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mandate"
+            }
+          },
           "subscriptions": {
             "type": "array",
             "items": {
@@ -19146,9 +19304,14 @@
           "customer_id",
           "rail",
           "psp_id",
+          "status",
+          "replaced_by",
           "card",
           "billing_details",
           "health",
+          "contact_cardholder_at",
+          "reusable",
+          "mandates",
           "subscriptions",
           "collection_currencies",
           "created_at"
@@ -22572,6 +22735,23 @@
             ]
           },
           "retire_webhook_overlap": {
+            "type": "boolean"
+          }
+        }
+      },
+      "UpdatePaymentMethodParams": {
+        "type": "object",
+        "properties": {
+          "exp_month": {
+            "type": "integer"
+          },
+          "exp_year": {
+            "type": "integer"
+          },
+          "billing_details": {
+            "$ref": "#/components/schemas/BillingDetails"
+          },
+          "reusable": {
             "type": "boolean"
           }
         }

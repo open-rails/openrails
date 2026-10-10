@@ -13,6 +13,7 @@ import (
 	solana "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -121,7 +122,7 @@ func (s *Store) enqueueInitialMembership(ctx context.Context, p EnqueueParams) (
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != nil {
+		if method.CustomerID != customer || method.Rail != p.Provider || !paymentmethods.Chargeable(method) {
 			return apperr.Conflictf("initial enrollment instrument changed before admission")
 		}
 		if err := terms.Instrument.Matches(method); err != nil {

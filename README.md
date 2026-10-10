@@ -683,6 +683,8 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
 | `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
 | `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
+| `PATCH /billing/v1/me/payment-methods/{id}` | change a card's expiry, billing details or reuse |
+| `POST /billing/v1/me/payment-methods/{id}/verify` | confirm a card again after its brand changed |
 | `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
 | `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
 | `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |

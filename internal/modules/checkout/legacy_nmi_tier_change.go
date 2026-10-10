@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -199,7 +200,7 @@ func (s *CheckoutService) processProviderNMITierChange(ctx context.Context, req 
 	if err != nil {
 		return nil, err
 	}
-	if methodRow.CustomerID != customerID || !charge.ChargeableOn(methodRow, sub.PspID) || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == nil || methodRow.ParkReason != nil {
+	if methodRow.CustomerID != customerID || !charge.ChargeableOn(methodRow, sub.PspID) || methodRow.Custodian != models.CustodianPSP || methodRow.RailCustomerRef == nil || !paymentmethods.Chargeable(methodRow) {
 		return nil, ErrPaymentMethodStale
 	}
 	instrument := charge.FreezeInstrument(methodRow, sub.PspID)

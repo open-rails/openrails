@@ -26,6 +26,7 @@ import (
 const (
 	EndReplaced             = "replaced"
 	EndBrandChanged         = "brand_changed"
+	EndClosed               = "closed"
 	EndSubscriptionEnded    = "subscription_ended"
 	EndPaymentMethodRemoved = "payment_method_removed"
 )
@@ -372,6 +373,52 @@ func SetLineage(ctx context.Context, q *gen.Queries, merchantID, mandateID uuid.
 // lineage survives. Merchant-initiated charges under them are refused.
 func RequireReconsent(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUID, now time.Time) error {
 	_, err := q.RequireMandatesReconsent(ctx, gen.RequireMandatesReconsentParams{MerchantID: merchantID, PaymentMethodID: methodID, Now: now.UTC()})
+	return err
+}
+
+// AwaitingConsent are a card's mandates waiting for the customer's consent,
+// locked for their replacement.
+func AwaitingConsent(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUID) ([]gen.BillingMandate, error) {
+	return q.ListMandatesAwaitingConsent(ctx, gen.ListMandatesAwaitingConsentParams{MerchantID: merchantID, PaymentMethodID: methodID})
+}
+
+// Reconsent replaces a mandate waiting for consent with an active one in the
+// same scope, citing the lineage the customer's verification established.
+func Reconsent(ctx context.Context, q *gen.Queries, m gen.BillingMandate, lineage charge.Mandate, now time.Time) (gen.BillingMandate, error) {
+	if m.Status != StatusRequiresReconsent || m.PaymentMethodID == nil {
+		return gen.BillingMandate{}, fmt.Errorf("%w: mandate %s is not waiting for consent", ErrChanged, m.ID)
+	}
+	lineage.ID, lineage.Kind = uuid.Nil, ""
+	a := Agreement{MerchantID: m.MerchantID, CustomerID: m.CustomerID, PaymentMethodID: *m.PaymentMethodID, PSPID: m.PspID, Rail: m.Rail,
+		Kind: charge.Agreement(m.Kind), SubscriptionID: m.SubscriptionID, Lineage: &lineage, AcceptedAt: now}
+	if m.Currency != nil {
+		a.Currency = *m.Currency
+	}
+	return Replace(ctx, q, a, now)
+}
+
+// Reuse is the customer's consent to reuse a card for one-click buys, on the
+// account psp: an existing live consent stands; a new one cites the card's
+// standing unscheduled lineage there, or none until its next storing charge.
+func Reuse(ctx context.Context, q *gen.Queries, merchantID, customerID, methodID, pspID uuid.UUID, rail string, now time.Time) error {
+	if _, found, err := liveInScope(ctx, q, Agreement{MerchantID: merchantID, CustomerID: customerID, PaymentMethodID: methodID, PSPID: pspID, Kind: charge.AgreementCardOnFile}); err != nil || found {
+		return err
+	}
+	lineage, err := Citable(ctx, q, merchantID, customerID, methodID, pspID, rail, charge.AgreementCardOnFile)
+	if err != nil {
+		return err
+	}
+	if lineage != nil {
+		lineage.ID, lineage.Kind = uuid.Nil, ""
+	}
+	_, err = Create(ctx, q, Agreement{MerchantID: merchantID, CustomerID: customerID, PaymentMethodID: methodID, PSPID: pspID, Rail: rail,
+		Kind: charge.AgreementCardOnFile, Lineage: lineage, AcceptedAt: now})
+	return err
+}
+
+// RevokeReuse withdraws a card's one-click reuse.
+func RevokeReuse(ctx context.Context, q *gen.Queries, merchantID, methodID uuid.UUID, now time.Time) error {
+	_, err := q.RevokeCardOnFileMandates(ctx, gen.RevokeCardOnFileMandatesParams{MerchantID: merchantID, PaymentMethodID: methodID, Now: now.UTC()})
 	return err
 }
 

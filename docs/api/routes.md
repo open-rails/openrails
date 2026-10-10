@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (192), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (194), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
@@ -75,6 +75,8 @@ A customer acting on its own account.
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |
 | POST | `/v1/me/payment-methods` | customer | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` |  |
 | PUT | `/v1/me/payment-methods/{id}` | customer | — | `ReplacePaymentMethodCardParams` | 200 `PaymentMethod`<br>202 — | `Idempotency-Key` |
+| PATCH | `/v1/me/payment-methods/{id}` | customer | — | `UpdatePaymentMethodParams` | 200 `PaymentMethod` |  |
+| POST | `/v1/me/payment-methods/{id}/verify` | customer | — | — | 200 `PaymentMethod` | `Idempotency-Key` |
 | DELETE | `/v1/me/payment-methods/{id}` | customer | — | — | 202 —<br>204 — |  |
 | POST | `/v1/me/payment-method-setups` | customer | — | `PaymentMethodSetupParams` | 200 `PaymentMethodSetup` | `Idempotency-Key` |
 | GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `PaymentMethodSetup` |  |

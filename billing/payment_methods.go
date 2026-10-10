@@ -12,17 +12,46 @@ type PaymentMethodListParams struct {
 	IDs []PaymentMethodID
 }
 
-// PaymentMethod is a customer's stored card. PSPID names the PSP holding it,
-// null for a card a third-party custodian holds (any PSP of its rail that
-// reaches the custodian charges it).
+// PaymentMethodStatus is where a saved card stands. Only an active card is
+// charged; the others are final.
+type PaymentMethodStatus string
+
+const (
+	PaymentMethodActive PaymentMethodStatus = "active"
+	// PaymentMethodClosed: the bank closed the account. Subscriptions it paid
+	// wait for another card; none is canceled because of it.
+	PaymentMethodClosed PaymentMethodStatus = "closed"
+	// PaymentMethodReplaced: another payment method took its place.
+	PaymentMethodReplaced PaymentMethodStatus = "replaced"
+	PaymentMethodRemoved  PaymentMethodStatus = "removed"
+)
+
+// PaymentMethod is the card account a customer chose. Its issuer may reissue
+// it (a new number, expiry or brand) under the same payment method; a card
+// the customer enters is a new one. PSPID names the PSP holding it, null for
+// a card a third-party custodian holds (any PSP of its rail that reaches the
+// custodian charges it).
 type PaymentMethod struct {
-	ID             PaymentMethodID     `json:"id"`
-	CustomerID     CustomerID          `json:"customer_id"`
-	Rail           string              `json:"rail"`
-	PSPID          *PSPID              `json:"psp_id"`
+	ID         PaymentMethodID     `json:"id"`
+	CustomerID CustomerID          `json:"customer_id"`
+	Rail       string              `json:"rail"`
+	PSPID      *PSPID              `json:"psp_id"`
+	Status     PaymentMethodStatus `json:"status"`
+	// ReplacedBy is the payment method that replaced this one.
+	ReplacedBy *PaymentMethodID `json:"replaced_by"`
+	// Card is the card as its issuer last reported it.
 	Card           *CardDetails        `json:"card"`
 	BillingDetails *BillingDetails     `json:"billing_details"`
 	Health         PaymentMethodHealth `json:"health"`
+	// ContactCardholderAt is when the issuer last asked the cardholder to
+	// contact it; the card still pays until it says more.
+	ContactCardholderAt *time.Time `json:"contact_cardholder_at"`
+	// Reusable: the customer keeps the card for one-click buys (an active
+	// card_on_file mandate).
+	Reusable bool `json:"reusable"`
+	// Mandates are the live agreements on the card. One that requires
+	// reconsent waits for POST /v1/me/payment-methods/{id}/verify.
+	Mandates []Mandate `json:"mandates"`
 	// Subscriptions are the subscriptions the card pays.
 	Subscriptions []PaymentMethodSubscription `json:"subscriptions"`
 	// CollectionCurrencies are the currencies whose invoices the card
@@ -113,6 +142,17 @@ type ReplacePaymentMethodCardParams struct {
 	PaymentToken   string          `json:"payment_token,omitempty"`
 	Card           *Card           `json:"card,omitempty"`
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
+}
+
+// UpdatePaymentMethodParams edits a saved card in place: its expiry (both
+// fields together), its billing details, and whether it is kept for one-click
+// buys. An absent field is unchanged; the card number never changes, so a new
+// card is a new payment method.
+type UpdatePaymentMethodParams struct {
+	ExpMonth       *int            `json:"exp_month,omitempty"`
+	ExpYear        *int            `json:"exp_year,omitempty"`
+	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
+	Reusable       *bool           `json:"reusable,omitempty"`
 }
 
 // CollectionPaymentMethod is the card that collects a customer's invoices in

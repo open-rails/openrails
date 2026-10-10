@@ -193,15 +193,26 @@ WHERE id=sqlc.arg(id) AND merchant_id=sqlc.arg(merchant_id)
   AND expires_at>sqlc.arg(now);
 
 -- Capture attachment never reparents an existing instrument to another payer.
+-- A new method's history starts with the card it was saved with.
 -- name: AttachCapturedPaymentMethod :one
+WITH pm AS (
 INSERT INTO billing.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,created_at,updated_at)
-VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),NULL,'nmi','hyperswitch',sqlc.arg(custodian_id),NULLIF(sqlc.arg(vendor_customer_id)::text,''),sqlc.arg(vendor_method_id)::text,sqlc.narg(card_brand)::text,sqlc.narg(card_last4)::text,sqlc.narg(card_exp_month)::smallint,sqlc.narg(card_exp_year)::smallint,'pan_proxy',sqlc.arg(now),sqlc.arg(now))
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,status,created_at,updated_at)
+VALUES(sqlc.arg(id),sqlc.arg(merchant_id),sqlc.arg(customer_id),NULL,'nmi','hyperswitch',sqlc.arg(custodian_id),NULLIF(sqlc.arg(vendor_customer_id)::text,''),sqlc.arg(vendor_method_id)::text,sqlc.narg(card_brand)::text,sqlc.narg(card_last4)::text,sqlc.narg(card_exp_month)::smallint,sqlc.narg(card_exp_year)::smallint,'pan_proxy','active',sqlc.arg(now),sqlc.arg(now))
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=billing.payment_methods.id
 WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
   AND billing.payment_methods.custodian='hyperswitch'
-RETURNING *;
+RETURNING *
+), saved AS (
+INSERT INTO billing.payment_method_versions (merchant_id,customer_id,payment_method_id,source,kind,event_ref,psp_id,custodian_id,
+    rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,effective_at)
+SELECT merchant_id,customer_id,id,'customer_save','saved','created',psp_id,custodian_id,
+    rail_customer_ref,rail_method_ref,NULLIF(card_brand,''),card_last4,card_exp_month,card_exp_year,created_at
+FROM pm
+ON CONFLICT (merchant_id,payment_method_id,source,event_ref) DO NOTHING
+)
+SELECT * FROM pm;
 
 -- name: CountInvalidCheckoutCaptureReferences :one
 -- Terminal replay retains the original capture authority even after a later

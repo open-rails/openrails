@@ -16,7 +16,6 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -154,12 +153,10 @@ func compactStrings(values ...string) []string {
 	return out
 }
 
-// UpsertStripeCardForCustomer mirrors one currently attached Stripe card. It
-// never decides which card a subscription should use; that decision is folded
-// separately from fetched Stripe customer/subscription truth. A mirrored card
-// Stripe reissued under another brand loses its stored-credential agreements
-// (#1166), recorded under eventRef ("" when no event names the change), and
-// brandChanged reports it.
+// UpsertStripeCardForCustomer mirrors one currently attached Stripe card,
+// reporting whether it created the mirror. It never decides which card a
+// subscription should use, and never changes a mirrored card: that is
+// ObserveStripeCard's.
 func UpsertStripeCardForCustomer(
 	ctx context.Context,
 	database *db.DB,
@@ -167,8 +164,7 @@ func UpsertStripeCardForCustomer(
 	clock clockwork.Clock,
 	customerID string,
 	method *StripePaymentMethodState,
-	eventRef string,
-) (pm *models.PaymentMethod, brandChanged bool, err error) {
+) (pm *models.PaymentMethod, created bool, err error) {
 	customerID = strings.TrimSpace(customerID)
 	if method == nil || customerID == "" || strings.TrimSpace(method.ID) == "" || database == nil || customers == nil || method.Card == nil {
 		return nil, false, nil
@@ -208,6 +204,7 @@ func UpsertStripeCardForCustomer(
 			RailMethodRef:   paymentMethodID,
 			Fingerprint:     method.Fingerprint,
 			Card:            *card,
+			Status:          paymentmethods.StatusActive,
 			CreatedAt:       now,
 			UpdatedAt:       now,
 		}
@@ -218,54 +215,26 @@ func UpsertStripeCardForCustomer(
 		if err := methods.Create(ctx, pm); err != nil {
 			return nil, false, fmt.Errorf("insert stripe payment method: %w", err)
 		}
+		return pm, true, nil
 	case err != nil:
 		return nil, false, fmt.Errorf("lookup stripe payment method: %w", err)
-	default:
-		if pm.CustomerID != identity.CustomerIDFromString(userID).UUID() || pm.RailCustomerRef != "" && pm.RailCustomerRef != customerID {
-			return nil, false, errors.New("stripe payment method belongs to a different customer")
-		}
+	}
+	if pm.CustomerID != identity.CustomerIDFromString(userID).UUID() || pm.RailCustomerRef != "" && pm.RailCustomerRef != customerID {
+		return nil, false, errors.New("stripe payment method belongs to a different customer")
+	}
+	if pm.RailCustomerRef == "" {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, false, err
 		}
-		q := database.Gen(ctx)
-		if pm.RailCustomerRef == "" {
-			rows, err := q.BindMissingStripeCustomerReference(ctx, gen.BindMissingStripeCustomerReferenceParams{MerchantID: mid.UUID(), ID: pm.ID, CustomerID: pm.CustomerID, PspID: pspID, RailMethodRef: paymentMethodID, RailCustomerRef: customerID, Now: now})
-			if err != nil {
-				return nil, false, err
-			}
-			if rows != 1 {
-				return nil, false, errors.New("stripe payment method cannot adopt verified customer binding")
-			}
-			pm.RailCustomerRef = customerID
-		}
-		brandChanged = paymentmethods.BrandChanged(pm.Card.Brand, card.Brand)
-		brand, last4, month, year := card.Columns()
-		rows, err := q.RefreshStripePaymentMethodCard(ctx, gen.RefreshStripePaymentMethodCardParams{MerchantID: mid.UUID(), ID: pm.ID,
-			CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year, Fingerprint: method.Fingerprint, UpdatedAt: now})
+		rows, err := database.Gen(ctx).BindMissingStripeCustomerReference(ctx, gen.BindMissingStripeCustomerReferenceParams{MerchantID: mid.UUID(), ID: pm.ID, CustomerID: pm.CustomerID, PspID: pspID, RailMethodRef: paymentMethodID, RailCustomerRef: customerID, Now: now})
 		if err != nil {
-			return nil, false, fmt.Errorf("update stripe payment method: %w", err)
+			return nil, false, err
 		}
 		if rows != 1 {
-			return nil, false, paymentmethods.ErrPaymentMethodNotFound
+			return nil, false, errors.New("stripe payment method cannot adopt verified customer binding")
 		}
-		pm.Card, pm.UpdatedAt = *card, now
-		if method.Fingerprint != "" {
-			pm.Fingerprint = method.Fingerprint
-		}
-		if brandChanged {
-			if err := mandates.RequireReconsent(ctx, q, mid.UUID(), pm.ID, now); err != nil {
-				return nil, false, err
-			}
-			ref := strings.TrimSpace(eventRef)
-			if ref == "" {
-				ref = "refresh:" + now.UTC().Format(time.RFC3339Nano)
-			}
-			if err := paymentmethods.RecordCardUpdate(ctx, q, paymentmethods.CardUpdate{MerchantID: mid.UUID(), PaymentMethodID: pm.ID, CustomerID: pm.CustomerID,
-				PSPID: pm.PspID, Source: paymentmethods.UpdateStripe, Kind: paymentmethods.CardBrandChanged, EventRef: ref, OccurredAt: now}); err != nil {
-				return nil, false, err
-			}
-		}
+		pm.RailCustomerRef = customerID
 	}
-	return pm, brandChanged, nil
+	return pm, false, nil
 }

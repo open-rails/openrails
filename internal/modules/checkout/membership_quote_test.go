@@ -28,7 +28,7 @@ func TestInitialMembershipQuote(t *testing.T) {
 	expiry := now.Add(time.Hour)
 	session := models.CheckoutAttempt{ID: uuid.New(), CustomerID: customer, PspID: psp, PriceID: &price.ID, Mode: models.CheckoutAttemptModeSubscription, Rail: models.RailNMI,
 		Status: models.CheckoutAttemptStatusRequiresAction, Amount: new(price.Amount), Currency: new(price.Currency), ExpiresAt: &expiry}
-	method := gen.BillingPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, Rail: "nmi", Custodian: models.CustodianHyperSwitch, CustodianID: &custodian, RailCustomerRef: new("customer"), RailMethodRef: new("method")}
+	method := gen.BillingPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, Rail: "nmi", Status: "active", Custodian: models.CustodianHyperSwitch, CustodianID: &custodian, RailCustomerRef: new("customer"), RailMethodRef: new("method")}
 
 	require.NoError(t, quoteInitialMembership(ctx, &session, &price, &product, method, now))
 	encoded, err := json.Marshal(session)

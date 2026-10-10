@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -123,7 +124,7 @@ func (s *CheckoutService) ConfirmInitialMembership(ctx context.Context, accepted
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != accepted.CustomerID || !charge.ChargeableOn(method, accepted.PSPID) || method.ParkReason != nil {
+		if method.CustomerID != accepted.CustomerID || !charge.ChargeableOn(method, accepted.PSPID) || !paymentmethods.Chargeable(method) {
 			return charge.ErrInstrumentChanged
 		}
 		if sessionID != nil {

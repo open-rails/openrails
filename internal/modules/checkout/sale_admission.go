@@ -19,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -104,7 +105,7 @@ func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.
 	if err != nil {
 		return out, err
 	}
-	if target.Scope == nil || !charge.ChargeableOn(method, target.Scope.ID) || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || method.ParkReason != nil {
+	if target.Scope == nil || !charge.ChargeableOn(method, target.Scope.ID) || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || !paymentmethods.Chargeable(method) {
 		return out, errors.New("sale instrument does not match customer and provider")
 	}
 	now := purchase.now().UTC().Truncate(time.Microsecond)

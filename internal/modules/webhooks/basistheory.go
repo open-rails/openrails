@@ -3,11 +3,13 @@ package webhooks
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/config"
@@ -17,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
 // BasisTheoryWebhookHandler folds Basis Theory custody events (#795) into
@@ -129,6 +132,13 @@ func custodianScopeIDs(ctx context.Context) (uuid.UUID, uuid.UUID, error) {
 	return mid.UUID(), cid, err
 }
 
+func (s *basisTheoryWebhookService) now() time.Time {
+	if s.d.Clock != nil {
+		return s.d.Clock.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
 func (s *basisTheoryWebhookService) gen(ctx context.Context) *gen.Queries {
 	return s.d.DB.Gen(ctx)
 }
@@ -185,7 +195,8 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 	return nil
 }
 
-// refreshInstrumentFromToken re-reads the token and refreshes masked metadata.
+// refreshInstrumentFromToken re-reads the token and applies the card it now
+// holds to every method on it.
 func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Context, evt basistheory.Event) error {
 	mid, cid, err := custodianScopeIDs(ctx)
 	if err != nil {
@@ -207,18 +218,16 @@ func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Conte
 		}
 		return fmt.Errorf("basistheory token.updated: fetch token: %w", err)
 	}
-	brand, last4, month, year := btCard(token.Card).Columns()
-	_, err = s.gen(ctx).RefreshCustodianCardMetadata(ctx, gen.RefreshCustodianCardMetadataParams{MerchantID: mid, CustodianID: cid,
-		Custodian:     models.CustodianBasisTheory,
-		RailMethodRef: token.ID,
-		CardBrand:     brand,
-		CardLast4:     last4,
-		CardExpMonth:  month,
-		CardExpYear:   year,
-		Fingerprint:   token.Fingerprint,
-	})
+	methods, err := s.gen(ctx).ListPaymentMethodsByCustodianRef(ctx, gen.ListPaymentMethodsByCustodianRefParams{MerchantID: mid, CustodianID: cid, Custodian: models.CustodianBasisTheory, RailMethodRef: token.ID})
 	if err != nil {
-		return fmt.Errorf("basistheory token.updated: refresh instrument: %w", err)
+		return fmt.Errorf("basistheory token.updated: find instruments: %w", err)
+	}
+	card := paymentmethods.Card{Card: btCard(token.Card), Fingerprint: token.Fingerprint}
+	for _, id := range methods {
+		if _, err := applyCardEvent(ctx, s.d.DB, s.d.SubscriptionLifecycleService, paymentmethods.CardEvent{MerchantID: mid, PaymentMethodID: id,
+			Source: paymentmethods.SourceProviderRead, EventRef: evt.ID, Card: card, At: s.now()}); err != nil {
+			return fmt.Errorf("basistheory token.updated: %w", err)
+		}
 	}
 	return nil
 }
@@ -250,9 +259,8 @@ func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Contex
 	return nil
 }
 
-// foldNetworkTokenStatus updates NT status/enrichment ONLY — the PAN-side
-// expiry is deliberately never touched (BT never rewrites the card token's
-// FPAN; that is the Account Updater's job).
+// foldNetworkTokenStatus records a network token's status as a card version;
+// the card itself is the Account Updater's.
 func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, evt basistheory.Event, forcedStatus string) error {
 	mid, cid, err := custodianScopeIDs(ctx)
 	if err != nil {
@@ -280,12 +288,16 @@ func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, 
 	if status == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("basistheory %s: no status resolvable for network token %s", evt.Type, data.NetworkToken.ID))
 	}
-	if _, err := s.gen(ctx).SetNetworkTokenStatusByNetworkTokenID(ctx, gen.SetNetworkTokenStatusByNetworkTokenIDParams{MerchantID: mid, CustodianID: cid,
-		Custodian:          models.CustodianBasisTheory,
-		NetworkTokenID:     data.NetworkToken.ID,
-		NetworkTokenStatus: status,
-	}); err != nil {
-		return fmt.Errorf("basistheory %s: fold network token status: %w", evt.Type, err)
+	methods, err := s.gen(ctx).ListPaymentMethodsByNetworkToken(ctx, gen.ListPaymentMethodsByNetworkTokenParams{MerchantID: mid, CustodianID: cid,
+		Custodian: models.CustodianBasisTheory, NetworkTokenID: data.NetworkToken.ID})
+	if err != nil {
+		return fmt.Errorf("basistheory %s: find instruments: %w", evt.Type, err)
+	}
+	for _, id := range methods {
+		if _, err := applyCardEvent(ctx, s.d.DB, s.d.SubscriptionLifecycleService, paymentmethods.CardEvent{MerchantID: mid, PaymentMethodID: id,
+			Source: paymentmethods.SourceNetworkToken, EventRef: evt.ID, Card: paymentmethods.Card{NetworkTokenStatus: status}, At: s.now()}); err != nil {
+			return fmt.Errorf("basistheory %s: fold network token status: %w", evt.Type, err)
+		}
 	}
 	return nil
 }
@@ -321,7 +333,7 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 	if err != nil {
 		return fmt.Errorf("basistheory account updater: results for job %s: %w", jobID, err)
 	}
-	stats, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), jobID, rows)
+	stats, err := FoldAccountUpdaterResults(ctx, s.d.DB, s.d.SubscriptionLifecycleService, jobID, rows, s.now())
 	if err != nil {
 		return err
 	}
@@ -334,7 +346,7 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 // FoldAccountUpdaterRows applies parsed AU result rows. Exported for the
 // integration test to drive the fold without a live BT job.
 func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, jobRef string, rows []basistheory.AccountUpdaterResultRow) error {
-	_, err := FoldAccountUpdaterResults(ctx, s.gen(ctx), jobRef, rows)
+	_, err := FoldAccountUpdaterResults(ctx, s.d.DB, s.d.SubscriptionLifecycleService, jobRef, rows, s.now())
 	return err
 }
 
@@ -345,120 +357,98 @@ type AccountUpdaterFoldStats struct {
 	Rows int
 	// Adopted: instruments the network refreshed. or#872: this is the number
 	// that proves the updater pays for itself — cards recovered before dunning.
-	Adopted      int
-	Rotated      int
-	Parked       int
-	ResultCounts map[string]int
+	Adopted int
+	Rotated int
+	// Closed and Contacted: cards the issuer closed, and cards whose issuer
+	// asks for the cardholder; both wait on the customer.
+	Closed, Contacted int
+	ResultCounts      map[string]int
 }
 
-// FoldAccountUpdaterResults applies parsed account-updater result rows through
-// the EXISTING single writer for each outcome: RotateCustodianMethodRef for the
-// UPD_ family (which also clears the park — or#872) and
-// ParkPaymentMethodByMethodRef for the two "stop and look" outcomes. There is
-// deliberately no second update path: the batch runner (or#795) and the
-// account-updater.job.completed webhook both land here.
-//
-// Doctrine: nothing is ever deleted and nothing is terminally canceled. A
-// closed account or a contact-cardholder answer PARKS the instrument (or#870
-// bucket 2) so charges fail loudly and an operator decides.
-func FoldAccountUpdaterResults(ctx context.Context, q *gen.Queries, jobRef string, rows []basistheory.AccountUpdaterResultRow) (AccountUpdaterFoldStats, error) {
+// FoldAccountUpdaterResults applies parsed account-updater result rows, one
+// card version per instrument and row (#1168): a reissue adopts the custodian's
+// new token on the same method; a closed account closes the method; a
+// contact-cardholder answer prompts the customer, or closes a Mastercard card.
+// The batch runner (or#795) and the account-updater.job.completed webhook
+// both land here. Nothing is deleted and nothing is canceled.
+func FoldAccountUpdaterResults(ctx context.Context, database *db.DB, life *subscriptions.SubscriptionLifecycleService, jobRef string, rows []basistheory.AccountUpdaterResultRow, now time.Time) (AccountUpdaterFoldStats, error) {
 	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
 	mid, cid, err := custodianScopeIDs(ctx)
 	if err != nil {
 		return stats, err
 	}
-	// #1115: each method a row changed is one card update.
-	record := func(token string, kind paymentmethods.CardUpdateKind, methods []gen.RotateCustodianMethodRefRow) error {
-		for _, m := range methods {
-			if err := paymentmethods.RecordCardUpdate(ctx, q, paymentmethods.CardUpdate{MerchantID: mid, PaymentMethodID: m.ID, CustomerID: m.CustomerID,
-				PSPID: m.PspID, Source: paymentmethods.UpdateBTAccountUpdater, Kind: kind, EventRef: strings.TrimSpace(jobRef) + ":" + token}); err != nil {
-				return fmt.Errorf("account updater: record %s: %w", token, err)
-			}
-		}
-		return nil
-	}
-	park := func(token, reason, why string, kind paymentmethods.CardUpdateKind) error {
-		parked, err := q.ParkPaymentMethodByMethodRef(ctx, gen.ParkPaymentMethodByMethodRefParams{MerchantID: mid, CustodianID: cid,
-			Custodian:     models.CustodianBasisTheory,
-			RailMethodRef: token,
-			ParkReason:    reason,
-		})
-		if err != nil {
-			return fmt.Errorf("account updater: park %s: %w", token, err)
-		}
-		methods := make([]gen.RotateCustodianMethodRefRow, 0, len(parked))
-		for _, p := range parked {
-			methods = append(methods, gen.RotateCustodianMethodRefRow(p))
-		}
-		if err := record(token, kind, methods); err != nil {
-			return err
-		}
-		if len(parked) > 0 {
-			stats.Parked++
-			log.WithContext(ctx).WithFields(log.Fields{
-				"bt_token_id": token, "park_reason": reason,
-			}).Error("basistheory account updater: instrument PARKED — " + why + "; operator action required (never auto-canceled)")
-		}
-		return nil
-	}
 	for _, row := range rows {
 		code := strings.TrimSpace(row.ResultCode)
 		stats.ResultCounts[code]++
+		ev := paymentmethods.CardEvent{MerchantID: mid, Source: paymentmethods.SourceBasisTheoryUpdater, EventRef: strings.TrimSpace(jobRef) + ":" + row.Token, At: now}
 		switch basistheory.ClassifyAccountUpdaterResult(code) {
 		case basistheory.AUOutcomeUpdated:
-			newRef := strings.TrimSpace(row.NewToken)
-			if newRef == "" {
-				// In-place update (dedup): metadata refresh only, same token id.
-				newRef = row.Token
-			}
-			brand, last4, month, year := models.ParseCard(row.NewBrand, row.NewLast4, auExpiry(row.NewExpirationMonth, row.NewExpirationYear)).Columns()
-			rotated, err := q.RotateCustodianMethodRef(ctx, gen.RotateCustodianMethodRefParams{MerchantID: mid, CustodianID: cid,
-				Custodian:      models.CustodianBasisTheory,
-				OldMethodRef:   row.Token,
-				NewMethodRef:   newRef,
-				NewFingerprint: row.NewFingerprint,
-				CardBrand:      brand,
-				CardLast4:      last4,
-				CardExpMonth:   month,
-				CardExpYear:    year,
-			})
-			if err != nil {
-				return stats, fmt.Errorf("account updater: rotate %s -> %s: %w", row.Token, newRef, err)
-			}
-			if err := record(row.Token, paymentmethods.CardUpdated, rotated); err != nil {
-				return stats, err
-			}
-			if len(rotated) > 0 {
-				stats.Adopted++
-				if newRef != row.Token {
-					stats.Rotated++
-					log.WithContext(ctx).WithFields(log.Fields{
-						"old_bt_token_id": row.Token, "new_bt_token_id": newRef, "result_code": code,
-					}).Info("basistheory account updater: instrument rail_method_ref rotated")
-				}
-			}
+			ev.Card = paymentmethods.Card{Card: models.ParseCard(row.NewBrand, row.NewLast4, auExpiry(row.NewExpirationMonth, row.NewExpirationYear)),
+				Fingerprint: row.NewFingerprint, RailMethodRef: row.NewToken}
 		case basistheory.AUOutcomeClosed:
-			if err := park(row.Token, "bt_au_closed_account", "closed account", paymentmethods.CardClosed); err != nil {
-				return stats, err
-			}
+			ev.Advice = paymentmethods.AdviceClosed
 		case basistheory.AUOutcomeContactCardholder:
-			if err := park(row.Token, "bt_au_contact_cardholder", "the network will not answer without the cardholder", paymentmethods.ContactCustomer); err != nil {
-				return stats, err
-			}
+			ev.Advice = paymentmethods.AdviceContactCardholder
 		case basistheory.AUOutcomeNoChange:
 			// Recorded verbatim above; no evidence, no action.
+			continue
 		default:
 			log.WithContext(ctx).WithFields(log.Fields{
 				"bt_token_id": row.Token, "result_code": code,
 			}).Warn("basistheory account updater: unrecognized result code recorded verbatim; no fold")
+			continue
+		}
+		methods, err := database.Gen(ctx).ListPaymentMethodsByCustodianRef(ctx, gen.ListPaymentMethodsByCustodianRefParams{MerchantID: mid, CustodianID: cid, Custodian: models.CustodianBasisTheory, RailMethodRef: row.Token})
+		if err != nil {
+			return stats, fmt.Errorf("account updater: find %s: %w", row.Token, err)
+		}
+		for _, id := range methods {
+			ev.PaymentMethodID = id
+			applied, err := applyCardEvent(ctx, database, life, ev)
+			if err != nil {
+				return stats, fmt.Errorf("account updater: %s: %w", row.Token, err)
+			}
+			switch applied.Change {
+			case paymentmethods.CardUpdated, paymentmethods.CardBrandChanged:
+				stats.Adopted++
+				if newRef := strings.TrimSpace(row.NewToken); newRef != "" && newRef != row.Token {
+					stats.Rotated++
+				}
+			case paymentmethods.CardClosed:
+				stats.Closed++
+				log.WithContext(ctx).WithFields(log.Fields{"bt_token_id": row.Token, "result_code": code}).
+					Warn("basistheory account updater: card closed; the customer is asked for another (never auto-canceled)")
+			case paymentmethods.CardContactCardholder:
+				stats.Contacted++
+			}
 		}
 	}
-	if stats.Adopted > 0 || stats.Parked > 0 {
+	if stats.Adopted > 0 || stats.Closed > 0 || stats.Contacted > 0 {
 		log.WithContext(ctx).WithFields(log.Fields{
-			"rows": stats.Rows, "adopted": stats.Adopted, "rotated": stats.Rotated, "parked": stats.Parked,
+			"rows": stats.Rows, "adopted": stats.Adopted, "rotated": stats.Rotated, "closed": stats.Closed, "contacted": stats.Contacted,
 		}).Info("basistheory account updater: fold complete")
 	}
 	return stats, nil
+}
+
+// applyCardEvent applies one card event in its own transaction and delivers
+// the notices it queued once it commits.
+func applyCardEvent(ctx context.Context, database *db.DB, life *subscriptions.SubscriptionLifecycleService, ev paymentmethods.CardEvent) (paymentmethods.CardLifecycle, error) {
+	if life == nil {
+		return paymentmethods.CardLifecycle{}, errors.New("card lifecycle: no lifecycle service wired")
+	}
+	var applied paymentmethods.CardLifecycle
+	var notices []*models.NotificationQueue
+	err := database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		applied, notices, err = life.ApplyCardLifecycle(ctx, database.NewWithPgxTx(tx), ev)
+		return err
+	})
+	if err != nil {
+		return applied, err
+	}
+	life.DispatchNotifications(ctx, notices)
+	return applied, nil
 }
 
 // CloseAccountUpdaterBatch marks the durable batch (or#795) that carried this

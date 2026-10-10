@@ -66,6 +66,12 @@ var reasons = map[billing.DeclineReason]reasonSpec{
 	billing.DeclineUnknown: {category: Unknown, action: Retry},
 }
 
+// HolderMayHoldNewCard reports a refusal that says the card was reissued: its
+// holder's updater may already hold the new one.
+func HolderMayHoldNewCard(reason billing.DeclineReason) bool {
+	return reason == billing.DeclineExpiredCard || reason == billing.DeclineUpdateCardholderData
+}
+
 // ProviderFault reports a refusal another card cannot fix: the gateway, the
 // processor or our configuration refused it.
 func ProviderFault(reason billing.DeclineReason) bool {

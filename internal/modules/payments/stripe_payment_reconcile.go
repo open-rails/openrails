@@ -7,40 +7,76 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 )
 
-// StripeDetachedParkReason marks a provider-detached Stripe mirror as unusable.
-const StripeDetachedParkReason = "stripe_payment_method_detached"
-
 // MirrorAttachedStripePaymentMethod fetches the instrument before mirroring it.
 // A stale attached event therefore cannot revive a method Stripe now reports as
-// detached. eventRef names the event that asked (see UpsertStripeCardForCustomer).
+// detached. A method already mirrored takes the card Stripe now holds as a
+// version from source under eventRef.
 func MirrorAttachedStripePaymentMethod(
 	ctx context.Context,
 	database *db.DB,
 	customers *RailCustomerService,
 	clock clockwork.Clock,
 	reader StripePaymentStateReader,
-	paymentMethodID, eventRef string,
-) (*models.PaymentMethod, bool, error) {
+	paymentMethodID string,
+	source paymentmethods.CardSource,
+	eventRef string,
+) (*models.PaymentMethod, paymentmethods.CardLifecycle, error) {
 	if reader == nil {
-		return nil, false, errors.New("stripe payment state reader is not configured")
+		return nil, paymentmethods.CardLifecycle{}, errors.New("stripe payment state reader is not configured")
 	}
 	truth, err := reader.PaymentMethod(ctx, paymentMethodID)
 	if err != nil {
-		return nil, false, err
+		return nil, paymentmethods.CardLifecycle{}, err
 	}
 	if truth == nil || strings.TrimSpace(truth.CustomerID) == "" || truth.Card == nil {
-		return nil, false, nil
+		return nil, paymentmethods.CardLifecycle{}, nil
 	}
-	return UpsertStripeCardForCustomer(ctx, database, customers, clock, truth.CustomerID, truth, eventRef)
+	pm, created, err := UpsertStripeCardForCustomer(ctx, database, customers, clock, truth.CustomerID, truth)
+	if err != nil || pm == nil || created {
+		return pm, paymentmethods.CardLifecycle{}, err
+	}
+	life, err := ObserveStripeCard(ctx, database, clock, pm.ID, truth, source, eventRef)
+	if err != nil {
+		return nil, life, err
+	}
+	pm, err = models.PaymentMethodFromGen(life.Method)
+	return pm, life, err
+}
+
+// ObserveStripeCard applies the card Stripe holds for a mirrored method
+// (#1168). Stripe reissues under the same pm_ and reports a brand change the
+// same way, so brand and fingerprint are compared on every observation.
+func ObserveStripeCard(ctx context.Context, database *db.DB, clock clockwork.Clock, methodID uuid.UUID, truth *StripePaymentMethodState, source paymentmethods.CardSource, eventRef string) (paymentmethods.CardLifecycle, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return paymentmethods.CardLifecycle{}, err
+	}
+	if truth == nil || truth.Card == nil {
+		return paymentmethods.CardLifecycle{}, errors.New("stripe card observation carries no card")
+	}
+	now := time.Now().UTC()
+	if clock != nil {
+		now = clock.Now().UTC()
+	}
+	if strings.TrimSpace(eventRef) == "" {
+		eventRef = "read:" + now.Format(time.RFC3339Nano)
+	}
+	return paymentmethods.ApplyCardLifecycle(ctx, database.Gen(ctx), paymentmethods.CardEvent{
+		MerchantID: mid.UUID(), PaymentMethodID: methodID, Source: source, EventRef: eventRef, At: now,
+		Card: paymentmethods.Card{Card: *truth.Card, Fingerprint: truth.Fingerprint},
+	})
 }
 
 // ConvergeStripeCustomerPaymentState applies Stripe's current subscription
@@ -84,11 +120,11 @@ func ConvergeStripeCustomerPaymentState(
 		}
 		var localMethodID *uuid.UUID
 		if method := remote.PaymentMethod; method != nil && method.Card != nil {
-			local, _, err := UpsertStripeCardForCustomer(ctx, database, customers, clock, state.CustomerID, method, "")
+			local, _, err := UpsertStripeCardForCustomer(ctx, database, customers, clock, state.CustomerID, method)
 			if err != nil {
 				return err
 			}
-			if local != nil && local.ParkReason == "" {
+			if local != nil && local.Chargeable() {
 				id := local.ID
 				localMethodID = &id
 			}
@@ -104,9 +140,10 @@ func ConvergeStripeCustomerPaymentState(
 	return nil
 }
 
-// ParkDetachedStripePaymentMethod preserves a detached method as evidence and
-// clears every exact-PSP subscription link that could otherwise charge it.
-func ParkDetachedStripePaymentMethod(ctx context.Context, database *db.DB, paymentMethodID string) (*models.PaymentMethod, error) {
+// RemoveDetachedStripePaymentMethod removes a detached method, keeping its row
+// as evidence: its mandates end and every exact-PSP subscription link that
+// could otherwise charge it is cleared.
+func RemoveDetachedStripePaymentMethod(ctx context.Context, database *db.DB, paymentMethodID string) (*models.PaymentMethod, error) {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {
 		return nil, queryScopeErr
@@ -117,7 +154,7 @@ func ParkDetachedStripePaymentMethod(ctx context.Context, database *db.DB, payme
 	}
 	pspID, err := db.RequirePSPID(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("park stripe payment method: %w", err)
+		return nil, fmt.Errorf("remove stripe payment method: %w", err)
 	}
 	paymentMethodID = strings.TrimSpace(paymentMethodID)
 	if paymentMethodID == "" {
@@ -132,12 +169,14 @@ func ParkDetachedStripePaymentMethod(ctx context.Context, database *db.DB, payme
 		return nil, fmt.Errorf("load detached stripe payment method: %w", err)
 	}
 	q := database.Gen(ctx)
-	if _, err := q.ParkStripePaymentMethodByRef(ctx, gen.ParkStripePaymentMethodByRefParams{MerchantID: queryMerchant.UUID(),
-		ParkReason:    StripeDetachedParkReason,
+	if _, err := q.RemoveStripePaymentMethodByRef(ctx, gen.RemoveStripePaymentMethodByRefParams{MerchantID: queryMerchant.UUID(),
 		PspID:         pspID,
 		RailMethodRef: paymentMethodID,
-	}); err != nil {
-		return nil, fmt.Errorf("park detached stripe payment method: %w", err)
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("remove detached stripe payment method: %w", err)
+	}
+	if _, err := mandates.EndForPaymentMethod(ctx, q, queryMerchant.UUID(), method.ID, mandates.EndPaymentMethodRemoved, time.Time{}); err != nil {
+		return nil, fmt.Errorf("end detached stripe payment method mandates: %w", err)
 	}
 	if _, err := q.ClearStripePaymentMethodSubscriptions(ctx, gen.ClearStripePaymentMethodSubscriptionsParams{MerchantID: queryMerchant.UUID(),
 		PspID:           pspID,
@@ -145,6 +184,6 @@ func ParkDetachedStripePaymentMethod(ctx context.Context, database *db.DB, payme
 	}); err != nil {
 		return nil, fmt.Errorf("clear detached stripe payment method links: %w", err)
 	}
-	method.ParkReason = StripeDetachedParkReason
+	method.Status = paymentmethods.StatusRemoved
 	return method, nil
 }

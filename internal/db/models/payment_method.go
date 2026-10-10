@@ -55,6 +55,13 @@ type PaymentMethod struct {
 	ParkReason         string     `json:"-"`
 	ParkedAt           *time.Time `json:"-"`
 
+	// Status is active, closed, replaced or removed; only active is charged
+	// and the others are final (#1168).
+	Status       string     `json:"status"`
+	ReplacedByID *uuid.UUID `json:"-"`
+	// ContactCardholderAt is when the issuer last asked for the cardholder.
+	ContactCardholderAt *time.Time `json:"-"`
+
 	Card     Card           `json:"card"`
 	Metadata map[string]any `json:"metadata,omitempty"`
 
@@ -63,6 +70,12 @@ type PaymentMethod struct {
 
 	// Relationships
 	Subscriptions []*Subscription `json:"subscriptions,omitempty"`
+}
+
+// Chargeable reports whether the method can be charged now: active, with no
+// holder-side hold.
+func (pm *PaymentMethod) Chargeable() bool {
+	return pm.Status == "active" && pm.ParkReason == ""
 }
 
 // HoldingPSP is the PSP holding a PSP-held card; uuid.Nil for a card a

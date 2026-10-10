@@ -248,6 +248,7 @@ func stripeEventNeedsPaymentState(eventType string) bool {
 		"payment_method.attached",
 		"payment_method.detached",
 		"payment_method.automatically_updated",
+		"payment_method.updated",
 		"customer.updated",
 		"customer.subscription.updated",
 		"customer.subscription.deleted":

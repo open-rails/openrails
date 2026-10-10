@@ -1171,7 +1171,7 @@ type BillingPaymentAttempt struct {
 	OrderID                  *uuid.UUID
 }
 
-// A customer's stored payment instrument.
+// The card account a customer chose, held at one PSP or custodian. Its card is the latest of its payment_method_versions; its issuer may reissue it under the same method.
 type BillingPaymentMethod struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1197,7 +1197,7 @@ type BillingPaymentMethod struct {
 	CardExpYear *int16
 	// Billing details the customer entered with the card.
 	Metadata []byte
-	// Custodian-issued stable fingerprint of the card number, for dedup; empty when the custodian issues none.
+	// The holder's fingerprint of the card's current number; earlier numbers' are in payment_method_versions.
 	Fingerprint *string
 	// Custodian network token id; empty when none is provisioned.
 	NetworkTokenID *string
@@ -1207,7 +1207,7 @@ type BillingPaymentMethod struct {
 	NetworkTokenPar *string
 	// How a custodian card reaches the processor: pan_proxy or network_token.
 	ChargeVia string
-	// Non-empty when the instrument is parked (vault-side problem): charges fail loudly and nothing is canceled because of it.
+	// Non-empty while the method cannot be charged for a holder-side reason (a deletion in flight, a custody token gone): charges fail loudly and nothing is canceled because of it.
 	ParkReason *string
 	// When the instrument was parked; NULL when it is not.
 	ParkedAt *time.Time
@@ -1215,20 +1215,45 @@ type BillingPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
+	// active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
+	Status string
+	// The method that replaced this one, when status is replaced.
+	ReplacedByID *uuid.UUID
+	// When the issuer last asked for the cardholder to be contacted; cleared by the next change to the card.
+	ContactCardholderAt *time.Time
 }
 
-// Changes to a stored card's standing, by source (nmi_acu, bt_account_updater, customer) and kind; event_ref makes a redelivered notice a no-op. Retention: permanent, never pruned.
-type BillingPaymentMethodUpdate struct {
+// Append-only history of the card behind a payment method: one row per save, customer edit, updater or network change, closure or contact advice, with the card as its holder reported it at that version. Replays of one source event are one row. Retention: permanent, never pruned.
+type BillingPaymentMethodVersion struct {
 	ID              uuid.UUID
 	MerchantID      uuid.UUID
-	PaymentMethodID uuid.UUID
 	CustomerID      uuid.UUID
-	PspID           *uuid.UUID
-	Source          string
-	Kind            string
-	EventRef        string
-	OccurredAt      time.Time
-	CreatedAt       time.Time
+	PaymentMethodID uuid.UUID
+	// Who reported the change: customer_save, customer_edit, stripe_updater, nmi_acu, basis_theory_updater, hyperswitch_updater, network_token or provider_read (OpenRails read the holder).
+	Source string
+	// saved; updated (a new number, expiry, holder handle or network token, under the same brand); brand_changed; closed; contact_cardholder.
+	Kind string
+	// The source's event, notice or operation; one row per method, source and event.
+	EventRef string
+	// The PSP holding the card at this version, for a PSP-held card; with custodian_id, the scope of its fingerprint.
+	PspID *uuid.UUID
+	// The custodian holding the card at this version, for a custodian-held card.
+	CustodianID     *uuid.UUID
+	RailCustomerRef *string
+	RailMethodRef   *string
+	CardBrand       *string
+	CardLast4       *string
+	CardExpMonth    *int16
+	CardExpYear     *int16
+	// The holder's fingerprint of the card number at this version; a reissued number has a new one.
+	Fingerprint        *string
+	NetworkTokenID     *string
+	NetworkTokenStatus *string
+	// Payment account reference, where the holder reports one.
+	NetworkTokenPar *string
+	// When the change was learned.
+	EffectiveAt time.Time
+	CreatedAt   time.Time
 }
 
 // Immutable financial price versions; retire with archived, never delete. Retention: permanent, never pruned.

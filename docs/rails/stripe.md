@@ -182,13 +182,17 @@ the session's `success_url`. Completion arrives via `checkout.session.completed`
 
 ### Card updates
 
-`payment_method.automatically_updated` refreshes the same payment method from
-Stripe's current card: brand, last four, expiry and fingerprint. A same-brand
-reissue keeps billing, and memberships waiting on the card retry. A reissue
-under another brand needs the customer's consent again: OpenRails refuses to
-charge the card off-session (renewals it bills, invoice collection) with
-failure code `stored_credential_required`, and asks the members it pays for to
-act, until the customer saves the card again or pays a membership with it.
+`payment_method.automatically_updated` (Stripe's card updater) and
+`payment_method.updated` (a change through Stripe's API) are versions of the
+same payment method, read from Stripe: brand, last four, expiry and
+fingerprint. A same-brand reissue keeps billing, and memberships waiting on the
+card retry. A reissue under another brand needs the customer's consent again:
+the card's mandates wait (`requires_reconsent`), OpenRails refuses to charge it
+off-session (renewals it bills, invoice collection) with failure code
+`stored_credential_required`, and asks the members it pays for to act. The
+customer's `POST /v1/me/payment-methods/{id}/verify` confirms a SetupIntent on
+the same card with them present, and new mandates cite it. A detached card is
+removed and its mandates end.
 
 ### Subscriptions Stripe bills
 

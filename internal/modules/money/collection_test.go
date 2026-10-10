@@ -24,7 +24,7 @@ import (
 func TestCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	ctx := context.Background()
 	method := gen.BillingPaymentMethod{
-		ID: uuid.New(), Rail: "nmi", RailCustomerRef: new("vault-123"), RailMethodRef: new("bt-token-123"),
+		ID: uuid.New(), Rail: "nmi", Status: "active", RailCustomerRef: new("vault-123"), RailMethodRef: new("bt-token-123"),
 	}
 	request := func(currency string) ChargeRequest {
 		return ChargeRequest{

@@ -13,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/hyperswitch"
 	"github.com/open-rails/openrails/internal/merchants"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/railresolve"
@@ -73,7 +74,7 @@ func (a *hyperSwitchCollectionAdapter) Prepare(ctx context.Context, method gen.B
 	if req.HyperSwitch == nil || *req.HyperSwitch != a.binding {
 		return nil, fmt.Errorf("%w: accepted HyperSwitch custody profile changed", charge.ErrInstrumentChanged)
 	}
-	if method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ChargeVia != "pan_proxy" || method.RailCustomerRef == nil || method.RailMethodRef == nil || method.ParkReason != nil {
+	if method.Custodian != models.CustodianHyperSwitch || method.CustodianID == nil || method.ChargeVia != "pan_proxy" || method.RailCustomerRef == nil || method.RailMethodRef == nil || !paymentmethods.Chargeable(method) {
 		return nil, fmt.Errorf("HyperSwitch collection requires an owned, usable permanent card")
 	}
 	// Read-only contract qualification precedes the durable submission marker.

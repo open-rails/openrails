@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
@@ -95,7 +96,7 @@ func (s *Store) enqueueSale(ctx context.Context, p EnqueueParams) (gen.BillingPr
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != customer || method.Rail != p.Provider || method.ParkReason != nil {
+		if method.CustomerID != customer || method.Rail != p.Provider || !paymentmethods.Chargeable(method) {
 			return apperr.Conflictf("sale instrument changed before admission")
 		}
 		if err := terms.Instrument.Matches(method); err != nil {

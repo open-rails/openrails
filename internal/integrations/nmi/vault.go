@@ -29,6 +29,8 @@ type UpdateCustomerVaultData struct {
 	// BillingID targets the exact stored instrument inside a multi-entry
 	// customer vault. Empty falls back to resolving the priority-1 entry.
 	BillingID string
+	// CardExp, MMYY, sets the stored card's expiry without a new token.
+	CardExp string
 	CreateCustomerVaultData
 }
 
@@ -140,6 +142,12 @@ func (c *NMIClient) UpdateCustomerVault(ctx context.Context, data UpdateCustomer
 		return fmt.Errorf("failed to update customer vault: customer %s billing record has no id", vaultID)
 	}
 	billing.ID = billingID
+	if exp := strings.TrimSpace(data.CardExp); exp != "" {
+		if billing.PaymentDetails == nil {
+			billing.PaymentDetails = &v5PaymentDetails{}
+		}
+		billing.PaymentDetails.CardExp = exp
+	}
 
 	body := map[string]any{"billing": []*v5CustomerBillingRequest{billing}}
 	if err := c.sendV5Request(ctx, http.MethodPatch, "/customers/"+url.PathEscape(vaultID), body, nil); err != nil {

@@ -126,9 +126,12 @@ Consequences, all enforced rather than documented:
   ahead of each renewal, asks the custodian to refresh the cards backing
   subscriptions due inside `account_updater_lookahead_days` (default 14, and
   also how long a refresh stays fresh — a card is looked up once per cycle).
-  Results are applied through the same writers the custodian's webhooks use: a
-  reissue refreshes the instrument and CLEARS any park, a closed account or a
-  "contact cardholder" answer parks it. Nothing is ever deleted or canceled.
+  Results are applied as card versions, through the same writer the
+  custodian's webhooks use: a reissue gives the same payment method the new
+  token and card and clears any park; another brand holds its mandates for the
+  customer's consent; a closed account closes it; a "contact cardholder" answer
+  prompts the customer, or closes a Mastercard card. Nothing is ever deleted or
+  canceled.
   Both settings are off/default until declared — the updater is a priced add-on,
   and an unarmed custodian is never enumerated by the worker at all.
 * The retired inline keys (`settings.custodian_account_id`,

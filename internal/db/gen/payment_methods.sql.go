@@ -101,12 +101,13 @@ func (q *Queries) CountPaymentMethodsSharingCustomerRef(ctx context.Context, arg
 
 const createPaymentMethod = `-- name: CreatePaymentMethod :execrows
 
+WITH pm AS (
 INSERT INTO billing.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     card_brand, card_last4, card_exp_month, card_exp_year,
     metadata, created_at, updated_at, psp_id,
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
-    network_token_par, charge_via
+    network_token_par, charge_via, status
 ) VALUES (
     $1, $4::uuid, $2, $3, NULLIF($5::text, ''), NULLIF($6::text, ''),
     $7::text, $8::text, $9::smallint, $10::smallint,
@@ -118,8 +119,17 @@ INSERT INTO billing.payment_methods (
     $16::uuid,
     NULLIF($17::text, ''), NULLIF($18::text, ''),
     NULLIF($19::text, ''), NULLIF($20::text, ''),
-    COALESCE(NULLIF($21::text, ''), 'pan_proxy')
+    COALESCE(NULLIF($21::text, ''), 'pan_proxy'), 'active'
 )
+RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at
+)
+INSERT INTO billing.payment_method_versions (merchant_id, customer_id, payment_method_id, source, kind, event_ref, psp_id, custodian_id,
+    rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, fingerprint,
+    network_token_id, network_token_status, network_token_par, effective_at)
+SELECT merchant_id, customer_id, id, 'customer_save', 'saved', 'created', psp_id, custodian_id,
+    rail_customer_ref, rail_method_ref, NULLIF(card_brand, ''), card_last4, card_exp_month, card_exp_year, fingerprint,
+    network_token_id, network_token_status, network_token_par, created_at
+FROM pm
 `
 
 type CreatePaymentMethodParams struct {
@@ -148,7 +158,8 @@ type CreatePaymentMethodParams struct {
 
 // billing.payment_methods.
 // A PSP-held card names its PSP; a custodian-held card names its custodian
-// and no PSP.
+// and no PSP. A new method is active, and its history starts with the card it
+// was saved with.
 func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createPaymentMethod,
 		arg.ID,
@@ -182,7 +193,7 @@ func (q *Queries) CreatePaymentMethod(ctx context.Context, arg CreatePaymentMeth
 const customerHasVaultedPaymentMethod = `-- name: CustomerHasVaultedPaymentMethod :one
 SELECT EXISTS (
     SELECT 1 FROM billing.payment_methods
-    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND parked_at IS NULL
+    WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND status = 'active' AND parked_at IS NULL
 )
 `
 
@@ -282,7 +293,7 @@ func (q *Queries) GetCollectionCustodianAccountsForShare(ctx context.Context, ar
 }
 
 const getPaymentMethodByCustodianRef = `-- name: GetPaymentMethodByCustodianRef :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
   AND pm.custodian <> 'psp'
@@ -333,17 +344,24 @@ func (q *Queries) GetPaymentMethodByCustodianRef(ctx context.Context, arg GetPay
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }
 
 const getPaymentMethodByFingerprint = `-- name: GetPaymentMethodByFingerprint :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1
   AND pm.customer_id = $2::uuid
   AND pm.custodian = $3
   AND pm.custodian_id = $4::uuid
-  AND pm.fingerprint = $5::text
+  AND pm.status = 'active'
+  AND (pm.fingerprint = $5::text
+       OR pm.id IN (SELECT v.payment_method_id FROM billing.payment_method_versions v
+                    WHERE v.merchant_id = $1 AND v.customer_id = $2::uuid
+                      AND v.fingerprint = $5::text AND v.custodian_id = $4::uuid))
 ORDER BY pm.created_at
 LIMIT 1
 `
@@ -360,6 +378,8 @@ type GetPaymentMethodByFingerprintParams struct {
 // reuses that instrument instead of minting a duplicate. Scoped by the
 // custodian, which issues the fingerprint and holds the card, and by the
 // customer: one customer's charge never reuses another's card or agreement.
+// A number entered again after its reissue finds the method through its
+// history.
 func (q *Queries) GetPaymentMethodByFingerprint(ctx context.Context, arg GetPaymentMethodByFingerprintParams) (BillingPaymentMethod, error) {
 	row := q.db.QueryRow(ctx, getPaymentMethodByFingerprint,
 		arg.MerchantID,
@@ -394,12 +414,15 @@ func (q *Queries) GetPaymentMethodByFingerprint(ctx context.Context, arg GetPaym
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }
 
 const getPaymentMethodByID = `-- name: GetPaymentMethodByID :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods WHERE payment_methods.merchant_id = $2::uuid AND id = $1
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods WHERE payment_methods.merchant_id = $2::uuid AND id = $1
 `
 
 type GetPaymentMethodByIDParams struct {
@@ -435,6 +458,9 @@ func (q *Queries) GetPaymentMethodByID(ctx context.Context, arg GetPaymentMethod
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }
@@ -509,7 +535,7 @@ func (q *Queries) GetPaymentMethodByPSPRefs(ctx context.Context, arg GetPaymentM
 }
 
 const getPaymentMethodByRailInstrument = `-- name: GetPaymentMethodByRailInstrument :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1 AND pm.psp_id = $2::uuid
   AND pm.rail = $3
   AND pm.rail_customer_ref = $4::text
@@ -567,12 +593,15 @@ func (q *Queries) GetPaymentMethodByRailInstrument(ctx context.Context, arg GetP
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }
 
 const getPaymentMethodByRailMethodRefForPSP = `-- name: GetPaymentMethodByRailMethodRefForPSP :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.rail = $2
   AND pm.psp_id = $3::uuid
@@ -626,12 +655,15 @@ func (q *Queries) GetPaymentMethodByRailMethodRefForPSP(ctx context.Context, arg
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }
 
 const getPaymentMethodForShare = `-- name: GetPaymentMethodForShare :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid
   AND id = $2::uuid
 FOR SHARE
@@ -674,12 +706,15 @@ func (q *Queries) GetPaymentMethodForShare(ctx context.Context, arg GetPaymentMe
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }
 
 const getPaymentMethodForUpdate = `-- name: GetPaymentMethodForUpdate :one
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid AND id = $2::uuid
 FOR UPDATE
 `
@@ -717,41 +752,11 @@ func (q *Queries) GetPaymentMethodForUpdate(ctx context.Context, arg GetPaymentM
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
-}
-
-const insertPaymentMethodUpdate = `-- name: InsertPaymentMethodUpdate :exec
-INSERT INTO billing.payment_method_updates (merchant_id, payment_method_id, customer_id, psp_id, source, kind, event_ref, occurred_at)
-VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid,
-    $5::text, $6::text, $7::text, COALESCE($8::timestamptz, now()))
-ON CONFLICT DO NOTHING
-`
-
-type InsertPaymentMethodUpdateParams struct {
-	MerchantID      uuid.UUID
-	PaymentMethodID uuid.UUID
-	CustomerID      uuid.UUID
-	PspID           *uuid.UUID
-	Source          string
-	Kind            string
-	EventRef        string
-	OccurredAt      *time.Time
-}
-
-// #1115: idempotent on (source, event_ref, method); occurred_at defaults to now.
-func (q *Queries) InsertPaymentMethodUpdate(ctx context.Context, arg InsertPaymentMethodUpdateParams) error {
-	_, err := q.db.Exec(ctx, insertPaymentMethodUpdate,
-		arg.MerchantID,
-		arg.PaymentMethodID,
-		arg.CustomerID,
-		arg.PspID,
-		arg.Source,
-		arg.Kind,
-		arg.EventRef,
-		arg.OccurredAt,
-	)
-	return err
 }
 
 const listCustodianRoutePSPs = `-- name: ListCustodianRoutePSPs :many
@@ -793,7 +798,7 @@ func (q *Queries) ListCustodianRoutePSPs(ctx context.Context, arg ListCustodianR
 }
 
 const listCustomerPaymentMethodsByIDs = `-- name: ListCustomerPaymentMethodsByIDs :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND customer_id = $3::uuid
 ORDER BY created_at DESC, id DESC
@@ -839,6 +844,9 @@ func (q *Queries) ListCustomerPaymentMethodsByIDs(ctx context.Context, arg ListC
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -892,7 +900,7 @@ func (q *Queries) ListLatestChargeByPaymentMethodIDs(ctx context.Context, arg Li
 }
 
 const listPaymentMethodsByCustomer = `-- name: ListPaymentMethodsByCustomer :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
 ORDER BY pm.created_at DESC, pm.id DESC
@@ -937,6 +945,9 @@ func (q *Queries) ListPaymentMethodsByCustomer(ctx context.Context, arg ListPaym
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -949,7 +960,7 @@ func (q *Queries) ListPaymentMethodsByCustomer(ctx context.Context, arg ListPaym
 }
 
 const listPaymentMethodsByCustomerPage = `-- name: ListPaymentMethodsByCustomerPage :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid
   AND pm.customer_id = $2::uuid
   AND ($3::timestamptz IS NULL
@@ -1008,6 +1019,9 @@ func (q *Queries) ListPaymentMethodsByCustomerPage(ctx context.Context, arg List
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1020,7 +1034,7 @@ func (q *Queries) ListPaymentMethodsByCustomerPage(ctx context.Context, arg List
 }
 
 const listPaymentMethodsByCustomerRails = `-- name: ListPaymentMethodsByCustomerRails :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $2::uuid AND pm.customer_id = $1
   AND pm.rail = ANY($3::text[])
 ORDER BY pm.created_at DESC
@@ -1066,6 +1080,9 @@ func (q *Queries) ListPaymentMethodsByCustomerRails(ctx context.Context, arg Lis
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1078,7 +1095,7 @@ func (q *Queries) ListPaymentMethodsByCustomerRails(ctx context.Context, arg Lis
 }
 
 const listPaymentMethodsByIDs = `-- name: ListPaymentMethodsByIDs :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods WHERE payment_methods.merchant_id = $1::uuid AND id = ANY($2::uuid[])
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods WHERE payment_methods.merchant_id = $1::uuid AND id = ANY($2::uuid[])
 `
 
 type ListPaymentMethodsByIDsParams struct {
@@ -1120,6 +1137,9 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, arg ListPaymentMe
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1132,7 +1152,7 @@ func (q *Queries) ListPaymentMethodsByIDs(ctx context.Context, arg ListPaymentMe
 }
 
 const listPaymentMethodsByRail = `-- name: ListPaymentMethodsByRail :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $2::uuid AND pm.rail = $1
 ORDER BY pm.created_at DESC
 `
@@ -1176,6 +1196,9 @@ func (q *Queries) ListPaymentMethodsByRail(ctx context.Context, arg ListPaymentM
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1188,7 +1211,7 @@ func (q *Queries) ListPaymentMethodsByRail(ctx context.Context, arg ListPaymentM
 }
 
 const listPaymentMethodsByRails = `-- name: ListPaymentMethodsByRails :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods pm
 WHERE pm.merchant_id = $1::uuid AND pm.rail = ANY($2::text[])
 ORDER BY pm.created_at DESC
 `
@@ -1232,6 +1255,9 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, arg ListPayment
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1244,7 +1270,7 @@ func (q *Queries) ListPaymentMethodsByRails(ctx context.Context, arg ListPayment
 }
 
 const listVaultPaymentMethods = `-- name: ListVaultPaymentMethods :many
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at FROM billing.payment_methods
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM billing.payment_methods
 WHERE merchant_id = $1::uuid AND psp_id = $2::uuid AND rail = 'nmi'
   AND rail_customer_ref = $3::text AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
 ORDER BY created_at, id
@@ -1291,6 +1317,9 @@ func (q *Queries) ListVaultPaymentMethods(ctx context.Context, arg ListVaultPaym
 			&i.AccountUpdaterCheckedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.ReplacedByID,
+			&i.ContactCardholderAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1311,36 +1340,6 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 func (q *Queries) LockStripePaymentState(ctx context.Context, lockKey string) error {
 	_, err := q.db.Exec(ctx, lockStripePaymentState, lockKey)
 	return err
-}
-
-const parkPaymentMethod = `-- name: ParkPaymentMethod :execrows
-UPDATE billing.payment_methods SET
-    park_reason = $1::text,
-    parked_at = $2::timestamptz,
-    updated_at = $2::timestamptz
-WHERE merchant_id = $3::uuid AND id = $4::uuid AND park_reason IS NULL
-`
-
-type ParkPaymentMethodParams struct {
-	ParkReason string
-	ParkedAt   time.Time
-	MerchantID uuid.UUID
-	ID         uuid.UUID
-}
-
-// #1115: an account updater reported the card's account closed. The first
-// park stands.
-func (q *Queries) ParkPaymentMethod(ctx context.Context, arg ParkPaymentMethodParams) (int64, error) {
-	result, err := q.db.Exec(ctx, parkPaymentMethod,
-		arg.ParkReason,
-		arg.ParkedAt,
-		arg.MerchantID,
-		arg.ID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const parkPaymentMethodByMethodRef = `-- name: ParkPaymentMethodByMethodRef :many
@@ -1401,165 +1400,6 @@ func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaym
 	return items, nil
 }
 
-const parkStripePaymentMethodByRef = `-- name: ParkStripePaymentMethodByRef :execrows
-UPDATE billing.payment_methods SET
-    park_reason = $1::text,
-    parked_at = COALESCE(parked_at, now()),
-    updated_at = now()
-WHERE payment_methods.merchant_id = $2::uuid AND rail = 'stripe'
-  AND psp_id = $3::uuid
-  AND rail_method_ref = $4::text
-  AND park_reason IS NULL
-`
-
-type ParkStripePaymentMethodByRefParams struct {
-	ParkReason    string
-	MerchantID    uuid.UUID
-	PspID         uuid.UUID
-	RailMethodRef string
-}
-
-// A Stripe detach is irreversible provider truth. Preserve the local evidence,
-// but make the exact PSP-owned instrument unusable, within the merchant.
-func (q *Queries) ParkStripePaymentMethodByRef(ctx context.Context, arg ParkStripePaymentMethodByRefParams) (int64, error) {
-	result, err := q.db.Exec(ctx, parkStripePaymentMethodByRef,
-		arg.ParkReason,
-		arg.MerchantID,
-		arg.PspID,
-		arg.RailMethodRef,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const refreshCustodianCardMetadata = `-- name: RefreshCustodianCardMetadata :execrows
-UPDATE billing.payment_methods SET
-    card_brand = COALESCE($1::text, card_brand),
-    card_last4 = COALESCE($2::text, card_last4),
-    card_exp_month = COALESCE($3::smallint, card_exp_month),
-    card_exp_year = COALESCE($4::smallint, card_exp_year),
-    fingerprint = COALESCE(NULLIF($5::text, ''), fingerprint),
-    updated_at = now()
-WHERE merchant_id = $6::uuid
-  AND custodian_id = $7::uuid
-  AND custodian = $8
-  AND rail_method_ref = $9::text
-`
-
-type RefreshCustodianCardMetadataParams struct {
-	CardBrand     *string
-	CardLast4     *string
-	CardExpMonth  *int16
-	CardExpYear   *int16
-	Fingerprint   string
-	MerchantID    uuid.UUID
-	CustodianID   uuid.UUID
-	Custodian     string
-	RailMethodRef string
-}
-
-// #795 token.updated fold: refresh masked metadata from the custodian's read.
-func (q *Queries) RefreshCustodianCardMetadata(ctx context.Context, arg RefreshCustodianCardMetadataParams) (int64, error) {
-	result, err := q.db.Exec(ctx, refreshCustodianCardMetadata,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.Fingerprint,
-		arg.MerchantID,
-		arg.CustodianID,
-		arg.Custodian,
-		arg.RailMethodRef,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const refreshPaymentMethodCard = `-- name: RefreshPaymentMethodCard :execrows
-UPDATE billing.payment_methods SET
-    card_brand = COALESCE($1::text, card_brand),
-    card_last4 = COALESCE($2::text, card_last4),
-    card_exp_month = COALESCE($3::smallint, card_exp_month),
-    card_exp_year = COALESCE($4::smallint, card_exp_year),
-    park_reason = NULL,
-    parked_at = NULL,
-    updated_at = $5::timestamptz
-WHERE merchant_id = $6::uuid AND id = $7::uuid AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
-`
-
-type RefreshPaymentMethodCardParams struct {
-	CardBrand    *string
-	CardLast4    *string
-	CardExpMonth *int16
-	CardExpYear  *int16
-	UpdatedAt    time.Time
-	MerchantID   uuid.UUID
-	ID           uuid.UUID
-}
-
-// #1115: an account updater reissued the card in place. Its details change,
-// and a park an earlier notice set is cleared.
-func (q *Queries) RefreshPaymentMethodCard(ctx context.Context, arg RefreshPaymentMethodCardParams) (int64, error) {
-	result, err := q.db.Exec(ctx, refreshPaymentMethodCard,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.UpdatedAt,
-		arg.MerchantID,
-		arg.ID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const refreshStripePaymentMethodCard = `-- name: RefreshStripePaymentMethodCard :execrows
-UPDATE billing.payment_methods SET
-    card_brand = $1::text,
-    card_last4 = $2::text,
-    card_exp_month = $3::smallint,
-    card_exp_year = $4::smallint,
-    fingerprint = COALESCE(NULLIF($5::text, ''), fingerprint),
-    updated_at = $6::timestamptz
-WHERE merchant_id = $7::uuid AND id = $8::uuid AND rail = 'stripe'
-`
-
-type RefreshStripePaymentMethodCardParams struct {
-	CardBrand    *string
-	CardLast4    *string
-	CardExpMonth *int16
-	CardExpYear  *int16
-	Fingerprint  string
-	UpdatedAt    time.Time
-	MerchantID   uuid.UUID
-	ID           uuid.UUID
-}
-
-// Stripe's current card for a mirrored method: brand, last four, expiry and
-// fingerprint.
-func (q *Queries) RefreshStripePaymentMethodCard(ctx context.Context, arg RefreshStripePaymentMethodCardParams) (int64, error) {
-	result, err := q.db.Exec(ctx, refreshStripePaymentMethodCard,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.Fingerprint,
-		arg.UpdatedAt,
-		arg.MerchantID,
-		arg.ID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const replacePaymentMethodCard = `-- name: ReplacePaymentMethodCard :execrows
 UPDATE billing.payment_methods SET
     rail_method_ref = $1::text,
@@ -1610,145 +1450,23 @@ func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePayme
 	return result.RowsAffected(), nil
 }
 
-const rotateCustodianMethodRef = `-- name: RotateCustodianMethodRef :many
-UPDATE billing.payment_methods SET
-    rail_method_ref = $1::text,
-    fingerprint = COALESCE(NULLIF($2::text, ''), fingerprint),
-    card_brand = COALESCE($3::text, card_brand),
-    card_last4 = COALESCE($4::text, card_last4),
-    card_exp_month = COALESCE($5::smallint, card_exp_month),
-    card_exp_year = COALESCE($6::smallint, card_exp_year),
-    park_reason = NULL,
-    parked_at = NULL,
-    updated_at = now()
-WHERE merchant_id = $7::uuid
-  AND custodian_id = $8::uuid
-  AND custodian = $9
-  AND rail_method_ref = $10::text
-  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
-RETURNING id, customer_id, psp_id
+const setPaymentMethodMetadata = `-- name: SetPaymentMethodMetadata :execrows
+UPDATE billing.payment_methods SET metadata = $1, updated_at = $2::timestamptz
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND status = 'active'
 `
 
-type RotateCustodianMethodRefParams struct {
-	NewMethodRef   string
-	NewFingerprint string
-	CardBrand      *string
-	CardLast4      *string
-	CardExpMonth   *int16
-	CardExpYear    *int16
-	MerchantID     uuid.UUID
-	CustodianID    uuid.UUID
-	Custodian      string
-	OldMethodRef   string
-}
-
-type RotateCustodianMethodRefRow struct {
+type SetPaymentMethodMetadataParams struct {
+	Metadata   []byte
+	UpdatedAt  time.Time
+	MerchantID uuid.UUID
 	ID         uuid.UUID
-	CustomerID uuid.UUID
-	PspID      *uuid.UUID
 }
 
-// #795 Account Updater UPD_* fold: the custodian minted a NEW token id —
-// re-point rail_method_ref and refresh card metadata. The old->new mapping is
-// the same machinery a future custodian swap remap uses.
-// or#872 (do not fight the updater): the park is CLEARED here. An UPD_* row is
-// the network telling us the credential was reissued, so an instrument parked
-// earlier for bt_token_expired / bt_au_closed_account is usable again; leaving
-// the park set kept charges refused (custodian_proxy_collection) and invoice
-// recovery skipping the method, which is the engine overruling the very
-// recovery the account updater exists to deliver.
-func (q *Queries) RotateCustodianMethodRef(ctx context.Context, arg RotateCustodianMethodRefParams) ([]RotateCustodianMethodRefRow, error) {
-	rows, err := q.db.Query(ctx, rotateCustodianMethodRef,
-		arg.NewMethodRef,
-		arg.NewFingerprint,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.MerchantID,
-		arg.CustodianID,
-		arg.Custodian,
-		arg.OldMethodRef,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []RotateCustodianMethodRefRow
-	for rows.Next() {
-		var i RotateCustodianMethodRefRow
-		if err := rows.Scan(&i.ID, &i.CustomerID, &i.PspID); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const setNetworkTokenStatusByNetworkTokenID = `-- name: SetNetworkTokenStatusByNetworkTokenID :execrows
-UPDATE billing.payment_methods SET
-    network_token_status = $1::text,
-    updated_at = now()
-WHERE merchant_id = $2::uuid
-  AND custodian <> 'psp'
-  AND custodian_id = $3::uuid
-  AND custodian = $4
-  AND network_token_id = $5::text
-  AND network_token_status IS DISTINCT FROM $1::text
-`
-
-type SetNetworkTokenStatusByNetworkTokenIDParams struct {
-	NetworkTokenStatus string
-	MerchantID         uuid.UUID
-	CustodianID        uuid.UUID
-	Custodian          string
-	NetworkTokenID     string
-}
-
-// #795 webhook fold: NT lifecycle status/enrichment only (idempotent). Keyed on
-// the CUSTODIAN that sent the event (or#879) — the network token is a custody
-// artefact, and the rail says nothing about who minted it.
-func (q *Queries) SetNetworkTokenStatusByNetworkTokenID(ctx context.Context, arg SetNetworkTokenStatusByNetworkTokenIDParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setNetworkTokenStatusByNetworkTokenID,
-		arg.NetworkTokenStatus,
-		arg.MerchantID,
-		arg.CustodianID,
-		arg.Custodian,
-		arg.NetworkTokenID,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const setPaymentMethodNetworkToken = `-- name: SetPaymentMethodNetworkToken :execrows
-UPDATE billing.payment_methods SET
-    network_token_id = NULLIF($1::text, ''),
-    network_token_status = NULLIF($2::text, ''),
-    network_token_par = NULLIF($3::text, ''),
-    updated_at = now()
-WHERE merchant_id = $4 AND id = $5
-  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
-`
-
-type SetPaymentMethodNetworkTokenParams struct {
-	NetworkTokenID     string
-	NetworkTokenStatus string
-	NetworkTokenPar    string
-	MerchantID         uuid.UUID
-	ID                 uuid.UUID
-}
-
-// #795 NT provisioning result (id/status/par). Never touches PAN-side expiry.
-func (q *Queries) SetPaymentMethodNetworkToken(ctx context.Context, arg SetPaymentMethodNetworkTokenParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setPaymentMethodNetworkToken,
-		arg.NetworkTokenID,
-		arg.NetworkTokenStatus,
-		arg.NetworkTokenPar,
+// The billing details the customer edited on a live card.
+func (q *Queries) SetPaymentMethodMetadata(ctx context.Context, arg SetPaymentMethodMetadataParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setPaymentMethodMetadata,
+		arg.Metadata,
+		arg.UpdatedAt,
 		arg.MerchantID,
 		arg.ID,
 	)

@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/railresolve"
 	"github.com/open-rails/openrails/internal/shared/httpx"
@@ -115,6 +116,8 @@ type AccountUpdaterBatchWorker struct {
 	Rails  railresolve.Source
 	// Intents runs the durable submit (enqueue + inline execute, #674).
 	Intents *intents.Runner
+	// Lifecycle carries each folded card change to the subscriptions it pays.
+	Lifecycle *subscriptions.SubscriptionLifecycleService
 	// Outbound governs the provider-supplied result-download url. Zero value
 	// is the strict production policy; tests pass loopback.
 	Outbound httpx.Policy
@@ -244,7 +247,8 @@ func (w AccountUpdaterBatchWorker) RunPass(ctx context.Context) (AccountUpdaterP
 			"batches_abandoned":   result.BatchesAbandoned,
 			"instruments_batched": result.InstrumentsBatched,
 			"adopted":             result.Folded.Adopted,
-			"parked":              result.Folded.Parked,
+			"closed":              result.Folded.Closed,
+			"contacted":           result.Folded.Contacted,
 			"more_work_queued":    nextCursor != nil,
 		}).Info("Account updater: pass complete")
 	}
@@ -348,10 +352,10 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 			errs = errors.Join(errs, fmt.Errorf("download account updater results for job %s: %w", jobRef, err))
 			continue
 		}
-		// The ONE fold: rotate through RotateCustodianMethodRef (which clears
-		// the park, or#872), park closed/contact-cardholder, record every code
-		// verbatim. The webhook path lands in the same function.
-		stats, err := webhooks.FoldAccountUpdaterResults(ctx, q, jobRef, rows)
+		// The ONE fold: each row is a card version through ApplyCardLifecycle,
+		// every code recorded verbatim. The webhook path lands in the same
+		// function.
+		stats, err := webhooks.FoldAccountUpdaterResults(ctx, w.DB, w.Lifecycle, jobRef, rows, now)
 		if err != nil {
 			errs = errors.Join(errs, fmt.Errorf("fold account updater results for job %s: %w", jobRef, err))
 			continue
@@ -364,7 +368,8 @@ func (w AccountUpdaterBatchWorker) ingestMerchant(ctx context.Context, mid uuid.
 		result.Folded.Rows += stats.Rows
 		result.Folded.Adopted += stats.Adopted
 		result.Folded.Rotated += stats.Rotated
-		result.Folded.Parked += stats.Parked
+		result.Folded.Closed += stats.Closed
+		result.Folded.Contacted += stats.Contacted
 	}
 	return errs
 }

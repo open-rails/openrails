@@ -7,6 +7,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 )
 
@@ -30,8 +31,8 @@ func (a *CustodianProxyCollectionAdapter) Prepare(_ context.Context, method gen.
 	if strings.TrimSpace(models.DerefStr(method.RailMethodRef)) == "" {
 		return nil, fmt.Errorf("custodian-held payment method missing its custodian token reference")
 	}
-	if strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
-		return nil, fmt.Errorf("custodian-held instrument is parked")
+	if !paymentmethods.Chargeable(method) {
+		return nil, fmt.Errorf("custodian-held instrument cannot be charged")
 	}
 	charger := a.Charger.WithSource(nmiproxy.Source{
 		TokenID: strings.TrimSpace(models.DerefStr(method.RailMethodRef)), Via: method.ChargeVia,

@@ -39,6 +39,7 @@ func v5Invalid(message string) (int, any) {
 type paymentDetails struct {
 	PaymentDetails struct {
 		PaymentToken string `json:"payment_token"`
+		CardExp      string `json:"card_exp"`
 	} `json:"payment_details"`
 }
 
@@ -147,6 +148,14 @@ func (m *Mock) v5(method string, seg []string, q url.Values, body []byte) (int, 
 		if method == http.MethodPatch {
 			if c, ok := token(); ok {
 				v.Card = c
+			}
+			var many []paymentDetails
+			if json.Unmarshal(in.Billing, &many) == nil {
+				for _, b := range many {
+					if exp := b.PaymentDetails.CardExp; exp != "" {
+						v.Card.Exp = exp
+					}
+				}
 			}
 		}
 		if method == http.MethodDelete {

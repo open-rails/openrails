@@ -757,7 +757,11 @@ pkg openrails/billing, const PaymentChargeback PaymentKind = "chargeback"
 pkg openrails/billing, const PaymentDisputeReversal PaymentKind = "dispute_reversal"
 pkg openrails/billing, const PaymentFailed PaymentStatus = "failed"
 pkg openrails/billing, const PaymentIDPrefix untyped string = "pay_"
+pkg openrails/billing, const PaymentMethodActive PaymentMethodStatus = "active"
+pkg openrails/billing, const PaymentMethodClosed PaymentMethodStatus = "closed"
 pkg openrails/billing, const PaymentMethodIDPrefix untyped string = "pm_"
+pkg openrails/billing, const PaymentMethodRemoved PaymentMethodStatus = "removed"
+pkg openrails/billing, const PaymentMethodReplaced PaymentMethodStatus = "replaced"
 pkg openrails/billing, const PaymentPartiallyRefunded PaymentStatus = "partially_refunded"
 pkg openrails/billing, const PaymentPending PaymentStatus = "pending"
 pkg openrails/billing, const PaymentRefund PaymentKind = "refund"
@@ -2513,12 +2517,17 @@ pkg openrails/billing, type PaymentMethod struct
 pkg openrails/billing, type PaymentMethod struct, BillingDetails *BillingDetails `json:"billing_details"`
 pkg openrails/billing, type PaymentMethod struct, Card *CardDetails `json:"card"`
 pkg openrails/billing, type PaymentMethod struct, CollectionCurrencies []string `json:"collection_currencies"`
+pkg openrails/billing, type PaymentMethod struct, ContactCardholderAt *time.Time `json:"contact_cardholder_at"`
 pkg openrails/billing, type PaymentMethod struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type PaymentMethod struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type PaymentMethod struct, Health PaymentMethodHealth `json:"health"`
 pkg openrails/billing, type PaymentMethod struct, ID PaymentMethodID `json:"id"`
+pkg openrails/billing, type PaymentMethod struct, Mandates []Mandate `json:"mandates"`
 pkg openrails/billing, type PaymentMethod struct, PSPID *PSPID `json:"psp_id"`
 pkg openrails/billing, type PaymentMethod struct, Rail string `json:"rail"`
+pkg openrails/billing, type PaymentMethod struct, ReplacedBy *PaymentMethodID `json:"replaced_by"`
+pkg openrails/billing, type PaymentMethod struct, Reusable bool `json:"reusable"`
+pkg openrails/billing, type PaymentMethod struct, Status PaymentMethodStatus `json:"status"`
 pkg openrails/billing, type PaymentMethod struct, Subscriptions []PaymentMethodSubscription `json:"subscriptions"`
 pkg openrails/billing, type PaymentMethodDeletion struct
 pkg openrails/billing, type PaymentMethodDeletion struct, Pending bool
@@ -2535,6 +2544,7 @@ pkg openrails/billing, type PaymentMethodRef struct
 pkg openrails/billing, type PaymentMethodRef struct, Rail string `json:"rail"`
 pkg openrails/billing, type PaymentMethodRef struct, RailCustomerRef string `json:"rail_customer_ref"`
 pkg openrails/billing, type PaymentMethodRef struct, RailMethodRef string `json:"rail_method_ref"`
+pkg openrails/billing, type PaymentMethodStatus string
 pkg openrails/billing, type PaymentMethodSubscription struct
 pkg openrails/billing, type PaymentMethodSubscription struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type PaymentMethodSubscription struct, DisplayName string `json:"display_name"`
@@ -3145,6 +3155,11 @@ pkg openrails/billing, type UpdatePSPParams struct, ExpectedRevision int64 `json
 pkg openrails/billing, type UpdatePSPParams struct, OperationID uuid.UUID `json:"operation_id"`
 pkg openrails/billing, type UpdatePSPParams struct, RetireWebhookOverlap bool `json:"retire_webhook_overlap"`
 pkg openrails/billing, type UpdatePSPParams struct, Settings map[string]any `json:"settings"`
+pkg openrails/billing, type UpdatePaymentMethodParams struct
+pkg openrails/billing, type UpdatePaymentMethodParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
+pkg openrails/billing, type UpdatePaymentMethodParams struct, ExpMonth *int `json:"exp_month,omitempty"`
+pkg openrails/billing, type UpdatePaymentMethodParams struct, ExpYear *int `json:"exp_year,omitempty"`
+pkg openrails/billing, type UpdatePaymentMethodParams struct, Reusable *bool `json:"reusable,omitempty"`
 pkg openrails/billing, type UpdatePriceParams struct
 pkg openrails/billing, type UpdatePriceParams struct, Archived catalog.Field[bool] `json:"archived,omitzero"`
 pkg openrails/billing, type UpdatePriceParams struct, PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`

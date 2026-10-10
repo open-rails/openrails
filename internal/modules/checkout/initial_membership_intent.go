@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
@@ -704,7 +705,7 @@ func (h *InitialMembershipIntentHandler) fenceInitialMembership(ctx context.Cont
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != p.Terms.CustomerID || method.ParkReason != nil {
+		if method.CustomerID != p.Terms.CustomerID || !paymentmethods.Chargeable(method) {
 			return charge.ErrInstrumentChanged
 		}
 		if err = p.Instrument.Matches(method); err != nil {

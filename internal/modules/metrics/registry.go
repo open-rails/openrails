@@ -454,9 +454,10 @@ const rebillCyclesFrom = `(SELECT c.merchant_id, c.id, c.psp_id, c.rail, c.owner
 		LEAST(w.attempted_at, CASE WHEN s.canceled_at IS NOT NULL THEN GREATEST(s.canceled_at, c.due_at) END, c.due_at + interval '15 days') AS closed_at,
 		CASE WHEN w.id IS NULL OR NOT (c.missed_at IS NOT NULL OR COALESCE(f.category <> 'approved', false)) THEN ''
 			WHEN w.source = 'provider_schedule' THEN 'late_provider_charge'
-			WHEN EXISTS (SELECT 1 FROM billing.payment_method_updates u
-				WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id AND u.kind = 'updated'
-				AND u.occurred_at >= COALESCE(c.missed_at, f.attempted_at) AND u.occurred_at <= w.attempted_at) THEN 'updated_card'
+			WHEN EXISTS (SELECT 1 FROM billing.payment_method_versions u
+				WHERE u.merchant_id = c.merchant_id AND u.payment_method_id = w.payment_method_id
+				AND u.kind IN ('updated', 'brand_changed')
+				AND u.effective_at >= COALESCE(c.missed_at, f.attempted_at) AND u.effective_at <= w.attempted_at) THEN 'updated_card'
 			WHEN w.kind = 'customer_retry' THEN 'customer_retry'
 			ELSE 'dunning_retry' END AS recovered_by
 	FROM billing.rebill_cycles c

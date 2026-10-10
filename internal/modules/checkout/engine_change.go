@@ -21,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -205,7 +206,7 @@ func (s *CheckoutService) enqueueEngineChange(ctx context.Context, req *Subscrip
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != terms.CustomerID || !charge.ChargeableOn(method, terms.PSPID) || method.Rail != string(sub.Rail) || method.ParkReason != nil {
+		if method.CustomerID != terms.CustomerID || !charge.ChargeableOn(method, terms.PSPID) || method.Rail != string(sub.Rail) || !paymentmethods.Chargeable(method) {
 			return charge.ErrInstrumentChanged
 		}
 		var binding *charge.HyperSwitchBinding

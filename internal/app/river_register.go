@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/money"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	"github.com/open-rails/openrails/internal/reconcile"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -125,13 +126,19 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	// custodian's lookahead window. Merchants with no armed custodian are never
 	// visited (the work queue starts at the custodian registry).
 	if err := addTrackedWorker(r, workers, &riverjobs.AccountUpdaterBatchWorker{
-		DB:      r.DB,
-		Config:  r.Config,
-		Clock:   clock,
-		Rails:   r.RailConfigs,
-		Intents: r.intentRunner(intentRegistry, clock),
+		DB:        r.DB,
+		Config:    r.Config,
+		Clock:     clock,
+		Rails:     r.RailConfigs,
+		Intents:   r.intentRunner(intentRegistry, clock),
+		Lifecycle: r.SubscriptionLifecycleService,
 	}); err != nil {
 		return fmt.Errorf("add account updater worker: %w", err)
+	}
+	// #1168: a decline that says the card was reissued reads its holder once.
+	holders, _ := r.CollectionResolver.(paymentmethods.CardHolders)
+	if err := addTrackedWorker(r, workers, &riverjobs.CardRefreshWorker{DB: r.DB, Clock: clock, Holders: holders, Lifecycle: r.SubscriptionLifecycleService}); err != nil {
+		return fmt.Errorf("add card refresh worker: %w", err)
 	}
 	if err := addTrackedWorker(r, workers, &riverjobs.SolanaPayGCWorker{DB: r.DB, Clock: clock}); err != nil {
 		return fmt.Errorf("add solana pay gc worker: %w", err)

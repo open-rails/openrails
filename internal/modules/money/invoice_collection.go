@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 
 	"github.com/google/uuid"
@@ -117,8 +118,8 @@ func (s *MoneyService) SetInvoiceCollectionPaymentMethod(ctx context.Context, pa
 		if method.MerchantID != tid.UUID() || method.CustomerID != payer.UUID() {
 			return ErrCollectionPaymentMethodInvalid
 		}
-		if strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
-			return fmt.Errorf("%w: payment method is parked", ErrCollectionPaymentMethodInvalid)
+		if !paymentmethods.Chargeable(method) {
+			return fmt.Errorf("%w: payment method cannot be charged", ErrCollectionPaymentMethodInvalid)
 		}
 		descriptor, ok := rails.Lookup(models.Rail(method.Rail))
 		if !ok {
@@ -620,7 +621,7 @@ func (s *MoneyService) collectionMethodFor(ctx context.Context, q *gen.Queries, 
 		}
 		return nil, fmt.Errorf("load collection payment method: %w", err)
 	}
-	if method.MerchantID != merchantID || method.CustomerID != payerID || strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
+	if method.MerchantID != merchantID || method.CustomerID != payerID || !paymentmethods.Chargeable(method) {
 		return nil, ErrCollectionPaymentMethodInvalid
 	}
 	if descriptor, ok := rails.Lookup(models.Rail(method.Rail)); !ok || !descriptor.SupportsChargeSavedMethod {

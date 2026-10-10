@@ -160,13 +160,18 @@ Enable these event types (what the handler consumes):
 - `chargeback.batch.complete` — auto-reconciled: refund recorded, subscription
   canceled
 - `acu.summary.automaticallyupdated` / `.closedaccount` / `.contactcustomer`
-  (Automatic Card Updater). An updated card is re-read from the vault, and
-  memberships waiting on it retry at the next due pass. A card reissued under
-  another brand instead loses its stored-credential agreements: it is charged
-  off-session only after a customer-initiated charge anchors one again, and its
-  members are asked to act. A closed account parks the card. Both closed and
-  contact-customer ask the member for a new card. Each notice is recorded once
-  in `payment_method_updates`.
+  (Automatic Card Updater). Each notice is one card version of the same payment
+  method, in `payment_method_versions`. An updated card is re-read from the
+  vault, and memberships waiting on it retry at the next due pass. A card
+  reissued under another brand keeps its payment method, but its mandates wait
+  for the customer (`requires_reconsent`): renewals stop and the members are
+  asked to verify the card (`POST /v1/me/payment-methods/{id}/verify`). A
+  closed account closes the method and ends its mandates; its memberships wait
+  for another card and are never canceled. A contact-customer notice prompts
+  the member, except on a Mastercard card, where it means a closed account.
+- A renewal declined as an expired or reissued card (`expired_card`,
+  `update_cardholder_data`) reads the vault once before the member is asked:
+  a newer card there is adopted and the renewal retries.
 
 Subscription-state events are treated as wake-up signals only: OpenRails marks
 the subscription dirty and converges from freshly *fetched* gateway truth, so a

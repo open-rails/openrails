@@ -19,7 +19,7 @@ func TestOrderRenewalPreferenceIsAcceptedAndReplayed(t *testing.T) {
 	ctx := merchant.WithID(t.Context(), billing.MerchantID(mid))
 	product := models.Product{ID: uuid.New(), DisplayName: "Term", Entitlements: []string{"premium"}}
 	price := models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 10_000_000, Currency: "USD", BillingIntervalHours: new(720), AccessDurationHours: new(24)}
-	method := gen.BillingPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, Rail: "nmi", Custodian: models.CustodianPSP, PspID: &psp, RailCustomerRef: new("vault"), RailMethodRef: new("method")}
+	method := gen.BillingPaymentMethod{ID: uuid.New(), MerchantID: mid, CustomerID: customer, Rail: "nmi", Status: "active", Custodian: models.CustodianPSP, PspID: &psp, RailCustomerRef: new("vault"), RailMethodRef: new("method")}
 	for _, preference := range []*bool{nil, new(true), new(false)} {
 		state := map[string]any{}
 		if preference != nil {

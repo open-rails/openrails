@@ -573,7 +573,7 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 	// with another customer's instrument and agreements.
 	var held *gen.BillingPaymentMethod
 	if tokenIntent != nil {
-		if prior := h.heldCard(ctx, merchantID, p.UserID, tokenIntent.Fingerprint); prior != nil && prior.ParkReason == nil {
+		if prior := h.heldCard(ctx, merchantID, p.UserID, tokenIntent.Fingerprint); prior != nil && paymentmethods.Chargeable(*prior) {
 			held = prior
 		}
 	}
@@ -723,13 +723,14 @@ func (h *CustodianSaleIntentHandler) provisionNetworkToken(ctx context.Context, 
 	if h.Sale.DB == nil {
 		return
 	}
-	if _, err := h.Sale.DB.Gen(ctx).SetPaymentMethodNetworkToken(ctx, gen.SetPaymentMethodNetworkTokenParams{
-		MerchantID:         merchantID,
-		ID:                 instrumentID,
-		NetworkTokenID:     nt.ID,
-		NetworkTokenStatus: nt.Status,
-		NetworkTokenPar:    nt.PAR,
-	}); err != nil {
+	err = h.Sale.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := paymentmethods.ApplyCardLifecycle(ctx, h.Sale.DB.NewWithPgxTx(tx).Gen(ctx), paymentmethods.CardEvent{
+			MerchantID: merchantID, PaymentMethodID: instrumentID, Source: paymentmethods.SourceNetworkToken, EventRef: "provision:" + orderID,
+			Card: paymentmethods.Card{NetworkTokenID: nt.ID, NetworkTokenStatus: nt.Status, NetworkTokenPAR: nt.PAR}, At: h.Sale.PurchaseService.now(),
+		})
+		return err
+	})
+	if err != nil {
 		log.WithContext(ctx).WithError(err).Warn("custodian sale: failed to persist network token on instrument")
 	}
 }

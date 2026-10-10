@@ -75,7 +75,7 @@ func (r *HTTPStripePaymentStateReader) PaymentMethod(ctx context.Context, paymen
 		}
 		return nil, fmt.Errorf("retrieve stripe payment method: %w", err)
 	}
-	state, err := parseStripePaymentMethodState(body)
+	state, err := ParseStripePaymentMethodState(body)
 	if err != nil {
 		return nil, fmt.Errorf("parse stripe payment method: %w", err)
 	}
@@ -213,7 +213,8 @@ func (r *HTTPStripePaymentStateReader) listSubscriptions(ctx context.Context, cu
 	return out, nil
 }
 
-func parseStripePaymentMethodState(body []byte) (*StripePaymentMethodState, error) {
+// ParseStripePaymentMethodState reads a Stripe PaymentMethod body.
+func ParseStripePaymentMethodState(body []byte) (*StripePaymentMethodState, error) {
 	var paymentMethod struct {
 		ID       string            `json:"id"`
 		Customer json.RawMessage   `json:"customer"`

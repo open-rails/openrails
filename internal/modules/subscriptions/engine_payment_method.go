@@ -99,7 +99,7 @@ func (s *SubscriptionLifecycleService) moveEngineMethod(ctx context.Context, tx 
 		// Another customer's method is indistinguishable from a missing one.
 		return nil, apperr.New(http.StatusNotFound, billing.CodeResourceNotFound, "payment method not found")
 	}
-	if !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != nil || method.ChargeVia != "pan_proxy" {
+	if !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || !paymentmethods.Chargeable(method) || method.ChargeVia != "pan_proxy" {
 		return nil, charge.ErrInstrumentChanged
 	}
 	if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method); err != nil {

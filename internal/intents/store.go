@@ -183,7 +183,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 			if err != nil {
 				return err
 			}
-			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || method.ParkReason != nil {
+			if sub.PaymentMethodID == nil || method.ID != *sub.PaymentMethodID || method.CustomerID != engineCustomer || !paymentmethods.Chargeable(method) {
 				return errors.New("engine admission payment method changed")
 			}
 			if err := payload.Instrument.Matches(method); err != nil {
@@ -282,7 +282,7 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 		if err != nil {
 			return err
 		}
-		if method.CustomerID.String() != accepted.UserID || method.Rail != row.Rail || method.ParkReason != nil {
+		if method.CustomerID.String() != accepted.UserID || method.Rail != row.Rail || !paymentmethods.Chargeable(method) {
 			return apperr.Conflictf("payment method changed before upgrade admission")
 		}
 		if accepted.Instrument.Matches(method) != nil || mandates.Recheck(ctx, d.Gen(ctx), row.MerchantID, accepted.Instrument.Mandate) != nil {

@@ -51,11 +51,11 @@ SELECT count(*) FROM billing.rebill_cycles WHERE merchant_id = $1;
 -- name: PurgeMerchantRowsRebillCycles :exec
 DELETE FROM billing.rebill_cycles WHERE merchant_id = $1;
 
--- name: CountMerchantRowsPaymentMethodUpdates :one
-SELECT count(*) FROM billing.payment_method_updates WHERE merchant_id = $1;
+-- name: CountMerchantRowsPaymentMethodVersions :one
+SELECT count(*) FROM billing.payment_method_versions WHERE merchant_id = $1;
 
--- name: PurgeMerchantRowsPaymentMethodUpdates :exec
-DELETE FROM billing.payment_method_updates WHERE merchant_id = $1;
+-- name: PurgeMerchantRowsPaymentMethodVersions :exec
+DELETE FROM billing.payment_method_versions WHERE merchant_id = $1;
 
 -- name: CountMerchantRowsNMIHistoryMonths :one
 SELECT count(*) FROM billing.nmi_history_months WHERE merchant_id = $1;

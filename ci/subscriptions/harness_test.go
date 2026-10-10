@@ -545,7 +545,7 @@ func (w *world) settleCollectionScans() {
 	}, 30*time.Second, 20*time.Millisecond, "healthy refresh's ordinary scans finish before the fault")
 }
 
-var workKinds = []string{"openrails.provider_operation", "openrails.subscription_converge"}
+var workKinds = []string{"openrails.provider_operation", "openrails.subscription_converge", "openrails.card_refresh"}
 
 // settle waits until no operation or convergence work is runnable. Jobs the
 // engine scheduled for a moment already past are promoted at once (River's

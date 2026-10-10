@@ -11,12 +11,15 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
@@ -459,13 +462,35 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 	if err != nil {
 		return nil, err
 	}
+	ids := make([]uuid.UUID, 0, len(methods))
+	for _, pm := range methods {
+		ids = append(ids, pm.ID)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	live, err := r.State.DB.Gen(ctx).ListLiveMandatesOfPaymentMethods(ctx, gen.ListLiveMandatesOfPaymentMethodsParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), PaymentMethodIds: ids})
+	if err != nil {
+		return nil, err
+	}
+	agreements := map[uuid.UUID][]billing.Mandate{}
+	for _, m := range live {
+		agreements[*m.PaymentMethodID] = append(agreements[*m.PaymentMethodID], mandates.View(m))
+	}
 	now := time.Now().UTC()
 	for _, pm := range methods {
 		var charge *models.PaymentMethodCharge
 		if c, ok := charges[pm.ID]; ok {
 			charge = &c
 		}
-		out = append(out, PaymentMethodToAPI(pm, charge, collects[pm.ID], now))
+		view := PaymentMethodToAPI(pm, charge, collects[pm.ID], now)
+		view.Mandates = []billing.Mandate{}
+		for _, m := range agreements[pm.ID] {
+			view.Mandates = append(view.Mandates, m)
+			view.Reusable = view.Reusable || (m.Kind == billing.MandateCardOnFile && m.Status == billing.MandateActive)
+		}
+		out = append(out, view)
 	}
 	return out, nil
 }
@@ -487,12 +512,22 @@ func PaymentMethodToAPI(pm *models.PaymentMethod, charge *models.PaymentMethodCh
 		ID:                   billing.PaymentMethodID(pm.ID),
 		CustomerID:           billing.CustomerID(pm.CustomerID),
 		Rail:                 string(pm.Rail),
+		Status:               billing.PaymentMethodStatus(pm.Status),
 		Card:                 pm.Card.Details(),
 		BillingDetails:       billingDetailsFromMetadata(pm.Metadata),
 		Health:               paymentMethodHealth(pm.Card, charge, now),
+		ContactCardholderAt:  pm.ContactCardholderAt,
+		Mandates:             []billing.Mandate{},
 		Subscriptions:        subs,
 		CollectionCurrencies: collects,
 		CreatedAt:            pm.CreatedAt,
+	}
+	if pm.Status != string(billing.PaymentMethodActive) {
+		out.Health.Active = false
+	}
+	if pm.ReplacedByID != nil {
+		replacement := billing.PaymentMethodID(*pm.ReplacedByID)
+		out.ReplacedBy = &replacement
 	}
 	if pm.PspID != nil {
 		psp := billing.PSPID(*pm.PspID)

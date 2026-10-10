@@ -117,3 +117,27 @@ SELECT * FROM billing.mandates
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
   AND id = ANY (sqlc.arg(ids)::uuid[])
 ORDER BY created_at DESC, id DESC;
+
+-- name: RevokeCardOnFileMandates :many
+-- The customer withdrew reuse of one card for one-click buys.
+UPDATE billing.mandates SET status = 'revoked', end_reason = 'customer_revoked',
+    ended_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+  AND kind = 'card_on_file' AND status IN ('active', 'requires_reconsent')
+RETURNING *;
+
+-- name: ListMandatesAwaitingConsent :many
+-- A card's agreements waiting for the customer's fresh consent, oldest first.
+SELECT * FROM billing.mandates
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid
+  AND status = 'requires_reconsent'
+ORDER BY created_at, id
+FOR UPDATE;
+
+-- name: ListLiveMandatesOfPaymentMethods :many
+-- The live agreements on a customer's named cards, oldest first.
+SELECT * FROM billing.mandates
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND payment_method_id = ANY (sqlc.arg(payment_method_ids)::uuid[])
+  AND status IN ('active', 'requires_reconsent')
+ORDER BY created_at, id;

@@ -40,6 +40,7 @@ migration 0036_invoice_overdue_is_a_filter.up.sql sha256:4d1c199b499f2a956ea1adb
 migration 0037_failed_usage.up.sql sha256:440a0bea4b34c76571c07a94918d935e1ce94c889b5e583c9c68ec0b52901cba
 migration 0038_orders.up.sql sha256:f86c20901b76602ca48f6007250096be288b84bed1f3798991f4a328f4dd56cb
 migration 0039_seat_changes.up.sql sha256:01cdc00df32eafff33a059e754d9a576a0f8f184d3bb0ef2aba86a6c89ceded6
+migration 0040_card_versions.up.sql sha256:4654ccd95d380f54bb07ad921881eca379ac7dd7f0a0f33da4d5addaeee21672
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1613,30 +1614,55 @@ table billing.payment_attempts
   index CREATE UNIQUE INDEX payment_attempts_psp_id_transaction_id_key ON billing.payment_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE (transaction_id IS NOT NULL)
   index CREATE INDEX payment_attempts_subscription_id_attempted_at_idx ON billing.payment_attempts USING btree (merchant_id, subscription_id, attempted_at) WHERE (subscription_id IS NOT NULL)
 
-table billing.payment_method_updates
+table billing.payment_method_versions
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
-  column payment_method_id uuid NOT NULL
   column customer_id uuid NOT NULL
-  column psp_id uuid
+  column payment_method_id uuid NOT NULL
   column source text NOT NULL
   column kind text NOT NULL
   column event_ref text NOT NULL
-  column occurred_at timestamp with time zone NOT NULL
+  column psp_id uuid
+  column custodian_id uuid
+  column rail_customer_ref text
+  column rail_method_ref text
+  column card_brand text
+  column card_last4 text
+  column card_exp_month smallint
+  column card_exp_year smallint
+  column fingerprint text
+  column network_token_id text
+  column network_token_status text
+  column network_token_par text
+  column effective_at timestamp with time zone NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint payment_method_updates_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
-  constraint payment_method_updates_event_ref_check CHECK ((event_ref <> ''::text))
-  constraint payment_method_updates_kind_check CHECK ((kind = ANY (ARRAY['updated'::text, 'brand_changed'::text, 'closed_account'::text, 'contact_customer'::text])))
-  constraint payment_method_updates_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint payment_method_updates_payment_method_id_fkey FOREIGN KEY (merchant_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, id) ON DELETE CASCADE
-  constraint payment_method_updates_pkey PRIMARY KEY (merchant_id, id)
-  constraint payment_method_updates_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
-  constraint payment_method_updates_source_check CHECK ((source = ANY (ARRAY['nmi_acu'::text, 'bt_account_updater'::text, 'stripe_card_updater'::text, 'customer'::text])))
-  index CREATE INDEX payment_method_updates_customer_id_idx ON billing.payment_method_updates USING btree (merchant_id, customer_id)
-  index CREATE INDEX payment_method_updates_payment_method_id_occurred_at_idx ON billing.payment_method_updates USING btree (merchant_id, payment_method_id, occurred_at)
-  index CREATE UNIQUE INDEX payment_method_updates_pkey ON billing.payment_method_updates USING btree (merchant_id, id)
-  index CREATE INDEX payment_method_updates_psp_id_idx ON billing.payment_method_updates USING btree (merchant_id, psp_id)
-  index CREATE UNIQUE INDEX payment_method_updates_source_event_ref_payment_method_id_key ON billing.payment_method_updates USING btree (merchant_id, source, event_ref, payment_method_id)
+  constraint payment_method_versions_card_brand_check CHECK ((card_brand <> ''::text))
+  constraint payment_method_versions_card_exp_month_check CHECK (((card_exp_month >= 1) AND (card_exp_month <= 12)))
+  constraint payment_method_versions_card_exp_year_check CHECK (((card_exp_year >= 2000) AND (card_exp_year <= 2199)))
+  constraint payment_method_versions_card_expiry_pair_check CHECK (((card_exp_month IS NULL) = (card_exp_year IS NULL)))
+  constraint payment_method_versions_card_last4_check CHECK ((card_last4 ~ '^[0-9]{4}$'::text))
+  constraint payment_method_versions_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
+  constraint payment_method_versions_event_key UNIQUE (merchant_id, payment_method_id, source, event_ref)
+  constraint payment_method_versions_event_ref_check CHECK ((event_ref <> ''::text))
+  constraint payment_method_versions_fingerprint_check CHECK ((fingerprint <> ''::text))
+  constraint payment_method_versions_holder_check CHECK (((psp_id IS NULL) <> (custodian_id IS NULL)))
+  constraint payment_method_versions_kind_check CHECK ((kind = ANY (ARRAY['saved'::text, 'updated'::text, 'brand_changed'::text, 'closed'::text, 'contact_cardholder'::text])))
+  constraint payment_method_versions_network_token_id_check CHECK ((network_token_id <> ''::text))
+  constraint payment_method_versions_network_token_par_check CHECK ((network_token_par <> ''::text))
+  constraint payment_method_versions_network_token_status_check CHECK ((network_token_status = ANY (ARRAY['active'::text, 'inactive'::text, 'suspended'::text, 'deleted'::text])))
+  constraint payment_method_versions_payment_method_id_fkey FOREIGN KEY (merchant_id, customer_id, payment_method_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id) ON DELETE CASCADE
+  constraint payment_method_versions_pkey PRIMARY KEY (merchant_id, id)
+  constraint payment_method_versions_psp_id_fkey FOREIGN KEY (merchant_id, psp_id) REFERENCES billing.psps(merchant_id, id) ON DELETE RESTRICT
+  constraint payment_method_versions_rail_customer_ref_check CHECK ((rail_customer_ref <> ''::text))
+  constraint payment_method_versions_rail_method_ref_check CHECK ((rail_method_ref <> ''::text))
+  constraint payment_method_versions_source_check CHECK ((source = ANY (ARRAY['customer_save'::text, 'customer_edit'::text, 'stripe_updater'::text, 'nmi_acu'::text, 'basis_theory_updater'::text, 'hyperswitch_updater'::text, 'network_token'::text, 'provider_read'::text])))
+  index CREATE INDEX payment_method_versions_custodian_id_idx ON billing.payment_method_versions USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL)
+  index CREATE INDEX payment_method_versions_customer_id_fingerprint_idx ON billing.payment_method_versions USING btree (merchant_id, customer_id, fingerprint) WHERE (fingerprint IS NOT NULL)
+  index CREATE UNIQUE INDEX payment_method_versions_event_key ON billing.payment_method_versions USING btree (merchant_id, payment_method_id, source, event_ref)
+  index CREATE INDEX payment_method_versions_payment_method_id_effective_at_idx ON billing.payment_method_versions USING btree (merchant_id, payment_method_id, effective_at, id)
+  index CREATE UNIQUE INDEX payment_method_versions_pkey ON billing.payment_method_versions USING btree (merchant_id, id)
+  index CREATE INDEX payment_method_versions_psp_id_idx ON billing.payment_method_versions USING btree (merchant_id, psp_id) WHERE (psp_id IS NOT NULL)
+  trigger CREATE TRIGGER guard_payment_method_version_update BEFORE UPDATE ON billing.payment_method_versions FOR EACH ROW EXECUTE FUNCTION billing.guard_payment_method_version_update()
 
 table billing.payment_methods
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1663,6 +1689,9 @@ table billing.payment_methods
   column account_updater_checked_at timestamp with time zone
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column status text NOT NULL
+  column replaced_by_id uuid
+  column contact_cardholder_at timestamp with time zone
   constraint payment_methods_card_exp_month_check CHECK (((card_exp_month >= 1) AND (card_exp_month <= 12)))
   constraint payment_methods_card_exp_year_check CHECK (((card_exp_year >= 2000) AND (card_exp_year <= 2199)))
   constraint payment_methods_card_expiry_pair_check CHECK (((card_exp_month IS NULL) = (card_exp_year IS NULL)))
@@ -1684,6 +1713,9 @@ table billing.payment_methods
   constraint payment_methods_psp_id_rail_fkey FOREIGN KEY (merchant_id, psp_id, rail) REFERENCES billing.psps(merchant_id, id, rail) ON DELETE RESTRICT
   constraint payment_methods_rail_customer_ref_check CHECK ((rail_customer_ref <> ''::text))
   constraint payment_methods_rail_method_ref_check CHECK ((rail_method_ref <> ''::text))
+  constraint payment_methods_replaced_by_check CHECK ((((status = 'replaced'::text) = (replaced_by_id IS NOT NULL)) AND (replaced_by_id <> id)))
+  constraint payment_methods_replaced_by_id_fkey FOREIGN KEY (merchant_id, customer_id, replaced_by_id) REFERENCES billing.payment_methods(merchant_id, customer_id, id)
+  constraint payment_methods_status_check CHECK ((status = ANY (ARRAY['active'::text, 'closed'::text, 'replaced'::text, 'removed'::text])))
   index CREATE INDEX payment_methods_custodian_account_updater_checked_at_idx ON billing.payment_methods USING btree (merchant_id, custodian, account_updater_checked_at NULLS FIRST) WHERE ((custodian <> 'psp'::text) AND (rail_method_ref IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_network_token_id_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, network_token_id) WHERE ((custodian <> 'psp'::text) AND (network_token_id IS NOT NULL))
   index CREATE INDEX payment_methods_custodian_id_rail_method_ref_idx ON billing.payment_methods USING btree (merchant_id, custodian_id, rail_method_ref) WHERE (custodian <> 'psp'::text)
@@ -1694,6 +1726,8 @@ table billing.payment_methods
   index CREATE INDEX payment_methods_psp_id_idx ON billing.payment_methods USING btree (psp_id)
   index CREATE UNIQUE INDEX payment_methods_psp_instrument_key ON billing.payment_methods USING btree (merchant_id, psp_id, custodian_id, rail_customer_ref, rail_method_ref) NULLS NOT DISTINCT
   index CREATE INDEX payment_methods_rail_rail_method_ref_idx ON billing.payment_methods USING btree (rail, rail_method_ref)
+  index CREATE INDEX payment_methods_replaced_by_id_idx ON billing.payment_methods USING btree (merchant_id, replaced_by_id) WHERE (replaced_by_id IS NOT NULL)
+  trigger CREATE TRIGGER guard_payment_method_status BEFORE UPDATE OF status, replaced_by_id ON billing.payment_methods FOR EACH ROW EXECUTE FUNCTION billing.guard_payment_method_status()
 
 table billing.payments
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3213,7 +3247,7 @@ function billing.guard_billing_restore_receipt()
                     'orders',
                     'ownership_claims',
                     'payment_attempts',
-                    'payment_method_updates',
+                    'payment_method_versions',
                     'payment_methods',
                     'payments',
                     'price_key_movements',
@@ -3386,6 +3420,31 @@ function billing.guard_merchant_restore()
           END IF;
       END IF;
       RETURN NEW;
+  END;
+  $function$
+
+function billing.guard_payment_method_status()
+  CREATE OR REPLACE FUNCTION billing.guard_payment_method_status()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF OLD.status <> 'active' AND (NEW.status, NEW.replaced_by_id) IS DISTINCT FROM (OLD.status, OLD.replaced_by_id) THEN
+          RAISE EXCEPTION 'payment method % is %, which is final', OLD.id, OLD.status USING ERRCODE = '23514';
+      END IF;
+      RETURN NEW;
+  END;
+  $function$
+
+function billing.guard_payment_method_version_update()
+  CREATE OR REPLACE FUNCTION billing.guard_payment_method_version_update()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      RAISE EXCEPTION 'card version % is append-only', OLD.id USING ERRCODE = '23514';
   END;
   $function$
 

@@ -48,14 +48,24 @@ func (q *Queries) AcceptPaymentMethodSetupSession(ctx context.Context, arg Accep
 }
 
 const attachCapturedPaymentMethod = `-- name: AttachCapturedPaymentMethod :one
+WITH pm AS (
 INSERT INTO billing.payment_methods
-(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,created_at,updated_at)
-VALUES($1,$2,$3,NULL,'nmi','hyperswitch',$4,NULLIF($5::text,''),$6::text,$7::text,$8::text,$9::smallint,$10::smallint,'pan_proxy',$11,$11)
+(id,merchant_id,customer_id,psp_id,rail,custodian,custodian_id,rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,charge_via,status,created_at,updated_at)
+VALUES($1,$2,$3,NULL,'nmi','hyperswitch',$4,NULLIF($5::text,''),$6::text,$7::text,$8::text,$9::smallint,$10::smallint,'pan_proxy','active',$11,$11)
 ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=billing.payment_methods.id
 WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
   AND billing.payment_methods.custodian='hyperswitch'
-RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at
+RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at
+), saved AS (
+INSERT INTO billing.payment_method_versions (merchant_id,customer_id,payment_method_id,source,kind,event_ref,psp_id,custodian_id,
+    rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,effective_at)
+SELECT merchant_id,customer_id,id,'customer_save','saved','created',psp_id,custodian_id,
+    rail_customer_ref,rail_method_ref,NULLIF(card_brand,''),card_last4,card_exp_month,card_exp_year,created_at
+FROM pm
+ON CONFLICT (merchant_id,payment_method_id,source,event_ref) DO NOTHING
+)
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM pm
 `
 
 type AttachCapturedPaymentMethodParams struct {
@@ -72,8 +82,39 @@ type AttachCapturedPaymentMethodParams struct {
 	Now              time.Time
 }
 
+type AttachCapturedPaymentMethodRow struct {
+	ID                      uuid.UUID
+	MerchantID              uuid.UUID
+	CustomerID              uuid.UUID
+	Rail                    string
+	PspID                   *uuid.UUID
+	Custodian               string
+	CustodianID             *uuid.UUID
+	RailCustomerRef         *string
+	RailMethodRef           *string
+	CardBrand               *string
+	CardLast4               *string
+	CardExpMonth            *int16
+	CardExpYear             *int16
+	Metadata                []byte
+	Fingerprint             *string
+	NetworkTokenID          *string
+	NetworkTokenStatus      *string
+	NetworkTokenPar         *string
+	ChargeVia               string
+	ParkReason              *string
+	ParkedAt                *time.Time
+	AccountUpdaterCheckedAt *time.Time
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	Status                  string
+	ReplacedByID            *uuid.UUID
+	ContactCardholderAt     *time.Time
+}
+
 // Capture attachment never reparents an existing instrument to another payer.
-func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCapturedPaymentMethodParams) (BillingPaymentMethod, error) {
+// A new method's history starts with the card it was saved with.
+func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCapturedPaymentMethodParams) (AttachCapturedPaymentMethodRow, error) {
 	row := q.db.QueryRow(ctx, attachCapturedPaymentMethod,
 		arg.ID,
 		arg.MerchantID,
@@ -87,7 +128,7 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 		arg.CardExpYear,
 		arg.Now,
 	)
-	var i BillingPaymentMethod
+	var i AttachCapturedPaymentMethodRow
 	err := row.Scan(
 		&i.ID,
 		&i.MerchantID,
@@ -113,6 +154,9 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 		&i.AccountUpdaterCheckedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.ReplacedByID,
+		&i.ContactCardholderAt,
 	)
 	return i, err
 }

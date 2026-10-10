@@ -1107,7 +1107,7 @@ func (s *SubscriptionLifecycleService) ResumeMembership(ctx context.Context, par
 			if err != nil {
 				return err
 			}
-			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || method.ParkReason != nil || method.Rail != string(subscription.Rail) || method.RailCustomerRef == nil || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method) != nil {
+			if method.CustomerID != subscription.CustomerID || !charge.ChargeableOn(method, subscription.PspID) || !paymentmethods.Chargeable(method) || method.Rail != string(subscription.Rail) || method.RailCustomerRef == nil || method.RailMethodRef == nil || (method.Custodian != models.CustodianHyperSwitch && method.Custodian != models.CustodianPSP) || observedInstrument.Matches(method) != nil {
 				return fmt.Errorf("resume engine: payment method is unavailable")
 			}
 			if _, err := mandates.ForSubscription(ctx, q, subscription.MerchantID, subscription.CustomerID, subscription.ID, method.ID, subscription.PspID); err != nil {
@@ -2157,7 +2157,19 @@ func (s *SubscriptionLifecycleService) FailMembership(ctx context.Context, param
 			data.Reason = string(endReason)
 		}
 
-		if !quietRetry {
+		// A decline that says the card was reissued reads the holder once
+		// first: an updater may already hold the new card, and the member is
+		// asked only if it does not (#1168).
+		readCard := needsPaymentMethodUpdate && subscription.PaymentMethodID != nil &&
+			decline.HolderMayHoldNewCard(billing.DeclineReason(normalize.FromPtr(params.FailureReason)))
+		if readCard {
+			args := paymentmethods.CardRefreshArgs{MerchantID: subscription.MerchantID, PaymentMethodID: *subscription.PaymentMethodID}
+			opts := args.InsertOpts()
+			if err := s.DB.InsertRiverJobTx(ctx, tx, args, &opts); err != nil {
+				return fmt.Errorf("queue declined card read: %w", err)
+			}
+		}
+		if !quietRetry && !readCard {
 			notification := &models.NotificationQueue{
 				ID:         uuidutil.NewV7(),
 				CustomerID: subscription.CustomerID,

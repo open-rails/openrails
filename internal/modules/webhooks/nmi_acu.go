@@ -3,7 +3,6 @@ package webhooks
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -14,39 +13,37 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/lifecycle"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// acuKinds maps NMI's Account Updater notices to card updates.
-var acuKinds = map[string]paymentmethods.CardUpdateKind{
-	EventTypeNMIACUUpdated:         paymentmethods.CardUpdated,
-	EventTypeNMIACUClosedAccount:   paymentmethods.CardClosed,
-	EventTypeNMIACUContactCustomer: paymentmethods.ContactCustomer,
+// acuAdvice maps NMI's Account Updater notices that carry no card.
+var acuAdvice = map[string]paymentmethods.CardAdvice{
+	EventTypeNMIACUClosedAccount:   paymentmethods.AdviceClosed,
+	EventTypeNMIACUContactCustomer: paymentmethods.AdviceContactCardholder,
 }
 
-// handleACUEvent acts on an NMI Account Updater notice for one vault (#1115):
-//   - updated: each stored card on the vault takes the details NMI now holds
-//     (read from the vault, not the notice), a park an earlier notice set is
-//     cleared, and memberships waiting on the card retry at the next due pass.
-//     A card reissued under another brand loses its stored-credential
-//     agreements instead, and its members are asked to act (#1166);
-//   - closed account: the card is parked, so it is not charged again, and its
-//     members are asked for a new card;
-//   - contact customer: its members are asked for a new card.
+// handleACUEvent applies an NMI Account Updater notice to each stored card on
+// one vault through ApplyCardLifecycle (#1115, #1168):
+//   - updated: the card takes the details NMI now holds, read from the vault
+//     rather than the notice. A same-brand reissue keeps billing; another
+//     brand holds the card's mandates for the customer's consent;
+//   - closed account: the card closes and its mandates end;
+//   - contact customer: the customer is prompted, or, on a Mastercard card
+//     (whose updater means a closed account by it), the card closes.
 //
-// Each is recorded once per notice in payment_method_updates.
+// A notice is one version per card; a redelivery changes nothing.
 func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 	body, err := s.parseACUEventBody()
 	if err != nil {
 		return MarkWebhookErrorNonRetryable(err)
 	}
-	vault, kind := body.Vault(), acuKinds[s.Data.EventType]
+	vault := body.Vault()
 	if vault == "" {
 		return MarkWebhookErrorNonRetryable(fmt.Errorf("nmi %s names no vault", s.Data.EventType))
+	}
+	if s.SubscriptionLifecycleService == nil {
+		return fmt.Errorf("nmi account updater: no lifecycle service wired")
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -65,17 +62,11 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 		logger.Info("NMI account updater notice for a vault with no stored card here")
 		return nil
 	}
+	advice, isAdvice := acuAdvice[s.Data.EventType]
 	var customer nmi.V5Customer
-	if kind == paymentmethods.CardUpdated {
-		if s.NMIResolver == nil {
-			return fmt.Errorf("nmi account updater: no NMI client resolver wired")
-		}
-		client, ok, err := s.NMIResolver.ResolveNMIClient(ctx, mid.UUID(), &psp)
-		if err != nil || !ok || client == nil {
-			return fmt.Errorf("nmi account updater: client for %s unavailable: %v", psp, err)
-		}
+	if !isAdvice {
 		var found bool
-		if customer, found, err = client.GetCustomer(ctx, vault); err != nil {
+		if customer, found, err = s.readVault(ctx, mid.UUID(), psp, vault); err != nil {
 			return err
 		}
 		if !found {
@@ -87,96 +78,40 @@ func (s *NMIWebhookService) handleACUEvent(ctx context.Context) error {
 	var notices []*models.NotificationQueue
 	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		d := s.DB.NewWithPgxTx(tx)
-		q := d.Gen(ctx)
 		notices = nil
 		for _, m := range methods {
-			recorded := kind
-			switch kind {
-			case paymentmethods.CardUpdated:
+			ev := paymentmethods.CardEvent{MerchantID: mid.UUID(), PaymentMethodID: m.ID, Source: paymentmethods.SourceNMIACU, EventRef: s.Data.EventID, Advice: advice, At: now}
+			if !isAdvice {
 				card, err := intents.NMIVaultCard(customer, models.DerefStr(m.RailMethodRef))
 				if err != nil {
 					return fmt.Errorf("nmi account updater: card %s: %w", m.ID, err)
 				}
-				prior, err := q.GetPaymentMethodForUpdate(ctx, gen.GetPaymentMethodForUpdateParams{MerchantID: mid.UUID(), ID: m.ID})
-				if err != nil {
-					return err
-				}
-				brand, last4, month, year := card.Columns()
-				if _, err := q.RefreshPaymentMethodCard(ctx, gen.RefreshPaymentMethodCardParams{MerchantID: mid.UUID(), ID: m.ID,
-					CardBrand: brand, CardLast4: last4, CardExpMonth: month, CardExpYear: year, UpdatedAt: now}); err != nil {
-					return err
-				}
-				if paymentmethods.BrandChanged(models.DerefStr(prior.CardBrand), card.Brand) {
-					// #1166: another brand needs the customer's agreement again.
-					recorded = paymentmethods.CardBrandChanged
-					if err := mandates.RequireReconsent(ctx, q, mid.UUID(), m.ID, now); err != nil {
-						return err
-					}
-					asked, err := askForNewCard(ctx, s.SubscriptionLifecycleService, d, m.ID, now)
-					if err != nil {
-						return err
-					}
-					notices = append(notices, asked...)
-					break
-				}
-				if err := subscriptions.WakeForReplacedMethod(ctx, d, mid.UUID(), m.ID, now); err != nil {
-					return err
-				}
-			case paymentmethods.CardClosed:
-				if _, err := q.ParkPaymentMethod(ctx, gen.ParkPaymentMethodParams{MerchantID: mid.UUID(), ID: m.ID, ParkReason: "nmi_acu_closed_account", ParkedAt: now}); err != nil {
-					return err
-				}
-				fallthrough
-			case paymentmethods.ContactCustomer:
-				asked, err := askForNewCard(ctx, s.SubscriptionLifecycleService, d, m.ID, now)
-				if err != nil {
-					return err
-				}
-				notices = append(notices, asked...)
+				ev.Card = paymentmethods.Card{Card: card}
 			}
-			if err := paymentmethods.RecordCardUpdate(ctx, q, paymentmethods.CardUpdate{MerchantID: mid.UUID(), PaymentMethodID: m.ID, CustomerID: m.CustomerID,
-				PSPID: m.PspID, Source: paymentmethods.UpdateNMIACU, Kind: recorded, EventRef: s.Data.EventID, OccurredAt: now}); err != nil {
+			_, asked, err := s.SubscriptionLifecycleService.ApplyCardLifecycle(ctx, d, ev)
+			if err != nil {
 				return err
 			}
+			notices = append(notices, asked...)
 		}
 		return nil
 	})
 	if err != nil {
 		return err
 	}
-	if s.SubscriptionLifecycleService != nil {
-		s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
-	}
+	s.SubscriptionLifecycleService.DispatchNotifications(ctx, notices)
 	logger.Info("NMI account updater notice applied")
 	return nil
 }
 
-// askForNewCard queues the update-your-card notice for each membership the
-// card pays for, once per paid period.
-func askForNewCard(ctx context.Context, lifecycleService *subscriptions.SubscriptionLifecycleService, d *db.DB, method uuid.UUID, now time.Time) ([]*models.NotificationQueue, error) {
-	if lifecycleService == nil {
-		return nil, fmt.Errorf("card update: no lifecycle service wired")
+// readVault reads one vault from the PSP that holds it.
+func (s *NMIWebhookService) readVault(ctx context.Context, merchantID, psp uuid.UUID, vault string) (nmi.V5Customer, bool, error) {
+	if s.NMIResolver == nil {
+		return nmi.V5Customer{}, false, fmt.Errorf("nmi account updater: no NMI client resolver wired")
 	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
+	client, ok, err := s.NMIResolver.ResolveNMIClient(ctx, merchantID, &psp)
+	if err != nil || !ok || client == nil {
+		return nmi.V5Customer{}, false, fmt.Errorf("nmi account updater: client for %s unavailable: %v", psp, err)
 	}
-	ids, err := d.Gen(ctx).ListLiveSubscriptionsOnMethod(ctx, gen.ListLiveSubscriptionsOnMethodParams{MerchantID: mid.UUID(), PaymentMethodID: method})
-	if err != nil {
-		return nil, err
-	}
-	repo := subscriptions.NewSubscriptionRepo(d)
-	var out []*models.NotificationQueue
-	for _, id := range ids {
-		sub, err := repo.GetByID(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		queued, err := lifecycleService.ApplyEffects(ctx, d, sub, []lifecycle.Effect{lifecycle.Notify{Kind: lifecycle.NoticeUpdateMethod}}, now, subscriptions.EffectOptions{})
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, queued...)
-	}
-	return out, nil
+	return client.GetCustomer(ctx, vault)
 }

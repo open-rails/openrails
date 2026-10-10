@@ -93,6 +93,11 @@ func canonicalWireFixtures() map[string]any {
 		"payment.json": paymentFixtureValue(when, priceFixtureValue, card),
 		"payment_method.json": billing.PaymentMethod{
 			ID: methodFixture, CustomerID: customerFixture, Rail: "nmi", PSPID: ptr(billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555"))), Card: card,
+			Status: billing.PaymentMethodActive, Reusable: true, Mandates: []billing.Mandate{{
+				ID: billing.MandateID(uuid.MustParse("66666666-6666-4666-8666-666666666666")), CustomerID: customerFixture, PaymentMethodID: ptr(methodFixture),
+				PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")), Kind: billing.MandateCardOnFile, Status: billing.MandateActive,
+				CardBrand: ptr("visa"), InitialTransactionID: ptr("10000001"), AcceptedAt: when, CreatedAt: when,
+			}},
 			BillingDetails:       &billing.BillingDetails{Name: ptr("Ada Lovelace"), Address: &billing.BillingAddress{PostalCode: ptr("80202"), Country: ptr("US")}},
 			Health:               billing.PaymentMethodHealth{ExpiryStatus: ptr(billing.CardExpiryValid), LastChargedAt: &when, LastChargeOutcome: ptr(billing.ChargeSucceeded), Active: true},
 			Subscriptions:        []billing.PaymentMethodSubscription{{ID: subscriptionFixture, DisplayName: "Pro", CreatedAt: when}},

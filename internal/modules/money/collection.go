@@ -14,6 +14,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/mandates"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -96,8 +97,8 @@ func (c *ScopedCharger) Prepare(ctx context.Context, req ChargeRequest) (Prepare
 	if method.CustomerID != req.Payer.UUID() {
 		return nil, fmt.Errorf("payment method belongs to another customer")
 	}
-	if strings.TrimSpace(models.DerefStr(method.ParkReason)) != "" {
-		return nil, fmt.Errorf("%w: payment method is parked", charge.ErrInstrumentChanged)
+	if !paymentmethods.Chargeable(method) {
+		return nil, fmt.Errorf("%w: payment method cannot be charged", charge.ErrInstrumentChanged)
 	}
 	if err := req.Instrument.Validate(); err != nil {
 		return nil, err
@@ -178,7 +179,7 @@ func (c *ScopedCharger) checkInstrumentForSubmit(ctx context.Context, req Charge
 		if err != nil {
 			return err
 		}
-		if method.CustomerID != req.Payer.UUID() || method.ParkReason != nil || normalizeRail(method.Rail) != rail {
+		if method.CustomerID != req.Payer.UUID() || !paymentmethods.Chargeable(method) || normalizeRail(method.Rail) != rail {
 			return charge.ErrInstrumentChanged
 		}
 		if err := req.Instrument.Matches(method); err != nil {

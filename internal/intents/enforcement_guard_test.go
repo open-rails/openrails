@@ -162,6 +162,8 @@ var allowedWriteCallers = map[string]string{
 	// --- vault lifecycle -------------------------------------------------
 	"internal/modules/paymentmethods/rail_payment_method_service.go:CreatePaymentMethod":           "the create half of the vault lifecycle: no durable intent exists until a vault does",
 	"internal/http/handlers/update_subscription_payment_method.go:updateSubscriptionPaymentMethod": "a $0 recurring verification the customer is present for, before the move commits; it moves no funds and a lost answer is resent under a new order (#1168)",
+	"internal/service/payment_method_edit.go:pushCardEdit":                                         "the customer's own expiry and billing-detail edit, customer present: a set-to-value write recorded locally only after the provider answers; a lost answer is resent (#1168)",
+	"internal/service/payment_method_edit.go:verifyCard":                                           "a $0 verification the customer is present for after a brand change, before the reconsent commits; it moves no funds and a lost answer is resent under a new order (#1168)",
 	"internal/modules/paymentmethods/rail_payment_method_service.go:deletePaymentMethodDirect":     "reactive decline-cleanup only: vault referenced nowhere, harmless if lost; durable deletes route through DeletePaymentMethod → nmi_vault_delete intent (#674 tail)",
 	"internal/modules/paymentmethods/rail_payment_method_service.go:cleanupVaultBestEffort":        "reactive decline-cleanup (shared-vault scope); see deletePaymentMethodDirect",
 

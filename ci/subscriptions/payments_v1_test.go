@@ -161,8 +161,8 @@ func TestCustodianCardRoutesPerCharge(t *testing.T) {
 		VALUES ($1, 'vault', 'basis_theory', $2, 'bt-e2e', false, '{}') RETURNING id`), merchant, env).Scan(&custodian))
 	insert := func(pspID *uuid.UUID) (uuid.UUID, error) {
 		var id uuid.UUID
-		err := w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.payment_methods (merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_method_ref, charge_via)
-			VALUES ($1, $2, 'nmi', $3, 'basis_theory', $4, $5, 'pan_proxy') RETURNING id`), merchant, c.cid().UUID(), pspID, custodian, "tok_"+uuid.NewString()).Scan(&id)
+		err := w.pool.QueryRow(ctx, w.q(`INSERT INTO billing.payment_methods (merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_method_ref, charge_via, status)
+			VALUES ($1, $2, 'nmi', $3, 'basis_theory', $4, $5, 'pan_proxy', 'active') RETURNING id`), merchant, c.cid().UUID(), pspID, custodian, "tok_"+uuid.NewString()).Scan(&id)
 		return id, err
 	}
 	_, err = insert(&psp)

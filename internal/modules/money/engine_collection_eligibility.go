@@ -75,7 +75,7 @@ func (s *MoneyService) engineCollectionMethod(ctx context.Context, d *db.DB, sub
 	if err := charge.FreezeInstrument(observed, sub.PspID).Matches(method); err != nil {
 		return unusable(err)
 	}
-	if method.CustomerID != sub.CustomerID || !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || method.ParkReason != nil {
+	if method.CustomerID != sub.CustomerID || !charge.ChargeableOn(method, sub.PspID) || method.Rail != string(sub.Rail) || !paymentmethods.Chargeable(method) {
 		return unusable(errors.New("engine recurring method is not qualified for this obligation"))
 	}
 	account, err := q.GetPSP(ctx, gen.GetPSPParams{MerchantID: sub.MerchantID, ID: sub.PspID})

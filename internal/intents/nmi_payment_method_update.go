@@ -482,8 +482,11 @@ func (h *NMIPaymentMethodUpdateHandler) finalize(ctx context.Context, intent gen
 		if err := NewStore(d).RecordProgress(ctx, intent.ID, map[string]any{"finalized": true}); err != nil {
 			return err
 		}
-		if err := paymentmethods.RecordCardUpdate(ctx, d.Gen(ctx), paymentmethods.CardUpdate{MerchantID: intent.MerchantID, PaymentMethodID: pm.ID, CustomerID: pm.CustomerID,
-			PSPID: pm.PspID, Source: paymentmethods.UpdateByCustomer, Kind: paymentmethods.CardUpdated, EventRef: intent.ID.String(), OccurredAt: now}); err != nil {
+		replaced, err := d.Gen(ctx).GetPaymentMethodForUpdate(ctx, gen.GetPaymentMethodForUpdateParams{MerchantID: intent.MerchantID, ID: pm.ID})
+		if err != nil {
+			return err
+		}
+		if err := paymentmethods.RecordVersion(ctx, d.Gen(ctx), replaced, paymentmethods.SourceCustomerSave, paymentmethods.CardUpdated, intent.ID.String(), now); err != nil {
 			return err
 		}
 		if err := recordReplacementVerification(ctx, d, intent, pm.CustomerID, pm.ID, now, attempts.Attempt{Approved: true, TransactionID: ref, Answer: decline.Evidence{CardBrand: card.CardType, CardLast4: card.LastFour}}); err != nil {

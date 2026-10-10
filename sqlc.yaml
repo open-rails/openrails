@@ -36,6 +36,7 @@ sql:
       - "internal/migrate/postgres/0037_failed_usage.up.sql"
       - "internal/migrate/postgres/0038_orders.up.sql"
       - "internal/migrate/postgres/0039_seat_changes.up.sql"
+      - "internal/migrate/postgres/0040_card_versions.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

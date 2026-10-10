@@ -126,12 +126,12 @@ func (q *Queries) CountMerchantRowsPaymentAttempts(ctx context.Context, merchant
 	return count, err
 }
 
-const countMerchantRowsPaymentMethodUpdates = `-- name: CountMerchantRowsPaymentMethodUpdates :one
-SELECT count(*) FROM billing.payment_method_updates WHERE merchant_id = $1
+const countMerchantRowsPaymentMethodVersions = `-- name: CountMerchantRowsPaymentMethodVersions :one
+SELECT count(*) FROM billing.payment_method_versions WHERE merchant_id = $1
 `
 
-func (q *Queries) CountMerchantRowsPaymentMethodUpdates(ctx context.Context, merchantID uuid.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countMerchantRowsPaymentMethodUpdates, merchantID)
+func (q *Queries) CountMerchantRowsPaymentMethodVersions(ctx context.Context, merchantID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countMerchantRowsPaymentMethodVersions, merchantID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -326,12 +326,12 @@ func (q *Queries) PurgeMerchantRowsPaymentAttempts(ctx context.Context, merchant
 	return err
 }
 
-const purgeMerchantRowsPaymentMethodUpdates = `-- name: PurgeMerchantRowsPaymentMethodUpdates :exec
-DELETE FROM billing.payment_method_updates WHERE merchant_id = $1
+const purgeMerchantRowsPaymentMethodVersions = `-- name: PurgeMerchantRowsPaymentMethodVersions :exec
+DELETE FROM billing.payment_method_versions WHERE merchant_id = $1
 `
 
-func (q *Queries) PurgeMerchantRowsPaymentMethodUpdates(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, purgeMerchantRowsPaymentMethodUpdates, merchantID)
+func (q *Queries) PurgeMerchantRowsPaymentMethodVersions(ctx context.Context, merchantID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, purgeMerchantRowsPaymentMethodVersions, merchantID)
 	return err
 }
 
