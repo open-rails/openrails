@@ -512,7 +512,7 @@ func runtimeClock(overrides *runtimeOverrides) clockwork.Clock {
 }
 
 // createRedisClient opens the declared Redis. It does not wait for it: the
-// health monitor reports it, and Ready fails until it answers.
+// health monitor reports it, degraded until it answers.
 func createRedisClient(cfg *config.Config) (*redis.Client, error) {
 	if cfg.Redis == nil {
 		return nil, nil

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/require"
@@ -70,12 +71,19 @@ type resilientBoot struct {
 	nmi    http.RoundTripper
 	stripe http.RoundTripper
 	slug   string
+	// redisDown hands the runtime an unreachable Redis.
+	redisDown bool
 	// chain is the Solana node the rail reads; nil is an unreachable one.
 	chain *solanafake.Node
 }
 
 func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Client {
 	t.Helper()
+	var rdb *redis.Client
+	if b.redisDown {
+		rdb = redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
+		t.Cleanup(func() { _ = rdb.Close() })
+	}
 	psps := map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{AccountID: "acct_e2e", SecretKey: "sk_test_e2e", WebhookSigningSecret: "whsec_e2e"}.PSPConfig(),
 		"solana": openrails.SolanaPSP{TransitKey: transitKey}.PSPConfig(),
@@ -93,7 +101,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Cli
 	}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
 	start := time.Now()
-	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
+	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), 20*time.Second, "construction never waits on an optional provider")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })
@@ -188,10 +196,10 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.Equal(t, "redirect_to_url", paid.NextAction.Type)
 }
 
-// First boot with Vault and the NMI posture probe unavailable: the runtime
-// builds and is ready, the card rails are offered, only the Solana rail is
-// missing and its signer answers unavailable; each recovers in the
-// background. A declared Redis is not optional (TestDeclaredRedisMustAnswer).
+// First boot with Vault, Redis and the NMI posture probe all unavailable: the
+// runtime builds and is ready, the card rails are offered, only the Solana
+// rail is missing and its signer answers unavailable; each recovers in the
+// background.
 func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 	t.Setenv("VAULT_MAX_RETRIES", "0")
 	f := newFixture(t)
@@ -206,9 +214,21 @@ func TestOptionalProvidersNeverBlockBoot(t *testing.T) {
 		}
 	})
 
-	rt := f.resilientRuntime(t, resilientBoot{vault: fake, nmi: nmi, stripe: &stripeCheckoutFake{t: t}, slug: "resilient-" + uuid.NewString()[:8]})
+	rt := f.resilientRuntime(t, resilientBoot{vault: fake, nmi: nmi, stripe: &stripeCheckoutFake{t: t}, slug: "resilient-" + uuid.NewString()[:8], redisDown: true})
 	client := rt
 	waitReady(t, rt)
+	require.Eventually(t, func() bool {
+		deps, err := engine.Graph(rt).Runtime.Ready(t.Context())
+		if err != nil {
+			return false
+		}
+		for _, dep := range deps {
+			if dep.Name == "redis" {
+				return dep.Optional && !dep.Available && dep.Err != nil
+			}
+		}
+		return false
+	}, 5*time.Second, 20*time.Millisecond, "unreachable Redis is reported without failing readiness")
 	require.ErrorIs(t, probe(t, rt, "openrails_vault"), vault.ErrUnavailable)
 	require.Error(t, probe(t, rt, "openrails_psp_posture"), "the NMI verdict is still unknown")
 

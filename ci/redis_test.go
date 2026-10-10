@@ -19,7 +19,9 @@ import (
 
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
+	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
+	"github.com/open-rails/openrails/internal/engine"
 )
 
 // redisEngine is one engine over cfg's Redis, serving buyers.
@@ -37,6 +39,27 @@ func redisEngine(t *testing.T, f *fixture, rc openrails.RedisConfig) (*openrails
 	return client, mux
 }
 
+// redisState is the redis entry readiness reports while the engine is
+// ready; ok is false otherwise.
+func redisState(t *testing.T, client *openrails.Client) (dep app.ReadinessDependency, ok bool) {
+	deps, err := engine.Graph(client).Runtime.Ready(t.Context())
+	if err != nil {
+		return dep, false
+	}
+	for _, d := range deps {
+		if d.Name == "redis" {
+			return d, true
+		}
+	}
+	return dep, false
+}
+
+// degraded reports an unavailable Redis on a ready engine.
+func degraded(t *testing.T, client *openrails.Client) bool {
+	dep, ok := redisState(t, client)
+	return ok && dep.Optional && !dep.Available && dep.Err != nil
+}
+
 // pay is a checkout payment from addr: the rate-limited checkout bucket.
 func pay(h http.Handler, addr string) int {
 	req := httptest.NewRequest(http.MethodPost, "/v1/checkout-sessions/ocs_"+strings.ReplaceAll(uuid.NewString(), "-", "")+"/pay", strings.NewReader(`{}`))
@@ -50,7 +73,7 @@ func pay(h http.Handler, addr string) int {
 // A managed Redis takes only TLS and an ACL user. OpenRails reaches it by a
 // rediss:// URL or by address, user and password, verifying it against the
 // operator's CA, and counts its rate limits there. A wrong credential or an
-// untrusted certificate fails readiness.
+// untrusted certificate leaves it degraded.
 func TestRedisOverTLSWithACLUser(t *testing.T) {
 	rawURL := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_TLS_URL"))
 	caFile := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_REDIS_TLS_CA"))
@@ -77,7 +100,7 @@ func TestRedisOverTLSWithACLUser(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			client, h := redisEngine(t, f, rc)
-			require.Eventually(t, func() bool { return client.Ready(t.Context()) == nil }, 15*time.Second, 50*time.Millisecond)
+			require.Eventually(t, func() bool { dep, ok := redisState(t, client); return ok && dep.Available }, 15*time.Second, 50*time.Millisecond)
 			ip := "198.51.100." + map[string]string{"url": "21", "address": "22"}[name]
 			for range 3 {
 				require.NotEqual(t, http.StatusTooManyRequests, pay(h, ip+":4711"))
@@ -96,22 +119,21 @@ func TestRedisOverTLSWithACLUser(t *testing.T) {
 	} {
 		t.Run("refused: "+name, func(t *testing.T) {
 			client, _ := redisEngine(t, f, rc)
-			require.Never(t, func() bool { return client.Ready(t.Context()) == nil }, 2*time.Second, 100*time.Millisecond)
-			require.ErrorContains(t, client.Ready(t.Context()), "readiness: redis")
+			require.Eventually(t, func() bool { return degraded(t, client) }, 15*time.Second, 50*time.Millisecond, "ready, with Redis degraded")
+			require.Never(t, func() bool { return !degraded(t, client) }, 2*time.Second, 100*time.Millisecond)
 		})
 	}
 }
 
-// A declared Redis that does not answer fails readiness instead of the engine
-// quietly counting in memory; meanwhile limits still hold, counted in
-// PostgreSQL. Without a declared Redis there is nothing to wait for.
-func TestDeclaredRedisMustAnswer(t *testing.T) {
+// A declared Redis that does not answer costs speed, not correctness: the
+// engine is ready and reports Redis degraded, and limits still hold, counted
+// in PostgreSQL. Without a declared Redis none is reported.
+func TestDeclaredRedisOutageDegrades(t *testing.T) {
 	f := newFixture(t)
 	start := time.Now()
 	down, h := redisEngine(t, f, openrails.RedisConfig{Addr: "127.0.0.1:1"})
 	require.Less(t, time.Since(start), 10*time.Second, "construction never waits on Redis")
-	require.Never(t, func() bool { return down.Ready(t.Context()) == nil }, 2*time.Second, 100*time.Millisecond)
-	require.ErrorContains(t, down.Ready(t.Context()), "readiness: redis")
+	require.Eventually(t, func() bool { return degraded(t, down) }, 15*time.Second, 50*time.Millisecond, "ready, with Redis degraded")
 	const addr = "198.51.100.23:4711"
 	// Eleven requests inside one fixed minute window.
 	if s := time.Now().Second(); s > 45 {
@@ -129,4 +151,9 @@ func TestDeclaredRedisMustAnswer(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, none.Close(context.Background())) })
 	require.NoError(t, none.Start(t.Context()))
 	require.Eventually(t, func() bool { return none.Ready(t.Context()) == nil }, 15*time.Second, 50*time.Millisecond)
+	deps, err := engine.Graph(none).Runtime.Ready(t.Context())
+	require.NoError(t, err)
+	for _, dep := range deps {
+		require.NotEqual(t, "redis", dep.Name)
+	}
 }

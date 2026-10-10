@@ -26,10 +26,9 @@ type ReadinessDependency struct {
 
 // Ready is the readiness shared by the standalone /readyz and embedded
 // Runtime.Ready. Postgres, River (the host's fleet bound to RiverJobs, or
-// OpenRails' own running), a declared catalog (applied) and a declared Redis
-// are required. Vault and PSP posture are reported as optional (degraded)
-// entries. Redis, Vault and PSP posture come from cached background state;
-// Ready never contacts them.
+// OpenRails' own running) and a declared catalog (applied) are required. Redis, Vault and PSP
+// posture are reported from cached background state as optional (degraded)
+// entries; Ready never contacts them.
 func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 	if r == nil || r.riverClosed.Load() {
 		dep := ReadinessDependency{Name: "runtime", Err: fmt.Errorf("not initialized")}
@@ -71,13 +70,14 @@ func (r *Runtime) Ready(ctx context.Context) ([]ReadinessDependency, error) {
 		add("river_consumer", false, consumerErr)
 	}
 
-	// A declared Redis is required: no answer yet, or none, fails Ready.
+	// A declared Redis that does not answer is degraded: requests count in
+	// PostgreSQL meanwhile.
 	if r.RedisClient != nil {
 		redisErr := errors.New("not reached yet")
 		if observed, err := r.redisState.observed(); observed {
 			redisErr = err
 		}
-		add("redis", false, redisErr)
+		add("redis", true, redisErr)
 	}
 	if r.MerchantSecretBackend != nil && r.MerchantSecretBackend.VaultAuth != nil {
 		add("vault", true, r.MerchantSecretBackend.State())
@@ -131,7 +131,7 @@ func (r *Runtime) startRedisMonitor() {
 			}
 			if before, prev := r.redisState.observed(); !before || (prev == nil) != (err == nil) {
 				if err != nil {
-					log.WithError(err).Error("redis: unreachable; Ready fails until it answers")
+					log.WithError(err).Error("redis: unreachable; counting in PostgreSQL until it answers")
 				} else {
 					log.Info("redis: reachable")
 				}

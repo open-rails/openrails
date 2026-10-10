@@ -46,9 +46,9 @@ there is no separate private/service listener.
   PostgreSQL, shared by every replica. Name it with `redis.addr` (`REDIS_ADDR`)
   or a `redis://` / `rediss://` URL (`REDIS_URL`), with `redis.username`
   (`REDIS_USERNAME`, an ACL user), `redis.password`, `redis.tls` and
-  `redis.ca_cert` (`REDIS_CA_CERT`, the PEM CA) as it needs. A declared Redis
-  is required: readiness fails until it answers, while requests count in
-  PostgreSQL.
+  `redis.ca_cert` (`REDIS_CA_CERT`, the PEM CA) as it needs. While a declared
+  Redis does not answer, requests count in PostgreSQL and readiness reports it
+  degraded without failing.
 - **HashiCorp Vault** — optional. Two independent uses: KV storage for merchant
   secrets (`secret_backend: vault`) and Transit signing for Solana custody. See
   [vault.md](vault.md).
