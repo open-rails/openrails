@@ -140,8 +140,8 @@ The root and server modules release together. The script pins
 `server/go.mod`'s require of the root to `vX.Y.Z`, commits that, tags the
 commit `vX.Y.Z` and `server/vX.Y.Z` (signed, annotated) and pushes master and
 both tags. `vX.Y.Z` runs `release.yaml` (GoReleaser builds the binary from the
-server module: binaries, checksums, SBOMs, generated notes, the
-`openrails-billing-ui-X.Y.Z.tgz` asset, build provenance) and
+server module: binaries, checksums, SBOMs, generated notes, build
+provenance; then `@openrails/billing-ui@X.Y.Z` on npm) and
 `docker-publish.yaml` (`vX.Y.Z`, `X.Y`, `latest` on Docker Hub and GHCR, one
 manifest for linux/amd64 and linux/arm64). Edit the generated notes on the
 release page if needed. Dry run:

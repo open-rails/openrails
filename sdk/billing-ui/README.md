@@ -21,10 +21,11 @@ session document, billing fields, browser-autofill behavior, and the checkout
 request schema.
 
 The package lives in the OpenRails repository and shares its version: each
-OpenRails release `vX.Y.Z` attaches `openrails-billing-ui-X.Y.Z.tgz`.
+OpenRails release `vX.Y.Z` publishes `@openrails/billing-ui@X.Y.Z` to npm, with
+provenance.
 
 ```sh
-pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
+pnpm add @openrails/billing-ui@X.Y.Z
 ```
 
 ## Checkout

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # Pack @openrails/billing-ui as <out-dir>/openrails-billing-ui-<version>.tgz.
-# Each release attaches it (.goreleaser.yaml); hosts install it by URL, so the
-# asset name is a contract.
+# release.yaml publishes it to npm.
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
