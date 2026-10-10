@@ -87,6 +87,18 @@ function OfferList({
   const { client } = useBillingContext()
   const scales = useCurrencyScales()
   const [session, setSession] = React.useState<string>()
+  // One source per session: Checkout drops the result of a payment whose
+  // source changed, and saving a card re-renders this panel.
+  const source = React.useMemo(
+    () =>
+      session
+        ? // The customer's surface: their saved cards pay too.
+          client.checkoutSource(session, {
+            customerBase: `${client.baseUrl}/me`,
+          })
+        : null,
+    [client, session]
+  )
   const [starting, setStarting] = React.useState<string>()
   const [failure, setFailure] = React.useState<string>()
 
@@ -157,14 +169,11 @@ function OfferList({
           {failure}
         </p>
       ) : null}
-      {session ? (
+      {source ? (
         <CheckoutModal
           open
           onOpenChange={(open) => !open && setSession(undefined)}
-          // The customer's surface: their saved cards pay too.
-          source={client.checkoutSource(session, {
-            customerBase: `${client.baseUrl}/me`,
-          })}
+          source={source}
           appearance={appearance}
           onComplete={(result) => {
             if (result.status !== "succeeded") return
