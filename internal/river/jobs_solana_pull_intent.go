@@ -47,15 +47,12 @@ type SolanaTxReader interface {
 }
 
 // SolanaPullIntentHandler drives the crank state machine through the intent
-// ledger. Effectively-once on-chain is double-walled: the ledger dedupes
-// intents per period AND the subscriptions program itself rejects a second
-// pull in an already-paid period (Custom:400) — so a re-crank after an
-// unresolved read can never move money twice. What the intent ADDS is the
-// pre-submit signature record: the renewal repair runs off it after any crash.
+// ledger. It records the signature before sending, repairs landed pulls, and
+// only retries a recorded transaction after confirming that it reverted.
 type SolanaPullIntentHandler struct {
 	Core   *SolanaCrankWorker // DB/Config/Clock/Cranker/Lifecycle (no Intents)
 	Store  *intents.Store     // pre-submit signature write-ahead
-	Chain  SolanaTxReader     // nil tolerated: verification degrades to re-crank
+	Chain  SolanaTxReader     // nil leaves recorded transactions unresolved
 	Policy intents.BackoffPolicy
 }
 
@@ -82,18 +79,17 @@ func decodeSolanaPullPayload(intent gen.BillingProviderIntent) (SolanaPullPayloa
 	return p, nil
 }
 
-// recordedSignature reads the pre-submit signature off the intent's evidence.
-func recordedSignature(intent gen.BillingProviderIntent) string {
+func recordedSignature(intent gen.BillingProviderIntent) (string, error) {
 	if len(intent.ResultEvidence) == 0 {
-		return ""
+		return "", nil
 	}
 	var evidence struct {
 		TransactionID string `json:"transaction_id"`
 	}
 	if err := json.Unmarshal(intent.ResultEvidence, &evidence); err != nil {
-		return ""
+		return "", fmt.Errorf("decode solana pull evidence: %w", err)
 	}
-	return evidence.TransactionID
+	return evidence.TransactionID, nil
 }
 
 func (h *SolanaPullIntentHandler) loadRow(ctx context.Context, p SolanaPullPayload) (*models.SolanaSubscription, error) {
@@ -141,19 +137,22 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	// A previously-recorded signature means a tx WAS signed (and possibly
 	// landed). Resolve it via the chain BEFORE any re-pull: landed ⇒ renewal
 	// repair; read failure ⇒ never crank blind on top of an unresolved send.
-	if sig := recordedSignature(intent); sig != "" {
+	sig, err := recordedSignature(intent)
+	if err != nil {
+		return intents.Parked(err.Error())
+	}
+	if sig != "" {
 		result, verdict := h.checkSignature(ctx, sig)
 		switch verdict {
 		case sigVerdictUnknown:
-			return intents.Ambiguous("recorded pull signature unresolved (chain read failed); refusing to re-pull blind")
+			return intents.Ambiguous("recorded pull signature unresolved; refusing to re-pull blind")
 		case sigVerdictLanded:
 			if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 				return intents.Parked("recorded pull signature landed but " + err.Error())
 			}
 			return h.repairFromSignature(ctx, repo, row, sig)
 		case sigVerdictNotLanded:
-			// Verified not executed (reverted or never landed): safe to
-			// re-crank — the program's period guard backstops a stale read.
+			// The transaction reverted, so no payment was made.
 		}
 	}
 
@@ -203,25 +202,27 @@ func (h *SolanaPullIntentHandler) Execute(ctx context.Context, intent gen.Billin
 	}
 }
 
-// Verify resolves an ambiguous pull via chain READS on the recorded
-// signature: landed ⇒ renewal repair; verified not landed ⇒ the executor may
-// re-crank (program period guard backstops); no signature ⇒ nothing was ever
-// signed, plain retry.
+// Verify repairs successful pulls and retries reverted transactions. Missing
+// transactions stay unresolved: even after expiry, a missing historical read
+// does not prove that the payment never landed.
 func (h *SolanaPullIntentHandler) Verify(ctx context.Context, intent gen.BillingProviderIntent) intents.Outcome {
 	p, err := decodeSolanaPullPayload(intent)
 	if err != nil {
 		return intents.Terminal(err.Error())
 	}
-	sig := recordedSignature(intent)
+	sig, err := recordedSignature(intent)
+	if err != nil {
+		return intents.Parked(err.Error())
+	}
 	if sig == "" {
 		return intents.Retryable("no signature recorded; nothing was submitted")
 	}
 	result, verdict := h.checkSignature(ctx, sig)
 	switch verdict {
 	case sigVerdictUnknown:
-		return intents.Ambiguous("chain read failed; still unresolved")
+		return intents.Ambiguous("recorded pull signature still unresolved")
 	case sigVerdictNotLanded:
-		return intents.Retryable("recorded signature verified not landed; safe to re-pull")
+		return intents.Retryable("recorded transaction reverted; safe to re-pull")
 	}
 	if err := verifyPullMemoMatchesIntent(result, intent.ID); err != nil {
 		return intents.Parked("recorded pull signature landed but " + err.Error())
@@ -267,21 +268,16 @@ func (h *SolanaPullIntentHandler) checkSignature(ctx context.Context, signature 
 	}
 	sig, err := solanago.SignatureFromBase58(signature)
 	if err != nil {
-		// Not a real signature (corrupt evidence): nothing can have landed.
-		return nil, sigVerdictNotLanded
+		return nil, sigVerdictUnknown
 	}
 	result, err := h.Chain.GetTransaction(ctx, sig)
 	if err != nil || result == nil {
-		// gagliardetto's GetTransaction reports "not found" as an error too;
-		// distinguishing it from transport failure is not reliable, so both are
-		// UNKNOWN — the caller decides (executor refuses to re-pull blind on a
-		// recorded signature; the program period guard covers a stale answer).
-		if errors.Is(err, rpc.ErrNotFound) {
-			return nil, sigVerdictNotLanded
-		}
 		return nil, sigVerdictUnknown
 	}
-	if result.Meta != nil && result.Meta.Err != nil {
+	if result.Meta == nil {
+		return nil, sigVerdictUnknown
+	}
+	if result.Meta.Err != nil {
 		return nil, sigVerdictNotLanded // landed but REVERTED: no money moved
 	}
 	return result, sigVerdictLanded
