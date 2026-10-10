@@ -114,16 +114,30 @@ func (s *NotificationService) EmailEnabled() bool {
 	return s.emailService.IsEnabled()
 }
 
+// emailLease is how long one sender holds a notification's email: past the
+// send's own timeout, so only a sender that died is replaced.
+const emailLease = 5 * time.Minute
+
 // DeliverEmail sends the email for an already-created notification and stamps
 // emailed_at on success. Without an armed email service the row stays
 // undelivered for the sweep to retry; a rendered no-op (unsupported type, no
-// email address) still stamps so the sweep never rescans it.
+// email address) still stamps so the sweep never rescans it. One sender holds
+// the email at a time: an email already sent, or being sent by another sender
+// (the inline dispatch, its job, any replica's sweep), is skipped.
 func (s *NotificationService) DeliverEmail(ctx context.Context, notification *models.NotificationQueue) error {
 	if !s.EmailEnabled() {
 		log.WithContext(ctx).Debug("email service not available - leaving notification undelivered")
 		return nil
 	}
+	leased, err := s.repo.LeaseEmail(ctx, notification.ID, emailLease)
+	if err != nil || !leased {
+		return err
+	}
 	if err := s.sendEmailNotification(ctx, notification); err != nil {
+		if releaseErr := s.repo.ReleaseEmail(ctx, notification.ID); releaseErr != nil {
+			log.WithContext(ctx).WithError(releaseErr).WithField("notification_id", notification.ID).
+				Warn("failed to release notification email; the next sender waits for its lease")
+		}
 		return err
 	}
 	if err := s.repo.MarkEmailed(ctx, notification.ID, time.Now().UTC()); err != nil {

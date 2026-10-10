@@ -93,7 +93,7 @@ var excludedColumns = map[string]string{
 	"merchant_secrets":              "merchant_id name value version created_at updated_at",
 	"merchant_destructive_policy":   "merchant_id destructive_actions_enabled enforce_armed_at first_pull_completed_at updated_by reason updated_at",
 	"merchant_webhooks":             "id merchant_id name destination_host secret_version format enabled created_at updated_at",
-	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at",
+	"notifications":                 "id event_type data recipient_kind read_at severity title body link created_at merchant_id customer_id emailed_at email_lease_expires_at",
 	"provider_mutation_logs":        "id merchant_id rail psp_id provider_intent_id intent_type idempotency_key attempt phase reason evidence created_at custodian_id",
 	"subscription_verifications":    "merchant_id subscription_id unverified_at reads last_read_at last_error",
 	"nmi_bulk_checkpoints":          "merchant_id psp_id window_starts_at window_ends_at next_page started_at",

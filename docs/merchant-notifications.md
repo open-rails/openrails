@@ -26,8 +26,12 @@ Each row declares `recipient_kind`: customer rows have a merchant-scoped
 `customer_id`; merchant rows have no customer and carry the operator message.
 Queries and mutations select their recipient kind explicitly. `read_at` is the
 single inbox read marker; the customer API derives `seen` from it. Only customer
-rows enter the notification email sweep. Retention applies to both recipient
-kinds: by default read rows expire after 90 days and all rows after 180 days.
+rows enter the notification email sweep. One sender at a time holds a row's
+email (the dispatch that created it, its job, or any replica's sweep), so
+replicas send it once; a sender that dies is replaced after five minutes, and
+one that dies between sending and recording it means one duplicate. Retention
+applies to both recipient kinds: by default read rows expire after 90 days and
+all rows after 180 days.
 Reading a notification never acknowledges a financial or lifecycle event in
 `host_outbox`.
 

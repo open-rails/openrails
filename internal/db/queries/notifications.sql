@@ -99,6 +99,20 @@ UPDATE billing.notifications
 SET emailed_at = sqlc.arg(emailed_at)::timestamptz
 WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1 AND emailed_at IS NULL;
 
+-- One sender at a time: claims an undelivered email for lease. No row means
+-- it was sent or another sender holds it.
+-- name: LeaseNotificationEmail :execrows
+UPDATE billing.notifications
+SET email_lease_expires_at = now() + make_interval(secs => sqlc.arg(lease_seconds)::float8)
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = sqlc.arg(id)::uuid
+  AND emailed_at IS NULL AND (email_lease_expires_at IS NULL OR email_lease_expires_at <= now());
+
+-- A sender that failed hands the email back to the next one.
+-- name: ReleaseNotificationEmail :exec
+UPDATE billing.notifications
+SET email_lease_expires_at = NULL
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1 AND emailed_at IS NULL;
+
 -- A customer's own notifications, newest first.
 -- name: ListCustomerNotifications :many
 SELECT * FROM billing.notifications nq

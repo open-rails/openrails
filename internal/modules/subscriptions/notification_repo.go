@@ -121,6 +121,18 @@ func (r *NotificationQueueRepo) MarkEmailed(ctx context.Context, id uuid.UUID, a
 	return err
 }
 
+// LeaseEmail claims an undelivered email for one sender for lease; false when
+// it was sent or another sender holds it.
+func (r *NotificationQueueRepo) LeaseEmail(ctx context.Context, id uuid.UUID, lease time.Duration) (bool, error) {
+	n, err := r.db.Gen(ctx).LeaseNotificationEmail(ctx, gen.LeaseNotificationEmailParams{ID: id, LeaseSeconds: lease.Seconds()})
+	return n == 1, err
+}
+
+// ReleaseEmail hands an unsent email back to the next sender.
+func (r *NotificationQueueRepo) ReleaseEmail(ctx context.Context, id uuid.UUID) error {
+	return r.db.Gen(ctx).ReleaseNotificationEmail(ctx, id)
+}
+
 func (r *NotificationQueueRepo) Update(ctx context.Context, notification *models.NotificationQueue) error {
 	data, err := notification.DataJSONB()
 	if err != nil {

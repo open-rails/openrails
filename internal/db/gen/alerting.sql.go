@@ -150,7 +150,7 @@ func (q *Queries) GetMerchantWebhook(ctx context.Context, arg GetMerchantWebhook
 }
 
 const listMerchantNotifications = `-- name: ListMerchantNotifications :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications
 WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant'
   AND (NOT $2::boolean OR read_at IS NULL)
   AND ($3::timestamptz IS NULL OR (created_at, id) < ($3::timestamptz, $4::uuid))
@@ -195,6 +195,7 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -207,7 +208,7 @@ func (q *Queries) ListMerchantNotifications(ctx context.Context, arg ListMerchan
 }
 
 const listMerchantNotificationsByIDs = `-- name: ListMerchantNotificationsByIDs :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[]) AND recipient_kind = 'merchant'
 ORDER BY created_at DESC, id DESC
 `
@@ -240,6 +241,7 @@ func (q *Queries) ListMerchantNotificationsByIDs(ctx context.Context, arg ListMe
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -332,7 +334,7 @@ const markMerchantNotificationsRead = `-- name: MarkMerchantNotificationsRead :m
 UPDATE billing.notifications
 SET read_at = COALESCE(read_at, now())
 WHERE merchant_id = $1::uuid AND recipient_kind = 'merchant' AND id = ANY($2::uuid[])
-RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
+RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at
 `
 
 type MarkMerchantNotificationsReadParams struct {
@@ -363,6 +365,7 @@ func (q *Queries) MarkMerchantNotificationsRead(ctx context.Context, arg MarkMer
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}

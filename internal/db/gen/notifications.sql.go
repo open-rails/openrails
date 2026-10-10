@@ -184,7 +184,7 @@ func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteS
 }
 
 const getNotificationByID = `-- name: GetNotificationByID :one
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1
 `
 
 func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (BillingNotification, error) {
@@ -204,12 +204,35 @@ func (q *Queries) GetNotificationByID(ctx context.Context, id uuid.UUID) (Billin
 		&i.MerchantID,
 		&i.CustomerID,
 		&i.EmailedAt,
+		&i.EmailLeaseExpiresAt,
 	)
 	return i, err
 }
 
+const leaseNotificationEmail = `-- name: LeaseNotificationEmail :execrows
+UPDATE billing.notifications
+SET email_lease_expires_at = now() + make_interval(secs => $1::float8)
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $2::uuid
+  AND emailed_at IS NULL AND (email_lease_expires_at IS NULL OR email_lease_expires_at <= now())
+`
+
+type LeaseNotificationEmailParams struct {
+	LeaseSeconds float64
+	ID           uuid.UUID
+}
+
+// One sender at a time: claims an undelivered email for lease. No row means
+// it was sent or another sender holds it.
+func (q *Queries) LeaseNotificationEmail(ctx context.Context, arg LeaseNotificationEmailParams) (int64, error) {
+	result, err := q.db.Exec(ctx, leaseNotificationEmail, arg.LeaseSeconds, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listCustomerNotifications = `-- name: ListCustomerNotifications :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications nq
 WHERE nq.merchant_id = $1::uuid AND nq.recipient_kind = 'customer' AND nq.customer_id = $2::uuid
   AND ($3::boolean IS NULL OR (nq.read_at IS NOT NULL) = $3::boolean)
   AND ($4::timestamptz IS NULL OR (nq.created_at, nq.id) < ($4::timestamptz, $5::uuid))
@@ -257,6 +280,7 @@ func (q *Queries) ListCustomerNotifications(ctx context.Context, arg ListCustome
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -269,7 +293,7 @@ func (q *Queries) ListCustomerNotifications(ctx context.Context, arg ListCustome
 }
 
 const listNotificationsByCustomer = `-- name: ListNotificationsByCustomer :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications nq
 WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id() AND nq.customer_id = $1::uuid
 ORDER BY nq.created_at DESC
 `
@@ -297,6 +321,7 @@ func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uu
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -309,7 +334,7 @@ func (q *Queries) ListNotificationsByCustomer(ctx context.Context, customerID uu
 }
 
 const listNotificationsFiltered = `-- name: ListNotificationsFiltered :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications nq
 WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_merchant_id()
   AND ($1::uuid IS NULL OR nq.customer_id = $1::uuid)
   AND ($2::text IS NULL OR nq.event_type = $2::text)
@@ -355,6 +380,7 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -367,7 +393,7 @@ func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotific
 }
 
 const listUndeliveredNotifications = `-- name: ListUndeliveredNotifications :many
-SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at FROM billing.notifications nq
+SELECT id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at FROM billing.notifications nq
 WHERE nq.merchant_id = $1::uuid
   AND nq.recipient_kind = 'customer' AND nq.emailed_at IS NULL
   AND ($2::timestamptz IS NULL
@@ -412,6 +438,7 @@ func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUnde
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -446,7 +473,7 @@ const markCustomerNotificationsRead = `-- name: MarkCustomerNotificationsRead :m
 UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])
   AND recipient_kind = 'customer' AND customer_id = $3::uuid
-RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at
+RETURNING id, event_type, data, recipient_kind, read_at, severity, title, body, link, created_at, merchant_id, customer_id, emailed_at, email_lease_expires_at
 `
 
 type MarkCustomerNotificationsReadParams struct {
@@ -479,6 +506,7 @@ func (q *Queries) MarkCustomerNotificationsRead(ctx context.Context, arg MarkCus
 			&i.MerchantID,
 			&i.CustomerID,
 			&i.EmailedAt,
+			&i.EmailLeaseExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -532,6 +560,18 @@ func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg P
 	var found bool
 	err := row.Scan(&found)
 	return found, err
+}
+
+const releaseNotificationEmail = `-- name: ReleaseNotificationEmail :exec
+UPDATE billing.notifications
+SET email_lease_expires_at = NULL
+WHERE recipient_kind = 'customer' AND merchant_id = billing.current_merchant_id() AND id = $1 AND emailed_at IS NULL
+`
+
+// A sender that failed hands the email back to the next one.
+func (q *Queries) ReleaseNotificationEmail(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, releaseNotificationEmail, id)
+	return err
 }
 
 const renewalReceiptSince = `-- name: RenewalReceiptSince :one

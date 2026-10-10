@@ -976,6 +976,8 @@ type BillingNotification struct {
 	CustomerID    *uuid.UUID
 	// When the notification email was sent; NULL = undelivered (the notification_email_sweep retries).
 	EmailedAt *time.Time
+	// Until when one sender holds the undelivered email; another sends it only after this passes, so a sender that died is replaced.
+	EmailLeaseExpiresAt *time.Time
 }
 
 // Durable financial reservations for exact provider-operation bodies. Open rows reserve amount (in currency, USD for now) against the linked customer_balance ledger account; they are not ledger movements and never TTL-expire. Retention: permanent, never pruned.
