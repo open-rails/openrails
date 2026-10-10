@@ -19,20 +19,20 @@ func staleRate(asOf, now time.Time) bool {
 	return asOf.IsZero() || now.Sub(asOf) > maxRateAge
 }
 
-// flights makes request-path upstream reads single-flight per pair, bounded,
+// flights makes request-path upstream reads single-flight per key, bounded,
 // abandoned when the caller's ctx ends, and negatively cached for negativeTTL
 // so a burst of quotes does not hammer a failing upstream.
-type flights struct {
+type flights[T any] struct {
 	mu          sync.Mutex
-	calls       map[string]*flightCall
+	calls       map[string]*flightCall[T]
 	failed      map[string]failedFetch
 	negativeTTL time.Duration
 }
 
-type flightCall struct {
-	done  chan struct{}
-	quote *Quote
-	err   error
+type flightCall[T any] struct {
+	done   chan struct{}
+	result T
+	err    error
 }
 
 type failedFetch struct {
@@ -40,24 +40,25 @@ type failedFetch struct {
 	err   error
 }
 
-func newFlights() *flights {
-	return &flights{calls: map[string]*flightCall{}, failed: map[string]failedFetch{}, negativeTTL: defaultNegativeTTL}
+func newFlights[T any]() *flights[T] {
+	return &flights[T]{calls: map[string]*flightCall[T]{}, failed: map[string]failedFetch{}, negativeTTL: defaultNegativeTTL}
 }
 
-func (f *flights) do(ctx context.Context, key string, fetch func(context.Context) (*Quote, error)) (*Quote, error) {
+func (f *flights[T]) do(ctx context.Context, key string, fetch func(context.Context) (T, error)) (T, error) {
+	var zero T
 	f.mu.Lock()
 	if failed, ok := f.failed[key]; ok && time.Now().Before(failed.until) {
 		f.mu.Unlock()
-		return nil, failed.err
+		return zero, failed.err
 	}
 	call := f.calls[key]
 	if call == nil {
-		call = &flightCall{done: make(chan struct{})}
+		call = &flightCall[T]{done: make(chan struct{})}
 		f.calls[key] = call
 		go func() {
 			fctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineFetchTimeout)
 			defer cancel()
-			call.quote, call.err = fetch(fctx)
+			call.result, call.err = fetch(fctx)
 			f.mu.Lock()
 			delete(f.calls, key)
 			if call.err != nil {
@@ -72,19 +73,14 @@ func (f *flights) do(ctx context.Context, key string, fetch func(context.Context
 	f.mu.Unlock()
 	select {
 	case <-call.done:
-		if call.err != nil {
-			return nil, call.err
-		}
-		// Each waiter owns its result; other waiters still read the flight.
-		quote := *call.quote
-		return &quote, nil
+		return call.result, call.err
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return zero, ctx.Err()
 	}
 }
 
-// forget clears a remembered failure once a background refresh succeeds.
-func (f *flights) forget(key string) {
+// forget clears a remembered failure once a refresh succeeds.
+func (f *flights[T]) forget(key string) {
 	f.mu.Lock()
 	delete(f.failed, key)
 	f.mu.Unlock()

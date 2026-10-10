@@ -98,7 +98,7 @@ explicit:
 | Deps field | Meaning |
 |---|---|
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
-| `Redis` | Optional shared rate limits, FX rates and abuse statistics. |
+| `Redis` | Optional shared rate limits and abuse statistics. |
 | `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |

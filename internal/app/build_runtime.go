@@ -55,7 +55,6 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/iputil"
-	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 const (
@@ -73,6 +72,7 @@ const (
 type runtimeOverrides struct {
 	StripeTransport http.RoundTripper
 	NMITransport    http.RoundTripper
+	FXTransport     http.RoundTripper
 	DNSResolver     *net.Resolver
 	DB              *db.DB
 	Redis           *redis.Client
@@ -249,7 +249,12 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 			_ = leaseDB.Close()
 		}
 	}()
-	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, redisClient, clock, solanaPriceProvider, customers, stripeClients)
+	var fxTransport http.RoundTripper
+	if overrides != nil {
+		fxTransport = overrides.FXTransport
+	}
+	fxRates := fx.NewRates(database, fx.NewSource(fxTransport))
+	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, fxRates, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +342,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 		SolanaTransactionService: serviceInstances.SolanaTransactionService,
 		SolanaPriceProvider:      solanaPriceProvider,
 		FXProvider:               serviceInstances.FXProvider,
-		FXRateRefresher:          serviceInstances.FXRateRefresher,
+		FXRates:                  serviceInstances.FXRates,
 
 		UserSubscriptionService:  serviceInstances.UserSubscriptionService,
 		AdminSubscriptionService: serviceInstances.AdminSubscriptionService,
@@ -543,10 +548,7 @@ type servicesInstances struct {
 	SolanaTransactionService *solanamodule.SolanaTransactionService
 	SolanaPriceProvider      solanamodule.TokenPriceProvider
 	FXProvider               fx.Provider
-	FXRateRefresher          interface {
-		Stop()
-		LastRefresh() time.Time
-	}
+	FXRates                  *fx.Rates
 
 	UserSubscriptionService  *subscriptions.UserSubscriptionService
 	AdminSubscriptionService *subscriptions.AdminSubscriptionService
@@ -577,7 +579,7 @@ func alertingDashboardBaseURL(cfg *config.Config) string {
 	return strings.TrimRight(cfg.DashboardBaseURL, "/")
 }
 
-func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, redisClient *redis.Client, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver identity.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
+func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs railresolve.Source, collectionResolver *money.MerchantCollectionAdapterBuilder, solanaRPCResolver *solanamodule.MerchantRPCBuilder, fxRates *fx.Rates, clock clockwork.Clock, solanaPriceProvider solanamodule.TokenPriceProvider, usernameResolver identity.UsernameResolver, stripeClients *stripeapi.Factory) (*servicesInstances, error) {
 	productService := catalog.NewProductService(database)
 	priceService := catalog.NewPriceService(database)
 	// NotificationService created with nil emailService - will be set later in buildRuntime
@@ -617,27 +619,10 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		Clock:      clock,
 	})
 	railCustomerService := payments.NewRailCustomerService(database)
-	// Create FX provider for Solana token quoting and policy-currency admission.
-	// Runtime enforcement reads fresh cross-currency rates from Redis; same-currency
-	// paths do not require FX.
-	//
-	// THIS IS THE DEFAULT FX PROVIDER for the whole app — LIVE rates, always on.
-	// ExchangeAPIProvider uses the fawazahmed0 exchange-api (CC0, free, NO API key),
-	// wrapped in a 5-minute in-memory cache, or (when Redis is present) a 3-hour
-	// Redis cache with a background refresher. There is no config switch and no
-	// NoOp fallback here: production never runs at a flat 1.0 rate.
-	liveFX := fx.NewExchangeAPIProvider()
-	var fxProvider fx.Provider = fx.NewCachedProvider(liveFX, 5*time.Minute)
-	var fxRateRefresher interface {
-		Stop()
-		LastRefresh() time.Time
-	}
-	if redisClient != nil {
-		redisFX := fx.NewRedisCachedProvider(redisClient, liveFX, 3*time.Hour)
-		redisFX.Start(context.Background(), moneyutil.CurrencyCodes(), 2*time.Hour)
-		fxProvider = redisFX
-		fxRateRefresher = redisFX
-	}
+	// FX for Solana token quotes and policy-currency admission: live rates
+	// from billing.fx_rates, which the FX refresh job fills once for the fleet
+	// (riverjobs.FXRefreshWorker). Never a flat 1.0 rate.
+	fxProvider := fxRates
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
@@ -797,7 +782,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		SolanaTransactionService:     solanaTransactionService,
 		SolanaPriceProvider:          solanaPriceProvider,
 		FXProvider:                   fxProvider,
-		FXRateRefresher:              fxRateRefresher,
+		FXRates:                      fxRates,
 		UserSubscriptionService:      userSubscriptionService,
 		AdminSubscriptionService:     adminSubscriptionService,
 		PriceMigrationService:        priceMigrationService,

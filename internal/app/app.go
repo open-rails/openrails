@@ -42,6 +42,8 @@ type BootstrapOptions struct {
 	// NMITransport replaces the NMI wire at the real endpoints (test seam);
 	// posture is still verified through it.
 	NMITransport http.RoundTripper
+	// FXTransport replaces the FX sources' wire (test seam).
+	FXTransport http.RoundTripper
 	// DNSResolver answers api_host proof lookups (test seam).
 	DNSResolver *net.Resolver
 	PGXPool     *pgxpool.Pool
@@ -115,6 +117,12 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		NMITransport: func() http.RoundTripper {
 			if opts != nil {
 				return opts.NMITransport
+			}
+			return nil
+		}(),
+		FXTransport: func() http.RoundTripper {
+			if opts != nil {
+				return opts.FXTransport
 			}
 			return nil
 		}(),

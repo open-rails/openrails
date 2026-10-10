@@ -3,13 +3,13 @@ package fx
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
-
-	redis "github.com/redis/go-redis/v9"
 )
 
 // Exact rational conversion with one final ceiling, across ISO scales.
@@ -56,319 +56,137 @@ func TestConvertAmount(t *testing.T) {
 	}
 }
 
-func TestCachedProvider(t *testing.T) {
-	mock := NewMockProvider(map[string]float64{"eur": 1.08})
-	cached := NewCachedProvider(mock, time.Minute)
-	ctx := context.Background()
-	for range 2 {
-		q, err := cached.QuoteToUSD(ctx, "eur")
-		if err != nil || q.Rate != 1.08 || q.FromCurrency != "EUR" || mock.CallCount != 1 {
-			t.Fatalf("quote %+v err %v calls %d", q, err, mock.CallCount)
-		}
-	}
-	cached.InvalidateAll()
-	if _, _ = cached.QuoteToUSD(ctx, "EUR"); mock.CallCount != 2 {
-		t.Fatalf("invalidate must refetch, calls %d", mock.CallCount)
-	}
-	if _, err := cached.QuoteToUSD(ctx, "gbp"); err == nil {
-		t.Fatal("provider error must not be cached as a quote")
-	}
-	expiring := NewCachedProvider(mock, 0)
-	_, _ = expiring.QuoteToUSD(ctx, "eur")
-	_, _ = expiring.QuoteToUSD(ctx, "eur")
-	if mock.CallCount != 5 {
-		t.Fatalf("zero ttl must never serve cache, calls %d", mock.CallCount)
-	}
+// fxServer serves one exchange-api file per base currency, dated date, and
+// counts the requests; failing bases answer 503.
+type fxServer struct {
+	*httptest.Server
+	requests atomic.Int64
+	date     string
+	failing  map[string]bool
 }
 
-// The endpoint is lower case in path and keys; quotes stay upper.
-func TestExchangeAPIWire(t *testing.T) {
-	var path string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path = r.URL.Path
-		_, _ = w.Write([]byte(`{"date":"2026-09-01","eur":{"usd":1.08,"gbp":0.85}}`))
+func newFXServer(t *testing.T, date string, failing ...string) *fxServer {
+	s := &fxServer{date: date, failing: map[string]bool{}}
+	for _, base := range failing {
+		s.failing[base] = true
+	}
+	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.requests.Add(1)
+		base := strings.TrimSuffix(r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:], ".json")
+		if s.failing[base] {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		dated := ""
+		if s.date != "" {
+			dated = fmt.Sprintf(`"date":%q,`, s.date)
+		}
+		_, _ = fmt.Fprintf(w, `{%s%q:{"usd":1.25,"eur":0.8,"gbp":0.7,"jpy":150,"xyz":3}}`, dated, base)
 	}))
-	defer srv.Close()
-	p := &ExchangeAPIProvider{client: srv.Client(), baseURL: srv.URL}
-	q, err := p.QuoteToUSD(context.Background(), "EUR")
-	if err != nil || path != "/eur.json" || q.Rate != 1.08 || q.FromCurrency != "EUR" || q.ToCurrency != "USD" ||
-		!q.AsOf.Equal(time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)) {
-		t.Fatalf("quote %+v path %q err %v", q, path, err)
-	}
-	if q, err := p.Quote(context.Background(), "usd", "USD"); err != nil || q.Rate != 1 {
-		t.Fatalf("same currency: %+v %v", q, err)
-	}
+	t.Cleanup(s.Close)
+	return s
 }
 
-// A canceled ctx stays detectable through the error wrap chain.
-func TestExchangeAPICanceledContextIsDetectable(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	if _, err := NewExchangeAPIProvider().Quote(ctx, "eur", "usd"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("want context.Canceled through the wrap chain, got %v", err)
+func (s *fxServer) source(fallback *fxServer) *Source {
+	urls := []string{s.URL + "/v1/currencies"}
+	if fallback != nil {
+		urls = append(urls, fallback.URL+"/v1/currencies")
 	}
+	return &Source{client: s.Client(), urls: urls}
 }
 
-// The Redis cache fails closed when no fresh rate exists anywhere rather than
-// inventing one.
-func TestRedisCachedProviderFailsClosedWithoutARate(t *testing.T) {
-	p := NewRedisCachedProvider(nil, NewMockProvider(nil), 0)
-	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-		t.Fatal("an unquotable pair must refuse")
-	}
-	if q, err := p.Quote(context.Background(), "usd", "USD"); err != nil || q.Rate != 1 {
-		t.Fatalf("same currency: %+v %v", q, err)
-	}
-}
-
-type flakyProvider struct {
-	calls atomic.Int64
-	down  atomic.Bool
-	fail  atomic.Int64 // calls to fail before answering
-}
-
-func (f *flakyProvider) Quote(_ context.Context, from, to string) (*Quote, error) {
-	n := f.calls.Add(1)
-	if f.down.Load() || n <= f.fail.Load() {
-		return nil, errors.New("upstream down")
-	}
-	return &Quote{FromCurrency: from, ToCurrency: to, Rate: 1.25, AsOf: time.Now()}, nil
-}
-
-func (f *flakyProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return f.Quote(ctx, currency, "USD")
-}
-
-// Redis is an accelerator: while it is unreachable, quotes come from the
-// in-memory rates and the refresher keeps retrying the publish.
-func TestRedisCachedProviderServesMemoryWhileRedisIsDown(t *testing.T) {
-	rdb := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", DialTimeout: 100 * time.Millisecond, MaxRetries: -1})
-	t.Cleanup(func() { _ = rdb.Close() })
-	upstream := &flakyProvider{}
-	p := NewRedisCachedProvider(rdb, upstream, time.Hour)
-	ctx := context.Background()
-
-	if err := p.Refresh(ctx, []string{"EUR", "USD"}); err == nil {
-		t.Fatal("the redis publish must report the outage")
-	}
-	fetched := upstream.calls.Load()
-	upstream.down.Store(true)
-	q, err := p.Quote(ctx, "EUR", "USD")
-	if err != nil || q.Rate != 1.25 {
-		t.Fatalf("quote from memory: %+v %v", q, err)
-	}
-	if upstream.calls.Load() != fetched {
-		t.Fatal("a fresh in-memory rate needs no upstream call")
-	}
-	if p.LastRefresh().IsZero() {
-		t.Fatal("a complete fetch is a successful refresh even when redis is down")
-	}
-}
-
-// A failed refresh is retried with backoff, not after the next 2h interval.
-func TestRedisCachedProviderRetriesFailedRefresh(t *testing.T) {
-	upstream := &flakyProvider{}
-	upstream.fail.Store(1)
-	p := NewRedisCachedProvider(nil, upstream, time.Hour)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	p.Start(ctx, []string{"EUR", "USD"}, 2*time.Hour)
-	t.Cleanup(p.Stop)
-	deadline := time.Now().Add(10 * time.Second)
-	for p.LastRefresh().IsZero() {
-		if time.Now().After(deadline) {
-			t.Fatal("the failed refresh was not retried")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	upstream.down.Store(true)
-	if q, err := p.Quote(ctx, "USD", "EUR"); err != nil || q.Rate != 1.25 {
-		t.Fatalf("retried pair: %+v %v", q, err)
-	}
-}
-
-type scriptedProvider struct {
-	calls atomic.Int64
-	gate  chan struct{}
-	asOf  time.Time
-	err   error
-}
-
-func (s *scriptedProvider) Quote(_ context.Context, from, to string) (*Quote, error) {
-	s.calls.Add(1)
-	if s.gate != nil {
-		<-s.gate
-	}
-	if s.err != nil {
-		return nil, s.err
-	}
-	asOf := s.asOf
-	if asOf.IsZero() {
-		asOf = time.Now()
-	}
-	return &Quote{FromCurrency: from, ToCurrency: to, Rate: 1.25, AsOf: asOf}, nil
-}
-
-func (s *scriptedProvider) QuoteToUSD(ctx context.Context, currency string) (*Quote, error) {
-	return s.Quote(ctx, currency, "USD")
-}
-
-// A lagging upstream file is not a fresh rate, however recently it was fetched.
-func TestRedisCachedProviderRejectsStaleUpstreamRates(t *testing.T) {
-	p := NewRedisCachedProvider(nil, &scriptedProvider{asOf: time.Now().Add(-5 * 24 * time.Hour)}, time.Hour)
-	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-		t.Fatal("a rate published days ago must not quote")
-	}
-	if err := p.Refresh(context.Background(), []string{"EUR", "USD"}); err == nil {
-		t.Fatal("refresh must report a stale upstream")
-	}
-}
-
-// Concurrent misses for one pair make one upstream call.
-func TestRedisCachedProviderSingleFlightsInlineFetch(t *testing.T) {
-	upstream := &scriptedProvider{gate: make(chan struct{})}
-	p := NewRedisCachedProvider(nil, upstream, time.Hour)
-	errs := make(chan error, 8)
-	for range 8 {
-		go func() { _, err := p.Quote(context.Background(), "EUR", "USD"); errs <- err }()
-	}
-	time.Sleep(100 * time.Millisecond)
-	close(upstream.gate)
-	for range 8 {
-		if err := <-errs; err != nil {
-			t.Fatal(err)
-		}
-	}
-	if n := upstream.calls.Load(); n != 1 {
-		t.Fatalf("upstream calls = %d, want 1", n)
-	}
-}
-
-// An upstream failure is remembered briefly, so a burst of quotes does not
-// hammer a provider that just failed.
-func TestRedisCachedProviderNegativeCachesUpstreamFailure(t *testing.T) {
-	upstream := &scriptedProvider{err: errors.New("upstream down")}
-	p := NewRedisCachedProvider(nil, upstream, time.Hour)
-	p.flights.negativeTTL = 200 * time.Millisecond
-	for range 3 {
-		if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-			t.Fatal("want failure")
-		}
-	}
-	if n := upstream.calls.Load(); n != 1 {
-		t.Fatalf("upstream calls = %d, want 1 inside the negative window", n)
-	}
-	time.Sleep(250 * time.Millisecond)
-	upstream.err = nil
-	if _, err := p.Quote(context.Background(), "EUR", "USD"); err != nil {
+// One file per base holds its rates to every target: one request, lower case
+// on the wire, upper case in the table, unknown currencies dropped.
+func TestSourceReadsOneFilePerBase(t *testing.T) {
+	srv := newFXServer(t, "2026-09-01")
+	var path string
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		srv.requests.Add(1)
+		_, _ = w.Write([]byte(`{"date":"2026-09-01","eur":{"usd":1.08,"gbp":0.85,"jpy":160,"xyz":2}}`))
+	})
+	tb, err := srv.source(nil).Table(context.Background(), "EUR", []string{"USD", "GBP", "JPY", "EUR"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if n := upstream.calls.Load(); n != 2 {
-		t.Fatalf("upstream calls = %d, want 2 after the window", n)
+	want := Table{Base: "EUR", AsOf: time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC), Rates: map[string]float64{"USD": 1.08, "GBP": 0.85, "JPY": 160}}
+	if path != "/v1/currencies/eur.json" || srv.requests.Load() != 1 || fmt.Sprint(tb) != fmt.Sprint(want) {
+		t.Fatalf("table %+v path %q requests %d", tb, path, srv.requests.Load())
 	}
 }
 
-// The in-memory cache (no Redis) holds the same line as the Redis cache: a
-// lagging upstream file is not fresh, concurrent misses make one call, and a
-// failure is remembered briefly.
-func TestCachedProviderRejectsStaleUpstreamRates(t *testing.T) {
-	p := NewCachedProvider(&scriptedProvider{asOf: time.Now().Add(-5 * 24 * time.Hour)}, time.Hour)
-	if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-		t.Fatal("a rate published days ago must not quote")
+// A failing primary is read from the fallback, one request each.
+func TestSourceFallsBack(t *testing.T) {
+	primary, fallback := newFXServer(t, "2026-09-01", "eur"), newFXServer(t, "2026-09-01")
+	tb, err := primary.source(fallback).Table(context.Background(), "EUR", []string{"USD"})
+	if err != nil || tb.Rates["USD"] != 1.25 || primary.requests.Load() != 1 || fallback.requests.Load() != 1 {
+		t.Fatalf("table %+v err %v requests %d+%d", tb, err, primary.requests.Load(), fallback.requests.Load())
+	}
+	fallback.failing["eur"] = true
+	if _, err := primary.source(fallback).Table(context.Background(), "EUR", []string{"USD"}); err == nil {
+		t.Fatal("both down must fail")
 	}
 }
 
-func TestCachedProviderSingleFlightsFetch(t *testing.T) {
-	upstream := &scriptedProvider{gate: make(chan struct{})}
-	p := NewCachedProvider(upstream, time.Hour)
+// A file without a publication date carries no AsOf, so it reads as stale.
+func TestSourceUndatedTableIsStale(t *testing.T) {
+	tb, err := newFXServer(t, "").source(nil).Table(context.Background(), "EUR", []string{"USD"})
+	if err != nil || !tb.AsOf.IsZero() || !staleRate(tb.AsOf, time.Now()) {
+		t.Fatalf("undated table: %+v %v", tb, err)
+	}
+}
+
+// A canceled ctx stays detectable through the wrap chain.
+func TestSourceCanceledContextIsDetectable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := newFXServer(t, "2026-09-01").source(nil).Table(ctx, "EUR", []string{"USD"}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+}
+
+// Concurrent misses for one key make one call; a failure is remembered for
+// the negative window, then tried again.
+func TestFlightsSingleFlightAndRememberFailure(t *testing.T) {
+	f := newFlights[int]()
+	f.negativeTTL = 200 * time.Millisecond
+	var calls atomic.Int64
+	gate := make(chan struct{})
 	errs := make(chan error, 8)
 	for range 8 {
-		go func() { _, err := p.Quote(context.Background(), "EUR", "USD"); errs <- err }()
+		go func() {
+			_, err := f.do(context.Background(), "EUR", func(context.Context) (int, error) {
+				calls.Add(1)
+				<-gate
+				return 1, nil
+			})
+			errs <- err
+		}()
 	}
 	time.Sleep(100 * time.Millisecond)
-	close(upstream.gate)
+	close(gate)
 	for range 8 {
 		if err := <-errs; err != nil {
 			t.Fatal(err)
 		}
 	}
-	if n := upstream.calls.Load(); n != 1 {
-		t.Fatalf("upstream calls = %d, want 1", n)
+	if calls.Load() != 1 {
+		t.Fatalf("calls = %d, want 1", calls.Load())
 	}
-}
 
-func TestCachedProviderNegativeCachesFailure(t *testing.T) {
-	upstream := &scriptedProvider{err: errors.New("upstream down")}
-	p := NewCachedProvider(upstream, time.Hour)
-	p.flights.negativeTTL = 200 * time.Millisecond
+	down := errors.New("down")
+	fail := func(context.Context) (int, error) { calls.Add(1); return 0, down }
 	for range 3 {
-		if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-			t.Fatal("want failure")
+		if _, err := f.do(context.Background(), "GBP", fail); !errors.Is(err, down) {
+			t.Fatalf("want the failure, got %v", err)
 		}
 	}
-	if n := upstream.calls.Load(); n != 1 {
-		t.Fatalf("upstream calls = %d, want 1 inside the negative window", n)
+	if calls.Load() != 2 {
+		t.Fatalf("calls = %d, want 2 inside the negative window", calls.Load())
 	}
-}
-
-// A cached rate ages out by its publication date at use time, not only when it
-// was fetched: both caches refetch rather than serve a rate now too old.
-func TestCachedRatesAgeAtUseTime(t *testing.T) {
-	published := time.Now()
-	for name, build := range map[string]func(Provider) (Provider, *func() time.Time){
-		"memory": func(up Provider) (Provider, *func() time.Time) {
-			p := NewCachedProvider(up, 1000*time.Hour)
-			return p, &p.now
-		},
-		"redis": func(up Provider) (Provider, *func() time.Time) {
-			p := NewRedisCachedProvider(nil, up, 1000*time.Hour)
-			return p, &p.now
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			upstream := &scriptedProvider{asOf: published}
-			p, now := build(upstream)
-			if _, err := p.Quote(context.Background(), "EUR", "USD"); err != nil {
-				t.Fatal(err)
-			}
-			*now = func() time.Time { return published.Add(49 * time.Hour) }
-			if _, err := p.Quote(context.Background(), "EUR", "USD"); err == nil {
-				t.Fatal("a rate published 49h ago must not be served from cache")
-			}
-			if n := upstream.calls.Load(); n != 2 {
-				t.Fatalf("upstream calls = %d, want a refetch", n)
-			}
-		})
-	}
-}
-
-// An FX file without a publication date is not fresh: it carries no AsOf
-// (never "now"), so every cache refuses it.
-func TestExchangeAPIUndatedRateIsStale(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"eur":{"usd":1.08}}`))
-	}))
-	defer srv.Close()
-	p := &ExchangeAPIProvider{client: srv.Client(), baseURL: srv.URL}
-	q, err := p.QuoteToUSD(context.Background(), "EUR")
-	if err != nil || !q.AsOf.IsZero() {
-		t.Fatalf("undated quote must carry no AsOf: %+v %v", q, err)
-	}
-	if _, err := NewCachedProvider(p, time.Hour).Quote(context.Background(), "EUR", "USD"); err == nil {
-		t.Fatal("an undated rate must not quote")
-	}
-}
-
-// An unreachable upstream fails every pair; the refresh reports it in one
-// line, not one per pair.
-func TestRefreshFailureIsOneLine(t *testing.T) {
-	down := errors.New("upstream unreachable")
-	p := NewRedisCachedProvider(nil, &scriptedProvider{err: down}, time.Hour)
-	err := p.Refresh(context.Background(), []string{"EUR", "USD", "GBP"})
-	if !errors.Is(err, down) {
-		t.Fatalf("the cause is kept: %v", err)
-	}
-	if got, want := err.Error(), "6 of 6 FX pairs failed; first EUR -> USD: upstream unreachable"; got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	time.Sleep(250 * time.Millisecond)
+	_, _ = f.do(context.Background(), "GBP", fail)
+	if calls.Load() != 3 {
+		t.Fatalf("calls = %d, want a retry after the window", calls.Load())
 	}
 }

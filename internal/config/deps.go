@@ -21,7 +21,7 @@ type Deps struct {
 	// Postgres is the host's pool; its role owns OpenRails' tables, which New
 	// creates or upgrades. Nil opens one from Config.DB.
 	Postgres *pgxpool.Pool
-	// Redis is optional shared storage for rate limits, FX rates and abuse statistics.
+	// Redis is optional shared storage for rate limits and abuse statistics.
 	Redis *redis.Client
 	// Vault is a borrowed, authenticated client for Config.SecretBackend
 	// vault. The host owns its renewal; OpenRails never revokes it.
@@ -44,10 +44,12 @@ type Deps struct {
 	UserInfo UserInfo
 
 	// Test seams, refused with Config.TestMode live. StripeTransport and
-	// NMITransport replace the provider wires; DNSResolver answers api_host
-	// proofs; Clock drives renewal dates, retries and entitlement windows.
+	// NMITransport replace the provider wires and FXTransport the FX
+	// sources'; DNSResolver answers api_host proofs; Clock drives renewal
+	// dates, retries and entitlement windows.
 	StripeTransport http.RoundTripper
 	NMITransport    http.RoundTripper
+	FXTransport     http.RoundTripper
 	DNSResolver     *net.Resolver
 	Clock           clockwork.Clock
 }

@@ -264,6 +264,7 @@ pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, ConsoleAssets fs.FS
 pkg openrails, type Deps struct, DNSResolver *net.Resolver
 pkg openrails, type Deps struct, Email config.EmailSender
+pkg openrails, type Deps struct, FXTransport http.RoundTripper
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
 pkg openrails, type Deps struct, Postgres *pgxpool.Pool
 pkg openrails, type Deps struct, Redis *redis.Client

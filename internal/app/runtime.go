@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
@@ -213,10 +212,8 @@ type Runtime struct {
 	SolanaMintDecimals  *solanamodule.MintDecimals
 	SolanaPriceProvider solanamodule.TokenPriceProvider
 	FXProvider          fx.Provider
-	FXRateRefresher     interface {
-		Stop()
-		LastRefresh() time.Time
-	}
+	// FXRates is FXProvider; its Refresh is the fleet's FX refresh job.
+	FXRates *fx.Rates
 	// SolanaCranker drives recurring Solana pulls (#256). Injected by the
 	// composition root once the merchant secret store is available; nil -> the
 	// cranker worker log-and-skips.
@@ -327,14 +324,6 @@ func (r *Runtime) SetConfiguredMerchant(id billing.MerchantID) {
 	r.configuredMerchant.Store(&id)
 }
 
-func (r *Runtime) FXRateHealth() (time.Time, bool) {
-	if r == nil || r.FXRateRefresher == nil {
-		return time.Time{}, false
-	}
-	last := r.FXRateRefresher.LastRefresh()
-	return last, !last.IsZero() && time.Since(last) < 4*time.Hour
-}
-
 // Close gracefully shuts down runtime resources.
 func (r *Runtime) Close(ctx context.Context) error {
 	if r == nil {
@@ -367,9 +356,6 @@ func (r *Runtime) Close(ctx context.Context) error {
 	if r.SolanaPayPoller != nil {
 		log.Info("Stopping Solana Pay poller...")
 		r.SolanaPayPoller.Stop()
-	}
-	if r.FXRateRefresher != nil {
-		r.FXRateRefresher.Stop()
 	}
 
 	// Only stop River client if we created it (not external)

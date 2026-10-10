@@ -92,6 +92,7 @@ var Tables = map[string]Table{
 	"merchant_write_posture":            {Class: State},
 	"book_identity":                     {Class: State},
 	"worker_state":                      {Class: State},
+	"fx_rates":                          {Class: State},
 	"merchant_configurations":           {Class: State},
 	"merchant_deks":                     {Class: State},
 	"merchant_secrets":                  {Class: State},

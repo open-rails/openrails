@@ -1086,10 +1086,17 @@ of leader neither delays nor repeats a period's run.
 | Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
+| FX refresh (+ start) | 2 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
 | Solana gas alert · Solana ledger reconcile | 6 h |
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
+
+The FX refresh reads each currency's published rates, one request per
+currency (the fallback mirror when the primary fails), into `billing.fx_rates`,
+which every replica quotes from. A stored rate is quoted for 3 hours after it
+was read; a quote that finds none fresh reads its base currency itself and
+stores it for the other replicas.
 
 The health checker seeds `billing.worker_state` and raises a critical
 `life.worker.stalled` finding in every merchant when a periodic kind stops
@@ -1142,7 +1149,7 @@ trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
 
 | Destination | What for |
 |---|---|
-| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes. Fetched when a quote needs one and cached 5 minutes; with Redis, refreshed in the background every 2 hours. Boot never waits for them: a failed refresh is retried with backoff, and a rate it cannot fetch fails only the quote that needed it. |
+| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes: once per fleet every 2 hours, one request per currency (the FX refresh job), and by a quote that finds no fresh stored rate. Boot never waits for them: a failed refresh is retried with backoff, and a rate it cannot fetch fails only the quote that needed it. |
 | `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
 | `api.stripe.com` | Stripe PSPs. |
 | `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by `test_mode`. |

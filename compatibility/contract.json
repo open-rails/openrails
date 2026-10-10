@@ -1065,7 +1065,7 @@
       "type CustomerRoutes struct {\n\tPrefix string\n\n\tMerchant string\n\n\tAuth billingauth.Auth\n}",
       "type DBConfig struct {\n\tURL string\n\n\tHost     string\n\tPort     string\n\tDatabase string\n\tUsername string\n\tPassword string\n\n\tSSLMode string\n\n\tSQLTrace bool\n}",
       "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1440,9 +1440,6 @@
       "type FlexFormResponse struct {\n\tRedirectURL string `json:\"redirect_url\"`\n}",
       "type GenerateFlexFormURLParams struct {\n\tUsername      string `json:\"username\"`\n\tEmail         string `json:\"email\"`\n\tCustomerFName string `json:\"customer_fname\"`\n\tCustomerLName string `json:\"customer_lname\"`\n\tAddress1      string `json:\"address1\"`\n\tCity          string `json:\"city\"`\n\tState         string `json:\"state\"`\n\tZipCode       string `json:\"zipcode\"`\n\tCountry       string `json:\"country\"`\n\tFlexID        string `json:\"flex_id\"`\n\tFormName      string `json:\"form_name\"`\n\tReservationID string `json:\"reservation_id\"`\n\n\tCurrency string `json:\"currency\"`\n}",
       "type GenerateUpgradeFlexFormURLParams struct {\n\tUsername string `json:\"username\"`\n\tEmail    string `json:\"email\"`\n\n\tFlexID   string `json:\"flex_id\"`\n\tFormName string `json:\"form_name\"`\n\n\tCurrency string `json:\"currency\"`\n\n\tOriginalSubscriptionID string `json:\"original_subscription_id\"`\n}"
-    ],
-    "internal/integrations/fx": [
-      "type redisRate struct {\n\tFromCurrency string    `json:\"from_currency\"`\n\tToCurrency   string    `json:\"to_currency\"`\n\tRate         float64   `json:\"rate\"`\n\tProvider     string    `json:\"provider\"`\n\tAsOf         time.Time `json:\"as_of\"`\n\tFetchedAt    time.Time `json:\"fetched_at\"`\n\tExpiresAt    time.Time `json:\"expires_at\"`\n}"
     ],
     "internal/integrations/hyperswitch": [
       "func (*forbiddenRaw) UnmarshalJSON(raw []byte) error {\n\tif bytes.Equal(bytes.TrimSpace(raw), []byte(\"null\")) {\n\t\treturn nil\n\t}\n\treturn ErrBinding\n}",
@@ -2650,19 +2647,6 @@
       "sha256": "crypto/sha256",
       "strings": "strings",
       "url": "net/url"
-    },
-    "internal/integrations/fx/redis_cache.go": {
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "json": "encoding/json",
-      "log": "github.com/sirupsen/logrus",
-      "money": "github.com/open-rails/openrails/internal/modules/money",
-      "redis": "github.com/redis/go-redis/v9",
-      "retry": "github.com/open-rails/openrails/internal/retry",
-      "strings": "strings",
-      "sync": "sync",
-      "time": "time"
     },
     "internal/integrations/hyperswitch/client.go": {
       "bytes": "bytes",

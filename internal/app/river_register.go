@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/destructive"
+	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -149,6 +150,10 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 		Clock: clock,
 	}); err != nil {
 		return fmt.Errorf("add ledger integrity worker: %w", err)
+	}
+	// Reads every currency's FX rates once for the fleet.
+	if err := addTrackedWorker(r, workers, &riverjobs.FXRefreshWorker{Rates: r.FXRates}); err != nil {
+		return fmt.Errorf("add FX refresh worker: %w", err)
 	}
 	// Flushes the Redis admission-denial counters to PG hourly aggregates.
 	// Redis may be nil (no-admission deployments); the worker no-ops then.
@@ -671,6 +676,19 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 2 hours and on start: one FX refresh for the fleet (34 requests),
+	// which every replica quotes from.
+	jobs = append(jobs, r.healthPeriodic(
+		fx.RefreshInterval,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.FXRefreshArgs{}, &river.InsertOpts{
+				Queue:      riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: fx.RefreshInterval},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Every 5 minutes: flush admission-denial counters from Redis to PG.
