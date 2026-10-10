@@ -1,7 +1,7 @@
 # Standalone Integration Guide
 
 How to deploy OpenRails as its own self-hosted HTTP service and integrate your
-application against it; `examples/standalone` is the runnable quickstart. Money
+application against it ([Backend integration](#backend-integration) shows the Go client, `NewRemote`). Money
 is an integer in the currency's native units (`GET /v1/config`'s `currencies`;
 micros for USD), a decimal string on the wire ([money-wire.md](money-wire.md)). Vocabulary:
 a **rail** is a gateway kind (`nmi`, `ccbill`,
