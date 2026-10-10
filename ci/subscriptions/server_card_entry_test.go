@@ -169,7 +169,7 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 
 	// A field a card number used to be pasted into is an unknown field, named
 	// without its value.
-	status, body = c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "card_number": entryVisa})
+	status, body = c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "token": w.nmi.Tokenize(visa), "card_number": entryVisa})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	code, message = errorOf(body)
 	require.Equal(t, []string{"unknown_field", "unknown field card_number"}, []string{code, message})
@@ -190,7 +190,7 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 	price := w.permanent("content:post")
 
 	for name, body := range map[string]map[string]any{
-		"card and token":           {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "payment_token": "tok-1234"},
+		"card and token":           {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "token": "tok-1234"},
 		"number in another field":  {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "4111 1111 1111 1111"}},
 		"number as a bare field":   {"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "card_number": entryVisa},
 		"number failing its check": {"psp_id": w.psp["nmi"], "card": map[string]any{"number": "4111111111111112", "exp_month": 10, "exp_year": 2027, "cvc": entryCVC}},
@@ -481,7 +481,7 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	status, body := declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadGateway, status, "a gateway rejection, as a rejected sale is: %v", body)
 	w.nmi.Issue(entryVisa, card{})
-	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "payment_token": "tok-1234"})
+	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "token": "tok-1234"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	w.nmi.LoseSales(1)
 	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})

@@ -24,7 +24,7 @@ import (
 // the status and body.
 func (c *customer) cardSave(ip string, cd card) (int, string) {
 	c.w.t.Helper()
-	return c.cardSaveJSON(ip, map[string]any{"psp_id": c.w.psp["nmi"], "payment_token": c.w.nmi.Tokenize(cd), "billing_details": map[string]any{"name": "Card Holder"}})
+	return c.cardSaveJSON(ip, map[string]any{"psp_id": c.w.psp["nmi"], "token": c.w.nmi.Tokenize(cd), "billing_details": map[string]any{"name": "Card Holder"}})
 }
 
 // cardSaveJSON submits a card save request body for c from client address ip.
@@ -132,7 +132,7 @@ func TestSecurityCardAttackModeWithoutCaptcha(t *testing.T) {
 		w := newWorld(t, redisOnly)
 		ip := freshAddresses()
 		for i := range 100 {
-			status, body := w.newCustomer().cardSaveJSON(ip(i), map[string]any{"payment_token": "x"})
+			status, body := w.newCustomer().cardSaveJSON(ip(i), map[string]any{"token": "x"})
 			require.Equal(t, http.StatusBadRequest, status, "junk %d: %s", i, body)
 		}
 		few := make([]*customer, 10)

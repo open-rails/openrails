@@ -41,7 +41,7 @@ var paymentsRoutes = []Route{
 		Query: paymentListQuery(), Responses: []Reply{{200, billing.ListPage[billing.Payment]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListMyPayments)},
 }
 
-var paymentOperationErrors = codes(append([]string{"payment_not_found"}, cardSetupErrors...)...)
+var paymentOperationErrors = codes("card_attempts_blocked", "card_declined", "card_not_saved", "custodian_capture_unavailable", "customer_session_required", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_not_found", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable")
 
 // paymentListQuery is the query of a payment list.
 func paymentListQuery(extra ...Param) []Param {

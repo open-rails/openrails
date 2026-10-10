@@ -111,7 +111,7 @@ merchants:
 	}
 	psps, err := engine.ListPSPs(ctx, billing.PSPListParams{}, at)
 	require.NoError(t, err)
-	card := me(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "payment_token": gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
+	card := me(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "token": gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 		"billing_details": map[string]any{"name": "New Comer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})["id"]
 	session := me(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID})["id"].(string)
 	var option any

@@ -22,7 +22,7 @@ import (
 // saveFrom submits one NMI card save for c to replica r from client address ip.
 func (c *customer) saveFrom(r *world, ip string, cd card) int {
 	c.w.t.Helper()
-	body, err := json.Marshal(map[string]any{"psp_id": r.psp["nmi"], "payment_token": r.nmi.Tokenize(cd), "billing_details": map[string]any{"name": "Card Tester"}})
+	body, err := json.Marshal(map[string]any{"psp_id": r.psp["nmi"], "token": r.nmi.Tokenize(cd), "billing_details": map[string]any{"name": "Card Tester"}})
 	require.NoError(c.w.t, err)
 	req, err := http.NewRequestWithContext(c.w.t.Context(), http.MethodPost, r.server.URL+mountPrefix+"/v1/me/payment-methods", bytes.NewReader(body))
 	require.NoError(c.w.t, err)

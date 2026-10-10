@@ -114,10 +114,10 @@ take their PSPs from it.
 - Only **armed** PSPs appear — a rail the merchant has no live account on is simply
   absent. Switch on `flow`, not on a hard-coded list of rails:
   - `tokenize` — load `config.tokenization_url`, tokenize with `config.tokenization_key`,
-    POST the resulting `payment_token`.
-  - `elements` — Stripe with a declared `publishable_key`: save the card in the page
-    (`POST /v1/me/payment-method-setups`, Stripe.js `confirmSetup`, then
-    `.../confirm`), then pay the checkout session with its `payment_method_id`.
+    POST the resulting token.
+  - `elements` — Stripe with a declared `publishable_key`: Stripe Elements makes a
+    `pm_` (`createPaymentMethod`), which an order's `payment.token` charges and saves
+    in one call, or `POST /v1/me/payment-methods` saves without buying.
   - `redirect` — nothing needed in the browser; paying answers a `redirect_to_url`
     `next_action` (Stripe without a publishable key, one-off prices only).
 - `checkout` is true for PSPs that take new purchases and new cards under the
@@ -298,10 +298,15 @@ read of the order, never on the browser's word.
 
 ### Payment methods
 
-`POST /v1/me/payment-methods` takes the PSP's `psp_id`, a Collect.js `payment_token`
-(or, for a PSP whose card entry is server, the `card`) and optional `billing_details`
-(`name`, `email`, `phone`, `address` with `line1`, `line2`, `city`, `state`,
-`postal_code`, `country`) and creates an NMI vault record. `PUT` on the method replaces an NMI
+`POST /v1/me/payment-methods` saves a card in one call: the PSP's `psp_id`, the `token`
+of its own fields (a Collect.js token, a Stripe `pm_`; or, for a PSP whose card entry
+is server, the `card`) and optional `billing_details` (`name`, `email`, `phone`,
+`address` with `line1`, `line2`, `city`, `state`, `postal_code`, `country`). A Stripe
+card the bank wants to authenticate answers `status: requires_action` with a
+`next_action` (Stripe.js `handleNextAction` with `payload.client_secret`), then
+`POST /v1/me/payment-methods/{id}/confirm` saves it. The token may come from the PSP's
+fields on any page of yours, an iframe on another domain of yours included; OpenRails
+offers no page of its own for it. `PUT` on the method replaces an NMI
 card with a new `payment_token` or `card`. OpenRails reads the saved card's brand, last
 four and expiry from the PSP; the browser never states them. `PATCH` edits the card in
 place: `exp_month` with `exp_year`, `billing_details`, and `reusable` (kept for one-click

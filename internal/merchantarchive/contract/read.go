@@ -86,6 +86,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-2 {
 			r.Values = append(r.Values, new("succeeded"), new("0"))
 		}
+		// Payment methods before card saves awaited the customer had no setup.
+		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
+		}
 		// Orders before the payment axis had one status.
 		if p.Name == "orders" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = splitOrderStatus(p, r.Values)

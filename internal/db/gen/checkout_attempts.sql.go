@@ -56,7 +56,7 @@ ON CONFLICT (merchant_id,psp_id,custodian_id,rail_customer_ref,rail_method_ref)
 DO UPDATE SET id=billing.payment_methods.id
 WHERE billing.payment_methods.customer_id=EXCLUDED.customer_id
   AND billing.payment_methods.custodian='hyperswitch'
-RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at
+RETURNING id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref
 ), saved AS (
 INSERT INTO billing.payment_method_versions (merchant_id,customer_id,payment_method_id,source,kind,event_ref,psp_id,custodian_id,
     rail_customer_ref,rail_method_ref,card_brand,card_last4,card_exp_month,card_exp_year,effective_at)
@@ -65,7 +65,7 @@ SELECT merchant_id,customer_id,id,'customer_save','saved','created',psp_id,custo
 FROM pm
 ON CONFLICT (merchant_id,payment_method_id,source,event_ref) DO NOTHING
 )
-SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at FROM pm
+SELECT id, merchant_id, customer_id, rail, psp_id, custodian, custodian_id, rail_customer_ref, rail_method_ref, card_brand, card_last4, card_exp_month, card_exp_year, metadata, fingerprint, network_token_id, network_token_status, network_token_par, charge_via, park_reason, parked_at, account_updater_checked_at, created_at, updated_at, status, replaced_by_id, contact_cardholder_at, setup_ref FROM pm
 `
 
 type AttachCapturedPaymentMethodParams struct {
@@ -110,6 +110,7 @@ type AttachCapturedPaymentMethodRow struct {
 	Status                  string
 	ReplacedByID            *uuid.UUID
 	ContactCardholderAt     *time.Time
+	SetupRef                *string
 }
 
 // Capture attachment never reparents an existing instrument to another payer.
@@ -157,6 +158,7 @@ func (q *Queries) AttachCapturedPaymentMethod(ctx context.Context, arg AttachCap
 		&i.Status,
 		&i.ReplacedByID,
 		&i.ContactCardholderAt,
+		&i.SetupRef,
 	)
 	return i, err
 }

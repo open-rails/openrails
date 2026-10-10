@@ -11,6 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -18,6 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/abuse"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
@@ -98,7 +100,9 @@ func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID, en
 	r.SuccessJSON(billing.ListPage[billing.PaymentMethod]{Items: out, Next: methods.Next})
 }
 
-// CreatePaymentMethod (POST /me/payment-methods) saves a card with a PSP.
+// CreatePaymentMethod (POST /me/payment-methods) saves a card with a PSP in
+// one call. A Stripe card the bank wants authenticated answers requires_action
+// with its next_action.
 func CreatePaymentMethod(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil {
@@ -116,14 +120,22 @@ func CreatePaymentMethod(r *httprequest.Request) {
 	}
 	pspID := req.PSPID.UUID()
 	if req.Card != nil {
-		if !cardFieldAdmitted(r, strings.TrimSpace(req.PaymentToken) != "", billingDetailStrings(req.BillingDetails)...) {
+		if !cardFieldAdmitted(r, strings.TrimSpace(req.Token) != "", billingDetailStrings(req.BillingDetails)...) {
 			return
 		}
-	} else if strings.TrimSpace(req.PaymentToken) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "payment_token or card is required").WithParam("payment_token"))
+	} else if strings.TrimSpace(req.Token) == "" {
+		r.APIError(api.Coded(billing.CodeInvalidParam, "token or card is required").WithParam("token"))
 		return
 	}
 	if refuseBlockedCardAttempt(r, user.ID) {
+		return
+	}
+	if mid, err := merchant.Require(r.Request.Context()); err == nil && pspRail(r, mid.UUID(), pspID) == string(models.RailStripe) {
+		if req.Card != nil {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "a Stripe card is entered in Stripe's fields").WithParam("card"))
+			return
+		}
+		saveStripeCard(r, user, pspID, req.Token)
 		return
 	}
 
@@ -137,7 +149,7 @@ func CreatePaymentMethod(r *httprequest.Request) {
 		details.Email = strings.TrimSpace(*user.Email)
 	}
 	create := &paymentmethods.CreatePaymentMethodRequest{
-		PaymentToken: strings.TrimSpace(req.PaymentToken),
+		PaymentToken: strings.TrimSpace(req.Token),
 		Card:         req.Card,
 		PSPID:        pspID,
 		NameOnCard:   details.Name,
@@ -192,6 +204,80 @@ func CreatePaymentMethod(r *httprequest.Request) {
 }
 
 const codePaymentMethodUpdateUnsupported = "payment_method_update_unsupported"
+
+// pspRail is the rail of one of the merchant's PSPs, "" when unknown.
+func pspRail(r *httprequest.Request, merchantID, pspID uuid.UUID) string {
+	psp, err := r.State.DB.Gen(r.Request.Context()).GetPSP(r.Request.Context(), gen.GetPSPParams{MerchantID: merchantID, ID: pspID})
+	if err != nil {
+		return ""
+	}
+	return psp.Rail
+}
+
+// saveStripeCard saves a card the page's Stripe fields tokenized.
+func saveStripeCard(r *httprequest.Request, user *checkout.UserIdentity, psp uuid.UUID, token string) {
+	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
+	if !ok || r.State.CheckoutService == nil {
+		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
+		return
+	}
+	ctx, cancel := r.Budget(createPaymentMethodTimeout)
+	defer cancel()
+	saved, err := r.State.CheckoutService.SaveStripeCard(ctx, psp, token, user, resolver)
+	writeStripeCard(r, user, http.StatusCreated, saved, err)
+}
+
+// ConfirmPaymentMethod (POST /me/payment-methods/{id}/confirm) finishes a
+// card save the bank asked the customer to authenticate.
+func ConfirmPaymentMethod(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "")
+		return
+	}
+	id, err := billing.ParsePaymentMethodID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
+		return
+	}
+	resolver, ok := r.State.CollectionResolver.(intents.StripeEngineServiceResolver)
+	if !ok || r.State.CheckoutService == nil {
+		r.ErrorCode(billing.CodeServiceUnavailable, "Stripe card save unavailable")
+		return
+	}
+	saved, err := r.State.CheckoutService.ConfirmStripeCard(r.Request.Context(), id.UUID(), user, resolver)
+	writeStripeCard(r, user, http.StatusOK, saved, err)
+}
+
+func writeStripeCard(r *httprequest.Request, user *checkout.UserIdentity, status int, saved checkout.StripeCardSaved, err error) {
+	var refused *paymentmethods.PaymentMethodError
+	switch {
+	case errors.As(err, &refused):
+		recordCardFailure(r, abuse.CustomerSubject(user.ID), abuse.AddressSubject(r.ClientIP()), abuse.MerchantSubject)
+		writePaymentMethodError(r, refused)
+		return
+	case errors.Is(err, paymentmethods.ErrPaymentMethodNotFound):
+		r.ErrorCode(billing.CodeResourceNotFound, "Payment method not found")
+		return
+	case errors.Is(err, checkout.ErrPaymentMethodStale):
+		writePaymentMethodStale(r)
+		return
+	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):
+		r.APIError(api.Coded(billing.CodeInvalidParam, "psp_id must name an armed Stripe PSP").WithParam("psp_id"))
+		return
+	case err != nil:
+		writeRefusal(r, err, "failed to save the card")
+		return
+	}
+	out, err := paymentMethodsView(r, identity.CustomerIDFromString(user.ID), []*models.PaymentMethod{saved.Method}, false)
+	if err != nil {
+		r.InternalError("failed to read payment method", err)
+		return
+	}
+	out[0].NextAction = saved.NextAction
+	r.SetHeader("Cache-Control", "no-store")
+	r.JSON(status, out[0])
+}
 
 // createPaymentMethodProviderError is the refusal of a card save the provider
 // may or may not have made; nil for any other error. The provider's own text

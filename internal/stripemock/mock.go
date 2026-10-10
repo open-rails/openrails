@@ -320,6 +320,9 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 			switch decline := m.declines[pm]; decline {
 			case "":
 				s["status"] = "succeeded"
+				if method, ok := m.methods[pm]; ok && method["customer"] == nil {
+					method["customer"] = form.Get("customer")
+				}
 			case "auth":
 				s["status"] = "requires_action"
 			default:

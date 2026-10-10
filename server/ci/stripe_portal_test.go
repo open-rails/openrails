@@ -85,8 +85,9 @@ merchants:
 	psps, err := cp.Client().ListPSPs(t.Context(), billing.PSPListParams{}, openrails.ForMerchantID(m.ID))
 	require.NoError(t, err)
 	require.Len(t, psps.Items, 1)
-	w = me(shop, "/payment-method-setups", fmt.Sprintf(`{"psp_id":%q,"consent":true}`, psps.Items[0].ID))
-	require.Equal(t, http.StatusOK, w.Code, "starting a card setup makes the Stripe customer: %s", w.Body.String())
+	card := stripe.NewPaymentMethod(stripemock.Card{Brand: "visa", Last4: "4242"})
+	w = me(shop, "/payment-methods", fmt.Sprintf(`{"psp_id":%q,"token":%q}`, psps.Items[0].ID, card))
+	require.Equal(t, http.StatusCreated, w.Code, "saving a card makes the Stripe customer: %s", w.Body.String())
 
 	w = me(shop, portal, "")
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())

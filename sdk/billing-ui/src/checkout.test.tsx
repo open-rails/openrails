@@ -1107,7 +1107,7 @@ describe("one card panel", () => {
         path: "/billing/v1/me/payment-methods",
         body: {
           psp_id: "psp_nmi",
-          payment_token: "preview_payment_token",
+          token: "preview_payment_token",
           billing_details: {
             name: "Pat Reader",
             address: { postal_code: "94107", country: expect.any(String) },

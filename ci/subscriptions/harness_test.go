@@ -7,7 +7,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -907,13 +906,17 @@ func (c *customer) saveCard(rail string, card card) string {
 	c.w.t.Helper()
 	switch rail {
 	case "stripe":
-		setup := c.must(http.MethodPost, "/payment-method-setups", "setup-"+uuid.NewString(), map[string]any{"psp_id": c.w.psp["stripe"], "consent": true})
-		c.w.stripe.completeSetup(strings.TrimSuffix(setup["client_secret"].(string), "_secret_gf"), card)
-		confirmed := unwrap(c.must(http.MethodPost, fmt.Sprintf("/payment-method-setups/%s/confirm", setup["id"]), "", nil))
-		return confirmed["payment_method_id"].(string)
+		// Stripe's fields make a pm_; one call saves it. A card whose
+		// charges challenge saves without one.
+		token := c.w.newCardToken("stripe", card)
+		c.w.stripe.SetMethodDecline(token, "")
+		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": c.w.psp["stripe"], "token": token}))
+		require.Equal(c.w.t, "active", saved["status"], "%v", saved)
+		c.w.stripe.SetMethodDecline(token, card.Decline)
+		return saved["id"].(string)
 	case "nmi":
 		token := c.w.nmi.Tokenize(card)
-		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": c.w.psp["nmi"], "payment_token": token, "billing_details": map[string]any{"name": "E2E Payer"}}))
+		saved := unwrap(c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": c.w.psp["nmi"], "token": token, "billing_details": map[string]any{"name": "E2E Payer"}}))
 		return saved["id"].(string)
 	}
 	c.w.t.Fatalf("unknown rail %s", rail)

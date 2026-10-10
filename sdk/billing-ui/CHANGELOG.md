@@ -1,5 +1,16 @@
 # Changelog
 
+## A card is saved in one call
+
+- `addPaymentMethod` takes `token` (was `payment_token`). A Stripe card is a
+  `pm_` from Stripe's fields, saved by the same call; a card the bank wants to
+  authenticate answers `status: "requires_action"` with `next_action`, and
+  `confirmPaymentMethod(id)` finishes it after Stripe.js `handleNextAction`.
+  `StripeCardEntry` and `SavePaymentMethod` do this themselves.
+- `createCardSetup`, `getCardSetup`, `confirmCardSetup`, the `CardSetup` type
+  and the `returnURL` / `cardSetupReturnURL` props are gone: 3-D Secure runs in
+  the page.
+
 ## Offers sell products by key
 
 - The public catalog is a lookup by product key: `listProducts({ keys })` and

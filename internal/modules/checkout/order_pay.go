@@ -252,7 +252,7 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 			}
 			return OrderCharge{}, err
 		}
-		if method.Custodian != models.CustodianPSP || method.ParkReason != "" || (method.Rail != models.RailNMI && method.Rail != models.RailStripe) {
+		if method.Custodian != models.CustodianPSP || method.ParkReason != "" || method.Status != paymentmethods.StatusActive || (method.Rail != models.RailNMI && method.Rail != models.RailStripe) {
 			return OrderCharge{}, fmt.Errorf("%w: the payment method cannot pay an order", ErrPaymentMethodStale)
 		}
 		chosen = nil

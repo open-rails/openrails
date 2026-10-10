@@ -757,6 +757,7 @@ pkg openrails/billing, const PaymentMethodClosed PaymentMethodStatus = "closed"
 pkg openrails/billing, const PaymentMethodIDPrefix untyped string = "pm_"
 pkg openrails/billing, const PaymentMethodRemoved PaymentMethodStatus = "removed"
 pkg openrails/billing, const PaymentMethodReplaced PaymentMethodStatus = "replaced"
+pkg openrails/billing, const PaymentMethodRequiresAction PaymentMethodStatus = "requires_action"
 pkg openrails/billing, const PaymentPartiallyRefunded PaymentStatus = "partially_refunded"
 pkg openrails/billing, const PaymentPending PaymentStatus = "pending"
 pkg openrails/billing, const PaymentRefund PaymentKind = "refund"
@@ -1493,7 +1494,7 @@ pkg openrails/billing, type CreatePaymentMethodParams struct
 pkg openrails/billing, type CreatePaymentMethodParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 pkg openrails/billing, type CreatePaymentMethodParams struct, Card *Card `json:"card,omitempty"`
 pkg openrails/billing, type CreatePaymentMethodParams struct, PSPID PSPID `json:"psp_id"`
-pkg openrails/billing, type CreatePaymentMethodParams struct, PaymentToken string `json:"payment_token,omitempty"`
+pkg openrails/billing, type CreatePaymentMethodParams struct, Token string `json:"token,omitempty"`
 pkg openrails/billing, type CreatePaymentParams struct
 pkg openrails/billing, type CreatePaymentParams struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type CreatePaymentParams struct, InvoiceID *InvoiceID `json:"invoice_id,omitempty"`
@@ -2520,6 +2521,7 @@ pkg openrails/billing, type PaymentMethod struct, DefaultCurrencies []string `js
 pkg openrails/billing, type PaymentMethod struct, Health PaymentMethodHealth `json:"health"`
 pkg openrails/billing, type PaymentMethod struct, ID PaymentMethodID `json:"id"`
 pkg openrails/billing, type PaymentMethod struct, Mandates []Mandate `json:"mandates"`
+pkg openrails/billing, type PaymentMethod struct, NextAction *NextAction `json:"next_action"`
 pkg openrails/billing, type PaymentMethod struct, PSPID *PSPID `json:"psp_id"`
 pkg openrails/billing, type PaymentMethod struct, Rail string `json:"rail"`
 pkg openrails/billing, type PaymentMethod struct, ReplacedBy *PaymentMethodID `json:"replaced_by"`
@@ -3453,6 +3455,7 @@ pkg openrails/openrailstest/nmimock, type Sale struct, TransactionID string
 pkg openrails/openrailstest/nmimock, type Sale struct, Vault string
 pkg openrails/openrailstest/stripemock, func New(Options) *Mock
 pkg openrails/openrailstest/stripemock, method (*Mock) Authenticate(string) bool
+pkg openrails/openrailstest/stripemock, method (*Mock) AuthenticateSetup(string) bool
 pkg openrails/openrailstest/stripemock, method (*Mock) CheckoutSessions() []CheckoutSession
 pkg openrails/openrailstest/stripemock, method (*Mock) Close()
 pkg openrails/openrailstest/stripemock, method (*Mock) CompleteCheckoutSession(context.Context, string) (string, error)

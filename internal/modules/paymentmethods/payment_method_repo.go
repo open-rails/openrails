@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
 type PaymentMethodRepo struct {
@@ -139,6 +140,7 @@ func (r *PaymentMethodRepo) create(ctx context.Context, m *models.PaymentMethod)
 		NetworkTokenStatus: m.NetworkTokenStatus,
 		NetworkTokenPar:    m.NetworkTokenPAR,
 		ChargeVia:          m.ChargeVia, // "" -> 'pan_proxy'
+		SetupRef:           normalize.OptionalString(m.SetupRef),
 	})
 	if err != nil {
 		return err
