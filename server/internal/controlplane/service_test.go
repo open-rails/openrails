@@ -44,7 +44,6 @@ func TestAuthKitRefusesIncompleteConfiguration(t *testing.T) {
 		"merchant creation slug pattern": {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer}, pool, []Option{WithMerchantCreation(MerchantCreationConfig{SlugPattern: "("})}},
 		"naming policy":                  {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, Naming: config.NamingConfig{FormerNames: config.FormerNamesConfig{Mode: "sometimes"}}}, pool, nil},
 		"explicit client-IP posture":     {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, MintDisabled: true}, pool, nil},
-		"rate limits need Redis":         {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, DirectPeerIP: true, MintDisabled: true}, pool, nil},
 		"AUTHKIT_ACTIVE_KEY_ID":          {&config.Config{}, &hostconfig.AuthConfig{Issuer: issuer, ActiveKeyID: "k", ActivePrivateKeyPEM: "not a pem"}, pool, nil},
 	} {
 		_, _, err := AuthKit(tc.cfg, tc.auth, tc.pool, tc.opts...)

@@ -150,8 +150,8 @@ func WithRateLimitOverrides(overrides map[string]authkit.RateLimit) Option {
 	return func(o *options) { o.rateLimitOverrides = overrides }
 }
 
-// WithRedis shares AuthKit's rate-limit counters across replicas. Without it
-// the host must declare a single replica (auth.allow_memory).
+// WithRedis counts AuthKit's rate limits in Redis; without it, and while it
+// fails, AuthKit counts them in PostgreSQL, shared by every replica.
 func WithRedis(rd *redis.Client) Option {
 	return func(o *options) { o.redis = rd }
 }
@@ -329,13 +329,8 @@ func AuthKit(cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool
 		SMS:           options.sms,
 		NameAdmission: options.nameAdmission,
 	}
-	// AuthKit's rate limits are shared through Redis, or per process only
-	// when the operator declared a single replica.
-	switch {
-	case options.redis != nil:
+	if options.redis != nil {
 		deps.Redis = options.redis
-	case !auth.AllowMemory:
-		return authkit.Config{}, authkit.Deps{}, errors.New("controlplane: AuthKit rate limits need Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
 	}
 	return authConfig(auth, options, cp.naming, &httpCfg, config.RiverSchemaName(cfg)), deps, nil
 }

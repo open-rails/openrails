@@ -2,8 +2,8 @@
 # of this chart: name them in config and secrets. docs/kubernetes.md has a
 # walkthrough.
 
-# Every pod serves the API and runs the workers. More than one needs Redis
-# (config.redis) for AuthKit's rate limits and its keys from secrets.authKeys.
+# Every pod serves the API and runs the workers. More than one needs AuthKit's
+# keys from secrets.authKeys.
 replicaCount: 1
 
 image:
@@ -28,8 +28,8 @@ config:
   # auth:
   #   issuer: https://billing.example.com # https, required
   #   request_origin: https://billing.example.com
-  # Optional, no default; without it OpenRails counts its limits in Postgres.
-  # AuthKit's limits need it unless auth.allow_memory (one replica only).
+  # Optional, no default; without it OpenRails and AuthKit count their limits
+  # in Postgres.
   # redis:
   #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
   # The ingress controller's pod or node CIDR: without it the client IP is the

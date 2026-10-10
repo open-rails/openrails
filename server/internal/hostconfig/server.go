@@ -144,13 +144,12 @@ type MerchantCreationConfig struct {
 // through the control plane rather than declared here.
 type AuthConfig struct {
 	// The Allow* fields are narrow exceptions for local development; TestMode
-	// sandbox enables none of them. AllowMemory keeps AuthKit's stores in
-	// memory, AllowPrivateNetworkJWKS lets a remote application's keys be
-	// fetched from a private address, AllowMissingSenders boots without email
-	// or SMS senders, AllowEphemeralSigningKey generates a signing key when
-	// none is configured, and AllowLoopbackHTTP admits http://localhost for
-	// Issuer and RequestOrigin.
-	AllowMemory              bool
+	// sandbox enables none of them. AllowPrivateNetworkJWKS lets a remote
+	// application's keys be fetched from a private address,
+	// AllowMissingSenders boots without email or SMS senders,
+	// AllowEphemeralSigningKey generates a signing key when none is
+	// configured, and AllowLoopbackHTTP admits http://localhost for Issuer and
+	// RequestOrigin.
 	AllowPrivateNetworkJWKS  bool
 	AllowMissingSenders      bool
 	AllowEphemeralSigningKey bool

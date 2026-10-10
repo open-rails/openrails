@@ -70,8 +70,8 @@ type Options struct {
 	// (authkit.DefaultRateLimits, #743).
 	AuthRateLimitOverrides map[string]authkit.RateLimit
 
-	// Redis shares AuthKit's rate limits across replicas; nil requires
-	// Auth.AllowMemory.
+	// Redis counts AuthKit's rate limits; nil counts them in PostgreSQL, which
+	// every replica shares.
 	Redis *redis.Client
 
 	// MerchantCreation is the hosted policy for merchant names users claim

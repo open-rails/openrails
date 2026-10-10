@@ -30,7 +30,7 @@ func TestControlPlaneRequiresAnEnrollableSecondFactor(t *testing.T) {
 	attach := func(auth server.AuthConfig) (*server.Server, error) {
 		t.Helper()
 		auth.Issuer = "http://127.0.0.1/" + f.schema
-		auth.AllowMemory, auth.AllowMissingSenders, auth.AllowLoopbackHTTP, auth.DirectPeerIP = true, true, true, true
+		auth.AllowMissingSenders, auth.AllowLoopbackHTTP, auth.DirectPeerIP = true, true, true
 		auth.Schema = f.authSchema()
 		return f.buildServer(t, func(cfg *server.Config, _ *server.Deps) { cfg.Auth = auth })
 	}

@@ -21,7 +21,7 @@ Chart version `X.Y.Z` runs image `vX.Y.Z`.
 | `secrets.merchantOverlays` | Secret keys holding merchant manifest overlays (PSP credentials outside Vault). |
 | `metrics` | The private `/metrics` listener (`private_port`), its Service port and an optional ServiceMonitor. |
 | `ingress` | Hosts routed whole to the server; TLS. |
-| `replicaCount` | 1. More need Redis for AuthKit's rate limits and `secrets.authKeys`. |
+| `replicaCount` | 1. More need `secrets.authKeys`. |
 | `podDisruptionBudget`, `topologySpreadConstraints`, `affinity` | Scheduling. |
 
 The chart owns `host`, `port` and `private_port` (`ports.http`, `metrics.port`).
