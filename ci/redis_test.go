@@ -125,24 +125,13 @@ func TestRedisOverTLSWithACLUser(t *testing.T) {
 	}
 }
 
-// A declared Redis that does not answer costs speed, not correctness: the
-// engine is ready and reports Redis degraded, and limits still hold, counted
-// in PostgreSQL. Without a declared Redis none is reported.
+// A declared Redis that does not answer leaves the engine ready, with Redis
+// reported degraded (TestRedisDownKeepsAbuseLimitsPerInstance: what it then
+// enforces). Without a declared Redis none is reported.
 func TestDeclaredRedisOutageDegrades(t *testing.T) {
 	f := newFixture(t)
-	start := time.Now()
-	down, h := redisEngine(t, f, openrails.RedisConfig{Addr: "127.0.0.1:1"})
-	require.Less(t, time.Since(start), 10*time.Second, "construction never waits on Redis")
+	down, _ := redisEngine(t, f, openrails.RedisConfig{Addr: "127.0.0.1:1"})
 	require.Eventually(t, func() bool { return degraded(t, down) }, 15*time.Second, 50*time.Millisecond, "ready, with Redis degraded")
-	const addr = "198.51.100.23:4711"
-	// Eleven requests inside one fixed minute window.
-	if s := time.Now().Second(); s > 45 {
-		time.Sleep(time.Duration(61-s) * time.Second)
-	}
-	for i := range 10 {
-		require.NotEqual(t, http.StatusTooManyRequests, pay(h, addr), "request %d", i+1)
-	}
-	require.Equal(t, http.StatusTooManyRequests, pay(h, addr), "the window is still counted")
 
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: "noredis-" + uuid.NewString()[:8], DisplayName: "No Redis"}
