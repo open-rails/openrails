@@ -354,7 +354,7 @@ func (s *CheckoutAttemptService) acceptOnCreate(ctx context.Context, req *Checko
 	if req.Acceptance == nil || resp == nil || resp.MembershipQuote == nil {
 		return resp, nil
 	}
-	return s.acceptQuoteOnCreate(ctx, resp, user, *req.Acceptance)
+	return s.acceptQuote(ctx, resp.ID.UUID(), &CheckoutAttemptConfirmRequest{Payment: CheckoutAttemptConfirmPayment{Rail: resp.Payment.Rail}}, user, *req.Acceptance)
 }
 
 func canonicalizeCheckoutPaymentName(payment *CheckoutAttemptPaymentRequest) {

@@ -292,7 +292,9 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	ctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = db.WithPSPID(ctx, *in.PspID)
+	var declined *models.PaymentMethod
 	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		declined = nil
 		d := h.database().NewWithPgxTx(tx)
 		customer, _ := uuid.Parse(p.UserID)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: customer}); err != nil {
@@ -397,6 +399,11 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
 		}
+		if !success && p.NewCard {
+			if declined, err = declinedCard(ctx, d, in.MerchantID, p.PaymentMethodID); err != nil {
+				return err
+			}
+		}
 		raw, err := json.Marshal(evidence)
 		if err != nil {
 			return err
@@ -415,6 +422,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	if err != nil {
 		return intents.Ambiguous("sale receipt retained; local completion pending: " + err.Error())
 	}
+	discardCard(ctx, h.Sale.RailPaymentMethodService, declined)
 	return outcome
 }
 

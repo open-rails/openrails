@@ -426,7 +426,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 	ctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = db.WithPSPID(ctx, *in.PspID)
+	var declined *models.PaymentMethod
 	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		declined = nil
 		d := h.database().NewWithPgxTx(tx)
 		if _, err := d.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: in.MerchantID, ID: p.Terms.CustomerID}); err != nil {
 			return err
@@ -581,6 +583,9 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 			for key, value := range outcome.Evidence {
 				evidence[key] = value
 			}
+			if declined, err = enrollmentCard(ctx, d, in.MerchantID, p); err != nil {
+				return err
+			}
 		}
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
@@ -606,6 +611,7 @@ func (h *InitialMembershipIntentHandler) complete(ctx context.Context, in gen.Bi
 	if err != nil {
 		return intents.Ambiguous("initial receipts retained; local completion pending: " + err.Error())
 	}
+	discardCard(ctx, h.Checkout.RailPaymentMethodService, declined)
 	return outcome
 }
 

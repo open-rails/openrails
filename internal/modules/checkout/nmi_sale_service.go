@@ -162,6 +162,7 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 		if err != nil {
 			return err
 		}
+		prepared.NewCard = createdPaymentMethod
 		if prepared.Instrument.RailCustomerRef != railCustomerRef || prepared.Instrument.RailMethodRef != railMethodRef {
 			return errors.New("sale instrument changed during admission")
 		}
@@ -177,9 +178,6 @@ func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutReque
 	intent, err = s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(intent), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
 	if err != nil {
 		return nil, err
-	}
-	if intent.Status == intents.StatusFailedTerminal && createdPaymentMethod && s.RailPaymentMethodService != nil {
-		_ = s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, resolvedMethod)
 	}
 	return renderSaleOperation(intent)
 }

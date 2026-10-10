@@ -5,11 +5,11 @@ import (
 	"errors"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -37,12 +37,48 @@ func (s *CheckoutService) vaultEnrollmentCard(ctx context.Context, req *Checkout
 }
 
 func (s *CheckoutService) discardEnrollmentCard(ctx context.Context, method *models.PaymentMethod) {
-	if method == nil || s.RailPaymentMethodService == nil {
+	discardCard(ctx, s.RailPaymentMethodService, method)
+}
+
+// discardCard removes a card a purchase saved from the buyer's token, in
+// OpenRails and at the processor.
+func discardCard(ctx context.Context, cards *paymentmethods.RailPaymentMethodService, method *models.PaymentMethod) {
+	if method == nil || cards == nil {
 		return
 	}
-	if err := s.RailPaymentMethodService.CleanupPaymentMethodBestEffort(ctx, method); err != nil {
-		log.WithError(err).WithField("payment_method_id", method.ID).Warn("discard enrollment card")
+	if err := cards.CleanupPaymentMethodBestEffort(context.WithoutCancel(ctx), method); err != nil {
+		log.WithError(err).WithField("payment_method_id", method.ID).Warn("discard declined card")
 	}
+}
+
+// declinedCard is the card a purchase saved from the buyer's token, read in
+// the transaction that records its decline: whichever executor records the
+// decline discards it once that commits. nil when it is already gone.
+func declinedCard(ctx context.Context, d *db.DB, merchantID, methodID uuid.UUID) (*models.PaymentMethod, error) {
+	row, err := d.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: merchantID, ID: methodID})
+	if db.IsNotFound(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return models.PaymentMethodFromGen(row)
+}
+
+// enrollmentCard is declinedCard for an enrollment whose checkout attempt
+// vaulted its card from a token; nil for a card the buyer already had.
+func enrollmentCard(ctx context.Context, d *db.DB, merchantID uuid.UUID, p InitialMembershipPayload) (*models.PaymentMethod, error) {
+	if p.CheckoutAttemptID == nil {
+		return nil, nil
+	}
+	session, err := NewCheckoutAttemptRepo(d).GetByID(ctx, *p.CheckoutAttemptID)
+	if err != nil {
+		return nil, err
+	}
+	if vaulted, _ := session.RailState[initialMembershipVaultedMethodKey].(string); vaulted != p.Terms.PaymentMethodID.String() {
+		return nil, nil
+	}
+	return declinedCard(ctx, d, merchantID, p.Terms.PaymentMethodID)
 }
 
 func (s *CheckoutAttemptService) vaultEnrollmentCard(ctx context.Context, payment *CheckoutAttemptPaymentRequest, session *models.CheckoutAttempt, target railTarget, user *UserIdentity) (*models.PaymentMethod, error) {
@@ -80,37 +116,4 @@ func (s *CheckoutAttemptService) discardEnrollmentCard(ctx context.Context, meth
 	if vault, ok := s.checkoutService.(enrollmentCardVault); ok && method != nil {
 		vault.discardEnrollmentCard(context.WithoutCancel(ctx), method)
 	}
-}
-
-// acceptQuoteOnCreate confirms a just-quoted membership for the present payer.
-// A definite decline removes a card this session vaulted from a token.
-func (s *CheckoutAttemptService) acceptQuoteOnCreate(ctx context.Context, quoted *CheckoutAttemptResponse, user *UserIdentity, payer billingauth.Payer) (*CheckoutAttemptResponse, error) {
-	id := quoted.ID.UUID()
-	resp, err := s.acceptQuote(ctx, id, &CheckoutAttemptConfirmRequest{Payment: CheckoutAttemptConfirmPayment{Rail: quoted.Payment.Rail}}, user, payer)
-	if err != nil || (resp != nil && resp.Status == string(models.CheckoutAttemptStatusFailed)) {
-		s.discardDeclinedEnrollmentCard(ctx, id)
-	}
-	return resp, err
-}
-
-func (s *CheckoutAttemptService) discardDeclinedEnrollmentCard(ctx context.Context, sessionID uuid.UUID) {
-	session, err := s.repo.GetByID(ctx, sessionID)
-	if err != nil {
-		return
-	}
-	raw, _ := session.RailState[initialMembershipVaultedMethodKey].(string)
-	methodID, err := uuid.Parse(raw)
-	if err != nil || methodID == uuid.Nil || s.paymentMethodService == nil {
-		return
-	}
-	ctx = db.WithPSPID(ctx, session.PspID)
-	operation, err := intents.NewStore(s.db).GetByIdempotencyKey(ctx, InitialMembershipIdempotencyKey("checkout_attempt:"+session.ID.String()))
-	if err != nil || operation.Status != intents.StatusFailedTerminal {
-		return
-	}
-	method, err := s.paymentMethodService.GetByID(ctx, methodID)
-	if err != nil || method.CustomerID != session.CustomerID {
-		return
-	}
-	s.discardEnrollmentCard(ctx, method)
 }

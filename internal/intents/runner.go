@@ -306,7 +306,7 @@ func (r *Runner) EnqueueAndExecute(ctx context.Context, p EnqueueParams) (gen.Bi
 	if err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
-	return r.ExecuteByID(ctx, row.ID)
+	return r.executeInline(ctx, row)
 }
 
 // EnqueueOwnedAndExecute is EnqueueAndExecute for work whose idempotency key
@@ -319,6 +319,14 @@ func (r *Runner) EnqueueOwnedAndExecute(ctx context.Context, p EnqueueParams, ow
 		return gen.BillingProviderIntent{}, err
 	}
 	if err := owns(row); err != nil {
+		return gen.BillingProviderIntent{}, err
+	}
+	return r.executeInline(ctx, row)
+}
+
+// executeInline runs a request's accepted operation in the request.
+func (r *Runner) executeInline(ctx context.Context, row gen.BillingProviderIntent) (gen.BillingProviderIntent, error) {
+	if err := failpoint.Hit(ctx, failpoint.Site{Point: failpoint.BeforeInline, Kind: row.IntentType, Operation: row.ID}); err != nil {
 		return gen.BillingProviderIntent{}, err
 	}
 	return r.ExecuteByID(ctx, row.ID)

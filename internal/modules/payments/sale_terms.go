@@ -62,6 +62,9 @@ type NMISalePayload struct {
 	// Recurring: the order has a recurring line, so the charge stores the
 	// card for a recurring agreement.
 	Recurring bool `json:"recurring,omitempty"`
+	// NewCard: the sale saved its card from the buyer's token, so a decline
+	// removes it.
+	NewCard bool `json:"new_card,omitempty"`
 }
 
 // Agreement is the stored-credential agreement the sale charges under: a

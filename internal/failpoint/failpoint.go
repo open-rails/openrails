@@ -28,6 +28,9 @@ const (
 	// AfterAttempt fires after a provider's answer is recorded as a payment
 	// attempt and before the lifecycle applies it.
 	AfterAttempt Point = "after-attempt"
+	// BeforeInline fires after a request's operation is accepted and before
+	// the request executes it inline; River's worker may claim it meanwhile.
+	BeforeInline Point = "before-inline"
 )
 
 // Site is one hit: the point, the operation and its subscription.
