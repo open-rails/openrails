@@ -30,16 +30,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
-// grantLedger binds a #514 grant ledger to the query handle + merchant, on the
-// service clock so derived event/expiry timestamps stay consistent with the
-// rest of the money service.
+// grantLedger binds a grant ledger to the query handle + merchant on the
+// service clock, so derived timestamps match the rest of the money service.
 func (s *MoneyService) grantLedger(q *gen.Queries, tenantID uuid.UUID) *grants.Ledger {
 	gl := grants.New(q, tenantID)
 	gl.SetClock(s.now)
 	return gl
 }
 
-// moneyLedger binds a #512 double-entry money ledger to the query handle +
+// moneyLedger binds the double-entry money ledger to the query handle +
 // merchant (for direct transfers like owed accrual/settlement).
 func (s *MoneyService) moneyLedger(q *gen.Queries, tenantID uuid.UUID) *ledger.Ledger {
 	return ledger.New(q, tenantID)
@@ -108,23 +107,12 @@ func (s *MoneyService) now() time.Time {
 }
 
 // ErrCustomerRequired is returned when a money operation cannot resolve a
-// real payer merchant-subject id. HARDCUT (#221): customer_id is supplied by
-// the caller and is NOT synthesized — there is no deterministic stand-in
-// derivation. For the
-// self-hosted / single-merchant personal case the merchant subject IS the authenticated
-// user's own account/personal merchant-subject UUID, so a non-UUID invoker with no explicit
-// payer is a programming error rather than something to paper over.
+// payer: customer_id comes from the caller and is never synthesized.
 var ErrCustomerRequired = errors.New("customer_id required")
 
-// resolveCustomer resolves the merchant subject for a money operation (issue #221, the
-// payer/billing payer). When the caller supplies an explicit merchant subject it is
-// used verbatim. Otherwise, for the self-hosted / single-merchant personal case,
-// the payer is the invoker's own account/personal merchant-subject id parsed from its UUID
-// subject (identity.CustomerIDFromString). It is NEVER a synthesized stand-in.
-//
-// The invokerID is the free-form invoker (who caused usage); it is retained for
-// attribution and is NOT the financial payer. resolveCustomer returns
-// ErrCustomerRequired when no payer can be resolved.
+// resolveCustomer returns the explicit payer, else the invoker parsed as a
+// customer UUID (the self-hosted personal case), else ErrCustomerRequired. The
+// invoker is kept for attribution and is not the financial payer.
 func resolveCustomer(payer *identity.CustomerID, invokerID string) (identity.CustomerID, error) {
 	if payer != nil && !payer.IsZero() {
 		return *payer, nil
@@ -140,10 +128,8 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency strin
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
 	}
-	// Reads are scoped by merchant + OWNER (issue #221). For the self-hosted /
-	// single-merchant personal case the payer IS the user's own account/personal merchant-subject
-	// UUID — the same row the merchant-subject-owned writers stamp — so single-user reads return
-	// the right balance. customer_id is never synthesized.
+	// Reads are scoped by merchant + payer; without an explicit payer the
+	// invoker's own UUID is the payer.
 	payer, err := resolveCustomer(nil, invokerID)
 	if err != nil {
 		return nil, err
@@ -151,9 +137,8 @@ func (s *MoneyService) GetBalance(ctx context.Context, invokerID, currency strin
 	return s.GetBalanceForCustomer(ctx, payer, currency)
 }
 
-// GetBalanceForCustomer reads a balance scoped explicitly by merchant subject (issue
-// #221), for callers that own balances at a team customer rather than a personal
-// customer group. The invoker string is not required for a payer-scoped read.
+// GetBalanceForCustomer reads a balance scoped explicitly by payer, e.g. a team
+// customer rather than the invoker's own. No invoker is needed.
 func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyBalance, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -168,9 +153,8 @@ func (s *MoneyService) GetBalanceForCustomer(ctx context.Context, payer identity
 	}
 	tenantID := tid.UUID()
 	payerID := payer.UUID()
-	// Derived read (#491): balance = SUM spendable blocks, held = active holds +
-	// open windows. No lock needed — a stale read can never overdraft (writers
-	// re-derive under the customers-row lock).
+	// Derived read without a lock: a stale read never overdrafts, since writers
+	// re-derive under the customers-row lock.
 	return s.deriveBalance(ctx, s.db.Gen(ctx), tenantID, payerID, cur)
 }
 
@@ -211,8 +195,8 @@ type AdmissionCapacity struct {
 	BillingMode string
 	CreditLimit int64
 	// OutstandingOwed is the payer's unpaid arrears (positive), read O(1) from
-	// their own arrears account in the same lookup (or#897). The credit line is
-	// a ceiling on DEBT, so the line still available is CreditLimit - this.
+	// their own arrears account in the same lookup. The credit line caps debt,
+	// so the line still available is CreditLimit - this.
 	OutstandingOwed int64
 }
 
@@ -271,13 +255,8 @@ func (s *MoneyService) WithLockedAdmissionCapacity(ctx context.Context, payer id
 
 // GetAdmissionCapacity reads the admit hot-path capacity in one point lookup:
 // customer_balance counters, optional money_settings, and the payer's arrears
-// account.
-//
-// or#878 ruling / or#897: it now reports OutstandingOwed. Arrears debt does NOT
-// show up as a negative customer_balance — AccrueOwed debits the arrears
-// account, leaving the balance untouched — so a credit line that ignored
-// outstanding owed never bit at all: a payer could accrue past the line
-// indefinitely. Still one query, still O(1).
+// account. Arrears debt never shows as a negative balance, so the credit line
+// must be checked against OutstandingOwed.
 func (s *MoneyService) GetAdmissionCapacity(ctx context.Context, payer identity.CustomerID, currency string) (AdmissionCapacity, error) {
 	if s == nil || s.db == nil {
 		return AdmissionCapacity{}, fmt.Errorf("money service not initialized")
@@ -376,9 +355,9 @@ func (s *MoneyService) ListBalanceTransactions(ctx context.Context, payer identi
 	}), nil
 }
 
-// GetAccountSettingsForCustomer returns the stored money-account settings for an
-// payer (billing mode and expiry default), scoped to
-// the request merchant (issue #242). Never nil — missing rows return the defaults.
+// GetAccountSettingsForCustomer returns the payer's stored money-account
+// settings (billing mode and expiry default) in the request merchant. Never
+// nil: missing rows return the defaults.
 func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	var out *models.MoneyAccount
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -392,19 +371,10 @@ func (s *MoneyService) GetAccountSettingsForCustomer(ctx context.Context, payer 
 	return out, err
 }
 
-// or#894 task 4: GetTransactionBySource is DELETED, not fixed. It read the
-// ledger by (transfer_type, source, source_id) — the same coordinate the
-// capture/waste collision lived at — and had no callers. A dead read that
-// resolves an ambiguous coordinate is a trap waiting for its first caller, so
-// it goes. Reads by coordinate now go through GetLedgerTransferByCoords with an
-// operation.
-
-// GetDepositBySourceID answers "what did this deposit key do" (or#906): the
-// credit grant committed at the caller's key, or (nil, nil) when the key never
-// committed. KEY-QUALIFIED on the deposit's full structural coordinate —
-// (merchant, payer, source_id) with operation=deposit fixed by the method
-// itself — exactly the coordinate depositTx dedupes on. NOT a keyless
-// coordinate read; or#894 deleted that shape as a trap (see above).
+// GetDepositBySourceID returns the credit grant committed at the caller's
+// deposit key, or (nil, nil) when it never committed. It reads the exact
+// coordinate depositTx dedupes on: (merchant, payer, source_id), operation
+// deposit.
 func (s *MoneyService) GetDepositBySourceID(ctx context.Context, payer identity.CustomerID, sourceID string) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -439,16 +409,14 @@ func (s *MoneyService) GetDepositBySourceID(ctx context.Context, payer identity.
 }
 
 type DepositParams struct {
-	// CustomerID is the merchant subject that owns the deposited balance (issue #221). When
-	// nil, the payer is the invoker (Invoker)'s own account/personal merchant-subject UUID for the
-	// self-hosted / single-merchant personal case; it is never a synthesized
-	// stand-in, and a non-UUID Invoker with no explicit payer is rejected.
+	// CustomerID owns the deposited balance; nil means the invoker's own UUID.
+	// A non-UUID Invoker without CustomerID is refused.
 	CustomerID  *identity.CustomerID
 	Invoker     string
 	Currency    string
 	Amount      int64
 	Source      string
-	SourceID    *string    // #491: natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
+	SourceID    *string    // natural-key string (uuidv7 pk + UNIQUE natural key), not a derived uuid
 	ExpiresAt   *time.Time // nil is permanent; expiry is an immutable operation term
 	Description *string
 	// RepayOwed applies the new credit to outstanding owed first.
@@ -528,8 +496,8 @@ func (s *MoneyService) DepositBatch(ctx context.Context, items []DepositParams) 
 }
 
 // ensureCustomer upserts the billing.customers row for a payable customer id
-// so the money-write FKs are satisfied on a customer's FIRST money operation
-// (deposit/hold/usage). customers is UUID-only (#491). ON CONFLICT DO NOTHING.
+// so the money-write FKs hold on a customer's first money operation
+// (deposit/hold/usage). ON CONFLICT DO NOTHING.
 func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUID) error {
 	if tsid == uuid.Nil {
 		return nil
@@ -544,12 +512,10 @@ func ensureCustomer(ctx context.Context, q *gen.Queries, tenantID, tsid uuid.UUI
 	return db.EnsureCustomerRowQ(ctx, q, tenantID, tsid)
 }
 
-// depositTx records a money-in as a #514 credit grant (kind=credit), then
-// materializes it (derive-2) into a #512 ledger deposit (DR processor_clearing /
-// CR customer_balance). The grant IS the FIFO credit lot — there is no separate
-// money_blocks row. Idempotent on the deposit's natural key (merchant, payer,
-// source_id) via the credit-grant lookup. Runs under the customers-row lock so
-// deposits serialize per customer.
+// depositTx records a money-in as a credit grant, then materializes it into a
+// ledger deposit (DR processor_clearing / CR customer_balance); the grant IS
+// the FIFO lot. Idempotent on (merchant, payer, source_id) via the credit-grant
+// lookup. Runs under the customers-row lock so deposits serialize per customer.
 func (s *MoneyService) depositTx(ctx context.Context, q *gen.Queries, params DepositParams) (*models.MoneyTransaction, error) {
 	now := s.now()
 	expiresAt, err := params.expiryAt(now)
@@ -660,9 +626,8 @@ func sameDepositExpiry(a, b *time.Time) bool {
 	return a.Equal(*b)
 }
 
-// creditGrantTxn synthesizes the public MoneyTransaction DTO for a deposit from
-// its backing credit grant (the lot). The single-entry money_transactions row is
-// gone (#512 hard cut); this DTO is derived, not stored.
+// creditGrantTxn derives the public MoneyTransaction DTO for a deposit from
+// its credit grant (the lot).
 func creditGrantTxn(g gen.BillingGrant) (*models.MoneyTransaction, error) {
 	var spec grants.Spec
 	if err := json.Unmarshal(g.SpecSnapshot, &spec); err != nil {
@@ -690,9 +655,8 @@ func creditGrantTxn(g gen.BillingGrant) (*models.MoneyTransaction, error) {
 }
 
 type WithdrawParams struct {
-	// CustomerID is the merchant subject to withdraw from (issue #221). When nil, the payer
-	// is the invoker (Invoker)'s own account/personal merchant-subject UUID for the self-hosted /
-	// single-merchant personal case; it is never a synthesized stand-in.
+	// CustomerID is the payer to withdraw from; nil means the invoker's own
+	// UUID.
 	CustomerID *identity.CustomerID
 	Invoker    string
 	Currency   string
@@ -721,13 +685,11 @@ func (s *MoneyService) Withdraw(ctx context.Context, params WithdrawParams) (*mo
 	return trx, nil
 }
 
-// withdrawBalanceAndBlocks debits `amount` from the customer's prepaid balance by
-// spending #514 credit lots FIFO (soonest-expiring first) via the grant ledger,
-// which emits one #512 credit_spend transfer per lot drawn — tagged with the
-// caller's operation coordinate (source, sourceID) for idempotency/history and
-// grant_id for lot attribution. The available/credit-line gate is the CALLER's
-// job (#491); this fails only if the lots physically cannot cover `amount` (a
-// gated caller never hits that). Returns the derived balance AFTER the debit.
+// withdrawBalanceAndBlocks debits amount from the customer's prepaid balance by
+// spending credit lots FIFO (soonest-expiring first), one credit_spend transfer
+// per lot at the caller's coordinate. The available/credit-line gate is the
+// caller's job; this fails only if the lots cannot cover amount. Returns the
+// derived balance after the debit.
 func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string, key IdempotencyKey, resource string, amount int64) (newBalance int64, applied bool, err error) {
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
@@ -760,16 +722,11 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 	return bal.Balance - amount, true, nil
 }
 
-// lockBalance is the per-customer spend mutex (#491): it FOR UPDATE-locks the
-// customers row (the serialization point — money_balances is gone), ensuring the
-// row exists first, then returns the DERIVED balance snapshot
-// (Balance = ledger customer-balance counters, HeldBalance = durable open
-// operation authorizations)
-// computed UNDER the lock. HeldBalance includes durable open operation
-// authorizations and live request reservations.
-// Every spend/hold/capture/deposit/expiry path calls this before
-// reading/mutating the customer's blocks so no two mutations on the same
-// customer interleave (no overdraft, atomic hold placement).
+// lockBalance is the per-customer spend mutex: it ensures the customers row
+// exists, FOR UPDATE-locks it, and returns the balance derived under the lock
+// (Balance = ledger counters, HeldBalance = open authorizations + live
+// reservations). Every spend/hold/capture/deposit/expiry path calls it first,
+// so mutations on one customer never interleave (no overdraft).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeCurrency(currency)
 	tid, err := merchant.Require(ctx)
@@ -789,14 +746,12 @@ func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer id
 	return s.deriveBalance(ctx, q, tenantID, payerID, cur)
 }
 
-// deriveBalance computes the balance snapshot from the source of truth: balance
-// = the customer's #512 ledger account counters and held = the sum of durable
-// open operation authorizations linked to that account. The caller holds the
-// customers-row lock (#491).
+// deriveBalance computes the balance snapshot: balance = the customer's ledger
+// account counters, held = heldAmount. Writers call it under the customers-row
+// lock.
 func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (*models.MoneyBalance, error) {
 	l := ledger.New(q, tenantID)
-	// A balance READ must never create the account (#534): no account = zero
-	// balance. EnsureCustomerBalance (create) is reserved for the write flows.
+	// A balance read never creates the account: no account = zero balance.
 	acc, found, err := l.CustomerBalanceAccountID(ctx, payerID, cur)
 	if err != nil {
 		return nil, err
@@ -850,8 +805,8 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 		return nil, err
 	}
 	payerID := payer.UUID()
-	// Lock + derive once: gate on held-aware available (a withdraw cannot eat into
-	// reserved/held funds), then idempotency, then debit the FIFO blocks (#491).
+	// Lock + derive once: gate on held-aware available (a withdraw cannot eat
+	// into held funds), then idempotency, then debit the FIFO lots.
 	bal, err := s.lockBalance(ctx, q, payer, params.Invoker, cur)
 	if err != nil {
 		return nil, err
@@ -859,9 +814,6 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 	if bal.Balance-bal.HeldBalance < params.Amount {
 		return nil, ErrInsufficientCredits
 	}
-	// or#891 item 1 (same shape as SpendCredits): the dedupe read used to sit
-	// behind `if params.SourceID != nil`, so a keyless withdraw posted
-	// unconditionally and every retry debited again.
 	if params.SourceID == nil {
 		return nil, fmt.Errorf("withdraw: source_id required for idempotency")
 	}
@@ -871,9 +823,8 @@ func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params Wi
 	if kerr != nil {
 		return nil, kerr
 	}
-	// or#891 item 3: compare the TOTAL already withdrawn at these coordinates (a
-	// withdraw fans out one credit_spend transfer per FIFO lot) and refuse a
-	// replay whose amount differs, rather than answering it with the first row.
+	// Compare the total already withdrawn at this coordinate (one credit_spend
+	// per FIFO lot) and refuse a replay with a different amount.
 	committed, cerr := key.requireSameAmount(ctx, q, tenantID, payerID, cur, params.Amount)
 	if cerr != nil {
 		return nil, cerr

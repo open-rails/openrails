@@ -12,10 +12,9 @@ import (
 )
 
 // CustodianProxyCollectionAdapter collects invoices from custodian-held
-// instruments (#795) through the #297 charge seam: a merchant-initiated
-// unscheduled CoF charge, detokenized through the custodian's proxy into the
-// PSP's own NMI gateway. Same anchor semantics as the NMI adapter — it IS the
-// NMI rail (or#879), reached differently.
+// instruments: a merchant-initiated unscheduled CoF charge, detokenized through
+// the custodian's proxy into the PSP's own NMI gateway. It is the NMI rail,
+// with the NMI adapter's anchor semantics.
 type CustodianProxyCollectionAdapter struct {
 	Charger *nmiproxy.Charger
 }

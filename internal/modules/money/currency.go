@@ -6,17 +6,12 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// The system currency registry itself lives in internal/shared/moneyutil
-// (or#863): a zero-dependency scale table has to sit BELOW every provider
-// boundary that needs it, and this package cannot be one of those homes —
-// internal/modules/money imports internal/modules/subscriptions, so the two
-// NMI plan-migration pushes could never have called the converter here.
-// What remains in this file is the BILLING doctrine layered on the registry.
+// The currency registry lives in internal/shared/moneyutil; this file is the
+// billing policy on top of it.
 
 // DefaultCurrency is the explicit USD currency code used by callers that want
-// USD. It is a declared CONFIG default — the FX base/accounting unit — and
-// never a substitute for a currency a payment, price or transaction failed to
-// carry (CUR-9).
+// USD. It is a declared config default (the FX base/accounting unit), never a
+// substitute for a currency a payment, price or transaction failed to carry.
 const DefaultCurrency = "USD"
 
 // normalizeCurrency upper-cases the code, so built-in currency codes are

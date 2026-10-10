@@ -12,8 +12,7 @@ import (
 )
 
 // Mapping helpers between sqlc-generated row types (internal/db/gen) and the
-// domain models this service returns (#334 boundary rule: gen types never
-// leak out of the package).
+// domain models this service returns: gen types never leak out of the package.
 
 func fromJSONBC[T any](b []byte, dst *T, col string) error {
 	if len(b) == 0 {
@@ -32,10 +31,9 @@ func toJSONBC[M ~map[string]V, V any](m M) ([]byte, error) {
 	return json.Marshal(m)
 }
 
-// moneyTransactionFromTransfer derives the public MoneyTransaction DTO from a
-// #512 immutable ledger transfer (the single-entry money_transactions table was
-// retired in the hard cut). The DTO's sign convention is preserved: money OUT of
-// the customer is negative. Transfers are immutable, so UpdatedAt == CreatedAt.
+// moneyTransactionFromTransfer derives the public MoneyTransaction DTO from an
+// immutable ledger transfer. Money out of the customer is negative; UpdatedAt
+// == CreatedAt.
 func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTransaction {
 	amount := r.Amount
 	txType := r.TransferType
@@ -55,8 +53,7 @@ func moneyTransactionFromTransfer(r gen.BillingLedgerTransfer) *models.MoneyTran
 	case "credit_revoke", "credit_refund":
 		amount = -amount
 	}
-	// Every ledger transfer is posted (single-phase) since migration 014 retired
-	// the in-ledger two-phase pending apparatus (holds are Redis-only, #513).
+	// Every ledger transfer is posted.
 	status := "posted"
 	var customerID uuid.UUID
 	if r.CustomerID != nil {

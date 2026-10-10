@@ -71,25 +71,18 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	// Materialize the payable customers row so the invoices FK (migration
-	// 076) is satisfied even if no prior money op touched this subject (#317).
-	//
-	// or#868 B2: on a merchant-PINNED connection. FinalizeInvoice is a
-	// host/embedded-facing seam (internal/service.Service.FinalizeInvoice), so
-	// nothing upstream necessarily pinned one, and off the request path the
-	// since-removed RLS denied this INSERT (42501) — taking the whole arrears
-	// close down with it.
+	// Materialize the customers row the invoice references, on a
+	// merchant-pinned connection.
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return ensureCustomer(ctx, s.db.Gen(ctx), tid.UUID(), payer.UUID())
 	}); err != nil {
 		return nil, err
 	}
 
-	// #615/#707: rate reported usage (billing.usage_events) into pending owed
-	// invoice items via the catalog rate cards, BEFORE the finalize transaction
-	// rolls pending items onto the invoice. Runs in its own transactions
-	// (AccrueOwed) so the committed owed accruals are visible to the finalize tx
-	// below; the #672 watermark makes a re-finalize accrue nothing new.
+	// Rate reported usage into pending owed invoice items via the catalog rate
+	// cards before the finalize transaction rolls them onto the invoice. The
+	// accruals commit in their own transactions; the rating watermark makes a
+	// re-finalize accrue nothing new.
 	if err := s.sweepCatalogRateCardUsage(ctx, payer, cur, from.UTC(), to.UTC()); err != nil {
 		return nil, err
 	}
@@ -156,9 +149,8 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 			lineItems = append(lineItems, *it)
 		}
 
-		// #798: itemize the RATED charge per accrual source (e.g.
-		// "metered:<meter>") so the statement shows cost per category —
-		// gauge/metered usage rollups above carry quantities but zero amounts.
+		// Itemize the rated charge per accrual source (e.g. "metered:<meter>"):
+		// the usage rollups above carry quantities but zero amounts.
 		ratedRows, rerr := q.SumPendingInvoiceItemAmountBySourceInPeriod(ctx, gen.SumPendingInvoiceItemAmountBySourceInPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			PeriodStartsAt: pfrom, PeriodEndsAt: pto,
@@ -172,7 +164,7 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 			}
 		}
 
-		// --- money movements (#512 ledger, by transfer_type; amounts positive) ---
+		// --- money movements (ledger, by transfer_type; amounts positive) ---
 		movs, merr := q.SumLedgerMovementsByCustomerInPeriod(ctx, gen.SumLedgerMovementsByCustomerInPeriodParams{
 			MerchantID: tenantID, CustomerID: payerID, Currency: cur,
 			PeriodStartsAt: pfrom, PeriodEndsAt: pto,
@@ -180,9 +172,8 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 		if merr != nil {
 			return merr
 		}
-		// Normalize ledger transfer types (all positive amounts) into the statement's
-		// signed movement map: money in is positive, money out negative — matching the
-		// retired single-entry money_transactions sign convention.
+		// Normalize ledger transfer types (positive amounts) into the statement's
+		// signed movement map: money in positive, money out negative.
 		movements := map[string]int64{}
 		for _, m := range movs {
 			switch m.TransferType {
@@ -212,8 +203,8 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 			return nil
 		}
 		// A statement also states its period's charges that threshold invoices
-		// already bill, and is paid only once they are (#1147). A threshold
-		// invoice states only what it bills.
+		// already bill, and is paid only once they are. A threshold invoice
+		// states only what it bills.
 		var covered int64
 		if basis != basisPending {
 			period := gen.LockInvoicesBillingPeriodParams{MerchantID: tenantID, CustomerID: payerID, Currency: cur, PeriodStartsAt: pfrom, PeriodEndsAt: pto}
@@ -250,16 +241,16 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 		}
 		due := min(receivable, max(owed-claimed, 0))
 
-		// --- closing balance snapshot (derived, #491) ---
+		// --- closing balance snapshot (derived) ---
 		bal, balErr := s.deriveBalance(ctx, q, tenantID, payerID, cur)
 		if balErr != nil {
 			return balErr
 		}
 		closing := bal.Balance
 
-		// --- payer invoice profile (#798): net-N terms, collection method,
-		// document snapshot. Absent profile keeps the historical defaults
-		// (due at finalize, charge_automatically, no document fields).
+		// Payer invoice profile: net-N terms, collection method, document
+		// snapshot. Without one: due at finalize, charge_automatically, no
+		// document fields.
 		var profile *CustomerInvoiceProfile
 		if row, perr := q.GetInvoiceProfile(ctx, gen.GetInvoiceProfileParams{
 			MerchantID: tenantID, CustomerID: payerID,
@@ -302,7 +293,7 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 			ID:               invoiceID,
 			MerchantID:       tenantID,
 			CustomerID:       payerID,
-			Currency:         cur, // amounts are minor units of this currency (#474)
+			Currency:         cur, // amounts are native units of this currency
 			InvoiceNumber:    &invoiceNumber,
 			PeriodStartsAt:   pfrom,
 			PeriodEndsAt:     pto,
@@ -385,9 +376,9 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 		}); err != nil {
 			return err
 		}
-		// #726: consume the pending workspace — attached rows keep only their
-		// invoice_id/status tombstone so they can't bill twice. No 'invoiced'
-		// rows are inserted; the statement itemization is line_items above.
+		// Consume the pending workspace: attached rows keep only their
+		// invoice_id/status tombstone so they can't bill twice. The statement
+		// itemization is line_items above.
 		if _, err := q.AttachPendingInvoiceItemsToInvoice(ctx, gen.AttachPendingInvoiceItemsToInvoiceParams{
 			MerchantID:     inv.MerchantID,
 			CustomerID:     inv.CustomerID,
@@ -437,10 +428,9 @@ func (s *MoneyService) finalizeInvoice(ctx context.Context, payer identity.Custo
 	return inv, nil
 }
 
-// GetInvoiceByID returns one finalized invoice (with its snapshotted line
-// items) for an merchant subject by id (issue #303). It filters merchant +
-// payer + id on Qx(ctx); an invoice belonging to another payer/merchant is
-// unreachable (fail closed, pgx.ErrNoRows).
+// GetInvoiceByID returns one finalized invoice with its line items, filtered
+// by merchant + payer + id: another payer's invoice is unreachable
+// (pgx.ErrNoRows).
 func (s *MoneyService) GetInvoiceByID(ctx context.Context, payer identity.CustomerID, id uuid.UUID) (*models.Invoice, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -492,10 +482,8 @@ func (s *MoneyService) VoidInvoice(ctx context.Context, payer identity.CustomerI
 		}); e != nil {
 			return e
 		}
-		// or#897: cancel the DEBT, not just the invoice row. The ledger is the
-		// exposure substrate, so an unreversed accrual would keep capping the
-		// payer for a bill that no longer exists. Idempotent on the invoice
-		// coordinate, so a double void writes off once.
+		// Write off the debt, not just the invoice row: an unreversed accrual
+		// would keep capping the payer. Idempotent on the invoice coordinate.
 		before, e := q.GetInvoiceForPayer(ctx, gen.GetInvoiceForPayerParams{
 			MerchantID: tid.UUID(), CustomerID: payer.UUID(), ID: id,
 		})
@@ -686,10 +674,9 @@ func (s *MoneyService) FinalizeDueInvoicesForBoundary(ctx context.Context, bound
 }
 
 // finalizeInvoicePayers finalizes every (payer, currency) ListInvoicePayers
-// enumerates (ledger money movement OR catalog-priced usage since
-// activeSince) whose period holds activity. A usage-only payer (the metered
-// platform fee: zero-amount usage, no deposit or spend) has no ledger row
-// until FinalizeInvoice rates it (exactly-once through the #672 watermark).
+// enumerates (ledger movement or catalog-priced usage since activeSince) whose
+// period holds activity. A usage-only payer has no ledger row until
+// FinalizeInvoice rates it, exactly once through the rating watermark.
 func (s *MoneyService) finalizeInvoicePayers(ctx context.Context, activeSince time.Time, period func(gen.ListInvoicePayersRow) (time.Time, time.Time, error)) (int, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")

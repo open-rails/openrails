@@ -26,16 +26,10 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// #725/#788: the invoice collection plane arms rail credentials PER
-// MERCHANT from the merchant-secrets store AT CHARGE TIME — the ONE Layer-C
-// resolution seam (there is no boot-config plane anymore, #788). A merchant
-// that declares a rail account resolves that rail from the store ONLY —
-// missing or unreadable secrets fail the charge CLOSED (loud error naming
-// merchant, rail and secret). A rail with no store row simply has no
-// collection adapter (the charge fails closed with "no invoice collection
-// adapter configured"). Nothing is cached: adapters are cheap per-charge
-// structs, so a rotated credential takes effect on the next charge — same
-// posture as checkout, webhooks and the pull plane.
+// Invoice collection arms rail credentials per merchant from the
+// merchant-secrets store at charge time. A declared account with missing or
+// unreadable secrets fails the charge closed; a rail with no account has no
+// adapter. Nothing is cached, so a rotated credential applies on the next charge.
 
 // CollectionAdapterResolver arms the store-scoped adapter for one saved-method
 // charge. ok=false with nil err = the merchant declares no account on the rail
@@ -51,16 +45,16 @@ type CollectionAdapterResolver interface {
 type CollectionEndpoints struct {
 	StripeBaseURL string
 	NMIV5BaseURL  string
-	// Classic NMI endpoints (#727 manual-rebill leg: Direct Post + Query API).
+	// Classic NMI endpoints (manual-rebill leg: Direct Post + Query API).
 	NMIDirectPostURL string
 	NMIQueryURL      string
-	// BTBaseURL points store-armed Basis Theory clients at a fake server (#795).
+	// BTBaseURL points store-armed Basis Theory clients at a fake server.
 	BTBaseURL string
 }
 
 // CollectionPlane is the runtime-facing per-merchant credential resolver
-// surface (#725/#788): store-armed collection adapters, raw NMI clients and
-// the reconciliation reads for in-doubt collection operations.
+// surface: store-armed collection adapters, raw NMI clients and the
+// reconciliation reads for in-doubt collection operations.
 // Satisfied by *MerchantCollectionAdapterBuilder; tests may inject fakes.
 type CollectionPlane interface {
 	CollectionAdapterResolver
@@ -76,7 +70,7 @@ type CollectionVerifier interface {
 	ConfirmCollectionNotExecuted(ctx context.Context, in gen.BillingProviderIntent) error
 }
 
-// NMIClientResolver is the raw-client NMI leg of the #725 store resolver.
+// NMIClientResolver is the raw-client NMI leg of the store resolver.
 type NMIClientResolver = railresolve.NMIClientResolver
 
 // MerchantCollectionAdapterBuilder builds one merchant's collection adapter at
@@ -165,9 +159,8 @@ func (b *MerchantCollectionAdapterBuilder) ResolveCollectionAdapter(ctx context.
 	case isStripe:
 		adapter, err = b.stripeAdapter(ctx, svc, mid, scope)
 	case method.Custodian == models.CustodianBasisTheory:
-		// or#879: same rail, same gateway, different transport — the card is
-		// held by the custodian, so the charge goes through its proxy. The
-		// INSTRUMENT decides this, not the rail.
+		// The card is held by the custodian, so the charge goes through its
+		// proxy to the same gateway: the instrument decides this, not the rail.
 		scope.CustodianID = method.CustodianID
 		adapter, err = b.custodianProxyAdapter(ctx, svc, mid, scope)
 	case method.Custodian == models.CustodianHyperSwitch:
@@ -268,11 +261,9 @@ func (b *MerchantCollectionAdapterBuilder) stripeService(ctx context.Context, sv
 	return service, nil
 }
 
-// custodianProxyAdapter arms the #795 detokenizing-proxy collection adapter:
-// the custodian's private app key and THIS PSP's own gateway security key. The
-// gateway half is the PSP's (or#879 folded the old cross-account pointer away);
-// the custodial half is the referenced custodian's (or#880), so several PSPs
-// charging the same vault share ONE credential rather than a copy each.
+// custodianProxyAdapter arms the detokenizing-proxy collection adapter: the
+// custodian's private app key and this PSP's own gateway security key. The
+// custodial credential is the custodian's, so PSPs charging one vault share it.
 func (b *MerchantCollectionAdapterBuilder) custodianProxyAdapter(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, scope merchants.PSPScope) (CollectionAdapter, error) {
 	if scope.CustodianID == nil {
 		return nil, fmt.Errorf("psp %s/%s: instrument is held by custodian %s but the PSP references none", scope.Rail, scope.AccountID, models.CustodianBasisTheory)
@@ -324,7 +315,7 @@ func (b *MerchantCollectionAdapterBuilder) requireSecret(ctx context.Context, _ 
 // requireCustodianSecret is the custody sibling: the credential is scoped to
 // the CUSTODIAN's identity, not to the PSP that happens to charge through it.
 func (b *MerchantCollectionAdapterBuilder) requireCustodianSecret(ctx context.Context, svc *merchants.Service, mid billing.MerchantID, custodian merchants.CustodianScope, key string) (string, error) {
-	// or#812: same versioned read as every other provider credential.
+	// Same versioned read as every other provider credential.
 	ref, err := custodian.SecretRef(key)
 	if err != nil {
 		return "", err

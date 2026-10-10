@@ -12,28 +12,19 @@ import (
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
 
-// The idempotency key on a money write is (Operation, Source, SourceID) within
-// (merchant, payer, currency). Three rules hold everywhere in this package,
-// with no exceptions and no "degrade quietly" path:
+// ErrIdempotencyKeyReused refuses a key replayed with different charging terms.
 //
-//  1. EVERY part is REQUIRED. A money write without a key used to skip its
-//     dedupe read and post unconditionally, so every retry double-charged. An
-//     absent key is now a refusal, never a silent non-guarantee (or#891).
-//  2. The OPERATION is engine-composed and part of the coordinate. Without it,
-//     two different money operations that happen to share a caller's
-//     (source, source_id) alias at the ledger: a wasted-spend overage charge
-//     and the capture of the same rendered request both landed at
-//     ("invoke", request_id), the capture moved 0 micros, and the caller was
-//     told it succeeded (or#894).
-//  3. A key is a claim about the BODY, not just about the call. Replaying a key
-//     with different charging terms is a caller bug, so it returns
-//     ErrIdempotencyKeyReused instead of the first result. Answering a changed
-//     retry with the original amount is how a corrected charge silently keeps
-//     the wrong number.
+// A money write's idempotency key is (Operation, Source, SourceID) within
+// (merchant, customer, currency), and in this package:
 //
-// The key must be REPRODUCIBLE by the caller across retries of the same logical
-// operation. A value minted per attempt (uuid.New() in a handler) satisfies
-// every check here and guarantees nothing — it is a fresh operation each time.
+//   - every part is required: a missing key is refused, never skipped;
+//   - the operation is engine-composed, so two operations sharing a caller's
+//     (source, source_id) never alias at the ledger;
+//   - a key is a claim about the body: a retry with different terms gets this
+//     error, never the first result.
+//
+// The key must be reproducible across retries of one logical operation; one
+// minted per attempt (uuid.New() in a handler) guarantees nothing.
 var ErrIdempotencyKeyReused = errors.New("idempotency_key_reused")
 
 // Operation is the engine-composed kind of money write; see ledger.Operation.
@@ -61,14 +52,9 @@ const (
 // UsageOperation is the operation kind of a metered usage charge (usage:<event_type>).
 func UsageOperation(eventType string) Operation { return ledger.UsageOperation(eventType) }
 
-// IdempotencyKey is the coordinate a durable money write is idempotent on. It
-// replaces the Source/SourceID string pairs that were duplicated across five
-// param structs, each re-validating them independently and arriving at
-// different answers — which is exactly why the rules diverged (or#892).
-//
-// The zero value is UNUSABLE: the only way to build one is NewIdempotencyKey,
-// which refuses a blank part. "No key" therefore stops being a representable
-// state, and the scattered validations collapse into one constructor.
+// IdempotencyKey is the coordinate a durable money write is idempotent on. The
+// zero value is unusable; NewIdempotencyKey, which refuses a blank part,
+// builds one.
 type IdempotencyKey struct {
 	coord ledger.Coord
 }
@@ -139,14 +125,9 @@ func (e *IdempotencyConflict) Error() string {
 
 func (e *IdempotencyConflict) Unwrap() error { return ErrIdempotencyKeyReused }
 
-// committedAt reports the total money already posted at this key's coordinate
-// and how many legs carry it. A spend fans out into one credit_spend transfer
-// per FIFO lot drawn plus at most one owed_accrual, so the first transfer's
-// amount is NOT the operation's amount — only the sum is.
-//
-// This is or#891's body check: the committed amount is already durable at the
-// coordinate, so comparing a retry against it needs no fingerprint column. It
-// lives here rather than being repeated at each of the four write sites.
+// committedAt reports the total already posted at this key's coordinate and
+// how many legs carry it. A spend fans out one credit_spend per FIFO lot plus
+// at most one owed_accrual, so only the sum is the operation's amount.
 func (k IdempotencyKey) committedAt(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, currency string) (total int64, legs int64, err error) {
 	row, err := q.SumLedgerSpendByCoords(ctx, gen.SumLedgerSpendByCoordsParams{
 		MerchantID: merchantID, CustomerID: customerID, Currency: currency,

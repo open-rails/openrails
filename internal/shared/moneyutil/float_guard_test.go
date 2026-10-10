@@ -12,21 +12,9 @@ import (
 	"testing"
 )
 
-// TestNoFloatsInMoneyPackages enforces MONEY-3: currency and crypto amounts are
-// INTEGERS. No float may represent, convert, round, or compare an amount.
-//
-// A *rate* may legitimately be a float (an FX quote, a token price feed) —
-// arithmetic that produces or compares an *amount* may not. Every float that
-// survives in a guarded package is therefore a rate, a rate→exact-rational
-// converter, or a named residual, and each carries its justification below.
-//
-// Shape is deliberately the same as config.TestNoLibraryEnvReads: a walk, a
-// needle set, an allowlist with a one-line justification per entry, a failing
-// test. It differs in one way that matters — it parses the AST rather than
-// grepping lines, so a float that arrives through a wrapper, a struct field, a
-// method value, or a renamed import is still visible, and the allowlist is
-// keyed by DECLARATION rather than by file. Adding a second float to an
-// already-allowlisted file fails.
+// TestNoFloatsInMoneyPackages enforces MONEY-3: amounts are integers, and no
+// float may represent, convert, round or compare one. Only rates (FX quotes,
+// token prices) may be floats, each allowlisted per declaration with a reason.
 func TestNoFloatsInMoneyPackages(t *testing.T) {
 	// Packages where amounts live. Every one of these is float-free today
 	// except for the allowlisted rate sites below — keep it that way.
@@ -43,11 +31,6 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/admission/",
 		"internal/modules/solana/",
 		"internal/modules/webhooks/",
-		// or#863: the guard listed internal/modules/reconcile/ (deleted in
-		// or#893 phase 9) and stopped — but the reconcile ENGINE is
-		// internal/reconcile/, a different package, and it held a live
-		// violation (a float64 on-chain token amount). The packages below were
-		// the guard's holes; each one reaches an amount.
 		"internal/reconcile/",
 		"internal/http/handlers/",
 		"internal/river/",

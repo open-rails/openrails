@@ -87,10 +87,9 @@ type ResourceRevenueDailyRow struct {
 	Amount   int64  `json:"amount"`
 }
 
-// ResourceRevenueDaily returns per-day revenue (sum of captured usage_event
-// amounts; older rows used a USD-specific internal unit conversion) for
-// a resource (typed attribution column), across ALL payers in the merchant, over
-// [from, to). Powers endpoint revenue analytics (#410).
+// ResourceRevenueDaily returns per-day revenue (summed captured usage_event
+// amounts) for a resource across all payers in the merchant over [from, to),
+// for endpoint revenue analytics.
 func (s *MoneyService) ResourceRevenueDaily(ctx context.Context, resource, currency string, from, to time.Time) ([]ResourceRevenueDailyRow, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")

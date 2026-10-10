@@ -1,12 +1,8 @@
-// Package ledger is the #512 double-entry, append-only money ledger expressed
-// over the sqlc-generated ledger_accounts / ledger_transfers tables.
-//
-// A ledger is a (merchant, currency) pair. Accounts belong to one ledger;
-// transfers move an amount debit->credit within one ledger and are immutable
-// (a trigger refuses UPDATE and DELETE). Balances are maintained on account
-// counters, with transfers as the immutable truth. Every transfer is posted
-// (single-phase): the admission hold lives in Redis (#513), never as an
-// in-ledger pending.
+// Package ledger is the double-entry, append-only money ledger over
+// ledger_accounts / ledger_transfers. A ledger is a (merchant, currency) pair;
+// transfers move an amount debit->credit within one ledger and are immutable.
+// Account counters hold balances; transfers are the truth. Every transfer is
+// posted: holds live outside the ledger.
 package ledger
 
 import (
@@ -32,9 +28,8 @@ const (
 	ArrearsLiability AccountType = "arrears_liability"
 	ExpiredCredits   AccountType = "expired_credits"
 	// RevokedCredits holds the unspent remainder clawed back when a credit grant
-	// is revoked (distinct from ExpiredCredits = time-lapse). The money is frozen
-	// here (recoverable/reversible), not refunded; a refund moves it out to
-	// RailClearing. (#514, see docs/consistency-invariants.md §11 decision 4.)
+	// is revoked (ExpiredCredits is time-lapse): frozen and reversible, not
+	// refunded; a refund moves it out to RailClearing.
 	RevokedCredits       AccountType = "revoked_credits"
 	PromotionalFunding   AccountType = "promotional_funding"
 	CreditRefundClearing AccountType = "credit_refund_clearing"
@@ -42,10 +37,9 @@ const (
 )
 
 // TransferType is the closed vocabulary of ledger_transfers.transfer_type,
-// mirrored by the schema's ledger_transfers_type_check (#832). It was free text:
-// ledger_transfers_grant_id_transfer_type_key — what stops a credit lot being deposited,
-// expired or revoked twice — is PARTIAL on named transfer_type literals, so a
-// typo fell outside the index and the duplicate posted silently.
+// mirrored by ledger_transfers_type_check. The lot-once index
+// ledger_transfers_grant_id_transfer_type_key is partial on these literals, so
+// a typo would escape it and post a duplicate.
 type TransferType string
 
 const (
@@ -61,34 +55,28 @@ const (
 	CreditExpire            TransferType = "credit_expire" // unspent lot remainder, time-lapsed
 	CreditRevoke            TransferType = "credit_revoke" // unspent lot remainder, clawed back
 	// CreditReinstate reverses a clawback (revoked_credits -> customer_balance).
-	// The revoke is deliberately reversible (#514); this is how.
 	CreditReinstate TransferType = "credit_reinstate"
 	OwedAccrual     TransferType = "owed_accrual" // postpaid usage -> arrears liability
 	OwedPayment     TransferType = "owed_payment" // arrears settled by an external charge
-	// OwedWriteoff cancels accrued debt without money moving (or#897): the exact
-	// inverse of OwedAccrual, posted when an invoice is voided. Distinct from
-	// OwedPayment, which means a rail actually collected.
+	// OwedWriteoff cancels accrued debt without money moving when an invoice is
+	// voided: the inverse of OwedAccrual. OwedPayment means a rail collected.
 	OwedWriteoff TransferType = "owed_writeoff"
 	// OwedRepayment pays debt from a newly funded credit lot (customer balance
 	// -> arrears liability), carrying that lot's grant_id.
 	OwedRepayment TransferType = "owed_repayment"
 )
 
-// AllTransferTypes must equal the DB CHECK exactly (TestTransferTypeVocabularyMatchesSchema).
+// AllTransferTypes must equal the DB CHECK exactly (TestLedgerVocabularyMatchesSchema).
 var AllTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditRefund, CreditRefundRestore, CreditRefundCash, CreditRefundCashRestore, CreditRefundFunding, CreditSpend, CreditExpire, CreditRevoke, CreditReinstate, OwedAccrual, OwedPayment, OwedWriteoff, OwedRepayment}
 
 // LotOnceTransferTypes are the at-most-once-per-lot movements enforced by
 // ledger_transfers_grant_id_transfer_type_key.
 var LotOnceTransferTypes = []TransferType{Deposit, DepositBonus, CreditPurchaseRevenue, CreditExpire, CreditRevoke}
 
-// Operation is the KIND of money write that posted a transfer — the or#894
-// discriminator in the idempotency coordinate. It is ENGINE-COMPOSED: a caller
-// supplies only (source, source_id), so two different operations can never
-// alias on one caller key, and a caller cannot claim another operation's key.
-//
-// Without it, a wasted-spend overage charge and the CAPTURE of the same
-// rendered request both landed at ("invoke", request_id): the capture moved 0
-// micros, returned the waste transfer, and reported success.
+// Operation is the kind of money write that posted a transfer, part of the
+// idempotency coordinate. The engine composes it and a caller supplies only
+// (source, source_id), so two operations (an overage charge and the capture of
+// the same request) never alias on one caller key.
 type Operation string
 
 const (
@@ -119,16 +107,16 @@ func UsageOperation(eventType string) Operation {
 }
 
 // Coord is the idempotency coordinate a durable money write posts at, within
-// (merchant, customer, currency). All three parts are required — money.
-// IdempotencyKey is the only constructor callers use to build one.
+// (merchant, customer, currency). All three parts are required;
+// money.NewIdempotencyKey builds one for callers.
 type Coord struct {
 	Operation Operation
 	Source    string
 	SourceID  string
 }
 
-// Validate refuses a partial coordinate. A blank part is the shape that made a
-// money write silently non-idempotent (or#891) or ambiguous (or#894).
+// Validate refuses a partial coordinate: a blank part makes a money write
+// non-idempotent or ambiguous.
 func (c Coord) Validate() error {
 	if strings.TrimSpace(string(c.Operation)) == "" || c.Operation == usageOpPrefix {
 		return fmt.Errorf("ledger: operation required on the idempotency coordinate")
@@ -180,24 +168,16 @@ func (l *Ledger) EnsureCustomerBalance(ctx context.Context, customer uuid.UUID, 
 	return l.ensureAccount(ctx, CustomerBalance, currency, &c, true, false)
 }
 
-// EnsureCustomerArrears get-or-creates a customer's OWN arrears-liability
-// account (or#897). Receivables are per-debtor: a merchant-wide liability
-// account can only answer "how much is owed in total", so per-payer exposure
-// had to be summed over that payer's whole transfer history — O(records) on the
-// admission hot path, which is exactly the shape the work-scales-with-activity
-// law exists to prevent. With one account per debtor, outstanding owed is the
-// account's counter: O(1), symmetric with balance.
-//
-// NOT debits_must_not_exceed_credits: an arrears account is SUPPOSED to go
-// negative — that negative balance IS the debt.
+// EnsureCustomerArrears get-or-creates the customer's own arrears-liability
+// account, so outstanding owed is one counter read, not a sum over history.
+// Not debits_must_not_exceed_credits: its negative balance IS the debt.
 func (l *Ledger) EnsureCustomerArrears(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, error) {
 	c := customer
 	return l.ensureAccount(ctx, ArrearsLiability, currency, &c, false, false)
 }
 
 // CustomerArrearsAccountID returns the customer's arrears account id, and false
-// when it does not exist. Read-only: an exposure READ must never create an
-// account (#534), so a payer who has never accrued reads a clean zero.
+// when it does not exist. Read-only: an exposure read never creates an account.
 func (l *Ledger) CustomerArrearsAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
 	c := customer
 	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
@@ -212,15 +192,10 @@ func (l *Ledger) CustomerArrearsAccountID(ctx context.Context, customer uuid.UUI
 	return acc.ID, true, nil
 }
 
-// OutstandingOwed is the payer's unpaid arrears in this currency, as a POSITIVE
-// amount, read O(1) from the arrears account's maintained counters. Debt makes
-// the account balance negative (accruals debit it, payments credit it), so the
-// exposure is its negation. Zero when the payer has no arrears account.
-//
-// This is the ONLY exposure substrate (or#878 ruling, or#897). It replaced an
-// invoice-derived sum: invoices are presentation/collection artifacts, they lag
-// the ledger by a finalize cycle, and every invoice line already has an
-// owed_accrual leg — so the invoice view could only ever be a stale copy.
+// OutstandingOwed is the customer's unpaid arrears in this currency as a
+// positive amount, read O(1) from the arrears account's counters (debt makes
+// that balance negative). Zero without an arrears account. It is the only
+// exposure source: invoices lag the ledger and only mirror its accruals.
 func (l *Ledger) OutstandingOwed(ctx context.Context, customer uuid.UUID, currency string) (int64, error) {
 	acc, found, err := l.CustomerArrearsAccountID(ctx, customer, currency)
 	if err != nil || !found {
@@ -237,9 +212,8 @@ func (l *Ledger) OutstandingOwed(ctx context.Context, customer uuid.UUID, curren
 }
 
 // CustomerBalanceAccountID returns the customer's balance account id, and false
-// when it does not exist yet. Read-only: unlike EnsureCustomerBalance it NEVER
-// creates the account, so a balance READ for a never-registered customer is a
-// clean zero, not an account-creating write (#534).
+// when it does not exist yet. Read-only: unlike EnsureCustomerBalance it never
+// creates the account, so reading an unknown customer gives a clean zero.
 func (l *Ledger) CustomerBalanceAccountID(ctx context.Context, customer uuid.UUID, currency string) (uuid.UUID, bool, error) {
 	c := customer
 	acc, err := l.q.GetLedgerAccount(ctx, gen.GetLedgerAccountParams{
@@ -283,11 +257,10 @@ type Transfer struct {
 	Amount        int64
 	Currency      string
 	Type          TransferType
-	// Coord is the operation coordinate this leg is idempotent on (or#894).
-	// Required on every transfer.
+	// Coord is the operation coordinate this leg is idempotent on. Required.
 	Coord Coord
-	// GrantID attributes a credit_spend/credit_expire/deposit to its #514 credit
-	// lot, independently of Coord (which carries the OPERATION coordinate).
+	// GrantID attributes a credit_spend/credit_expire/deposit to its credit
+	// lot, independently of Coord.
 	GrantID           *uuid.UUID
 	Customer          *uuid.UUID
 	Invoker, Resource *string
@@ -297,32 +270,21 @@ type Transfer struct {
 	AllowDebitNegativeUpTo int64
 }
 
-// Apply appends one (posted, single-phase) transfer, enforcing the debit
-// account's sign constraint before it posts to the balance counters.
-//
-// Deprecated in favour of ApplyIdempotent, which reports whether the write
-// actually landed. Apply keeps the old shape for read-through call sites that
-// genuinely do not care; it is a thin wrapper and carries no second contract.
+// Apply is ApplyIdempotent for callers that don't need the applied flag: it
+// appends one posted transfer, enforcing the debit account's sign constraint.
 func (l *Ledger) Apply(ctx context.Context, t Transfer) (gen.BillingLedgerTransfer, error) {
 	tr, _, err := l.ApplyIdempotent(ctx, t)
 	return tr, err
 }
 
-// ApplyIdempotent is THE durable money write (or#892). Every ledger movement in
-// the system funnels through it, and once-only is enforced by the DATABASE:
-// the insert is ON CONFLICT DO NOTHING against
-// ledger_transfers_operation_once_key, so a replay at the same coordinate
-// inserts nothing no matter what order the caller took its locks in.
+// ApplyIdempotent is the durable money write every ledger movement funnels
+// through. The database enforces once-only: ON CONFLICT DO NOTHING on
+// ledger_transfers_operation_once_key, whatever the caller's lock order.
 //
-// applied reports what happened:
-//   - true  — this call posted the transfer; the balance counters moved.
-//   - false — the coordinate was already committed. NOTHING moved in this call,
-//     and the returned row is the transfer that DID land. This is the
-//     applied-vs-replayed signal consumers were rebuilding claim tables to get.
-//
-// The database checks account constraints and updates counters only after a
-// successful insert. A duplicate therefore replays even if the original
-// transfer depleted the balance; it never checks or moves the money again.
+// applied is true when this call posted the transfer and moved the counters;
+// false when the coordinate was already committed: nothing moved and the
+// returned row is the transfer that landed. A replay never rechecks or moves
+// money, even if the original depleted the balance.
 func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.BillingLedgerTransfer, applied bool, err error) {
 	// The coordinate is validated HERE, at the one insert every money movement
 	// funnels through, so no new spend path can post an unkeyed or ambiguous leg.
@@ -397,11 +359,9 @@ func (l *Ledger) Balance(ctx context.Context, account uuid.UUID) (int64, error) 
 	return l.q.LedgerAccountBalance(ctx, gen.LedgerAccountBalanceParams{AccountID: account, MerchantID: l.merchant})
 }
 
-// --- flow constructors: the standard money movements as transfer pairs --------
-
 // Deposit credits the customer's balance from the rail-clearing account
 // (DR processor_clearing / CR customer_balance). grantID attributes the deposit
-// to its #514 credit lot (uuid.Nil for a non-lot deposit).
+// to its credit lot (uuid.Nil for a non-lot deposit).
 func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, grantID uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	clearing, err := l.EnsureSystemAccount(ctx, RailClearing, currency)
 	if err != nil {
@@ -423,11 +383,10 @@ func (l *Ledger) Deposit(ctx context.Context, customer uuid.UUID, currency strin
 	return l.Apply(ctx, t)
 }
 
-// AccrueOwed recognizes postpaid usage as a revenue claim against the arrears
-// liability account (DR arrears_liability / CR platform_revenue). The customer
-// balance is untouched — the debt is tracked as a pending invoice item by the
-// caller and nets out when PayOwed settles it. arrears_liability's net balance
-// (which goes negative as debt accrues) is the conserved owed exposure.
+// AccrueOwed recognizes postpaid usage as revenue against the customer's
+// arrears account (DR arrears_liability / CR platform_revenue), leaving the
+// balance untouched; PayOwed settles it. The arrears account's negative
+// balance is the owed exposure.
 func (l *Ledger) AccrueOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	tr, _, err := l.AccrueOwedIdempotent(ctx, customer, currency, amount, coord, invoice)
 	return tr, err
@@ -451,12 +410,9 @@ func (l *Ledger) AccrueOwedIdempotent(ctx context.Context, customer uuid.UUID, c
 	})
 }
 
-// WriteOffOwed cancels accrued arrears WITHOUT money moving (DR platform_revenue
-// / CR arrears_liability) — the exact inverse of AccrueOwed. Posted when an
-// invoice is voided: the debt is canceled, so the revenue recognised at accrual
-// is given back and the payer's liability returns toward zero. Without this the
-// invoice says "voided" and the ledger says "still owed", and since the ledger
-// is the exposure substrate the payer stays capped for a bill nobody owes.
+// WriteOffOwed cancels accrued arrears without money moving (DR
+// platform_revenue / CR arrears_liability), the inverse of AccrueOwed. Posted
+// when an invoice is voided, so the ledger stops counting it as owed.
 func (l *Ledger) WriteOffOwed(ctx context.Context, customer uuid.UUID, currency string, amount int64, coord Coord, invoice *uuid.UUID) (gen.BillingLedgerTransfer, error) {
 	rev, err := l.EnsureSystemAccount(ctx, PlatformRevenue, currency)
 	if err != nil {
@@ -490,11 +446,6 @@ func (l *Ledger) PayOwed(ctx context.Context, customer uuid.UUID, currency strin
 		Coord: coord, Customer: &c, Invoice: invoice,
 	})
 }
-
-// NOTE: in-ledger two-phase (Authorize/Capture/Release over pending transfers)
-// was retired in migration 014 — admission holds live in Redis (#513), so every
-// transfer here is posted. Re-add a durable two-phase path here (with an expiry
-// sweep) if a future flow genuinely needs in-ledger holds.
 
 // RepayOwed pays a customer's debt from their balance (DR customer_balance /
 // CR arrears_liability), attributed to the funding credit lot.

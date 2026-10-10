@@ -42,7 +42,7 @@ func (s *MoneyService) GetAccountSettings(ctx context.Context, payer identity.Cu
 	return s.getAccountSettings(ctx, payer, currency)
 }
 
-// getAccountSettings is the currency-aware form (#472).
+// getAccountSettings is the currency-aware form.
 func (s *MoneyService) getAccountSettings(ctx context.Context, payer identity.CustomerID, currency string) (*models.MoneyAccount, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -139,7 +139,7 @@ func (s *MoneyService) upsertAccountSettingsTx(ctx context.Context, payer identi
 	cur.MerchantID = tenantID
 	cur.CustomerID = payer.UUID()
 	cur.Currency = normalizeCurrency(currency)
-	// #474 invariant: money_accounts (billing settings) are external-currency-only.
+	// Settings require a registered billing currency.
 	if err := RequireBillingCurrency(cur.Currency); err != nil {
 		return nil, err
 	}

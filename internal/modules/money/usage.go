@@ -37,9 +37,9 @@ func usageKeyWindow(now time.Time) (from, to time.Time) {
 	return now.Add(-retention.UsageIngestWindow), now.Add(retention.UsageClockSkew)
 }
 
-// RecordUsageParams is one metered, host-priced usage event (issue #289). The
-// host supplies the final Amount (in the currency's internal precision); OpenRails
-// records the event AND debits the ledger atomically.
+// RecordUsageParams is one metered, host-priced usage event. The host supplies
+// the final Amount (in the currency's internal precision); OpenRails records
+// the event and debits the ledger atomically.
 type RecordUsageParams struct {
 	// Payer is the merchant subject BILLED for this usage (the payer). When nil it is
 	// resolved from Invoker (self-hosted/personal case), never synthesized.
@@ -48,14 +48,14 @@ type RecordUsageParams struct {
 	Currency  string
 	EventType string // metered event kind, e.g. "gpt-4o"
 	// Dimensions are per-dimension counts (input_tokens, output_tokens,
-	// cached_input_tokens, requests, ...). Used for reporting + #298 throughput.
+	// cached_input_tokens, requests, ...) for reporting and throughput.
 	Dimensions map[string]int64
 	// Amount is the host-priced cost (>= 0). 0 records a free/zero-cost event
 	// (still metered for dimensions) without a ledger debit.
 	Amount int64
 	// Key is the idempotency coordinate; its operation must be
-	// UsageOperation(EventType), so two different event types at one
-	// (source, source_id) post two distinct charges (or#894).
+	// UsageOperation(EventType), so two event types at one (source, source_id)
+	// post two distinct charges.
 	Key      IdempotencyKey
 	Metadata map[string]any
 	// OccurredAt defaults to now when zero. It must lie within the ingest
@@ -70,24 +70,16 @@ type RecordUsageParams struct {
 	FailedWindows []FailedUsageWindow
 }
 
-// RecordUsage durably records a metered usage event AND debits the credit ledger
-// in ONE transaction (issue #289). Idempotent on
-// (merchant, payer, event_type, source, source_id): a replayed request returns the
-// existing event with Replayed set and never double-charges, while a replay
-// carrying a CHANGED amount is refused (ErrIdempotencyKeyReused). The event's
-// key is honoured for the ingest window after it occurred; the ledger debit of
-// a priced event is idempotent for good.
-// Concurrency-safe: the balance row is locked FOR UPDATE before the idempotency
-// check, so two concurrent identical records serialize and the second sees the
-// first's event.
+// RecordUsage durably records a metered usage event and debits the credit
+// ledger in one transaction. Idempotent on (merchant, payer, event_type,
+// source, source_id): a replay returns the existing event with Replayed set and
+// never double-charges; a changed amount gets ErrIdempotencyKeyReused. The
+// event's key is honoured for the ingest window after it occurred; a priced
+// event's ledger debit is idempotent for good. The balance row is locked before
+// the idempotency check, so concurrent identical records serialize.
 //
-// A zero Amount is a legitimate use: it records the event durably (metering
-// dimensions, and or#903's once-only claim for a report whose money outcome is
-// nothing) without touching the ledger.
-//
-// This is the DURABLE side. In FAST mode (#298) it runs write-behind, off the
-// per-request hot path; the synchronous admission decision is the Redis headroom
-// op, not this write.
+// A zero Amount records the event (dimensions, a once-only claim) without
+// touching the ledger.
 func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams) (*models.UsageEvent, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -149,8 +141,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 		if params.Failed {
 			outcome = UsageFailed
 		}
-		// or#891 item 3: same key, different charging term = refusal, never the
-		// first event answered for a corrected one.
+		// Same key, different charging term = refusal, never the first event
+		// answered for a corrected one.
 		replay := func(row gen.BillingUsageEvent) error {
 			var rerr error
 			if ev, rerr = usageEventFromGen(row); rerr != nil {
@@ -176,9 +168,8 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 					Field: "amount", Committed: reported, Retried: params.Amount,
 				}
 			}
-			// or#903: say so. A caller that must not repeat a NON-ledger side
-			// effect (a cache counter, a host notification) cannot tell an
-			// applied write from a replayed one without this.
+			// Callers with non-ledger side effects (a cache counter, a host
+			// notification) need to tell an applied write from a replay.
 			ev.Replayed = true
 			return nil
 		}
@@ -225,10 +216,9 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			}
 		}
 
-		// Debit the ledger for the host-priced amount (skip for zero-cost events).
-		// Unified credit line (#302): draw prepaid balance first, then accrue to
-		// owed up to the credit line. Prepay-only accounts (no line) deny when the
-		// amount exceeds available balance.
+		// Debit the ledger for the host-priced amount (skip for zero-cost
+		// events): prepaid balance first, then owed up to the credit line.
+		// Prepay-only accounts deny when the amount exceeds available balance.
 		var debitID *uuid.UUID
 		if charge == 0 {
 			// A metered payer's first event opens its balance account: the
@@ -242,7 +232,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			if derr != nil {
 				return derr
 			}
-			// Link the usage event to the durable #512 spend transfer (the balance
+			// Link the usage event to the durable spend transfer (the balance
 			// debit, else the owed accrual) at these coordinates.
 			tr, terr := q.GetLedgerSpendByCoords(ctx, gen.GetLedgerSpendByCoordsParams{
 				MerchantID: tenantID, CustomerID: payerID, Currency: cur,
@@ -325,14 +315,10 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 }
 
 // FindUsageEvent returns the durable event already recorded at these
-// idempotency coordinates, or (nil, nil) when the key is unclaimed.
-//
-// or#903: this is how a caller asks "has my write already happened?" BEFORE
-// deciding what to write. It exists because some callers derive the amount they
-// are about to record from mutable state (wasted-spend grace), so re-deriving it
-// on a replay produces a different number and RecordUsage's changed-amount
-// refusal would fire on an IDENTICAL retry. The read is not a lock — RecordUsage
-// remains the atomic decision — it only lets the caller stop before it grades.
+// idempotency coordinates, or (nil, nil) when the key is unclaimed. Callers
+// that derive the amount from mutable state ask first, so an identical retry
+// doesn't trip RecordUsage's changed-amount refusal. It is not a lock;
+// RecordUsage stays the atomic decision.
 func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.CustomerID, currency, eventType string, key IdempotencyKey) (*models.UsageEvent, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -385,7 +371,7 @@ func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.Custom
 
 // UsageRollupRow is a per-event_type aggregate of usage over a window: total
 // host-priced amount, event count, and summed per-dimension counts. Powers
-// usage reporting (GET /v1/me/usage) and #303 invoice line items.
+// usage reporting (GET /v1/me/usage) and invoice line items.
 type UsageRollupRow struct {
 	EventType   string           `json:"event_type"`
 	Currency    string           `json:"currency"`

@@ -13,9 +13,9 @@ import (
 )
 
 // NMICollectionAdapter collects invoices from NMI customer vault payment
-// methods through the #297 charge seam: every collection is a
-// merchant-initiated unscheduled credential-on-file charge carrying the
-// instrument's stored-credential replay reference.
+// methods: every collection is a merchant-initiated unscheduled
+// credential-on-file charge carrying the instrument's stored-credential replay
+// reference.
 type NMICollectionAdapter struct {
 	Charger *nmidirect.Charger
 }
@@ -25,8 +25,8 @@ func NewNMICollectionAdapter(client *nmi.NMIClient) *NMICollectionAdapter {
 }
 
 func (a *NMICollectionAdapter) Prepare(_ context.Context, method gen.BillingPaymentMethod, req ChargeRequest) (PreparedCharge, error) {
-	// or#864: NO default. A guessed currency here mints a real charge in a
-	// currency nobody established; the gate answers before anything else.
+	// No default: a guessed currency would mint a real charge in a currency
+	// nobody established.
 	currency := normalizeCurrency(req.Currency)
 	if err := moneyutil.RequireFiatCurrency(currency); err != nil {
 		return nil, fmt.Errorf("nmi collection: refusing to charge without an established currency: %w", err)

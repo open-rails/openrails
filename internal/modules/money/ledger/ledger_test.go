@@ -35,9 +35,9 @@ func sorted[T ~string](vs []T) []string {
 	return out
 }
 
-// #832: ledger_transfers_grant_id_transfer_type_key is partial on named transfer_type
-// literals, so Go and DB vocabularies must agree exactly or a typo silently
-// escapes the lot-once index and a lot is deposited/revoked twice.
+// ledger_transfers_grant_id_transfer_type_key is partial on named transfer_type
+// literals, so Go and DB vocabularies must agree exactly or a typo escapes the
+// lot-once index and a lot is deposited or revoked twice.
 func TestLedgerVocabularyMatchesSchema(t *testing.T) {
 	entries, err := postgresmigrations.FS.ReadDir(".")
 	require.NoError(t, err)
@@ -66,7 +66,7 @@ func TestLedgerVocabularyMatchesSchema(t *testing.T) {
 	}))
 }
 
-// LED-12: a partial idempotency coordinate is refused.
+// A partial idempotency coordinate is refused.
 func TestCoordRequiresEveryPart(t *testing.T) {
 	require.NoError(t, ledger.Coord{Operation: ledger.OpSpend, Source: "invoke", SourceID: "r-1"}.Validate())
 	require.NoError(t, ledger.Coord{Operation: ledger.UsageOperation("api.call"), Source: "invoke", SourceID: "r-1"}.Validate())

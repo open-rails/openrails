@@ -1,5 +1,5 @@
 // Package statement keeps period statements on their invoices: a statement
-// is paid once the invoices billing its charges are (#1147).
+// is paid once the invoices billing its charges are.
 package statement
 
 import (

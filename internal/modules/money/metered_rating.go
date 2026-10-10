@@ -17,10 +17,9 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// Rate cards (#638) are the ONLY metered-pricing engine (#707) and, since
-// or#893, the only metered-pricing INPUT: this sweep rates reported usage
-// (billing.usage_events) into pending owed invoice items through the #672
-// per-period watermark.
+// Rate cards are the only metered-pricing engine and input: this sweep rates
+// reported usage (billing.usage_events) into pending owed invoice items
+// through a per-period watermark.
 
 type catalogRateCardRow struct {
 	ID          uuid.UUID
@@ -103,11 +102,9 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 }
 
 // loadCatalogRateCards loads the arrears usage rate cards that apply to one
-// payer, joined to their meters. A payer-scoped card (#798 negotiated
-// pricing, customer_id set) REPLACES the merchant-default card for the same
-// meter_key. event_type and value_property default to the meter key when the
-// meter leaves them unset; aggregation defaults to sum. or#893 removed the
-// #599 counter/gauge bridge — aggregation is the only meter shape.
+// payer, joined to their meters. A payer-scoped card (negotiated pricing,
+// customer_id set) replaces the merchant default for the same meter_key.
+// event_type and value_property default to the meter key; aggregation to sum.
 func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string) ([]catalogRateCardRow, error) {
 	var out []catalogRateCardRow
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
@@ -405,15 +402,12 @@ func meteredPeriodSourceID(from, to time.Time) string {
 }
 
 // accrueMeteredPrefix accrues owed for a metered source over the period prefix
-// [periodFrom, ratedThrough), where ratedPrefix is the cost of rating the WHOLE
-// prefix once (allowances/rounding applied over the full aggregate). A durable
-// watermark row per (payer, currency, source[+dim], period start) records what
-// has already been accrued for the period; only the delta above it is accrued —
-// in the SAME transaction as the ledger transfer — so overlapping closes over
-// one period (threshold close mid-period, a later threshold close, the
-// month-end finalize) bill each unit of usage exactly once (#672). The
-// watermark is monotone: a stale or repeated close computes delta <= 0 and
-// accrues nothing. Returns the newly accrued delta in micros.
+// [periodFrom, ratedThrough), where ratedPrefix is the cost of rating the whole
+// prefix once. A watermark row per (payer, currency, source[+dim], period
+// start) records what is already accrued; only the delta is accrued, in the
+// ledger transfer's transaction, so overlapping closes bill each unit once. A
+// stale or repeated close computes delta <= 0 and accrues nothing. Returns the
+// accrued delta.
 func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.CustomerID, currency, source, dimValue string, periodFrom, ratedThrough time.Time, ratedPrefix int64) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -444,9 +438,7 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 	}
 
 	var accrued int64
-	// or#868 B2: merchant-pinned, matching AccrueOwed. Under the since-removed
-	// RLS the watermark INSERT below failed (42501) off the request path: the
-	// bare RunInTx this replaces carried no openrails.merchant_id.
+	// Merchant-pinned, matching AccrueOwed.
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		// Upsert-lock the watermark row: ON CONFLICT DO UPDATE takes the row lock
 		// and returns the current committed values, serializing concurrent sweeps.
@@ -477,10 +469,9 @@ func (s *MoneyService) accrueMeteredPrefix(ctx context.Context, payer identity.C
 		if _, err := ml.AccrueOwed(ctx, payerID, cur, delta, ratingKey.Coord(), nil); err != nil {
 			return err
 		}
-		// #798: the accrual belongs to its RATING PERIOD, not the sweep time —
-		// stamp invoice_at = periodFrom so a close over a past window (e.g. the
-		// previous-month finalize) attaches it instead of leaking it into the
-		// next period's invoice.
+		// The accrual belongs to its rating period, not the sweep time:
+		// invoice_at = periodFrom, so a close over a past window attaches it
+		// instead of leaking it into the next period's invoice.
 		if err := insertPendingInvoiceItemTx(ctx, q, tenantID, payerID, cur, txOwedAccrual, ratingKey.invoiceItemSourceID(), delta, periodFrom.UTC(), map[string]any{
 			"operation": string(ratingKey.Operation()),
 			"source":    ratingKey.Source(),

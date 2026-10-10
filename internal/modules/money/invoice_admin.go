@@ -107,7 +107,7 @@ var (
 	ErrPaymentExceedsDue       = errors.New("payment amount exceeds invoice amount_due")
 )
 
-// InvoiceAdminActions describes support operations without granting permission.
+// InvoiceActions describes support operations without granting permission.
 // Unknown/in-flight collections require reconciliation before any support mutation.
 func InvoiceActions(invoice *models.Invoice, now time.Time) []billing.InvoiceAction {
 	actions := make([]billing.InvoiceAction, 0, 4)

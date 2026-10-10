@@ -12,30 +12,18 @@ const (
 	MicrosPerCent      = MicrosPerMajorUnit / CentsPerMajorUnit
 )
 
-// Micros is an amount in millionths of a major currency unit — the system-wide
-// internal money unit. Defined type so passing micros where a cents/dollars
-// parameter is expected is a compile error (#671).
+// Micros is an amount in millionths of a major currency unit, the internal
+// money unit. A defined type, so mixing it with Cents is a compile error.
 type Micros int64
 
 // Cents is an amount in hundredths of a major currency unit — the minor unit
 // most card rails (NMI, Stripe) charge in for 2-decimal currencies.
 type Cents int64
 
-// GAP-12 / or#863. Unit changes are typed, so handing cents to a micros
-// parameter (or the reverse) is a compile error rather than a mischarge.
-//
-// The internal->rail direction lives in currency.go and is currency-aware
-// (NativeToRailMinor / NativeToRailMinorExact). The currency-BLIND
-// MicrosToCentsCeil/MicrosToCentsExact that 14 provider boundaries used to
-// call are DELETED, not deprecated: an exported converter that cannot see the
-// currency is a converter that cannot refuse an amount whose currency nobody
-// established, and it is not reintroducible if it does not exist.
-//
-// Deliberately NOT converted: DB columns are
-// still bare bigint, most struct fields are still int64, and
-// NativeToRailMinor still takes int64 because its input is "internal units at
-// the CURRENCY's registered scale" (JPY is 10^4), which is not always micros —
-// typing it Micros would be a lie.
+// Internal->rail conversions are currency-aware (NativeToRailMinor); there is
+// deliberately no currency-blind micros->cents converter. NativeToRailMinor
+// takes int64, not Micros: its input is at the currency's registered scale,
+// which is not always micros.
 
 // CentsToMicros widens a fiat card-rail minor amount into native units. The
 // registered fiat currencies share this shift; crypto uses native atomic units

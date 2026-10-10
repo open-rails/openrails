@@ -19,8 +19,8 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 )
 
-// CUR-8/CUR-9 (or#864): every off-session charge path refuses a currency that
-// is not registered; normalisation is allowed, substitution never.
+// Every off-session charge path refuses a currency that is not registered;
+// normalisation is allowed, substitution never.
 func TestCollectionRefusesUnestablishedCurrency(t *testing.T) {
 	ctx := context.Background()
 	method := gen.BillingPaymentMethod{

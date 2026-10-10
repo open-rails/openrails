@@ -1,15 +1,6 @@
-// Package grants is the #514 append-only grant ledger — the access-domain
-// sibling of the #512 money ledger.
-//
-//   - derive-1 (Grant / Revoke / Expire / Supersede) appends immutable grant
-//     events; it is the SOLE writer of billing.grants.
-//   - derive-2 (Materialize) folds the grant log into projections: product
-//     access windows in billing.product_access and credit lots as deposits.
-//
-// Grants are immutable: revoke/expire/supersede are NEW events referencing the
-// original. An access grant gives a product for a window; the customer's keys
-// are the product's at check time. A credit grant carries the lot
-// amount+currency and IS the FIFO lot.
+// Package grants is the append-only grant ledger: derive-1 appends immutable
+// grant events (the sole writer of billing.grants); derive-2 projects them into
+// product access windows and credit-lot deposits. A credit grant IS its lot.
 package grants
 
 import (
@@ -76,20 +67,13 @@ type DepositProvenance struct {
 	PaidAmount *int64 `json:"paid_amount,string,omitempty"`
 }
 
-// Ledger is the append-only grant ledger for one merchant. It composes a #512
-// money ledger over the same query handle so a credit grant and its deposit
-// transfer commit together.
+// Ledger is the append-only grant ledger for one merchant. It composes a money
+// ledger over the same query handle so a credit grant and its deposit commit
+// together.
 //
-// Clock convention (#658 — name the clock):
-//   - VALID TIME (effective/domain time) lives in starts_at/ends_at. It is the
-//     time a fact is true in the domain, NOT when we recorded it — so it is
-//     backdatable and the fold is a pure function of source facts, replayable at
-//     any wall-clock. A grant event carries a real window [starts_at, ends_at];
-//     a termination event (revoke/expire/supersede) is a WINDOW-LESS point event
-//     whose effective instant is starts_at and whose ends_at is always NULL
-//     (enforced by grants_termination_no_window_check).
-//   - TRANSACTION TIME (when we wrote the row) lives in created_at. It is never
-//     read as a business fact.
+// Valid time lives in starts_at/ends_at: backdatable, so the fold replays at
+// any wall clock. A termination is a point event at starts_at with ends_at
+// NULL. Transaction time is created_at, never read as a business fact.
 type Ledger struct {
 	q        *gen.Queries
 	merchant uuid.UUID
@@ -131,7 +115,7 @@ type GrantInput struct {
 	EndsAt   *time.Time
 	Amount   *int64  // credit lots
 	Currency *string // credit lots
-	Reason   *string // free-text provenance (or#906: a deposit's description)
+	Reason   *string // free-text provenance (a deposit's description)
 	// Actor and GrantReason attribute a free product grant (Source Granted).
 	Actor       string
 	GrantReason GrantReason
@@ -254,20 +238,17 @@ func (l *Ledger) Revoke(ctx context.Context, grantID uuid.UUID, reason string) (
 	return l.terminate(ctx, grantID, "revoke", reason, time.Time{})
 }
 
-// RevokeAsOf is Revoke with an explicit EFFECTIVE revocation instant (valid time)
-// recorded on the termination's starts_at — for converge-not-replay revocations
-// (e.g. grace lapsed last Tuesday), so the grant ledger agrees with the entitlement
-// effect instead of stamping convergence wall-clock. The zero Time means "now".
+// RevokeAsOf is Revoke with an explicit effective instant (valid time) on the
+// termination's starts_at, so a converged revocation agrees with the
+// entitlement effect instead of stamping wall clock. Zero means now.
 func (l *Ledger) RevokeAsOf(ctx context.Context, grantID uuid.UUID, reason string, asOf time.Time) (gen.BillingGrant, error) {
 	return l.terminate(ctx, grantID, "revoke", reason, asOf)
 }
 
 // terminate appends a termination event (revoke/expire) superseding the grant.
-// asOf is the effective revocation instant recorded on starts_at (valid time);
-// the zero Time falls back to now(), mirroring Grant()'s zero-StartsAt handling.
-// ends_at is ALWAYS NULL: a termination is a window-less point event (see the
-// clock convention on Ledger), so it never trips grants_valid_window_check even when the
-// grant it terminates already expired.
+// asOf is the effective instant on starts_at; zero means now(). ends_at is
+// always NULL, so it never trips grants_valid_window_check even when the
+// grant already expired.
 func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason string, asOf time.Time) (gen.BillingGrant, error) {
 	g, err := l.q.GetGrant(ctx, gen.GetGrantParams{MerchantID: l.merchant, ID: grantID})
 	if err != nil {
@@ -362,12 +343,9 @@ func (l *Ledger) MaterializeGrant(ctx context.Context, g gen.BillingGrant) error
 	}
 }
 
-// clawbackRevokedCredit retracts a revoked credit lot's UNSPENT remainder via a
-// reversing transfer DR customer_balance / CR revoked_credits (the money is
-// frozen there — recoverable/reversible — NOT refunded; a refund is a separate
-// step). Idempotent: GetCreditLotRemaining nets out prior credit_revoke
-// transfers, so a re-derive of an already-clawed lot moves nothing. (#514, see
-// docs/consistency-invariants.md §11 decision 4.)
+// clawbackRevokedCredit moves a revoked credit lot's unspent remainder DR
+// customer_balance / CR revoked_credits: frozen and reversible, not refunded.
+// Idempotent: GetCreditLotRemaining nets out prior credit_revoke transfers.
 func (l *Ledger) clawbackRevokedCredit(ctx context.Context, g gen.BillingGrant) error {
 	if g.Currency == nil {
 		return fmt.Errorf("grants: revoked credit grant %s missing currency", g.ID)
@@ -420,25 +398,22 @@ func (l *Ledger) RevokeBySourceAsOf(ctx context.Context, customer uuid.UUID, kin
 	return nil
 }
 
-// The four DERIVE detections below are single set queries (#575): `customer` nil
-// sweeps the whole merchant (the convergence sweep — one anti-join, not one query
-// per grant-holder), non-nil scopes to that customer (the inline AfterMutation
-// path). Each query mirrors the previous per-grant Go detection exactly; the
-// equivalence is pinned by the converge DERIVE integration tests.
+// The four DERIVE detections below are single set queries: customer nil
+// sweeps the whole merchant, non-nil scopes to one customer (the inline
+// AfterMutation path).
 
-// MissingEffects returns live grants whose derived grant effects are NOT fully
-// materialized — the detection behind `derive.grant_effect.missing` (#511 DERIVE
-// plane). Repair = MaterializeGrant (idempotent), so re-running converges to empty.
+// MissingEffects returns live grants whose derived effects are not fully
+// materialized (`derive.grant_effect.missing`). Repair = MaterializeGrant
+// (idempotent).
 func (l *Ledger) MissingEffects(ctx context.Context, customer *uuid.UUID) ([]gen.BillingGrant, error) {
 	return l.q.ListLiveGrantsMissingEffects(ctx, gen.ListLiveGrantsMissingEffectsParams{
 		MerchantID: l.merchant, CustomerID: customer,
 	})
 }
 
-// UnretractedTerminations returns TERMINATED grants whose derived effect is still
-// live — the detection behind `derive.grant_effect.excess` (#511): a revoke/expire
-// event was recorded but its retraction never propagated. Repair = MaterializeGrant,
-// which retracts (entitlement → revoke window; credit → clawback) — idempotent.
+// UnretractedTerminations returns terminated grants whose derived effect is
+// still live (`derive.grant_effect.excess`). Repair = MaterializeGrant, which
+// retracts (access → revoke window; credit → clawback), idempotently.
 func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUID) ([]gen.BillingGrant, error) {
 	return l.q.ListUnretractedTerminations(ctx, gen.ListUnretractedTerminationsParams{
 		MerchantID: l.merchant, CustomerID: customer,
@@ -446,40 +421,30 @@ func (l *Ledger) UnretractedTerminations(ctx context.Context, customer *uuid.UUI
 }
 
 // UngrantedGrantablePayments returns completed, positive, one-off payments
-// that produced NO grant — the detection behind `derive.grant.missing` (grant
-// tier, #511): every purchase grants its product or a credit lot. Surface-only.
+// that produced no grant (`derive.grant.missing`). Surface-only.
 func (l *Ledger) UngrantedGrantablePayments(ctx context.Context, customer *uuid.UUID) ([]gen.ListUngrantedGrantablePaymentsRow, error) {
 	return l.q.ListUngrantedGrantablePayments(ctx, gen.ListUngrantedGrantablePaymentsParams{
 		MerchantID: l.merchant, CustomerID: customer,
 	})
 }
 
-// RefundedSourceGrants returns LIVE grants whose backing payment was refunded —
-// the detection behind `derive.grant.excess` (grant tier, #511): the source no
-// longer justifies the grant (money came back, access still live). Surface-only —
-// an operator decides (a goodwill refund may intentionally keep access).
+// RefundedSourceGrants returns live grants whose backing payment was refunded
+// (`derive.grant.excess`). Surface-only: a goodwill refund may keep access.
 func (l *Ledger) RefundedSourceGrants(ctx context.Context, customer *uuid.UUID) ([]gen.ListLiveGrantsWithRefundedPaymentRow, error) {
 	return l.q.ListLiveGrantsWithRefundedPayment(ctx, gen.ListLiveGrantsWithRefundedPaymentParams{
 		MerchantID: l.merchant, CustomerID: customer,
 	})
 }
 
-// --- #631 derive-1 from stored sources -------------------------------------
-//
-// derive-1 today only repairs EXISTING grants (MissingEffects/Unretracted) and
-// SURFACES ungranted one-off payments for an operator. After the migrate/
-// convergence split the host-one migrate inserts source-of-truth subscriptions +
-// solana wallet payments but NO grants/entitlements (#724) — so the engine must
-// CREATE the grant + entitlement window from the bare source. These detections
-// are source-keyed (source_type+source_id), so they are a NO-OP for live data
-// (which already carries its grant) and only fire on the migrated cohort.
+// derive-1 from stored sources: a migrate may insert subscriptions and wallet
+// payments without grants, so these source-keyed detections create the grant
+// and window from the bare source. Live data already has its grant.
 
 // UngrantedSubscriptions returns active/canceled/unknown subscriptions for a
-// grantable product with no subscription-sourced grant yet — the detection behind
-// `derive.subscription.missing` (#631). #716 fail-open: `unknown` sources too, so
-// the standing-access lane can engage for imported unknowns. #717: chargeback
-// cancels are excluded — no runway. scanSince bounds the scan to
-// windows ending on/after it (3y). customer nil = merchant-wide sweep.
+// grantable product with no subscription-sourced grant yet
+// (`derive.subscription.missing`). Unknown fails open; chargeback cancels get
+// no runway. scanSince bounds the scan to windows ending on/after it.
+// customer nil = merchant-wide sweep.
 func (l *Ledger) UngrantedSubscriptions(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedSubscriptionsRow, error) {
 	return l.q.ListUngrantedSubscriptions(ctx, gen.ListUngrantedSubscriptionsParams{
 		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince,
@@ -487,8 +452,8 @@ func (l *Ledger) UngrantedSubscriptions(ctx context.Context, customer *uuid.UUID
 }
 
 // UngrantedWalletPayments returns completed solana wallet payments carrying a
-// stored access window with no grant yet — the detection behind
-// `derive.wallet.missing` (#631). customer nil = merchant-wide sweep.
+// stored access window with no grant yet (`derive.wallet.missing`). customer
+// nil = merchant-wide sweep.
 func (l *Ledger) UngrantedWalletPayments(ctx context.Context, customer *uuid.UUID, scanSince time.Time) ([]gen.ListUngrantedWalletPaymentsRow, error) {
 	return l.q.ListUngrantedWalletPayments(ctx, gen.ListUngrantedWalletPaymentsParams{
 		MerchantID: l.merchant, CustomerID: customer, ScanSince: scanSince,
@@ -562,9 +527,9 @@ type customerWindow struct {
 }
 
 // deriveAccessWindow records the source's access grant and asks derive-2 to
-// project it. The GRANT is provenance — recorded UNCONDITIONALLY (#695:
-// detection keys on grant existence); whether a WINDOW materializes is
-// MaterializeGrant's decision. Replay is keyed by the exact interval.
+// project it. The grant is always recorded (detection keys on it);
+// MaterializeGrant decides whether a window materializes. Replay is keyed by
+// the exact interval.
 func (l *Ledger) deriveAccessWindow(ctx context.Context, w customerWindow) (bool, error) {
 	exists, err := l.q.AccessGrantWindowExists(ctx, gen.AccessGrantWindowExistsParams{
 		MerchantID: l.merchant, CustomerID: w.Customer, ProductID: w.Product, SourceType: string(w.Source), SourceID: w.SourceID,

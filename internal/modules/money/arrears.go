@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// Arrears transaction types (postpaid usage ledger, issue #241).
+// Arrears transaction types (postpaid usage ledger).
 const (
 	txOwedAccrual   = "owed_accrual"   // usage accrued to outstanding owed (positive amount)
 	txOwedPayment   = "owed_payment"   // owed collected via a card charge (negative amount)
@@ -51,21 +51,14 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 	now := s.now()
 
 	var trx *models.MoneyTransaction
-	// or#868 B2: this was a bare RunInTx under the comment "privileged (no-GUC)
-	// transaction". No such pool exists — it worked only where an HTTP request
-	// had already pinned a merchant connection and pgxBegin inherited its GUC.
-	// Off that path (internal/service.FinalizeInvoice, MoneyService.SweepUsage, both
-	// embedded seams) the transaction carried no openrails.merchant_id and the
-	// since-removed RLS denied every insert below (42501), so metered/arrears
-	// billing was inoperable there. MerchantTx sets the GUC transaction-locally
-	// from the context's merchant, which the explicit merchant_id predicates
-	// then agree with.
+	// MerchantTx pins the context's merchant for the transaction, so this works
+	// off the request path too.
 	err = s.db.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 
-		// #677: per-customer spend mutex (same customers-row FOR UPDATE as
-		// lockBalance) BEFORE the check-then-insert, so concurrent accruals at the
-		// same coordinates serialize — one posts, the other replays it below.
+		// Take the per-customer spend lock (lockBalance's customers row FOR
+		// UPDATE) before the check-then-insert, so concurrent accruals at the
+		// same coordinates serialize: one posts, the other replays.
 		if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 			return err
 		}
@@ -113,9 +106,8 @@ func (s *MoneyService) AccrueOwed(ctx context.Context, payer identity.CustomerID
 // ensureSettingsRowTx inserts a default settings row for payer if one does not
 // exist, using the given billing mode. No-op when the row exists.
 func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, currency, mode string, now time.Time) error {
-	// Materialize the payable customers row so the money_accounts FK
-	// (migration 076) is satisfied — this is the shared choke point for settings
-	// writes (suspend/resume/verify/graduate/arrears) (#317).
+	// money_settings references the customers row; this is the shared choke
+	// point for settings writes.
 	if err := ensureCustomer(ctx, q, tenantID, payerID); err != nil {
 		return err
 	}
@@ -125,15 +117,9 @@ func (s *MoneyService) ensureSettingsRowTx(ctx context.Context, q *gen.Queries, 
 	})
 }
 
-// GetOutstandingOwed returns the payer's current arrears exposure in currency,
-// read O(1) from their arrears-liability account (or#897).
-//
-// It was invoice-derived (open invoices + pending items). Invoices are
-// presentation/collection artifacts that lag the ledger by a finalize cycle,
-// and EVERY invoice line already has an owed_accrual leg — verified: the only
-// pending-item writer is insertPendingInvoiceItemTx and all of its callers post
-// an accrual first — so the invoice view could only ever be a staler copy of
-// the ledger. One substrate, and it is the ledger.
+// GetOutstandingOwed returns the payer's arrears exposure in currency, read
+// O(1) from their arrears-liability account. The ledger, not invoices, is the
+// exposure source: every invoice line already has an owed_accrual leg.
 func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.CustomerID, currency string) (int64, error) {
 	if s == nil || s.db == nil {
 		return 0, fmt.Errorf("money service not initialized")
@@ -149,8 +135,6 @@ func (s *MoneyService) GetOutstandingOwed(ctx context.Context, payer identity.Cu
 	if err := RequireBillingCurrency(cur); err != nil {
 		return 0, err
 	}
-	// or#868 B2: still pinned (under the since-removed RLS an unpinned read saw
-	// no account and reported zero exposure, which is fail-OPEN).
 	var owed int64
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		var e error

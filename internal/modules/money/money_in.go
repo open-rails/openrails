@@ -36,9 +36,8 @@ type ChargeRequest struct {
 	Invoker         string
 	InvoiceID       *uuid.UUID
 	PaymentMethodID uuid.UUID
-	// AmountCents is RAIL MINOR UNITS (typed Cents, #671): cents for USD/EUR,
-	// whole yen for zero-decimal JPY — always produced via NativeToRailMinor,
-	// never by an inline /10_000 or /100.
+	// AmountCents is rail minor units (cents for USD, whole yen for JPY),
+	// always from NativeToRailMinor, never an inline /10_000 or /100.
 	AmountCents moneyutil.Cents
 	Currency    string
 	// IdempotencyKey is the operation's provider identity: the NMI order id and

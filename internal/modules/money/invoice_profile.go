@@ -17,19 +17,18 @@ import (
 // MaxInvoiceNetTermsDays prevents overflow when terms become a due-date duration.
 const MaxInvoiceNetTermsDays = int64((1<<63 - 1) / (24 * time.Hour))
 
-// Invoice collection methods (#798). charge_automatically charges the saved
-// payment method via ChargeOutstanding; send_invoice is a manual-remittance
-// terms receivable the collection path never touches — payment arrives via
-// RecordInvoiceRemittance.
+// Invoice collection methods. charge_automatically charges the saved payment
+// method via ChargeOutstanding; send_invoice is a manual-remittance receivable
+// the collection path never touches, paid via RecordInvoiceRemittance.
 const (
 	CollectionChargeAutomatically = "charge_automatically"
 	CollectionSendInvoice         = "send_invoice"
 )
 
-// CustomerInvoiceProfile is a payer's enterprise invoicing profile (#798):
-// net-N credit terms, collection method and the document fields snapshotted
-// onto every invoice at finalize. Absent profile = zero value (due
-// immediately, charge_automatically, no document fields).
+// CustomerInvoiceProfile is a payer's enterprise invoicing profile: net-N
+// terms, collection method and the document fields snapshotted onto every
+// invoice at finalize. Absent = zero value (due immediately,
+// charge_automatically, no document fields).
 type CustomerInvoiceProfile struct {
 	NetTermsDays     int                     `json:"net_terms_days"`
 	CollectionMethod string                  `json:"collection_method"`

@@ -550,8 +550,8 @@ func (h *InvoiceCollectionHandler) finalizeSettle(ctx context.Context, intent ge
 }
 
 // finalizeRefusal records a definitive provider refusal: attempt failed,
-// invoice dunned by the or#870 decline doctrine on its own billing cycle,
-// invoice released. A local failure retains the refusal for the verifier.
+// invoice dunned on its own billing cycle, invoice released. A local failure
+// retains the refusal for the verifier.
 func (h *InvoiceCollectionHandler) finalizeRefusal(ctx context.Context, intent gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, rail, failureCode, failureMessage, transactionID string) intents.Outcome {
 	if strings.TrimSpace(failureCode) == "" {
 		failureCode = "declined"
@@ -757,7 +757,7 @@ func (h *InvoiceCollectionHandler) qualifyAndSettle(ctx context.Context, in gen.
 }
 
 // recordInvoiceAttempt records the collection charge's answer as an invoice
-// attempt (#1111) in the transaction that settles or fails the invoice.
+// attempt in the transaction that settles or fails the invoice.
 func recordInvoiceAttempt(ctx context.Context, q *gen.Queries, in gen.BillingProviderIntent, p intents.InvoiceCollectionPayload, rail string, a attempts.Attempt, at time.Time) error {
 	if rail == "" {
 		rail = in.Rail

@@ -10,28 +10,16 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// #833 ledger integrity diagnostics. Two invariants hold the double-entry
-// ledger up and neither was ever computed:
+// Ledger integrity diagnostics, per (merchant, currency):
 //
-//  1. CONSERVATION — per (merchant, currency), sum(credits_posted - debits_posted)
-//     over every account is 0. Structural given the transfer model; a non-zero
-//     sum means money was created or destroyed inside one ledger.
+//  1. Conservation: sum(credits_posted - debits_posted) over every account is
+//     0. Cheap (O(accounts)); catches one-sided counter corruption.
+//  2. Counter drift: ledger_accounts counters are a projection kept by the
+//     transfer insert trigger. Bypassing it (COPY, restore, disabled triggers)
+//     silently skews every balance while conservation still holds; recomputing
+//     from ledger_transfers catches it.
 //
-//  2. COUNTER DRIFT — ledger_accounts.{credits,debits}_posted is a MAINTAINED
-//     PROJECTION written by the transfer insert trigger, not a derived
-//     view. Bypass the trigger (superuser session, COPY, restore, a migration
-//     that disables triggers) and the counters diverge from ledger_transfers
-//     with no error anywhere — every balance read is then silently wrong.
-//     Recompute the counters from the append-only log and compare.
-//
-// The two are NOT redundant, and neither subsumes the other: a transfer that
-// skipped the trigger entirely leaves BOTH sides untouched, so conservation
-// still sums to zero and only the recompute catches it. A one-sided counter
-// corruption breaks conservation, which is the far cheaper check to run often
-// (O(accounts), no scan of the transfer log).
-//
-// Both require an explicitly selected merchant regardless of database role.
-// Platform fleet checks enumerate authorized merchants and call once per ID.
+// Both take an explicitly selected merchant; fleet checks call once per merchant.
 
 // ConservationBreach is one (merchant, currency) ledger whose account balances
 // do not sum to zero.

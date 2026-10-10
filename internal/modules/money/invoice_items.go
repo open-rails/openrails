@@ -13,7 +13,7 @@ import (
 )
 
 // insertPendingInvoiceItemTx queues an owed accrual in the invoice_items
-// pending workspace (#726). Rows only leave via attach-at-close; the customer
+// pending workspace. Rows only leave via attach-at-close; the customer
 // statement itemization is invoices.line_items, never this table.
 func insertPendingInvoiceItemTx(
 	ctx context.Context,

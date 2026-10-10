@@ -15,13 +15,11 @@ import (
 // spendable credit-lot remainder.
 var ErrInsufficientCredits = errors.New("grants: insufficient credits")
 
-// CreditSpend consumes `amount` of credits FIFO across the customer's live
-// credit lots (soonest-expiring first), emitting one #512 ledger spend transfer
-// per lot drawn. Each transfer carries the OPERATION coordinate (operation,
-// source, sourceID) — the caller's idempotency key, discriminated by the kind
-// of money write (or#894) — AND grant_id = the lot it draws from. Per-lot remaining is derived from the ledger — no
-// mutable remaining column. Atomic: nothing is applied unless the full amount is
-// covered. Compose inside a tx for isolation.
+// CreditSpend consumes amount FIFO across the customer's live credit lots
+// (soonest-expiring first), one ledger spend transfer per lot drawn, each
+// carrying the caller's coordinate (its idempotency key) and the lot's
+// grant_id. Lot remainders derive from the ledger. Nothing is applied unless
+// the full amount is covered; compose inside a tx.
 func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency string, amount int64, invoker, resource string, coord ledger.Coord) (applied bool, err error) {
 	if amount <= 0 {
 		return false, fmt.Errorf("grants: spend amount must be positive, got %d", amount)
@@ -80,9 +78,9 @@ func (l *Ledger) CreditSpend(ctx context.Context, customer uuid.UUID, currency s
 	return applied, nil
 }
 
-// LockCustomer takes the per-customer spend mutex (#491/#677): the same
-// customers-row FOR UPDATE money's lockBalance takes, so lot-consuming/
-// reversing writes serialize with spends. Only effective inside a tx.
+// LockCustomer takes the per-customer spend lock (the customers row FOR UPDATE
+// money's lockBalance takes), so lot-consuming/reversing writes serialize with
+// spends. Only effective inside a tx.
 func (l *Ledger) LockCustomer(ctx context.Context, customer uuid.UUID) error {
 	if _, err := l.q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{
 		ID: customer, MerchantID: l.merchant,
@@ -92,12 +90,10 @@ func (l *Ledger) LockCustomer(ctx context.Context, customer uuid.UUID) error {
 	return nil
 }
 
-// ExpireLapsed claws the unspent remainder of every past-expiry credit lot to
-// the expired_credits account (one #512 transfer per lot). Idempotent: an
-// already-expired lot has zero remainder and is skipped. Returns total expired.
-// Compose inside a tx: it takes the per-customer spend lock (#677) so a
-// concurrent spend can't draw a lot between the remaining read and the
-// credit_expire write.
+// ExpireLapsed moves the unspent remainder of every past-expiry credit lot to
+// expired_credits, one transfer per lot, and returns the total. Idempotent: an
+// expired lot has zero remainder. Compose inside a tx: it takes the spend lock
+// so a concurrent spend can't draw a lot between the read and the write.
 func (l *Ledger) ExpireLapsed(ctx context.Context, customer uuid.UUID, currency string) (int64, error) {
 	if err := l.LockCustomer(ctx, customer); err != nil {
 		return 0, err

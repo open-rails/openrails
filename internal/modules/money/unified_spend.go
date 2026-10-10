@@ -19,8 +19,7 @@ import (
 // Prepay-only = credit limit 0; arrears = explicit credit line.
 
 // SpendParams is a unified immediate spend (balance first, then owed). Key is
-// built with money.NewIdempotencyKey — Source/SourceID are no longer two loose
-// strings a caller can half-fill (or#892).
+// built with money.NewIdempotencyKey.
 type SpendParams struct {
 	Payer    *identity.CustomerID
 	Invoker  string
@@ -30,15 +29,12 @@ type SpendParams struct {
 }
 
 // SpendCredits debits an account balance-first-then-owed in one transaction,
-// gated by the credit line. Idempotent on
-// (merchant, payer, currency, operation=spend, source, source_id) — the key is
-// REQUIRED, and a replay carrying a different Amount is refused with
-// ErrIdempotencyKeyReused rather than answered with the first result (see
-// idempotency.go). Returns ErrInsufficientCredits when balance + remaining
-// credit line cannot cover the amount.
-//
-// The returned transaction carries Replayed (or#892): false = this call moved
-// the money, true = the coordinate was already committed and nothing moved now.
+// gated by the credit line. Idempotent on (merchant, payer, currency,
+// operation=spend, source, source_id): the key is required, and a replay with
+// a different Amount gets ErrIdempotencyKeyReused. Returns
+// ErrInsufficientCredits when balance + remaining credit line cannot cover the
+// amount. Replayed is true when the coordinate was already committed and
+// nothing moved.
 func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -46,10 +42,6 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 	if params.Amount <= 0 {
 		return nil, fmt.Errorf("amount must be positive")
 	}
-	// or#891 item 1: this used to be `if params.SourceID != ""` around the dedupe
-	// read only, so a keyless spend posted unconditionally and every retry
-	// double-debited — while CaptureAuthorized, off this SAME struct, hard-required
-	// both halves. That asymmetry was the defect, not caller sloppiness.
 	if err := params.Key.RequireOperation(OpSpend); err != nil {
 		return nil, err
 	}
@@ -82,16 +74,13 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 		applied := false
 		var serr error
 		if !committed {
-			// The pre-check is a fast path and a body guard, NOT the enforcement:
-			// once-only is the unique index under spendBalanceThenOwedTx, so
-			// `applied` stays authoritative when two transactions race past it.
+			// The pre-check is a fast path and body guard; the unique index under
+			// spendBalanceThenOwedTx enforces once-only, so `applied` stays
+			// authoritative when two transactions race past it.
 			//
-			// A REPLAY must not reach the spend arithmetic at all. The balance has
-			// already moved, so re-deriving fromBalance/fromOwed against it splits
-			// the same charge into a short balance leg plus an owed remainder and
-			// denies a prepaid payer with ErrInsufficientCredits — a replay
-			// answered with a hard failure, which is the exact shape #513
-			// decision 8 forbids.
+			// A replay must not reach the spend arithmetic: the balance already
+			// moved, so re-deriving it would split the charge and could deny a
+			// prepaid payer, answering a replay with a hard failure.
 			_, _, applied, serr = s.spendBalanceThenOwedTx(ctx, q, payer, params.Invoker, cur, params.Key, params.Amount, false)
 			if serr != nil {
 				return serr
@@ -115,18 +104,14 @@ func (s *MoneyService) SpendCredits(ctx context.Context, params SpendParams) (*m
 	return trx, nil
 }
 
-// CaptureAuthorized records the durable money movement for an admitted request.
-// The in-flight authorization itself lives in Redis; this method only posts the
-// actual charge and is idempotent on (merchant, payer, currency, source,
-// source_id).
+// CaptureAuthorized records the durable money movement for an admitted
+// request, idempotent on (merchant, payer, currency, operation=capture,
+// source, source_id).
 //
-// #513 decision 8: capture RECORDS REALITY UNCONDITIONALLY. The Redis spendgate
-// at admit time is the ONLY gate, and concurrent admits may bounded-over-admit.
-// Capture therefore must NOT re-gate the credit line: it draws the prepaid
-// balance first and records any remainder as owed/overdraft (even for a prepaid
-// payer with no credit line — an involuntary overdraft that is reconciled later).
-// Re-gating here would mean "served but can't charge", which is deterministic on
-// idempotent retry and a hard failure for the caller.
+// Capture records reality unconditionally: admission is the only gate, so it
+// never re-gates the credit line. It draws the prepaid balance first and
+// records any remainder as owed/overdraft, even for a prepaid payer with no
+// line. Re-gating would make a served request fail on every retry.
 func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams) (*models.MoneyTransaction, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -158,11 +143,8 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 		if _, err := s.lockBalance(ctx, q, payer, params.Invoker, cur); err != nil {
 			return err
 		}
-		// or#891 item 3: a key hit used to return the first transfer WITHOUT
-		// comparing Amount, so a retry that corrected the amount was told it
-		// succeeded while the ledger kept the original number. Compare the total
-		// already posted at these coordinates — not the first transfer's amount,
-		// which is only one FIFO lot's take — and refuse a changed body.
+		// Compare the total already posted at this coordinate (not the first
+		// transfer, which is one FIFO lot's take) and refuse a changed body.
 		if _, cerr := params.Key.requireSameAmount(ctx, q, tenantID, payer.UUID(), cur, params.Amount); cerr != nil {
 			return cerr
 		}
@@ -210,22 +192,19 @@ func (s *MoneyService) CaptureAuthorized(ctx context.Context, params SpendParams
 	return trx, nil
 }
 
-// spendBalanceThenOwedTx debits `amount` within an existing tx: it draws the
-// prepaid balance first (FIFO credit lots → #512 ledger spend transfers) and
-// accrues any remainder to pending invoice items + an arrears-liability ledger
-// transfer. The caller must have already locked the balance row (serialization
-// point) and handled idempotency. Returns the amounts drawn from balance and
-// accrued to owed (either may be 0).
+// spendBalanceThenOwedTx debits amount within an existing tx: prepaid balance
+// first (FIFO credit lots → ledger spend transfers), any remainder accrued to
+// pending invoice items + an arrears-liability transfer. The caller has locked
+// the balance row and handled idempotency. Returns the amounts drawn from
+// balance and accrued to owed (either may be 0).
 //
 // preAuthorized selects the gating contract:
-//   - false (immediate SpendCredits): the remainder is GATED by the account's
-//     credit line — a prepaid payer (no/zero credit line) or a spend that would
-//     push owed past the line is rejected with ErrInsufficientCredits, and
-//     nothing is debited.
-//   - true (capture of a pre-authorized hold, #513 decision 8): NEVER re-gates.
-//     The remainder is recorded as owed/overdraft unconditionally — including for
-//     a prepaid payer with no credit line (an involuntary overdraft). The Redis
-//     spendgate at admit time was the only gate; capture records reality.
+//   - false (SpendCredits): the remainder is gated by the credit line; a payer
+//     without one, or a spend past it, gets ErrInsufficientCredits and nothing
+//     is debited.
+//   - true (capture of an admitted request): never re-gates; the remainder is
+//     recorded as owed/overdraft even without a credit line. Admission was the
+//     gate; capture records reality.
 func (s *MoneyService) spendBalanceThenOwedTx(
 	ctx context.Context, q *gen.Queries, payer identity.CustomerID,
 	userID, currency string, key IdempotencyKey, amount int64, preAuthorized bool,
@@ -233,11 +212,9 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	if amount <= 0 {
 		return 0, 0, false, fmt.Errorf("amount must be positive")
 	}
-	// or#891 items 1+4: every leg posted below carries this key — the ledger
-	// transfers AND the pending invoice item behind invoice_items_customer_id_currency_source_type_source_id_key. A
-	// blank key used to reach here and be papered over with a freshly minted
-	// uuidv7, which can never collide, so every replay of a keyless spend accrued
-	// a NEW invoice item. The ledger does not mint keys on a caller's behalf.
+	// Every leg below carries this key: the ledger transfers and the pending
+	// invoice item. The ledger never mints a key for a caller: a fresh one
+	// would make every replay accrue a new item.
 	if key.IsZero() {
 		return 0, 0, false, fmt.Errorf("spend: idempotency key required")
 	}
@@ -259,7 +236,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 		available = 0
 	}
 	// bal.Balance is the raw ledger balance and can include unswept lapsed-lot
-	// remainders that CreditSpend cannot draw (#676): cap the balance leg at the
+	// remainders that CreditSpend cannot draw: cap the balance leg at the
 	// spendable-lot total so a lapsed lot never fails the spend outright.
 	lots, lerr := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
@@ -311,10 +288,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 			if settings.CreditLimitAmount <= 0 {
 				return 0, 0, false, ErrInsufficientCredits
 			}
-			// or#878 ruling / or#897: exposure is LEDGER-measured. This used to sum
-			// open invoices + pending invoice items, which lag the ledger by a
-			// finalize cycle — so a payer could spend past the line in the window
-			// between accruing and being invoiced.
+			// Exposure is ledger-measured; invoices lag it by a finalize cycle.
 			exposure, eerr := s.moneyLedger(q, tenantID).OutstandingOwed(ctx, payerID, cur)
 			if eerr != nil {
 				return 0, 0, false, eerr

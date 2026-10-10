@@ -10,14 +10,9 @@ import (
 	"github.com/open-rails/openrails/internal/currency"
 )
 
-// System currency registry (#472), moved here from internal/modules/money by
-// or#863. It is a zero-dependency scale table, and it belongs in the leaf money
-// package for one concrete reason: the single internal->rail converter has to
-// be reachable from EVERY provider boundary. It was not. internal/modules/money
-// imports internal/modules/subscriptions, so subscriptions can never import
-// money back — which is exactly why the two NMI plan-migration pushes hardcoded
-// a divide-by-10 000 instead of asking the registry. Currency is system-fixed,
-// NOT merchant-scoped: the codebase is the authority (there is no DB CHECK).
+// The currency registry sits in this leaf so every provider boundary can reach
+// the one internal->rail converter without an import cycle. Currency is
+// system-fixed, not merchant-scoped: the code is the authority (no DB CHECK).
 
 // Currency is one registered currency and its native/settlement scale.
 type Currency = currency.Units
@@ -32,12 +27,8 @@ var currencies = func() map[string]Currency {
 	return out
 }()
 
-// NormalizeCurrency canonicalises a currency code to UPPER case (CUR-6).
-// It lives here, in the leaf, rather than in the registry package, because it
-// is a pure string operation with no registry dependency — and because the
-// repo-level write chokepoints that must call it (payments, prices) cannot
-// import internal/modules/money without an import cycle. ONE definition:
-// money.NormalizeCurrency delegates here.
+// NormalizeCurrency canonicalises a currency code to upper case. It lives in
+// the leaf so write chokepoints can call it without importing money.
 func NormalizeCurrency(code string) string {
 	return strings.ToUpper(strings.TrimSpace(code))
 }
@@ -136,13 +127,9 @@ func DescribeNativeScales() string {
 	return strings.Join(parts, ", ")
 }
 
-// NativeToRailMinor is THE internal->provider amount converter (#671): it
-// converts an internal native amount (10^Decimals units per major unit) into
-// the provider/rail minor unit (10^MinorDecimals per major unit — cents for
-// USD/EUR, whole yen for zero-decimal JPY; typed Cents). Rounds UP so the
-// charge always covers the internal amount (never under-charges); the
-// sub-minor remainder (< one rail minor unit) is the customer's gain. Errors
-// on an unregistered currency — callers must not guess a scale.
+// NativeToRailMinor converts an internal native amount to the rail minor unit
+// (cents for USD, whole yen for JPY), rounding UP so a charge never
+// under-covers it; amounts <= 0 give 0. Errors on an unregistered currency.
 func NativeToRailMinor(currency string, amount int64) (Cents, error) {
 	div, err := nativeDivisor(currency)
 	if err != nil {
@@ -162,12 +149,8 @@ func NativeToRailMinor(currency string, amount int64) (Cents, error) {
 	return Cents(quotient), nil
 }
 
-// NativeToRailMinorExact is NativeToRailMinor's no-rounding sibling: the
-// conversion used where an amount is a PRICE rather than a computed accrual, so
-// a sub-minor remainder is a defect to surface, never a rounding to absorb.
-// Same registry, same refusal on an unregistered currency — which is the whole
-// point: a hardcoded /10_000 cannot refuse, and so happily converts an amount
-// whose currency nobody established.
+// NativeToRailMinorExact is NativeToRailMinor without rounding, for prices: a
+// sub-minor remainder or an unregistered currency is an error.
 func NativeToRailMinorExact(currency string, amount int64) (Cents, error) {
 	div, err := nativeDivisor(currency)
 	if err != nil {
@@ -242,9 +225,7 @@ func allDigits(s string) bool {
 }
 
 // minorUnitName names a currency's rail minor unit for error messages: "whole
-// cents" for the 2-decimal majority, the generic term otherwise (whole yen is
-// not a cent, and saying so would be the same kind of small lie this issue is
-// about).
+// cents" for 2-decimal currencies, "whole minor units" otherwise.
 func minorUnitName(currency string) string {
 	if cur, ok := LookupCurrency(currency); ok && cur.MinorDecimals == 2 {
 		return "whole cents"
