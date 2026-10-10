@@ -1,16 +1,36 @@
 package checkout
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
+
+// QuoteSolanaUpgrade credits only money paid for the current period.
+func QuoteSolanaUpgrade(ctx context.Context, database *db.DB, sub *models.Subscription, current, next *models.Price, now time.Time) (ModelBUpgradeQuote, error) {
+	if sub.CurrentPeriodStartsAt == nil {
+		return ModelBUpgradeQuote{}, ErrTierChangePeriodUnknown
+	}
+	ctx = db.WithPSPID(ctx, sub.PspID)
+	paid, err := payments.NewPaymentRepo(database).GetSolanaPeriodPaidAmount(ctx, sub.ID, *sub.CurrentPeriodStartsAt, current.Currency)
+	if err != nil {
+		return ModelBUpgradeQuote{}, fmt.Errorf("read Solana paid period: %w", err)
+	}
+	return QuoteModelBUpgrade(ModelBUpgrade{
+		Old: PriceAmount{Micros: paid, Currency: current.Currency}, New: PriceAmountOf(next),
+		PeriodStart: sub.CurrentPeriodStartsAt, PeriodEnd: sub.CurrentPeriodEndsAt,
+		NewCycleHours: next.RecurringCycleHours(),
+	}, now)
+}
 
 var (
 	// ErrTierChangeCycleUnknown: the target price has no positive billing

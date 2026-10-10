@@ -103,7 +103,10 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 		{"lite", "period_end", 0, 0, 3},
 		{"premium", "now", 1, 120_000_000, 4},
 	} {
+		preview := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/change/preview", "", map[string]any{"price_id": price(tc.target)}))
 		prep := unwrap(b.must(http.MethodPost, "/subscriptions/"+sub+"/change", "tc-"+uuid.NewString(), map[string]any{"price_id": price(tc.target)}))
+		require.Equal(t, prep["amount_due_now"], preview["amount_due_now"], "preview and preparation use the same paid-period credit")
+		require.Equal(t, prep["effective"], preview["effective"])
 		require.Equal(t, fmt.Sprint(tc.amount), prep["amount_due_now"])
 		require.Equal(t, tc.effective, prep["effective"], "%s: direction comes from the price per hour", tc.target)
 		require.Equal(t, "requires_action", prep["status"])

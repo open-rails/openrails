@@ -20,7 +20,6 @@ import (
 	solanasubscriptions "github.com/open-rails/openrails/internal/integrations/solana/subscriptions"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/payments"
 	solanamodule "github.com/open-rails/openrails/internal/modules/solana"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
@@ -131,19 +130,8 @@ func resolveSolanaTierChange(r *httprequest.Request, subscriptionID uuid.UUID, n
 	}
 
 	if isUpgrade && quoteUpgrade {
-		if oldSub.CurrentPeriodStartsAt == nil {
-			return nil, checkout.ErrTierChangePeriodUnknown
-		}
 		ctx := db.WithPSPID(r.Request.Context(), oldSub.PspID)
-		paid, err := payments.NewPaymentRepo(r.State.DB).GetSolanaPeriodPaidAmount(ctx, oldSub.ID, *oldSub.CurrentPeriodStartsAt, oldPrice.Currency)
-		if err != nil {
-			return nil, fmt.Errorf("read Solana paid period: %w", err)
-		}
-		quote, err := checkout.QuoteModelBUpgrade(checkout.ModelBUpgrade{
-			Old: checkout.PriceAmount{Micros: paid, Currency: oldPrice.Currency}, New: checkout.PriceAmountOf(newPrice),
-			PeriodStart: oldSub.CurrentPeriodStartsAt, PeriodEnd: oldSub.CurrentPeriodEndsAt,
-			NewCycleHours: newPrice.RecurringCycleHours(),
-		}, nowOrDefault(r))
+		quote, err := checkout.QuoteSolanaUpgrade(ctx, r.State.DB, oldSub, oldPrice, newPrice, nowOrDefault(r))
 		if err != nil {
 			return nil, err
 		}
