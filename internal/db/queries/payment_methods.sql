@@ -2,15 +2,16 @@
 
 -- name: CreatePaymentMethod :execrows
 -- A PSP-held card names its PSP; a custodian-held card names its custodian
--- and no PSP. A new method is active, and its history starts with the card it
--- was saved with.
+-- and no PSP. A new method is active, or requires_action while setup_ref
+-- awaits the customer, and its history starts with the card it was saved
+-- with.
 WITH pm AS (
 INSERT INTO billing.payment_methods (
     id, merchant_id, customer_id, rail, rail_customer_ref, rail_method_ref,
     card_brand, card_last4, card_exp_month, card_exp_year,
     metadata, created_at, updated_at, psp_id,
     custodian, custodian_id, fingerprint, network_token_id, network_token_status,
-    network_token_par, charge_via, status
+    network_token_par, charge_via, status, setup_ref
 ) VALUES (
     $1, sqlc.arg(merchant_id)::uuid, $2, $3, NULLIF(sqlc.arg(rail_customer_ref)::text, ''), NULLIF(sqlc.arg(rail_method_ref)::text, ''),
     sqlc.narg(card_brand)::text, sqlc.narg(card_last4)::text, sqlc.narg(card_exp_month)::smallint, sqlc.narg(card_exp_year)::smallint,
@@ -22,7 +23,8 @@ INSERT INTO billing.payment_methods (
     sqlc.narg(custodian_id)::uuid,
     NULLIF(sqlc.arg(fingerprint)::text, ''), NULLIF(sqlc.arg(network_token_id)::text, ''),
     NULLIF(sqlc.arg(network_token_status)::text, ''), NULLIF(sqlc.arg(network_token_par)::text, ''),
-    COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'), 'active'
+    COALESCE(NULLIF(sqlc.arg(charge_via)::text, ''), 'pan_proxy'),
+    CASE WHEN sqlc.narg(setup_ref)::text IS NULL THEN 'active' ELSE 'requires_action' END, sqlc.narg(setup_ref)::text
 )
 RETURNING *
 )
@@ -286,3 +288,24 @@ LIMIT 1;
 -- The billing details the customer edited on a live card.
 UPDATE billing.payment_methods SET metadata = sqlc.narg(metadata), updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'active';
+
+-- name: CompletePaymentMethodSetup :execrows
+-- The customer completed the bank's authentication: the card is saved.
+UPDATE billing.payment_methods SET status = 'active', setup_ref = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'requires_action';
+
+-- name: AbandonPaymentMethodSetup :execrows
+-- The bank refused the card, or its authentication was never completed.
+UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'requires_action';
+
+-- name: AbandonStalePaymentMethodSetups :execrows
+-- Card saves that waited for the customer past the cutoff are removed.
+UPDATE billing.payment_methods SET status = 'removed', setup_ref = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'requires_action' AND created_at < sqlc.arg(before)::timestamptz;
+
+-- name: ListStaleSetupMerchants :many
+-- The sweep's work queue: merchants with a card save waiting past the cutoff.
+SELECT DISTINCT merchant_id FROM billing.payment_methods
+WHERE status = 'requires_action' AND created_at < sqlc.arg(before)::timestamptz
+LIMIT sqlc.arg(merchant_limit)::int;

@@ -163,3 +163,41 @@ func (s *StripeService) decodeEngineSetup(ctx context.Context, p StripeEngineSet
 	out.ExpYear = method.Card.ExpYear
 	return out, nil
 }
+
+// StripeSetupDeclined is the bank refusing a card OpenRails tried to save.
+type StripeSetupDeclined struct{ DeclineCode string }
+
+func (e *StripeSetupDeclined) Error() string { return "Stripe declined the card: " + e.DeclineCode }
+
+// ConfirmEngineSetup saves a card the page tokenized (methodRef, a pm_) to
+// the customer in one call: a SetupIntent OpenRails creates and confirms.
+// The bank may ask for 3-D Secure first: requires_action, with an ephemeral
+// client secret. p.SessionID names the payment method it saves.
+func (s *StripeService) ConfirmEngineSetup(ctx context.Context, p StripeEngineSetupParams, methodRef string) (StripeEngineSetup, error) {
+	if err := s.checkEngineSetup(p); err != nil {
+		return StripeEngineSetup{}, err
+	}
+	if !stripeEngineID(methodRef, "pm_") {
+		return StripeEngineSetup{}, errors.New("invalid Stripe payment method identity")
+	}
+	scoped := *s
+	scoped.Rails = railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: s.accountID, Stripe: &config.StripeRailConfig{SecretKey: s.accountSecret}}}
+	s = &scoped
+	v := url.Values{"customer": {p.CustomerRef}, "usage": {"off_session"}, "payment_method_types[]": {"card"}, "payment_method": {methodRef}, "confirm": {"true"}}
+	for k, value := range p.metadata() {
+		v.Set("metadata["+k+"]", value)
+	}
+	body, err := s.stripePostForm(ctx, "/v1/setup_intents", v, "engine-setup:"+p.SessionID.String())
+	var refused *StripeAPIError
+	if errors.As(err, &refused) && refused.StatusCode == http.StatusPaymentRequired {
+		code := refused.DeclineCode
+		if code == "" {
+			code = refused.Code
+		}
+		return StripeEngineSetup{}, &StripeSetupDeclined{DeclineCode: code}
+	}
+	if err != nil {
+		return StripeEngineSetup{}, errors.New("Stripe setup outcome requires recovery")
+	}
+	return s.decodeEngineSetup(ctx, p, "", body)
+}

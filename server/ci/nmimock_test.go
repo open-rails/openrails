@@ -60,7 +60,7 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	}
 
 	card := nmimock.Card{Brand: "visa", Last4: "4242"}
-	method := do(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "payment_token": gateway.Tokenize(card),
+	method := do(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "token": gateway.Tokenize(card),
 		"billing_details": map[string]any{"name": "Host Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}, http.StatusCreated)["id"]
 	session := do(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID}, http.StatusCreated)["id"].(string)
 	var option any

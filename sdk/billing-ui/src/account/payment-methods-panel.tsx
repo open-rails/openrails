@@ -37,8 +37,6 @@ import { useNotice } from "./notice"
 import { BillingStatusBadge } from "./status-badge"
 
 export interface PaymentMethodsPanelProps {
-  /** Return target after off-page card verification; see `SavePaymentMethod`. */
-  cardSetupReturnURL?: (setupId: string) => string
   /**
    * Offers to make a card the default for this currency: it pays the
    * currency's invoices and every subscription in it without its own card.
@@ -65,7 +63,6 @@ function removeMessage(error: BillingError, m: Translator): string {
  * payment setup (`GET /config`) that saves a card in the page.
  */
 export function PaymentMethodsPanel({
-  cardSetupReturnURL,
   defaultCurrency,
   defaultCountry,
   appearance,
@@ -343,7 +340,6 @@ export function PaymentMethodsPanel({
             <SavePaymentMethod
               key={psp.psp_id}
               psp={psp}
-              returnURL={cardSetupReturnURL}
               defaultCountry={defaultCountry}
               appearance={appearance}
               onSaved={() => {

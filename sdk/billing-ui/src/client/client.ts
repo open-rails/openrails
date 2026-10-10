@@ -18,7 +18,6 @@ import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
 import {
   accountSchema,
-  cardSetupSchema,
   checkoutSessionLinkSchema,
   publicConfigSchema,
   paymentAuthenticationSchema,
@@ -33,7 +32,6 @@ import {
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
   type Account,
-  type CardSetup,
   type CheckoutSessionLink,
   type PublicConfig,
   type PaymentAuthentication,
@@ -449,8 +447,9 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Stores a card entered in the page with the PSP `psp_id`: a Collect.js
-     * token (`cardSetupDriver` "collect_js") or the card itself ("card").
+     * Saves a card entered in the page with the PSP `psp_id` in one call: the
+     * token of its own fields, or the card itself ("card"). A Stripe card the
+     * bank wants authenticated answers `requires_action`.
      */
     addPaymentMethod(card: NewCard): Promise<PaymentMethod> {
       return json(paymentMethodSchema, "/me/payment-methods", {
@@ -460,31 +459,13 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * Starts an in-page card setup with a PSP whose browser SDK collects the
-     * card (see `cardSetupDriver`). `idempotencyKey` identifies this attempt.
+     * Finishes saving a card the bank asked to authenticate, after the PSP's
+     * script answered its `next_action`.
      */
-    createCardSetup(input: {
-      pspId: string
-      idempotencyKey: string
-    }): Promise<CardSetup> {
-      return json(cardSetupSchema, "/me/payment-method-setups", {
-        method: "POST",
-        body: { psp_id: input.pspId, consent: true },
-        headers: { "Idempotency-Key": input.idempotencyKey },
-      })
-    },
-
-    getCardSetup(setupId: string, signal?: AbortSignal): Promise<CardSetup> {
-      return json(cardSetupSchema, `/me/payment-method-setups/${id(setupId)}`, {
-        signal,
-      })
-    },
-
-    /** Verifies the setup with the provider; `payment_method_id` once saved. */
-    confirmCardSetup(setupId: string): Promise<CardSetup> {
+    confirmPaymentMethod(paymentMethodId: string): Promise<PaymentMethod> {
       return json(
-        cardSetupSchema,
-        `/me/payment-method-setups/${id(setupId)}/confirm`,
+        paymentMethodSchema,
+        `/me/payment-methods/${id(paymentMethodId)}/confirm`,
         { method: "POST", body: {} }
       )
     },

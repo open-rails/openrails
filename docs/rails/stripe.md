@@ -169,8 +169,9 @@ alert-only — it reports drift and never mutates your Stripe objects.
 ### Checkout
 
 With a declared `publishable_key`, a checkout session's Stripe option has driver
-`stripe_elements`: the page saves the card with Stripe Elements
-(`/v1/me/payment-method-setups`), pays the session with that
+`stripe_elements`: the page makes a `pm_` with Stripe Elements, saves it with
+`POST /v1/me/payment-methods` (one SetupIntent OpenRails confirms, 3-D Secure
+answered in the page and confirmed), pays the session with that
 `payment_method_id`, and runs 3-D Secure in the page through `operation`. This is
 how Stripe subscriptions are sold.
 

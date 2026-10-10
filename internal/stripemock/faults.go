@@ -25,6 +25,14 @@ func (m *Mock) SetDecline(last4, decline string) {
 	}
 }
 
+// SetMethodDecline sets the issuer's answer for future charges on one
+// payment method.
+func (m *Mock) SetMethodDecline(pm, decline string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.declines[pm] = decline
+}
+
 // DelayIntentVisibility models a list that has not caught up with a
 // completed create: reads by id see a PaymentIntent at once, the list after
 // delay.

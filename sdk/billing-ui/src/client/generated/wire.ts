@@ -163,7 +163,7 @@ export type CreateOrderParams = {
 
 export type CreatePaymentMethodParams = {
   psp_id?: string
-  payment_token?: string
+  token?: string
   card?: CardEntry
   billing_details?: BillingDetails
 }
@@ -555,7 +555,8 @@ export type PaymentMethod = {
   customer_id: string
   rail: string
   psp_id: string | null
-  status: "active" | "closed" | "removed" | "replaced"
+  status: "active" | "closed" | "removed" | "replaced" | "requires_action"
+  next_action: NextAction | null
   replaced_by: string | null
   card: CardDetails | null
   billing_details: BillingDetails | null
@@ -573,19 +574,6 @@ export type PaymentMethodHealth = {
   last_charged_at: string | null
   last_charge_outcome: "failed" | "succeeded" | null
   active: boolean
-}
-
-export type PaymentMethodSetup = {
-  id: string
-  status: string
-  setup_intent_id?: string
-  client_secret?: string
-  payment_method_id?: string
-}
-
-export type PaymentMethodSetupParams = {
-  psp_id?: string
-  consent?: boolean
 }
 
 export type PaymentMethodSubscription = {

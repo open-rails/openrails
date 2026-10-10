@@ -282,6 +282,7 @@ func PaymentMethodFromGen(p gen.BillingPaymentMethod) (*PaymentMethod, error) {
 
 		Status:              p.Status,
 		ReplacedByID:        p.ReplacedByID,
+		SetupRef:            DerefStr(p.SetupRef),
 		ContactCardholderAt: p.ContactCardholderAt,
 	}
 	if err := FromJSONB(p.Metadata, &m.Metadata, "payment_methods.metadata"); err != nil {

@@ -205,16 +205,3 @@ func TestHostedNewCardOneTimeSale(t *testing.T) {
 	require.Empty(t, h.subscriptions())
 	require.Len(t, w.nmi.ledger(""), 1)
 }
-
-// A Stripe card setup is read back by its customer.
-func TestStripeCardSetupReadsBack(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	c := w.newCustomer()
-	method := c.saveCard("stripe", visa)
-	var id uuid.UUID
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.checkout_attempts WHERE customer_id = $1 AND mode = 'payment_method'`), c.id).Scan(&id))
-	got := unwrap(c.must(http.MethodGet, "/payment-method-setups/"+billing.CheckoutAttemptID(id).String(), "", nil))
-	require.Equal(t, "succeeded", got["status"])
-	require.Equal(t, method, got["payment_method_id"])
-}

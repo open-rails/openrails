@@ -769,13 +769,11 @@ Mounting gives your users these routes under `/billing`:
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | pay a subscription with another saved card, or with their default again |
 | `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal now |
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
-| `POST /billing/v1/me/payment-methods` | save a card (a processor token, never the card number) |
+| `POST /billing/v1/me/payment-methods` | save a card in one call (the PSP's token, never the card number) |
 | `PUT`, `DELETE /billing/v1/me/payment-methods/{id}` | replace or remove a card |
 | `PATCH /billing/v1/me/payment-methods/{id}` | change a card's expiry, billing details or reuse |
 | `POST /billing/v1/me/payment-methods/{id}/verify` | confirm a card again after its brand changed |
-| `POST /billing/v1/me/payment-method-setups` | start saving a card through Stripe |
-| `GET /billing/v1/me/payment-method-setups/{id}` | read that setup |
-| `POST /billing/v1/me/payment-method-setups/{id}/confirm` | finish it |
+| `POST /billing/v1/me/payment-methods/{id}/confirm` | finish saving a card after the bank's 3-D Secure step |
 | `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its invoices and every subscription without its own card |
 | `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
 | `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |

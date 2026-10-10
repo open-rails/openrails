@@ -19,10 +19,13 @@ import (
 // Method statuses. A method is chargeable only while active; the others are
 // final.
 const (
-	StatusActive   = "active"
-	StatusClosed   = "closed"
-	StatusReplaced = "replaced"
-	StatusRemoved  = "removed"
+	// StatusRequiresAction is a card being saved: the customer completes the
+	// bank's authentication first. It is never charged.
+	StatusRequiresAction = "requires_action"
+	StatusActive         = "active"
+	StatusClosed         = "closed"
+	StatusReplaced       = "replaced"
+	StatusRemoved        = "removed"
 )
 
 // CardSource is who reported a change to a stored card.

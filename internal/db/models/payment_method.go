@@ -50,6 +50,9 @@ type PaymentMethod struct {
 	// and the others are final.
 	Status       string     `json:"status"`
 	ReplacedByID *uuid.UUID `json:"-"`
+	// SetupRef is the provider's setup awaiting the customer while Status is
+	// requires_action.
+	SetupRef string `json:"-"`
 	// ContactCardholderAt is when the issuer last asked for the cardholder.
 	ContactCardholderAt *time.Time `json:"-"`
 

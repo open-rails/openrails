@@ -146,7 +146,7 @@ func TestNMICardSaveDuplicateRefused(t *testing.T) {
 	w.nmi.SetDuplicateWindow(nmiDupWindow)
 	w.nmi.AddRecentCharge(visa, "0.00")
 	before := len(w.nmi.Vaults())
-	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "payment_token": w.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "E2E Payer"}})
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "token": w.nmi.Tokenize(visa), "billing_details": map[string]any{"name": "E2E Payer"}})
 	require.Equal(t, http.StatusConflict, status, "%v", body)
 	require.Equal(t, billing.CodePaymentDuplicateRefused, errorCode(body), "%v", body)
 	after := len(w.nmi.Vaults())

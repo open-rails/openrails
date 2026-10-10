@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -566,6 +567,9 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 	pm, err := s.rt.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pay.method, customer.String())
 	if err != nil {
 		return fmt.Errorf("%w: %w", checkout.ErrPaymentMethodStale, err)
+	}
+	if pm.Status != paymentmethods.StatusActive {
+		return fmt.Errorf("%w: the card is %s", checkout.ErrPaymentMethodStale, pm.Status)
 	}
 	for _, o := range options {
 		if strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {

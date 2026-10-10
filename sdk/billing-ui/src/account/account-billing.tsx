@@ -4,17 +4,13 @@ import type { CheckoutAppearance } from "#orck/appearance"
 import type { SendSolanaTransaction } from "#orck/client/client"
 import { BillingUiRoot } from "#orck/scope"
 import { PaymentHistory } from "./payment-history"
-import {
-  PaymentMethodsPanel,
-  type PaymentMethodsPanelProps,
-} from "./payment-methods-panel"
+import { PaymentMethodsPanel } from "./payment-methods-panel"
 import {
   SubscriptionsPanel,
   type SubscriptionsPanelProps,
 } from "./subscriptions-panel"
 
 export interface AccountBillingProps {
-  cardSetupReturnURL?: PaymentMethodsPanelProps["cardSetupReturnURL"]
   /**
    * Offers to make a card the default for this currency: it pays the
    * currency's invoices and every subscription in it without its own card.
@@ -32,7 +28,6 @@ export interface AccountBillingProps {
 
 /** Subscriptions, payment methods and history in one column. */
 export function AccountBilling({
-  cardSetupReturnURL,
   defaultCurrency,
   defaultCountry,
   sendSolanaTransaction,
@@ -55,7 +50,6 @@ export function AccountBilling({
         appearance={appearance}
       />
       <PaymentMethodsPanel
-        cardSetupReturnURL={cardSetupReturnURL}
         defaultCurrency={defaultCurrency}
         defaultCountry={defaultCountry}
         appearance={appearance}

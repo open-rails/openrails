@@ -88,8 +88,6 @@ export interface CheckoutProps {
   layout?: CheckoutLayout
   /** Billing country to preselect; default: the browser locale's region. */
   defaultCountry?: string
-  /** Return target after an off-page card verification (Stripe setup). */
-  cardSetupReturnURL?: (setupId: string) => string
   // Embedded hosts get the result via callback; page hosts also redirect.
   onComplete?: (result: PayResult) => void
   /**
@@ -187,7 +185,6 @@ export function Checkout({
   appearance,
   layout = "auto",
   defaultCountry,
-  cardSetupReturnURL,
   onComplete,
   onRedirect,
   onPhaseChange,
@@ -499,7 +496,7 @@ export function Checkout({
       }
       const method = await client.addPaymentMethod({
         psp_id: rail.psp_id ?? rail.id,
-        payment_token: tokenized.token,
+        token: tokenized.token,
         billing_details: billingDetailsOf(parsed.data),
       })
       billingContext?.notify({
@@ -854,7 +851,6 @@ export function Checkout({
               ref={stripeCard}
               psp={railPsp(option)}
               client={client}
-              returnURL={cardSetupReturnURL}
               defaultCountry={cardBilling.country || undefined}
               onCompleteChange={setStripeComplete}
               unavailableMessage={m.t("paymentMethods.unavailable")}

@@ -187,7 +187,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	to := w.tierPrice(group, 2, 2000, monthHours, false)
 
 	// A's objects: a membership with an upgrade awaiting authentication, a
-	// saved card and a card setup, an open invoice, a notification and a
+	// saved card, an open invoice, a notification and a
 	// checkout session.
 	a, sub := w.engineMember("stripe", embedded, from)
 	w.stripe.SetDecline(visa.Last4, "auth")
@@ -195,7 +195,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status)
 	aCard := a.saveCard("nmi", visa)
-	setup := a.must(http.MethodPost, "/payment-method-setups", "setup-"+uuid.NewString(), map[string]any{"psp_id": w.psp["stripe"], "consent": true})["id"].(string)
 	_, err = w.client[remote].UpdateCustomer(ctx, a.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 100_000_000}}})
 	require.NoError(t, err)
 	_, err = recordUsage(ctx, w.client[remote], billing.RecordUsageParams{CustomerID: a.cid(), Invoker: a.id, Currency: "USD", EventType: "idor", Amount: 50_000_000, Source: "test", SourceID: uuid.NewString()})
@@ -244,8 +243,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/payment-methods/{id}/verify":                    {"/payment-methods/" + aCard + "/verify", nil},
 		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
 		"PUT /v1/me/default-payment-methods/{currency}":              {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},
-		"GET /v1/me/payment-method-setups/{id}":                      {"/payment-method-setups/" + setup, nil},
-		"POST /v1/me/payment-method-setups/{id}/confirm":             {"/payment-method-setups/" + setup + "/confirm", map[string]any{}},
+		"POST /v1/me/payment-methods/{id}/confirm":                   {"/payment-methods/" + aCard + "/confirm", nil},
 		"GET /v1/me/checkout-sessions/{id}":                          {"/checkout-sessions/" + session.id, nil},
 		"POST /v1/me/checkout-sessions/{id}/pay":                     {"/checkout-sessions/" + session.id + "/pay", map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard}},
 		"GET /v1/me/orders/{id}":                                     {"/orders/" + aOrder, nil},
