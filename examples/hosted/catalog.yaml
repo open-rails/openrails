@@ -1,0 +1,45 @@
+# catalog.yaml
+schema_version: 1 # the file format
+products:
+  course-101:
+    display_name: Course 101 — Intro to CSS
+    entitlements: ["course:101"]
+    prices:
+      purchase:
+        amount: 4.99 USD
+        access_duration: null # permanent access
+      rent:
+        amount: 1.99 USD
+        access_duration: 3 days # access expires 3 days after purchase
+
+  course-102:
+    display_name: Course 102 — Intro to Tailwind
+    entitlements: ["course:102"]
+    prices:
+      purchase:
+        amount: 4.99 USD
+        access_duration: null
+      rent:
+        amount: 1.99 USD
+        access_duration: 3 days
+
+  course-bundle:
+    display_name: CSS courses 101 and 102
+    entitlements: ["course:101", "course:102"] # the same keys as individual sales
+    prices:
+      purchase:
+        amount: 8.99 USD # both courses at a discounted price
+        access_duration: null
+
+  channel-membership:
+    display_name: Channel membership
+    entitlements: ["channel:membership"]
+    prices:
+      monthly:
+        amount: 10 USD
+        access_duration: 30 days
+        billing_interval: 30 days
+      yearly:
+        amount: 99 USD
+        access_duration: 365 days
+        billing_interval: 365 days

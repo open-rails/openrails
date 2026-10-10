@@ -1,0 +1,3 @@
+merchant.yaml
+# The example server's config holds no secrets of yours.
+!openrails/config.yaml

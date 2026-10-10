@@ -1,0 +1,43 @@
+# The stack with NMI played by the server's fake gateway, and the browser
+# tests in web/e2e run inside the server's network namespace, so the browser
+# sees the localhost URLs a person does. Nothing is published on the host.
+#
+#   cp openrails/merchant.example.yaml openrails/merchant.yaml  # its placeholder keys suit the fake gateway
+#   (cd web && pnpm install)
+#   OPENRAILS_CLIENT_SECRET=$(openssl rand -hex 32) \
+#     docker compose -f compose.yaml -f compose.e2e.yaml run --rm e2e
+#   docker compose -f compose.yaml -f compose.e2e.yaml down -v
+services:
+  openrails:
+    network_mode: service:nmi
+    ports: !reset []
+    environment:
+      PROVIDER_SANDBOX_NMI_GATEWAY_URL: http://127.0.0.1:9091
+      RATE_LIMITS_DISABLED: "true" # every purchase comes from one browser
+    depends_on:
+      nmi: { condition: service_started }
+
+  app:
+    network_mode: service:nmi
+
+  mailpit:
+    ports: !reset []
+
+  nmi: # owns the namespace the server and app join, as a pod's first container
+    image: docker.io/openrails/openrails:v0.235.0
+    command: [sandbox, nmi-gateway, --listen, 127.0.0.1:9091, --max-lifetime, 1h]
+
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.60.0-noble
+    network_mode: service:nmi
+    working_dir: /example/web
+    volumes:
+      - ./:/example
+    environment:
+      E2E_BASE_URL: http://localhost:8080
+      E2E_USERS: reader1,reader2,reader3,reader4
+      E2E_PASSWORD: correct horse battery staple
+    command: [sh, -c, "node ../e2e-seed.mjs && npx playwright test"]
+    depends_on:
+      app: { condition: service_healthy }
+      catalog: { condition: service_completed_successfully }

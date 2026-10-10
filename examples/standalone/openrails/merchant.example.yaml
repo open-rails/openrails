@@ -1,0 +1,21 @@
+# The merchant this server serves, read at every boot: `openrails run-server
+# --merchant-manifest merchant.yaml`. Copy this file to merchant.yaml and fill
+# in your NMI sandbox gateway's IDs and keys; merchant.yaml holds secrets, so
+# keep it out of version control.
+version: 1
+merchants:
+  onlydemo: # your merchant's name: lowercase letters, digits and hyphens
+    display_name: OnlyDemo
+    api_host: localhost # the Host its public routes (the catalog, checkout) answer on
+    settings:
+      profile:
+        from_email: billing@onlydemo.example # receipts come from this address
+    psps:
+      mobius: # your name for this account; any key you like
+        rail: nmi
+        account_id: "000000" # the NMI dashboard's "Gateway ID"
+        settings:
+          tokenization_key: your-public-tokenization-key # the browser's card fields use it
+        secrets:
+          security_key: your-private-security-key
+          webhook_signing_secret: your-webhook-signing-key
