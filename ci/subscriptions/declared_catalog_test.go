@@ -211,7 +211,9 @@ products:
 	var held int
 	require.NoError(t, holder.QueryRow(t.Context(), w.sql(`SELECT count(*) FROM (SELECT 1 FROM billing.psps WHERE key = 'nmi' FOR UPDATE) held`)).Scan(&held))
 	require.Equal(t, 1, held)
-	time.AfterFunc(time.Second, func() { _ = holder.Rollback(context.Background()) })
+	released := make(chan struct{})
+	time.AfterFunc(time.Second, func() { _ = holder.Rollback(context.Background()); close(released) })
+	t.Cleanup(func() { <-released }) // before the cleanup's own Rollback above
 
 	client, err := w.bootDeclared(t.Context(), params)
 	require.NoError(t, err, "a PSP another replica holds delays New, never fails it")
