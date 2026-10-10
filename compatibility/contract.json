@@ -1078,7 +1078,7 @@
       "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tScope billingauth.Scope\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n\n\tPermissions Permissions\n\n\tAdminConsole bool\n}",
       "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
       "type UserInfo = userinfo.Lookup",
-      "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tKVMount string\n\n\tTransitMount string\n}"
+      "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tAuthMount string\n\n\tKVMount string\n\n\tTransitMount string\n}"
     ],
     "internal/nmimock": [
       "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n}",
@@ -2170,6 +2170,7 @@
     },
     "internal/config/config.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
+      "cmp": "cmp",
       "custodians": "github.com/open-rails/openrails/internal/custodians",
       "errors": "errors",
       "fmt": "fmt",

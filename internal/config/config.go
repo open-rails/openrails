@@ -1,6 +1,7 @@
 package config
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -312,6 +313,10 @@ type VaultConfig struct {
 	RoleID   string
 	SecretID string
 	K8sRole  string
+	// AuthMount is where the approle or kubernetes auth method is mounted:
+	// the -path of `vault auth enable`, without auth/. Empty is the method's
+	// name.
+	AuthMount string
 	// KVMount is the KV v2 mount merchant configuration lives in, under
 	// ScopePrefix (empty: "openrails"). Empty: a file holds it.
 	KVMount string
@@ -1192,7 +1197,15 @@ func validateVault(vc *VaultConfig) error {
 	if vc == nil {
 		return nil
 	}
-	for name, raw := range map[string]string{"vault.kv_mount": vc.KVMount, "vault.scope_prefix": vc.ScopePrefix, "vault.transit_mount": vc.TransitMount} {
+	if mount := strings.Trim(strings.TrimSpace(vc.AuthMount), "/"); mount != "" {
+		switch method := strings.ToLower(strings.TrimSpace(vc.AuthMethod)); {
+		case method != "approle" && method != "kubernetes":
+			return fmt.Errorf("vault.auth_mount applies to the approle and kubernetes auth methods, not %q", cmp.Or(method, "token"))
+		case strings.HasPrefix(mount, "auth/"):
+			return fmt.Errorf("vault.auth_mount %q is the path after auth/: %q", vc.AuthMount, strings.TrimPrefix(mount, "auth/"))
+		}
+	}
+	for name, raw := range map[string]string{"vault.auth_mount": vc.AuthMount, "vault.kv_mount": vc.KVMount, "vault.scope_prefix": vc.ScopePrefix, "vault.transit_mount": vc.TransitMount} {
 		p := strings.Trim(strings.TrimSpace(raw), "/")
 		if p != "" && (path.Clean(p) != p || strings.Contains(p, "..")) {
 			return fmt.Errorf("%s %q must be a plain Vault path", name, raw)

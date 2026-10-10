@@ -114,6 +114,7 @@ func TestEnvKeyRouting(t *testing.T) {
 		"DB_URL":                            "db.url",
 		"db_url":                            "db.url",
 		"VAULT_ADDR":                        "vault.address",
+		"VAULT_AUTH_MOUNT":                  "vault.auth_mount",
 		"AUTHKIT_ACTIVE_KEY_ID":             "auth.active_key_id",
 		"AUTHKIT_KEYS_PATH":                 "auth.keys_path",
 		"AUTH_NAMING_FORMER_NAMES_DURATION": "auth.naming.former_names.duration",

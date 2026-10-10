@@ -414,6 +414,7 @@ pkg openrails, type VaultConfig = config.VaultConfig
 pkg openrails, type VaultConfig struct
 pkg openrails, type VaultConfig struct, Address string
 pkg openrails, type VaultConfig struct, AuthMethod string
+pkg openrails, type VaultConfig struct, AuthMount string
 pkg openrails, type VaultConfig struct, K8sRole string
 pkg openrails, type VaultConfig struct, KVMount string
 pkg openrails, type VaultConfig struct, Namespace string

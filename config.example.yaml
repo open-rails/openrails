@@ -103,6 +103,7 @@ auth:
 #   role_id: ""
 #   secret_id: ""
 #   k8s_role: ""
+#   auth_mount: ""    # approle/kubernetes mount path without auth/; default the method's name
 
 # The built-in email sender, for billing and control-plane mail: any SMTP
 # server (SendGrid: host smtp.sendgrid.net, username apikey, password the API

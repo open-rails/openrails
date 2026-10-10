@@ -45,6 +45,7 @@ config:
   #   address: https://vault.example.com:8200
   #   auth_method: kubernetes # mounts the ServiceAccount token
   #   k8s_role: openrails
+  #   auth_mount: openrails-prod/k8s # where that auth method is mounted; default kubernetes
 
 # More files in /etc/openrails, each a YAML document or a string. The server
 # reads these names when present:

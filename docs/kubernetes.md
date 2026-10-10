@@ -142,8 +142,9 @@ directory.
 
 **Vault for merchant configuration** ([vault.md](vault.md)). Declare `config.vault`;
 with `auth_method: kubernetes` the chart mounts the pod's ServiceAccount token,
-which Vault's kubernetes auth method (mounted at `kubernetes`) exchanges for
-the role in `k8s_role`. Bind that role to the ServiceAccount the chart creates
+which Vault's kubernetes auth method exchanges for the role in `k8s_role`. The
+method is mounted at `kubernetes` unless `auth_mount` names another path
+(`openrails-prod/k8s`, without `auth/`). Bind that role to the ServiceAccount the chart creates
 (`<release>-openrails`, or `serviceAccount.name`). With a token instead, put
 `VAULT_TOKEN` in `secrets.files`.
 

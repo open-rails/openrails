@@ -121,6 +121,7 @@ func vaultConfig(vc *config.VaultConfig) vault.Config {
 		RoleID:     vc.RoleID,
 		SecretID:   vc.SecretID,
 		K8sRole:    vc.K8sRole,
+		AuthMount:  vc.AuthMount,
 	}
 }
 

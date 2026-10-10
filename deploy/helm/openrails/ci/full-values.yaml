@@ -16,6 +16,7 @@ config:
     address: https://vault.example.com:8200
     auth_method: kubernetes
     k8s_role: openrails
+    auth_mount: openrails-prod/k8s
 files:
   merchants.yaml:
     version: 1

@@ -43,11 +43,11 @@ type Config struct {
 	RoleID   string
 	SecretID string
 	// Kubernetes auth (AuthMethod == "kubernetes").
-	K8sRole         string
-	K8sJWTPath      string // defaults to the in-cluster service-account token path
-	KubernetesMount string // defaults to "kubernetes"
-	AppRoleMount    string // defaults to "approle"
-
+	K8sRole    string
+	K8sJWTPath string // defaults to the in-cluster service-account token path
+	// AuthMount is where the approle or kubernetes method is mounted (auth/
+	// AuthMount); empty is the method's name.
+	AuthMount string
 }
 
 const defaultK8sJWTPath = "/var/run/secrets/kubernetes.io/serviceaccount/token"
@@ -116,7 +116,7 @@ const requestTimeout = 10 * time.Second
 func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.Secret, error) {
 	switch strings.ToLower(strings.TrimSpace(cfg.AuthMethod)) {
 	case "approle":
-		mount := firstNonEmpty(cfg.AppRoleMount, "approle")
+		mount := firstNonEmpty(strings.Trim(cfg.AuthMount, "/"), "approle")
 		secretID, err := resolveApproleSecretID(cfg.SecretID)
 		if err != nil {
 			return nil, fmt.Errorf("vault: resolve approle secret_id: %w", err)
@@ -135,7 +135,7 @@ func login(ctx context.Context, client *vaultapi.Client, cfg Config) (*vaultapi.
 		if err != nil {
 			return nil, fmt.Errorf("vault: read k8s service-account token: %w", err)
 		}
-		mount := firstNonEmpty(cfg.KubernetesMount, "kubernetes")
+		mount := firstNonEmpty(strings.Trim(cfg.AuthMount, "/"), "kubernetes")
 		return client.Logical().WriteWithContext(ctx, "auth/"+mount+"/login", map[string]any{
 			"role": cfg.K8sRole,
 			"jwt":  strings.TrimSpace(string(jwt)),

@@ -145,6 +145,8 @@ vault:                                   # declaring it connects; embedded: Conf
   # namespace: billing
   auth_method: kubernetes                # kubernetes | approle | token
   k8s_role: openrails
+  # auth_mount: openrails-prod/k8s       # where the method is mounted (vault auth enable -path,
+  #                                      #   without auth/); default its name (env VAULT_AUTH_MOUNT)
   # role_id / secret_id                  # approle; a mounted secret FILE named VAULT_SECRET_ID
   #                                      #   is re-read on every re-auth (rotation-safe)
   # token                                # dev/e2e or a sidecar-managed token (env VAULT_TOKEN)
