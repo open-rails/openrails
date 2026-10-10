@@ -2,8 +2,9 @@ name: Release
 
 # A v* tag publishes the GitHub Release (.goreleaser.yaml): binaries, checksums,
 # SBOMs, generated notes, the @openrails/billing-ui tarball and build
-# provenance. scripts/release cuts one: vX.Y.Z and server/vX.Y.Z on one master
-# commit. The binary is built from the server module.
+# provenance; the same tarball is then published to npm. scripts/release cuts
+# one: vX.Y.Z and server/vX.Y.Z on one master commit. The binary is built from
+# the server module.
 # Pull requests that change the release build run it as a snapshot.
 on:
   push:
@@ -83,3 +84,39 @@ jobs:
 
       - name: List artifacts
         run: cat dist/checksums.txt
+
+  npm:
+    name: Publish @openrails/billing-ui to npm
+    needs: goreleaser
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write # npm trusted publishing; npm adds provenance
+    steps:
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish the release's tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          PKG: '@openrails/billing-ui'
+        run: |
+          v="${TAG#v}"
+          if npm view "$PKG@$v" version >/dev/null 2>&1; then
+            echo "$PKG@$v is already on npm"
+            exit 0
+          fi
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "openrails-billing-ui-$v.tgz"
+          latest="$(npm view "$PKG" dist-tags.latest 2>/dev/null || true)"
+          if [[ "$v" == *-* ]]; then
+            dist_tag=next
+          elif [[ -n "$latest" && "$(printf '%s\n%s\n' "$latest" "$v" | sort -V | tail -1)" != "$v" ]]; then
+            dist_tag="release-${v%.*}"
+          else
+            dist_tag=latest
+          fi
+          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag"

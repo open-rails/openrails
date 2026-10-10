@@ -545,11 +545,11 @@ AuthKit joins the same fleet when its `Database.RiverSchema` is
 
 [`@openrails/billing-ui`](sdk/billing-ui) is a React package with a styled
 checkout and an account page. Its components call your mounted `/billing/v1`
-routes directly, so you write no billing endpoints of your own. Install it from
-the release:
+routes directly, so you write no billing endpoints of your own. Install the
+version that matches your OpenRails:
 
 ```sh
-pnpm add https://github.com/open-rails/openrails/releases/download/vX.Y.Z/openrails-billing-ui-X.Y.Z.tgz
+pnpm add @openrails/billing-ui@X.Y.Z
 ```
 
 The storefront lists the catalog's offers. A customer who already holds a
@@ -1522,7 +1522,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [Embedded integration (Go library)](docs/embedded-integration.md) — run the engine in-process: boot, migrations, declaring your merchant, mounting the billing routes on your server, calling the in-process client.
 - [Standalone integration (service)](docs/standalone-integration.md) — deploy OpenRails as its own service: production config, first-run provisioning, API keys, the Go SDK and plain-HTTP integration.
 - [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout sessions, payment methods, tokens, and error handling.
-- [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI; each release attaches `openrails-billing-ui-X.Y.Z.tgz`.
+- [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI, on npm and attached to each release as `openrails-billing-ui-X.Y.Z.tgz`.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
 - [Customer contacts](docs/customer-contacts.md) — where customers' emails and names come from: your AuthKit in process, or your directory's SCIM 2.0 pushes.
 - [Products and prices through the Client](docs/catalog-client.md) and [choosing the merchant a call acts on](docs/client-merchant-selection.md).
