@@ -1,8 +1,6 @@
-// Package metrics is the #733 merchant analytics engine: a fixed in-code
-// registry of measures/dimensions and a compiler that turns a JSON query into
-// one parameterized SQL statement per source family, executed under MerchantTx
-// (merchant-scoped). No client string ever becomes SQL text — names resolve through
-// the registry allowlist, values ride as bind parameters.
+// Package metrics is the merchant analytics engine: an in-code registry of
+// measures and dimensions compiles a JSON query to parameterized SQL per source
+// family, so no client string ever becomes SQL text.
 package metrics
 
 import (
@@ -31,12 +29,10 @@ const (
 // Query is the POST /v1/admin/metrics/query body.
 type Query = billing.MetricsQuery
 
-// QueryRange bounds the query window. Date-only values are UTC calendar days:
-// from = day start (inclusive), to = day end (inclusive, i.e. to+1d exclusive).
-// RFC3339 timestamps are taken verbatim as [from, to). Last is the relative
-// alternative ("7d", "12w", "6m", "1y" — a trailing window ending today,
-// inclusive), mutually exclusive with from/to; saved dashboard widgets (#741)
-// use it so "past 7 days" stays current on every load.
+// QueryRange bounds the query window. Date-only values are inclusive UTC days;
+// RFC3339 timestamps are taken verbatim as [from, to). Last ("7d", "12w", "6m",
+// "1y") is a trailing window ending today, exclusive with from/to, so a saved
+// widget stays current.
 type QueryRange = billing.MetricsRange
 
 // OrderTerm orders result rows by a requested measure or dimension.

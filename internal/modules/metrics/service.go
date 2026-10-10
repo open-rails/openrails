@@ -422,11 +422,9 @@ func zeroFill(plan *Plan, groups map[string]*group) {
 }
 
 // assemble builds output rows: time, dims..., then measures in request order.
-// Ratios divide AFTER aggregation; a zero denominator yields null. Dimension
-// combos with zero signal across the whole range (an artifact of measure-level
-// FILTERs inside a broader group-by) are dropped — a combo earns a row by
-// having at least one non-zero leaf somewhere; time buckets inside a kept
-// combo still zero-fill.
+// Ratios divide after aggregation (zero denominator: null). A dimension combo
+// with no non-zero leaf in the range (a measure-level FILTER artifact) is
+// dropped; buckets inside a kept combo still zero-fill.
 func assemble(plan *Plan, groups map[string]*group) ([][]any, error) {
 	signal := map[string]bool{}
 	if len(plan.Dims) > 0 {

@@ -14,17 +14,13 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 )
 
-// FailureLedger is the durable card-testing counter (SEC-30). Every replica
-// reads and writes the same PostgreSQL rows, so blocks hold across a fleet
-// without Redis; CardAbuseGuard stays an optional captcha accelerator.
+// FailureLedger is the durable card-testing counter: every replica shares the
+// same PostgreSQL rows, so blocks hold across a fleet without Redis.
 //
-// Per subject (customer, client address): BlockAfter failures in FailWindow
-// or DailyBlockAfter in DailyWindow block further card attempts. Merchant-wide
-// GlobalAttackAfter failures in GlobalWindow, from at least
-// GlobalAttackSubjects customers and as many addresses, is attack mode: any
-// subject with a failure inside FailWindow is blocked. Subjects with no
-// recent failure are never blocked by it. The windows slide, so attack mode
-// ends on its own once failures age out.
+// Per subject (customer, client address): BlockAfter failures in FailWindow or
+// DailyBlockAfter in DailyWindow block card attempts. In attack mode any subject
+// with a failure inside FailWindow is blocked. The windows slide, so blocks and
+// attack mode end once failures age out.
 type FailureLedger struct {
 	db    *db.DB
 	clock clockwork.Clock

@@ -146,7 +146,7 @@ func compileFlow(plan *Plan, merchantID uuid.UUID, fam Family, spec familySpec, 
 	if len(group) > 0 {
 		sql += "\nGROUP BY " + strings.Join(group, ", ")
 	}
-	// @to is the range end, for states settled as of the query (#1116).
+	// @to is the range end, for states settled as of the query.
 	if strings.Contains(sql, "@to") {
 		sql = strings.ReplaceAll(sql, "@to", arg(plan.To)+"::timestamptz")
 	}

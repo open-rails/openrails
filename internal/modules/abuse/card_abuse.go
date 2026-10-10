@@ -11,15 +11,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/ratelimit"
 )
 
-// CardAbuseConfig tunes the failure-driven captcha/block escalation (#371, #331).
-//
-// Per (user + ip) subject there are TWO rolling windows:
-//   - a short BURST window (FailWindow, 15 min): CaptchaAfter -> captcha,
-//     BlockAfter -> aggressive block for the remainder of the window.
-//   - a DAILY window (DailyWindow, 24h): DailyBlockAfter -> blocked for the day.
-//
-// Plus the merchant-wide attack mode (GlobalWindow/GlobalAttackAfter/
-// GlobalAttackSubjects), which the durable FailureLedger decides.
+// CardAbuseConfig tunes the failure-driven captcha/block escalation. Each
+// subject has a burst window (FailWindow: CaptchaAfter -> captcha, BlockAfter
+// -> block) and a daily window (DailyWindow: DailyBlockAfter -> blocked for the
+// day). The Global* fields set merchant-wide attack mode, which the
+// FailureLedger decides.
 type CardAbuseConfig struct {
 	// FailWindow is the short rolling window for per-subject failed-charge counting.
 	FailWindow time.Duration
@@ -53,10 +49,7 @@ type CardAbuseConfig struct {
 	AttackTTL time.Duration
 }
 
-// DefaultCardAbuseConfig returns the agreed policy (#331): per (account+IP), in a
-// 15-min window 3 failures -> captcha and 6 -> block; in a 24h window 10 failures
-// -> block for the day; 100/24h at one merchant from 25 customers and 25
-// addresses -> attack mode.
+// DefaultCardAbuseConfig returns the production policy.
 func DefaultCardAbuseConfig() CardAbuseConfig {
 	return CardAbuseConfig{
 		FailWindow:           15 * time.Minute,
@@ -75,23 +68,17 @@ func DefaultCardAbuseConfig() CardAbuseConfig {
 }
 
 // CardAbuseGuard is the captcha accelerator over the durable FailureLedger: it
-// escalates abusive subjects to a captcha, and while the ledger reports the
-// merchant under attack it puts a captcha in front of everyone on that
-// merchant's card routes. It reuses the Redis windowed limiter and the captcha
-// ChallengeStore, and is built only when a captcha is configured: without one
-// the ledger's blocks are the whole policy. Captcha stays dormant for normal
-// users; only repeated FAILURES trigger it.
+// captchas abusive subjects and, while the ledger reports an attack, everyone
+// on that merchant's card routes. It is built only when Redis and a captcha are
+// configured; otherwise the ledger's blocks are the whole policy.
 type CardAbuseGuard struct {
 	lim        *ratelimit.Limiter
 	challenges *captcha.ChallengeStore
 	cfg        CardAbuseConfig
 }
 
-// NewCardAbuseGuard builds the guard. If lim or challenges is nil the guard is
-// a safe no-op (so it never breaks the charge path when Redis/captcha aren't
-// configured). cfg is used VERBATIM (#711 — no zero-value re-defaulting):
-// production wires DefaultCardAbuseConfig(), the ONE defaults path; tests
-// pass a complete config.
+// NewCardAbuseGuard builds the guard; a nil lim or challenges makes it a no-op.
+// cfg is used verbatim, with no zero-value defaulting.
 func NewCardAbuseGuard(lim *ratelimit.Limiter, challenges *captcha.ChallengeStore, cfg CardAbuseConfig) *CardAbuseGuard {
 	return &CardAbuseGuard{lim: lim, challenges: challenges, cfg: cfg}
 }
@@ -100,15 +87,10 @@ func (g *CardAbuseGuard) enabled() bool {
 	return g != nil && g.lim != nil && g.challenges != nil
 }
 
-// countFailure increments the failure counter for (key, unit) within window
-// (capped at max) and returns the current count in the window. The unit
-// distinguishes co-existing windows for the same subject (e.g. burst vs daily)
-// so their Redis keys never collide.
-//
-// Each window is checked independently (its own Check call) rather than as a
-// multi-window Policy: the limiter is all-or-nothing across a Policy's windows,
-// so a tripped short window would stop the daily counter from advancing. Separate
-// checks let the daily window keep accruing past the burst block.
+// countFailure counts one failure in (key, unit)'s window, capped at max, and
+// returns the window's count; unit keeps co-existing windows' keys apart. Each
+// window gets its own Check: the limiter is all-or-nothing across a Policy's
+// windows, so a tripped burst window would stop the daily counter.
 func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, window time.Duration, max int64) (int64, error) {
 	dec, err := g.lim.Check(ctx, "card_fail:"+key,
 		ratelimit.Policy{Windows: []ratelimit.Limit{{Unit: unit, Window: window, Max: max}}},
@@ -126,15 +108,10 @@ func (g *CardAbuseGuard) countFailure(ctx context.Context, key, unit string, win
 	return count, nil
 }
 
-// RecordChargeFailure records one failed/declined card attempt for the given
-// captcha subjects (use middleware.SubjectKeysFromContext(ctx): ["ip:x","user:y"],
-// the SAME resolved-client-IP subjects RateLimitHTTP pinned for this request —
-// #746) and escalates each subject's captcha/block state. attack is the
-// ledger's verdict after this refusal: it (re)opens merchantID's attack
-// captcha for AttackTTL, so the captcha lapses once refusals stop or the
-// ledger's window falls below the threshold. Best-effort: errors are logged,
-// never propagated, so abuse tracking can't break the (already failed) charge
-// response.
+// RecordChargeFailure counts one failed card attempt for each captcha subject
+// (middleware.SubjectKeysFromContext, the subjects RateLimitHTTP pinned) and
+// escalates it. attack, the ledger's verdict, (re)opens the merchant's attack
+// captcha for AttackTTL. Best-effort: errors are logged, never returned.
 func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uuid.UUID, subjectKeys []string, attack bool) {
 	if !g.enabled() {
 		return
@@ -144,9 +121,7 @@ func (g *CardAbuseGuard) RecordChargeFailure(ctx context.Context, merchantID uui
 			continue
 		}
 
-		// Daily window (24h): independent counter; trips a day-long block at
-		// DailyBlockAfter. Evaluated first so it still advances even when the
-		// burst window has already blocked the subject.
+		// Daily window first, so it keeps counting after the burst window blocks.
 		dailyCount, err := g.countFailure(ctx, key, "fail_day", g.cfg.DailyWindow, g.cfg.DailyBlockAfter)
 		if err != nil {
 			log.WithError(err).WithField("subject", key).Warn("card-abuse: failed to record daily charge failure")

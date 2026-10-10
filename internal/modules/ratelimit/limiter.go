@@ -1,12 +1,6 @@
-// Package ratelimit is a generic Redis-backed fixed-window limiter primitive.
-// Service admit no longer uses it for request/token/image throughput; retained
-// callers use it explicitly for non-money rate-limit use cases.
-//
-// Built natively (a host's rate limiter is a reference only, not
-// imported). Counters live in Redis/Garnet. The check+increment across all
-// windows is one atomic server-side op via a Lua script (portable across Redis
-// and Garnet; the interpreter overhead is microseconds, dominated by the network
-// RTT — a Garnet C# custom-transaction is a later, Garnet-committed optimization).
+// Package ratelimit is a Redis-backed fixed-window limiter. One Lua script
+// checks and increments every window atomically, so a denied request consumes
+// nothing.
 package ratelimit
 
 import (
@@ -19,17 +13,14 @@ import (
 
 // Limit is one fixed-window throughput limit: at most Max units of Unit per Window.
 type Limit struct {
-	// Unit is any arbitrary unit string: "request" (default; RPM/RPD), "token"
-	// (TPM/TPD), "image" (IPM), "video" (VPM), "gpu_second", ... — "per minute"
-	// vs "per day" is just Window. The whichever-window-first deny means RPM+TPM
-	// (or any mix, incl. images/min + videos/min) compose for free (#472).
-	Unit   string        // "request" (default), "token", "image", "video", "gpu_second", ...
+	// Unit is what the window counts ("request", "token", ...); Check's amounts
+	// are keyed by it.
+	Unit   string
 	Window time.Duration // e.g. time.Minute (RPM/TPM/IPM/VPM), 24h (RPD/TPD)
 	Max    int64
 }
 
-// Policy is the set of windows enforced for one (endpoint/model) at a tier. A
-// request is denied if it would breach ANY window (whichever is hit first).
+// Policy is a set of windows; a request is denied if it would breach any.
 type Policy struct {
 	Windows []Limit
 }
@@ -42,7 +33,7 @@ type WindowInfo struct {
 	ResetAfter time.Duration `json:"reset_after"`
 }
 
-// Decision is the outcome of an admission check.
+// Decision is the outcome of a Check.
 type Decision struct {
 	Allowed     bool         `json:"allowed"`
 	BlockedUnit string       `json:"blocked_unit,omitempty"` // the window that denied it

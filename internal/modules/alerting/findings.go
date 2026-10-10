@@ -16,26 +16,13 @@ import (
 
 var _ reconcile.FindingNotifier = (*Service)(nil)
 
-// NotifyFinding is the #787 emit seam both reconcile engines (the pull Engine
-// and the Convergence Engine) call after persisting a finding.
+// NotifyFinding is called by both reconcile engines after persisting a finding.
+// Only requires_review findings notify: one the engine can enforce stays
+// reconcile_required and self-heals, so notifying on severity alone would page
+// for problems already fixed. Low-severity findings stay in the console.
 //
-// Predicate: only status == requires_review findings fire — that status IS
-// the finding model's own "needs a human decision" signal (see
-// internal/reconcile/findings.go: chargebacks, duplicate subscriptions, and
-// ambiguous PS-1 matches are always requires_review because the fix is remote
-// or judgment-dependent). A high/critical finding the engine can enforce
-// automatically stays reconcile_required and self-heals without ever
-// reaching here — notifying on severity alone would page operators for
-// problems the system already fixed.
-//
-// Low-severity findings use the deduplicated in-app feed only.
-//
-// Dedupe: NotifiedAt/NotifiedSeverity on the finding row are the linkage. A
-// nil NotifiedAt means this open episode hasn't notified yet. A non-nil one
-// blocks re-firing UNLESS severity has genuinely escalated (a strictly lower
-// SeverityRank) since the last notify — a re-observation at the same or a
-// lower severity is silent. Every resolution path clears the linkage (see
-// reconciliation.sql), so a finding that reopens later notifies again.
+// A set NotifiedAt blocks re-firing unless severity strictly escalates; every
+// resolution clears it, so a reopened finding notifies again.
 func (s *Service) NotifyFinding(ctx context.Context, rec reconcile.FindingRecord) error {
 	queryMerchant, queryScopeErr := merchant.Require(ctx)
 	if queryScopeErr != nil {

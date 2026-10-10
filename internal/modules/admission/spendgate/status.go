@@ -16,7 +16,8 @@ type WindowUsage struct {
 	ResetsAt time.Time
 }
 
-// Reads and admission use the same durable facts, including expired work risk.
+// WindowUsage reports each effective window from the facts Admit reads: an
+// expired but unreleased hold still counts as used.
 func (g *Gate) WindowUsage(ctx context.Context, payer uuid.UUID, currency string, policy Policy, req Request) ([]WindowUsage, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {

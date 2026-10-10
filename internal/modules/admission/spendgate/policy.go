@@ -24,9 +24,8 @@ type Window struct {
 	Scope    Scope         `json:"scope"`
 	Duration time.Duration `json:"duration"`
 	Limit    int64         `json:"limit"`
-	// Key is a stable per-policy window identifier (e.g. "5h", "7d") so a window's
-	// durable window identity survives across reserves. Distinct windows under one scope MUST
-	// have distinct keys.
+	// Key is a stable per-policy window id (e.g. "5h", "7d") in its durable
+	// identity; windows under one scope MUST have distinct keys.
 	Key string `json:"key"`
 }
 
@@ -59,13 +58,10 @@ type resolvedWindow struct {
 	invoker string
 }
 
-// EffectiveWindows returns every window that applies to req under collect-all
-// semantics: all payer-scope windows, invoker-scope windows whose ScopeID matches
-// req.Invoker, role-scope windows for any of req.Roles, and trust-level-scope
-// windows for req.TrustLevel. Role windows include req.Invoker in their durable
-// identity, so a role budget is independently metered for each concrete
-// delegated invoker holding the role. The gate DENIES if ANY returned window is
-// over its limit.
+// EffectiveWindows returns every window that applies to req: all payer
+// windows plus the invoker, role and trust-level windows req matches. A role
+// window is metered separately for each invoker holding the role. Admission
+// denies if any window is over its limit.
 func (p Policy) EffectiveWindows(req Request) []resolvedWindow {
 	roles := make(map[string]bool, len(req.Roles))
 	for _, r := range req.Roles {

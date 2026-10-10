@@ -364,10 +364,9 @@ func (s *EntitlementService) PushAccess(ctx context.Context, p PushAccessParams)
 	return created, nil
 }
 
-// BoundSubscriptionAccess writes the PROVEN closure of a subscription's access
-// (#691): live subscription windows end at endAt — advance-written on disk, so
-// a dead system cannot extend a canceled sub — and windows starting at or
-// after it are removed. Idempotent.
+// BoundSubscriptionAccess closes a subscription's access at endAt: live
+// windows end there (written ahead, so a dead system cannot extend a canceled
+// subscription) and windows starting at or after it are removed. Idempotent.
 func (s *EntitlementService) BoundSubscriptionAccess(ctx context.Context, subscriptionID uuid.UUID, endAt time.Time) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("entitlement service not initialized")

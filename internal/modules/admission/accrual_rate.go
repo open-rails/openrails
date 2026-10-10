@@ -10,26 +10,15 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// microsPerHour is the canonical rate unit on every or#897 surface: the declared
-// cap, the host's prospective delta, and the measured rate all speak it, so no
-// caller ever has to know the merchant's measurement window.
+// Rates are micros per hour everywhere (declared cap, host's prospective delta,
+// measured rate), so no caller needs the merchant's measurement window.
 const secondsPerHour = int64(3600)
 
-// AccrualRateMeter measures a payer's CURRENT accrual rate — micros per hour —
-// from rated usage, for the or#897 accrual_rate_cap quota.
-//
-// The measurement is a LOOKBACK, not a history: it sums usage_events over the
-// policy's window and scales to an hour, so the read is bounded by what the
-// payer did in that window and never by how long it has been a customer. It is
-// served by usage_events_customer_id_occurred_at_idx (merchant_id, customer_id, occurred_at).
-//
-// What it can and cannot see, stated plainly because a quota that silently
-// under-measures is worse than none: it observes what has been REPORTED. A
-// deployment admitted seconds ago has not accrued yet, so the host's own
-// inventory is always ahead of this reading. That is why admission takes the
-// host's prospective DELTA as an input rather than trying to infer it — the
-// measured rate answers "what is already running", the delta answers "what am I
-// about to add", and only the host knows the second.
+// AccrualRateMeter measures a customer's current accrual rate, in micros per
+// hour, for the accrual_rate_cap quota. It sums usage_events over the policy's
+// window (served by usage_events_customer_id_occurred_at_idx), so it sees only
+// reported usage: admission takes the host's prospective delta for what is
+// about to start.
 type AccrualRateMeter struct {
 	db  *db.DB
 	now func() time.Time
@@ -77,11 +66,9 @@ func (m *AccrualRateMeter) MeasuredRatePerHour(ctx context.Context, payer identi
 	return RatePerHour(total, window), nil
 }
 
-// RatePerHour scales an amount accrued over window into micros per hour.
-//
-// Integer arithmetic on purpose (money never touches float), and the division is
-// LAST so a sub-hour window does not round its own numerator away: $1 in a
-// 60-second window is $60/hour, not $0/hour.
+// RatePerHour scales an amount accrued over window into micros per hour, in
+// integer math with the division last so a sub-hour window keeps its numerator
+// ($1 in 60s is $60/hour).
 func RatePerHour(amountInWindow int64, window time.Duration) int64 {
 	seconds := int64(window / time.Second)
 	if seconds <= 0 {

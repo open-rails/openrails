@@ -56,10 +56,9 @@ type Plan struct {
 	ImplicitCurrency bool
 }
 
-// Validate resolves a query against the registry and returns a compilable plan,
-// or every validation error at once. Exported for #741 (dry-run validation).
-// Relative ranges resolve against the wall clock; use ValidateAt for a pinned
-// clock (tests, deterministic fixtures).
+// Validate resolves a query against the registry into a compilable plan, or
+// returns every validation error at once. Relative ranges resolve against the
+// wall clock; ValidateAt pins it.
 func Validate(q *Query) (*Plan, *ValidationError) {
 	return ValidateAt(q, time.Now().UTC())
 }
@@ -69,7 +68,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 	var errs []FieldError
 	add := func(fe FieldError) { errs = append(errs, fe) }
 
-	// --- measures ---------------------------------------------------------------
 	if len(q.Measures) == 0 {
 		add(FieldError{Code: "missing_measures", Param: "measures",
 			Message: "measures is required: pick at least one measure", Valid: PublicMeasureNames()})
@@ -97,7 +95,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		measures = append(measures, m)
 	}
 
-	// --- by (dimensions) ----------------------------------------------------------
 	hasTime := false
 	var dims []string
 	seenDim := map[string]bool{}
@@ -139,7 +136,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
-	// --- grain -----------------------------------------------------------------
 	grain := q.Grain
 	if grain == "" {
 		grain = "day"
@@ -160,7 +156,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		add(fe)
 	}
 
-	// --- range -------------------------------------------------------------------
 	var from, to time.Time
 	if q.Range == nil || (q.Range.Last == "" && (q.Range.From == "" || q.Range.To == "")) {
 		add(FieldError{Code: "missing_range", Param: "range",
@@ -195,7 +190,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
-	// --- buckets (clamp) ------------------------------------------------------------
 	var buckets []time.Time
 	if hasTime && validGrain && !from.IsZero() && from.Before(to) {
 		buckets = bucketLabels(from, to, grain)
@@ -205,7 +199,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
-	// --- filters --------------------------------------------------------------------
 	filters := map[string][]string{}
 	filterDims := make([]string, 0, len(q.Filters))
 	for name := range q.Filters {
@@ -266,9 +259,8 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 			}
 		}
 		if name == "currency" {
-			// CUR-6: stored currency is canonical UPPER, so an API caller
-			// filtering on "usd" must still match. Normalising here rather
-			// than in SQL keeps the comparison index-friendly.
+			// Stored currency is upper case, so "usd" must still match;
+			// normalizing here keeps the SQL comparison index-friendly.
 			normalized := make([]string, 0, len(vals))
 			for _, v := range vals {
 				normalized = append(normalized, money.NormalizeCurrency(v))
@@ -278,7 +270,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		filters[name] = vals
 	}
 
-	// --- order ---------------------------------------------------------------------
 	for i, o := range q.Order {
 		if (o.Measure == "") == (o.Dimension == "") {
 			add(FieldError{Code: "invalid_order", Param: fmt.Sprintf("order[%d]", i),
@@ -299,7 +290,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
-	// --- limit ------------------------------------------------------------------------
 	limit := DefaultLimit
 	if q.Limit != nil {
 		limit = *q.Limit
@@ -309,7 +299,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		}
 	}
 
-	// --- compare ------------------------------------------------------------------------
 	compare := false
 	switch q.Compare {
 	case "":
@@ -325,7 +314,6 @@ func ValidateAt(q *Query, now time.Time) (*Plan, *ValidationError) {
 		add(fe)
 	}
 
-	// --- implicit currency ---------------------------------------------------------------
 	implicitCurrency := false
 	moneyPresent := false
 	for _, m := range measures {

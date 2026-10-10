@@ -2,12 +2,9 @@ package dashboard
 
 import "github.com/open-rails/openrails/internal/modules/metrics"
 
-// DefaultWidgets is the seeded template served when a merchant has no saved
-// row (#740 default layout): KPI row (mrr / net revenue / churn w/ compare) +
-// dunning stat, revenue by week by stream, payment health per rail account,
-// new subs by subscriber type — plus usage/credits widgets only when the
-// merchant actually has usage activity. Relative ranges keep it current.
-// The merchant edits from here; nothing is written until they save.
+// DefaultWidgets is the template served when a merchant has no saved layout;
+// usage widgets appear only when the merchant has usage. Nothing is written
+// until the merchant saves.
 func DefaultWidgets(hasUsage bool) []Widget {
 	last30 := &metrics.QueryRange{Last: "30d"}
 	widgets := []Widget{

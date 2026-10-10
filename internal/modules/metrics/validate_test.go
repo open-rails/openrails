@@ -133,7 +133,7 @@ func TestImplicitCurrencyGrouping(t *testing.T) {
 	}
 }
 
-// Ranges are inclusive UTC calendar days; relative ranges end today (#741 saved widgets stay current).
+// Ranges are inclusive UTC calendar days; relative ranges end today.
 func TestRangeResolution(t *testing.T) {
 	day := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
 

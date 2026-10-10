@@ -11,10 +11,9 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Denial capture (#733): denials are counted in Redis hourly hashes on the hot
-// path (one HINCRBY, fire-and-forget) and flushed to
-// billing.admission_denials_hourly by a periodic river job. The hot path
-// NEVER writes Postgres per-request.
+// Denials are counted in Redis hourly hashes on the hot path (one HINCRBY) and
+// flushed to admission_denials_hourly by a river job; the hot path never writes
+// Postgres per request.
 
 // DenialKeyPrefix namespaces the hourly denial hashes:
 // or:mdeny:<merchant-uuid>:<unix-hour> -> { "<customer-uuid>|<reason>": count }.
