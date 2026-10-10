@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-// A write refused with 403 step_up_required opens AuthKit's step-up dialog
-// (auth-ui) and runs again on the fresh session; cancelling keeps the refusal.
-// The real api client, auth-ui client and dialog run against a stubbed server.
+// A write refused with 401 step_up_required (RFC 9470) opens AuthKit's
+// step-up dialog (auth-ui) and runs again on the fresh session; cancelling
+// keeps the refusal. The real api client, auth-ui client and dialog run
+// against a stubbed server.
 import { afterEach, beforeEach, expect, it } from "vitest"
 
 import { api, ApiError } from "@/lib/api/client"
@@ -14,13 +15,19 @@ const stepUpRequired = () =>
   Response.json(
     {
       error: {
-        type: "invalid_request_error",
+        type: "authentication_error",
         code: "step_up_required",
         message: "step_up_required",
         metadata: { step_up_methods: ["password"], max_age_seconds: 900 },
       },
     },
-    { status: 403 }
+    {
+      status: 401,
+      headers: {
+        "WWW-Authenticate":
+          'Bearer error="insufficient_user_authentication", max_age="900"',
+      },
+    }
   )
 
 let grants: Recorded[]
@@ -123,7 +130,7 @@ it("leaves OpenRails' refusal when the user cancels", async () => {
   const refused = await write
   expect(refused).toBeInstanceOf(ApiError)
   expect((refused as ApiError).stepUpRequired).toBe(true)
-  expect(grants).toHaveLength(1)
+  expect(session.getAccessToken(), "a step-up is no sign-out").not.toBeNull()
   expect(stepUps).toHaveLength(0)
 })
 

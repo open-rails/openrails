@@ -152,7 +152,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	at := func(base string) router.Router { return recorder{base: base, seen: seen} }
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	providers := routesurface.AllProviderRoutes()
-	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Permissions: staffPermissions, Capabilities: &billing.Capabilities{}, External: External{
+	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Scope: testScope, Permissions: staffPermissions, Capabilities: &billing.Capabilities{}, External: External{
 		Live: raw, Ready: raw, CaptchaStatus: raw, CaptchaScript: raw,
 	}}
 	customers := CustomerMount{Auth: authtest.Deny{}, Providers: providers}
@@ -213,7 +213,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 
 	reads, staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}
 	mount := func(seen map[string]int, perms Permissions) {
-		RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Permissions: perms})
+		RegisterStaffRoutes(recorder{base: "/v1", seen: seen}, &app.Runtime{Config: &config.Config{}}, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: perms})
 	}
 	metrics := map[string]int{}
 	mount(reads, Permissions{AdminRead: "r"})

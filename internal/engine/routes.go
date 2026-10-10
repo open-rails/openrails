@@ -95,7 +95,8 @@ func logMount(sel config.Routes, perms httproutes.Permissions, routes int) {
 	fields := log.Fields{"prefix": sel.Prefix + "/v1", "routes": routes, "auth": fmt.Sprintf("%T", sel.Auth), "programmatic": sel.RouteGroups.Programmatic}
 	if perms != (httproutes.Permissions{}) {
 		fields["customer_read"], fields["customer_update"], fields["catalog"], fields["merchant_config"], fields["metrics"] = perms.AdminRead, perms.AdminUpdate, perms.Catalog, perms.MerchantConfig, perms.Metrics
-		log.WithFields(fields).Warn("openrails: staff routes mounted; Auth.RequirePermission gates each route with its group's permission")
+		fields["scope_authority"], fields["scope_id"] = sel.Scope.Authority, sel.Scope.ID
+		log.WithFields(fields).Warn("openrails: staff routes mounted; each asks the caller's Can for its group's permission in Routes.Scope")
 		return
 	}
 	log.WithFields(fields).Info("openrails: routes mounted")

@@ -51,7 +51,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	user := authtest.NewUser(t, as.Client)
 	customer := authtest.SignIn(t, as.Client, user).AccessToken
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client, Prefix: "/billing"}))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
 	stripe.SendWebhooksTo(srv.URL+"/billing/v1/webhooks/stripe/acct_test", "whsec_test")

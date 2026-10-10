@@ -299,19 +299,29 @@ price never silently reprices existing subscriptions. For dynamic products with 
 
 ### 6. Authentication and HTTP
 
-OpenRails has no logins of its own. You supply your auth only when you mount
-routes, as `Routes.Auth`: net/http middleware in AuthKit's own shape.
+OpenRails has no logins of its own, and you write no middleware for it. You
+supply your auth only when you mount routes, as `Routes.Auth`: an
+`openrails.Authenticator` (helpers/auth's), which only says who a request is.
+OpenRails asks it once per request and builds every gate from its answer, a
+`Verified`:
 
-| Method | OpenRails stacks it on |
+| Call | OpenRails asks it |
 |---|---|
-| `Required()` | every customer route, every programmatic route and the access read: a signed-in request |
-| `RequirePermission(permission)` | every staff route, with your permission for the route's group (`Routes.Permissions`), checked live on the mounted merchant; it authenticates the request itself |
-| `Sensitive()` | after `RequirePermission`, when a user in person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An API key or application has no sign-in to renew |
-| `Identity(ctx)` | read after them: who was admitted |
+| `Authenticate(r)` | on every customer, staff and programmatic route and the access read, once; on a checkout session only when a credential is presented, never to refuse |
+| `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
+| `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff route, with your permission for the route's group (`Routes.Permissions`) in `Routes.Scope`, checked live; without it the request holds nothing |
+| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | then, when a person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An application has no sign-in to renew; a person whose credential has none (a personal API key) is refused 403 `step_up_unavailable` |
 
-Refusals are your middleware's own responses. After them OpenRails reads
-`Identity` and refuses a request it finds none on, so a middleware that checks
-nothing admits no one. Each handler checks the identity again before it runs.
+OpenRails answers every refusal itself, with the status and challenge
+`auth.Refuse` gives every consumer: 401 with `WWW-Authenticate` for a missing,
+invalid, expired or revoked credential (your `auth.Challenge` headers win), 403
+for a permission not held, 503 `authentication_unavailable` or
+`authorization_unavailable` when your auth cannot answer, and RFC 9470's step-up
+for a stale sign-in: 401 `step_up_required` with `WWW-Authenticate: Bearer
+error="insufficient_user_authentication", max_age=...` and your challenge's
+metadata. An identity without a subject or invoker is refused, so an
+Authenticator that checks nothing admits no one. Each handler checks the
+verdict again before it runs.
 
 `Identity` returns an `openrails.Identity` in three parts:
 
@@ -339,16 +349,22 @@ metrics `Metrics`. The groups are independent; one turned on without its
 permission, or a permission given for a group that is off, fails the mount.
 The programmatic routes your backend calls over HTTP (`/v1/app/*`,
 `RouteGroups.Programmatic`) need no permission: they admit the application
-your `Auth` vouches for, by its `Identity.SubjectKind`, and refuse a person.
-`Auth` is helpers/auth's, and AuthKit's `*authkit.Client` implements it: a
-`root:` permission is checked on your root group with no configuration. A host
-with its own sessions implements the four methods directly; its `Identity`
-must name a person `SubjectUser` and an application's credential
-`SubjectApplication`, since the programmatic routes admit by that alone.
-`openrailstest.CheckAuth` checks an implementation in your CI: it fires
-anonymous, refused, customer, other merchant, stale sign-in and machine
-requests at each permission, and one permission's holder at the others, checks
-each one's subject kind, and fails on any acceptance or mix-up.
+your `Auth` says a request is, by its `Identity.SubjectKind`, and refuse a
+person. `Routes.Scope` is where callers hold the staff permissions: AuthKit's
+`ak.Scope(ctx, iam.RootGroup())` for root roles, with `Auth:
+ak.Authenticator()`. It is required with any staff group on and refused
+without one; a permission your Authenticator says it does not know
+(`auth.PermissionCatalog`) fails the mount. A host with its own sessions
+implements `Authenticate` and its `Verified` directly (the README's
+"Using your own auth"); its `Identity` must name a person `SubjectUser` and an
+application's credential `SubjectApplication`, since the programmatic routes
+admit by that alone. `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
+checks an implementation in your CI with helpers' conformance kit
+(`github.com/open-rails/helpers/auth/authtest`): anonymous, refused, staff, a
+user holding nothing, one-permission holders, a stale sign-in and your
+application, each permission in exactly `Routes.Scope`, and staff signed out
+last; it fails on any acceptance or mix-up, and on a person whose subject is
+not a canonical UUID.
 
 An `openrails.Routes` selects the routes `client.Routes` returns; mount them
 on your root router with the adapter for it. Validation happens here: a mount
@@ -356,7 +372,7 @@ without `Auth` fails before anything is registered, so nothing is ever served
 open.
 
 ```go
-routes := openrails.Routes{Auth: auth, Prefix: "/billing"}
+routes := openrails.Routes{Auth: ak.Authenticator(), Prefix: "/billing"}
 // net/http or Chi: github.com/open-rails/openrails/adapters/http
 if err := openrailshttp.Mount(mux, client, routes); err != nil { return err }
 // Gin: github.com/open-rails/openrails/adapters/gin

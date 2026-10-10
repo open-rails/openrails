@@ -36,7 +36,8 @@ On is one switch, where the HTTP surface is chosen:
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
-    Auth:         ak,
+    Auth:         ak.Authenticator(),
+    Scope:        staff,      // ak.Scope(ctx, iam.RootGroup()): where staff hold the permissions
     Prefix:       "/billing", // the API at /billing/v1/*, the console at /billing/admin
     RouteGroups:  openrails.RouteGroups{Admin: true},
     Permissions:  openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
@@ -248,8 +249,9 @@ Standalone SaaS deployments that do serve it in production should front it with
 their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
 covers the auth endpoints).
 
-Who may sign in is decided by the admin API, not the console: embedded, the
-mount's `Auth.RequirePermission` checks each route's permission (`Routes.Permissions`).
+Who may sign in is decided by the admin API, not the console: embedded, each
+route asks the mount's `Auth` for its permission (`Routes.Permissions`) in
+`Routes.Scope`.
 
 ### Viewing it
 
@@ -264,7 +266,8 @@ recovery and backup codes. auth-ui keeps the access token in memory and the
 rotating refresh token in the tab's `sessionStorage`, which restores the session
 across reloads of that tab; every API call carries the bearer, never a cookie.
 Every write runs through auth-ui's step-up dialog: when OpenRails answers
-`403 step_up_required` (an owner operation after a stale sign-in), the dialog
+`401 step_up_required` (RFC 9470's `insufficient_user_authentication`, an owner
+operation after a stale sign-in), the console stays signed in and the dialog
 asks the user to confirm it's them and the write is retried. Who can sign in
 and what they may do: standalone, the server's merchant roles
 (`owner`/`support`/`viewer`) or a trusted issuer's token; embedded, the host's

@@ -1,5 +1,5 @@
-// Package authtest is an Auth for tests: bearer tokens it issues name an
-// identity and the merchant permissions its subject holds.
+// Package authtest is an Authenticator for tests: bearer tokens it issues
+// name an identity and the permissions its subject holds in Scope.
 package authtest
 
 import (
@@ -9,31 +9,32 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/open-rails/openrails/billing"
+	auth "github.com/open-rails/helpers/auth"
+
 	"github.com/open-rails/openrails/internal/billingauth"
 )
+
+// Scope is where Fake's subjects hold their permissions.
+var Scope = billingauth.Scope{Authority: "test", ID: "staff"}
 
 // Grant is what one token carries.
 type Grant struct {
 	Identity    billingauth.Identity
 	Permissions []string
-	// Stale fails Sensitive: the sign-in is too old to move money.
+	// Stale fails CheckRecentSignIn: the sign-in is too old to move money.
 	Stale bool
 }
 
-// Fake is an Auth over the tokens it issued. The zero value refuses
+// Fake is an Authenticator over the tokens it issued. The zero value refuses
 // everyone.
 type Fake struct {
 	mu     sync.Mutex
 	grants map[string]Grant
-	// calls and refusals count each middleware's decisions, by name.
-	calls, refusals map[string]int
 }
 
-var _ billingauth.Auth = (*Fake)(nil)
-
-type grantKey struct{}
+var _ billingauth.Authenticator = (*Fake)(nil)
 
 // Issue returns a token for g.
 func (f *Fake) Issue(g Grant) string {
@@ -45,6 +46,13 @@ func (f *Fake) Issue(g Grant) string {
 	token := "test_" + rand.Text()
 	f.grants[token] = g
 	return token
+}
+
+// Revoke ends token, as signing out does.
+func (f *Fake) Revoke(token string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.grants, token)
 }
 
 // User is a user acting itself in a session, issued by "test".
@@ -67,142 +75,61 @@ func (f *Fake) Machine(id string, perms ...string) string {
 	return f.Issue(Grant{Identity: Application(id), Permissions: perms})
 }
 
-// Admitted counts the requests a middleware admitted.
-func (f *Fake) Admitted(name string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls[name]
-}
-
-func (f *Fake) admit(name string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.calls == nil {
-		f.calls = map[string]int{}
-	}
-	f.calls[name]++
-}
-
-func refuse(w http.ResponseWriter, r *http.Request, code string) {
-	billingauth.WriteRefusal(w, r, billingauth.Refusal(code))
-}
-
-// Refused counts the requests a middleware refused.
-func (f *Fake) Refused(name string) int {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.refusals[name]
-}
-
-func (f *Fake) refuse(w http.ResponseWriter, r *http.Request, name, code string) {
-	f.mu.Lock()
-	if f.refusals == nil {
-		f.refusals = map[string]int{}
-	}
-	f.refusals[name]++
-	f.mu.Unlock()
-	refuse(w, r, code)
-}
-
-// grant is the request's grant: the one an earlier gate admitted, else its
-// bearer token's.
-func (f *Fake) grant(r *http.Request) (Grant, bool) {
-	if g, ok := r.Context().Value(grantKey{}).(Grant); ok {
-		return g, true
-	}
+// Authenticate admits a token Fake issued.
+func (f *Fake) Authenticate(r *http.Request) (billingauth.Verified, error) {
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok {
-		return Grant{}, false
+		return nil, auth.ErrUnauthenticated
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	g, issued := f.grants[strings.TrimSpace(token)]
-	return g, issued
-}
-
-// Required admits a token Fake issued.
-func (f *Fake) Required() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			g, ok := f.grant(r)
-			if !ok {
-				f.refuse(w, r, "Required", billing.CodeAuthenticationRequired)
-				return
-			}
-			f.admit("Required")
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), grantKey{}, g)))
-		})
+	if !issued {
+		return nil, auth.ErrUnauthenticated
 	}
+	return Verified{Grant: g}, nil
 }
 
-// RequirePermission admits a token Fake issued whose subject holds exactly
-// perm.
-func (f *Fake) RequirePermission(perm string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			g, ok := f.grant(r)
-			if !ok {
-				f.refuse(w, r, "RequirePermission", billing.CodeAuthenticationRequired)
-				return
-			}
-			if !slices.Contains(g.Permissions, perm) {
-				f.refuse(w, r, "RequirePermission", billing.CodePermissionRequired)
-				return
-			}
-			f.admit("RequirePermission")
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), grantKey{}, g)))
-		})
+// Verified is a Grant as a request's Verified: it holds its permissions in
+// Scope, and a person signed in recently unless Stale.
+type Verified struct{ Grant Grant }
+
+func (v Verified) Identity() billingauth.Identity { return v.Grant.Identity }
+
+func (v Verified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
+	return scope == Scope && permission != "" && slices.Contains(v.Grant.Permissions, permission), nil
+}
+
+// CheckRecentSignIn: an application, or a person's key, has no sign-in of
+// its own.
+func (v Verified) CheckRecentSignIn(context.Context) error {
+	id := v.Grant.Identity
+	switch {
+	case id.SubjectKind != billingauth.SubjectUser, id.Credential.Kind == billingauth.CredentialAPIKey, id.Credential.Kind == billingauth.CredentialSignedToken:
+		return auth.ErrForbidden
+	case v.Grant.Stale:
+		return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute}
 	}
+	return nil
 }
 
-// Sensitive admits a request whose grant is not Stale.
-func (f *Fake) Sensitive() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			g, ok := r.Context().Value(grantKey{}).(Grant)
-			if !ok || g.Stale {
-				f.refuse(w, r, "Sensitive", billing.CodeStepUpRequired)
-				return
-			}
-			f.admit("Sensitive")
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// Identity is who a gate admitted.
-func (f *Fake) Identity(ctx context.Context) (billingauth.Identity, bool) {
-	g, ok := ctx.Value(grantKey{}).(Grant)
-	return g.Identity, ok
-}
-
-// PassThrough is a broken Auth whose middleware checks nothing and admits
-// no identity: OpenRails must refuse every gated route behind it.
+// PassThrough is a broken Authenticator: it admits every request without
+// saying who it is. OpenRails must refuse every gated route behind it.
 type PassThrough struct{}
 
-var _ billingauth.Auth = PassThrough{}
+var _ billingauth.Authenticator = PassThrough{}
 
-func pass(next http.Handler) http.Handler { return next }
+func (PassThrough) Authenticate(*http.Request) (billingauth.Verified, error) { return nobody{}, nil }
 
-func (PassThrough) Required() func(http.Handler) http.Handler                { return pass }
-func (PassThrough) RequirePermission(string) func(http.Handler) http.Handler { return pass }
-func (PassThrough) Sensitive() func(http.Handler) http.Handler               { return pass }
-func (PassThrough) Identity(context.Context) (billingauth.Identity, bool) {
-	return billingauth.Identity{}, false
-}
+type nobody struct{}
+
+func (nobody) Identity() billingauth.Identity { return billingauth.Identity{} }
 
 // Deny refuses every request.
 type Deny struct{}
 
-var _ billingauth.Auth = Deny{}
+var _ billingauth.Authenticator = Deny{}
 
-func deny(http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { refuse(w, r, billing.CodeAuthenticationRequired) })
-}
-
-func (Deny) Required() func(http.Handler) http.Handler                { return deny }
-func (Deny) RequirePermission(string) func(http.Handler) http.Handler { return deny }
-func (Deny) Sensitive() func(http.Handler) http.Handler               { return deny }
-func (Deny) Identity(context.Context) (billingauth.Identity, bool) {
-	return billingauth.Identity{}, false
+func (Deny) Authenticate(*http.Request) (billingauth.Verified, error) {
+	return nil, auth.ErrUnauthenticated
 }

@@ -84,9 +84,11 @@ the credential. On the standalone server the permissions are its merchant
 persona's `server.MerchantRead`, `server.MerchantWrite`,
 `server.MerchantAdmin` and `server.MerchantMetrics`: an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
-role in the merchant's group. A user in person also needs a recent sign-in on
-a `sensitive` route: otherwise `403 step_up_required`, with the step-up methods
-in `metadata`; an application never steps up. A `/v1/app` route refuses a person
+role in the merchant's group. A person also needs a recent sign-in on a
+`sensitive` route: otherwise `401 step_up_required` (RFC 9470: `WWW-Authenticate:
+Bearer error="insufficient_user_authentication", max_age="900"`), with the
+step-up methods in `metadata`, or `403 step_up_unavailable` for a credential
+with no sign-in of its own; an application never steps up. A `/v1/app` route refuses a person
 (`403 application_required`), and answers a retried write's `Idempotency-Key`
 with the first response; the key sent with another request is
 `422 idempotency_key_reused`.

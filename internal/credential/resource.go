@@ -5,6 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"time"
+
+	auth "github.com/open-rails/helpers/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -39,6 +42,29 @@ type ResolvedResourceAccess struct {
 	Email         string
 	EmailVerified bool
 	Username      string
+	// AuthTime is when the token's user signed in at the issuer; zero when
+	// the token does not say.
+	AuthTime time.Time
+}
+
+// FederatedSignInWindow is how recent a trusted issuer's sign-in must be
+// for an operation that moves money or grants access: AuthKit's own window.
+const FederatedSignInWindow = 15 * time.Minute
+
+// CheckRecentSignIn is nil when the token's user signed in at the issuer
+// within FederatedSignInWindow of now; otherwise a step-up whose metadata
+// asks the client to re-authorize with max_age=0. A client acting for itself
+// has no sign-in of its own (auth.ErrForbidden).
+func (r *ResolvedResourceAccess) CheckRecentSignIn(now time.Time) error {
+	switch {
+	case r == nil:
+		return auth.ErrUnauthenticated
+	case r.Machine:
+		return auth.ErrForbidden
+	case !r.AuthTime.IsZero() && !r.AuthTime.After(now) && now.Sub(r.AuthTime) <= FederatedSignInWindow:
+		return nil
+	}
+	return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: FederatedSignInWindow, Metadata: map[string]any{"issuer": r.Issuer, "max_age": 0}}
 }
 
 // HasPermission reports whether the access token grants perm.

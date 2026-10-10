@@ -194,6 +194,7 @@ var errorCodes = []ErrorCode{
 	{CodeAccessTokenInvalid, 401, authn, "The access token is invalid, expired or not issued for this deployment."},
 	{CodeAccessTokenIssuerUnknown, 401, authn, "The access token's issuer is not trusted by this deployment."},
 	{CodeDPoPNonceRequired, 401, authn, "The DPoP proof must carry the server nonce; retry with the DPoP-Nonce header's value."},
+	{CodeStepUpRequired, 401, authn, "The operation needs a recent sign-in (RFC 9470: WWW-Authenticate insufficient_user_authentication with max_age); metadata carries the provider's challenge."},
 
 	// Authorization.
 	{CodePermissionRequired, 403, authz, "The credential lacks the permission the route requires."},
@@ -207,7 +208,6 @@ var errorCodes = []ErrorCode{
 	{CodeInsufficientScope, 403, authz, "The access token was not granted the scope this surface requires."},
 	{CodeInvokerScopedPrincipal, 403, authz, "An invoker-scoped credential spends a customer's balance but may not manage the account."},
 	{CodeApplicationRequired, 403, authz, "The route is your backend's: it takes an application's credential, never a person's."},
-	{CodeStepUpRequired, 403, authz, "The operation needs a recent sign-in; metadata carries the challenge."},
 	{CodeStepUpUnavailable, 403, authz, "The operation needs a recent sign-in and this credential cannot prove one."},
 	{CodeAuthorizationUnavailable, 503, fault, "Permissions could not be checked right now; retry."},
 	{"customer_action_required", 403, authz, "Only the customer may take this action, through their own step."},

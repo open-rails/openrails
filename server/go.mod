@@ -20,8 +20,8 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.0
 	github.com/knadh/koanf/providers/rawbytes v1.0.0
 	github.com/knadh/koanf/v2 v2.2.2
-	github.com/open-rails/authkit v1.14.0
-	github.com/open-rails/helpers v1.5.0
+	github.com/open-rails/authkit v1.16.0
+	github.com/open-rails/helpers v1.6.0
 	github.com/redis/go-redis/v9 v9.22.0
 	github.com/riverqueue/river v0.47.0
 	github.com/sirupsen/logrus v1.9.4

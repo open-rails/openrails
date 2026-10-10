@@ -31,19 +31,6 @@ func (l *featureLimitLLM) CompleteTools(context.Context, string, []dashboard.Too
 	return &dashboard.ToolTurn{Text: "No further lookups needed."}, nil
 }
 
-// hostKey admits every request as the host backend's API key.
-type hostKey struct{}
-
-func pass(next http.Handler) http.Handler { return next }
-
-func (hostKey) Required() func(http.Handler) http.Handler                { return pass }
-func (hostKey) RequirePermission(string) func(http.Handler) http.Handler { return pass }
-func (hostKey) Sensitive() func(http.Handler) http.Handler               { return pass }
-func (hostKey) Identity(context.Context) (openrails.Identity, bool) {
-	return openrails.Identity{Issuer: "test", Subject: "test-host", SubjectKind: openrails.SubjectApplication,
-		Invoker: openrails.Invoker{Issuer: "test", ID: "test-host"}, Credential: openrails.Credential{Kind: openrails.CredentialAPIKey, ID: "k_test"}}, true
-}
-
 // Real feature handlers accept two requests in total across host mounts,
 // then refuse before calling the model. The merchant directory, catalog and
 // request scopes use PostgreSQL; only authentication and the LLM are supplied
@@ -68,7 +55,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	graph.Runtime.CopilotService.SetLLM(catalogLLM)
 	mount := func(prefix string) http.Handler {
 		t.Helper()
-		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, RouteGroups: staffGroups, Permissions: staffPermissions})
+		routes, err := client.Routes(openrails.Routes{Auth: hostKey{}, Scope: staffScope, RouteGroups: staffGroups, Permissions: staffPermissions})
 		require.NoError(t, err)
 		mux := http.NewServeMux()
 		for _, route := range routes {

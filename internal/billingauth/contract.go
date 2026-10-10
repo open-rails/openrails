@@ -8,17 +8,22 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// Auth is the host's auth (helpers/auth's Auth; AuthKit's *authkit.Client
-// implements it). The route gate stacks Required on a customer route,
-// RequirePermission on a merchant route, plus Sensitive where the operation
-// moves money or removes access and a user acts in person. OpenRails then
-// refuses a request with no Identity.
-type Auth = auth.Auth
+// Authenticator is the host's auth (helpers/auth): it says who a request is.
+// OpenRails builds every gate from the Verified it returns, asking its Can
+// for a permission in a Scope and its CheckRecentSignIn for a person's recent
+// sign-in, and answers every refusal itself.
+type Authenticator = auth.Authenticator
 
-// Identity is who Auth admitted (helpers/auth): Subject, the native account
-// whose authority and money are used; Invoker, who actually acts (the
-// subject itself, or a party acting on its behalf); Credential, how it was
-// proven. Balances and authority are the subject's, limits key on the
+// Verified is one request's verified credential (helpers/auth).
+type Verified = auth.Verified
+
+// Scope is where a permission is held (helpers/auth): a group of an issuer.
+type Scope = auth.Scope
+
+// Identity is who the Authenticator says a request is (helpers/auth):
+// Subject, the native account whose authority and money are used; Invoker,
+// who actually acts (the subject itself, or a party acting on its behalf);
+// Credential, how it was proven. Balances and authority are the subject's, limits key on the
 // invoker, and audit records all three.
 type Identity = auth.Identity
 
@@ -86,7 +91,13 @@ func CredentialName(who Identity) string {
 // host's own Go client.
 const HostIssuer = "openrails:host"
 
-// Errors the internal Auth implementations classify with errors.Is.
+// HostScope is where the in-process host holds every permission: its own
+// merchant.
+func HostScope(mid billing.MerchantID) Scope {
+	return Scope{Authority: HostIssuer, ID: mid.String()}
+}
+
+// Errors the internal Authenticators classify with errors.Is.
 var (
 	ErrUnauthenticated = auth.ErrUnauthenticated
 	ErrForbidden       = auth.ErrForbidden
@@ -105,9 +116,51 @@ type Staff struct {
 type identityKey struct{}
 type staffKey struct{}
 type merchantKey struct{}
+type verifiedKey struct{}
 
-// BindMerchant records the merchant the route gate pinned a request to; the
-// host's Auth runs after it. Only the route gate calls it.
+// BindVerified records the request's Verified: the route gate's later steps
+// and the handlers that offer other routes' actions ask its Can, and nothing
+// verifies the request again or keeps it past the request. Only the route
+// gate calls it.
+func BindVerified(ctx context.Context, v Verified) context.Context {
+	return context.WithValue(ctx, verifiedKey{}, v)
+}
+
+// VerifiedFrom is the request's Verified the route gate bound.
+func VerifiedFrom(ctx context.Context) (Verified, bool) {
+	if ctx == nil {
+		return nil, false
+	}
+	v, ok := ctx.Value(verifiedKey{}).(Verified)
+	return v, ok && v != nil
+}
+
+// MerchantBinding is embedded by OpenRails' own Verified types whose
+// credential names the merchant it acts on: a merchant API key, a trusted
+// issuer's access token, the in-process host. Its method is unexported, so no
+// host's Verified can claim a merchant.
+type MerchantBinding struct{ target Target }
+
+// BindsMerchant is a MerchantBinding naming target.
+func BindsMerchant(target Target) MerchantBinding { return MerchantBinding{target: target} }
+
+func (b MerchantBinding) boundMerchant() Target { return b.target }
+
+type merchantBound interface{ boundMerchant() Target }
+
+// NamedMerchant is the merchant v's credential names, when it is one of
+// OpenRails' own that names one.
+func NamedMerchant(v Verified) (Target, bool) {
+	b, ok := v.(merchantBound)
+	if !ok {
+		return Target{}, false
+	}
+	t := b.boundMerchant()
+	return t, !t.MerchantID.IsZero()
+}
+
+// BindMerchant records the merchant the route gate pinned a request to.
+// Only the route gate calls it.
 func BindMerchant(ctx context.Context, id billing.MerchantID) context.Context {
 	return context.WithValue(ctx, merchantKey{}, id)
 }

@@ -9,36 +9,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
 )
-
-// deny admits everyone and refuses every permission but the allowed ones,
-// recording each one asked.
-type deny struct {
-	recordingAuth
-	allowed map[string]bool
-	asked   []string
-}
-
-func (g *deny) RequirePermission(perm string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			g.asked = append(g.asked, perm)
-			if !g.allowed[perm] {
-				billingauth.WriteRefusal(w, r, billingauth.Refusal(billing.CodePermissionRequired))
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
 
 var wildcard = regexp.MustCompile(`\{[^}]+\}`)
 
@@ -77,9 +54,9 @@ func merchantSurface(rt *app.Runtime, opts Options) *router.Table {
 // the group its blast radius sets: a read, a write on customers, or the
 // merchant's own configuration.
 func TestMerchantRouteAuthorization(t *testing.T) {
-	gate := &deny{recordingAuth: recordingAuth{who: authtest.User(userA)}}
+	gate := &recordingAuth{who: authtest.User(userA), allowed: map[string]bool{}}
 	rt := gatedRuntime(t)
-	table := merchantSurface(rt, Options{Auth: gate, Permissions: staffPermissions})
+	table := merchantSurface(rt, Options{Auth: gate, Scope: testScope, Permissions: staffPermissions})
 	h := table.Handler()
 	asked := map[string]string{}
 	for _, key := range routeKeys(table) {
@@ -87,11 +64,16 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 			continue
 		}
 		method, path, _ := strings.Cut(key, " ")
-		gate.asked = nil
 		rec := do(h, method, wildcard.ReplaceAllString(path, "x"), nil)
 		require.Equal(t, http.StatusForbidden, rec.Code, key)
-		require.Len(t, gate.asked, 1, "%s reached its handler without authorization, or asked twice", key)
-		asked[key] = gate.asked[0]
+		var perms []string
+		for _, call := range gate.take() {
+			if perm, ok := strings.CutPrefix(call, "Can:"); ok {
+				perms = append(perms, perm)
+			}
+		}
+		require.Len(t, perms, 1, "%s reached its handler without authorization, or asked twice", key)
+		asked[key] = perms[0]
 	}
 
 	read, write, catalog, admin, metrics := staffPermissions.AdminRead, staffPermissions.AdminUpdate, staffPermissions.Catalog, staffPermissions.MerchantConfig, staffPermissions.Metrics
@@ -169,7 +151,7 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 		for _, writable := range []bool{false, true} {
 			rt := &app.Runtime{Config: &config.Config{SecretBackend: backend}, RouteCapabilities: &routesurface.RuntimeCapabilities{SecretWrite: writable}}
 			table := &router.Table{}
-			RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{MerchantConfig: "staff:admin"}})
+			RegisterStaffRoutes(router.NewMux(table, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{MerchantConfig: "staff:admin"}})
 			keys := routeKeys(table)
 			for _, key := range []string{
 				"GET /admin/configuration", "PATCH /admin/configuration",
@@ -187,8 +169,8 @@ func TestConfigurationRoutesMountedForEveryBackend(t *testing.T) {
 func TestCatalogWritePolicy(t *testing.T) {
 	rt := &app.Runtime{Config: &config.Config{}}
 	staff, edits := &router.Table{}, &router.Table{}
-	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
-	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{Catalog: "staff:catalog"}})
+	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Scope: testScope, Permissions: Permissions{Catalog: "staff:catalog"}})
 	for _, key := range []string{"POST /admin/credit-grants", "POST /admin/psps/refresh"} {
 		require.Contains(t, routeKeys(staff), key)
 	}
@@ -217,7 +199,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil, nil), Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(nil, nil), Scope: testScope, Permissions: Permissions{AdminRead: "staff:read", AdminUpdate: "staff:write"}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.

@@ -49,7 +49,7 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	as := authtest.NewAuthorizationServer(t, authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }))
 	customer := authtest.SignIn(t, as.Client, authtest.NewUser(t, as.Client)).AccessToken
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client, Prefix: "/billing"}))
+	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
 	do := func(method, path string, body any, want int) map[string]any {
 		t.Helper()
 		w := call(t, mux, customer, method, "/billing/v1/me"+path, "", body)

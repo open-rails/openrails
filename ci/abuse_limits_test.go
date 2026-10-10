@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/helpers/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -19,18 +20,24 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 )
 
-// staffMember admits every request as one member of the merchant's staff.
+// staffMember says every request is one member of the merchant's staff,
+// holding every permission in staffScope and signed in recently.
 type staffMember struct{}
 
 const staffMemberID = "7f6c1f0e-4a7b-4f5e-9a51-2a8f0c3b9d11"
 
-func (staffMember) Required() func(http.Handler) http.Handler                { return pass }
-func (staffMember) RequirePermission(string) func(http.Handler) http.Handler { return pass }
-func (staffMember) Sensitive() func(http.Handler) http.Handler               { return pass }
-func (staffMember) Identity(context.Context) (openrails.Identity, bool) {
+func (staffMember) Authenticate(*http.Request) (auth.Verified, error) { return staffMember{}, nil }
+
+func (staffMember) Identity() openrails.Identity {
 	return openrails.Identity{Issuer: "test", Subject: staffMemberID, SubjectKind: openrails.SubjectUser,
-		Invoker: openrails.Invoker{Issuer: "test", ID: staffMemberID}, Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: "s_staff"}}, true
+		Invoker: openrails.Invoker{Issuer: "test", ID: staffMemberID}, Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: "s_staff"}}
 }
+
+func (staffMember) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
+	return scope == staffScope && permission != "", nil
+}
+
+func (staffMember) CheckRecentSignIn(context.Context) error { return nil }
 
 // Three replicas without Redis count one set of abuse limits: the per-address
 // rate limit, an admin's lockout and a captcha challenge set on one replica
@@ -48,7 +55,7 @@ func TestReplicasShareAbuseLimitsWithoutRedis(t *testing.T) {
 		t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 		buyers, admins := http.NewServeMux(), http.NewServeMux()
 		require.NoError(t, openrailshttp.Mount(buyers, client, openrails.Routes{Auth: authtest.Deny{}}))
-		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: staffMember{}, RouteGroups: staffGroups, Permissions: staffPermissions}))
+		require.NoError(t, openrailshttp.Mount(admins, client, openrails.Routes{Auth: staffMember{}, Scope: staffScope, RouteGroups: staffGroups, Permissions: staffPermissions}))
 		public[i], staff[i] = buyers, admins
 	}
 	call := func(on []http.Handler, replica int, method, path, addr string) *httptest.ResponseRecorder {

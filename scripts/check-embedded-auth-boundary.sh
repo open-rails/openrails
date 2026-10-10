@@ -33,32 +33,38 @@ package main
 import (
  "context"
  "net/http"
+ "time"
+ "github.com/open-rails/helpers/auth"
  "github.com/open-rails/openrails"
  gin "github.com/open-rails/openrails/adapters/gin"
  fiber "github.com/open-rails/openrails/adapters/fiber"
 )
 var _ = gin.Mount
 var _ = fiber.Mount
+var staff = openrails.Scope{Authority: "https://identity.example", ID: "billing"}
 type ownAuth struct{}
-type userKey struct{}
+type session struct{ signedIn time.Time }
 type perm string
 func (p perm) String() string { return string(p) }
-func (ownAuth) gate(next http.Handler) http.Handler {
- return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-  if r.Header.Get("Authorization") == "" { http.Error(w, "sign in", http.StatusUnauthorized); return }
-  next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), userKey{}, "11111111-1111-4111-8111-111111111111")))
- })
+func (ownAuth) Authenticate(r *http.Request) (auth.Verified, error) {
+ if r.Header.Get("Authorization") == "" { return nil, auth.ErrUnauthenticated }
+ return session{signedIn: time.Now()}, nil
 }
-func (a ownAuth) Required() func(http.Handler) http.Handler { return a.gate }
-func (a ownAuth) RequirePermission(string) func(http.Handler) http.Handler { return a.gate }
-func (a ownAuth) Sensitive() func(http.Handler) http.Handler { return a.gate }
-func (ownAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
- id, ok := ctx.Value(userKey{}).(string)
+func (session) Identity() openrails.Identity {
+ id := "11111111-1111-4111-8111-111111111111"
  return openrails.Identity{Issuer: "https://identity.example", Subject: id, SubjectKind: openrails.SubjectUser,
-  Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}, ok
+  Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}
+}
+func (session) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
+ return scope == staff && permission == "billing:read", nil
+}
+func (s session) CheckRecentSignIn(context.Context) error {
+ if time.Since(s.signedIn) > 15*time.Minute { return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute} }
+ return nil
 }
 func main() {
- routes := openrails.Routes{Auth: ownAuth{}, Permissions: openrails.Permissions{AdminRead: perm("billing:read")}}
+ var a openrails.Authenticator = ownAuth{}
+ routes := openrails.Routes{Auth: a, Scope: staff, RouteGroups: openrails.RouteGroups{Admin: true}, Permissions: openrails.Permissions{AdminRead: perm("billing:read")}}
  cfg := openrails.Config{TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}
  if routes.Auth == nil || cfg.TestMode != openrails.Sandbox { panic("unreachable") }
 }

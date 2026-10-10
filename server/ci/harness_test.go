@@ -7,7 +7,6 @@ package ci_test
 
 import (
 	"context"
-	"net/http"
 	"os"
 	"strings"
 	"testing"
@@ -86,18 +85,8 @@ var adminPermissions = openrails.Permissions{AdminRead: staffPermissions.AdminRe
 // adminGroups turns on the admin group alone.
 var adminGroups = openrails.RouteGroups{Admin: true}
 
-// hostKey admits every request as the host backend's API key.
-type hostKey struct{}
-
-func pass(next http.Handler) http.Handler { return next }
-
-func (hostKey) Required() func(http.Handler) http.Handler                { return pass }
-func (hostKey) RequirePermission(string) func(http.Handler) http.Handler { return pass }
-func (hostKey) Sensitive() func(http.Handler) http.Handler               { return pass }
-func (hostKey) Identity(context.Context) (openrails.Identity, bool) {
-	return openrails.Identity{Issuer: "test", Subject: "test-host", SubjectKind: openrails.SubjectApplication,
-		Invoker: openrails.Invoker{Issuer: "test", ID: "test-host"}, Credential: openrails.Credential{Kind: openrails.CredentialAPIKey, ID: "k_test"}}, true
-}
+// staffScope is where a test host's staff hold its permissions.
+var staffScope = openrails.Scope{Authority: "test", ID: "staff"}
 
 // rescueClock is River's test clock pinned at one instant.
 type rescueClock struct{ at time.Time }

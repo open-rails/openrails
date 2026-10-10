@@ -4,6 +4,7 @@ package ci_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +23,7 @@ import (
 // registration without a sender, refuses to boot.
 func TestRegistrationModeReachesAuthKit(t *testing.T) {
 	f := newFixture(t)
-	for _, tc := range []struct {
+	for i, tc := range []struct {
 		mode     iam.RegistrationMode
 		register int
 	}{
@@ -68,6 +69,9 @@ func TestRegistrationModeReachesAuthKit(t *testing.T) {
 			require.NoError(t, err)
 			req := httptest.NewRequest(http.MethodPost, base+"/register", strings.NewReader(string(body)))
 			req.Header.Set("Content-Type", "application/json")
+			// The servers share one AuthKit schema, whose rate limits every
+			// instance counts together: each mode registers from its own address.
+			req.RemoteAddr = fmt.Sprintf("203.0.113.%d:4000", 20+i)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 			require.Equal(t, tc.register, rec.Code, rec.Body.String())

@@ -4,72 +4,63 @@ import (
 	"context"
 	"net/http"
 
+	auth "github.com/open-rails/helpers/auth"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 	"github.com/open-rails/openrails/internal/requestauth"
 )
 
-// HostAuth gates the merchant routes of the in-process transport: the
-// embedding host's own principal, a context value the transport attaches and
-// no network request can carry. It admits no customer.
+// HostAuth is the in-process transport's Authenticator: the embedding host's
+// own principal, a context value the transport attaches and no network
+// request can carry. It is an application holding every permission at its
+// own merchant, which its credential names. It admits no customer.
 type HostAuth struct{}
 
-var _ billingauth.Auth = HostAuth{}
+var _ billingauth.Authenticator = HostAuth{}
 
-func refuseWith(w http.ResponseWriter, r *http.Request, err error) {
-	billingauth.WriteRefusal(w, r, billingauth.AsRefusal(err))
-}
-
-// Required admits the in-process host principal and binds its merchant.
-func (HostAuth) Required() func(http.Handler) http.Handler { return admitHost }
-
-// RequirePermission admits the host, its merchant's owner, whatever the
-// permission, and binds that merchant.
-func (HostAuth) RequirePermission(string) func(http.Handler) http.Handler { return admitHost }
-
-func admitHost(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		hp, ok := requestauth.HostPrincipalFromContext(r.Context())
-		switch {
-		case !ok:
-			refuseWith(w, r, billingauth.ErrUnauthenticated)
-			return
-		case hp.MerchantID.IsZero():
-			refuseWith(w, r, billingauth.Refusal(billing.CodeHostPrincipalInvalid))
-			return
-		}
-		target, err := hostTarget(r, hp)
-		if err != nil {
-			refuseWith(w, r, err)
-			return
-		}
-		ctx := merchanttarget.WithResolved(r.Context(), target)
-		next.ServeHTTP(w, r.WithContext(merchant.WithID(ctx, target.MerchantID)))
-	})
-}
-
-// Sensitive admits the host: it is trusted for its own merchant.
-func (HostAuth) Sensitive() func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler { return next }
-}
-
-// Identity is the in-process host: an application acting itself.
-func (HostAuth) Identity(ctx context.Context) (billingauth.Identity, bool) {
-	hp, ok := requestauth.HostPrincipalFromContext(ctx)
-	if !ok || hp.MerchantID.IsZero() {
-		return billingauth.Identity{}, false
+// Authenticate admits the in-process host principal.
+func (HostAuth) Authenticate(r *http.Request) (billingauth.Verified, error) {
+	if r == nil {
+		return nil, billingauth.ErrUnauthenticated
+	}
+	hp, ok := requestauth.HostPrincipalFromContext(r.Context())
+	switch {
+	case !ok:
+		return nil, billingauth.ErrUnauthenticated
+	case hp.MerchantID.IsZero():
+		return nil, billingauth.Refusal(billing.CodeHostPrincipalInvalid)
+	}
+	target, err := hostTarget(r, hp)
+	if err != nil {
+		return nil, err
 	}
 	id := hp.Subject
 	if id == "" {
 		id = "host"
 	}
-	return billingauth.Identity{
+	return hostVerified{MerchantBinding: billingauth.BindsMerchant(target), id: billingauth.Identity{
 		Issuer: billingauth.HostIssuer, Subject: id, SubjectKind: billingauth.SubjectApplication,
 		Invoker: billingauth.Invoker{Issuer: billingauth.HostIssuer, ID: id}, Credential: billingauth.Credential{Kind: billingauth.CredentialAPIKey, ID: "in-process"},
-	}, true
+	}}, nil
 }
+
+type hostVerified struct {
+	billingauth.MerchantBinding
+	id billingauth.Identity
+}
+
+func (v hostVerified) Identity() billingauth.Identity { return v.id }
+
+// Can grants the host every permission at its own merchant.
+func (v hostVerified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {
+	target, ok := billingauth.NamedMerchant(v)
+	return ok && permission != "" && scope == billingauth.HostScope(target.MerchantID), nil
+}
+
+// CheckRecentSignIn: an application has no sign-in of its own.
+func (hostVerified) CheckRecentSignIn(context.Context) error { return auth.ErrForbidden }
 
 // hostTarget is the merchant an in-process request acts on: the host
 // principal's, which a resolved selector must agree with.
@@ -88,7 +79,14 @@ func hostTarget(r *http.Request, hp *requestauth.HostPrincipal) (billingauth.Tar
 }
 
 // HostOptions mounts every staff route for the in-process transport, whose
-// HostAuth admits the host whatever the permission.
+// host holds every permission at its own merchant.
 func HostOptions() Options {
-	return Options{Auth: HostAuth{}, AuthBindsMerchant: true, Permissions: Permissions{AdminRead: "host", AdminUpdate: "host", Catalog: "host", MerchantConfig: "host", Metrics: "host"}}
+	return Options{
+		Auth:            HostAuth{},
+		ResolveMerchant: CredentialOnly,
+		Scope: func(_ context.Context, mid billing.MerchantID) (billingauth.Scope, error) {
+			return billingauth.HostScope(mid), nil
+		},
+		Permissions: Permissions{AdminRead: "host", AdminUpdate: "host", Catalog: "host", MerchantConfig: "host", Metrics: "host"},
+	}
 }

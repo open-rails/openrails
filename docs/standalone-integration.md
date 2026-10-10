@@ -313,9 +313,12 @@ resource_server:
   redirect URI `<console URL>/callback` (authorization code and refresh, DPoP)
   and set `admin_console.issuer` to the issuer and its `client_id`. OpenRails'
   own sign-in is off unless you set `local_sign_in: true`.
-- A sensitive operation (one that moves money or grants access) needs the
-  token's `auth_time` within 15 minutes; otherwise `403 step_up_required`
-  (metadata `max_age: 0`) asks the client to re-authorize.
+- A sensitive operation (one that moves money or grants access) needs a
+  person's token's `auth_time` within 15 minutes; otherwise `401
+  step_up_required` (`WWW-Authenticate: Bearer
+  error="insufficient_user_authentication", max_age="900"`, metadata
+  `max_age: 0`) asks the client to re-authorize. A client acting for itself
+  has no sign-in to renew.
 - Staff your issuer grants nothing can hold a merchant role by email
   invitation (a federated grant), which joins the token's own permissions,
   within the ceiling. Grants are a hosted product's: it builds them on the
@@ -343,12 +346,14 @@ resource_server:
   `access_token_merchant_not_bound` (another merchant), `insufficient_scope`,
   `permission_required`.
 
-These tokens, merchant API keys and the server's own sessions answer the
-same `openrails.Auth` contract an embedded host implements, through the same
-route gate: a token's `sub` is the subject (a user), and its invoker; a client
-acting for itself and an API key are an application subject. Customer routes
-take the customer only from the subject. A trusted issuer's user token is vouched
-for by its issuer: the standalone server asks it for no recent sign-in.
+These tokens, merchant API keys and the server's own sessions are the server's
+own `openrails.Authenticator`, the contract an embedded host implements,
+through the same route gate: a token's `sub` is the subject (a user), and its
+invoker; a client acting for itself and an API key are an application subject.
+Customer routes take the customer only from the subject. A key or a token names
+its merchant and holds its grant there; a session acts on the merchant the
+request selects or its only one, holding its role there, checked live. Each
+merchant's scope is its permission group.
 
 ### Webhooks
 
@@ -413,9 +418,9 @@ upgraded and its routes mounted at the issuer's path; and the multi-merchant
 control plane (merchants and their names, teams, API keys, federated grants,
 trusted issuers, fleet analytics), which is Go methods only: no OpenRails route
 registers a merchant or manages a team. The engine's routes are
-gated by the server's own `openrails.Auth`: it accepts merchant API keys, the
-server's sessions and trusted issuers' access tokens, and resolves the merchant
-each acts for.
+gated by the server's own `openrails.Authenticator`: it accepts merchant API
+keys, the server's sessions and trusted issuers' access tokens, and resolves
+the merchant each acts for.
 
 | `server.Config` | Meaning |
 |---|---|

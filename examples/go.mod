@@ -4,9 +4,8 @@ go 1.26.9
 
 require (
 	github.com/gin-gonic/gin v1.12.0
-	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.14.0
+	github.com/open-rails/authkit v1.16.0
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
 )
@@ -42,6 +41,7 @@ require (
 	github.com/goccy/go-yaml v1.19.2 // indirect
 	github.com/golang-jwt/jwt/v5 v5.3.1 // indirect
 	github.com/google/go-tpm v0.9.8 // indirect
+	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/securecookie v1.1.2 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-cleanhttp v0.5.2 // indirect
@@ -79,7 +79,7 @@ require (
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
-	github.com/open-rails/helpers v1.5.0 // indirect
+	github.com/open-rails/helpers v1.6.0 // indirect
 	github.com/open-rails/migratekit v1.10.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect

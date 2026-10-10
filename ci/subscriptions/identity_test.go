@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -332,7 +333,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	require.Equal(t, "open", a.must(http.MethodGet, "/orders/"+aOrder, "", nil)["status"], "A's order is still A's to pay")
 }
 
-// The harness's own Auth passes the conformance kit a host runs in its CI.
+// The harness's own Authenticator passes the conformance kit a host runs in
+// its CI, with the mount's Scope and Permissions.
 func TestHarnessAuthConforms(t *testing.T) {
 	t.Parallel()
 	v := &verifier{secret: []byte("conformance-" + uuid.NewString())}
@@ -347,17 +349,20 @@ func TestHarnessAuthConforms(t *testing.T) {
 			return r
 		}
 	}
-	openrailstest.CheckAuth(t, v, openrailstest.AuthCases{
-		Permissions:  permissions,
-		Programmatic: true,
-		Customer:     req(v.token(t, customer)),
-		Staff:        req(v.token(t, "staff")),
-		Holders:      map[string]func() *http.Request{staffReads.String(): req(v.token(t, "reader"))},
+	person := func(role string, signedIn time.Time) string {
+		return v.issue(t, grant{subject: uuid.NewString(), role: role, sid: "s_" + role + uuid.NewString()[:8], signedIn: signedIn})
+	}
+	staff := grant{subject: uuid.NewString(), role: "staff", sid: "s_staff"}
+	openrailstest.CheckAuth(t, openrails.Routes{Auth: v, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}, helpersauthtest.Cases{
+		Staff:   req(v.issue(t, staff)),
+		User:    req(v.token(t, customer)),
+		Holders: map[string]func() *http.Request{staffReads.String(): req(person("reader", time.Time{}))},
+		Stale:   req(person("staff", time.Now().Add(-time.Hour))),
 		Refused: map[string]func() *http.Request{
 			"forged": req(v.token(t, customer) + "x"), "another issuer's": req(stranger.token(t, customer)), "signed out": req(signedOut),
 		},
-		StaleStaff: req(v.staleToken(t, "staff")),
-		Machine:    req(v.hostToken(t)),
+		Application: req(v.hostToken(t)),
+		Revoke:      func() { v.revoked.Store("s_staff", struct{}{}) },
 	})
 }
 

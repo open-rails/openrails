@@ -171,30 +171,8 @@ func (c *ControlPlane) ResolveResourceToken(r *http.Request) (*credential.Resolv
 		Email:         cl.Email,
 		EmailVerified: cl.EmailVerified,
 		Username:      cl.Username,
+		AuthTime:      cl.AuthTime,
 	}, nil
-}
-
-// federatedSignInWindow is how recent a trusted issuer's sign-in must be for
-// an operation that moves money or grants access: AuthKit's own window.
-const federatedSignInWindow = 15 * time.Minute
-
-// RequireRecentResourceSignIn refuses a sensitive operation unless r's token
-// says its user signed in at the issuer within federatedSignInWindow; the
-// client re-authorizes with max_age=0.
-func (c *ControlPlane) RequireRecentResourceSignIn(r *http.Request) error {
-	if c == nil || c.resource == nil || r == nil {
-		return billingauth.Refusal(billing.CodeStepUpUnavailable)
-	}
-	cl, _, err := c.verifyResourceToken(r, billing.ScopeMerchant)
-	if err != nil {
-		return credential.ResourceTokenRefusal(err)
-	}
-	if !cl.AuthTime.IsZero() && !cl.AuthTime.After(time.Now()) && time.Since(cl.AuthTime) <= federatedSignInWindow {
-		return nil
-	}
-	refusal := billingauth.Refusal(billing.CodeStepUpRequired)
-	refusal.Metadata = map[string]any{"issuer": strings.TrimSpace(cl.Issuer), "max_age": 0}
-	return refusal
 }
 
 // ResolveResourceUser verifies r's access token for a signed-in user's own

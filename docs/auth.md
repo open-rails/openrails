@@ -7,30 +7,45 @@ OpenRails-SaaS, not the engine.
 
 ## Who is calling: one contract
 
-OpenRails authenticates nobody itself. Every customer and merchant route asks
-an `openrails.Auth`, given at `Mount` as `Routes.Auth`: net/http middleware in
-AuthKit's shape. The embedded host supplies its own; the standalone server
-supplies its trusted issuers, API keys and control-plane sessions through the
-same contract, and the in-process Go client its own host authority.
+OpenRails authenticates nobody itself, and the host writes no middleware for
+it. Every gated route asks an `openrails.Authenticator`, given at `Mount` as
+`Routes.Auth`, who the request is (`Authenticate`, once per request), and
+builds its gate from the answer: its `Identity`, its `Can(scope, permission)`
+for a staff route's permission in `Routes.Scope`, and its
+`CheckRecentSignIn` for a person's recent sign-in. AuthKit provides one as
+`ak.Authenticator()`. The standalone server supplies its trusted issuers, API
+keys and control-plane sessions through the same contract, and the in-process
+Go client its own host authority.
 
-| Route tier | What runs | Who it admits |
+| Route tier | What OpenRails asks | Who it admits |
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
-| checkout session | the session id; `Required` only to show saved cards | the session's own customer sees and pays with its saved cards |
-| customer (`/v1/me`) | `Required` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
-| merchant (`/v1/admin`) | `RequirePermission(permission)` with the host's permission for the route's group (`Routes.Permissions`), then `Sensitive` when a user in person moves money, removes access or exports data | a person or an application holding that permission on the mounted merchant |
-| access (`GET /v1/admin/access`) | `Required` | any person or application; it answers what they hold |
-| application (`/v1/app`) | `Required` | an application (its `Identity.SubjectKind`), never a person; no permission |
+| checkout session | the session id; `Authenticate` only when a credential is presented, never to refuse | the session's own customer, a person in person, sees and pays with its saved cards |
+| customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
+| merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's group permission (`Routes.Permissions`) in the merchant's scope, then `CheckRecentSignIn` when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
+| access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
+| application (`/v1/app`) | `Authenticate` | an application (its `Identity.SubjectKind`), never a person; no permission |
 
-OpenRails binds the merchant a customer route serves before `Required` runs;
-the middleware reads it with `openrails.RequestMerchant` rather than resolving
-`OpenRails-Merchant` itself.
+OpenRails binds the merchant a customer route serves before it asks
+`Authenticate`; the host reads it with `openrails.RequestMerchant` rather than
+resolving `OpenRails-Merchant` itself.
 
-The middleware answers its own refusals. Afterwards OpenRails reads
-`Auth.Identity` and refuses a request it finds no identity or invoker on, so a
-middleware that checks nothing admits no one; each handler checks the
-identity again before it runs. A mount whose groups need `Auth` fails without
-one.
+OpenRails answers every refusal itself, the same for every host, with the
+status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`
+(`authentication_required`, `credential_expired`, `credential_revoked`,
+`sender_proof_required`, and the provider's own challenge headers), 403
+(`permission_required`, `application_required`, `invoker_scoped_principal`,
+`step_up_unavailable` for a person whose credential has no sign-in of its own),
+503 when the host's auth cannot answer (`authentication_unavailable`,
+`authorization_unavailable`, or a panic). A stale sign-in is RFC 9470's step-up:
+401 `step_up_required` with `WWW-Authenticate: Bearer
+error="insufficient_user_authentication", max_age="900"` and the provider's
+challenge as the error's metadata. A Verified without `Can` holds nothing; an
+identity without a subject or invoker is refused, so an Authenticator that
+checks nothing admits no one; each handler checks the verdict again before it
+runs. A mount whose groups need `Auth`, or a staff group without `Scope`,
+fails. `openrailstest.CheckAuth` checks an Authenticator against this contract
+in the host's CI.
 
 An identity has three parts:
 

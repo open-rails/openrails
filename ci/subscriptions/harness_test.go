@@ -6,13 +6,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
+	auth "github.com/open-rails/helpers/auth"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -30,7 +34,6 @@ import (
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
@@ -76,52 +79,66 @@ var permissions = openrails.Permissions{AdminRead: staffReads, AdminUpdate: staf
 // routeGroups turns on every route group the harness mounts.
 var routeGroups = openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 
-// verifier is a neutral host's Auth: HS256 tokens. "staff" is a user holding
-// every permission, "support" the staff reads and writes but not the
-// merchant's configuration, "reader" the reads, "host" the host's own backend
-// (an application with an API key) all of them; UUID subjects are native
-// customers. Like AuthKit, its checks are live: a session revoked after its
-// token was minted is refused as a revoked credential. A sign-in (auth_time)
-// older than 15 minutes needs a step-up for operations that move money.
+// verifier is a neutral host's Authenticator: HS256 tokens. Its "staff"
+// role holds every permission, "support" the staff reads and writes but not
+// the merchant's configuration, "reader" the reads, and "host" the host's
+// own backend (an application with an API key) all of them, in staffScope.
+// A token's role is its subject unless it names one; UUID subjects are
+// native customers. Like AuthKit, its checks are live: a session revoked
+// after its token was minted is refused as a revoked credential. A sign-in
+// (auth_time) older than 15 minutes needs a step-up for operations that move
+// money; a key has no sign-in of its own.
 type verifier struct {
 	secret  []byte
 	revoked sync.Map // session id -> struct{}
+	// down is the host's session store failing: no request can be verified.
+	down atomic.Bool
 }
 
-var _ openrails.Auth = (*verifier)(nil)
+var _ openrails.Authenticator = (*verifier)(nil)
+
+// staffScope is where the verifier's roles hold their permissions.
+var staffScope = openrails.Scope{Authority: issuer, ID: "staff"}
 
 // hostApp is the host backend's application subject.
 const hostApp = "host"
 
-type verifiedKey struct{}
-
 // verified is one token as the verifier read it.
 type verified struct {
 	id       openrails.Identity
+	role     string
 	signedIn time.Time
 }
 
 // grant is a token's identity: its subject's kind, credential and invoker
 // default to a user acting itself in a session.
 type grant struct {
-	subject, kind, credential, sid string
-	invokerIssuer, invoker         string
-	signedIn                       time.Time
+	subject, role, kind, credential, sid string
+	invokerIssuer, invoker               string
+	signedIn                             time.Time
 }
 
-func (v *verifier) verify(r *http.Request) (verified, error) {
-	if got, ok := r.Context().Value(verifiedKey{}).(verified); ok {
-		return got, nil
+// Authenticate verifies r's bearer token, live.
+func (v *verifier) Authenticate(r *http.Request) (auth.Verified, error) {
+	if v.down.Load() {
+		return nil, errors.Join(auth.ErrUnavailable, errors.New("e2e: the host's sessions are down"))
 	}
-	token, err := jwt.Parse(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), func(*jwt.Token) (any, error) { return v.secret, nil },
+	raw, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok || raw == "" {
+		return nil, auth.ErrUnauthenticated
+	}
+	token, err := jwt.Parse(raw, func(*jwt.Token) (any, error) { return v.secret, nil },
 		jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(issuer), jwt.WithAudience("billing"), jwt.WithExpirationRequired())
-	if err != nil || !token.Valid {
-		return verified{}, billingauth.Refusal(billing.CodeAuthenticationRequired)
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return nil, errors.Join(auth.ErrUnauthenticated, auth.ErrExpired)
+	case err != nil || !token.Valid:
+		return nil, auth.ErrUnauthenticated
 	}
 	claims := token.Claims.(jwt.MapClaims)
 	subject, _ := claims["sub"].(string)
 	if subject == "" {
-		return verified{}, billingauth.Refusal(billing.CodeAuthenticationRequired)
+		return nil, auth.ErrUnauthenticated
 	}
 	text := func(name, fallback string) string {
 		if value, _ := claims[name].(string); value != "" {
@@ -131,7 +148,7 @@ func (v *verifier) verify(r *http.Request) (verified, error) {
 	}
 	sid := text("sid", "")
 	if _, gone := v.revoked.Load(sid); gone && sid != "" {
-		return verified{}, billingauth.Refusal(billing.CodeCredentialRevoked)
+		return nil, errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
 	}
 	authTime, _ := claims["auth_time"].(float64)
 	id := openrails.Identity{
@@ -139,62 +156,32 @@ func (v *verifier) verify(r *http.Request) (verified, error) {
 		Invoker:    openrails.Invoker{Issuer: text("inv_iss", issuer), ID: text("inv", subject)},
 		Credential: openrails.Credential{Kind: openrails.CredentialKind(text("cred", string(openrails.CredentialSession))), ID: text("sid", text("jti", ""))},
 	}
-	return verified{id: id, signedIn: time.Unix(int64(authTime), 0)}, nil
+	return verified{id: id, role: text("role", subject), signedIn: time.Unix(int64(authTime), 0)}, nil
 }
 
-// gate is middleware that verifies the token, then admits it by check.
-func (v *verifier) gate(check func(verified) error) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			got, err := v.verify(r)
-			if err == nil {
-				err = check(got)
-			}
-			if err != nil {
-				billingauth.WriteRefusal(w, r, billingauth.AsRefusal(err))
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), verifiedKey{}, got)))
-		})
+func (got verified) Identity() openrails.Identity { return got.id }
+
+// Can is the role's permissions, exactly, in staffScope.
+func (got verified) Can(_ context.Context, scope openrails.Scope, permission string) (bool, error) {
+	if scope != staffScope {
+		return false, nil
 	}
+	held := map[string][]perm{
+		"staff": {staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics}, hostApp: {staffReads, staffWrites, staffCatalog, staffConfig, staffMetrics},
+		"support": {staffReads, staffWrites}, "reader": {staffReads},
+	}[got.role]
+	return slices.Contains(held, perm(permission)), nil
 }
 
-func (v *verifier) Required() func(http.Handler) http.Handler {
-	return v.gate(func(verified) error { return nil })
-}
-
-func (v *verifier) RequirePermission(permission string) func(http.Handler) http.Handler {
-	return v.gate(func(got verified) error {
-		switch got.id.Subject {
-		case "staff", hostApp:
-			return nil
-		case "support":
-			if permission == staffReads.String() || permission == staffWrites.String() {
-				return nil
-			}
-		case "reader":
-			if permission == staffReads.String() {
-				return nil
-			}
-		}
-		return billingauth.Refusal(billing.CodePermissionRequired)
-	})
-}
-
-func (v *verifier) Sensitive() func(http.Handler) http.Handler {
-	return v.gate(func(got verified) error {
-		if time.Since(got.signedIn) > 15*time.Minute {
-			refusal := billingauth.Refusal(billing.CodeStepUpRequired)
-			refusal.Metadata = map[string]any{"step_up_methods": []string{"password"}}
-			return refusal
-		}
-		return nil
-	})
-}
-
-func (v *verifier) Identity(ctx context.Context) (openrails.Identity, bool) {
-	got, ok := ctx.Value(verifiedKey{}).(verified)
-	return got.id, ok
+// CheckRecentSignIn: a person signed in within 15 minutes, in a session.
+func (got verified) CheckRecentSignIn(context.Context) error {
+	switch {
+	case got.id.SubjectKind != openrails.SubjectUser || got.id.Credential.Kind == openrails.CredentialAPIKey:
+		return auth.ErrForbidden
+	case time.Since(got.signedIn) > 15*time.Minute:
+		return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute, Metadata: map[string]any{"step_up_methods": []string{"password"}}}
+	}
+	return nil
 }
 
 func (v *verifier) token(t testing.TB, subject string) string {
@@ -226,7 +213,7 @@ func (v *verifier) issue(t testing.TB, g grant) string {
 		g.signedIn = time.Now()
 	}
 	claims := jwt.MapClaims{"sub": g.subject, "iss": issuer, "aud": "billing", "exp": time.Now().Add(time.Hour).Unix(), "auth_time": g.signedIn.Unix(), "jti": uuid.NewString()}
-	for name, value := range map[string]string{"sid": g.sid, "kind": g.kind, "cred": g.credential, "inv_iss": g.invokerIssuer, "inv": g.invoker} {
+	for name, value := range map[string]string{"sid": g.sid, "role": g.role, "kind": g.kind, "cred": g.credential, "inv_iss": g.invokerIssuer, "inv": g.invoker} {
 		if value != "" {
 			claims[name] = value
 		}
@@ -373,7 +360,7 @@ func (w *world) start() {
 		w.declare(psps)
 	}
 	w.psps = psps
-	routes := openrails.Routes{Auth: w.auth, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
+	routes := openrails.Routes{Auth: w.auth, Scope: staffScope, Prefix: mountPrefix, RouteGroups: routeGroups, Permissions: permissions}
 	if w.mount != nil {
 		w.mount(&routes)
 	}

@@ -171,7 +171,7 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 
 #### Guard its routes with your auth
 
-OpenRails has no auth of its own; when you mount its routes you pass in your own auth middleware, which OpenRails uses to protect its routes. Authkit's client satisfies this interface.
+OpenRails has no auth of its own. When you mount its routes you pass in your auth, which only says who a request is; OpenRails decides what each route admits and answers refusals itself. AuthKit provides this as `ak.Authenticator()`.
 
 First let's define permissions and two staff roles; staff are just regular users given a role. Support can see and help customers: read their billing history and make changes such as cancelling a membership or issuing a refund. Operators can do all of that and also edit the catalog, configure billing, and see the business metrics (revenue, sales) that support cannot.
 
@@ -188,8 +188,8 @@ rbac.Root.Role("support", customersRead, customersUpdate)
 rbac.Root.Role("operator", customersRead, customersUpdate, catalogUpdate, billingConfig, metricsRead)
 ```
 
-Then build AuthKit with those roles. AuthKit signs your users in, and its
-client is the auth OpenRails' routes use. The rest of its config (email, SMS,
+Then build AuthKit with those roles. AuthKit signs your users in, and says
+who each request to OpenRails' routes is. The rest of its config (email, SMS,
 rate limits) is in AuthKit's README:
 
 ```go
@@ -207,9 +207,14 @@ if err != nil {
 Finally, mount OpenRails' routes with AuthKit guarding them:
 
 ```go
+staff, err := ak.Scope(ctx, iam.RootGroup()) // where your staff hold the permissions above
+if err != nil {
+	return err
+}
 err = openrailsgin.Mount(r, bill, openrails.Routes{
-	Auth:   ak,         // your auth; required. Public, customer (/v1/me) and webhook routes are always on
-	Prefix: "/billing", // the API is served at /billing/v1/*
+	Auth:   ak.Authenticator(), // says who a request is; required. Public, customer (/v1/me) and webhook routes are always on
+	Scope:  staff,              // where callers must hold Permissions; required with any staff group on
+	Prefix: "/billing",         // the API is served at /billing/v1/*
 
 	// Every other route group is off unless you turn it on here.
 	RouteGroups: openrails.RouteGroups{
@@ -287,60 +292,56 @@ you can keep that pushed copy instead: leave `UserInfo` out and turn on
 
 #### Using your own auth
 
-Without AuthKit, implement the same four methods over your own sessions,
-then run `openrailstest.CheckAuth` against them in your CI:
+Without AuthKit, tell OpenRails who a request is. You write no middleware:
+OpenRails checks each route's permission and a person's recent sign-in
+itself, and answers refusals (401, 403, sign in again) the same way for
+every host:
 
 ```go
-type appAuth struct{ sessions *Sessions }
+// shopAuth says who a request is; OpenRails decides what to admit.
+type shopAuth struct{ sessions *Sessions }
 
-type sessionKey struct{}
-
-func (a appAuth) Required() func(http.Handler) http.Handler {
-	return a.check(func(*Session) bool { return true })
+func (a shopAuth) Authenticate(r *http.Request) (auth.Verified, error) {
+	s, err := a.sessions.Lookup(r) // your session cookie, checked live: signed out, banned or deleted is refused
+	switch {
+	case errors.Is(err, ErrNoSession):
+		return nil, auth.ErrUnauthenticated
+	case err != nil:
+		return nil, errors.Join(auth.ErrUnavailable, err)
+	}
+	return session{s}, nil
 }
 
-func (a appAuth) RequirePermission(permission string) func(http.Handler) http.Handler {
-	return a.check(func(s *Session) bool { return s.Can(permission) }) // exactly this permission
-}
+type session struct{ s *Session }
 
-func (a appAuth) Sensitive() func(http.Handler) http.Handler {
-	return a.check(func(s *Session) bool { return time.Since(s.SignedInAt) < 15*time.Minute })
-}
-
-// check signs the request in once (your session cookie, checked live, bans
-// included), then admits it when ok.
-func (a appAuth) check(ok func(*Session) bool) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			s, found := r.Context().Value(sessionKey{}).(*Session)
-			if !found {
-				if s, found = a.sessions.Lookup(r); !found {
-					http.Error(w, "sign in", http.StatusUnauthorized)
-					return
-				}
-			}
-			if !ok(s) {
-				http.Error(w, "forbidden", http.StatusForbidden)
-				return
-			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionKey{}, s)))
-		})
+func (v session) Identity() auth.Identity {
+	return auth.Identity{
+		Issuer: "https://shop.example", Subject: v.s.UserID, SubjectKind: auth.SubjectUser, // a UUID
+		Invoker:    auth.Invoker{Issuer: "https://shop.example", ID: v.s.UserID}, // acting itself
+		Credential: auth.Credential{Kind: auth.CredentialSession, ID: v.s.ID},
 	}
 }
 
-func (a appAuth) Identity(ctx context.Context) (openrails.Identity, bool) {
-	s, ok := ctx.Value(sessionKey{}).(*Session)
-	if !ok {
-		return openrails.Identity{}, false
-	}
-	return openrails.Identity{
-		Issuer: "https://shop.example", Subject: s.UserID, SubjectKind: openrails.SubjectUser, // a UUID
-		Invoker:    openrails.Invoker{Issuer: "https://shop.example", ID: s.UserID}, // acting itself
-		Credential: openrails.Credential{Kind: openrails.CredentialSession, ID: s.ID},
-		Email:      s.Email, EmailVerified: s.EmailVerified,
-	}, true
+// Can: exactly this permission, in exactly this scope.
+func (v session) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
+	return scope == billingStaff && v.s.Has(permission), nil
 }
+
+// CheckRecentSignIn: signed in within 15 minutes, for writes that move money.
+func (v session) CheckRecentSignIn(context.Context) error {
+	if time.Since(v.s.SignedInAt) > 15*time.Minute {
+		return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute}
+	}
+	return nil
+}
+
+var billingStaff = auth.Scope{Authority: "https://shop.example", ID: "billing"}
 ```
+
+The types are `github.com/open-rails/helpers/auth`. Mount with
+`Routes{Auth: shopAuth{sessions}, Scope: billingStaff, ...}`, and check your
+adapter in CI with `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
+(`github.com/open-rails/helpers/auth/authtest`).
 
 If your app already loads its own configuration (koanf, kong, flags), build the
 same declaration in Go instead of reading `merchant.yaml`. Each rail has a typed
@@ -441,9 +442,14 @@ func run(ctx context.Context) error {
 		return err
 	}
 	// Billing. Public, customer (/me) and webhook routes are always mounted.
+	staff, err := ak.Scope(ctx, iam.RootGroup()) // where the roles above are held
+	if err != nil {
+		return err
+	}
 	err = openrailsgin.Mount(r, bill, openrails.Routes{
-		Auth:        ak,         // AuthKit guards each route: OpenRails asks it, by route
-		Prefix:      "/billing", // the API is served at /billing/v1/*
+		Auth:        ak.Authenticator(), // says who a request is; OpenRails decides what to admit
+		Scope:       staff,              // where callers hold Permissions
+		Prefix:      "/billing",         // the API is served at /billing/v1/*
 		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true},
 		Permissions: openrails.Permissions{
 			AdminRead:      customersRead,
@@ -497,8 +503,15 @@ func run(ctx context.Context) error {
 customer and webhook routes are always mounted; every other route group is off
 until `RouteGroups` turns it on:
 
-- `Auth`: your auth. Customer routes ask it who is signed in; staff routes ask
-  it whether the caller holds the route's permission.
+- `Auth`: your auth, which only says who a request is (`Authenticate`). Customer
+  routes take a person acting for themself; staff routes ask the answer's
+  `Can` for the route's permission in `Scope` and, for a person on a write that
+  moves money or removes access, its `CheckRecentSignIn`. OpenRails answers
+  every refusal: 401 with a `WWW-Authenticate` challenge (a stale sign-in is
+  RFC 9470's `insufficient_user_authentication`, code `step_up_required`), 403,
+  or 503 when your auth cannot answer.
+- `Scope`: where callers hold `Permissions`, such as AuthKit's
+  `ak.Scope(ctx, iam.RootGroup())`. Required with any staff group on.
 - `Prefix`: where the API lives; `/billing` serves `/billing/v1/*`.
 - `RouteGroups.Admin`: customer support, the routes your staff and back office
   call at `/billing/v1/admin` to read and change customers' billing: payments
@@ -520,12 +533,13 @@ until `RouteGroups` turns it on:
   backend when it talks to OpenRails over HTTP (a standalone or hosted
   OpenRails, or a service of yours not written in Go): usage, admissions,
   provider operations, host events, and user provisioning. They take any
-  application credential your auth vouches for and refuse a person. Embedded,
+  application your auth says a request is (an API key, a client's own token)
+  and refuse a person. Embedded,
   your Go code calls the same operations on the `Client` and you can leave this
   off.
 - `Permissions`: what a caller must hold for each staff group. `Mount` fails
   when a staff group is on without its permission, or a permission is given
-  for a group that is off.
+  for a group that is off or your auth does not know.
 - `AdminConsole`: `true` serves the staff dashboard at `/billing/admin` (below);
   off by default.
 
@@ -549,7 +563,8 @@ the routes it drives. This one has only customer support:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
-	Auth:         ak,
+	Auth:         ak.Authenticator(),
+	Scope:        staff,
 	Prefix:       "/billing",
 	RouteGroups:  openrails.RouteGroups{Admin: true},
 	Permissions:  openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
@@ -559,8 +574,8 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 
 - **Who signs in**: your staff, with their AuthKit accounts, through your
   AuthKit at `/api/v1` on the same origin. Every page calls the routes of its
-  area, which ask your `Auth` whether the staff member holds that area's
-  permission, and a change after a stale sign-in asks them to confirm it is them.
+  area, which check that the staff member holds that area's permission in
+  `Routes.Scope`, and a change after a stale sign-in asks them to confirm it is them.
 - **What each sees**: an area appears only when its group is on and the
   staff member holds its permission; on load the console asks
   `GET /v1/admin/access`, which any signed-in staff member may call. Customer
@@ -1117,7 +1132,8 @@ name the permission its callers need:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
-	Auth:        ak,
+	Auth:        ak.Authenticator(),
+	Scope:       staff,
 	Prefix:      "/billing",
 	RouteGroups: openrails.RouteGroups{Catalog: true},
 	Permissions: openrails.Permissions{Catalog: catalogUpdate}, // a permission of your own for the catalog

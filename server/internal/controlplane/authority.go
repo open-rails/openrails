@@ -69,6 +69,50 @@ func (c *ControlPlane) ResolveAuthorizedMerchant(ctx context.Context, r *http.Re
 	return mid, slug, err
 }
 
+// UserMerchant is the live merchant a user acts on in the admin API: the
+// one ref names (a current or former name), else the only merchant group
+// they hold a role in. It checks no permission: the staff gate asks the
+// session's Can in that merchant's group.
+func (c *ControlPlane) UserMerchant(ctx context.Context, userID, ref string) (billing.MerchantID, string, error) {
+	if c == nil || c.Core() == nil {
+		return billing.MerchantID{}, "", ErrNoControlPlane
+	}
+	var groupID string
+	var err error
+	if ref = strings.TrimSpace(ref); ref == "" {
+		groupID, err = c.merchantGroupForUser(ctx, userID)
+	} else {
+		groupID, err = c.merchantGroupByName(ctx, ref)
+	}
+	if err != nil {
+		return billing.MerchantID{}, "", err
+	}
+	mid, slug, err := c.merchantForGroupID(ctx, groupID)
+	if errors.Is(err, ErrServiceCredentialMerchantUnresolved) {
+		return billing.MerchantID{}, "", billing.ErrMerchantUnresolved
+	}
+	return mid, slug, err
+}
+
+// MerchantGroup is the permission group bound to mid, a live merchant: where
+// its staff hold their permissions.
+func (c *ControlPlane) MerchantGroup(ctx context.Context, mid billing.MerchantID) (string, error) {
+	directory, err := c.directory()
+	if err != nil {
+		return "", err
+	}
+	m, err := directory.Get(ctx, mid)
+	switch {
+	case errors.Is(err, merchants.ErrMerchantNotFound):
+		return "", billing.ErrMerchantUnresolved
+	case err != nil:
+		return "", err
+	case m.PermissionGroupID == "" || m.Status != merchants.StatusActive:
+		return "", billing.ErrMerchantUnresolved
+	}
+	return m.PermissionGroupID, nil
+}
+
 // CheckRecentSignIn is AuthKit's Sensitive check for r's user token, with
 // helpers/auth RecentSignInChecker's errors.
 func (c *ControlPlane) CheckRecentSignIn(ctx context.Context, r *http.Request) error {

@@ -2,10 +2,11 @@ package routes
 
 import "fmt"
 
-// Permissions are the host's permissions for the staff route groups, as
-// Auth.RequirePermission takes them: the admin group's reads and updates,
-// the catalog, the merchant's configuration and its business metrics. Each
-// group is independent; an empty one leaves its routes unmounted.
+// Permissions are the host's permissions for the staff route groups, as the
+// gate asks the Verified's Can for them: the admin group's reads and
+// updates, the catalog, the merchant's configuration and its business
+// metrics. Each group is independent; an empty one leaves its routes
+// unmounted. The programmatic routes need none.
 type Permissions struct{ AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics string }
 
 // Validate refuses AdminUpdate without AdminRead.
@@ -34,7 +35,8 @@ func (p Permissions) For(r Route) string {
 	return ""
 }
 
-// Needs names the Routes.Permissions field a staff route checks.
+// Needs names the Routes.Permissions field a route checks: a staff route's
+// group's, none for a programmatic route (#1179 leaves that open).
 func (r Route) Needs() string {
 	switch r.Group {
 	case CatalogAdmin:

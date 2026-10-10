@@ -21,7 +21,7 @@ type Authenticator struct{ verifier verify.Authenticator }
 
 func NewAuthenticator(v verify.Authenticator) *Authenticator { return &Authenticator{verifier: v} }
 
-// Authenticate implements billingauth.Authenticator, returning
+// Authenticate implements billingauth.SessionAuthenticator, returning
 // billingauth.ErrUnauthenticated when no valid credential is present.
 func (p *Authenticator) Authenticate(ctx context.Context, r *http.Request) (billingauth.UserContext, error) {
 	cl, err := p.claims(ctx, r)
@@ -67,7 +67,7 @@ func (p *Authenticator) CheckRecentSignIn(ctx context.Context, r *http.Request) 
 	}
 	sessions, ok := p.verifier.(verify.SessionChecker)
 	if !ok {
-		return billingauth.ErrRecentSignInUnavailable
+		return errors.Join(helpersauth.ErrForbidden, errors.New("recent sign-in cannot be checked"))
 	}
 	err = sessions.CheckRecentSignIn(ctx, cl)
 	e, _ := iam.AsError(err)
