@@ -235,6 +235,16 @@ export type BillingDetails = z.infer<typeof billingDetailsSchema>
 
 export const paymentMethodSchema = z.object({
   id: z.string(),
+  /** `requires_action` while the bank's authentication of a new card waits. */
+  status: z.string().nullish(),
+  /** The bank's authentication of a card being saved. */
+  next_action: z
+    .object({
+      type: z.string(),
+      psp_id: z.string().nullish(),
+      payload: z.record(z.string(), z.string()).nullish(),
+    })
+    .nullish(),
   rail: z.string().nullish(),
   /** The PSP holding the card; null for a card a custodian holds. */
   psp_id: z.string().nullish(),
@@ -542,15 +552,6 @@ export const publicConfigSchema = z.object({
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>
 
-/** An in-page card setup; `payment_method_id` is set once the card is saved. */
-export const cardSetupSchema = z.object({
-  id: z.string(),
-  status: z.string(),
-  client_secret: z.string().nullish(),
-  payment_method_id: z.string().nullish(),
-})
-export type CardSetup = z.infer<typeof cardSetupSchema>
-
 export const paymentAuthenticationSchema = z.object({
   client_secret: z.string().nullish(),
 })
@@ -571,15 +572,13 @@ interface NewCardFields {
 }
 
 /**
- * A card to save: a token from the PSP's own fields (`payment_token`), or,
- * for a PSP whose card_entry is server (`cardSetupDriver` "card"), the card
- * itself, posted to OpenRails and never kept by this package.
+ * A card to save: the single-use token of the PSP's own fields (a Collect.js
+ * token, a Stripe `pm_`), or, for a PSP whose card_entry is server
+ * (`cardSetupDriver` "card"), the card itself, posted to OpenRails and never
+ * kept by this package.
  */
 export type NewCard = NewCardFields &
-  (
-    | { payment_token: string; card?: never }
-    | { card: CardEntry; payment_token?: never }
-  )
+  ({ token: string; card?: never } | { card: CardEntry; token?: never })
 
 /**
  * A minted checkout session. `id` reads and pays it with no other credential;

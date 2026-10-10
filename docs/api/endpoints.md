@@ -254,18 +254,23 @@ follow through the durable schedule swap. A default that cannot pay a
 following subscription is `409 payment_method_psp_mismatch`; following a
 default not set is `400 default_payment_method_required`.
 
-- **Save** (`POST /v1/me/payment-methods`): `psp_id`, a `payment_token` from
-  the PSP's card fields (or `card` for a PSP whose card entry is server), and
-  optional `billing_details`. OpenRails reads brand, last four and expiry from
-  the PSP. A save the PSP refuses is `502 payment_provider_rejected`.
+- **Save** (`POST /v1/me/payment-methods`), one call: `psp_id`, the `token`
+  of the PSP's card fields (a Collect.js token, a Stripe `pm_` from Elements;
+  or `card` for a PSP whose card entry is server), and optional
+  `billing_details`. OpenRails reads brand, last four and expiry from the PSP.
+  A Stripe card is saved by one SetupIntent OpenRails confirms; when the bank
+  asks for 3-D Secure the method answers `status: requires_action` with a
+  `next_action`, which Stripe.js completes in the page, and
+  `POST /v1/me/payment-methods/{id}/confirm` finishes it (a refused one is
+  `402 card_declined`, an abandoned one is removed after a day). A declined
+  card is `402 card_declined`; a save the PSP refuses is
+  `502 payment_provider_rejected`.
 - **Replace** (`PUT`): the updated method when confirmed, `202` with no body
   while the provider outcome is still being resolved (repeat the same request),
   `409 payment_method_update_retry_required` when a fresh token is needed.
 - **Delete**: `204` when the provider and the local record are both gone, `202`
   while that converges. Stripe cards are managed in Stripe's billing portal
   (`POST /v1/me/stripe/billing-portal-sessions`).
-- **Stripe cards** are saved through a setup: `POST /v1/me/payment-method-setups`,
-  Stripe.js confirms it in the page, then `…/{id}/confirm`.
 
 A merchant reads a customer's cards and may delete one; it can never create or
 change one.

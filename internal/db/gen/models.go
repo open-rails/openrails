@@ -1123,12 +1123,14 @@ type BillingPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
-	// active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
+	// requires_action (being saved: the customer completes the bank's authentication, setup_ref); active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
 	Status string
 	// The method that replaced this one, when status is replaced.
 	ReplacedByID *uuid.UUID
 	// When the issuer last asked for the cardholder to be contacted; cleared by the next change to the card.
 	ContactCardholderAt *time.Time
+	// The provider's setup awaiting the customer (a Stripe SetupIntent) while status is requires_action.
+	SetupRef *string
 }
 
 // Append-only history of the card behind a payment method: one row per save, customer edit, updater or network change, closure or contact advice, with the card as its holder reported it at that version. Replays of one source event are one row. Retention: permanent, never pruned.

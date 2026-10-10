@@ -33,12 +33,6 @@ export interface SavePaymentMethodProps {
   /** The PSP to save the card with, from OpenRails's payment config. */
   psp: PspConfig
   onSaved: (paymentMethodId: string) => void
-  /**
-   * Where the provider returns after an off-page verification (3-D Secure),
-   * given the setup id to confirm with `client.confirmCardSetup`. Default:
-   * the current page with `?setup_id=`.
-   */
-  returnURL?: (setupId: string) => string
   /** Billing country to preselect; default: the browser locale's region. */
   defaultCountry?: string
   submitLabel?: string
@@ -104,7 +98,7 @@ function TokenizedSetup({
     try {
       method = await client.addPaymentMethod({
         psp_id: psp.psp_id,
-        payment_token: card.payment_token,
+        token: card.payment_token,
         billing_details: billingDetailsOf(card),
       })
     } catch (cause) {
@@ -220,7 +214,6 @@ function NativeCardSetup({
 function ElementsSetup({
   psp,
   onSaved,
-  returnURL,
   submitLabel,
   defaultCountry,
 }: SavePaymentMethodProps) {
@@ -258,7 +251,6 @@ function ElementsSetup({
         ref={card}
         psp={psp}
         client={client}
-        returnURL={returnURL}
         defaultCountry={country || undefined}
         onCompleteChange={setComplete}
         unavailableMessage={t("paymentMethods.unavailable")}

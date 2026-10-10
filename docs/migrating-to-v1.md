@@ -330,7 +330,7 @@ fields (`400 unknown_field`), and every error code is in
 | `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/app/entitlements/check` (your backend) or `GET /v1/admin/entitlements` (staff); the effective tier is removed |
 | `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
 | `GET /v1/merchant/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
-| `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
+| `/v1/me/payment-methods/stripe-setup…`, `/v1/me/payment-method-setups…` | `POST /v1/me/payment-methods` with a Stripe `pm_` as `token`; `/v1/me/payment-methods/{id}/confirm` after 3-D Secure |
 | `PUT /v1/me/default-payment-method` with `currency` | `PUT /v1/me/default-payment-methods/{currency}`; a subscription's `payment_method_id` is its own card, `null` follows the default |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
@@ -355,7 +355,7 @@ fields (`400 unknown_field`), and every error code is in
   `exp_month`, `exp_year`, each nullable. `last_four`, `card_type` and
   `expiry_date` are gone.
 - **Saving a card.** `POST /v1/me/payment-methods` takes `psp_id`, a
-  `payment_token` or `card`, and `billing_details` (`name`, `email`, `phone`,
+  `token` or `card`, and `billing_details` (`name`, `email`, `phone`,
   `address`), and answers 201. A save the PSP refuses is 502
   `payment_provider_rejected`.
 - **Product entitlements.** `entitlements_spec` maps are replaced by

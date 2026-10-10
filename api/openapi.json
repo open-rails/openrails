@@ -8074,6 +8074,7 @@
           "card_requires_https",
           "invalid_param",
           "payment_duplicate_refused",
+          "payment_method_stale",
           "payment_provider_rejected",
           "provider_outcome_unknown",
           "service_unavailable"
@@ -8321,132 +8322,7 @@
         ]
       }
     },
-    "/v1/me/payment-method-setups": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PaymentMethodSetupParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethodSetup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/payment-method-setups/{id}": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethodSetup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
-    "/v1/me/payment-method-setups/{id}/confirm": {
+    "/v1/me/payment-methods/{id}/confirm": {
       "post": {
         "tags": [
           "customer"
@@ -8467,7 +8343,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaymentMethodSetup"
+                  "$ref": "#/components/schemas/PaymentMethod"
                 }
               }
             }
@@ -8483,19 +8359,8 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
-          "card_attempts_blocked",
           "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
           "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
           "resource_not_found",
           "service_unavailable"
         ],
@@ -13081,7 +12946,7 @@
           "psp_id": {
             "type": "string"
           },
-          "payment_token": {
+          "token": {
             "type": "string"
           },
           "card": {
@@ -18106,7 +17971,18 @@
               "active",
               "closed",
               "removed",
-              "replaced"
+              "replaced",
+              "requires_action"
+            ]
+          },
+          "next_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "replaced_by": {
@@ -18185,6 +18061,7 @@
           "rail",
           "psp_id",
           "status",
+          "next_action",
           "replaced_by",
           "card",
           "billing_details",
@@ -18262,41 +18139,6 @@
           },
           "rail_method_ref": {
             "type": "string"
-          }
-        }
-      },
-      "PaymentMethodSetup": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "setup_intent_id": {
-            "type": "string"
-          },
-          "client_secret": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "status"
-        ]
-      },
-      "PaymentMethodSetupParams": {
-        "type": "object",
-        "properties": {
-          "psp_id": {
-            "type": "string"
-          },
-          "consent": {
-            "type": "boolean"
           }
         }
       },

@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -223,4 +224,58 @@ func TestOrderProcessing(t *testing.T) {
 	require.Equal(t, "complete", confirmed.body["status"], "%v", confirmed.body)
 	require.True(t, c.entitled("orders:processing"))
 	require.Len(t, w.nmi.saleOrders(), 1, "the lost answer is read, never resent")
+}
+
+// A card is added in one call: the page's Stripe fields make a pm_, and
+// OpenRails saves it with one SetupIntent it confirms. A bank that wants
+// 3-D Secure leaves the card requires_action until the customer completes it
+// and confirms; until then it pays nothing, and abandoned it is removed.
+func TestStripeCardSaveAuthenticates(t *testing.T) {
+	t.Parallel()
+	w := orderWorld(t)
+	life := w.lifetime("orders:saved-3ds", 2_000_000)
+	c := w.newCustomer()
+	setups := len(w.stripe.Submitted("/v1/setup_intents"))
+	token := w.newCardToken("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
+	pending := c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["stripe"], "token": token})
+	require.Equal(t, "requires_action", pending["status"], "%v", pending)
+	require.Equal(t, setups+1, len(w.stripe.Submitted("/v1/setup_intents")), "one SetupIntent, created and confirmed by OpenRails")
+	require.Empty(t, w.stripe.Submitted("/v1/payment_intents"), "nothing charged")
+	next := pending["next_action"].(map[string]any)
+	require.Equal(t, "authenticate", next["type"])
+	setup := next["payload"].(map[string]any)["setup_intent_id"].(string)
+	require.NotEmpty(t, next["payload"].(map[string]any)["client_secret"])
+	id := pending["id"].(string)
+
+	refused := c.order(http.MethodPost, "/orders", "early-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(2_000_000),
+		"payment": map[string]any{"payment_method_id": id}})
+	require.Equal(t, "payment_method_stale", orderError(refused), "a card being saved pays nothing: %v", refused.body)
+	still := c.must(http.MethodPost, "/payment-methods/"+id+"/confirm", "", nil)
+	require.Equal(t, "requires_action", still["status"])
+	require.NotNil(t, still["next_action"])
+
+	require.True(t, w.stripe.AuthenticateSetup(setup))
+	saved := c.must(http.MethodPost, "/payment-methods/"+id+"/confirm", "", nil)
+	require.Equal(t, "active", saved["status"], "%v", saved)
+	require.Nil(t, saved["next_action"])
+	require.Equal(t, true, saved["reusable"])
+	require.Equal(t, c.must(http.MethodPost, "/payment-methods/"+id+"/confirm", "", nil)["status"], "active", "confirm again changes nothing")
+	w.stripe.SetMethodDecline(token, "")
+	bought := c.order(http.MethodPost, "/orders", "saved-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(2_000_000),
+		"payment": map[string]any{"payment_method_id": id}})
+	require.Equal(t, "complete", bought.body["status"], "%v", bought.body)
+
+	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["stripe"], "token": w.newCardToken("stripe", card{Brand: "visa", Last4: "0341", Decline: "insufficient_funds"})})
+	require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
+	require.Equal(t, "card_declined", errorCode(body))
+
+	abandoned := c.must(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["stripe"], "token": w.newCardToken("stripe", card{Brand: "visa", Last4: "3156", Decline: "auth"})})
+	require.Equal(t, "requires_action", abandoned["status"])
+	w.advance(25 * time.Hour)
+	w.expireOrders()
+	var methods []string
+	for _, m := range c.paymentMethods() {
+		methods = append(methods, m["id"].(string)+":"+m["status"].(string))
+	}
+	require.ElementsMatch(t, []string{id + ":active", abandoned["id"].(string) + ":removed"}, methods, "a declined card was never saved; an abandoned one is removed")
 }

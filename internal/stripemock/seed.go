@@ -50,6 +50,22 @@ func (m *Mock) Authenticate(paymentIntent string) bool {
 	return true
 }
 
+// AuthenticateSetup completes the bank's challenge on a SetupIntent awaiting
+// it: the card is saved to the intent's customer.
+func (m *Mock) AuthenticateSetup(setupIntent string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.setups[setupIntent]
+	if !ok || s["status"] != "requires_action" {
+		return false
+	}
+	s["status"] = "succeeded"
+	if method, ok := m.methods[fmt.Sprint(s["payment_method"])]; ok && method["customer"] == nil {
+		method["customer"] = s["customer"]
+	}
+	return true
+}
+
 // ReissueCard is Stripe's card updater giving payment method pm a new card.
 func (m *Mock) ReissueCard(pm, brand, last4 string, month int, fingerprint string) {
 	m.mu.Lock()
