@@ -628,10 +628,11 @@ disappears. Two safety doctrines matter operationally:
 
 ## Dunning
 
-No knobs. The schedule is a hardcoded function of the price's billing cycle —
-the retry span always stays well inside one cycle. Retries are OFFSETS from
-the initial failure (progressive, front-loading where transient declines
-clear):
+The built-in schedule is a function of the price's billing cycle — the retry
+span always stays well inside one cycle. A merchant may replace it with its
+`dunning_policy` setting; a case runs under the policy in force at its first
+decline. Retries are OFFSETS from the initial failure (progressive,
+front-loading where transient declines clear). The built-in schedule:
 
 | Cycle | Retry offsets | Failures to terminal | Derived staleness window |
 |---|---|---|---|
@@ -655,13 +656,15 @@ table, the same for every owner:
 - **Terminal at once:** stolen or fraudulent card, and "stop recurring" codes.
 
 The staleness window ("never
-charge a months-old failure") derives from the same schedule — last offset +
-min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is canceled +
-downgraded WITHOUT a charge. Terminal failure = cancel + revoke entitlements
-+ rail-side delete via the intent ledger's deferred-delete mechanism.
+charge a months-old failure") derives from the case's schedule — last offset +
+min(24h, cycle/2) slack — so it cannot be misconfigured; anything older is
+skipped WITHOUT a charge and parked `unverified` (access intact) for provider
+verification. Terminal failure = cancel + revoke entitlements + rail-side
+delete via the intent ledger's deferred-delete mechanism.
 
 This schedule governs every subscription OpenRails collects itself: engine
-memberships on Stripe and NMI, and every NMI schedule (`nmi_schedule`). NMI
+memberships on Stripe and NMI, Solana pulls, and every NMI schedule
+(`nmi_schedule`). NMI
 never retries a declined scheduled charge, so on `nmi_schedule` the provider's
 decline is the schedule's first failure (first retry at the first offset, never
 at once). Retries count from when the decline happened, not when OpenRails saw

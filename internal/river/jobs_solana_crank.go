@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/catalog"
-	"github.com/open-rails/openrails/internal/modules/collection"
 	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/solana/solanasubs"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -85,10 +84,7 @@ type resolvedPlan struct {
 	fingerprint     int64
 	fiatAmount      int64
 	currency        string
-	// cycleHours is the price's billing cycle in hours (0 = unknown) and
-	// retryAttempts the subscription's consecutive-failure count so far: they
-	// feed the cadence-relative dunning schedule.
-	cycleHours    int
+	// retryAttempts is the subscription's consecutive-failure count so far.
 	retryAttempts int
 	// The subscription a failed pull is an attempt of.
 	customerID, pspID uuid.UUID
@@ -343,8 +339,7 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}, nil
 		default:
 			// Recoverable subscriber decline (insufficient USDC, etc.) ->
-			// dunning. Advance next_pull_at by the cadence-relative dunning
-			// interval so it aligns with dunning instead of re-failing hourly.
+			// dunning, on the membership's retry schedule.
 			llog.Warn("Solana cranker: recoverable pull failure; routing to dunning")
 			reason := crankErr.Error()
 			code := string(cf.Code)
@@ -361,23 +356,23 @@ func (w *SolanaCrankWorker) crankOne(ctx context.Context, repo solanaSubStore, r
 			}); err != nil {
 				return crankOutcome{}, fmt.Errorf("solana crank: fail membership: %w", err)
 			}
-			// plan.retryAttempts was loaded BEFORE the FailMembership above
-			// recorded this failure, so the schedule gap is looked up at +1.
-			gap, err := collection.NextRetryIn(plan.cycleHours, plan.retryAttempts+1)
+			// The next pull is the membership's next retry, which FailMembership
+			// set from the case's dunning policy. None means that failure ended
+			// it; one period on keeps this record from hot-looping meanwhile.
+			failed, err := subscriptions.NewSubscriptionRepo(w.DB).GetByID(ctx, subID)
 			if err != nil {
-				return crankOutcome{}, fmt.Errorf("solana crank: %w", err)
+				return crankOutcome{}, fmt.Errorf("solana crank: reload membership: %w", err)
 			}
-			if gap <= 0 {
-				// That failure was terminal under the schedule (FailMembership
-				// canceled the membership); advance one period so this record
-				// doesn't hot-loop while the cancellation settles.
+			var nextRetry time.Time
+			if failed.NextRetryAt != nil {
+				nextRetry = failed.NextRetryAt.UTC()
+			} else {
 				periodHoursI64, err := safecast.Convert[int64](periodHours)
 				if err != nil {
 					return crankOutcome{}, fmt.Errorf("solana crank: period hours overflow: %w", err)
 				}
-				gap = time.Duration(periodHoursI64) * time.Hour
+				nextRetry = w.now().Add(time.Duration(periodHoursI64) * time.Hour)
 			}
-			nextRetry := w.now().Add(gap)
 			if err := repo.SetNextPullAt(ctx, row.ID, nextRetry); err != nil {
 				return crankOutcome{}, err
 			}
@@ -519,7 +514,6 @@ func (w *SolanaCrankWorker) resolvePlan(ctx context.Context, row *models.SolanaS
 		fingerprint:     fingerprint,
 		fiatAmount:      price.Amount,
 		currency:        price.Currency,
-		cycleHours:      collection.BillingCycleHoursOf(price),
 		retryAttempts:   retryAttempts,
 		customerID:      sub.CustomerID,
 		pspID:           sub.PspID,
