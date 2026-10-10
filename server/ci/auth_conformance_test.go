@@ -29,11 +29,13 @@ import (
 
 // guardedHost is an AuthKit host whose root roles hold its own staff
 // permissions, as the README declares them, beside a stricter one for the
-// merchant's configuration, and whose backend holds a root API key.
+// merchant's configuration, and whose backend holds a root API key with the
+// programmatic ones too.
 type guardedHost struct {
 	ak                        *authkit.Client
 	scope                     openrails.Scope
 	read, update, admin       iam.Perm
+	entitlements, events      iam.Perm
 	roles                     map[string]iam.Role
 	customer, reader, support string // access tokens
 	owner, gone               string
@@ -49,14 +51,16 @@ func newGuardedHostOn(t *testing.T, pool *pgxpool.Pool) *guardedHost {
 	t.Helper()
 	rbac := authkit.NewRoles(authkit.APIKeys)
 	h := &guardedHost{
-		read:   rbac.Root.Permission("customers", "read"),
-		update: rbac.Root.Permission("customers", "update"),
-		admin:  rbac.Root.Permission("billing", "admin"),
+		read:         rbac.Root.Permission("billing", "read"),
+		update:       rbac.Root.Permission("billing", "manage"),
+		admin:        rbac.Root.Permission("config", "manage"),
+		entitlements: rbac.Root.Permission("entitlements", "read"),
+		events:       rbac.Root.Permission("events", "read"),
 	}
 	h.roles = map[string]iam.Role{
 		"reader":  rbac.Root.Role("reader", h.read),
 		"support": rbac.Root.Role("support", h.read, h.update),
-		"admin":   rbac.Root.Role("billing-admin", h.read, h.update, h.admin),
+		"admin":   rbac.Root.Role("billing-admin", h.read, h.update, h.admin, h.entitlements, h.events),
 	}
 	as := authtest.NewAuthorizationServer(t,
 		authtest.WithDeps(func(d *authkit.Deps) { d.Postgres = pool }),
@@ -264,7 +268,7 @@ func TestAuthKitRefusals(t *testing.T) {
 	h := newGuardedHostOn(t, pool)
 	client := f.runtime(t, "refusals-"+uuid.NewString()[:8])
 	mux := http.NewServeMux()
-	require.NoError(t, openrailshttp.Mount(mux, client, h.routes(openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update}, true)))
+	require.NoError(t, openrailshttp.Mount(mux, client, h.routes(openrails.Permissions{AdminRead: h.read, AdminUpdate: h.update, Entitlements: h.entitlements, Events: h.events}, true)))
 	refund := "/billing/v1/admin/payments/" + billing.PaymentID(uuid.New()).String() + "/refunds"
 
 	anonymous := httptest.NewRecorder()
@@ -312,7 +316,7 @@ func TestAuthKitRefusals(t *testing.T) {
 }
 
 // Mount fails closed: a group on without its permission, a permission for a
-// group that is off or AuthKit does not know, a staff group without Scope or
+// group that is off or AuthKit does not know, a permission without Scope or
 // a Scope without one, and any group without Auth.
 func TestMountFailsClosed(t *testing.T) {
 	f := newFixture(t)
@@ -323,13 +327,15 @@ func TestMountFailsClosed(t *testing.T) {
 		routes openrails.Routes
 		err    string
 	}{
-		"admin without its read": {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminUpdate: h.update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
-		"an empty read":          {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: iam.Perm{}}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
-		"a group that is off":    {openrails.Routes{Auth: ak, Permissions: openrails.Permissions{Catalog: h.admin}}, "Permissions.Catalog is given, but RouteGroups.Catalog is off"},
-		"no Auth":                {openrails.Routes{Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "Routes.Auth is required"},
-		"no Scope":               {openrails.Routes{Auth: ak, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "without Routes.Scope"},
-		"a Scope, no staff":      {openrails.Routes{Auth: ak, Scope: h.scope}, "Routes.Scope is given, but no staff route group is on"},
-		"an unknown permission":  {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: perm("root:customers:raed")}}, `does not know the permission "root:customers:raed"`},
+		"admin without its read":             {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminUpdate: h.update}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		"an empty read":                      {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: iam.Perm{}}}, "RouteGroups.Admin is on without Permissions.AdminRead"},
+		"a group that is off":                {openrails.Routes{Auth: ak, Permissions: openrails.Permissions{Catalog: h.admin}}, "Permissions.Catalog is given, but RouteGroups.Catalog is off"},
+		"no Auth":                            {openrails.Routes{Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "Routes.Auth is required"},
+		"no Scope":                           {openrails.Routes{Auth: ak, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: h.read}}, "without Routes.Scope"},
+		"a Scope, no permission":             {openrails.Routes{Auth: ak, Scope: h.scope}, "Routes.Scope is given, but no permission is"},
+		"programmatic off":                   {openrails.Routes{Auth: ak, Scope: h.scope, Permissions: openrails.Permissions{Events: h.events}}, "Permissions.Events is given, but RouteGroups.Programmatic is off"},
+		"an unknown permission":              {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: adminGroups, Permissions: openrails.Permissions{AdminRead: perm("root:billing:raed")}}, `does not know the permission "root:billing:raed"`},
+		"an unknown programmatic permission": {openrails.Routes{Auth: ak, Scope: h.scope, RouteGroups: openrails.RouteGroups{Programmatic: true}, Permissions: openrails.Permissions{Usage: perm("root:usage:manage")}}, `does not know the permission "root:usage:manage"`},
 	} {
 		err := openrailshttp.Mount(http.NewServeMux(), client, tc.routes)
 		require.ErrorContains(t, err, tc.err, name)

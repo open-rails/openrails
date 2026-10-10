@@ -170,7 +170,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 			TrustedIssuers: []server.TrustedIssuerConfig{
 				{
 					Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop},
-					Permissions:    []string{staffperm.BillingRead, staffperm.ConfigManage},
+					Permissions:    []string{staffperm.BillingRead, staffperm.CatalogManage, staffperm.ConfigManage},
 					AllowedOrigins: []string{adminOrigin},
 					GroupRoles:     map[string]string{"billing-admins": "owner"},
 				},
@@ -261,7 +261,7 @@ func TestResourceServerAcceptsTrustedIssuerTokens(t *testing.T) {
 		require.Len(t, list, 1)
 		require.Equal(t, shop, list[0].Slug)
 		require.Equal(t, "custom", list[0].Role, "owner grants capped by the ceiling are no named role")
-		require.ElementsMatch(t, []string{staffperm.BillingRead, staffperm.ConfigManage}, list[0].Permissions)
+		require.ElementsMatch(t, []string{staffperm.BillingRead, staffperm.CatalogManage, staffperm.ConfigManage}, list[0].Permissions)
 
 		w = serve(userMerchants(cp), rsRequest{path: "/hosted/merchants", authorization: bearer(host.mint(t, func(c jwt.MapClaims) { delete(c, "permissions") }))})
 		require.Equal(t, http.StatusOK, w.Code)

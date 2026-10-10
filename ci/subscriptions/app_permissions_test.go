@@ -3,9 +3,11 @@
 package subscriptions_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -84,12 +86,20 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 	gate := httptest.NewServer(mux)
 	t.Cleanup(gate.Close)
 	for _, call := range calls {
-		status, body := w.merchantJSONAt(gate.URL, w.auth.hostToken(t), call.method, call.path, call.body())
-		want := http.StatusNotFound
 		if call.perm == appEntitlements {
-			want = call.status
+			status, body := w.merchantJSONAt(gate.URL, w.auth.hostToken(t), call.method, call.path, call.body())
+			require.Equal(t, call.status, status, "%s on a mount given Entitlements: %v", call.path, body)
+			continue
 		}
-		require.Equal(t, want, status, "%s on a mount given Entitlements alone: %v", call.path, body)
+		raw, err := json.Marshal(call.body())
+		require.NoError(t, err)
+		req, err := http.NewRequestWithContext(t.Context(), call.method, gate.URL+mountPrefix+call.path, bytes.NewReader(raw))
+		require.NoError(t, err)
+		req.Header.Set("Authorization", "Bearer "+w.auth.hostToken(t))
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		_ = res.Body.Close()
+		require.Equal(t, http.StatusNotFound, res.StatusCode, "%s is not mounted without %s", call.path, call.perm)
 	}
 
 	for name, routes := range map[string]openrails.Routes{
