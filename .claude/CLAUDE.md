@@ -49,12 +49,15 @@ through `host-four`; these are placeholders, not customer or repository names.
   groups (`Routes.RouteGroups`: `Admin`, `Catalog`, `MerchantConfig`, `Metrics`) are off
   unless the host turns them on, and each needs its permission in `Routes.Scope`
   (`Permissions.AdminRead`, plus `AdminUpdate` for admin changes; `Catalog`;
-  `MerchantConfig`; `Metrics`); `Programmatic` (`/v1/app`) admits applications. No
-  route registers a merchant or manages a
+  `MerchantConfig`; `Metrics`); `Programmatic` (`/v1/app`) admits applications, each
+  route only with its permission (`Orders`, `Entitlements`, `Usage`, `Costs`, `Events`).
+  No route registers a merchant or manages a
   team, API keys or the merchant directory: those are `server` Go methods and
   the `openrails` CLI; a hosted product builds its own routes on them.
-- OpenRails names no staff permissions: the host passes its own in
-  `Routes.Permissions`; the in-process `Client` checks none.
+- Permissions are `persona:resource:action` (`read`/`manage`), the persona being where
+  they are held: embedded hosts pass their own `root:…` in `Routes.Permissions`
+  (OpenRails names none); the standalone server's are `merchant:…` (the `server`
+  package's `Merchant…` constants). The in-process `Client` checks none.
 - Wire: lists are `{data, next_cursor}` (cursor only); DELETE answers 204; nulls are
   present; times are RFC 3339 UTC; unknown request fields are refused; error codes
   come from the registry (`billing.ErrorCodes()`); IDs are prefixed (`psp_`, `chk_`, …).
