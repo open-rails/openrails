@@ -428,6 +428,25 @@ func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUnde
 	return items, nil
 }
 
+const markAllCustomerNotificationsRead = `-- name: MarkAllCustomerNotificationsRead :execrows
+UPDATE billing.notifications SET read_at = now()
+WHERE merchant_id = $1::uuid AND recipient_kind = 'customer'
+  AND customer_id = $2::uuid AND read_at IS NULL
+`
+
+type MarkAllCustomerNotificationsReadParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+}
+
+func (q *Queries) MarkAllCustomerNotificationsRead(ctx context.Context, arg MarkAllCustomerNotificationsReadParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markAllCustomerNotificationsRead, arg.MerchantID, arg.CustomerID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markCustomerNotificationsRead = `-- name: MarkCustomerNotificationsRead :many
 UPDATE billing.notifications SET read_at = COALESCE(read_at, now())
 WHERE merchant_id = $1::uuid AND id = ANY($2::uuid[])

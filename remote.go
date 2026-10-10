@@ -278,15 +278,37 @@ func (c *Client) bearer(ctx context.Context, target CredentialTarget) (string, e
 	return strings.TrimSpace(tok), nil
 }
 
-// ListCustomerEntitlements returns one page of the keys the customer holds at
-// params.At (zero: now), in byte order, optionally only those under
-// params.Prefix: the current keys of the products they hold.
-func (c *Client) ListCustomerEntitlements(ctx context.Context, customerID billing.CustomerID, params billing.CustomerEntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
+// ListEntitlements returns one page of the keys customers hold at params.At
+// (zero: now), by customer then key in byte order: of params.CustomerIDs (1
+// to billing.MaxBatchItems), only params.Entitlements and keys under
+// params.Prefix. A key absent from the answer is not held. Without
+// customers, params.Entitlements names one key and the page is its holders.
+func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error) {
+	switch {
+	case len(params.CustomerIDs) > billing.MaxBatchItems:
+		return nil, invalidErr(fmt.Sprintf("at most %d customers per read", billing.MaxBatchItems))
+	case len(params.Entitlements) > billing.MaxBatchItems:
+		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per read", billing.MaxBatchItems))
+	case len(params.CustomerIDs) == 0 && (len(params.Entitlements) != 1 || params.Prefix != ""):
+		return nil, invalidErr("without customer ids, name exactly one entitlement")
 	}
 	query := pageValues(nil, params.PageRequest)
+	if len(params.CustomerIDs) > 0 {
+		parts := make([]string, len(params.CustomerIDs))
+		for i, id := range params.CustomerIDs {
+			if id.IsZero() {
+				return nil, invalidErr("customer ids must be nonzero")
+			}
+			parts[i] = id.String()
+		}
+		query.Set("customer_id", strings.Join(parts, ","))
+	}
+	for _, key := range params.Entitlements {
+		if strings.TrimSpace(key) == "" {
+			return nil, invalidErr("entitlements must not contain a blank key")
+		}
+		query.Add("entitlement", key)
+	}
 	if params.Prefix != "" {
 		query.Set("prefix", params.Prefix)
 	}
@@ -294,67 +316,7 @@ func (c *Client) ListCustomerEntitlements(ctx context.Context, customerID billin
 		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
 	}
 	var out billing.ListPage[billing.CustomerEntitlement]
-	if err := c.do(ctx, http.MethodGet, path+"/entitlements?"+query.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// CheckEntitlements answers which of params.Entitlements the customer holds,
-// and the keys they hold under each of params.Prefixes, at params.At (zero:
-// now); every requested key and prefix is in the answer. One call checks at
-// most billing.MaxEntitlementChecks keys and billing.MaxEntitlementPrefixes
-// prefixes; more is refused with invalid_param, not split, so every answer
-// reads one instant. A prefix is bytes OpenRails gives no meaning.
-func (c *Client) CheckEntitlements(ctx context.Context, customerID billing.CustomerID, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	switch {
-	case len(params.Entitlements) == 0 && len(params.Prefixes) == 0:
-		return nil, invalidErr("entitlements or prefixes is required")
-	case len(params.Entitlements) > billing.MaxEntitlementChecks:
-		return nil, invalidErr(fmt.Sprintf("at most %d entitlements per check", billing.MaxEntitlementChecks))
-	case len(params.Prefixes) > billing.MaxEntitlementPrefixes:
-		return nil, invalidErr(fmt.Sprintf("at most %d prefixes per check", billing.MaxEntitlementPrefixes))
-	}
-	for _, key := range params.Entitlements {
-		if strings.TrimSpace(key) == "" {
-			return nil, invalidErr("entitlements must not contain a blank key")
-		}
-	}
-	if params.Entitlements == nil {
-		params.Entitlements = []string{}
-	}
-	var out billing.EntitlementCheck
-	if err := c.do(ctx, http.MethodPost, path+"/entitlements/check", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	if out.Entitlements == nil {
-		out.Entitlements = map[string]bool{}
-	}
-	if out.Quantities == nil {
-		out.Quantities = map[string]*int{}
-	}
-	if out.Held == nil {
-		out.Held = map[string]billing.HeldEntitlements{}
-	}
-	return &out, nil
-}
-
-// ListEntitlementCustomers returns one page of the customers holding
-// entitlement at params.At (zero: now), ordered by customer id.
-func (c *Client) ListEntitlementCustomers(ctx context.Context, entitlement string, params billing.EntitlementCustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerID], error) {
-	if strings.TrimSpace(entitlement) == "" {
-		return nil, invalidErr("entitlement is required")
-	}
-	query := pageValues(nil, params.PageRequest)
-	if !params.At.IsZero() {
-		query.Set("at", params.At.UTC().Format(time.RFC3339Nano))
-	}
-	var out billing.ListPage[billing.CustomerID]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/entitlements/"+url.PathEscape(entitlement)+"/customers?"+query.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/entitlements?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

@@ -339,6 +339,11 @@ func mySubscription(r *httprequest.Request, userID string, id uuid.UUID) (billin
 		return billing.Subscription{}, false
 	}
 	out := subscription.View()
+	one := []billing.Subscription{out}
+	if !withMandates(r, one) {
+		return billing.Subscription{}, false
+	}
+	out = one[0]
 	payer, ok := selfAccountPayer(r)
 	if !ok {
 		return billing.Subscription{}, false
@@ -368,5 +373,5 @@ func writeMerchantSubscription(r *httprequest.Request, id uuid.UUID) {
 		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
-	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
+	writeSubscription(r, subscriptionView(subscription, r.Clock.Now()))
 }

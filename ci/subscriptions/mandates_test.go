@@ -5,18 +5,24 @@ package subscriptions_test
 import (
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// mandates is the customer's mandates as the Client lists them.
+// mandates is the customer's mandates as the admin card list embeds them:
+// every agreement on each saved card, ended ones included.
 func (w *world) mandates(tp topology, customer billing.CustomerID) []billing.Mandate {
 	w.t.Helper()
-	page, err := w.client[tp].ListMandates(w.t.Context(), customer, billing.MandateListParams{PageRequest: billing.PageRequest{Limit: 100}})
+	page, err := w.client[tp].ListPaymentMethods(w.t.Context(), customer, billing.PaymentMethodListParams{PageRequest: billing.PageRequest{Limit: 100}})
 	require.NoError(w.t, err)
-	return page.Items
+	out := []billing.Mandate{}
+	for _, card := range page.Items {
+		out = append(out, card.Mandates...)
+	}
+	return out
 }
 
 func (w *world) mandate(tp topology, customer billing.CustomerID, id billing.MandateID) billing.Mandate {
@@ -98,6 +104,37 @@ func TestRenewalSendsItsMandateReferences(t *testing.T) {
 			require.Len(t, attempts.Items, 1)
 			require.NotNil(t, attempts.Items[0].MandateID)
 			require.Equal(t, recurring.ID, *attempts.Items[0].MandateID)
+			require.NotNil(t, w.subscription(tp, e.sub).MandateID)
+			require.Equal(t, recurring.ID, *w.subscription(tp, e.sub).MandateID, "the subscription names the agreement it renews under")
+			everyAttempt, err := w.client[tp].ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{SubscriptionID: e.sub})
+			require.NoError(t, err)
+			var paidBy *billing.PaymentAttempt
+			for i, a := range everyAttempt.Items {
+				if a.PaymentID != nil {
+					paidBy = &everyAttempt.Items[i]
+				}
+			}
+			require.NotNil(t, paidBy, "the enrollment charge names its payment: %+v", everyAttempt.Items)
+			byPayment, err := w.client[tp].ListPaymentAttempts(t.Context(), billing.PaymentAttemptListParams{PaymentID: *paidBy.PaymentID})
+			require.NoError(t, err)
+			require.Len(t, byPayment.Items, 1, "the attempts behind one payment")
+			require.Equal(t, paidBy.ID, byPayment.Items[0].ID)
+			succeeded, err := w.client[tp].ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: e.sub, Status: billing.PaymentSucceeded})
+			require.NoError(t, err)
+			require.NotEmpty(t, succeeded.Items)
+			for _, p := range succeeded.Items {
+				require.Equal(t, billing.PaymentSucceeded, p.Status)
+			}
+			refunded, err := w.client[tp].ListPayments(t.Context(), billing.PaymentListParams{SubscriptionID: e.sub, Status: billing.PaymentRefunded})
+			require.NoError(t, err)
+			require.Empty(t, refunded.Items)
+			own := e.c.must(http.MethodGet, "/payment-methods", "", nil)["data"].([]any)
+			require.NotEmpty(t, own)
+			for _, card := range own {
+				for _, m := range card.(map[string]any)["mandates"].([]any) {
+					require.Contains(t, []string{string(billing.MandateActive), string(billing.MandateRequiresReconsent)}, m.(map[string]any)["status"], "the customer sees the agreements that can still charge")
+				}
+			}
 			require.Equal(t, renewal.Initial, attempts.Items[0].SentInitialTransactionID)
 			require.Empty(t, w.nmi.Unexpected())
 		})
@@ -157,10 +194,15 @@ func TestDeletedCardEndsItsMandates(t *testing.T) {
 	status, body := c.call(http.MethodDelete, "/payment-methods/"+method, "", nil)
 	require.Contains(t, []int{http.StatusAccepted, http.StatusNoContent}, status, "%v", body)
 	w.settle()
-	ended := w.mandate(embedded, c.cid(), saved[0].ID)
-	require.Equal(t, billing.MandateEnded, ended.Status)
-	require.Equal(t, billing.MandateEndPaymentMethodRemoved, *ended.EndReason)
-	require.NotNil(t, ended.EndedAt)
-	require.Nil(t, ended.PaymentMethodID, "the card is gone")
-	require.Equal(t, saved[0].InitialTransactionID, ended.InitialTransactionID, "its references stay")
+	require.Empty(t, w.mandates(embedded, c.cid()), "no card carries it any more")
+	var state, reason string
+	var card, initial *string
+	var endedAt *time.Time
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT status, end_reason, ended_at, payment_method_id::text, initial_transaction_id FROM billing.mandates WHERE id = $1::uuid`), saved[0].ID.UUID()).
+		Scan(&state, &reason, &endedAt, &card, &initial))
+	require.Equal(t, string(billing.MandateEnded), state)
+	require.Equal(t, string(billing.MandateEndPaymentMethodRemoved), reason)
+	require.NotNil(t, endedAt)
+	require.Nil(t, card, "the card is gone")
+	require.Equal(t, saved[0].InitialTransactionID, initial, "its references stay as evidence")
 }

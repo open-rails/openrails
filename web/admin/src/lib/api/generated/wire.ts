@@ -96,6 +96,7 @@ export type Allowance = {
 export type Application = {
   schema_version?: number
   prune?: boolean
+  entitlement_replacements?: EntitlementReplacement[]
   products?: Record<string, ApplyProduct>
   meters?: Record<string, ApplyMeter>
 }
@@ -154,7 +155,7 @@ export type ArchivePSPParams = {
 export type ArchiveProductParams = {
   product_id?: string
   product_key?: string
-  purchase_action?: "none" | "refund" | "review"
+  purchase_action?: "refund" | "review"
   purchase_window_starts_at?: string
   window_seconds?: number
   reason?: string
@@ -278,6 +279,14 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
+export type CaptchaConfig = {
+  provider: string
+  site_key: string
+  script_url: string
+  action: string
+  token_header: string
+}
+
 export type CaptchaStatus = {
   enabled: boolean
   required: boolean
@@ -377,18 +386,6 @@ export type ChangeSubscriptionParams = {
   price_id?: string
   quantity?: number
   reason?: string
-}
-
-export type CheckEntitlementsParams = {
-  entitlements?: string[]
-  prefixes?: string[]
-  prefix_limit?: number
-  at?: string
-}
-
-export type CheckProductAccessParams = {
-  product_ids?: string[]
-  product_keys?: string[]
 }
 
 export type CheckoutCustomerIdentity = {
@@ -727,7 +724,9 @@ export type CustomerContact = {
 }
 
 export type CustomerEntitlement = {
+  customer_id: string
   entitlement: string
+  quantity: number | null
 }
 
 export type CustomerNotificationLookup = {
@@ -877,12 +876,6 @@ export type EntitlementChange = {
   holders: number
 }
 
-export type EntitlementCheck = {
-  entitlements: Record<string, boolean> | null
-  quantities: Record<string, number | null> | null
-  held: Record<string, HeldEntitlements> | null
-}
-
 export type EntitlementReplacement = {
   from?: string
   to?: string
@@ -965,11 +958,6 @@ export type GetEffectiveTiersParams = {
 
 export type Health = {
   status: "ok" | "ready"
-}
-
-export type HeldEntitlements = {
-  keys: string[]
-  truncated: boolean
 }
 
 export type HostEvent = {
@@ -1093,6 +1081,7 @@ export type Mandate = {
 
 export type MarkNotificationsReadParams = {
   notification_ids?: string[]
+  all?: boolean
 }
 
 export type Matrix = {
@@ -1174,6 +1163,13 @@ export type MeterRateCard = {
   allowance: Allowance | null
   created_at: string
   updated_at: string
+}
+
+export type MeterRateCardParams = {
+  product_id?: string
+  filter?: Record<string, string[]>
+  price?: RatePrice
+  allowance?: Allowance
 }
 
 export type MetricsAnswer = {
@@ -1343,28 +1339,6 @@ export type NotificationData = {
   product_name?: string
   payment_method?: string
   user_email?: string
-}
-
-export type Offer = {
-  kind: "finite" | "permanent" | "recurring"
-  product_id: string
-  product_key: string
-  product_display_name: string
-  entitlements: string[]
-  price_id: string
-  price_key: string
-  unit_amount: string
-  currency: string
-  access_duration_hours: number | null
-  billing_interval_hours: number | null
-}
-
-export type OfferListParams = {
-  entitlements?: string[]
-  kind?: "finite" | "permanent" | "recurring"
-  preferred_currency?: string
-  limit?: number
-  cursors?: Record<string, string>
 }
 
 export type OpenProviderOperationParams = {
@@ -1844,11 +1818,6 @@ export type Product = {
   updated_at: string
 }
 
-export type ProductAccessCheck = {
-  access: Record<string, boolean> | null
-  quantities: Record<string, number | null> | null
-}
-
 export type ProductAccessGrant = {
   id: string
   customer_id: string
@@ -1875,7 +1844,7 @@ export type ProductArchive = {
   id: string
   product_id: string
   product_key: string
-  purchase_action: "none" | "refund" | "review"
+  purchase_action: "refund" | "review"
   purchase_window_starts_at: string | null
   reason: string | null
   created_at: string
@@ -2001,7 +1970,9 @@ export type ProvisioningToken = {
 export type PublicConfig = {
   capabilities: Capabilities
   currencies: CurrencyUnits[]
+  rails: RailDefinition[]
   payment: PaymentConfig | null
+  captcha: CaptchaConfig | null
 }
 
 export type Quantity = {
@@ -2120,10 +2091,6 @@ export type ReleaseProviderOperationParams = {
   release_reference?: string
 }
 
-export type ReplaceEntitlementsParams = {
-  pairs?: EntitlementReplacement[]
-}
-
 export type ReplacePaymentMethodCardParams = {
   payment_token?: string
   card?: CardEntry
@@ -2177,13 +2144,7 @@ export type SetMeterParams = {
   aggregation?: "count" | "latest" | "max" | "min" | "sum" | "unique_count"
   unit?: string
   group_by?: Record<string, string>
-}
-
-export type SetMeterRateCardParams = {
-  product_id?: string
-  filter?: Record<string, string[]>
-  price?: RatePrice
-  allowance?: Allowance
+  rate_card?: MeterRateCardParams | null
 }
 
 export type SetRateOverrideParams = {
@@ -2266,7 +2227,6 @@ export type Subscription = {
   recovery?: PaymentRecovery
   dunning: SubscriptionDunning | null
   deletion_scheduled_at?: string
-  payments?: Payment[]
   id: string
   customer_id: string
   product_id: string
@@ -2278,6 +2238,7 @@ export type Subscription = {
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_change: ScheduledChange | null
   payment_method_id: string | null
+  mandate_id: string | null
   started_at: string
   ended_at: string | null
   current_period_starts_at: string | null

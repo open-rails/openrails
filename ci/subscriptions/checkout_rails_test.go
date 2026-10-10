@@ -246,7 +246,7 @@ func TestCatalogRefusesPriceNoRailCanSell(t *testing.T) {
 
 func priceID(t *testing.T, w *world, productKey, key string) string {
 	t.Helper()
-	price, err := w.client[embedded].GetPriceByKey(t.Context(), productKey, key)
+	price, err := priceByKey(t.Context(), w.client[embedded], productKey, key)
 	require.NoError(t, err)
 	return price.ID.String()
 }

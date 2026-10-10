@@ -65,24 +65,29 @@ func (q *Queries) GetPayerRateCard(ctx context.Context, arg GetPayerRateCardPara
 	return i, err
 }
 
-const listPayerRateCards = `-- name: ListPayerRateCards :many
+const listRateOverrides = `-- name: ListRateOverrides :many
 
 SELECT customer_id, meter_key, allowance, price, created_at, updated_at
 FROM billing.catalog_rate_cards
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND meter_key IS NOT NULL
-  AND ($3::text IS NULL OR meter_key > $3::text)
-ORDER BY meter_key
-LIMIT $4::int
+WHERE merchant_id = $1::uuid AND customer_id IS NOT NULL AND meter_key IS NOT NULL
+  AND ($2::uuid IS NULL OR customer_id = $2::uuid)
+  AND ($3::text IS NULL OR meter_key = $3::text)
+  AND ($4::uuid IS NULL
+       OR (customer_id, meter_key) > ($4::uuid, $5::text))
+ORDER BY customer_id, meter_key
+LIMIT $6::int
 `
 
-type ListPayerRateCardsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	AfterKey   *string
-	FetchLimit int32
+type ListRateOverridesParams struct {
+	MerchantID    uuid.UUID
+	CustomerID    *uuid.UUID
+	MeterKey      *string
+	AfterCustomer *uuid.UUID
+	AfterKey      *string
+	FetchLimit    int32
 }
 
-type ListPayerRateCardsRow struct {
+type ListRateOverridesRow struct {
 	CustomerID *uuid.UUID
 	MeterKey   *string
 	Allowance  []byte
@@ -94,11 +99,14 @@ type ListPayerRateCardsRow struct {
 // or#909: negotiated per-payer rate-card overrides (#798 storage) — the read
 // side. Writes stay in money/enterprise.go's SetUsageRateCard /
 // DeletePayerRateCard chokepoints.
-// One keyset page of a customer's overrides, by meter.
-func (q *Queries) ListPayerRateCards(ctx context.Context, arg ListPayerRateCardsParams) ([]ListPayerRateCardsRow, error) {
-	rows, err := q.db.Query(ctx, listPayerRateCards,
+// One keyset page of customers' overrides, by customer then meter; each
+// filter is optional.
+func (q *Queries) ListRateOverrides(ctx context.Context, arg ListRateOverridesParams) ([]ListRateOverridesRow, error) {
+	rows, err := q.db.Query(ctx, listRateOverrides,
 		arg.MerchantID,
 		arg.CustomerID,
+		arg.MeterKey,
+		arg.AfterCustomer,
 		arg.AfterKey,
 		arg.FetchLimit,
 	)
@@ -106,9 +114,9 @@ func (q *Queries) ListPayerRateCards(ctx context.Context, arg ListPayerRateCards
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListPayerRateCardsRow
+	var items []ListRateOverridesRow
 	for rows.Next() {
-		var i ListPayerRateCardsRow
+		var i ListRateOverridesRow
 		if err := rows.Scan(
 			&i.CustomerID,
 			&i.MeterKey,

@@ -101,7 +101,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/billing-import":                                                  admin,
 		"GET /v1/admin/host-events":                                                      read,
 		"POST /v1/admin/host-events/acknowledge":                                         write,
-		"GET /v1/admin/customers/{customer_id}/entitlements":                             read,
+		"GET /v1/admin/entitlements":                                                     read,
 		"POST /v1/admin/tiers/lookup":                                                    read,
 		"GET /v1/admin/customers/{customer_id}":                                          read,
 		"GET /v1/admin/orders":                                                           read,
@@ -110,7 +110,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}":                  write,
 		"POST /v1/admin/payments":                                                        write,
 		"POST /v1/admin/product-access":                                                  write,
-		"PUT /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}":               catalog,
+		"PUT /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}":                 catalog,
 		"PATCH /v1/admin/customers/{customer_id}":                                        write,
 		"POST /v1/admin/credit-grants":                                                   write,
 		"POST /v1/admin/customers/{customer_id}/credit-grants/{id}/revoke":               write,
@@ -135,8 +135,7 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/subscriptions/{id}/change":                                       write,
 		"POST /v1/admin/subscriptions/{id}/change/preview":                               read,
 		"POST /v1/admin/price-migrations/preview":                                        read,
-		"POST /v1/admin/customers/{customer_id}/entitlements/check":                      read,
-		"POST /v1/admin/customers/{customer_id}/product-access/check":                    read,
+		"GET /v1/admin/product-access":                                                   read,
 		"POST /v1/admin/price-migrations":                                                write,
 		"GET /v1/admin/invoices":                                                         read,
 		"POST /v1/admin/invoices/{id}/void":                                              write,
@@ -155,12 +154,12 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/psps/{id}/archive":                                               admin,
 		"POST /v1/admin/psps/routing-preview":                                            admin,
 		"POST /v1/admin/psps/refresh":                                                    admin,
-		"GET /v1/admin/rails":                                                            admin,
 		"GET /v1/admin/catalog/products":                                                 read,
-		"POST /v1/admin/catalog/offers/lookup":                                           read,
+		"GET /v1/admin/catalog/prices/{id}/history":                                      read,
+		"GET /v1/admin/catalog/rate-overrides":                                           read,
 		"POST /v1/admin/catalog/applications":                                            catalog,
 		"PUT /v1/admin/catalog/meters/{key}":                                             catalog,
-		"DELETE /v1/admin/catalog/meters/{key}/rate-card":                                catalog,
+		"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}":              catalog,
 		"POST /v1/admin/catalog/product-archives":                                        catalog,
 	} {
 		require.Contains(t, asked, key)
@@ -202,7 +201,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	staff, edits := &router.Table{}, &router.Table{}
 	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{AdminRead: "staff:read", AdminWrite: "staff:write"}})
 	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Permissions: Permissions{AdminRead: "staff:read", CatalogWrite: "staff:catalog"}})
-	for _, key := range []string{"GET /admin/catalog/revision", "GET /admin/catalog/meters", "GET /admin/catalog/product-archives/{id}", "GET /admin/catalog/products", "POST /admin/catalog/offers/lookup", "GET /admin/customers/{customer_id}/rate-overrides", "POST /admin/credit-grants"} {
+	for _, key := range []string{"GET /admin/catalog/revision", "GET /admin/catalog/meters", "GET /admin/catalog/product-archives/{id}", "GET /admin/catalog/products", "GET /admin/catalog/prices/{id}/history", "GET /admin/catalog/rate-overrides", "POST /admin/credit-grants"} {
 		require.Contains(t, routeKeys(staff), key)
 	}
 	for _, key := range routeKeys(staff) {
@@ -211,7 +210,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 		require.True(t, ok, key)
 		require.NotEqual(t, CatalogWrite, route.Group, "%s: a catalog write is CatalogWrite's", key)
 	}
-	for _, key := range []string{"POST /admin/catalog/applications", "PUT /admin/catalog/products/by-key/{product_key}", "PATCH /admin/catalog/prices/{id}", "DELETE /admin/catalog/meters/{key}/rate-card", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/customers/{customer_id}/rate-overrides/{meter_key}", "DELETE /admin/customers/{customer_id}/rate-overrides/{meter_key}"} {
+	for _, key := range []string{"POST /admin/catalog/applications", "PUT /admin/catalog/products/by-key/{product_key}", "PATCH /admin/catalog/prices/{id}", "PUT /admin/catalog/meters/{key}", "POST /admin/catalog/product-archives", "POST /admin/catalog/prices", "PUT /admin/catalog/rate-overrides/{customer_id}/{meter_key}", "DELETE /admin/catalog/rate-overrides/{customer_id}/{meter_key}"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
 

@@ -46,12 +46,11 @@ func TestClientRequestShapes(t *testing.T) {
 	customer := customerID.String()
 	product := billing.ProductID(uuid.New()).String()
 	client, seen := recordingRemote(t, map[string]string{
-		"/v1/admin/admissions":                                      `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
-		"/v1/admin/customers":                                       `{"data":[{"id":"` + customer + `","settings":{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}}],"next_cursor":null}`,
-		"/v1/admin/customers/" + customer + "/credit-grants":        `{"data":[{"amount":"1"}],"next_cursor":null}`,
-		"/v1/admin/customers/" + customer + "/product-access":       `{"data":[],"next_cursor":"next"}`,
-		"/v1/admin/customers/" + customer + "/product-access/check": `{"access":{"` + product + `":true}}`,
-		"/v1/admin/customers/" + customer + "/entitlements/check":   `{"entitlements":{"pro":true,"team":false}}`,
+		"/v1/admin/admissions":                               `{"items":[{"status":200,"admission":{"allowed":true,"state":"open"},"error":null}]}`,
+		"/v1/admin/customers":                                `{"data":[{"id":"` + customer + `","settings":{"customer_id":"` + customer + `","credit_limits":[],"trust_levels":[{"currency":"USD","trust_level":"gold"}],"billing_policy":null,"invoice_profile":null}}],"next_cursor":null}`,
+		"/v1/admin/customers/" + customer + "/credit-grants": `{"data":[{"amount":"1"}],"next_cursor":null}`,
+		"/v1/admin/product-access":                           `{"data":[],"next_cursor":"next"}`,
+		"/v1/admin/entitlements":                             `{"data":[{"customer_id":"` + customer + `","entitlement":"pro"}],"next_cursor":null}`,
 	})
 	who := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.MustParse(customer))}
 	expires := time.Now().Add(time.Hour)
@@ -160,44 +159,25 @@ func TestClientRequestShapes(t *testing.T) {
 		{"delegation delete escapes one segment per key", func() error {
 			return client.DeleteSpendDelegation(t.Context(), typedCustomer, " invoker ", "a/b:c")
 		}, http.MethodDelete, "/v1/admin/customers/" + customer + "/spend-delegations/invoker/a%2Fb:c", "", nil},
-		{"access check keeps duplicates", func() error {
-			id, _ := billing.ParseProductID(product)
-			got, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{id, id}})
-			if err == nil && !got.Access[product] {
-				err = errors.New("access not decoded")
+		{"entitlements of named customers", func() error {
+			page, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customerID, customerID}, Entitlements: []string{"pro", "a,b"}})
+			if err == nil && (len(page.Items) != 1 || page.Items[0].CustomerID != customerID || page.Items[0].Entitlement != "pro") {
+				err = errors.New("entitlements not decoded")
 			}
 			return err
-		}, http.MethodPost, "/v1/admin/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, []any{product, product}, b["product_ids"])
-		}},
-		{"access check by key", func() error {
-			_, err := client.CheckProductAccess(t.Context(), customerID, billing.CheckProductAccessParams{ProductKeys: []string{"pro plan&x"}})
+		}, http.MethodGet, "/v1/admin/entitlements", "customer_id=" + customer + "%2C" + customer + "&entitlement=pro&entitlement=a%2Cb", nil},
+		{"holders of one entitlement", func() error {
+			_, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{Entitlements: []string{"pro"}, PageRequest: billing.PageRequest{Limit: 7}})
 			return err
-		}, http.MethodPost, "/v1/admin/customers/" + customer + "/product-access/check", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, []any{"pro plan&x"}, b["product_keys"])
-		}},
-		{"entitlement check", func() error {
-			got, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{Entitlements: []string{"pro", "team"}})
-			if err == nil && (!got.Entitlements["pro"] || got.Entitlements["team"] || len(got.Entitlements) != 2 || got.Held == nil) {
-				err = errors.New("check not decoded")
-			}
-			return err
-		}, http.MethodPost, "/v1/admin/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, map[string]any{"entitlements": []any{"pro", "team"}}, b, "zero At, prefixes and limit are omitted")
-		}},
-		{"entitlement check prefixes only", func() error {
-			_, err := client.CheckEntitlements(t.Context(), customerID, billing.CheckEntitlementsParams{Prefixes: []string{"content:t:"}, PrefixLimit: 5})
-			return err
-		}, http.MethodPost, "/v1/admin/customers/" + customer + "/entitlements/check", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, map[string]any{"entitlements": []any{}, "prefixes": []any{"content:t:"}, "prefix_limit": float64(5)}, b, "no keys send a list, not null")
-		}},
+		}, http.MethodGet, "/v1/admin/entitlements", "entitlement=pro&limit=7", nil},
 		{"access list pages", func() error {
-			page, err := client.ListProductAccess(t.Context(), customerID, billing.ProductAccessListParams{PageRequest: billing.PageRequest{Limit: 7, Cursor: "cursor"}, LiveOnly: true})
+			id, _ := billing.ParseProductID(product)
+			page, err := client.ListProductAccess(t.Context(), billing.ProductAccessListParams{PageRequest: billing.PageRequest{Limit: 7, Cursor: "cursor"}, CustomerIDs: []billing.CustomerID{customerID}, ProductIDs: []billing.ProductID{id}, LiveOnly: true})
 			if err == nil && page.Next != "next" {
 				err = errors.New("page not decoded")
 			}
 			return err
-		}, http.MethodGet, "/v1/admin/customers/" + customer + "/product-access", "cursor=cursor&limit=7&live=true", nil},
+		}, http.MethodGet, "/v1/admin/product-access", "cursor=cursor&customer_id=" + customer + "&limit=7&live=true&product_id=" + product, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,19 +215,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 
 	// Free-form host strings: blank and dot segments are refused.
 	pathStrings := map[string]func(id string) error{
-		"product key": func(id string) error { _, err := c.GetProductByKey(ctx, id); return err },
-		"price key":   func(id string) error { _, err := c.GetPriceByKey(ctx, "product", id); return err },
-		"price history": func(id string) error {
-			_, err := c.ListPriceKeyHistory(ctx, "product", id, billing.PageRequest{})
-			return err
-		},
 		"meter":     func(id string) error { _, err := c.GetMeter(ctx, id); return err },
 		"set meter": func(id string) error { _, err := c.SetMeter(ctx, id, billing.SetMeterParams{}); return err },
-		"set rate card": func(id string) error {
-			_, err := c.SetMeterRateCard(ctx, id, billing.SetMeterRateCardParams{})
-			return err
-		},
-		"delete rate card": func(id string) error { return c.DeleteMeterRateCard(ctx, id) },
 		"rate override meter": func(id string) error {
 			_, err := c.SetRateOverride(ctx, billing.CustomerID(uuid.New()), id, billing.SetRateOverrideParams{})
 			return err
@@ -275,12 +244,8 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			return err
 		},
 		"admission": func(id string) error { _, err := c.GetAdmission(ctx, id); return err },
-		"entitlement check key": func(id string) error {
-			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: []string{"pro", id}, At: now})
-			return err
-		},
-		"entitled customers": func(id string) error {
-			_, err := c.ListEntitlementCustomers(ctx, id, billing.EntitlementCustomerListParams{})
+		"entitlement key": func(id string) error {
+			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customerID}, Entitlements: []string{"pro", id}, At: now})
 			return err
 		},
 	}
@@ -323,10 +288,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"price":        func() error { _, err := c.GetPrice(ctx, billing.PriceID{}, billing.GetPriceParams{}); return err },
 		"update price": func() error { _, err := c.UpdatePrice(ctx, billing.PriceID{}, billing.UpdatePriceParams{}); return err },
-		"rate overrides": func() error {
-			_, err := c.ListRateOverrides(ctx, billing.CustomerID{}, billing.PageRequest{})
-			return err
-		},
 		"checkout options": func() error {
 			_, err := c.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
 			return err
@@ -343,20 +304,12 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}})
 			return err
 		},
-		"access check customer": func() error {
-			_, err := c.CheckProductAccess(ctx, billing.CustomerID{}, billing.CheckProductAccessParams{ProductKeys: []string{"k"}})
-			return err
-		},
-		"access check both": func() error {
-			_, err := c.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{}, ProductKeys: []string{}})
-			return err
-		},
-		"access check neither": func() error {
-			_, err := c.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{})
-			return err
-		},
 		"access list customer": func() error {
-			_, err := c.ListProductAccess(ctx, billing.CustomerID{}, billing.ProductAccessListParams{})
+			_, err := c.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{{}}})
+			return err
+		},
+		"access list empty customers": func() error {
+			_, err := c.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{}})
 			return err
 		},
 		"create access product": func() error {
@@ -369,7 +322,7 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"delete access id": func() error { return c.DeleteProductAccess(ctx, customerID, billing.ProductAccessID{}) },
 		"list entitlements customer": func() error {
-			_, err := c.ListCustomerEntitlements(ctx, billing.CustomerID{}, billing.CustomerEntitlementListParams{})
+			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{{}}})
 			return err
 		},
 		"create access customer": func() error {
@@ -428,20 +381,20 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 			_, err := c.AcknowledgeHostEvents(ctx, nil)
 			return err
 		},
-		"entitlement check customer": func() error {
-			_, err := c.CheckEntitlements(ctx, billing.CustomerID{}, billing.CheckEntitlementsParams{Entitlements: []string{"pro"}})
+		"entitlements over bound": func() error {
+			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customerID}, Entitlements: make([]string, billing.MaxBatchItems+1)})
 			return err
 		},
-		"entitlement check over bound": func() error {
-			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: make([]string, billing.MaxEntitlementChecks+1)})
+		"entitlements customers over bound": func() error {
+			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: make([]billing.CustomerID, billing.MaxBatchItems+1)})
 			return err
 		},
-		"entitlement check empty": func() error {
-			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Entitlements: []string{}})
+		"entitlement holders of several keys": func() error {
+			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{Entitlements: []string{"a", "b"}})
 			return err
 		},
-		"entitlement check prefixes over bound": func() error {
-			_, err := c.CheckEntitlements(ctx, customerID, billing.CheckEntitlementsParams{Prefixes: make([]string, billing.MaxEntitlementPrefixes+1)})
+		"entitlement holders under a prefix": func() error {
+			_, err := c.ListEntitlements(ctx, billing.EntitlementListParams{Entitlements: []string{"a"}, Prefix: "a"})
 			return err
 		},
 		"effective tier customer": func() error {

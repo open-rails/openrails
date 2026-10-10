@@ -66,9 +66,9 @@ func (c *customer) buyWith(rail, method string, price *billing.Price) {
 
 func (c *customer) entitledAt(entitlement string, at time.Time) bool {
 	c.w.t.Helper()
-	got, err := c.w.client[embedded].CheckEntitlements(c.w.t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: at})
+	got, err := heldKeys(c.w.t.Context(), c.w.client[embedded], c.customerID(), at, entitlement)
 	require.NoError(c.w.t, err)
-	return got.Entitlements[entitlement]
+	return got[entitlement]
 }
 
 // SEC-25: revoked access stays revoked. A refund that revokes a stacked,

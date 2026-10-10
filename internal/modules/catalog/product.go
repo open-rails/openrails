@@ -211,11 +211,12 @@ func (s *ProductService) GetAll(ctx context.Context) ([]*models.Product, error) 
 // live price sells; false, products only granted. IDs, when not nil, reads
 // those products instead, in one page.
 type ProductFilter struct {
-	IDs         []uuid.UUID
-	Archived    *bool
-	TierGroup   string
-	Entitlement string
-	ForSale     *bool
+	IDs          []uuid.UUID
+	Keys         []string
+	Archived     *bool
+	TierGroup    string
+	Entitlements []string
+	ForSale      *bool
 }
 
 // List returns one keyset page of products, newest first.
@@ -241,7 +242,7 @@ func (s *ProductService) List(ctx context.Context, filter ProductFilter, page bi
 		return billing.ListPage[*models.Product]{}, err
 	}
 	rows, err := s.db.Gen(ctx).ListProductsFiltered(ctx, gen.ListProductsFilteredParams{MerchantID: queryMerchant.UUID(), Archived: filter.Archived,
-		TierGroup: strings.TrimSpace(filter.TierGroup), Entitlement: filter.Entitlement, ForSale: filter.ForSale,
+		TierGroup: strings.TrimSpace(filter.TierGroup), Keys: filter.Keys, Entitlements: filter.Entitlements, ForSale: filter.ForSale,
 		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*models.Product]{}, err

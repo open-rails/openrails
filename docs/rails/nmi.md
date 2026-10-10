@@ -268,7 +268,7 @@ doesn't surprise you:
   documented `PATCH /v5/subscriptions/{id}` returns `E_ROUTE_NOT_FOUND` on the
   live gateway. Transaction search stays on `query.php` (v5 has no list/search).
 - **Every later charge names its first.** Each agreement on a card is a
-  mandate (`ListMandates`): `card_on_file` from the card's save, `recurring`
+  mandate (each card's `mandates` on `ListPaymentMethods`): `card_on_file` from the card's save, `recurring`
   per subscription, `unscheduled` per collection currency. Its storing
   transaction's id is sent by every later charge under it, and only through
   the PSP account that ran it. A merchant-initiated charge runs only under an

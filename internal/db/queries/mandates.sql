@@ -101,21 +101,12 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg
   AND status IN ('active', 'requires_reconsent')
 RETURNING *;
 
--- name: ListCustomerMandatesPage :many
--- One page of a customer's mandates, newest first, after a (created_at, id)
--- cursor.
-SELECT * FROM billing.mandates m
-WHERE m.merchant_id = sqlc.arg(merchant_id)::uuid AND m.customer_id = sqlc.arg(customer_id)::uuid
-  AND (sqlc.narg(after_at)::timestamptz IS NULL
-       OR (m.created_at, m.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT sqlc.arg(row_limit)::int;
-
--- name: ListCustomerMandatesByIDs :many
--- A customer's named mandates, newest first.
+-- name: ListPaymentMethodMandates :many
+-- The agreements on the named cards, newest first; live_only keeps those
+-- that can still authorize a charge.
 SELECT * FROM billing.mandates
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND id = ANY (sqlc.arg(ids)::uuid[])
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = ANY (sqlc.arg(payment_method_ids)::uuid[])
+  AND (NOT sqlc.arg(live_only)::boolean OR status IN ('active', 'requires_reconsent'))
 ORDER BY created_at DESC, id DESC;
 
 -- name: RevokeCardOnFileMandates :many
@@ -141,3 +132,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND payment_method_id = ANY (sqlc.arg(payment_method_ids)::uuid[])
   AND status IN ('active', 'requires_reconsent')
 ORDER BY created_at, id;
+
+-- name: ListSubscriptionMandates :many
+-- The agreement each subscription renews under: its live recurring mandate.
+-- One per subscription (mandates_recurring_live_key): at most row_limit.
+SELECT subscription_id::uuid AS subscription_id, id FROM billing.mandates
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY (sqlc.arg(subscription_ids)::uuid[])
+  AND kind = 'recurring' AND status IN ('active', 'requires_reconsent')
+LIMIT sqlc.arg(row_limit)::int;

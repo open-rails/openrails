@@ -405,8 +405,8 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Configuration | `GetMerchantConfiguration`, `ApplyMerchantConfiguration`, `GetAPIHost` |
 | Policy | `ListSpendDelegations`, `SetSpendDelegations`, `DeleteSpendDelegation` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
-| Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements`, `ListCustomerEntitlements`, `ListEntitlementCustomers`, `GetEffectiveTiers`, `CheckProductAccess`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `GetProductByKey`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `GetPriceByKey`, `ListPrices`, `ListPriceKeyHistory`, `UpdatePrice`, `ListOffers`, `ListMeters`, `GetMeter`, `SetMeter`, `SetMeterRateCard`, `DeleteMeterRateCard`, `ListMeterRateOverrides`, `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `RefreshCatalogDrift` (drift is `ListFindings` with type `catalog.*`) |
+| Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `ListEntitlements`, `GetEffectiveTiers`, `ListProductAccess`, `CreateProductAccess`, `DeleteProductAccess` |
+| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `EnsureProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride`, `RefreshCatalogDrift` (drift is `ListFindings` with type `catalog.*`) |
 | Checkout | `CreateCheckoutSession`, `ListCheckoutOptions`, `GetPublicConfig` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
 | Orders | `ListOrders`, `GetOrder` (staff read; only the customer pays) |
@@ -428,7 +428,9 @@ verdicts, err := client.Admit(ctx, []billing.AdmitParams{{
 receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmissionParams{
     Amount: 43_000, Usage: &billing.CaptureUsage{EventType: "chat.completion"},
 })
-held, err := client.CheckEntitlements(ctx, billing.CustomerID(customerID), billing.CheckEntitlementsParams{Entitlements: []string{"premium"}})
+held, err := client.ListEntitlements(ctx, billing.EntitlementListParams{
+    CustomerIDs: []billing.CustomerID{billing.CustomerID(customerID)}, Entitlements: []string{"premium"},
+}) // held.Items is empty when the key is not held
 ```
 
 Entitlement checks address customers by the ids your auth system already holds;

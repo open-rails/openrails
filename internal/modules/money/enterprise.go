@@ -396,32 +396,44 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 	})
 }
 
-// ListPayerRateCards returns one keyset page of a customer's rate overrides,
-// by meter.
-func (s *MoneyService) ListPayerRateCards(ctx context.Context, payer identity.CustomerID, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
+// ListRateOverrides returns one keyset page of customers' rate overrides,
+// by customer then meter: of one customer and one meter when given.
+func (s *MoneyService) ListRateOverrides(ctx context.Context, payer *identity.CustomerID, meterKey string, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
 	var out billing.ListPage[billing.RateOverride]
 	if s == nil || s.db == nil {
 		return out, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return out, fmt.Errorf("payer required")
 	}
 	limit, err := pagination.Limit(page)
 	if err != nil {
 		return out, err
 	}
-	after, err := afterMeterKey(page.Cursor)
-	if err != nil {
+	var position struct {
+		Customer uuid.UUID `json:"c"`
+		Meter    string    `json:"m"`
+	}
+	params := gen.ListRateOverridesParams{FetchLimit: pagination.Fetch(limit)}
+	if present, err := pagination.Decode(page.Cursor, &position); err != nil {
 		return out, err
+	} else if present {
+		if position.Customer == uuid.Nil {
+			return out, pagination.ErrInvalidCursor
+		}
+		params.AfterCustomer, params.AfterKey = &position.Customer, &position.Meter
+	}
+	if payer != nil {
+		id := payer.UUID()
+		params.CustomerID = &id
+	}
+	if meterKey = catalogrules.NormalizeKey(meterKey); meterKey != "" {
+		params.MeterKey = &meterKey
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return out, err
 	}
+	params.MerchantID = tid.UUID()
 	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.db.Gen(ctx).ListPayerRateCards(ctx, gen.ListPayerRateCardsParams{
-			MerchantID: tid.UUID(), CustomerID: payer.UUID(), AfterKey: after, FetchLimit: pagination.Fetch(limit),
-		})
+		rows, err := s.db.Gen(ctx).ListRateOverrides(ctx, params)
 		if err != nil {
 			return err
 		}
@@ -433,7 +445,12 @@ func (s *MoneyService) ListPayerRateCards(ctx context.Context, payer identity.Cu
 			}
 			items = append(items, item)
 		}
-		out = pagination.Cut(items, limit, func(o billing.RateOverride) any { return meterKeyPosition{Key: o.MeterKey} })
+		out = pagination.Cut(items, limit, func(o billing.RateOverride) any {
+			return struct {
+				Customer uuid.UUID `json:"c"`
+				Meter    string    `json:"m"`
+			}{o.CustomerID.UUID(), o.MeterKey}
+		})
 		return nil
 	})
 	return out, err

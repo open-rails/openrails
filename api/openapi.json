@@ -1506,54 +1506,6 @@
         ]
       }
     },
-    "/v1/admin/catalog/entitlement-replacements": {
-      "post": {
-        "tags": [
-          "catalog_write"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReplaceEntitlementsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogApplicationReceipt"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write"
-        ]
-      }
-    },
     "/v1/admin/catalog/drift/refresh": {
       "post": {
         "tags": [
@@ -1783,141 +1735,12 @@
         ]
       }
     },
-    "/v1/admin/catalog/meters/{key}/rate-card": {
-      "put": {
-        "tags": [
-          "catalog_write"
-        ],
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetMeterRateCardParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Meter"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
-          "default_rate_card_not_found",
-          "default_rate_card_required",
-          "meter_in_use",
-          "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
-          "rate_card_product_not_found",
-          "usage_meter_invalid",
-          "usage_meter_not_found",
-          "usage_rate_card_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request",
-          "catalog_write"
-        ]
-      },
-      "delete": {
-        "tags": [
-          "catalog_write"
-        ],
-        "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "CatalogWrite",
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-write": true,
-        "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
-          "default_rate_card_not_found",
-          "default_rate_card_required",
-          "meter_in_use",
-          "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
-          "rate_card_product_not_found",
-          "usage_meter_invalid",
-          "usage_meter_not_found",
-          "usage_rate_card_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "catalog_write"
-        ]
-      }
-    },
-    "/v1/admin/catalog/meters/{key}/rate-overrides": {
+    "/v1/admin/catalog/rate-overrides": {
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "cursor",
             "in": "query",
@@ -1925,91 +1748,8 @@
               "type": "string"
             }
           },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/RateOverride"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
-          "default_rate_card_not_found",
-          "default_rate_card_required",
-          "meter_in_use",
-          "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
-          "rate_card_product_not_found",
-          "usage_meter_invalid",
-          "usage_meter_not_found",
-          "usage_rate_card_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/rate-overrides": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
           {
             "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
             "in": "query",
             "schema": {
               "type": "string"
@@ -2020,6 +1760,13 @@
             "in": "query",
             "schema": {
               "type": "integer"
+            }
+          },
+          {
+            "name": "meter_key",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -2063,14 +1810,17 @@
         ],
         "x-openrails-auth": "merchant",
         "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": null,
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_query"
+        ],
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/rate-overrides/{meter_key}": {
+    "/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}": {
       "put": {
         "tags": [
           "catalog_write"
@@ -2448,8 +2198,14 @@
           {
             "name": "entitlement",
             "in": "query",
+            "style": "form",
+            "explode": true,
             "schema": {
-              "type": "string"
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -2470,6 +2226,19 @@
                 "type": "string"
               },
               "minItems": 1,
+              "maxItems": 100
+            }
+          },
+          {
+            "name": "keys",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
               "maxItems": 100
             }
           },
@@ -2651,53 +2420,6 @@
       }
     },
     "/v1/admin/catalog/products/by-key/{product_key}": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "product_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Product"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "catalog_benefit_overlap",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      },
       "put": {
         "tags": [
           "catalog_write"
@@ -2853,6 +2575,13 @@
             }
           },
           {
+            "name": "key",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "schema": {
@@ -2861,6 +2590,13 @@
           },
           {
             "name": "product_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "product_key",
             "in": "query",
             "schema": {
               "type": "string"
@@ -3050,81 +2786,14 @@
         ]
       }
     },
-    "/v1/admin/catalog/products/by-key/{product_key}/prices/by-key/{key}": {
+    "/v1/admin/catalog/prices/{id}/history": {
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
           {
-            "name": "product_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Price"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "catalog_benefit_overlap",
-          "price_key_cadence_conflict",
-          "price_key_not_found",
-          "price_not_found",
-          "product_not_found",
-          "resource_conflict",
-          "trial_unsupported_on_rail"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/catalog/products/by-key/{product_key}/prices/by-key/{key}/history": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "product_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "key",
+            "name": "id",
             "in": "path",
             "required": true,
             "schema": {
@@ -3195,70 +2864,6 @@
           "resource_conflict",
           "trial_unsupported_on_rail"
         ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/catalog/offers/lookup": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OfferListParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "object",
-                    "properties": {
-                      "data": {
-                        "type": "array",
-                        "items": {
-                          "$ref": "#/components/schemas/Offer"
-                        }
-                      },
-                      "next_cursor": {
-                        "type": [
-                          "string",
-                          "null"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "data",
-                      "next_cursor"
-                    ]
-                  }
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
@@ -4688,20 +4293,12 @@
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/entitlements": {
+    "/v1/admin/entitlements": {
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "at",
             "in": "query",
@@ -4714,6 +4311,26 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entitlement",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
             }
           },
           {
@@ -4783,149 +4400,6 @@
         ]
       }
     },
-    "/v1/admin/entitlements/{entitlement}/customers": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "entitlement",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "at",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_param",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/entitlements/check": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckEntitlementsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EntitlementCheck"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/admin/tiers/lookup": {
       "post": {
         "tags": [
@@ -4972,78 +4446,21 @@
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/product-access/check": {
-      "post": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CheckProductAccessParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductAccessCheck"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_param",
-          "service_credential_customer_scope_denied"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/customers/{customer_id}/product-access": {
+    "/v1/admin/product-access": {
       "get": {
         "tags": [
           "admin"
         ],
         "parameters": [
           {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
+            "name": "cursor",
+            "in": "query",
             "schema": {
               "type": "string"
             }
           },
           {
-            "name": "cursor",
+            "name": "customer_id",
             "in": "query",
             "schema": {
               "type": "string"
@@ -5075,6 +4492,13 @@
             "in": "query",
             "schema": {
               "type": "boolean"
+            }
+          },
+          {
+            "name": "product_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -5128,9 +4552,7 @@
           "tier:merchant",
           "request"
         ]
-      }
-    },
-    "/v1/admin/product-access": {
+      },
       "post": {
         "tags": [
           "admin"
@@ -8911,99 +8333,6 @@
         ]
       }
     },
-    "/v1/admin/customers/{customer_id}/mandates": {
-      "get": {
-        "tags": [
-          "admin"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "ids",
-            "in": "query",
-            "style": "form",
-            "explode": false,
-            "schema": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              },
-              "minItems": 1,
-              "maxItems": 100
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/Mandate"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "AdminRead",
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_param"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
     "/v1/me/default-payment-methods/{currency}": {
       "put": {
         "tags": [
@@ -10044,57 +9373,6 @@
         "x-openrails-errors": [
           "service_unavailable"
         ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/rails": {
-      "get": {
-        "tags": [
-          "merchant_config"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/RailDefinition"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": "MerchantConfig",
-        "x-openrails-errors": null,
         "x-openrails-error-sets": [
           "tier:merchant"
         ]
@@ -11941,6 +11219,12 @@
           "prune": {
             "type": "boolean"
           },
+          "entitlement_replacements": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/EntitlementReplacement"
+            }
+          },
           "products": {
             "type": "object",
             "additionalProperties": {
@@ -12388,7 +11672,6 @@
           "purchase_action": {
             "type": "string",
             "enum": [
-              "none",
               "refund",
               "review"
             ]
@@ -12970,6 +12253,33 @@
           "features"
         ]
       },
+      "CaptchaConfig": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string"
+          },
+          "site_key": {
+            "type": "string"
+          },
+          "script_url": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "token_header": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "site_key",
+          "script_url",
+          "action",
+          "token_header"
+        ]
+      },
       "CaptchaStatus": {
         "type": "object",
         "properties": {
@@ -13361,47 +12671,6 @@
           },
           "reason": {
             "type": "string"
-          }
-        }
-      },
-      "CheckEntitlementsParams": {
-        "type": "object",
-        "properties": {
-          "entitlements": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "prefixes": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "prefix_limit": {
-            "type": "integer"
-          },
-          "at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
-      },
-      "CheckProductAccessParams": {
-        "type": "object",
-        "properties": {
-          "product_ids": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "product_keys": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
           }
         }
       },
@@ -14844,12 +14113,27 @@
       "CustomerEntitlement": {
         "type": "object",
         "properties": {
+          "customer_id": {
+            "type": "string"
+          },
           "entitlement": {
             "type": "string"
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
-          "entitlement"
+          "customer_id",
+          "entitlement",
+          "quantity"
         ]
       },
       "CustomerNotificationLookup": {
@@ -15390,62 +14674,6 @@
           "holders"
         ]
       },
-      "EntitlementCheck": {
-        "type": "object",
-        "properties": {
-          "entitlements": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "boolean"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "quantities": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "held": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/HeldEntitlements"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "entitlements",
-          "quantities",
-          "held"
-        ]
-      },
       "EntitlementReplacement": {
         "type": "object",
         "properties": {
@@ -15844,24 +15072,6 @@
         },
         "required": [
           "status"
-        ]
-      },
-      "HeldEntitlements": {
-        "type": "object",
-        "properties": {
-          "keys": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "truncated": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "keys",
-          "truncated"
         ]
       },
       "HostEvent": {
@@ -16655,6 +15865,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "all": {
+            "type": "boolean"
           }
         }
       },
@@ -17008,6 +16221,29 @@
           "created_at",
           "updated_at"
         ]
+      },
+      "MeterRateCardParams": {
+        "type": "object",
+        "properties": {
+          "product_id": {
+            "type": "string"
+          },
+          "filter": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "price": {
+            "$ref": "#/components/schemas/RatePrice"
+          },
+          "allowance": {
+            "$ref": "#/components/schemas/Allowance"
+          }
+        }
       },
       "MetricsAnswer": {
         "type": "object",
@@ -17652,111 +16888,6 @@
           },
           "user_email": {
             "type": "string"
-          }
-        }
-      },
-      "Offer": {
-        "type": "object",
-        "properties": {
-          "kind": {
-            "type": "string",
-            "enum": [
-              "finite",
-              "permanent",
-              "recurring"
-            ]
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "product_key": {
-            "type": "string"
-          },
-          "product_display_name": {
-            "type": "string"
-          },
-          "entitlements": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "price_id": {
-            "type": "string"
-          },
-          "price_key": {
-            "type": "string"
-          },
-          "unit_amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "access_duration_hours": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "billing_interval_hours": {
-            "oneOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "kind",
-          "product_id",
-          "product_key",
-          "product_display_name",
-          "entitlements",
-          "price_id",
-          "price_key",
-          "unit_amount",
-          "currency",
-          "access_duration_hours",
-          "billing_interval_hours"
-        ]
-      },
-      "OfferListParams": {
-        "type": "object",
-        "properties": {
-          "entitlements": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "finite",
-              "permanent",
-              "recurring"
-            ]
-          },
-          "preferred_currency": {
-            "type": "string"
-          },
-          "limit": {
-            "type": "integer"
-          },
-          "cursors": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
           }
         }
       },
@@ -20193,48 +19324,6 @@
           "updated_at"
         ]
       },
-      "ProductAccessCheck": {
-        "type": "object",
-        "properties": {
-          "access": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "type": "boolean"
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "quantities": {
-            "oneOf": [
-              {
-                "type": "object",
-                "additionalProperties": {
-                  "oneOf": [
-                    {
-                      "type": "integer"
-                    },
-                    {
-                      "type": "null"
-                    }
-                  ]
-                }
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "access",
-          "quantities"
-        ]
-      },
       "ProductAccessGrant": {
         "type": "object",
         "properties": {
@@ -20406,7 +19495,6 @@
           "purchase_action": {
             "type": "string",
             "enum": [
-              "none",
               "refund",
               "review"
             ]
@@ -21066,10 +20154,26 @@
               "$ref": "#/components/schemas/CurrencyUnits"
             }
           },
+          "rails": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RailDefinition"
+            }
+          },
           "payment": {
             "oneOf": [
               {
                 "$ref": "#/components/schemas/PaymentConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "captcha": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CaptchaConfig"
               },
               {
                 "type": "null"
@@ -21080,7 +20184,9 @@
         "required": [
           "capabilities",
           "currencies",
-          "payment"
+          "rails",
+          "payment",
+          "captcha"
         ]
       },
       "Quantity": {
@@ -21540,17 +20646,6 @@
           }
         }
       },
-      "ReplaceEntitlementsParams": {
-        "type": "object",
-        "properties": {
-          "pairs": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/EntitlementReplacement"
-            }
-          }
-        }
-      },
       "ReplacePaymentMethodCardParams": {
         "type": "object",
         "properties": {
@@ -21717,29 +20812,16 @@
             "additionalProperties": {
               "type": "string"
             }
-          }
-        }
-      },
-      "SetMeterRateCardParams": {
-        "type": "object",
-        "properties": {
-          "product_id": {
-            "type": "string"
           },
-          "filter": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "array",
-              "items": {
-                "type": "string"
+          "rate_card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MeterRateCardParams"
+              },
+              {
+                "type": "null"
               }
-            }
-          },
-          "price": {
-            "$ref": "#/components/schemas/RatePrice"
-          },
-          "allowance": {
-            "$ref": "#/components/schemas/Allowance"
+            ]
           }
         }
       },
@@ -22030,12 +21112,6 @@
             "type": "string",
             "format": "date-time"
           },
-          "payments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/Payment"
-            }
-          },
           "id": {
             "type": "string"
           },
@@ -22096,6 +21172,16 @@
             ]
           },
           "payment_method_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mandate_id": {
             "oneOf": [
               {
                 "type": "string"
@@ -22230,6 +21316,7 @@
           "status",
           "scheduled_change",
           "payment_method_id",
+          "mandate_id",
           "started_at",
           "ended_at",
           "current_period_starts_at",

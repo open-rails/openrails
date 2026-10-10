@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
@@ -47,7 +48,9 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			require.Error(t, err, "a negative access duration is refused")
 
 			archived := w.membership("content:archived", 1_000_000)
-			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID, PurchaseAction: billing.PurchaseActionNone, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
+			_, err = client.ArchiveProduct(ctx, billing.ArchiveProductParams{ProductID: archived.ProductID, Reason: "retired", IdempotencyKey: "archive-" + archived.ProductID.String()})
+			require.ErrorIs(t, err, billing.ErrInvalid, "a product archive without a purchase action is a PATCH")
+			_, err = client.UpdateProduct(ctx, archived.ProductID, billing.UpdateProductParams{Archived: catalog.Value(true)})
 			require.NoError(t, err)
 			_, err = c.sell(embedded, order{price: archived.ID})
 			require.Error(t, err, "an archived price is not purchasable")

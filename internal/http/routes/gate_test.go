@@ -56,10 +56,9 @@ var openRoutes = []string{
 // person: those that move money or remove access. A change is reviewed.
 var sensitiveRoutes = []string{
 	"DELETE /v1/admin/alert-webhooks/{id}",
-	"DELETE /v1/admin/catalog/meters/{key}/rate-card",
+	"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
 	"DELETE /v1/admin/customers/{customer_id}/payment-methods/{id}",
 	"DELETE /v1/admin/customers/{customer_id}/product-access/{id}",
-	"DELETE /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
 	"DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}",
 	"DELETE /v1/admin/provisioning-tokens/{id}",
 	"GET /v1/admin/billing-archive",
@@ -76,7 +75,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/billing-import",
 	"POST /v1/admin/catalog/applications",
 	"POST /v1/admin/catalog/drift/refresh",
-	"POST /v1/admin/catalog/entitlement-replacements",
 	"POST /v1/admin/catalog/prices",
 	"POST /v1/admin/catalog/product-archives",
 	"POST /v1/admin/catalog/products",
@@ -108,9 +106,8 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/usage-events",
 	"PUT /v1/admin/alert-webhooks/{id}/url",
 	"PUT /v1/admin/catalog/meters/{key}",
-	"PUT /v1/admin/catalog/meters/{key}/rate-card",
 	"PUT /v1/admin/catalog/products/by-key/{product_key}",
-	"PUT /v1/admin/customers/{customer_id}/rate-overrides/{meter_key}",
+	"PUT /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
 	"PUT /v1/admin/customers/{customer_id}/spend-delegations",
 	"PUT /v1/admin/subscriptions/{id}/payment-method",
 }
@@ -304,7 +301,7 @@ func TestPassThroughAuthIsRefusedEverywhere(t *testing.T) {
 		require.Equal(t, http.StatusUnauthorized, code, r.Key())
 		gated++
 	}
-	require.Greater(t, gated, 150)
+	require.Greater(t, gated, 140)
 }
 
 // Every gated handler re-checks the verdict the gate bound: reached without

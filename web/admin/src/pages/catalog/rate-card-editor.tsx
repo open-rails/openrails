@@ -153,7 +153,7 @@ export function RateCardEditor({
           existing ? "Negotiated rate updated" : "Negotiated rate added"
         )
       } else {
-        await saveDefault.mutateAsync({ key: meter.key, rateCard })
+        await saveDefault.mutateAsync({ meter, rateCard })
         toast.success(existing ? "Default rate replaced" : "Default rate added")
       }
       setPendingRequest(null)

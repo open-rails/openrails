@@ -2,7 +2,7 @@
 // Money is native units at the currency registry scale; exact wires send int64
 // decimal strings (docs/money-wire.md).
 
-import type { Payment, SubscriptionDunning } from "./generated/wire"
+import type { SubscriptionDunning } from "./generated/wire"
 
 export type SubscriptionStatus =
   | "pending"
@@ -64,9 +64,12 @@ export interface RawPrice {
   [k: string]: unknown
 }
 
-// A customer's keys are the keys of the products they hold.
+// A customer's keys are the keys of the products they hold; quantity is the
+// most seats a held per-seat product grants (null: none per seat).
 export interface CustomerEntitlement {
+  customer_id: string
   entitlement: string
+  quantity: number | null
 }
 
 export interface RawProductAccessGrant {
@@ -95,10 +98,7 @@ export interface Page<T> {
 
 // --- Subscription admin response (list/detail) ---
 
-export interface AdminSubscription extends RawSubscription {
-  // Recovery history: the same Payment shape the payments endpoints serve.
-  payments?: Payment[]
-}
+export type AdminSubscription = RawSubscription
 
 export type {
   ChangeSubscriptionParams,
@@ -255,7 +255,7 @@ export interface PSP {
   updated_at: string
 }
 
-// RailDefinition is a rail a PSP can be armed on (GET /admin/rails).
+// RailDefinition is a rail a PSP can be armed on (GET /config rails).
 export interface RailDefinition {
   rail: Rail
   display_name: string

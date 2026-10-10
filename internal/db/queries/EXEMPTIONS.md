@@ -125,7 +125,8 @@ transaction_id)` would make it provable.
 
 `CountLiveProductHolders` answers one row per product a catalog edit changed;
 `ListLiveAccessBySubscriptions` the few live windows of each subscription on a
-page.
+page; `ListPaymentMethodMandates` the agreements of a page of cards, one per
+subscription and collection currency each card has carried.
 
 **PERMANENT — the product access cutover.** `ListAccessCutoverApprovals` and the
 statements of `convert_entitlement_windows` that read its temporary conversion

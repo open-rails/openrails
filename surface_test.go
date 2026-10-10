@@ -58,11 +58,10 @@ var embeddedMethods = map[string]string{
 // every field set (they take one of several).
 var routeArguments = map[string][]any{
 	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
-	"CheckProductAccess":    {billing.CustomerID(uuid.New()), billing.CheckProductAccessParams{ProductKeys: []string{"pro"}}},
 	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
 	"ListCheckoutOptions":   {billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "monthly"}},
-	"ListOffers":            {billing.OfferListParams{Entitlements: []string{"premium"}, Kind: billing.OfferPermanent}},
+	"SetMeter":              {"tokens", billing.SetMeterParams{Aggregation: catalog.AggregationSum, RateCard: catalog.Null[billing.MeterRateCardParams]()}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
 	"ArchiveProduct":        {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},
 	"CreatePriceMigration":  {billing.CreatePriceMigrationParams{FromPriceID: billing.PriceID(uuid.New()), ToPriceID: billing.PriceID(uuid.New())}},

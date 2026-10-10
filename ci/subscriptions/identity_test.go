@@ -344,10 +344,22 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	again, err := w.client[embedded].GetInvoice(ctx, invoices.Items[0].ID)
 	require.NoError(t, err)
 	require.Equal(t, invoices.Items[0].AmountDue, again.AmountDue)
+	status, everything := w.callAt(w.server.URL, b.token, http.MethodPost, "/notifications/read", "", map[string]any{"all": true})
+	require.Equal(t, http.StatusOK, status, "%v", everything)
+	require.Empty(t, everything["notifications"], "marking all read names none")
 	unread := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)[0].(map[string]any)
-	require.Equal(t, false, unread["seen"], "A's notification is still unread")
+	require.Equal(t, false, unread["seen"], "A's notification is still unread: B marked only B's own")
 	marked := a.must(http.MethodPost, "/notifications/read", "", map[string]any{"notification_ids": []string{notification}})["notifications"].(map[string]any)
 	require.Equal(t, true, marked[notification].(map[string]any)["seen"], "A marks it read")
+	_, err = w.pool.Exec(ctx, w.q(`INSERT INTO billing.notifications (merchant_id, customer_id, event_type, data)
+		SELECT id, $2, 'test.idor', '{}' FROM billing.merchants WHERE slug = $1`), w.slug, a.cid().UUID())
+	require.NoError(t, err)
+	a.must(http.MethodPost, "/notifications/read", "", map[string]any{"all": true})
+	for _, note := range a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any) {
+		require.Equal(t, true, note.(map[string]any)["seen"], "A marks all read")
+	}
+	status, refused := w.callAt(w.server.URL, a.token, http.MethodPost, "/notifications/read", "", map[string]any{"all": true, "notification_ids": []string{notification}})
+	require.Equal(t, http.StatusBadRequest, status, "all names no ids: %v", refused)
 	require.NotEmpty(t, unwrap(a.must(http.MethodGet, "/payment-operations/"+op+"/authentication", "", nil))["client_secret"], "A's upgrade still waits for A")
 	require.Equal(t, "open", a.must(http.MethodGet, "/orders/"+aOrder, "", nil)["status"], "A's order is still A's to pay")
 }

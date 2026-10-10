@@ -821,10 +821,12 @@ WHERE price.merchant_id = $1::uuid
   AND ($2::boolean IS NULL OR price.archived = $2::boolean)
   AND ($3::text IS NULL OR price.currency = $3::text)
   AND ($4::uuid IS NULL OR price.product_id = $4::uuid)
-  AND ($5::boolean IS NULL OR (price.billing_interval_hours IS NOT NULL) = $5::boolean)
-  AND ($6::timestamptz IS NULL OR (price.created_at, price.id) < ($6::timestamptz, $7::uuid))
+  AND ($5::text IS NULL OR prod.key = $5::text)
+  AND ($6::text IS NULL OR price.key = $6::text)
+  AND ($7::boolean IS NULL OR (price.billing_interval_hours IS NOT NULL) = $7::boolean)
+  AND ($8::timestamptz IS NULL OR (price.created_at, price.id) < ($8::timestamptz, $9::uuid))
 ORDER BY price.created_at DESC, price.id DESC
-LIMIT $8::int
+LIMIT $10::int
 `
 
 type ListPricesFilteredParams struct {
@@ -832,6 +834,8 @@ type ListPricesFilteredParams struct {
 	Archived   *bool
 	Currency   *string
 	ProductID  *uuid.UUID
+	ProductKey *string
+	Key        *string
 	Recurring  *bool
 	AfterAt    *time.Time
 	AfterID    *uuid.UUID
@@ -850,6 +854,8 @@ func (q *Queries) ListPricesFiltered(ctx context.Context, arg ListPricesFiltered
 		arg.Archived,
 		arg.Currency,
 		arg.ProductID,
+		arg.ProductKey,
+		arg.Key,
 		arg.Recurring,
 		arg.AfterAt,
 		arg.AfterID,

@@ -7,9 +7,26 @@ type PublicConfig struct {
 	Capabilities Capabilities `json:"capabilities"`
 	// Currencies is the scale registry behind every amount on the wire.
 	Currencies []CurrencyUnits `json:"currencies"`
+	// Rails is the rail registry: each rail a PSP can be declared on, with
+	// the credentials and settings it takes.
+	Rails []RailDefinition `json:"rails"`
 	// Payment is the merchant's browser payment setup; null when the request
 	// resolves no merchant.
 	Payment *PaymentConfig `json:"payment"`
+	// Captcha is the challenge to solve when a request answers 403
+	// captcha_required; null when the deployment challenges nobody.
+	Captcha *CaptchaConfig `json:"captcha"`
+}
+
+// CaptchaConfig is how a browser solves the deployment's captcha: load
+// ScriptURL, run the Provider's widget with SiteKey and Action, and resend
+// the refused request with the token in the TokenHeader header.
+type CaptchaConfig struct {
+	Provider    string `json:"provider"`
+	SiteKey     string `json:"site_key"`
+	ScriptURL   string `json:"script_url"`
+	Action      string `json:"action"`
+	TokenHeader string `json:"token_header"`
 }
 
 // PaymentConfig is the merchant's browser-safe payment setup: its armed PSPs

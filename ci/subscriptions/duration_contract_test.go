@@ -32,7 +32,7 @@ func TestCatalogDurationHumanAPIContract(t *testing.T) {
 	}
 	read := func(priceKey string, access, interval *int) *billing.Price {
 		t.Helper()
-		price, err := w.client[remote].GetPriceByKey(t.Context(), key, priceKey)
+		price, err := priceByKey(t.Context(), w.client[remote], key, priceKey)
 		require.NoError(t, err)
 		require.Equal(t, access, price.AccessDurationHours)
 		require.Equal(t, interval, price.BillingIntervalHours)

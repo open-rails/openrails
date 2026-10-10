@@ -40,9 +40,10 @@ SELECT * FROM billing.products
 WHERE products.merchant_id = sqlc.arg(merchant_id)::uuid
   AND (sqlc.narg(archived)::boolean IS NULL OR archived = sqlc.narg(archived)::boolean)
   AND (sqlc.arg(tier_group)::text = '' OR lower(btrim(tier_group)) = lower(btrim(sqlc.arg(tier_group)::text)))
-  AND (sqlc.arg(entitlement)::text = '' OR id IN (
+  AND (sqlc.narg(keys)::text[] IS NULL OR key = ANY (sqlc.narg(keys)::text[]))
+  AND (sqlc.narg(entitlements)::text[] IS NULL OR id IN (
     SELECT pe.product_id FROM billing.product_entitlements pe
-    WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = sqlc.arg(entitlement)::text AND pe.removed_at IS NULL))
+    WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = ANY (sqlc.narg(entitlements)::text[]) AND pe.removed_at IS NULL))
   -- For sale: some live price sells it. A product without one is granted only.
   AND (sqlc.narg(for_sale)::boolean IS NULL OR sqlc.narg(for_sale)::boolean = EXISTS (
     SELECT 1 FROM billing.prices pr

@@ -12,7 +12,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
@@ -43,19 +42,6 @@ func cachedReads(ctx context.Context, q *gen.Queries) error {
 func customPlans(ctx context.Context, q *gen.Queries) error {
 	_, err := q.SetConfig(ctx, gen.SetConfigParams{Setting: "plan_cache_mode", Value: "force_custom_plan", IsLocal: true})
 	return err
-}
-
-// cacheValid reports, in the caller's snapshot, whether the customer's cached
-// keys answer at at: built at the current entitlement generation and access
-// version, for a window containing at.
-func cacheValid(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, at time.Time) (bool, error) {
-	return q.EntitlementCacheValid(ctx, gen.EntitlementCacheValidParams{MerchantID: merchantID, CustomerID: customer, AtTime: at})
-}
-
-// heavy reports whether the customer holds enough products at at to cache.
-func heavy(ctx context.Context, q *gen.Queries, merchantID, customer uuid.UUID, at time.Time) (bool, error) {
-	held, err := q.CountHeldProductsUpTo(ctx, gen.CountHeldProductsUpToParams{MerchantID: merchantID, CustomerID: customer, AtTime: at, UpTo: HeavyBuyerProducts})
-	return held >= HeavyBuyerProducts, err
 }
 
 // RebuildEntitlementCache caches the keys a heavy buyer holds now, stamped
@@ -152,52 +138,4 @@ func (s *EntitlementService) rebuildAfterMiss(merchantID billing.MerchantID, cus
 			log.WithContext(ctx).WithError(err).WithField("customer_id", customer).Warn("entitlement cache rebuild failed; keys stay derived live")
 		}
 	}()
-}
-
-// readSnapshot is the customer's key reads in one snapshot: from the cache
-// when it is valid at at, else live. rebuild: the reads ran live for a heavy
-// buyer at the current instant, so the cache should be rebuilt.
-type readSnapshot struct {
-	q        *gen.Queries
-	merchant uuid.UUID
-	customer uuid.UUID
-	at       time.Time
-	cached   bool
-}
-
-func (s *EntitlementService) withKeys(ctx context.Context, customerID string, at time.Time, current bool, fn func(ctx context.Context, r readSnapshot) error) error {
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	customer, err := db.ResolveCustomerID(customerID)
-	if err != nil {
-		return err
-	}
-	rebuild := false
-	err = s.db.ReadSnapshot(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		q := s.db.NewWithPgxTx(tx).Gen(ctx)
-		cached, err := cacheValid(ctx, q, mid.UUID(), customer, at)
-		if err != nil {
-			return err
-		}
-		plan := customPlans
-		if cached {
-			plan = cachedReads
-		}
-		if err := plan(ctx, q); err != nil {
-			return err
-		}
-		if err := fn(ctx, readSnapshot{q: q, merchant: mid.UUID(), customer: customer, at: at, cached: cached}); err != nil {
-			return err
-		}
-		if !cached && current {
-			rebuild, err = heavy(ctx, q, mid.UUID(), customer, at)
-		}
-		return err
-	})
-	if err == nil && rebuild {
-		s.rebuildAfterMiss(mid, customer)
-	}
-	return err
 }

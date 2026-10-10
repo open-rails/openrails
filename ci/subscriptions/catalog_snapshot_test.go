@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -35,12 +36,14 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	}
 	_, err := c.ApplyCatalog(t.Context(), declaration(4000000))
 	require.NoError(t, err)
-	first, err := c.GetPriceByKey(t.Context(), "retained-video", "buy")
+	first, err := priceByKey(t.Context(), c, "retained-video", "buy")
 	require.NoError(t, err)
 	paid := buyer.mustCheckout(embedded, order{price: first.ID, rail: "nmi", method: method})
 	_, err = c.ApplyCatalog(t.Context(), declaration(7000000))
 	require.NoError(t, err)
-	_, err = c.ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: first.ProductID, IdempotencyKey: "snapshot-archive", Reason: "Catalog retirement"})
+	// A window that starts after the purchase leaves it alone: the archive only retires the product.
+	_, err = c.ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: first.ProductID, PurchaseAction: billing.PurchaseActionReview,
+		PurchaseWindowStartsAt: w.clock.Now().Add(time.Hour), IdempotencyKey: "snapshot-archive", Reason: "Catalog retirement"})
 	require.NoError(t, err)
 	// Default and customer-specific rate cards belong to the catalog snapshot.
 	rates, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1

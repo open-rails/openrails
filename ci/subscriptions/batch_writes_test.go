@@ -62,12 +62,15 @@ func TestProductAccessGrantBatches(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []billing.ProductAccessID{granted[0].ID, granted[1].ID}, []billing.ProductAccessID{again[0].ID, again[1].ID}, "a retry answers the existing grants")
 	for _, c := range []*customer{a, b} {
-		access, err := w.client[embedded].CheckProductAccess(t.Context(), c.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{price.ProductID}})
+		access, err := heldProducts(t.Context(), w.client[embedded], c.customerID(), price.ProductID)
 		require.NoError(t, err)
-		require.True(t, access.Access[price.ProductID.String()])
+		require.True(t, access[price.ProductID])
 	}
-	_, err = w.client[embedded].CheckProductAccess(t.Context(), a.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{}})
-	require.ErrorIs(t, err, billing.ErrInvalid, "a check names at least one product")
+	both, err := w.client[remote].ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{a.customerID(), b.customerID()}, ProductIDs: []billing.ProductID{price.ProductID}, LiveOnly: true})
+	require.NoError(t, err)
+	require.Len(t, both.Items, 2, "one read covers both customers")
+	_, err = w.client[embedded].ListProductAccess(t.Context(), billing.ProductAccessListParams{ProductIDs: []billing.ProductID{}})
+	require.ErrorIs(t, err, billing.ErrInvalid, "a product filter names at least one product")
 }
 
 // Usage is recorded in batches, each item on its own: a refused item does not

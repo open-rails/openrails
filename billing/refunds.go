@@ -60,8 +60,6 @@ func (id *ProductArchiveID) UnmarshalText(b []byte) error {
 type PurchaseAction string
 
 const (
-	// PurchaseActionNone archives the product only.
-	PurchaseActionNone PurchaseAction = "none"
 	// PurchaseActionRefund refunds each qualifying purchase in full and ends the
 	// access that purchase granted. A purchase OpenRails cannot refund
 	// automatically becomes a finding for the merchant to resolve instead.
@@ -72,14 +70,14 @@ const (
 )
 
 // ArchiveProductParams archives one product (ProductID or ProductKey) and
-// applies PurchaseAction (empty: none) to its one-time purchases made at or
+// applies PurchaseAction (refund or review) to its one-time purchases made at or
 // after PurchaseWindowStartsAt, or within WindowSeconds before the operation was first
 // accepted. The window is fixed at first acceptance; retries with the same
 // IdempotencyKey evaluate the same purchases and never refund twice.
 type ArchiveProductParams struct {
 	ProductID              ProductID      `json:"product_id,omitzero"`
 	ProductKey             string         `json:"product_key,omitempty"`
-	PurchaseAction         PurchaseAction `json:"purchase_action,omitempty"`
+	PurchaseAction         PurchaseAction `json:"purchase_action"`
 	PurchaseWindowStartsAt time.Time      `json:"purchase_window_starts_at,omitzero"`
 	WindowSeconds          int64          `json:"window_seconds,omitempty"`
 	Reason                 string         `json:"reason,omitempty"`

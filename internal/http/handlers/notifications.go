@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -62,6 +63,22 @@ func MarkMyNotificationsRead(r *httprequest.Request) {
 	ctx := r.Request.Context()
 	var req billing.MarkNotificationsReadParams
 	if !r.BindJSON(&req) {
+		return
+	}
+	if req.All {
+		if len(req.NotificationIDs) > 0 {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "all takes no notification_ids").WithParam("all"))
+			return
+		}
+		merchantID, customerID, ok := customerScope(r)
+		if !ok {
+			return
+		}
+		if _, err := r.State.DB.Gen(ctx).MarkAllCustomerNotificationsRead(ctx, gen.MarkAllCustomerNotificationsReadParams{MerchantID: merchantID, CustomerID: customerID}); err != nil {
+			r.InternalError("mark notifications read failed", err)
+			return
+		}
+		r.SuccessJSON(billing.CustomerNotificationLookup{Notifications: map[billing.NotificationID]*billing.Notification{}})
 		return
 	}
 	ids, ok := batchIDs(r, req.NotificationIDs, billing.MaxBatchItems, "notification_ids")

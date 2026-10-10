@@ -113,11 +113,6 @@ func ArchivePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ListRails handles GET /v1/admin/rails.
-func ListRails(r *httprequest.Request) {
-	r.JSON(http.StatusOK, billing.ListPage[billing.RailDefinition]{Items: merchants.RailDefinitions()})
-}
-
 // RefreshPSPs handles POST /v1/admin/psps/refresh: the merchant's PSP
 // pull runs now.
 func RefreshPSPs(r *httprequest.Request) {

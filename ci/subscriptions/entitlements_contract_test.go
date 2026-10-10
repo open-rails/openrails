@@ -5,6 +5,7 @@ package subscriptions_test
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ products:
 	}, &replay))
 	require.True(t, replay.Replayed)
 	require.Equal(t, initial.ApplicationID, replay.ApplicationID, "reordering an entitlement list must not create another application")
-	product, err := w.client[remote].GetProductByKey(t.Context(), key)
+	product, err := productByKey(t.Context(), w.client[remote], key)
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"post:101", "premium", " private key "}, product.Entitlements)
 	var wire map[string]any
@@ -129,13 +130,13 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 				key  string
 				want bool
 			}{{" private key ", true}, {"private key", false}} {
-				has, err := client.CheckEntitlements(t.Context(), customer.customerID(), billing.CheckEntitlementsParams{Entitlements: []string{check.key}, At: w.clock.Now()})
+				has, err := heldKeys(t.Context(), client, customer.customerID(), w.clock.Now(), check.key)
 				require.NoError(t, err)
-				require.Equal(t, map[string]bool{check.key: check.want}, has.Entitlements, "both transports preserve exact names")
-				members, err := client.ListEntitlementCustomers(t.Context(), check.key, billing.EntitlementCustomerListParams{})
+				require.Equal(t, map[string]bool{check.key: check.want}, has, "both transports preserve exact names")
+				members, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{Entitlements: []string{check.key}})
 				require.NoError(t, err)
 				if check.want {
-					require.Contains(t, members.Items, customer.customerID())
+					require.Contains(t, members.Items, billing.CustomerEntitlement{CustomerID: customer.customerID(), Entitlement: check.key})
 				} else {
 					require.Empty(t, members.Items)
 				}
@@ -161,17 +162,18 @@ func TestPurchasedAccessFollowsTheProduct(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, customer.entitled("post:202"), "a product without keys grants none")
 			require.False(t, next.entitled("post:202"))
-			access, err := client.CheckProductAccess(t.Context(), customer.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product.ID}})
+			access, err := heldProducts(t.Context(), client, customer.customerID(), product.ID)
 			require.NoError(t, err)
-			require.True(t, access.Access[product.ID.String()], "the customer still holds the product")
+			require.True(t, access[product.ID], "the customer still holds the product")
 		})
 	}
 }
 
-// One check answers every requested key from one query, on both transports:
-// held, expired, revoked and never granted keys, another customer's view, a
-// past instant, and the 100-key bound. A check of nothing is refused.
-func TestCheckEntitlementsAnswersEveryKey(t *testing.T) {
+// One read answers every requested key of every requested customer from one
+// query, on both transports: held, expired, revoked and never granted keys,
+// another customer's grants, a past instant, the 100-key and 100-customer
+// bounds, and the holders of one key. A key not listed is not held.
+func TestListEntitlementsAnswersEveryKeyAndCustomer(t *testing.T) {
 	w := newWorld(t)
 	c, other := w.newCustomer(), w.newCustomer()
 	staff := w.client[embedded]
@@ -180,59 +182,94 @@ func TestCheckEntitlementsAnswersEveryKey(t *testing.T) {
 	c.grant(w.giftProduct("check:active"), &day, nil)
 	c.grant(w.giftProduct("check:expired"), nil, &soon)
 	revoked := c.grant(w.giftProduct("check:revoked"), &day, nil)
+	other.grant(w.giftProduct("check:other", "check:active-too"), &day, nil)
 	require.NoError(t, staff.DeleteProductAccess(t.Context(), c.customerID(), revoked.ID))
 	w.advance(2 * time.Hour)
 
-	keys := []string{"check:active", "check:expired", "check:revoked", "check:unknown", "check:active"}
-	none := map[string]bool{"check:active": false, "check:expired": false, "check:revoked": false, "check:unknown": false}
+	keys := []string{"check:active", "check:expired", "check:revoked", "check:unknown", "check:active", "check:other"}
+	both := []billing.CustomerID{c.customerID(), other.customerID()}
+	rows := func(page *billing.ListPage[billing.CustomerEntitlement]) map[billing.CustomerEntitlement]bool {
+		out := map[billing.CustomerEntitlement]bool{}
+		for _, row := range page.Items {
+			out[row] = true
+		}
+		return out
+	}
 	for _, tp := range []topology{embedded, remote} {
 		client := w.client[tp]
-		var got *billing.EntitlementCheck
+		var got *billing.ListPage[billing.CustomerEntitlement]
 		queries := w.count(func() {
 			var err error
-			got, err = client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys})
+			got, err = client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: both, Entitlements: keys})
 			require.NoError(t, err)
 		})
-		require.Equal(t, map[string]bool{"check:active": true, "check:expired": false, "check:revoked": false, "check:unknown": false}, got.Entitlements, tp)
-		require.Empty(t, got.Held, "no prefix was asked")
-		require.Equal(t, 1, queries["CheckDerivedEntitlements"], "every key in one query: %v", queries)
-		require.Zero(t, queries["ListDerivedEntitlementsByPrefix"], "no prefix, no range read: %v", queries)
+		require.Equal(t, map[billing.CustomerEntitlement]bool{
+			{CustomerID: c.customerID(), Entitlement: "check:active"}:    true,
+			{CustomerID: other.customerID(), Entitlement: "check:other"}: true,
+		}, rows(got), tp)
+		require.Equal(t, 1, queries["CheckDerivedEntitlements"], "every key of every customer in one query: %v", queries)
+		require.Zero(t, queries["ListDerivedEntitlementsPage"], "named keys, no range read: %v", queries)
 
-		past, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys, At: start.Add(30 * time.Minute)})
+		past, err := heldKeys(t.Context(), client, c.customerID(), start.Add(30*time.Minute), keys...)
 		require.NoError(t, err)
-		require.Equal(t, map[string]bool{"check:active": true, "check:expired": true, "check:revoked": false, "check:unknown": false}, past.Entitlements, "At reads that instant; a revocation is not undone")
+		require.Equal(t, map[string]bool{"check:active": true, "check:expired": true, "check:revoked": false, "check:unknown": false, "check:other": false}, past, "At reads that instant; a revocation is not undone")
 
-		foreign, err := client.CheckEntitlements(t.Context(), other.customerID(), billing.CheckEntitlementsParams{Entitlements: keys})
+		all, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: both, Prefix: "check:"})
 		require.NoError(t, err)
-		require.Equal(t, none, foreign.Entitlements, "another customer's grants never answer")
+		require.Len(t, all.Items, 3, "each customer's keys under the prefix: %v", all.Items)
+		for i := 1; i < len(all.Items); i++ {
+			a, b := all.Items[i-1], all.Items[i]
+			require.True(t, a.CustomerID.String() < b.CustomerID.String() || a.CustomerID == b.CustomerID && a.Entitlement < b.Entitlement, "by customer, then key")
+		}
+		first, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: both, Prefix: "check:", PageRequest: billing.PageRequest{Limit: 2}})
+		require.NoError(t, err)
+		require.Len(t, first.Items, 2)
+		require.NotEmpty(t, first.Next)
+		rest, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: both, Prefix: "check:", PageRequest: billing.PageRequest{Limit: 2, Cursor: first.Next}})
+		require.NoError(t, err)
+		require.Equal(t, all.Items, append(first.Items, rest.Items...), "pages continue in order")
+		require.Empty(t, rest.Next)
 
-		full := make([]string, billing.MaxEntitlementChecks)
+		holders, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{Entitlements: []string{"check:active"}})
+		require.NoError(t, err)
+		require.Equal(t, []billing.CustomerEntitlement{{CustomerID: c.customerID(), Entitlement: "check:active"}}, holders.Items, "without customers, one key's holders")
+
+		full := make([]string, billing.MaxBatchItems)
 		for i := range full {
 			full[i] = fmt.Sprintf("check:bulk-%d", i)
 		}
 		full[0] = "check:active"
-		bulk, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: full})
+		bulk, err := heldKeys(t.Context(), client, c.customerID(), time.Time{}, full...)
 		require.NoError(t, err)
-		require.Len(t, bulk.Entitlements, billing.MaxEntitlementChecks)
-		require.True(t, bulk.Entitlements["check:active"])
-		require.False(t, bulk.Entitlements["check:bulk-1"])
+		require.True(t, bulk["check:active"])
+		require.False(t, bulk["check:bulk-1"])
 
-		for _, refused := range []billing.CheckEntitlementsParams{{Entitlements: append(full, "check:one-more")}, {}, {Entitlements: []string{}}} {
-			_, err = client.CheckEntitlements(t.Context(), c.customerID(), refused)
+		for _, refused := range []billing.EntitlementListParams{
+			{CustomerIDs: both, Entitlements: append(full, "check:one-more")},
+			{},
+			{Entitlements: []string{"check:active", "check:other"}},
+			{CustomerIDs: make([]billing.CustomerID, billing.MaxBatchItems+1)},
+		} {
+			_, err = client.ListEntitlements(t.Context(), refused)
 			require.ErrorIs(t, err, billing.ErrInvalid, "the client refuses before any I/O")
 		}
 	}
 
-	path := "/v1/admin/customers/" + c.id + "/entitlements/check"
-	for _, body := range []map[string]any{
-		{"entitlements": append(make([]string, billing.MaxEntitlementChecks), "one-more")},
-		{"entitlements": []string{"check:active", " "}},
-		{"entitlements": []string{}},
+	many := make([]string, billing.MaxBatchItems+1)
+	for i := range many {
+		many[i] = uuid.NewString()
+	}
+	for query, param := range map[string]string{
+		"?customer_id=" + c.id + "&entitlement=check:active&entitlement=%20": "entitlement",
+		"?customer_id=" + strings.Join(many, ","):                            "customer_id",
+		"?customer_id=not-an-id":                                             "customer_id",
+		"?entitlement=a&entitlement=b":                                       "entitlement",
+		"?customer_id=" + c.id + "&prefix=check%3A%01":                       "prefix",
 	} {
-		status, refused := w.staffJSON(http.MethodPost, path, body)
-		require.Equal(t, http.StatusBadRequest, status, "%v", refused)
+		status, refused := w.staffJSON(http.MethodGet, "/v1/admin/entitlements"+query, nil)
+		require.Equal(t, http.StatusBadRequest, status, "%s: %v", query, refused)
 		detail := refused["error"].(map[string]any)
-		require.Equal(t, billing.CodeInvalidParam, detail["code"])
-		require.Equal(t, "entitlements", detail["param"])
+		require.Contains(t, []string{billing.CodeInvalidParam, billing.CodeInvalidQuery}, detail["code"], query)
+		require.Equal(t, param, detail["param"], query)
 	}
 }

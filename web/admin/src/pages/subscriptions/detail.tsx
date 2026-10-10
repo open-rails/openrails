@@ -60,6 +60,10 @@ export function SubscriptionDetailPage() {
   const { data: sub, isPending: loading } = useQuery(
     adminQueries.subscription(id)
   )
+  const { data: paymentPage } = useQuery(
+    adminQueries.payments({ subscription_id: id }, 20)
+  )
+  const payments = paymentPage?.data ?? []
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>
   if (!sub)
     return (
@@ -210,7 +214,7 @@ export function SubscriptionDetailPage() {
           <CardTitle className="text-sm">Payments</CardTitle>
         </CardHeader>
         <CardContent>
-          {!sub.payments?.length ? (
+          {!payments.length ? (
             <p className="text-sm text-muted-foreground">
               No payments recorded.
             </p>
@@ -234,7 +238,7 @@ export function SubscriptionDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sub.payments.map((p) => (
+                {payments.map((p) => (
                   <TableRow key={p.id}>
                     <TableCell>
                       <Link

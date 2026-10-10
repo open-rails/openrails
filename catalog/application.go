@@ -91,10 +91,54 @@ func (f *Field[T]) UnmarshalJSON(raw []byte) error {
 // meters are maps keyed by their key. Its canonical content hash is its
 // permanent replay identity; omitted records and fields are preserved.
 type Application struct {
-	SchemaVersion int                     `json:"schema_version"`
-	Prune         bool                    `json:"prune,omitempty"`
-	Products      map[string]ApplyProduct `json:"products,omitempty"`
-	Meters        map[string]ApplyMeter   `json:"meters,omitempty"`
+	SchemaVersion int  `json:"schema_version"`
+	Prune         bool `json:"prune,omitempty"`
+	// EntitlementReplacements rename or remove a key across every product
+	// granting it, before Products apply.
+	EntitlementReplacements []EntitlementReplacement `json:"entitlement_replacements,omitempty"`
+	Products                map[string]ApplyProduct  `json:"products,omitempty"`
+	Meters                  map[string]ApplyMeter    `json:"meters,omitempty"`
+}
+
+// MaxEntitlementReplacements bounds the replacements of one application.
+const MaxEntitlementReplacements = 100
+
+// EntitlementReplacement moves every product granting From to grant To
+// instead; an empty To removes From. A key is not both replaced and a
+// replacement in one application.
+type EntitlementReplacement struct {
+	From string `json:"from"`
+	To   string `json:"to,omitempty"`
+}
+
+func validateReplacements(pairs []EntitlementReplacement) error {
+	if len(pairs) > MaxEntitlementReplacements {
+		return fmt.Errorf("at most %d entitlement_replacements", MaxEntitlementReplacements)
+	}
+	from := map[string]bool{}
+	to := map[string]bool{}
+	for _, pair := range pairs {
+		keys := []string{pair.From}
+		if pair.To != "" {
+			keys = append(keys, pair.To)
+		}
+		if _, err := NormalizeEntitlements(keys); err != nil {
+			return fmt.Errorf("entitlement_replacements: %w", err)
+		}
+		if from[pair.From] {
+			return fmt.Errorf("entitlement_replacements: duplicate from key %q", pair.From)
+		}
+		from[pair.From] = true
+		if pair.To != "" {
+			to[pair.To] = true
+		}
+	}
+	for key := range from {
+		if to[key] {
+			return fmt.Errorf("entitlement_replacements: key %q is both replaced and a replacement", key)
+		}
+	}
+	return nil
 }
 
 // ApplyMeter declares the meter its map key names; omitted fields keep their
@@ -148,7 +192,10 @@ func (a Application) Validate() error {
 	if a.SchemaVersion != ApplicationSchemaVersion {
 		return fmt.Errorf("unsupported catalog application schema_version %d", a.SchemaVersion)
 	}
-	count := len(a.Products) + len(a.Meters)
+	if err := validateReplacements(a.EntitlementReplacements); err != nil {
+		return err
+	}
+	count := len(a.Products) + len(a.Meters) + len(a.EntitlementReplacements)
 	for _, key := range slices.Sorted(maps.Keys(a.Products)) {
 		p := a.Products[key]
 		if err := validApplicationKey(key, "product"); err != nil {
@@ -262,6 +309,8 @@ func (a Application) CanonicalDigest() ([32]byte, error) {
 		products[key] = p
 	}
 	a.Products = products
+	a.EntitlementReplacements = slices.Clone(a.EntitlementReplacements)
+	slices.SortFunc(a.EntitlementReplacements, func(x, y EntitlementReplacement) int { return strings.Compare(x.From, y.From) })
 	raw, err := json.Marshal(a)
 	if err != nil {
 		return [32]byte{}, err

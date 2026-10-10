@@ -3,49 +3,46 @@
 -- generation and the customer's access version are the ones it was built at,
 -- for instants in its window. Otherwise the reader derives live.
 
--- name: EntitlementCacheValid :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.customer_entitlement_cache_stamps s
-    JOIN billing.merchants m ON m.id = s.merchant_id
-    JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
-    WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = sqlc.arg(customer_id)::uuid
-      AND s.entitlement_generation = m.entitlement_generation AND s.access_version = c.access_version
-      AND s.valid_from <= sqlc.arg(at_time)::timestamptz
-      AND (s.valid_until IS NULL OR s.valid_until > sqlc.arg(at_time)::timestamptz)
-)::boolean AS valid;
+-- name: ListValidEntitlementCaches :many
+-- The customers among customer_ids whose cached keys answer at at_time.
+SELECT s.customer_id FROM billing.customer_entitlement_cache_stamps s
+JOIN billing.merchants m ON m.id = s.merchant_id
+JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
+WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.customer_id = ANY (sqlc.arg(customer_ids)::uuid[])
+  AND s.entitlement_generation = m.entitlement_generation AND s.access_version = c.access_version
+  AND s.valid_from <= sqlc.arg(at_time)::timestamptz
+  AND (s.valid_until IS NULL OR s.valid_until > sqlc.arg(at_time)::timestamptz);
 
 -- name: CheckCachedEntitlements :many
--- One probe of the cache index per key.
-SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key)
-LEFT JOIN LATERAL (
-    SELECT true AS found, ec.quantity FROM billing.customer_entitlement_cache ec
-    WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = sqlc.arg(customer_id)::uuid
-      AND ec.entitlement = k.key
-    LIMIT 1
-) held ON true;
-
--- name: ListCachedEntitlementsByPrefix :many
--- The first row_limit keys under each prefix, one range of the cache index each.
-SELECT r.prefix::text AS prefix, h.entitlement::text AS entitlement
-FROM unnest(sqlc.arg(prefixes)::text[], sqlc.arg(uppers)::text[]) AS r(prefix, upper)
-CROSS JOIN LATERAL (
-    SELECT ec.entitlement FROM billing.customer_entitlement_cache ec
-    WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = sqlc.arg(customer_id)::uuid
-      AND ec.entitlement >= r.prefix AND ec.entitlement < r.upper
-    ORDER BY ec.entitlement
-    LIMIT sqlc.arg(row_limit)::int
-) h
-ORDER BY r.prefix COLLATE "C", h.entitlement COLLATE "C";
+-- Which of the keys each customer holds, and their seats: one probe of the
+-- cache index per (customer, key), at most row_limit (customers x keys) rows.
+SELECT ec.customer_id, ec.entitlement::text AS entitlement, COALESCE(ec.quantity, 0)::int AS quantity FROM billing.customer_entitlement_cache ec
+WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = ANY (sqlc.arg(customer_ids)::uuid[])
+  AND ec.entitlement = ANY (sqlc.arg(entitlements)::text[])
+LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListCachedEntitlementsPage :many
-SELECT ec.entitlement::text AS entitlement FROM billing.customer_entitlement_cache ec
-WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = sqlc.arg(customer_id)::uuid
-  AND ec.entitlement >= sqlc.arg(low_key)::text AND ec.entitlement > sqlc.arg(after_key)::text
+-- One keyset page of customers' cached keys, as ListDerivedEntitlementsPage.
+SELECT ec.customer_id, ec.entitlement::text AS entitlement, COALESCE(ec.quantity, 0)::int AS quantity FROM billing.customer_entitlement_cache ec
+WHERE ec.merchant_id = sqlc.arg(merchant_id)::uuid AND ec.customer_id = ANY (sqlc.arg(customer_ids)::uuid[])
+  AND (ec.customer_id, ec.entitlement) > (sqlc.arg(after_customer)::uuid, sqlc.arg(after_key)::text)
+  AND ec.entitlement >= sqlc.arg(low_key)::text
   AND (sqlc.arg(before_key)::text = '' OR ec.entitlement < sqlc.arg(before_key)::text)
-ORDER BY ec.entitlement
+ORDER BY ec.customer_id, ec.entitlement
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: ListHeavyBuyers :many
+-- The customers among customer_ids holding at least up_to products at
+-- at_time, counting at most up_to each.
+SELECT c.customer_id::uuid AS customer_id FROM unnest(sqlc.arg(customer_ids)::uuid[]) AS c(customer_id)
+WHERE (SELECT count(*) FROM (
+    SELECT DISTINCT pa.product_id FROM billing.product_access pa
+    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = c.customer_id
+      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+      AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
+    LIMIT sqlc.arg(up_to)::int
+) held) >= sqlc.arg(up_to)::int;
 
 -- name: CountHeldProductsUpTo :one
 -- How many products the customer holds at at_time, counting at most up_to.

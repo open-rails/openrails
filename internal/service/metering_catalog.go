@@ -49,16 +49,3 @@ func (s *Service) GetUsageMeter(ctx context.Context, meterKey string) (*billing.
 	}
 	return s.moneyService().GetUsageMeter(ctx, meterKey)
 }
-
-// ListUsageMeterOverrides returns one page of a meter's customer overrides.
-func (s *Service) ListUsageMeterOverrides(ctx context.Context, meterKey string, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return billing.ListPage[billing.RateOverride]{}, pinErr
-	}
-	defer release()
-	if s == nil || s.rt == nil {
-		return billing.ListPage[billing.RateOverride]{}, fmt.Errorf("service not initialized")
-	}
-	return s.moneyService().ListUsageMeterOverrides(ctx, meterKey, page)
-}

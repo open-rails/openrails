@@ -28,67 +28,28 @@ func (id *ProductAccessID) UnmarshalText(text []byte) error {
 	return err
 }
 
-// MaxEntitlementChecks bounds the keys of one entitlement check.
-const MaxEntitlementChecks = 100
-
-// Bounds of the prefixes of one entitlement check and of the keys answered
-// under each.
-const (
-	MaxEntitlementPrefixes  = 10
-	DefaultHeldEntitlements = 1000
-	MaxHeldEntitlements     = 10000
-)
-
-// CheckEntitlementsParams asks which of up to MaxEntitlementChecks keys a
-// customer holds at At (zero: now), and which keys they hold under each of up
-// to MaxEntitlementPrefixes byte prefixes: at most PrefixLimit per prefix
-// (zero: DefaultHeldEntitlements, at most MaxHeldEntitlements). A prefix is
-// bytes, not grammar: OpenRails gives it no meaning. Its last byte must be
-// printable ASCII (0x21-0x7E). At least one key or prefix is required.
-type CheckEntitlementsParams struct {
-	Entitlements []string  `json:"entitlements"`
-	Prefixes     []string  `json:"prefixes,omitempty"`
-	PrefixLimit  int       `json:"prefix_limit,omitempty"`
-	At           time.Time `json:"at,omitzero"`
-}
-
-// EntitlementCheck answers every requested key, and every requested prefix in
-// Held ({} when none was asked).
-// Quantities answers every requested key with the most seats a held per-seat
-// product grants it: null when it is not held per seat. Prefixes carry none.
-type EntitlementCheck struct {
-	Entitlements map[string]bool             `json:"entitlements"`
-	Quantities   map[string]*int             `json:"quantities"`
-	Held         map[string]HeldEntitlements `json:"held"`
-}
-
-// HeldEntitlements is the keys a customer holds under one prefix, in byte
-// order. Truncated: more were held than the limit returned.
-type HeldEntitlements struct {
-	Keys      []string `json:"keys"`
-	Truncated bool     `json:"truncated"`
-}
-
-// EntitlementCustomerListParams pages the customers holding one entitlement
-// at At (zero: now).
-type EntitlementCustomerListParams struct {
+// EntitlementListParams reads the entitlements customers hold at At (zero:
+// now), ordered by customer, then by key in byte order. CustomerIDs names 1
+// to MaxBatchItems customers; with none, Entitlements names exactly one key
+// and the answer is the customers holding it. Entitlements keeps only those
+// keys (at most MaxBatchItems): a key absent from the answer is not held.
+// Prefix keeps only keys under a byte prefix, which OpenRails gives no
+// meaning; its last byte must be printable ASCII (0x21-0x7E).
+type EntitlementListParams struct {
 	PageRequest
-	At time.Time
-}
-
-// CustomerEntitlementListParams pages the keys a customer holds at At (zero:
-// now), in byte order, optionally only those under Prefix (bytes, as
-// CheckEntitlementsParams.Prefixes).
-type CustomerEntitlementListParams struct {
-	PageRequest
-	Prefix string
-	At     time.Time
+	CustomerIDs  []CustomerID
+	Entitlements []string
+	Prefix       string
+	At           time.Time
 }
 
 // CustomerEntitlement is one key a customer holds: a key of a product they
-// hold.
+// hold. Quantity is the most seats a held per-seat product grants it; null
+// when none is per seat.
 type CustomerEntitlement struct {
-	Entitlement string `json:"entitlement"`
+	CustomerID  CustomerID `json:"customer_id"`
+	Entitlement string     `json:"entitlement"`
+	Quantity    *int       `json:"quantity"`
 }
 
 // GetEffectiveTiersParams asks the tier each of 1 to MaxBatchItems customers
@@ -170,24 +131,6 @@ type ProductAccessGrant struct {
 	UpdatedAt    time.Time    `json:"updated_at"`
 }
 
-// MaxProductAccessChecks bounds one product-access check.
-const MaxProductAccessChecks = 100
-
-// CheckProductAccessParams asks about 1 to MaxProductAccessChecks products,
-// named by exactly one of ProductIDs and ProductKeys.
-type CheckProductAccessParams struct {
-	ProductIDs  []ProductID `json:"product_ids"`
-	ProductKeys []string    `json:"product_keys"`
-}
-
-// ProductAccessCheck answers every requested product, keyed by the id or key
-// the request named: whether the customer holds it, and the most seats a live
-// window gives (null when not held per seat).
-type ProductAccessCheck struct {
-	Access     map[string]bool `json:"access"`
-	Quantities map[string]*int `json:"quantities"`
-}
-
 // CreateProductAccessParams grants a customer a product free. At most one of
 // Hours and EndsAt: Hours extends the customer's access to the product, from
 // the end of their latest live window of it (or now); EndsAt ends this grant
@@ -217,11 +160,14 @@ type CreateProductAccessBatchResult struct {
 	Items []ProductAccessGrant `json:"items"`
 }
 
-// ProductAccessListParams pages a customer's product-access windows, newest
-// first; LiveOnly keeps those live now. IDs instead reads 1 to MaxBatchItems
-// of the customer's named windows in one page; unknown ones are absent.
+// ProductAccessListParams pages product-access windows, newest first, of
+// the named customers and products (each 1 to MaxBatchItems; none: any);
+// LiveOnly keeps those live now. IDs instead reads 1 to MaxBatchItems named
+// windows in one page; unknown ones are absent.
 type ProductAccessListParams struct {
 	PageRequest
-	LiveOnly bool
-	IDs      []ProductAccessID
+	CustomerIDs []CustomerID
+	ProductIDs  []ProductID
+	LiveOnly    bool
+	IDs         []ProductAccessID
 }

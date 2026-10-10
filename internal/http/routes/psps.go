@@ -34,8 +34,6 @@ var pspsRoutes = []Route{
 	// A refresh rewrites the subscription mirrors from provider truth.
 	{Method: POST, Path: "/v1/admin/psps/refresh", Group: MerchantConfig, Auth: AuthMerchant, Name: "RefreshPSPs", Sensitive: true,
 		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},
-	{Method: GET, Path: "/v1/admin/rails", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListRails",
-		Responses: []Reply{{200, billing.ListPage[billing.RailDefinition]{}}}, Handler: h(handlers.ListRails)},
 
 	// The provider callback surface. The provider's account identity resolves
 	// its merchant; runtime bindings and signatures remain mandatory. The body

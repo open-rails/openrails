@@ -9,7 +9,7 @@ import {
   getPayment,
   getPaymentAttempt,
   getPrice,
-  getPriceKeyHistory,
+  getPriceHistory,
   getProduct,
   getRebillCycle,
   getSubscription,
@@ -380,17 +380,16 @@ export const adminQueries = {
       queryFn: ({ signal }) => getProduct(id!, signal),
       enabled: Boolean(id),
     }),
-  priceHistory: (productKey?: string, priceKey?: string) =>
+  priceHistory: (priceId?: string) =>
     queryOptions({
       queryKey: [
         ...queryKeys.catalog(),
         "prices",
         "history",
-        { productKey, priceKey },
+        priceId ?? "unselected",
       ],
-      queryFn: ({ signal }) =>
-        getPriceKeyHistory(productKey!, priceKey!, signal),
-      enabled: Boolean(productKey && priceKey),
+      queryFn: ({ signal }) => getPriceHistory(priceId!, signal),
+      enabled: Boolean(priceId),
     }),
   priceMigrations: (productKey?: string, priceKey?: string, limit = 5) =>
     queryOptions({

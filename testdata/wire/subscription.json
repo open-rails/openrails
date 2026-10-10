@@ -8,73 +8,6 @@
     "waiting_for_new_card": false,
     "last_failure_reason": "insufficient_funds"
   },
-  "payments": [
-    {
-      "id": "pay_eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
-      "kind": "charge",
-      "status": "succeeded",
-      "amount": "9223372036854775807",
-      "amount_refunded": "0",
-      "currency": "USD",
-      "customer_id": "22222222-2222-2222-2222-222222222222",
-      "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
-      "order_id": null,
-      "invoice_id": null,
-      "quantity": null,
-      "price_id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-      "price": {
-        "quantity": null,
-        "revision": 0,
-        "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
-        "key": "pro-monthly",
-        "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "archived": false,
-        "unit_amount": "9223372036854775807",
-        "currency": "USD",
-        "access_duration_hours": 720,
-        "billing_interval_hours": 720,
-        "trial_unit_amount": null,
-        "trial_duration_hours": null,
-        "psps": {
-          "mobius": {
-            "status": "linked",
-            "ids": null,
-            "lookup_key": "",
-            "sync_status": "unknown",
-            "drift": null,
-            "message": ""
-          }
-        },
-        "pending_manual_actions": [],
-        "created_at": "2026-09-16T00:00:00.123456789Z",
-        "updated_at": "2026-09-16T00:00:00.123456789Z"
-      },
-      "product": {
-        "id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-        "key": "pro",
-        "display_name": "Pro",
-        "description": "",
-        "tier_group": null,
-        "tier_rank": 0,
-        "archived": false
-      },
-      "channel": "rail",
-      "rail": "nmi",
-      "psp_id": "psp_55555555-5555-5555-5555-555555555555",
-      "transaction_id": "txn-1",
-      "card": {
-        "brand": "visa",
-        "last4": "4242",
-        "exp_month": 12,
-        "exp_year": 2030
-      },
-      "failure": null,
-      "refunded_payment_id": null,
-      "reason": null,
-      "refunds": null,
-      "created_at": "2026-09-16T00:00:00.123456789Z"
-    }
-  ],
   "id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
   "customer_id": "22222222-2222-2222-2222-222222222222",
   "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
@@ -129,6 +62,7 @@
     }
   },
   "payment_method_id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+  "mandate_id": "mdt_12121212-1212-4121-8121-121212121212",
   "started_at": "2026-09-16T00:00:00.123456789Z",
   "ended_at": null,
   "current_period_starts_at": "2026-09-16T00:00:00.123456789Z",

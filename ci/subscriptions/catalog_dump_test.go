@@ -99,7 +99,7 @@ products:
 	require.NoError(t, err)
 	_, err = source.client[embedded].ApplyCatalog(t.Context(), original)
 	require.NoError(t, err)
-	pack, err := source.client[embedded].GetProductByKey(t.Context(), "api-pack")
+	pack, err := productByKey(t.Context(), source.client[embedded], "api-pack")
 	require.NoError(t, err)
 	currentPack, err := source.client[embedded].CreatePrice(t.Context(), billing.CreatePriceParams{
 		ProductID: pack.ID, Key: "buy", Currency: "USD", UnitAmount: 90000000,
@@ -158,20 +158,20 @@ products:
 	require.False(t, receipt.Replayed)
 	restoredRaw, _ := dump(target)
 	require.Equal(t, string(raw), string(restoredRaw), "all exported declarations survive an empty-merchant round trip")
-	restoredPack, err := target.client[embedded].GetPriceByKey(t.Context(), "api-pack", "buy")
+	restoredPack, err := priceByKey(t.Context(), target.client[embedded], "api-pack", "buy")
 	require.NoError(t, err)
 	require.NotEqual(t, currentPack.ID, restoredPack.ID, "semantic copy uses destination identities")
 	require.EqualValues(t, 0, restoredPack.Revision, "full historical revision numbers require the billing archive")
 
 	// Content-addressed apply is a one-time batch, not a rollback command.
-	product, err := target.client[embedded].GetProductByKey(t.Context(), "premium")
+	product, err := productByKey(t.Context(), target.client[embedded], "premium")
 	require.NoError(t, err)
 	_, err = target.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Later edit")})
 	require.NoError(t, err)
 	replay, err := target.client[remote].ApplyCatalog(t.Context(), exported)
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
-	product, err = target.client[embedded].GetProductByKey(t.Context(), "premium")
+	product, err = productByKey(t.Context(), target.client[embedded], "premium")
 	require.NoError(t, err)
 	require.Equal(t, "Later edit", product.DisplayName)
 }

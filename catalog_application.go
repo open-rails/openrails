@@ -25,21 +25,6 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 	return &out, nil
 }
 
-// ReplaceEntitlements moves every product granting each pair's From key to
-// grant its To key instead, in one catalog edit; an empty To removes From.
-// Holders follow their products: they lose From and gain To at once. The
-// receipt lists each changed product.
-func (c *Client) ReplaceEntitlements(ctx context.Context, params billing.ReplaceEntitlementsParams, requestOptions ...RequestOption) (*billing.CatalogApplicationReceipt, error) {
-	if len(params.Pairs) == 0 {
-		return nil, invalidErr("pairs is required")
-	}
-	var out billing.CatalogApplicationReceipt
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/entitlement-replacements", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // GetCatalogRevision reads the catalog revision, which every catalog write
 // advances, and whether catalog writes are accepted.
 func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error) {

@@ -246,22 +246,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text
   AND customer_id IS NOT NULL;
 
--- name: ListUsageMeterOverrides :many
--- One keyset page of a meter's customer overrides, by customer.
-SELECT card.customer_id,
-       card.meter_key,
-       card.price,
-       card.allowance,
-       card.created_at,
-       card.updated_at
-FROM billing.catalog_rate_cards card
-WHERE card.merchant_id = sqlc.arg(merchant_id)
-  AND card.meter_key = sqlc.arg(meter_key)::text
-  AND card.customer_id IS NOT NULL
-  AND (sqlc.narg(after_customer)::uuid IS NULL OR card.customer_id > sqlc.narg(after_customer)::uuid)
-ORDER BY card.customer_id
-LIMIT sqlc.arg(fetch_limit)::int;
-
 -- name: LockUsageEventsForMeterCorrection :exec
 LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE;
 

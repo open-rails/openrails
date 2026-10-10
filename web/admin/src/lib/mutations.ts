@@ -5,6 +5,7 @@ import {
 } from "@/lib/api/client"
 import type {
   CreatePriceParams,
+  Meter,
   UpdateProductParams,
 } from "@/lib/api/generated/wire"
 import { mutationOptions, type QueryClient } from "@tanstack/react-query"
@@ -21,18 +22,16 @@ import {
   rotateWebhookURL,
   archivePSP,
   createPSP,
-  deleteDefaultUsageRateCard,
   deleteCustomerUsageRateOverride,
   deleteWebhook,
   getCustomer,
-  getPriceByKey,
-  getProduct,
+  getProductByKey,
   grantProductAccess,
   listCustomers,
   listPayments,
   listSubscriptions,
   applyMerchantSettings,
-  putDefaultUsageRateCard,
+  putUsageMeterRateCard,
   putCustomerUsageRateOverride,
   updatePSP,
   putUsageMeter,
@@ -387,8 +386,9 @@ export const adminMutations = {
         productKey: string
         priceKey: string
       }) => {
-        const price = await getPriceByKey(productKey, priceKey)
-        const product = await getProduct(price.product_id)
+        const product = await getProductByKey(productKey)
+        const price = product.prices.find((p) => p.key === priceKey)
+        if (!price) throw new Error(`No live price ${productKey}/${priceKey}`)
         return {
           price,
           productName: product.display_name,
@@ -491,17 +491,17 @@ export const adminMutations = {
     return mutationOptions({
       mutationKey: [...metersKey, "rate-card", "put"],
       mutationFn: ({
-        key,
+        meter,
         rateCard,
       }: {
-        key: string
+        meter: Meter
         rateCard: DefaultUsageRateCardRequest
-      }) => putDefaultUsageRateCard(key, rateCard),
-      onSuccess: (_result, { key }) =>
+      }) => putUsageMeterRateCard(meter, rateCard),
+      onSuccess: (_result, { meter }) =>
         Promise.all([
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: keys.usageMeter(key),
+            queryKey: keys.usageMeter(meter.key),
           }),
         ]),
     })
@@ -511,12 +511,12 @@ export const adminMutations = {
     const metersKey = keys.usageMeters()
     return mutationOptions({
       mutationKey: [...metersKey, "rate-card", "delete"],
-      mutationFn: (key: string) => deleteDefaultUsageRateCard(key),
-      onSuccess: (_result, key) =>
+      mutationFn: (meter: Meter) => putUsageMeterRateCard(meter, null),
+      onSuccess: (_result, meter) =>
         Promise.all([
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
-            queryKey: keys.usageMeter(key),
+            queryKey: keys.usageMeter(meter.key),
           }),
         ]),
     })

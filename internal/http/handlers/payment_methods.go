@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -48,7 +47,7 @@ func ListPaymentMethods(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listPaymentMethods(r, customer)
+	listPaymentMethods(r, customer, false)
 }
 
 // ListCustomerPaymentMethods (GET /admin/customers/{customer_id}/payment-methods)
@@ -63,7 +62,7 @@ func ListCustomerPaymentMethods(r *httprequest.Request) {
 		return
 	}
 	if ids == nil {
-		listPaymentMethods(r, customer)
+		listPaymentMethods(r, customer, true)
 		return
 	}
 	methods, err := r.State.PaymentMethodService.ListByIDs(r.Request.Context(), customer.UUID(), uuidutil.Of(ids))
@@ -71,7 +70,7 @@ func ListCustomerPaymentMethods(r *httprequest.Request) {
 		writeRefusal(r, err, "failed to list payment methods")
 		return
 	}
-	out, err := paymentMethodsView(r, customer, methods)
+	out, err := paymentMethodsView(r, customer, methods, true)
 	if err != nil {
 		r.InternalError("failed to read payment methods", err)
 		return
@@ -79,7 +78,9 @@ func ListCustomerPaymentMethods(r *httprequest.Request) {
 	r.SuccessJSON(billing.ListPage[billing.PaymentMethod]{Items: out})
 }
 
-func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID) {
+// listPaymentMethods is one page of the customer's cards; ended includes
+// the agreements that can no longer authorize a charge.
+func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID, ended bool) {
 	page, ok := r.Page()
 	if !ok {
 		return
@@ -89,7 +90,7 @@ func listPaymentMethods(r *httprequest.Request, customer identity.CustomerID) {
 		writeRefusal(r, err, "failed to list payment methods")
 		return
 	}
-	out, err := paymentMethodsView(r, customer, methods.Items)
+	out, err := paymentMethodsView(r, customer, methods.Items, ended)
 	if err != nil {
 		r.InternalError("failed to read payment methods", err)
 		return
@@ -442,7 +443,7 @@ func SetDefaultPaymentMethod(r *httprequest.Request) {
 }
 
 func writePaymentMethod(r *httprequest.Request, status int, customer identity.CustomerID, pm *models.PaymentMethod) {
-	out, err := paymentMethodsView(r, customer, []*models.PaymentMethod{pm})
+	out, err := paymentMethodsView(r, customer, []*models.PaymentMethod{pm}, false)
 	if err != nil {
 		r.InternalError("failed to read payment method", err)
 		return
@@ -451,9 +452,9 @@ func writePaymentMethod(r *httprequest.Request, status int, customer identity.Cu
 }
 
 // paymentMethodsView builds the wire methods of one customer: each card's
-// derived health, the subscriptions it pays and the currencies it is the
-// default for.
-func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, methods []*models.PaymentMethod) ([]billing.PaymentMethod, error) {
+// derived health, the subscriptions it pays, the currencies it is the
+// default for and its agreements (ended ones too when ended).
+func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, methods []*models.PaymentMethod, ended bool) ([]billing.PaymentMethod, error) {
 	out := make([]billing.PaymentMethod, 0, len(methods))
 	if len(methods) == 0 {
 		return out, nil
@@ -467,21 +468,17 @@ func paymentMethodsView(r *httprequest.Request, customer identity.CustomerID, me
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]uuid.UUID, 0, len(methods))
-	for _, pm := range methods {
-		ids = append(ids, pm.ID)
-	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	live, err := r.State.DB.Gen(ctx).ListLiveMandatesOfPaymentMethods(ctx, gen.ListLiveMandatesOfPaymentMethodsParams{MerchantID: mid.UUID(), CustomerID: customer.UUID(), PaymentMethodIds: ids})
+	ids := make([]uuid.UUID, len(methods))
+	for i, pm := range methods {
+		ids[i] = pm.ID
+	}
+	agreements, err := mandates.ForPaymentMethods(ctx, r.State.DB.Gen(ctx), mid.UUID(), ids, ended)
 	if err != nil {
 		return nil, err
-	}
-	agreements := map[uuid.UUID][]billing.Mandate{}
-	for _, m := range live {
-		agreements[*m.PaymentMethodID] = append(agreements[*m.PaymentMethodID], mandates.View(m))
 	}
 	now := time.Now().UTC()
 	for _, pm := range methods {

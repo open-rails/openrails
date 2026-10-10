@@ -38,7 +38,9 @@ const mounted = (
     queries.setQueryData(adminQueries.config().queryKey, {
       capabilities: { route_groups: groups, features: {} },
       currencies: [],
+      rails: [],
       payment: null,
+      captcha: null,
     })
   queries.setQueryData(adminQueries.catalogRevision().queryKey, {
     revision: 1,

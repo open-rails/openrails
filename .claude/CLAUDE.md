@@ -73,7 +73,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi): credentials + `account_id` + key
   (`psps.key`). A PSP is NOT the acquiring bank. Solana is the self-custody wallet slot.
 - PSP routes are `/v1/admin/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, `ArchivePSP`);
-  rails are read at `/v1/admin/rails`. Provider callbacks land on
+  rails are read in `GET /v1/config` (`rails`). Provider callbacks land on
   `/v1/webhooks/{rail}/{account_id}`.
 - A table that stores both `rail` and `psp_id` keeps them in agreement by a composite
   foreign key to `psps`.

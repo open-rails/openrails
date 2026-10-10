@@ -253,27 +253,29 @@ SELECT id, key, display_name, description, tier_group, tier_rank, archived, crea
 WHERE products.merchant_id = $1::uuid
   AND ($2::boolean IS NULL OR archived = $2::boolean)
   AND ($3::text = '' OR lower(btrim(tier_group)) = lower(btrim($3::text)))
-  AND ($4::text = '' OR id IN (
+  AND ($4::text[] IS NULL OR key = ANY ($4::text[]))
+  AND ($5::text[] IS NULL OR id IN (
     SELECT pe.product_id FROM billing.product_entitlements pe
-    WHERE pe.merchant_id = $1::uuid AND pe.entitlement = $4::text AND pe.removed_at IS NULL))
+    WHERE pe.merchant_id = $1::uuid AND pe.entitlement = ANY ($5::text[]) AND pe.removed_at IS NULL))
   -- For sale: some live price sells it. A product without one is granted only.
-  AND ($5::boolean IS NULL OR $5::boolean = EXISTS (
+  AND ($6::boolean IS NULL OR $6::boolean = EXISTS (
     SELECT 1 FROM billing.prices pr
     WHERE pr.merchant_id = products.merchant_id AND pr.product_id = products.id AND NOT pr.archived))
-  AND ($6::timestamptz IS NULL OR (created_at, id) < ($6::timestamptz, $7::uuid))
+  AND ($7::timestamptz IS NULL OR (created_at, id) < ($7::timestamptz, $8::uuid))
 ORDER BY created_at DESC, id DESC
-LIMIT $8::int
+LIMIT $9::int
 `
 
 type ListProductsFilteredParams struct {
-	MerchantID  uuid.UUID
-	Archived    *bool
-	TierGroup   string
-	Entitlement string
-	ForSale     *bool
-	AfterAt     *time.Time
-	AfterID     *uuid.UUID
-	FetchLimit  int32
+	MerchantID   uuid.UUID
+	Archived     *bool
+	TierGroup    string
+	Keys         []string
+	Entitlements []string
+	ForSale      *bool
+	AfterAt      *time.Time
+	AfterID      *uuid.UUID
+	FetchLimit   int32
 }
 
 // One keyset page, newest first: rows after (after_at, after_id).
@@ -282,7 +284,8 @@ func (q *Queries) ListProductsFiltered(ctx context.Context, arg ListProductsFilt
 		arg.MerchantID,
 		arg.Archived,
 		arg.TierGroup,
-		arg.Entitlement,
+		arg.Keys,
+		arg.Entitlements,
 		arg.ForSale,
 		arg.AfterAt,
 		arg.AfterID,

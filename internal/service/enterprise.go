@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -45,6 +46,26 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter)
 		return fmt.Errorf("service not initialized")
 	}
 	return money.NewMoneyService(s.catalogDatabase()).EnsureUsageMeter(ctx, spec)
+}
+
+// SetUsageMeter declares a meter and, in the same catalog edit, its rate
+// card: card sets it, removeCard removes it, neither keeps it.
+func (s *Service) SetUsageMeter(ctx context.Context, spec catalogrules.Meter, card *UsageRateCardInput, removeCard bool) error {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		if err := scoped.ensureUsageMeter(ctx, spec); err != nil {
+			return struct{}{}, err
+		}
+		switch {
+		case card != nil:
+			return struct{}{}, scoped.setUsageRateCard(ctx, *card)
+		case removeCard:
+			if err := scoped.deleteDefaultUsageRateCard(ctx, spec.Key); err != nil && !errors.Is(err, money.ErrDefaultRateCardNotFound) {
+				return struct{}{}, err
+			}
+		}
+		return struct{}{}, nil
+	})
+	return err
 }
 
 // UsageRateCardInput declares an in_arrears usage rate card. Payer nil = the
@@ -95,15 +116,6 @@ func (s *Service) setUsageRateCard(ctx context.Context, in UsageRateCardInput) e
 	})
 }
 
-// DeleteDefaultUsageRateCard removes a meter's merchant-default card after all
-// negotiated payer overrides have been removed.
-func (s *Service) DeleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
-	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
-		return struct{}{}, scoped.deleteDefaultUsageRateCard(ctx, meterKey)
-	})
-	return err
-}
-
 func (s *Service) deleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
@@ -117,8 +129,9 @@ func (s *Service) deleteDefaultUsageRateCard(ctx context.Context, meterKey strin
 	return money.NewMoneyService(s.catalogDatabase()).DeleteDefaultUsageRateCard(ctx, meterKey)
 }
 
-// ListPayerRateCards returns one page of a customer's rate overrides.
-func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.CustomerID, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
+// ListRateOverrides returns one page of customers' rate overrides, of one
+// customer and one meter when given.
+func (s *Service) ListRateOverrides(ctx context.Context, payer *identity.CustomerID, meterKey string, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return billing.ListPage[billing.RateOverride]{}, pinErr
@@ -127,7 +140,7 @@ func (s *Service) ListPayerRateCards(ctx context.Context, payer identity.Custome
 	if s == nil || s.rt == nil {
 		return billing.ListPage[billing.RateOverride]{}, fmt.Errorf("service not initialized")
 	}
-	return s.moneyService().ListPayerRateCards(ctx, payer, page)
+	return s.moneyService().ListRateOverrides(ctx, payer, meterKey, page)
 }
 
 // GetPayerRateCard reads a customer's rate override for one meter.

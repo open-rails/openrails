@@ -27,6 +27,7 @@ export {
 export type {
   Account,
   Balance,
+  CaptchaConfig,
   CardSetup,
   CardSummary,
   Currency,

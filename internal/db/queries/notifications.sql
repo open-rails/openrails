@@ -124,6 +124,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
   AND recipient_kind = 'customer' AND customer_id = sqlc.arg(customer_id)::uuid
 RETURNING *;
 
+-- name: MarkAllCustomerNotificationsRead :execrows
+UPDATE billing.notifications SET read_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'customer'
+  AND customer_id = sqlc.arg(customer_id)::uuid AND read_at IS NULL;
+
 -- #1069: renewal-receipt throttle — a receipt for this subscription whose
 -- renewal period started after since.
 -- name: RenewalReceiptSince :one

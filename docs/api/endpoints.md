@@ -116,6 +116,13 @@ an `ETag`). It holds what a browser needs before anything else:
   `status: "temporarily_unavailable"` and `retry_after` (seconds) instead of
   `config`, and then the document is not cached. With a Solana PSP armed,
   `solana` carries the network and accepted tokens.
+- `rails`: every rail a PSP can be declared on, with the credential and
+  setting keys it takes.
+- `captcha`: the challenge to solve when a request answers 403
+  `captcha_required` — `{provider, site_key, script_url, action,
+  token_header}`: load `script_url`, solve with `site_key` and `action`, and
+  resend the request with the token in `token_header`. Null when the
+  deployment challenges nobody.
 
 The merchant reads the same document at `GET /v1/admin/config`.
 `GET /v1/admin/checkout-options` lists, for a `price_id` or a `product_key`

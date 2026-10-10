@@ -29,13 +29,15 @@ type Meter struct {
 }
 
 // SetMeterParams declares a meter. EventType defaults to the meter's key; a
-// meter with recorded usage keeps its definition.
+// meter with recorded usage keeps its definition. RateCard sets the rate card
+// that prices its usage; null removes it, and omitted keeps it.
 type SetMeterParams struct {
-	EventType     string              `json:"event_type,omitempty"`
-	ValueProperty string              `json:"value_property,omitempty"`
-	Aggregation   catalog.Aggregation `json:"aggregation"`
-	Unit          string              `json:"unit,omitempty"`
-	GroupBy       map[string]string   `json:"group_by,omitempty"`
+	EventType     string                             `json:"event_type,omitempty"`
+	ValueProperty string                             `json:"value_property,omitempty"`
+	Aggregation   catalog.Aggregation                `json:"aggregation"`
+	Unit          string                             `json:"unit,omitempty"`
+	GroupBy       map[string]string                  `json:"group_by,omitempty"`
+	RateCard      catalog.Field[MeterRateCardParams] `json:"rate_card,omitzero"`
 }
 
 // MeterRateCard is the rate card that prices a meter's usage, under the
@@ -50,8 +52,9 @@ type MeterRateCard struct {
 	UpdatedAt  time.Time           `json:"updated_at"`
 }
 
-// SetMeterRateCardParams sets the rate card of a meter.
-type SetMeterRateCardParams struct {
+// MeterRateCardParams is a meter's rate card: its price, under the product
+// whose invoices carry it.
+type MeterRateCardParams struct {
 	ProductID ProductID           `json:"product_id"`
 	Filter    map[string][]string `json:"filter,omitempty"`
 	Price     catalog.RatePrice   `json:"price"`
@@ -68,6 +71,14 @@ type RateOverride struct {
 	Allowance     *catalog.Allowance `json:"allowance"`
 	CreatedAt     time.Time          `json:"created_at"`
 	UpdatedAt     time.Time          `json:"updated_at"`
+}
+
+// RateOverrideListParams pages customers' rate overrides, by customer then
+// meter: of CustomerID and MeterKey when set.
+type RateOverrideListParams struct {
+	PageRequest
+	CustomerID CustomerID
+	MeterKey   string
 }
 
 // SetRateOverrideParams sets a customer's price for one meter.

@@ -9,15 +9,13 @@ import (
 
 var cardSetupErrors = codes("card_attempts_blocked", "card_declined", "card_not_saved", "custodian_capture_unavailable", "customer_session_required", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable")
 
-// paymentMethodsRoutes is saved cards, for the customer and merchant staff,
-// the agreements on them, and the customer's default card per currency.
+// paymentMethodsRoutes is saved cards, with the agreements on them, for the
+// customer and merchant staff, and the customer's default card per currency.
 var paymentMethodsRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/customers/{customer_id}/payment-methods", Group: Admin, Auth: AuthMerchant, Name: "ListPaymentMethods", Level: LevelRead,
 		Query: params(cursorPage, idsParam), Responses: []Reply{{200, billing.ListPage[billing.PaymentMethod]{}}}, Errors: codes("invalid_cursor", "invalid_param"), Handler: h(handlers.ListCustomerPaymentMethods)},
 	{Method: DELETE, Path: "/v1/admin/customers/{customer_id}/payment-methods/{id}", Group: Admin, Auth: AuthMerchant, Name: "DeletePaymentMethod", Level: LevelWrite, Sensitive: true, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{202, nil}, {204, nil}}, Errors: codes("invalid_param", "payment_method_delete_failed", "payment_method_delete_unsupported", "rate_limit_exceeded", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.DeleteCustomerPaymentMethod)},
-	{Method: GET, Path: "/v1/admin/customers/{customer_id}/mandates", Group: Admin, Auth: AuthMerchant, Name: "ListMandates", Level: LevelRead,
-		Query: params(cursorPage, idsParam), Responses: []Reply{{200, billing.ListPage[billing.Mandate]{}}}, Errors: codes("invalid_cursor", "invalid_param"), Handler: h(handlers.ListMandates)},
 	{Method: PUT, Path: "/v1/me/default-payment-methods/{currency}", Group: Customer, Auth: AuthCustomer,
 		Request: billing.SetDefaultPaymentMethodParams{}, Responses: []Reply{{200, billing.DefaultPaymentMethod{}}}, Errors: codes("authentication_required", "card_declined", "default_payment_method_invalid", "invalid_param", "payment_method_not_psp_vaulted", "payment_method_psp_mismatch", "payment_method_same_vault", "payment_method_stale", "payment_provider_rejected", "rebill_terms_committed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.SetDefaultPaymentMethod)},
 	{Method: GET, Path: "/v1/me/payment-methods", Group: Customer, Auth: AuthCustomer,

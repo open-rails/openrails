@@ -158,12 +158,12 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 
 | Before | After |
 |---|---|
-| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.CheckEntitlements(` with a `billing.CustomerID` and `billing.CheckEntitlementsParams` (`Entitlements`, at most 100, and `At`), answering `billing.EntitlementCheck` |
-| `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListCustomerEntitlements(` with `billing.CustomerEntitlementListParams` (`Prefix`, `At`, a page), answering the customer's keys |
-| `ListCustomersWithEntitlement` | `client.ListEntitlementCustomers(` |
+| `HasEntitlement(ctx, subject string, key, at)`, `CheckEntitlements(ctx, subject string, keys, at)` | `client.ListEntitlements(` with `billing.EntitlementListParams` (`CustomerIDs`, `Entitlements`, at most 100 each, and `At`); a key not listed is not held |
+| `ListActiveEntitlements(ctx, subjects, at)`, `ListEntitlements(ctx, subject, at)` | `client.ListEntitlements(` with up to 100 `CustomerIDs` (and a `Prefix`, `At`, a page), answering each customer's keys |
+| `ListCustomersWithEntitlement` | `client.ListEntitlements(` with one key in `Entitlements` and no `CustomerIDs` |
 | `GrantEntitlement`, `RevokeEntitlement` | Grant the product that carries the key: `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
 | `ResolveEffectiveTier` | `client.GetEffectiveTiers(` with `billing.GetEffectiveTiersParams` (`Group`, up to 100 `CustomerIDs`); a customer's tier is nil when they hold none |
-| `client.ProductAccess.Check`, `CheckMany`, `List` | `client.CheckProductAccess(`, `client.ListProductAccess(`, `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
+| `client.ProductAccess.Check`, `CheckMany`, `List` | `client.ListProductAccess(` (`CustomerIDs`, `ProductIDs`, `LiveOnly`), `client.CreateProductAccess(`, `client.DeleteProductAccess(` |
 
 Every entitlement now derives from a grant; `source_type` is `purchase`,
 `subscription`, `admin` or `grace`.
@@ -172,12 +172,12 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(`, `client.EnsureProduct(`, `client.GetProduct(`, `client.GetProductByKey(`, `client.UpdateProduct(`, `client.ListProducts(` |
-| `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.GetPriceByKey(`, `client.UpdatePrice(` (a merge patch: `archived`, `psp_links`), `client.ListPrices(`, `client.ListPriceKeyHistory(` |
+| `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(`, `client.EnsureProduct(`, `client.GetProduct(`, `client.UpdateProduct(`, `client.ListProducts(` (by key: `Keys`) |
+| `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.UpdatePrice(` (a merge patch: `archived`, `psp_links`), `client.ListPrices(` (by key: `ProductKey`, `Key`), `client.ListPriceHistory(` |
 | `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`, `client.GetCatalogRevision(` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
-| `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(`, `client.GetMeter(`, `client.ListMeters(`, `client.SetMeterRateCard(`, `client.DeleteMeterRateCard(`, and `client.ListRateOverrides(`, `client.SetRateOverride(`, `client.DeleteRateOverride(` for a customer's negotiated price |
-| `ListOffersForEntitlements` | `client.ListOffers(` with `billing.OfferListParams` |
+| `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(` (its `RateCard`; null removes it), `client.GetMeter(`, `client.ListMeters(`, and `client.ListRateOverrides(`, `client.SetRateOverride(`, `client.DeleteRateOverride(` for a customer's negotiated price |
+| `ListOffersForEntitlements` | `client.ListProducts(` with `Entitlements` and `ForSale`; each product carries its current prices |
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
 | Product and price activate and deactivate; price `providers` | `archived` in the update; `psps` |
@@ -247,7 +247,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(`, `client.ArchivePSP(`, `client.PreviewPSPRouting(`, `client.RefreshPSPs(`, `client.ListRails(` |
+| `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(`, `client.ArchivePSP(`, `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in `client.GetPublicConfig(` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `client.DeclarePSP(` returns the `billing.PSP` |
 | `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.ApplyMerchantConfiguration(`. `client.Ready(` checks reachability; any authenticated call proves the credential |
 | `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvents(` takes up to 100 `billing.HostEventID`s and answers each event |
@@ -313,7 +313,7 @@ fields (`400 unknown_field`), and every error code is in
 | Before | After |
 |---|---|
 | `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
-| `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`), `/v1/admin/psps/{id}/archive`, `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; `/v1/admin/rails` |
+| `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`), `/v1/admin/psps/{id}/archive`, `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; rails in `GET /v1/config` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/admin/checkout-sessions`, `POST /v1/me/checkout-sessions` |
 | `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
 | `/v1/admin/credits/deposit`, `/v1/admin/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants`, `/v1/admin/customers/{customer_id}/credit-grants/{id}/revoke` |
@@ -322,8 +322,8 @@ fields (`400 unknown_field`), and every error code is in
 | `PUT …/spend-delegations:upsert` | `PUT /v1/admin/customers/{customer_id}/spend-delegations` (the whole set) and `DELETE /v1/admin/customers/{customer_id}/spend-delegations/{scope}/{scope_key}` |
 | `/v1/admin/admissions/{id}/…` | `/v1/admin/admissions/{request_id}`, `POST /v1/admin/admissions/release`, `POST /v1/admin/admissions/extend` |
 | `POST /v1/admin/usage/report`, `/usage/rollup` | `POST /v1/admin/usage-events`, `POST /v1/admin/metrics/query` |
-| `/v1/admin/users/{user_id}/…` | `/v1/admin/customers/{customer_id}/product-access` and the checks beneath it |
-| `POST /v1/admin/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/admin/customers/{customer_id}/entitlements/check`, `POST /v1/admin/tiers/lookup` |
+| `/v1/admin/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
+| `POST /v1/admin/customers/entitlements:batch`, `…/effective-tier` | `GET /v1/admin/entitlements`, `POST /v1/admin/tiers/lookup` |
 | `GET /v1/admin/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
 | `GET /v1/admin/customers/{id}/payments` | `GET /v1/admin/payments` with `customer_id` |
 | `/v1/me/payment-methods/stripe-setup…` | `/v1/me/payment-method-setups`, `/v1/me/payment-method-setups/{id}/confirm` |
@@ -331,7 +331,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
-| `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `/v1/admin/catalog/meters/{key}/rate-overrides`; `PATCH` the product or price |
+| `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `GET /v1/admin/catalog/rate-overrides`; `PATCH` the product or price |
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/admin/billing-import` |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/admin/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
@@ -514,11 +514,11 @@ applies atomically; hashes do not determine which unseen batch is newer.
 in-process client calls always work. `Config.Catalog` is optional startup shorthand,
 not a catalog ownership mode.
 
-`GetPriceByKey(ctx, productKey, priceKey)` and
-`ListPriceKeyHistory(ctx, productKey, priceKey, page)` now scope the key to its
-product. The HTTP paths are `/v1/merchant/catalog/products/by-key/{product_key}/prices/by-key/{key}`
-and its `/history` child. Checkout and repricing requests using `price_key` also
-supply `product_key`; requests using immutable price IDs keep their current shape.
+A price key is scoped to its product: `ListPrices` with `ProductKey` and `Key`
+reads a key's prices, and `ListPriceHistory(ctx, priceID, page)` its history
+(`GET /v1/admin/catalog/prices/{id}/history`). Checkout and repricing requests
+using `price_key` also supply `product_key`; requests using immutable price IDs
+keep their current shape.
 
 A price exposes an automatically assigned `revision`, starting at zero within
 its product/key. `UpdatePrice` no longer accepts `key`: create a new offer and

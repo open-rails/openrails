@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
-	"github.com/open-rails/openrails/internal/pagination"
 )
 
 // End reasons.
@@ -454,32 +453,40 @@ func optional(s string) *string {
 	return &s
 }
 
-// List is one page of a customer's mandates, newest first.
-func List(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, page billing.PageRequest) (billing.ListPage[billing.Mandate], error) {
-	limit, err := pagination.Limit(page)
-	if err != nil {
-		return billing.ListPage[billing.Mandate]{}, err
+// ForPaymentMethods is the agreements on each card, newest first: those
+// that can still authorize a charge, or with ended included every one.
+func ForPaymentMethods(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, methodIDs []uuid.UUID, ended bool) (map[uuid.UUID][]billing.Mandate, error) {
+	out := make(map[uuid.UUID][]billing.Mandate, len(methodIDs))
+	if len(methodIDs) == 0 {
+		return out, nil
 	}
-	afterAt, afterID, err := pagination.After(page.Cursor)
+	rows, err := q.ListPaymentMethodMandates(ctx, gen.ListPaymentMethodMandatesParams{MerchantID: merchantID, PaymentMethodIds: methodIDs, LiveOnly: !ended})
 	if err != nil {
-		return billing.ListPage[billing.Mandate]{}, err
+		return nil, err
 	}
-	rows, err := q.ListCustomerMandatesPage(ctx, gen.ListCustomerMandatesPageParams{MerchantID: merchantID, CustomerID: customerID, AfterAt: afterAt, AfterID: afterID, RowLimit: pagination.Fetch(limit)})
-	if err != nil {
-		return billing.ListPage[billing.Mandate]{}, err
+	for _, m := range rows {
+		if m.PaymentMethodID != nil {
+			out[*m.PaymentMethodID] = append(out[*m.PaymentMethodID], View(m))
+		}
 	}
-	cut := pagination.Cut(rows, limit, func(m gen.BillingMandate) any { return pagination.TimeID{At: m.CreatedAt, ID: m.ID} })
-	return pagination.Map(cut, View), nil
+	return out, nil
 }
 
-// ListByIDs reads a customer's named mandates, newest first; unknown ones are
-// absent.
-func ListByIDs(ctx context.Context, q *gen.Queries, merchantID, customerID uuid.UUID, ids []uuid.UUID) (billing.ListPage[billing.Mandate], error) {
-	rows, err := q.ListCustomerMandatesByIDs(ctx, gen.ListCustomerMandatesByIDsParams{MerchantID: merchantID, CustomerID: customerID, Ids: ids})
-	if err != nil {
-		return billing.ListPage[billing.Mandate]{}, err
+// ForSubscriptions is the agreement each subscription renews under, by
+// subscription; one without a live recurring mandate is absent.
+func ForSubscriptions(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, subscriptionIDs []uuid.UUID) (map[uuid.UUID]uuid.UUID, error) {
+	out := make(map[uuid.UUID]uuid.UUID, len(subscriptionIDs))
+	if len(subscriptionIDs) == 0 {
+		return out, nil
 	}
-	return pagination.Map(billing.ListPage[gen.BillingMandate]{Items: rows}, View), nil
+	rows, err := q.ListSubscriptionMandates(ctx, gen.ListSubscriptionMandatesParams{MerchantID: merchantID, SubscriptionIds: subscriptionIDs, RowLimit: int32(len(subscriptionIDs))}) // #nosec G115 -- a page of subscriptions
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		out[row.SubscriptionID] = row.ID
+	}
+	return out, nil
 }
 
 // View is a mandate as the API shows it.

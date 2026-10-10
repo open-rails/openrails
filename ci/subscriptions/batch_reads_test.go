@@ -102,7 +102,7 @@ func TestListReadsAreBatched(t *testing.T) {
 	var access *billing.ListPage[billing.ProductAccessGrant]
 	got = w.count(func() {
 		var err error
-		access, err = w.client[remote].ListProductAccess(t.Context(), c.customerID(), billing.ProductAccessListParams{})
+		access, err = w.client[remote].ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{c.customerID()}})
 		require.NoError(t, err)
 	})
 	requireBatched(t, got, "ListProductAccessPage")
@@ -193,7 +193,7 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	require.Equal(t, 1, got["ProductAccessCoverage"], "one coverage query for the product: %v", got)
 	// The rental stacks after the customer's latest window of the product.
 	start := now.Add(10 * 24 * time.Hour)
-	access, err := client.ListProductAccess(t.Context(), c.customerID(), billing.ProductAccessListParams{})
+	access, err := client.ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{c.customerID()}})
 	require.NoError(t, err)
 	var rented []billing.ProductAccessGrant
 	for _, a := range access.Items {
@@ -204,73 +204,65 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	require.Len(t, rented, 1)
 	require.True(t, start.Equal(rented[0].StartsAt), "starts %s", rented[0].StartsAt)
 	require.True(t, start.Add(48*time.Hour).Equal(*rented[0].EndsAt), "ends %v", rented[0].EndsAt)
-	held, err := client.CheckEntitlements(t.Context(), c.customerID(), billing.CheckEntitlementsParams{Entitlements: keys, At: start.Add(time.Hour)})
+	held, err := heldKeys(t.Context(), client, c.customerID(), start.Add(time.Hour), keys...)
 	require.NoError(t, err)
-	require.Equal(t, map[string]bool{"content:cov-a": true, "content:cov-b": true, "content:cov-c": true}, held.Entitlements)
+	require.Equal(t, map[string]bool{"content:cov-a": true, "content:cov-b": true, "content:cov-c": true}, held)
 }
 
-func TestListOffersIsOneRequest(t *testing.T) {
+// Products by entitlement and by key are list filters: one query reads
+// every requested key, each product with its current prices.
+func TestProductKeyFiltersAreOneRequest(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
 	hours := 48
+	productKeys := map[billing.PriceID]string{}
 	create := func(key string, spec []string, currency string, amount int64, duration *int) *billing.Price {
 		product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: key, Entitlements: spec})
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: key + "-" + strings.ToLower(currency), UnitAmount: amount, Currency: currency, AccessDurationHours: duration})
 		require.NoError(t, err)
+		productKeys[price.ID] = key
 		return price
 	}
 	postA := create("post-a-"+uuidShort(), []string{"post:a"}, "USD", 1_000_000, nil)
 	bundleUSD := create("bundle-"+uuidShort(), []string{"post:a", "post:b"}, "USD", 3_000_000, nil)
 	bundleEUR := create("bundle-eur-"+uuidShort(), []string{"post:a", "post:b"}, "EUR", 2_500_000, nil)
-	create("rental-"+uuidShort(), []string{"post:b"}, "USD", 500_000, &hours)
+	rental := create("rental-"+uuidShort(), []string{"post:b"}, "USD", 500_000, &hours)
+	_, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "granted-" + uuidShort(), DisplayName: "Granted", Entitlements: []string{"post:a"}})
+	require.NoError(t, err)
 
+	forSale := true
 	for _, tp := range []topology{embedded, remote} {
-		var offers billing.OfferPages
+		var page *billing.ListPage[billing.Product]
 		got := w.count(func() {
 			var err error
-			offers, err = w.client[tp].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"post:a", "post:b", "post:none", "post:a"}, Kind: billing.OfferPermanent, PreferredCurrency: "EUR", Limit: 2})
+			page, err = w.client[tp].ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"post:a", "post:b", "post:none", "a,b"}, ForSale: &forSale})
 			require.NoError(t, err)
 		})
-		require.Equal(t, 1, got["ListOffersForEntitlements"], "one query for every key: %v", got)
-		require.Len(t, offers, 3)
-		require.Empty(t, offers["post:none"].Items)
-		require.Empty(t, offers["post:none"].Next)
+		require.Equal(t, 1, got["ListProductsFiltered"], "one query for every key: %v", got)
+		sold := map[billing.PriceID]bool{}
+		for _, product := range page.Items {
+			for _, price := range product.Prices {
+				sold[price.ID] = true
+			}
+		}
+		require.Equal(t, map[billing.PriceID]bool{postA.ID: true, bundleUSD.ID: true, bundleEUR.ID: true, rental.ID: true}, sold, "every product on sale granting a key, with its current prices; a granted-only product is not for sale")
 
-		a := offers["post:a"]
-		require.Len(t, a.Items, 2)
-		require.NotEmpty(t, a.Next)
-		require.Equal(t, bundleEUR.ID, a.Items[0].PriceID, "preferred currency first")
-		require.Equal(t, "EUR", a.Items[0].Currency)
-		require.Equal(t, billing.OfferPermanent, a.Items[0].Kind)
-		b := offers["post:b"]
-		require.Len(t, b.Items, 2, "finite rental excluded from permanent offers")
-		require.Empty(t, b.Next)
-		require.Equal(t, bundleEUR.ID, b.Items[0].PriceID)
-		require.Equal(t, bundleUSD.ID, b.Items[1].PriceID)
-
-		next, err := w.client[tp].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"post:a", "post:b"}, Kind: billing.OfferPermanent, PreferredCurrency: "EUR", Limit: 2, Cursors: map[string]string{"post:a": a.Next}})
+		byKey, err := w.client[tp].ListProducts(t.Context(), billing.ProductListParams{Keys: []string{productKeys[postA.ID], "missing-" + uuidShort()}})
 		require.NoError(t, err)
-		seen := map[billing.PriceID]bool{a.Items[0].PriceID: true, a.Items[1].PriceID: true}
-		require.Len(t, next["post:a"].Items, 1)
-		require.Empty(t, next["post:a"].Next)
-		seen[next["post:a"].Items[0].PriceID] = true
-		require.Equal(t, map[billing.PriceID]bool{postA.ID: true, bundleUSD.ID: true, bundleEUR.ID: true}, seen)
-		require.Len(t, next["post:b"].Items, 2, "keys without a cursor start at their first page")
+		require.Len(t, byKey.Items, 1, "an unknown key is absent")
+		require.Equal(t, postA.ProductID, byKey.Items[0].ID)
 
-		_, err = w.client[tp].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"post:b"}, Kind: billing.OfferPermanent, PreferredCurrency: "EUR", Cursors: map[string]string{"post:b": a.Next}})
-		require.ErrorIs(t, err, billing.ErrInvalid, "a cursor is bound to its key")
-
-		finite, err := w.client[tp].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"post:b"}, Kind: billing.OfferFinite})
+		current, err := w.client[tp].ListPrices(t.Context(), billing.PriceListParams{ProductKey: productKeys[rental.ID], Key: rental.Key, Archived: new(false)})
 		require.NoError(t, err)
-		require.Len(t, finite["post:b"].Items, 1)
-		require.Equal(t, 48, *finite["post:b"].Items[0].AccessDurationHours)
+		require.Len(t, current.Items, 1)
+		require.Equal(t, rental.ID, current.Items[0].ID)
 	}
 
-	tooMany := make([]string, billing.MaxEntitlementChecks+1)
+	tooMany := make([]string, billing.MaxBatchItems+1)
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("post:%d", i)
 	}
-	_, err := client.ListOffers(t.Context(), billing.OfferListParams{Entitlements: tooMany, Kind: billing.OfferPermanent})
-	require.Error(t, err)
+	_, err = client.ListProducts(t.Context(), billing.ProductListParams{Entitlements: tooMany})
+	require.ErrorIs(t, err, billing.ErrInvalid)
 }

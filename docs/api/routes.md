@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (194), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (182), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `provider_signature`, `provisioning` (a provisioning token or a client-credentials access token with scope `scim`).
 
@@ -99,18 +99,14 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | GET | `/v1/admin/catalog/revision` | merchant | `AdminRead` | — | 200 `CatalogRevision` |  |
 | GET | `/v1/admin/catalog/meters` | merchant | `AdminRead` | — | 200 `ListPage<Meter>` |  |
 | GET | `/v1/admin/catalog/meters/{key}` | merchant | `AdminRead` | — | 200 `Meter` |  |
-| GET | `/v1/admin/catalog/meters/{key}/rate-overrides` | merchant | `AdminRead` | — | 200 `ListPage<RateOverride>` |  |
-| GET | `/v1/admin/customers/{customer_id}/rate-overrides` | merchant | `AdminRead` | — | 200 `ListPage<RateOverride>` |  |
+| GET | `/v1/admin/catalog/rate-overrides` | merchant | `AdminRead` | — | 200 `ListPage<RateOverride>` |  |
 | GET | `/v1/admin/catalog/product-archives/{id}` | merchant | `AdminRead` | — | 200 `ProductArchive` |  |
 | POST | `/v1/admin/catalog/ask` | merchant | `AdminRead` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
 | GET | `/v1/admin/catalog/products` | merchant | `AdminRead` | — | 200 `ListPage<Product>` |  |
 | GET | `/v1/admin/catalog/products/{id}` | merchant | `AdminRead` | — | 200 `Product` |  |
-| GET | `/v1/admin/catalog/products/by-key/{product_key}` | merchant | `AdminRead` | — | 200 `Product` |  |
 | GET | `/v1/admin/catalog/prices` | merchant | `AdminRead` | — | 200 `ListPage<Price>` |  |
 | GET | `/v1/admin/catalog/prices/{id}` | merchant | `AdminRead` | — | 200 `Price` |  |
-| GET | `/v1/admin/catalog/products/by-key/{product_key}/prices/by-key/{key}` | merchant | `AdminRead` | — | 200 `Price` |  |
-| GET | `/v1/admin/catalog/products/by-key/{product_key}/prices/by-key/{key}/history` | merchant | `AdminRead` | — | 200 `ListPage<PriceKeyMovement>` |  |
-| POST | `/v1/admin/catalog/offers/lookup` | merchant | `AdminRead` | `OfferListParams` | 200 `Record<string, ListPage<Offer>>` |  |
+| GET | `/v1/admin/catalog/prices/{id}/history` | merchant | `AdminRead` | — | 200 `ListPage<PriceKeyMovement>` |  |
 | GET | `/v1/admin/subscriptions` | merchant | `AdminRead` | — | 200 `ListPage<Subscription>` |  |
 | GET | `/v1/admin/subscriptions/{id}` | merchant | `AdminRead` | — | 200 `Subscription` |  |
 | POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `AdminWrite` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
@@ -123,12 +119,9 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | GET | `/v1/admin/price-migrations` | merchant | `AdminRead` | — | 200 `ListPage<PriceMigration>` |  |
 | GET | `/v1/admin/price-migrations/{id}` | merchant | `AdminRead` | — | 200 `PriceMigration` |  |
 | POST | `/v1/admin/price-migrations/{id}/cancel` | merchant | `AdminWrite` | — | 200 `PriceMigrationCancel` | sensitive |
-| GET | `/v1/admin/customers/{customer_id}/entitlements` | merchant | `AdminRead` | — | 200 `ListPage<CustomerEntitlement>` |  |
-| GET | `/v1/admin/entitlements/{entitlement}/customers` | merchant | `AdminRead` | — | 200 `ListPage<string>` |  |
-| POST | `/v1/admin/customers/{customer_id}/entitlements/check` | merchant | `AdminRead` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
+| GET | `/v1/admin/entitlements` | merchant | `AdminRead` | — | 200 `ListPage<CustomerEntitlement>` |  |
 | POST | `/v1/admin/tiers/lookup` | merchant | `AdminRead` | `GetEffectiveTiersParams` | 200 `EffectiveTierLookup` |  |
-| POST | `/v1/admin/customers/{customer_id}/product-access/check` | merchant | `AdminRead` | `CheckProductAccessParams` | 200 `ProductAccessCheck` |  |
-| GET | `/v1/admin/customers/{customer_id}/product-access` | merchant | `AdminRead` | — | 200 `ListPage<ProductAccessGrant>` |  |
+| GET | `/v1/admin/product-access` | merchant | `AdminRead` | — | 200 `ListPage<ProductAccessGrant>` |  |
 | POST | `/v1/admin/product-access` | merchant | `AdminWrite` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
 | DELETE | `/v1/admin/customers/{customer_id}/product-access/{id}` | merchant | `AdminWrite` | — | 204 — | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers` | merchant | `AdminRead` | — | 200 `ListPage<Customer>` |  |
@@ -171,7 +164,6 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 | GET | `/v1/admin/rebill-cycles/{id}` | merchant | `AdminRead` | — | 200 `RebillCycle` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `AdminRead` | — | 200 `ListPage<PaymentMethod>` |  |
 | DELETE | `/v1/admin/customers/{customer_id}/payment-methods/{id}` | merchant | `AdminWrite` | — | 202 —<br>204 — | sensitive; limit `destructive` |
-| GET | `/v1/admin/customers/{customer_id}/mandates` | merchant | `AdminRead` | — | 200 `ListPage<Mandate>` |  |
 | GET | `/v1/admin/host-events` | merchant | `AdminRead` | — | 200 `ListPage<HostEvent>` |  |
 | POST | `/v1/admin/host-events/acknowledge` | merchant | `AdminWrite` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` |  |
 | POST | `/v1/admin/metrics/query` | merchant | `AdminRead` | `MetricsQuery` | 200 `MetricsResult` |  |
@@ -189,13 +181,10 @@ Every catalog edit, behind the host's `Permissions.CatalogWrite`; each refuses w
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/admin/catalog/applications` | merchant | `CatalogWrite` | `Application` | 200 `CatalogApplicationReceipt` | sensitive |
-| POST | `/v1/admin/catalog/entitlement-replacements` | merchant | `CatalogWrite` | `ReplaceEntitlementsParams` | 200 `CatalogApplicationReceipt` | sensitive |
 | POST | `/v1/admin/catalog/drift/refresh` | merchant | `CatalogWrite` | — | 200 `CatalogDriftRefresh` | sensitive |
 | PUT | `/v1/admin/catalog/meters/{key}` | merchant | `CatalogWrite` | `SetMeterParams` | 200 `Meter` | sensitive |
-| PUT | `/v1/admin/catalog/meters/{key}/rate-card` | merchant | `CatalogWrite` | `SetMeterRateCardParams` | 200 `Meter` | sensitive |
-| DELETE | `/v1/admin/catalog/meters/{key}/rate-card` | merchant | `CatalogWrite` | — | 204 — | sensitive |
-| PUT | `/v1/admin/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `CatalogWrite` | `SetRateOverrideParams` | 200 `RateOverride` | sensitive; limit `grant` |
-| DELETE | `/v1/admin/customers/{customer_id}/rate-overrides/{meter_key}` | merchant | `CatalogWrite` | — | 204 — | sensitive; limit `destructive` |
+| PUT | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `CatalogWrite` | `SetRateOverrideParams` | 200 `RateOverride` | sensitive; limit `grant` |
+| DELETE | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `CatalogWrite` | — | 204 — | sensitive; limit `destructive` |
 | POST | `/v1/admin/catalog/product-archives` | merchant | `CatalogWrite` | `ArchiveProductParams` | 200 `ProductArchive` | sensitive; `Idempotency-Key` |
 | POST | `/v1/admin/catalog/products` | merchant | `CatalogWrite` | `CreateProductParams` | 201 `Product` | sensitive |
 | PATCH | `/v1/admin/catalog/products/{id}` | merchant | `CatalogWrite` | `UpdateProductParams` | 200 `Product` | sensitive |
@@ -216,7 +205,6 @@ The merchant's own configuration, every route behind the host's `Permissions.Mer
 | POST | `/v1/admin/psps/{id}/archive` | merchant | `MerchantConfig` | `ArchivePSPParams` | 200 `PSP` | sensitive |
 | POST | `/v1/admin/psps/routing-preview` | merchant | `MerchantConfig` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
 | POST | `/v1/admin/psps/refresh` | merchant | `MerchantConfig` | — | 202 `PSPRefresh` | sensitive |
-| GET | `/v1/admin/rails` | merchant | `MerchantConfig` | — | 200 `ListPage<RailDefinition>` |  |
 | GET | `/v1/admin/configuration` | merchant | `MerchantConfig` | — | 200 `MerchantConfigurationState` |  |
 | POST | `/v1/admin/configuration/applications` | merchant | `MerchantConfig` | `ApplyMerchantConfigurationParams` | 200 `MerchantConfigurationReceipt` | sensitive |
 | GET | `/v1/admin/api-host` | merchant | `MerchantConfig` | — | 200 `MerchantAPIHost` | when `merchant_directory` |

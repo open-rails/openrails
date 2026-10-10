@@ -51,6 +51,14 @@ export type Capabilities = {
   features: Record<string, boolean> | null
 }
 
+export type CaptchaConfig = {
+  provider: string
+  site_key: string
+  script_url: string
+  action: string
+  token_header: string
+}
+
 export type CaptchaStatus = {
   enabled: boolean
   required: boolean
@@ -196,7 +204,9 @@ export type CustomerChangeSubscriptionParams = {
 }
 
 export type CustomerEntitlement = {
+  customer_id: string
   entitlement: string
+  quantity: number | null
 }
 
 export type CustomerNotificationLookup = {
@@ -300,6 +310,7 @@ export type Mandate = {
 
 export type MarkNotificationsReadParams = {
   notification_ids?: string[]
+  all?: boolean
 }
 
 export type MintCheckoutSessionParams = {
@@ -674,12 +685,21 @@ export type ProductSummary = {
 export type PublicConfig = {
   capabilities: Capabilities
   currencies: CurrencyUnits[]
+  rails: RailDefinition[]
   payment: PaymentConfig | null
+  captcha: CaptchaConfig | null
 }
 
 export type Quantity = {
   min: number
   max: number
+}
+
+export type RailDefinition = {
+  rail: "ccbill" | "nmi" | "solana" | "stripe"
+  display_name: string
+  credential_keys: string[]
+  setting_keys: string[]
 }
 
 export type ReplacePaymentMethodCardParams = {
@@ -771,7 +791,6 @@ export type Subscription = {
   recovery?: PaymentRecovery
   dunning: SubscriptionDunning | null
   deletion_scheduled_at?: string
-  payments?: Payment[]
   id: string
   customer_id: string
   product_id: string
@@ -783,6 +802,7 @@ export type Subscription = {
   status: "active" | "awaiting_method" | "canceled" | "past_due" | "pending" | "unverified"
   scheduled_change: ScheduledChange | null
   payment_method_id: string | null
+  mandate_id: string | null
   started_at: string
   ended_at: string | null
   current_period_starts_at: string | null

@@ -134,11 +134,14 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 	require.NoError(t, err)
 	held := func(customer uuid.UUID, keys ...string) map[string]bool {
 		t.Helper()
-		rows, err := data.GenDirectory().CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: merchant, CustomerID: customer, AtTime: time.Now(), Entitlements: keys})
+		rows, err := data.GenDirectory().CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{MerchantID: merchant, CustomerIds: []uuid.UUID{customer}, AtTime: time.Now(), Entitlements: keys, RowLimit: int32(len(keys))}) // #nosec G115 -- a handful of keys
 		require.NoError(t, err)
 		out := map[string]bool{}
+		for _, key := range keys {
+			out[key] = false
+		}
 		for _, row := range rows {
-			out[row.Entitlement] = row.HasAccess
+			out[row.Entitlement] = true
 		}
 		return out
 	}

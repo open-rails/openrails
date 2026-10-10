@@ -46,13 +46,10 @@ type Subscription struct {
 	// subscription is past_due or awaiting_method.
 	Dunning             *SubscriptionDunning `json:"dunning"`
 	DeletionScheduledAt *time.Time           `json:"deletion_scheduled_at,omitempty"`
-	// Payments is the subscription's recovery history: the same Payment shape
-	// GET /v1/admin/payments serves.
-	Payments   []Payment      `json:"payments,omitempty"`
-	ID         SubscriptionID `json:"id"`
-	CustomerID CustomerID     `json:"customer_id"`
-	ProductID  ProductID      `json:"product_id"`
-	PriceID    PriceID        `json:"price_id"`
+	ID                  SubscriptionID       `json:"id"`
+	CustomerID          CustomerID           `json:"customer_id"`
+	ProductID           ProductID            `json:"product_id"`
+	PriceID             PriceID              `json:"price_id"`
 	// Quantity is the seats of a per-seat price: each period bills the unit
 	// amount times Quantity. Null unless the price is sold per seat.
 	Quantity           *int               `json:"quantity"`
@@ -61,20 +58,23 @@ type Subscription struct {
 	RailSubscriptionID *string            `json:"rail_subscription_id"`
 	Status             SubscriptionStatus `json:"status"`
 	// ScheduledChange is the change waiting for the next renewal, or null.
-	ScheduledChange       *ScheduledChange `json:"scheduled_change"`
-	PaymentMethodID       *PaymentMethodID `json:"payment_method_id"`
-	StartedAt             time.Time        `json:"started_at"`
-	EndedAt               *time.Time       `json:"ended_at"`
-	CurrentPeriodStartsAt *time.Time       `json:"current_period_starts_at"`
-	CurrentPeriodEndsAt   *time.Time       `json:"current_period_ends_at"`
-	CanceledAt            *time.Time       `json:"canceled_at"`
-	CancelType            *string          `json:"cancel_type"`
-	CancelFeedback        *string          `json:"cancel_feedback"`
-	Resumable             bool             `json:"resumable"`
-	CancelScheduled       bool             `json:"cancel_scheduled"`
-	CancelMode            string           `json:"cancel_mode"`
-	Price                 *Price           `json:"price,omitempty"`
-	Product               *ProductSummary  `json:"product,omitempty"`
+	ScheduledChange *ScheduledChange `json:"scheduled_change"`
+	PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
+	// MandateID is the agreement the subscription renews under; null when it
+	// has none (a provider-owned subscription, or one waiting for a card).
+	MandateID             *MandateID      `json:"mandate_id"`
+	StartedAt             time.Time       `json:"started_at"`
+	EndedAt               *time.Time      `json:"ended_at"`
+	CurrentPeriodStartsAt *time.Time      `json:"current_period_starts_at"`
+	CurrentPeriodEndsAt   *time.Time      `json:"current_period_ends_at"`
+	CanceledAt            *time.Time      `json:"canceled_at"`
+	CancelType            *string         `json:"cancel_type"`
+	CancelFeedback        *string         `json:"cancel_feedback"`
+	Resumable             bool            `json:"resumable"`
+	CancelScheduled       bool            `json:"cancel_scheduled"`
+	CancelMode            string          `json:"cancel_mode"`
+	Price                 *Price          `json:"price,omitempty"`
+	Product               *ProductSummary `json:"product,omitempty"`
 	// Card is display data for the card the subscription charges: its own
 	// (PaymentMethodID), or, when PaymentMethodID is null on a card
 	// subscription, the customer's default card for its currency.

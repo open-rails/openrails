@@ -75,11 +75,3 @@ type Mandate struct {
 	AcceptedAt       time.Time         `json:"accepted_at"`
 	CreatedAt        time.Time         `json:"created_at"`
 }
-
-// MandateListParams pages a customer's mandates, newest first. IDs instead
-// reads 1 to MaxBatchItems of the customer's named mandates in one page;
-// unknown ones are absent.
-type MandateListParams struct {
-	PageRequest
-	IDs []MandateID
-}

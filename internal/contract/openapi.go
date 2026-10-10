@@ -190,6 +190,10 @@ func (m *model) operation(r routes.Route) *obj {
 			schema = newObj("type", "array", "items", newObj("type", "string"), "minItems", 1, "maxItems", billing.MaxBatchItems)
 			params = append(params, newObj("name", q.Name, "in", "query", "style", "form", "explode", false, "schema", schema))
 			continue
+		case "strings":
+			schema = newObj("type", "array", "items", newObj("type", "string"), "maxItems", billing.MaxBatchItems)
+			params = append(params, newObj("name", q.Name, "in", "query", "style", "form", "explode", true, "schema", schema))
+			continue
 		}
 		params = append(params, newObj("name", q.Name, "in", "query", "schema", schema))
 	}

@@ -407,127 +407,6 @@ func (q *Queries) InsertMandate(ctx context.Context, arg InsertMandateParams) (B
 	return i, err
 }
 
-const listCustomerMandatesByIDs = `-- name: ListCustomerMandatesByIDs :many
-SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
-WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
-  AND id = ANY ($3::uuid[])
-ORDER BY created_at DESC, id DESC
-`
-
-type ListCustomerMandatesByIDsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Ids        []uuid.UUID
-}
-
-// A customer's named mandates, newest first.
-func (q *Queries) ListCustomerMandatesByIDs(ctx context.Context, arg ListCustomerMandatesByIDsParams) ([]BillingMandate, error) {
-	rows, err := q.db.Query(ctx, listCustomerMandatesByIDs, arg.MerchantID, arg.CustomerID, arg.Ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingMandate
-	for rows.Next() {
-		var i BillingMandate
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.PaymentMethodID,
-			&i.PspID,
-			&i.Rail,
-			&i.Kind,
-			&i.SubscriptionID,
-			&i.Currency,
-			&i.Status,
-			&i.EndReason,
-			&i.EndedAt,
-			&i.CardBrand,
-			&i.InitialTransactionID,
-			&i.NetworkTransactionID,
-			&i.TransactionLinkID,
-			&i.StoringAttemptID,
-			&i.AcceptedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listCustomerMandatesPage = `-- name: ListCustomerMandatesPage :many
-SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates m
-WHERE m.merchant_id = $1::uuid AND m.customer_id = $2::uuid
-  AND ($3::timestamptz IS NULL
-       OR (m.created_at, m.id) < ($3::timestamptz, $4::uuid))
-ORDER BY m.created_at DESC, m.id DESC
-LIMIT $5::int
-`
-
-type ListCustomerMandatesPageParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	AfterAt    *time.Time
-	AfterID    *uuid.UUID
-	RowLimit   int32
-}
-
-// One page of a customer's mandates, newest first, after a (created_at, id)
-// cursor.
-func (q *Queries) ListCustomerMandatesPage(ctx context.Context, arg ListCustomerMandatesPageParams) ([]BillingMandate, error) {
-	rows, err := q.db.Query(ctx, listCustomerMandatesPage,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.AfterAt,
-		arg.AfterID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingMandate
-	for rows.Next() {
-		var i BillingMandate
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.PaymentMethodID,
-			&i.PspID,
-			&i.Rail,
-			&i.Kind,
-			&i.SubscriptionID,
-			&i.Currency,
-			&i.Status,
-			&i.EndReason,
-			&i.EndedAt,
-			&i.CardBrand,
-			&i.InitialTransactionID,
-			&i.NetworkTransactionID,
-			&i.TransactionLinkID,
-			&i.StoringAttemptID,
-			&i.AcceptedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLiveMandatesOfPaymentMethods = `-- name: ListLiveMandatesOfPaymentMethods :many
 SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
@@ -629,6 +508,102 @@ func (q *Queries) ListMandatesAwaitingConsent(ctx context.Context, arg ListManda
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPaymentMethodMandates = `-- name: ListPaymentMethodMandates :many
+SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
+WHERE merchant_id = $1::uuid AND payment_method_id = ANY ($2::uuid[])
+  AND (NOT $3::boolean OR status IN ('active', 'requires_reconsent'))
+ORDER BY created_at DESC, id DESC
+`
+
+type ListPaymentMethodMandatesParams struct {
+	MerchantID       uuid.UUID
+	PaymentMethodIds []uuid.UUID
+	LiveOnly         bool
+}
+
+// The agreements on the named cards, newest first; live_only keeps those
+// that can still authorize a charge.
+func (q *Queries) ListPaymentMethodMandates(ctx context.Context, arg ListPaymentMethodMandatesParams) ([]BillingMandate, error) {
+	rows, err := q.db.Query(ctx, listPaymentMethodMandates, arg.MerchantID, arg.PaymentMethodIds, arg.LiveOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingMandate
+	for rows.Next() {
+		var i BillingMandate
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PaymentMethodID,
+			&i.PspID,
+			&i.Rail,
+			&i.Kind,
+			&i.SubscriptionID,
+			&i.Currency,
+			&i.Status,
+			&i.EndReason,
+			&i.EndedAt,
+			&i.CardBrand,
+			&i.InitialTransactionID,
+			&i.NetworkTransactionID,
+			&i.TransactionLinkID,
+			&i.StoringAttemptID,
+			&i.AcceptedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSubscriptionMandates = `-- name: ListSubscriptionMandates :many
+SELECT subscription_id::uuid AS subscription_id, id FROM billing.mandates
+WHERE merchant_id = $1::uuid AND subscription_id = ANY ($2::uuid[])
+  AND kind = 'recurring' AND status IN ('active', 'requires_reconsent')
+LIMIT $3::int
+`
+
+type ListSubscriptionMandatesParams struct {
+	MerchantID      uuid.UUID
+	SubscriptionIds []uuid.UUID
+	RowLimit        int32
+}
+
+type ListSubscriptionMandatesRow struct {
+	SubscriptionID uuid.UUID
+	ID             uuid.UUID
+}
+
+// The agreement each subscription renews under: its live recurring mandate.
+// One per subscription (mandates_recurring_live_key): at most row_limit.
+func (q *Queries) ListSubscriptionMandates(ctx context.Context, arg ListSubscriptionMandatesParams) ([]ListSubscriptionMandatesRow, error) {
+	rows, err := q.db.Query(ctx, listSubscriptionMandates, arg.MerchantID, arg.SubscriptionIds, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSubscriptionMandatesRow
+	for rows.Next() {
+		var i ListSubscriptionMandatesRow
+		if err := rows.Scan(&i.SubscriptionID, &i.ID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

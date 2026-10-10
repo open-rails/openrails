@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -37,7 +38,7 @@ const publicConfigMaxAge = "public, max-age=300"
 // settings key that is not on the whitelist cannot reach the response at all.
 func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
-		doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies()}
+		doc := publicConfigDocument(r, capabilities)
 		if mid, ok := merchant.FromContext(r.Request.Context()); ok && !mid.IsZero() && r.State != nil && r.State.Merchants != nil {
 			payment, ok := loadPaymentConfig(r, mid)
 			if !ok {
@@ -69,6 +70,21 @@ func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Reques
 	}
 }
 
+// publicConfigDocument is the configuration every merchant of the
+// deployment shares: capabilities, the currency and rail registries and the
+// captcha.
+func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilities) billing.PublicConfig {
+	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Rails: merchants.RailDefinitions()}
+	if r.State != nil && r.State.Config != nil && config.CaptchaEnabled(r.State.Config.Captcha) {
+		cfg := r.State.Config.Captcha
+		doc.Captcha = &billing.CaptchaConfig{
+			Provider: config.CaptchaProvider(cfg), SiteKey: strings.TrimSpace(cfg.SiteKey), ScriptURL: config.CaptchaScriptURL(cfg),
+			Action: config.CaptchaAction, TokenHeader: captcha.TokenHeader,
+		}
+	}
+	return doc
+}
+
 // ServiceGetPublicConfig serves the same document to the merchant, without
 // public cache headers.
 func ServiceGetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Request) {
@@ -77,7 +93,9 @@ func ServiceGetPublicConfig(capabilities billing.Capabilities) func(*httprequest
 		if !ok {
 			return
 		}
-		r.SuccessJSON(billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Payment: &payment})
+		doc := publicConfigDocument(r, capabilities)
+		doc.Payment = &payment
+		r.SuccessJSON(doc)
 	}
 }
 

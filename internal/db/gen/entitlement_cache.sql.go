@@ -13,32 +13,34 @@ import (
 )
 
 const checkCachedEntitlements = `-- name: CheckCachedEntitlements :many
-SELECT k.key::text AS entitlement, (held.found IS NOT NULL)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest($1::text[]) AS k(key)
-LEFT JOIN LATERAL (
-    SELECT true AS found, ec.quantity FROM billing.customer_entitlement_cache ec
-    WHERE ec.merchant_id = $2::uuid AND ec.customer_id = $3::uuid
-      AND ec.entitlement = k.key
-    LIMIT 1
-) held ON true
+SELECT ec.customer_id, ec.entitlement::text AS entitlement, COALESCE(ec.quantity, 0)::int AS quantity FROM billing.customer_entitlement_cache ec
+WHERE ec.merchant_id = $1::uuid AND ec.customer_id = ANY ($2::uuid[])
+  AND ec.entitlement = ANY ($3::text[])
+LIMIT $4::int
 `
 
 type CheckCachedEntitlementsParams struct {
-	Entitlements []string
 	MerchantID   uuid.UUID
-	CustomerID   uuid.UUID
+	CustomerIds  []uuid.UUID
+	Entitlements []string
+	RowLimit     int32
 }
 
 type CheckCachedEntitlementsRow struct {
+	CustomerID  uuid.UUID
 	Entitlement string
-	HasAccess   bool
 	Quantity    int32
 }
 
-// One probe of the cache index per key.
+// Which of the keys each customer holds, and their seats: one probe of the
+// cache index per (customer, key), at most row_limit (customers x keys) rows.
 func (q *Queries) CheckCachedEntitlements(ctx context.Context, arg CheckCachedEntitlementsParams) ([]CheckCachedEntitlementsRow, error) {
-	rows, err := q.db.Query(ctx, checkCachedEntitlements, arg.Entitlements, arg.MerchantID, arg.CustomerID)
+	rows, err := q.db.Query(ctx, checkCachedEntitlements,
+		arg.MerchantID,
+		arg.CustomerIds,
+		arg.Entitlements,
+		arg.RowLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -46,7 +48,7 @@ func (q *Queries) CheckCachedEntitlements(ctx context.Context, arg CheckCachedEn
 	var items []CheckCachedEntitlementsRow
 	for rows.Next() {
 		var i CheckCachedEntitlementsRow
-		if err := rows.Scan(&i.Entitlement, &i.HasAccess, &i.Quantity); err != nil {
+		if err := rows.Scan(&i.CustomerID, &i.Entitlement, &i.Quantity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -119,36 +121,6 @@ func (q *Queries) DropEntitlementCacheStamps(ctx context.Context, arg DropEntitl
 	return err
 }
 
-const entitlementCacheValid = `-- name: EntitlementCacheValid :one
-
-SELECT EXISTS (
-    SELECT 1 FROM billing.customer_entitlement_cache_stamps s
-    JOIN billing.merchants m ON m.id = s.merchant_id
-    JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
-    WHERE s.merchant_id = $1::uuid AND s.customer_id = $2::uuid
-      AND s.entitlement_generation = m.entitlement_generation AND s.access_version = c.access_version
-      AND s.valid_from <= $3::timestamptz
-      AND (s.valid_until IS NULL OR s.valid_until > $3::timestamptz)
-)::boolean AS valid
-`
-
-type EntitlementCacheValidParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	AtTime     time.Time
-}
-
-// A heavy buyer's cached keys. Every read checks the stamps in its own
-// snapshot: an entry answers only while the merchant's entitlement
-// generation and the customer's access version are the ones it was built at,
-// for instants in its window. Otherwise the reader derives live.
-func (q *Queries) EntitlementCacheValid(ctx context.Context, arg EntitlementCacheValidParams) (bool, error) {
-	row := q.db.QueryRow(ctx, entitlementCacheValid, arg.MerchantID, arg.CustomerID, arg.AtTime)
-	var valid bool
-	err := row.Scan(&valid)
-	return valid, err
-}
-
 const getAccessStamps = `-- name: GetAccessStamps :one
 SELECT m.entitlement_generation, c.access_version FROM billing.merchants m
 JOIN billing.customers c ON c.merchant_id = m.id
@@ -198,49 +170,51 @@ func (q *Queries) GetNextAccessBoundary(ctx context.Context, arg GetNextAccessBo
 	return next_at, err
 }
 
-const listCachedEntitlementsByPrefix = `-- name: ListCachedEntitlementsByPrefix :many
-SELECT r.prefix::text AS prefix, h.entitlement::text AS entitlement
-FROM unnest($1::text[], $2::text[]) AS r(prefix, upper)
-CROSS JOIN LATERAL (
-    SELECT ec.entitlement FROM billing.customer_entitlement_cache ec
-    WHERE ec.merchant_id = $3::uuid AND ec.customer_id = $4::uuid
-      AND ec.entitlement >= r.prefix AND ec.entitlement < r.upper
-    ORDER BY ec.entitlement
-    LIMIT $5::int
-) h
-ORDER BY r.prefix COLLATE "C", h.entitlement COLLATE "C"
+const listCachedEntitlementsPage = `-- name: ListCachedEntitlementsPage :many
+SELECT ec.customer_id, ec.entitlement::text AS entitlement, COALESCE(ec.quantity, 0)::int AS quantity FROM billing.customer_entitlement_cache ec
+WHERE ec.merchant_id = $1::uuid AND ec.customer_id = ANY ($2::uuid[])
+  AND (ec.customer_id, ec.entitlement) > ($3::uuid, $4::text)
+  AND ec.entitlement >= $5::text
+  AND ($6::text = '' OR ec.entitlement < $6::text)
+ORDER BY ec.customer_id, ec.entitlement
+LIMIT $7::int
 `
 
-type ListCachedEntitlementsByPrefixParams struct {
-	Prefixes   []string
-	Uppers     []string
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	RowLimit   int32
+type ListCachedEntitlementsPageParams struct {
+	MerchantID    uuid.UUID
+	CustomerIds   []uuid.UUID
+	AfterCustomer uuid.UUID
+	AfterKey      string
+	LowKey        string
+	BeforeKey     string
+	RowLimit      int32
 }
 
-type ListCachedEntitlementsByPrefixRow struct {
-	Prefix      string
+type ListCachedEntitlementsPageRow struct {
+	CustomerID  uuid.UUID
 	Entitlement string
+	Quantity    int32
 }
 
-// The first row_limit keys under each prefix, one range of the cache index each.
-func (q *Queries) ListCachedEntitlementsByPrefix(ctx context.Context, arg ListCachedEntitlementsByPrefixParams) ([]ListCachedEntitlementsByPrefixRow, error) {
-	rows, err := q.db.Query(ctx, listCachedEntitlementsByPrefix,
-		arg.Prefixes,
-		arg.Uppers,
+// One keyset page of customers' cached keys, as ListDerivedEntitlementsPage.
+func (q *Queries) ListCachedEntitlementsPage(ctx context.Context, arg ListCachedEntitlementsPageParams) ([]ListCachedEntitlementsPageRow, error) {
+	rows, err := q.db.Query(ctx, listCachedEntitlementsPage,
 		arg.MerchantID,
-		arg.CustomerID,
+		arg.CustomerIds,
+		arg.AfterCustomer,
+		arg.AfterKey,
+		arg.LowKey,
+		arg.BeforeKey,
 		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListCachedEntitlementsByPrefixRow
+	var items []ListCachedEntitlementsPageRow
 	for rows.Next() {
-		var i ListCachedEntitlementsByPrefixRow
-		if err := rows.Scan(&i.Prefix, &i.Entitlement); err != nil {
+		var i ListCachedEntitlementsPageRow
+		if err := rows.Scan(&i.CustomerID, &i.Entitlement, &i.Quantity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -251,44 +225,87 @@ func (q *Queries) ListCachedEntitlementsByPrefix(ctx context.Context, arg ListCa
 	return items, nil
 }
 
-const listCachedEntitlementsPage = `-- name: ListCachedEntitlementsPage :many
-SELECT ec.entitlement::text AS entitlement FROM billing.customer_entitlement_cache ec
-WHERE ec.merchant_id = $1::uuid AND ec.customer_id = $2::uuid
-  AND ec.entitlement >= $3::text AND ec.entitlement > $4::text
-  AND ($5::text = '' OR ec.entitlement < $5::text)
-ORDER BY ec.entitlement
-LIMIT $6::int
+const listHeavyBuyers = `-- name: ListHeavyBuyers :many
+SELECT c.customer_id::uuid AS customer_id FROM unnest($1::uuid[]) AS c(customer_id)
+WHERE (SELECT count(*) FROM (
+    SELECT DISTINCT pa.product_id FROM billing.product_access pa
+    WHERE pa.merchant_id = $2::uuid AND pa.customer_id = c.customer_id
+      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
+      AND pa.starts_at <= $3::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
+    LIMIT $4::int
+) held) >= $4::int
 `
 
-type ListCachedEntitlementsPageParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	LowKey     string
-	AfterKey   string
-	BeforeKey  string
-	RowLimit   int32
+type ListHeavyBuyersParams struct {
+	CustomerIds []uuid.UUID
+	MerchantID  uuid.UUID
+	AtTime      time.Time
+	UpTo        int32
 }
 
-func (q *Queries) ListCachedEntitlementsPage(ctx context.Context, arg ListCachedEntitlementsPageParams) ([]string, error) {
-	rows, err := q.db.Query(ctx, listCachedEntitlementsPage,
+// The customers among customer_ids holding at least up_to products at
+// at_time, counting at most up_to each.
+func (q *Queries) ListHeavyBuyers(ctx context.Context, arg ListHeavyBuyersParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listHeavyBuyers,
+		arg.CustomerIds,
 		arg.MerchantID,
-		arg.CustomerID,
-		arg.LowKey,
-		arg.AfterKey,
-		arg.BeforeKey,
-		arg.RowLimit,
+		arg.AtTime,
+		arg.UpTo,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []uuid.UUID
 	for rows.Next() {
-		var entitlement string
-		if err := rows.Scan(&entitlement); err != nil {
+		var customer_id uuid.UUID
+		if err := rows.Scan(&customer_id); err != nil {
 			return nil, err
 		}
-		items = append(items, entitlement)
+		items = append(items, customer_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listValidEntitlementCaches = `-- name: ListValidEntitlementCaches :many
+
+SELECT s.customer_id FROM billing.customer_entitlement_cache_stamps s
+JOIN billing.merchants m ON m.id = s.merchant_id
+JOIN billing.customers c ON c.merchant_id = s.merchant_id AND c.id = s.customer_id
+WHERE s.merchant_id = $1::uuid AND s.customer_id = ANY ($2::uuid[])
+  AND s.entitlement_generation = m.entitlement_generation AND s.access_version = c.access_version
+  AND s.valid_from <= $3::timestamptz
+  AND (s.valid_until IS NULL OR s.valid_until > $3::timestamptz)
+`
+
+type ListValidEntitlementCachesParams struct {
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	AtTime      time.Time
+}
+
+// A heavy buyer's cached keys. Every read checks the stamps in its own
+// snapshot: an entry answers only while the merchant's entitlement
+// generation and the customer's access version are the ones it was built at,
+// for instants in its window. Otherwise the reader derives live.
+// The customers among customer_ids whose cached keys answer at at_time.
+func (q *Queries) ListValidEntitlementCaches(ctx context.Context, arg ListValidEntitlementCachesParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, listValidEntitlementCaches, arg.MerchantID, arg.CustomerIds, arg.AtTime)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var customer_id uuid.UUID
+		if err := rows.Scan(&customer_id); err != nil {
+			return nil, err
+		}
+		items = append(items, customer_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

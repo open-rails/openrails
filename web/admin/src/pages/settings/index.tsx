@@ -500,7 +500,7 @@ function PSPsTab() {
   if (psps.isPending || rails.isPending)
     return <p className="text-sm text-muted-foreground">Loading…</p>
 
-  const railDefinitions = rails.data?.data ?? []
+  const railDefinitions = rails.data ?? []
 
   return (
     <div>

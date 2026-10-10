@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -77,19 +78,13 @@ func productAccessCustomer(r *httprequest.Request) (billing.CustomerID, bool) {
 	return customer, requireServiceCustomerScope(r, identity.CustomerID(customer))
 }
 
-// ListProductAccess is one page of a customer's product-access windows,
-// newest first; ?live=true keeps those live now, ?ids reads named ones.
+// ListProductAccess is one page of product-access windows, newest first:
+// of the customers ?customer_id= and the products ?product_id= name (comma
+// separated, any when absent); ?live=true keeps those live now, ?ids reads
+// named ones.
 func ListProductAccess(r *httprequest.Request) {
-	customer, ok := productAccessCustomer(r)
-	if !ok {
-		return
-	}
 	ids, ok := listIDs(r, billing.ParseProductAccessID)
 	if !ok {
-		return
-	}
-	if ids == nil {
-		listProductAccess(r, customer.UUID())
 		return
 	}
 	svc := productAccessService(r)
@@ -97,17 +92,40 @@ func ListProductAccess(r *httprequest.Request) {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	rows, err := svc.ListByIDs(r.Request.Context(), customer.UUID(), uuidutil.Of(ids))
-	if err != nil {
-		r.InternalError("failed to list product access", err)
+	if ids != nil {
+		if !requireMerchantRoutePrincipal(r) {
+			return
+		}
+		rows, err := svc.ListByIDs(r.Request.Context(), uuidutil.Of(ids))
+		if err != nil {
+			r.InternalError("failed to list product access", err)
+			return
+		}
+		now := r.Clock.Now()
+		out := billing.ListPage[billing.ProductAccessGrant]{Items: make([]billing.ProductAccessGrant, len(rows))}
+		for i, row := range rows {
+			out.Items[i] = productAccessGrant(row, now)
+		}
+		r.SuccessJSON(out)
 		return
 	}
-	now := r.Clock.Now()
-	out := billing.ListPage[billing.ProductAccessGrant]{Items: make([]billing.ProductAccessGrant, len(rows))}
-	for i, row := range rows {
-		out.Items[i] = productAccessGrant(row, now)
+	customers, ok := queryCustomerIDs(r, "customer_id")
+	if !ok {
+		return
 	}
-	r.SuccessJSON(out)
+	for _, id := range customers {
+		if !requireServiceCustomerScope(r, id) {
+			return
+		}
+	}
+	if len(customers) == 0 && !requireMerchantRoutePrincipal(r) {
+		return
+	}
+	products, ok := queryProductIDs(r, "product_id")
+	if !ok {
+		return
+	}
+	listProductAccess(r, productaccess.Filter{Customers: uuidutil.Of(customers), Products: uuidutil.Of(products)})
 }
 
 // SelfListProductAccess is one page of the customer's own product-access
@@ -117,10 +135,10 @@ func SelfListProductAccess(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listProductAccess(r, payer.UUID())
+	listProductAccess(r, productaccess.Filter{Customers: []uuid.UUID{payer.UUID()}})
 }
 
-func listProductAccess(r *httprequest.Request, customer uuid.UUID) {
+func listProductAccess(r *httprequest.Request, filter productaccess.Filter) {
 	page, ok := r.Page()
 	if !ok {
 		return
@@ -130,9 +148,8 @@ func listProductAccess(r *httprequest.Request, customer uuid.UUID) {
 		writeRefusal(r, err, "invalid page")
 		return
 	}
-	liveOnly := false
 	if raw := strings.TrimSpace(r.Query("live")); raw != "" {
-		if liveOnly, err = strconv.ParseBool(raw); err != nil {
+		if filter.LiveOnly, err = strconv.ParseBool(raw); err != nil {
 			r.APIError(api.Coded(billing.CodeInvalidQuery, "live must be true or false").WithParam("live"))
 			return
 		}
@@ -152,7 +169,7 @@ func listProductAccess(r *httprequest.Request, customer uuid.UUID) {
 		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
 		return
 	}
-	rows, more, err := svc.ListPage(r.Request.Context(), customer, afterID, limit, liveOnly)
+	rows, more, err := svc.ListPage(r.Request.Context(), filter, afterID, limit)
 	if err != nil {
 		r.InternalError("failed to list product access", err)
 		return
@@ -168,66 +185,30 @@ func listProductAccess(r *httprequest.Request, customer uuid.UUID) {
 	r.SuccessJSON(out)
 }
 
-// CheckProductAccess answers, for each requested product, whether the
-// customer holds it now: bought, subscribed or granted.
-func CheckProductAccess(r *httprequest.Request) {
-	customer, ok := productAccessCustomer(r)
-	if !ok {
-		return
+// queryProductIDs reads a comma-separated product id filter: 1 to
+// billing.MaxBatchItems distinct ids, or none when the request names none.
+func queryProductIDs(r *httprequest.Request, name string) ([]billing.ProductID, bool) {
+	raw := strings.TrimSpace(r.Query(name))
+	if raw == "" {
+		return nil, true
 	}
-	var req billing.CheckProductAccessParams
-	if !r.BindJSON(&req) {
-		return
+	parts := strings.Split(raw, ",")
+	if len(parts) > billing.MaxBatchItems {
+		r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s names at most %d products", name, billing.MaxBatchItems)).WithParam(name))
+		return nil, false
 	}
-	if (req.ProductIDs == nil) == (req.ProductKeys == nil) {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "exactly one of product_ids and product_keys is required"))
-		return
-	}
-	if n := len(req.ProductIDs) + len(req.ProductKeys); n == 0 || n > billing.MaxProductAccessChecks {
-		r.APIError(api.Coded(billing.CodeInvalidParam, fmt.Sprintf("a check names 1 to %d products", billing.MaxProductAccessChecks)))
-		return
-	}
-	for _, key := range req.ProductKeys {
-		if !validProductAccessKey(key) {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "product_key is invalid").WithParam("product_keys"))
-			return
+	out := make([]billing.ProductID, 0, len(parts))
+	for _, part := range parts {
+		id, err := billing.ParseProductID(strings.TrimSpace(part))
+		if err != nil || id.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s holds an invalid id %q", name, part)).WithParam(name))
+			return nil, false
+		}
+		if !slices.Contains(out, id) {
+			out = append(out, id)
 		}
 	}
-	products := make([]uuid.UUID, 0, len(req.ProductIDs))
-	for _, id := range req.ProductIDs {
-		if id.IsZero() {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "invalid product_id").WithParam("product_ids"))
-			return
-		}
-		products = append(products, id.UUID())
-	}
-	svc := productAccessService(r)
-	if svc == nil {
-		r.ErrorCode(billing.CodeInternalError, "product access service unavailable")
-		return
-	}
-	access, quantities := map[string]bool{}, map[string]*int{}
-	if req.ProductKeys != nil {
-		decisions, err := svc.CheckProductKeys(r.Request.Context(), customer.String(), req.ProductKeys)
-		if err != nil {
-			r.InternalError("failed to check product access", err)
-			return
-		}
-		for key, decision := range decisions {
-			access[key], quantities[key] = decision.HasAccess, decision.Quantity
-		}
-	} else {
-		decisions, err := svc.CheckProducts(r.Request.Context(), customer.String(), products)
-		if err != nil {
-			r.InternalError("failed to check product access", err)
-			return
-		}
-		for id, decision := range decisions {
-			key := billing.ProductID(id).String()
-			access[key], quantities[key] = decision.HasAccess, decision.Quantity
-		}
-	}
-	r.SuccessJSON(billing.ProductAccessCheck{Access: access, Quantities: quantities})
+	return out, true
 }
 
 // CreateProductAccess grants a batch of products free, across any customers,
@@ -344,8 +325,4 @@ func DeleteProductAccess(r *httprequest.Request) {
 		return
 	}
 	r.Status(http.StatusNoContent)
-}
-
-func validProductAccessKey(key string) bool {
-	return strings.TrimSpace(key) != "" && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }

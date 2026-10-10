@@ -67,17 +67,19 @@ type UpdateProductParams struct {
 }
 
 // ProductListParams filters ListProducts. A nil Archived lists both live and
-// archived products. Entitlement lists the products granting that key now.
-// ForSale true lists products some live price sells; false lists products
-// that are only granted. IDs instead reads 1 to MaxBatchItems named products
-// in one page, whatever their state; unknown ones are absent.
+// archived products. Keys lists the products with those keys, Entitlements
+// those granting any of those keys now (each at most MaxBatchItems). ForSale
+// true lists products some live price sells; false lists products that are
+// only granted. IDs instead reads 1 to MaxBatchItems named products in one
+// page, whatever their state; unknown ones are absent.
 type ProductListParams struct {
 	PageRequest
-	IDs         []ProductID
-	Archived    *bool
-	TierGroup   string
-	Entitlement string
-	ForSale     *bool
+	IDs          []ProductID
+	Keys         []string
+	Archived     *bool
+	TierGroup    string
+	Entitlements []string
+	ForSale      *bool
 }
 
 // Price is one way to buy a product: UnitAmount (micros of Currency) for
@@ -234,15 +236,19 @@ type GetPriceParams struct {
 }
 
 // PriceListParams filters ListPrices. Nil Archived and Recurring list both.
-// IDs instead reads 1 to MaxBatchItems named prices in one page, whatever
-// their state; unknown ones are absent.
+// ProductKey and Key select by key: a key's current price is the one not
+// archived, its earlier versions the archived ones. IDs instead reads 1 to
+// MaxBatchItems named prices in one page, whatever their state; unknown ones
+// are absent.
 type PriceListParams struct {
 	PageRequest
-	IDs       []PriceID
-	ProductID ProductID
-	Currency  string
-	Recurring *bool
-	Archived  *bool
+	IDs        []PriceID
+	ProductID  ProductID
+	ProductKey string
+	Key        string
+	Currency   string
+	Recurring  *bool
+	Archived   *bool
 }
 
 // PriceKeyMovement is one point in a price key's history: from EffectiveAt

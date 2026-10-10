@@ -55,6 +55,7 @@ unbounded-many CountLiveProductHolders       # one row per edited product, count
 unbounded-many ListLiveAccessBySubscriptions # live windows of a page of subscriptions
 unbounded-many ListPendingScheduledChanges   # at most one scheduled change per subscription of a page
 unbounded-many ListOrderLines                # the frozen lines of a page of orders
+unbounded-many ListPaymentMethodMandates     # agreements of a page of cards: one per subscription and currency each card carried
 
 # The cutover to product access: an operator action, once per merchant.
 unbounded-many ListAccessCutoverApprovals              # the changes an operator approved for one merchant

@@ -78,12 +78,12 @@ products:
 	require.Equal(t, first.AppliedRevision, edited.BaseRevision)
 	require.NotEqual(t, first.ApplicationID, edited.ApplicationID)
 	require.Equal(t, 1, edited.PricesChanged)
-	price, err := w.client[embedded].GetPriceByKey(t.Context(), key, "monthly")
+	price, err := priceByKey(t.Context(), w.client[embedded], key, "monthly")
 	require.NoError(t, err)
 	require.EqualValues(t, 12_000_000, price.UnitAmount)
 
 	// Both older batches remain permanent replays after an independent API edit.
-	product, err := w.client[embedded].GetProductByKey(t.Context(), key)
+	product, err := productByKey(t.Context(), w.client[embedded], key)
 	require.NoError(t, err)
 	_, err = w.client[remote].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Console title")})
 	require.NoError(t, err)
@@ -101,10 +101,10 @@ products:
 			require.Equal(t, apiRevision, revision())
 		}
 	}
-	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
+	product, err = productByKey(t.Context(), w.client[embedded], key)
 	require.NoError(t, err)
 	require.Equal(t, "Console title", product.DisplayName)
-	price, err = w.client[embedded].GetPriceByKey(t.Context(), key, "monthly")
+	price, err = priceByKey(t.Context(), w.client[embedded], key, "monthly")
 	require.NoError(t, err)
 	require.EqualValues(t, 12_000_000, price.UnitAmount)
 	outside, err = w.client[embedded].GetProduct(t.Context(), outside.ID)
@@ -116,7 +116,7 @@ products:
 	unseen := apply(remote, file("Earlier unseen title", 12_000_000))
 	require.False(t, unseen.Replayed)
 	require.Equal(t, apiRevision, unseen.BaseRevision)
-	product, err = w.client[embedded].GetProductByKey(t.Context(), key)
+	product, err = productByKey(t.Context(), w.client[embedded], key)
 	require.NoError(t, err)
 	require.Equal(t, "Earlier unseen title", product.DisplayName)
 

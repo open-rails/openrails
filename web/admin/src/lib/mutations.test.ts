@@ -6,6 +6,7 @@
 import type { MutationOptions, QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { Meter } from "@/lib/api/generated/wire"
 import { adminMutations as M } from "@/lib/mutations"
 import {
   aPayment, calls, client, cursorPages, exec, invalidated, MAX_INT64, seedCache, selectMerchant,
@@ -32,6 +33,7 @@ const price = { product_id: "prod_1", key: "monthly", unit_amount: "20000000", c
 const ratePrice = { model: "per_unit" as const, currency: "USD", per_unit: { unit_amount: "1000000", divide_by: 1 } }
 const rateCard = { product_id: "prod_1", filter: {}, price: ratePrice }
 const meter = { event_type: "token.used", value_property: "tokens", aggregation: "sum" as const, unit: "tokens", group_by: {} }
+const storedMeter = { ...meter, key: "tokens" } as unknown as Meter
 const refund = { amount: MAX_INT64, reason: "requested", revokeAccess: true }
 const creditLimit = { customerId: "cus_1", currency: "USD", amount: MAX_INT64 }
 const application = { schema_version: 1, products: {} }
@@ -62,7 +64,7 @@ const cases: Case[] = [
   ["asks the catalog copilot without invalidating the catalog", (_c, g) => g(M.askCatalogCopilot(), "what do we sell?"),
     "POST /admin/catalog/ask", []],
   ["loads the live price and product behind a copilot draft", (_c, g) => g(M.loadCatalogPriceDraft(), { productKey: "pro", priceKey: "monthly" }),
-    ["GET /admin/catalog/products/by-key/pro/prices/by-key/monthly", "GET /admin/catalog/products/prod_1"], []],
+    "GET /admin/catalog/products", []],
   ["applies a catalog application", (c, g) => g(M.applyCatalog(c), JSON.stringify(application)),
     "POST /admin/catalog/applications", catalogTree, application],
   ["refreshes drift alone", (c, g) => g(M.refreshCatalogDrift(c), undefined),
@@ -81,14 +83,14 @@ const cases: Case[] = [
     "POST /admin/price-migrations/pmig_1/cancel", catalogTree],
   ["stores a usage meter", (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
     "PUT /admin/catalog/meters/tokens", meterTree, meter],
-  ["stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { key: "tokens", rateCard }),
-    "PUT /admin/catalog/meters/tokens/rate-card", meterTree, rateCard],
-  ["removes a default rate card", (c, g) => g(M.deleteDefaultUsageRateCard(c), "tokens"),
-    "DELETE /admin/catalog/meters/tokens/rate-card", meterTree],
+  ["stores a default rate card", (c, g) => g(M.putDefaultUsageRateCard(c), { meter: storedMeter, rateCard }),
+    "PUT /admin/catalog/meters/tokens", meterTree, { ...meter, rate_card: rateCard }],
+  ["removes a default rate card", (c, g) => g(M.deleteDefaultUsageRateCard(c), storedMeter),
+    "PUT /admin/catalog/meters/tokens", meterTree, { ...meter, rate_card: null }],
   ["stores a negotiated rate", (c, g) => g(M.putCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens", override: { price: ratePrice } }),
-    "PUT /admin/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
+    "PUT /admin/catalog/rate-overrides/cus_1/tokens", [...meterTree, ...customerTree, "dashboard"], { price: ratePrice }],
   ["removes a negotiated rate", (c, g) => g(M.deleteCustomerUsageRateOverride(c), { customerId: "cus_1", meterKey: "tokens" }),
-    "DELETE /admin/customers/cus_1/rate-overrides/tokens", [...meterTree, ...customerTree, "dashboard"]],
+    "DELETE /admin/catalog/rate-overrides/cus_1/tokens", [...meterTree, ...customerTree, "dashboard"]],
   ["applies a settings change without dropping the PSP list", (c, g) => g(M.updateMerchantSettings(c), { revision: "rev_1", settings: { profile: { display_name: "Acme" } } }),
     "POST /admin/configuration/applications", ["settings"]],
   ["adds a PSP", (c, g) => g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1", operation_id: "ba47eaf9-7307-48e0-a41d-435af9c49ef9" }),
@@ -105,7 +107,7 @@ let requests: Recorded[]
 let routes: Record<string, Reply>
 beforeEach(async () => {
   routes = {
-    "/admin/catalog/products/by-key/pro/prices/by-key/monthly": { id: "price_1", product_id: "prod_1" },
+    "/admin/catalog/products": { data: [{ id: "prod_1", key: "pro", display_name: "Pro", prices: [{ id: "price_1", key: "monthly", product_id: "prod_1" }] }] },
     "POST /admin/product-access": { items: [{ id: "acc_1" }] },
   }
   requests = await server(routes)

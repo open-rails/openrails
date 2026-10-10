@@ -77,9 +77,8 @@ func (s *AdminSubscriptionService) now() time.Time {
 type AdminSubscriptionResponse struct {
 	*models.Subscription
 	//Product  *models.Product   `json:"product,omitempty"`
-	Price    *models.Price     `json:"price,omitempty"`
-	Payments []*models.Payment `json:"payments,omitempty"`
-	Dunning  *billing.SubscriptionDunning
+	Price   *models.Price `json:"price,omitempty"`
+	Dunning *billing.SubscriptionDunning
 }
 
 // ListSubscriptions is one page of the merchant's subscriptions matching f,
@@ -136,10 +135,7 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 	if err := LoadScheduledChanges(ctx, s.SubscriptionService.Database(), []*models.Subscription{subscription}); err != nil {
 		return nil, err
 	}
-	response := &AdminSubscriptionResponse{
-		Subscription: subscription,
-		Payments:     []*models.Payment{},
-	}
+	response := &AdminSubscriptionResponse{Subscription: subscription}
 
 	// Enrich with price and product data if available
 	if price, err := s.PriceService.GetByID(ctx, subscription.PriceID); err == nil {
@@ -155,19 +151,6 @@ func (s *AdminSubscriptionService) GetSubscriptionByID(ctx context.Context, subs
 		return nil, fmt.Errorf("load subscription dunning: %w", err)
 	}
 	response.Dunning = dunning[subscription.ID]
-
-	// Include payment history for this subscription
-	if s.PaymentService != nil {
-		payments, err := s.PaymentService.GetByUserID(ctx, subscription.CustomerID.String())
-		if err == nil {
-			// Filter to only payments for this subscription
-			for _, p := range payments {
-				if p.SubscriptionID != nil && *p.SubscriptionID == subscriptionID {
-					response.Payments = append(response.Payments, p)
-				}
-			}
-		}
-	}
 
 	return response, nil
 }

@@ -3,109 +3,83 @@
 -- then (product_entitlements valid time). Nothing per customer stores keys.
 
 -- name: CheckDerivedEntitlements :many
--- Key-first: for each key, the products granting it, then the customer's
--- live windows of each, for the most seats one gives. Cost: keys x products
--- granting each key; the LATERAL keeps the planner from scanning every window
--- the customer holds instead.
-SELECT k.key::text AS entitlement, (held.windows > 0)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest(sqlc.arg(entitlements)::text[]) AS k(key)
+-- Which of the keys each customer holds, with the most seats a live window
+-- gives (0: none per seat): one row per (customer, key) held, at most
+-- row_limit (customers x keys). Key-first: for each pair, the products
+-- granting the key, then the customer's live windows of each; the LATERAL
+-- keeps the planner from scanning every window the customer holds instead.
+SELECT c.customer_id::uuid AS customer_id, k.key::text AS entitlement, COALESCE(held.quantity, 0)::int AS quantity
+FROM unnest(sqlc.arg(customer_ids)::uuid[]) AS c(customer_id)
+CROSS JOIN unnest(sqlc.arg(entitlements)::text[]) AS k(key)
 CROSS JOIN LATERAL (
     SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_entitlements pe
     JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = k.key
       AND pe.added_at <= sqlc.arg(at_time)::timestamptz
       AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
-      AND pa.customer_id = sqlc.arg(customer_id)::uuid
+      AND pa.customer_id = c.customer_id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-) held;
+) held
+WHERE held.windows > 0
+LIMIT sqlc.arg(row_limit)::int;
 
--- name: ListDerivedEntitlementsByPrefix :many
--- Customer-first, one pass: the products the customer holds, then one probe
--- of each product's keys within [low, high), then the first row_limit keys
--- of each prefix in byte order (callers pass limit+1 to detect truncation).
--- The OFFSET 0 fence keeps the planner from scanning the catalog keyspace.
--- The key range is bounded as (product, key) rows: only the per-product index
--- can use it, so no plan scans a key range of the catalog once per held
+-- name: ListDerivedEntitlementsPage :many
+-- One keyset page of the keys customers hold at at_time, with the most seats
+-- a live window gives (0: none per seat), in (customer, key) byte order: after (after_customer, after_key), from low_key and below
+-- before_key ('' is unbounded). Customer-first, one probe per held product;
+-- the key bounds are (product, key) rows, so only the per-product index
+-- serves them and no plan scans a key range of the catalog per held
 -- product. Callers plan it for their parameters (a generic plan prices a
 -- 3-product and a 50,000-product customer alike).
 WITH owned AS MATERIALIZED (
-    SELECT DISTINCT pa.product_id FROM billing.product_access pa
-    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
+    SELECT pa.customer_id, pa.product_id, max(pa.quantity) AS quantity FROM billing.product_access pa
+    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = ANY (sqlc.arg(customer_ids)::uuid[])
+      AND pa.customer_id >= sqlc.arg(after_customer)::uuid
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-), keys AS MATERIALIZED (
-    SELECT DISTINCT k.entitlement FROM owned o
-    CROSS JOIN LATERAL (
-        SELECT pe.entitlement FROM billing.product_entitlements pe
-        WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = o.product_id
-          AND (pe.product_id, pe.entitlement) >= (o.product_id, sqlc.arg(low)::text)
-          AND (pe.product_id, pe.entitlement) < (o.product_id, sqlc.arg(high)::text)
-          AND pe.added_at <= sqlc.arg(at_time)::timestamptz
-          AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
-        OFFSET 0
-    ) k
+    GROUP BY pa.customer_id, pa.product_id
 )
-SELECT r.prefix::text AS prefix, h.entitlement::text AS entitlement
-FROM unnest(sqlc.arg(prefixes)::text[], sqlc.arg(uppers)::text[]) AS r(prefix, upper)
-CROSS JOIN LATERAL (
-    SELECT keys.entitlement FROM keys
-    WHERE keys.entitlement >= r.prefix COLLATE "C" AND keys.entitlement < r.upper COLLATE "C"
-    ORDER BY keys.entitlement COLLATE "C"
-    LIMIT sqlc.arg(row_limit)::int
-) h
-ORDER BY r.prefix COLLATE "C", h.entitlement COLLATE "C";
-
--- name: ListDerivedEntitlementsPage :many
--- One keyset page of the keys a customer holds at at_time, in byte order:
--- from low_key, after after_key (exclusive; '' starts) and below before_key
--- (exclusive; '' is unbounded). Customer-first, one probe per held product;
--- the bounds are (product, key) rows, as in ListDerivedEntitlementsByPrefix.
-WITH owned AS MATERIALIZED (
-    SELECT DISTINCT pa.product_id FROM billing.product_access pa
-    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-)
-SELECT DISTINCT k.entitlement FROM owned o
+SELECT o.customer_id::uuid AS customer_id, k.entitlement::text AS entitlement, COALESCE(max(o.quantity), 0)::int AS quantity FROM owned o
 CROSS JOIN LATERAL (
     SELECT pe.entitlement FROM billing.product_entitlements pe
     WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.product_id = o.product_id
       AND (pe.product_id, pe.entitlement) >= (o.product_id, sqlc.arg(low_key)::text)
-      AND (pe.product_id, pe.entitlement) > (o.product_id, sqlc.arg(after_key)::text)
+      AND (pe.product_id, pe.entitlement) > (o.product_id, CASE WHEN o.customer_id = sqlc.arg(after_customer)::uuid THEN sqlc.arg(after_key)::text ELSE '' END)
       AND (sqlc.arg(before_key)::text = '' OR pe.entitlement < sqlc.arg(before_key)::text)
       AND pe.added_at <= sqlc.arg(at_time)::timestamptz
       AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
     ORDER BY pe.entitlement COLLATE "C"
     LIMIT sqlc.arg(row_limit)::int
 ) k
-ORDER BY 1
+GROUP BY 1, 2
+ORDER BY 1, 2
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: ListDerivedEntitlementHolders :many
--- The reverse lookup: customers holding a key at at_time, keyset by customer
--- id after after_id. Key-first: the products granting it, then each
--- product's holders in customer order, stopping at the limit per product.
--- The cursor bounds (product, customer) rows, so only the per-product index
--- serves the probe.
-SELECT DISTINCT x.customer_id FROM billing.product_entitlements pe
+-- The reverse lookup: customers holding a key at at_time, with the most seats
+-- a live window gives (0: none per seat), keyset by customer id after
+-- after_id. Key-first: the products granting it, then each product's first
+-- row_limit holders in customer order. The cursor bounds (product, customer)
+-- rows, so only the per-product index serves the probe.
+SELECT x.customer_id, COALESCE(max(x.quantity), 0)::int AS quantity FROM billing.product_entitlements pe
 CROSS JOIN LATERAL (
-    SELECT pa.customer_id FROM billing.product_access pa
+    SELECT pa.customer_id, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.product_id = pe.product_id
       AND (pa.product_id, pa.customer_id) > (pe.product_id, sqlc.arg(after_id)::uuid)
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
+    GROUP BY pa.customer_id
     ORDER BY pa.customer_id
     LIMIT sqlc.arg(row_limit)::int
 ) x
 WHERE pe.merchant_id = sqlc.arg(merchant_id)::uuid AND pe.entitlement = sqlc.arg(entitlement)::text
   AND pe.added_at <= sqlc.arg(at_time)::timestamptz
   AND (pe.removed_at IS NULL OR pe.removed_at > sqlc.arg(at_time)::timestamptz)
+GROUP BY 1
 ORDER BY 1
 LIMIT sqlc.arg(row_limit)::int;
 

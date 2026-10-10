@@ -39,7 +39,7 @@ func GetAdminSubscriptions(r *httprequest.Request) {
 		return
 	}
 	now := r.Clock.Now()
-	r.SuccessJSON(pagination.Map(subs, func(sub *subscriptions.AdminSubscriptionResponse) billing.Subscription {
+	writeSubscriptions(r, pagination.Map(subs, func(sub *subscriptions.AdminSubscriptionResponse) billing.Subscription {
 		return subscriptionView(sub, now)
 	}))
 }
@@ -66,5 +66,5 @@ func GetAdminSubscription(r *httprequest.Request) {
 		writeRefusal(r, err, "failed to load subscription")
 		return
 	}
-	r.SuccessJSON(subscriptionView(subscription, r.Clock.Now()))
+	writeSubscription(r, subscriptionView(subscription, r.Clock.Now()))
 }

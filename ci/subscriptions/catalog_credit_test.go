@@ -36,11 +36,11 @@ products:
         customer_amount: {min_amount: 1000000, max_amount: 100000000}
 `, key)
 	apply(initial)
-	p, err := w.client[embedded].GetProductByKey(t.Context(), key)
+	p, err := productByKey(t.Context(), w.client[embedded], key)
 	require.NoError(t, err)
 	require.Equal(t, "USD", p.CreditGrant.Currency)
 	require.Equal(t, 365, *p.CreditGrant.ExpiresAfterDays)
-	first, err := w.client[embedded].GetPriceByKey(t.Context(), key, "deposit")
+	first, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.EqualValues(t, 0, first.Revision)
 	apply(fmt.Sprintf(`schema_version: 1
@@ -50,7 +50,7 @@ products:
       deposit:
         customer_amount: {min_amount: 1000000, max_amount: 500000000}
 `, key))
-	second, err := w.client[embedded].GetPriceByKey(t.Context(), key, "deposit")
+	second, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.NotEqual(t, first.ID, second.ID)
 	require.EqualValues(t, 1, second.Revision)
@@ -59,7 +59,7 @@ products:
 	require.True(t, old.Archived)
 	require.EqualValues(t, 100000000, old.CustomerAmount.MaxAmount)
 	require.True(t, apply(initial).Replayed)
-	current, err := w.client[embedded].GetPriceByKey(t.Context(), key, "deposit")
+	current, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.Equal(t, second.ID, current.ID)
 	apply(fmt.Sprintf(`schema_version: 1
@@ -70,7 +70,7 @@ products:
       deposit:
         customer_amount: {min_amount: 1000000, max_amount: 100000000}
 `, key))
-	restored, err := w.client[embedded].GetPriceByKey(t.Context(), key, "deposit")
+	restored, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.Equal(t, first.ID, restored.ID)
 	require.EqualValues(t, 0, restored.Revision)

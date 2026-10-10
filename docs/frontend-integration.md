@@ -82,7 +82,8 @@ its current prices, which is everything your pricing page needs.
 
 Public, unauthenticated, always mounted, cacheable (`Cache-Control: public,
 max-age=300` with an `ETag`). It holds the mount's `capabilities`, the currency
-registry (`currencies`) and `payment`, which answers "what can this merchant take
+and rail registries (`currencies`, `rails`), the `captcha` to solve when a request
+answers 403 `captcha_required` (null when none is configured), and `payment`, which answers "what can this merchant take
 money with, and what do I need in the browser to do it?" so you never hard-code a
 rail or duplicate a tokenization key in your own config. The merchant is resolved
 from the request `Host` (its `api_host`), exactly like the public catalog;

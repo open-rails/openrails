@@ -12,7 +12,7 @@ import (
 func TestCatalogEntitlementsAreNonnullableLists(t *testing.T) {
 	for _, shape := range []reflect.Type{
 		reflect.TypeFor[catalog.ApplyProduct](), reflect.TypeFor[billing.CreateProductParams](),
-		reflect.TypeFor[billing.UpdateProductParams](), reflect.TypeFor[billing.Product](), reflect.TypeFor[billing.Offer](),
+		reflect.TypeFor[billing.UpdateProductParams](), reflect.TypeFor[billing.Product](),
 	} {
 		found := false
 		for _, field := range fieldsOf(shape) {

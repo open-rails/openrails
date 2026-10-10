@@ -35,7 +35,10 @@ written by the caller.
 ### Authoring the catalog
 
 One application selects one authorized merchant outside the document and includes
-`schema_version`, optional `prune`, `products` and supported `meters`.
+`schema_version`, optional `prune`, `products`, supported `meters` and optional
+`entitlement_replacements`: `[{from, to}]` pairs that move a key across every product
+granting it before `products` apply (an empty `to` removes `from`), so holders lose
+`from` and gain `to` at once.
 Product-local `prices` and `rate_cards` are nested under each product. Products,
 prices and meters are maps keyed by their key; the key is the record's stable
 handle (a price's key names its version chain). See `config/catalog.example.yaml`.
@@ -279,9 +282,8 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 update plus payment refund permission) archives a product — never deletes it —
 and applies the host's policy to its one-time purchases at or after
 `PurchaseWindowStartsAt` (or within `WindowSeconds` of first acceptance), chosen by
-`PurchaseAction`:
+`PurchaseAction` (to archive a product alone, `PATCH` it `archived: true`):
 
-- `none`: archive only.
 - `refund`: refund each purchase in full and end the access it granted. Purchases
   that cannot be refunded automatically (refused, declined, off-rail) become reviews.
 - `review`: record each purchase for merchant review; no money moves.

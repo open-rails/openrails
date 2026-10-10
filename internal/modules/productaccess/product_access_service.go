@@ -4,10 +4,12 @@
 package productaccess
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -140,45 +142,6 @@ func (s *Service) RevokeProductAccess(ctx context.Context, customer, accessID uu
 	return true, ents.RevokeGrantedAccess(ctx, window, reason)
 }
 
-// ProductDecision is whether the customer holds a product now, and the most
-// seats a live per-seat window gives.
-type ProductDecision struct {
-	HasAccess bool
-	Quantity  *int
-}
-
-// CheckProducts answers, for each product, whether the customer holds it now.
-func (s *Service) CheckProducts(ctx context.Context, userID string, products []uuid.UUID) (map[uuid.UUID]ProductDecision, error) {
-	if len(products) > 100 {
-		return nil, errors.New("at most 100 product IDs are allowed")
-	}
-	for _, id := range products {
-		if id == uuid.Nil {
-			return nil, errors.New("product ID is required")
-		}
-	}
-	result := make(map[uuid.UUID]ProductDecision, len(products))
-	if len(products) == 0 {
-		return result, nil
-	}
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	customer, err := db.ResolveCustomerID(userID)
-	if err != nil {
-		return nil, err
-	}
-	rows, err := s.db.Gen(ctx).CheckProductAccess(ctx, gen.CheckProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductIds: products, AtTime: s.now().UTC()})
-	if err != nil {
-		return nil, err
-	}
-	for _, row := range rows {
-		result[row.ProductID] = ProductDecision{HasAccess: row.HasAccess, Quantity: models.SeatsOf(row.Quantity)}
-	}
-	return result, nil
-}
-
 // HasPermanentAccess reports whether the customer holds the product
 // indefinitely now.
 func (s *Service) HasPermanentAccess(ctx context.Context, customer, product uuid.UUID) (bool, error) {
@@ -189,10 +152,18 @@ func (s *Service) HasPermanentAccess(ctx context.Context, customer, product uuid
 	return s.db.Gen(ctx).HasPermanentProductAccess(ctx, gen.HasPermanentProductAccessParams{MerchantID: mid.UUID(), CustomerID: customer, ProductID: product, AtTime: s.now().UTC()})
 }
 
-// ListPage returns one page of the customer's windows, newest first: those
-// live now when liveOnly, else every window that was not removed. more:
-// another page follows.
-func (s *Service) ListPage(ctx context.Context, customer uuid.UUID, after *uuid.UUID, limit int, liveOnly bool) ([]gen.ListProductAccessPageRow, bool, error) {
+// Filter selects windows: of these customers and products (nil: any), live
+// now when LiveOnly.
+type Filter struct {
+	Customers []uuid.UUID
+	Products  []uuid.UUID
+	LiveOnly  bool
+}
+
+// ListPage returns one page of windows, newest first: those live now when
+// f.LiveOnly, else every window that was not removed. more: another page
+// follows.
+func (s *Service) ListPage(ctx context.Context, f Filter, after *uuid.UUID, limit int) ([]gen.ListProductAccessPageRow, bool, error) {
 	if limit < 1 || limit > 500 {
 		return nil, false, errors.New("limit must be between 1 and 500")
 	}
@@ -201,7 +172,7 @@ func (s *Service) ListPage(ctx context.Context, customer uuid.UUID, after *uuid.
 		return nil, false, err
 	}
 	rows, err := s.db.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{
-		MerchantID: mid.UUID(), CustomerID: customer, LiveOnly: liveOnly, AtTime: s.now().UTC(), AfterID: after, FetchLimit: int32(limit + 1),
+		MerchantID: mid.UUID(), CustomerIds: f.Customers, ProductIds: f.Products, LiveOnly: f.LiveOnly, AtTime: s.now().UTC(), AfterID: after, FetchLimit: int32(limit + 1),
 	})
 	if err != nil {
 		return nil, false, err
@@ -212,13 +183,13 @@ func (s *Service) ListPage(ctx context.Context, customer uuid.UUID, after *uuid.
 	return rows, false, nil
 }
 
-// ListByIDs reads a customer's named windows, newest first.
-func (s *Service) ListByIDs(ctx context.Context, customer uuid.UUID, ids []uuid.UUID) ([]gen.ListProductAccessPageRow, error) {
+// ListByIDs reads named windows, newest first.
+func (s *Service) ListByIDs(ctx context.Context, ids []uuid.UUID) ([]gen.ListProductAccessPageRow, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListCustomerProductAccessByIDs(ctx, gen.ListCustomerProductAccessByIDsParams{MerchantID: mid.UUID(), CustomerID: customer, Ids: ids})
+	rows, err := s.db.Gen(ctx).ListProductAccessViews(ctx, gen.ListProductAccessViewsParams{MerchantID: mid.UUID(), Ids: ids})
 	if err != nil {
 		return nil, err
 	}
@@ -226,6 +197,7 @@ func (s *Service) ListByIDs(ctx context.Context, customer uuid.UUID, ids []uuid.
 	for i, row := range rows {
 		out[i] = gen.ListProductAccessPageRow(row)
 	}
+	slices.SortFunc(out, func(a, b gen.ListProductAccessPageRow) int { return bytes.Compare(b.ID[:], a.ID[:]) })
 	return out, nil
 }
 

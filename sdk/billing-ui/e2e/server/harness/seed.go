@@ -81,11 +81,11 @@ products:
 	if _, err := c.ApplyCatalog(ctx, params); err != nil {
 		return "", "", err
 	}
-	once, err := c.GetPriceByKey(ctx, "e2e-card", "e2e-card-once")
+	once, err := currentPrice(ctx, c, "e2e-card", "e2e-card-once")
 	if err != nil {
 		return "", "", err
 	}
-	monthly, err := c.GetPriceByKey(ctx, "e2e-card", "e2e-card-monthly")
+	monthly, err := currentPrice(ctx, c, "e2e-card", "e2e-card-monthly")
 	if err != nil {
 		return "", "", err
 	}
@@ -128,11 +128,11 @@ products:
 	if _, err := c.ApplyCatalog(ctx, params); err != nil {
 		return "", "", err
 	}
-	pass, err := c.GetPriceByKey(ctx, "e2e-crypto", "e2e-crypto-pass")
+	pass, err := currentPrice(ctx, c, "e2e-crypto", "e2e-crypto-pass")
 	if err != nil {
 		return "", "", err
 	}
-	monthly, err := c.GetPriceByKey(ctx, "e2e-crypto", "e2e-crypto-monthly")
+	monthly, err := currentPrice(ctx, c, "e2e-crypto", "e2e-crypto-monthly")
 	if err != nil {
 		return "", "", err
 	}
@@ -247,3 +247,16 @@ func (r *Runtime) CustomerBilling(ctx context.Context, customerID string) (Custo
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// currentPrice is the live price a product key and price key name.
+func currentPrice(ctx context.Context, c *openrails.Client, productKey, key string) (*billing.Price, error) {
+	archived := false
+	page, err := c.ListPrices(ctx, billing.PriceListParams{ProductKey: productKey, Key: key, Archived: &archived})
+	if err != nil {
+		return nil, err
+	}
+	if len(page.Items) == 0 {
+		return nil, fmt.Errorf("no live price %s/%s", productKey, key)
+	}
+	return &page.Items[0], nil
+}

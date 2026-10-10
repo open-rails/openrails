@@ -51,6 +51,25 @@
       "storing_attempt_id": null,
       "accepted_at": "2026-09-16T00:00:00.123456789Z",
       "created_at": "2026-09-16T00:00:00.123456789Z"
+    },
+    {
+      "id": "mdt_12121212-1212-4121-8121-121212121212",
+      "customer_id": "22222222-2222-2222-2222-222222222222",
+      "payment_method_id": "pm_dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+      "psp_id": "psp_55555555-5555-5555-5555-555555555555",
+      "kind": "recurring",
+      "subscription_id": "sub_cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+      "currency": null,
+      "status": "active",
+      "end_reason": null,
+      "ended_at": null,
+      "card_brand": "visa",
+      "initial_transaction_id": "txn-1",
+      "network_transaction_id": null,
+      "transaction_link_id": null,
+      "storing_attempt_id": null,
+      "accepted_at": "2026-09-16T00:00:00.123456789Z",
+      "created_at": "2026-09-16T00:00:00.123456789Z"
     }
   ],
   "subscriptions": [

@@ -28,17 +28,17 @@ for its holders.
 
 Admin API (`Permissions.AdminRead`):
 
-- `POST /v1/admin/customers/{customer_id}/entitlements/check` —
-  `{"entitlements": [...], "prefixes": [...], "prefix_limit": n, "at"}` answers
-  `{"entitlements": {key: bool}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
-  for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
-- `GET /v1/admin/customers/{customer_id}/entitlements?prefix=&at=&cursor=&limit=` —
-  one page of the customer's keys in byte order (`Client.ListCustomerEntitlements`).
-- `GET /v1/admin/entitlements/{entitlement}/customers?at=&cursor=&limit=` — one page
-  of the customers holding a key (`Client.ListEntitlementCustomers`).
-- `POST /v1/admin/customers/{customer_id}/product-access/check` and
-  `GET /v1/admin/customers/{customer_id}/product-access?live=` — products held, bought,
-  subscribed or granted (`Client.CheckProductAccess`, `Client.ListProductAccess`).
+- `GET /v1/admin/entitlements?customer_id=&entitlement=&prefix=&at=&cursor=&limit=` —
+  the keys customers hold at one instant, by customer then key in byte order
+  (`Client.ListEntitlements`). `customer_id` names up to 100 customers, comma
+  separated; `entitlement`, repeated, keeps up to 100 keys, so a key absent from the
+  answer is not held; `prefix` keeps the keys under one prefix. Without `customer_id`,
+  one `entitlement` lists the customers holding it. Each row's `quantity` is the most
+  seats a held per-seat product grants the key (null when none is per seat). A host
+  minting tokens for a page of users reads all of them in one call.
+- `GET /v1/admin/product-access?customer_id=&product_id=&live=` — products held,
+  bought, subscribed or granted (`Client.ListProductAccess`); `live=true` with a
+  `product_id` is a product check, and each window's `quantity` is the seats it gives.
 - `GET /v1/me/entitlements` and `GET /v1/me/product-access` — the signed-in customer's own.
 
 A prefix is bytes OpenRails gives no meaning; its last byte must be printable ASCII. Every
@@ -57,9 +57,9 @@ list is `{data, next_cursor}` with keyset cursors.
   the first grants.
 - **Revoke** one window with `DELETE /v1/admin/customers/{customer_id}/product-access/{id}`
   (`Client.DeleteProductAccess`). Refunds and chargebacks revoke their payment's window.
-- **Catalog edits**: `UpdateProduct` and catalog applications set a product's keys;
-  `POST /v1/admin/catalog/entitlement-replacements` (`Client.ReplaceEntitlements`) moves a
-  key to another across every product in one edit. Each edit reports, per product, the keys
+- **Catalog edits**: `UpdateProduct` and catalog applications set a product's keys; an
+  application's `entitlement_replacements` (`[{from, to}]`; an empty `to` removes `from`)
+  moves a key to another across every product in the same edit. Each edit reports, per product, the keys
   added and removed and how many customers held it, and queues a
   `product.entitlements_changed` host event.
 

@@ -49,8 +49,10 @@ type PaymentMethod struct {
 	// Reusable: the customer keeps the card for one-click buys (an active
 	// card_on_file mandate).
 	Reusable bool `json:"reusable"`
-	// Mandates are the live agreements on the card. One that requires
-	// reconsent waits for POST /v1/me/payment-methods/{id}/verify.
+	// Mandates are the agreements the card carries, newest first: on the
+	// admin read every one, ended included (evidence for disputes); on the
+	// customer's own, those that can still authorize a charge. One that
+	// requires reconsent waits for POST /v1/me/payment-methods/{id}/verify.
 	Mandates []Mandate `json:"mandates"`
 	// Subscriptions are the subscriptions the card pays: as their own card,
 	// or as the default they follow.

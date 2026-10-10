@@ -43,7 +43,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
     psps: [solana]
 `, tc.amount))
 				require.NoError(t, err)
-				price, err := w.client[tp].GetPriceByKey(t.Context(), productKey, productKey+"-native")
+				price, err := priceByKey(t.Context(), w.client[tp], productKey, productKey+"-native")
 				require.NoError(t, err)
 				require.Equal(t, tc.token, price.Currency)
 				require.Equal(t, tc.native, price.UnitAmount)

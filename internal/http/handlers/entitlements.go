@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/entitlements"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/reconcile/converge"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -35,15 +37,24 @@ func convergeAfterMutation(r *httprequest.Request, customer uuid.UUID) {
 	}
 }
 
-// ServiceListCustomerEntitlements is one page of the keys a customer holds
-// at ?at= (zero: now), in byte order, optionally under ?prefix=: the keys of
-// the products they hold.
-func ServiceListCustomerEntitlements(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
+// ListEntitlements is one page of the keys customers hold at ?at= (zero:
+// now), by customer then key: of the customers ?customer_id= names (comma
+// separated), only ?entitlement= keys (repeated) and keys under ?prefix=.
+// Without customer_id, the one ?entitlement= key's holders.
+func ListEntitlements(r *httprequest.Request) {
+	customers, ok := queryCustomerIDs(r, "customer_id")
 	if !ok {
 		return
 	}
-	listCustomerEntitlements(r, customer.UUID())
+	for _, id := range customers {
+		if !requireServiceCustomerScope(r, id) {
+			return
+		}
+	}
+	if len(customers) == 0 && !requireMerchantRoutePrincipal(r) {
+		return
+	}
+	listEntitlements(r, customers, r.Request.URL.Query()["entitlement"])
 }
 
 // SelfListEntitlements is one page of the customer's own keys.
@@ -52,10 +63,16 @@ func SelfListEntitlements(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	listCustomerEntitlements(r, payer.UUID())
+	listEntitlements(r, []billing.CustomerID{billing.CustomerID(payer)}, nil)
 }
 
-func listCustomerEntitlements(r *httprequest.Request, customer uuid.UUID) {
+// entitlementCursor is the last row of a page of held keys.
+type entitlementCursor struct {
+	Customer uuid.UUID `json:"c"`
+	Key      string    `json:"k"`
+}
+
+func listEntitlements(r *httprequest.Request, customers []billing.CustomerID, keys []string) {
 	at, ok := parseAtQuery(r)
 	if !ok {
 		return
@@ -69,83 +86,56 @@ func listCustomerEntitlements(r *httprequest.Request, customer uuid.UUID) {
 		writeRefusal(r, err, "invalid page")
 		return
 	}
-	var after string
+	var after entitlementCursor
 	if _, err := pagination.Decode(page.Cursor, &after); err != nil {
 		writeRefusal(r, err, "invalid cursor")
 		return
 	}
-	keys, more, err := r.State.EntitlementService.ListEntitlementsPage(r.Request.Context(), customer, r.Query("prefix"), after, limit, at)
+	rows, more, err := r.State.EntitlementService.List(r.Request.Context(), entitlements.Query{
+		Customers: uuidutil.Of(customers), Keys: keys, Prefix: r.Query("prefix"), At: at,
+		After: entitlements.Held{Customer: after.Customer, Key: after.Key}, Limit: limit,
+	})
 	if err != nil {
 		writeRefusal(r, err, "failed to list entitlements")
 		return
 	}
-	out := billing.ListPage[billing.CustomerEntitlement]{Items: make([]billing.CustomerEntitlement, len(keys))}
-	for i, key := range keys {
-		out.Items[i] = billing.CustomerEntitlement{Entitlement: key}
+	out := billing.ListPage[billing.CustomerEntitlement]{Items: make([]billing.CustomerEntitlement, len(rows))}
+	for i, row := range rows {
+		out.Items[i] = billing.CustomerEntitlement{CustomerID: billing.CustomerID(row.Customer), Entitlement: row.Key, Quantity: row.Seats}
 	}
 	if more {
-		out.Next = pagination.Encode(keys[len(keys)-1])
+		last := rows[len(rows)-1]
+		out.Next = pagination.Encode(entitlementCursor{Customer: last.Customer, Key: last.Key})
 	}
 	r.SuccessJSON(out)
 }
 
-// ServiceListEntitlementCustomers is the reverse lookup: one page of the
-// customers holding an active window of the path's entitlement at ?at=,
-// ordered by customer id. It backs a host directory's filter by entitlement.
-func ServiceListEntitlementCustomers(r *httprequest.Request) {
-	entitlement := r.Param("entitlement")
-	if strings.TrimSpace(entitlement) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "entitlement is required").WithParam("entitlement"))
-		return
+// queryCustomerIDs reads a comma-separated customer id filter: 1 to
+// billing.MaxBatchItems distinct ids, or none when the request names none.
+func queryCustomerIDs(r *httprequest.Request, name string) ([]billing.CustomerID, bool) {
+	raw := strings.TrimSpace(r.Query(name))
+	if raw == "" {
+		return nil, true
 	}
-	at, ok := parseAtQuery(r)
-	if !ok {
-		return
+	parts := strings.Split(raw, ",")
+	if len(parts) > billing.MaxBatchItems {
+		r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s names at most %d customers", name, billing.MaxBatchItems)).WithParam(name))
+		return nil, false
 	}
-	if at.IsZero() {
-		at = r.Clock.Now()
+	out := make([]billing.CustomerID, 0, len(parts))
+	seen := make(map[billing.CustomerID]bool, len(parts))
+	for _, part := range parts {
+		id, err := billing.ParseCustomerID(strings.TrimSpace(part))
+		if err != nil || id.IsZero() {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("%s holds an invalid id %q", name, part)).WithParam(name))
+			return nil, false
+		}
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
 	}
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
-	limit, err := pagination.Limit(page)
-	if err != nil {
-		writeRefusal(r, err, "invalid page")
-		return
-	}
-	var after uuid.UUID
-	if _, err := pagination.Decode(page.Cursor, &after); err != nil {
-		writeRefusal(r, err, "invalid cursor")
-		return
-	}
-	ids, err := r.State.EntitlementService.ListCustomersWithEntitlement(r.Request.Context(), entitlement, at, after, int(pagination.Fetch(limit)))
-	if err != nil {
-		r.InternalError("failed to list customers", err)
-		return
-	}
-	customers := pagination.Map(pagination.Cut(ids, limit, func(id uuid.UUID) any { return id }), func(id uuid.UUID) billing.CustomerID { return billing.CustomerID(id) })
-	r.SuccessJSON(customers)
-}
-
-// ServiceCheckEntitlements answers which of the requested keys the customer
-// holds, and the keys they hold under each requested prefix, both at one
-// instant (zero: now). It reads only those keys and key ranges.
-func ServiceCheckEntitlements(r *httprequest.Request) {
-	customer, ok := commerceCustomer(r, customerIDParam(r.Param("customer_id")))
-	if !ok {
-		return
-	}
-	var req billing.CheckEntitlementsParams
-	if !r.BindJSON(&req) {
-		return
-	}
-	out, err := r.State.EntitlementService.Check(r.Request.Context(), customer.String(), req)
-	if err != nil {
-		writeRefusal(r, err, "entitlement check failed")
-		return
-	}
-	r.SuccessJSON(out)
+	return out, true
 }
 
 // GetEffectiveTiers answers the tier each requested customer holds in a

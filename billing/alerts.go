@@ -102,10 +102,11 @@ type SetAlertWebhookURLParams struct {
 	URL string `json:"url"`
 }
 
-// MarkNotificationsReadParams names 1 to MaxBatchItems notifications to mark
-// read.
+// MarkNotificationsReadParams marks a customer's notifications read: 1 to
+// MaxBatchItems named ones, or with All every unread one.
 type MarkNotificationsReadParams struct {
-	NotificationIDs []NotificationID `json:"notification_ids"`
+	NotificationIDs []NotificationID `json:"notification_ids,omitempty"`
+	All             bool             `json:"all,omitempty"`
 }
 
 // UnreadCount is how many notifications are unread.

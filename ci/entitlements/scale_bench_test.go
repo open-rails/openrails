@@ -86,52 +86,51 @@ func TestEntitlementScaleBenchmark(t *testing.T) {
 	for i, n := range sizes {
 		whale := whales[i]
 		prefix := fmt.Sprintf("w%d:", i)
-		keys := make([]string, billing.MaxEntitlementChecks)
+		keys := make([]string, billing.MaxBatchItems)
 		for k := range keys {
 			keys[k] = fmt.Sprintf("%s%06d:1", prefix, (k*97)%n+1)
 		}
-		exact := billing.CheckEntitlementsParams{Entitlements: keys}
-		held := billing.CheckEntitlementsParams{Prefixes: []string{prefix + "00", prefix + "01", prefix + "1"}}
-		contentkit := billing.CheckEntitlementsParams{Entitlements: keys[:50], Prefixes: []string{prefix}, PrefixLimit: billing.MaxHeldEntitlements}
-		check := func(p billing.CheckEntitlementsParams) func() {
+		read := func(p billing.EntitlementListParams) func() {
+			p.CustomerIDs = []billing.CustomerID{whale}
 			return func() {
-				_, err := client.CheckEntitlements(ctx, whale, p)
+				_, err := client.ListEntitlements(ctx, p)
 				require.NoError(t, err)
 			}
 		}
-		check(held)()
+		exact := read(billing.EntitlementListParams{Entitlements: keys})
+		held := read(billing.EntitlementListParams{Prefix: prefix + "0", PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit}})
+		held()
 		f.cached(whale)
-		row("CheckEntitlements exact 100, stale cache (live)", n, measure(t, 5, invalidate(whale), check(exact)))
-		row("CheckEntitlements 3 prefixes, stale cache (live)", n, measure(t, 5, invalidate(whale), check(held)))
+		row("ListEntitlements exact 100, stale cache (live)", n, measure(t, 5, invalidate(whale), exact))
+		row("ListEntitlements prefix page, stale cache (live)", n, measure(t, 5, invalidate(whale), held))
 		if os.Getenv("OPENRAILS_SCALE_BENCH_PLANS") != "" {
-			plan, used := f.executedPlan("ListDerivedEntitlementsByPrefix")
+			plan, used := f.executedPlan("ListDerivedEntitlementsPage")
 			t.Logf("%d held: live prefix read touched %d blocks: %s", n, used, plan)
 		}
-		row("cache rebuild (stale read to valid cache)", n, measure(t, 5, invalidate(whale), func() { check(held)(); f.cached(whale) }))
+		row("cache rebuild (stale read to valid cache)", n, measure(t, 5, invalidate(whale), func() { held(); f.cached(whale) }))
 		f.cached(whale)
-		row("CheckEntitlements exact 100, cached", n, measure(t, 100, nil, check(exact)))
-		row("CheckEntitlements 3 prefixes, cached", n, measure(t, 100, nil, check(held)))
-		row("ContentKit page (50 keys + prefix 10k)", n, measure(t, 100, nil, check(contentkit)))
+		row("ListEntitlements exact 100, cached", n, measure(t, 100, nil, exact))
+		row("ListEntitlements prefix page, cached", n, measure(t, 100, nil, held))
 		cursor := ""
-		row("ListCustomerEntitlements page 100", n, measure(t, 50, nil, func() {
-			page, err := client.ListCustomerEntitlements(ctx, whale, billing.CustomerEntitlementListParams{PageRequest: billing.PageRequest{Limit: 100, Cursor: cursor}})
+		row("ListEntitlements page 100", n, measure(t, 50, nil, func() {
+			page, err := client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{whale}, PageRequest: billing.PageRequest{Limit: 100, Cursor: cursor}})
 			require.NoError(t, err)
 			cursor = page.Next
 		}))
 		accessCursor := ""
 		row("ListProductAccess page 100", n, measure(t, 50, nil, func() {
-			page, err := client.ListProductAccess(ctx, whale, billing.ProductAccessListParams{PageRequest: billing.PageRequest{Limit: 100, Cursor: accessCursor}})
+			page, err := client.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{whale}, PageRequest: billing.PageRequest{Limit: 100, Cursor: accessCursor}})
 			require.NoError(t, err)
 			accessCursor = page.Next
 		}))
-		products, err := client.ListProductAccess(ctx, whale, billing.ProductAccessListParams{PageRequest: billing.PageRequest{Limit: billing.MaxProductAccessChecks}})
+		products, err := client.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{whale}, PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
 		require.NoError(t, err)
 		ids := make([]billing.ProductID, len(products.Items))
 		for k, item := range products.Items {
 			ids[k] = item.ProductID
 		}
-		row("CheckProductAccess 100 products", n, measure(t, 100, nil, func() {
-			_, err := client.CheckProductAccess(ctx, whale, billing.CheckProductAccessParams{ProductIDs: ids})
+		row("ListProductAccess of 100 products, live", n, measure(t, 100, nil, func() {
+			_, err := client.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{whale}, ProductIDs: ids, LiveOnly: true})
 			require.NoError(t, err)
 		}))
 		row("GetCustomer (console)", n, measure(t, 20, nil, func() {
@@ -150,16 +149,16 @@ func TestEntitlementScaleBenchmark(t *testing.T) {
 			require.NoError(t, client.DeleteProductAccess(ctx, whale, granted[next].ID))
 			next++
 		}))
-		row("CheckEntitlements 3 prefixes after a write", n, measure(t, 5, func() {
-			check(held)()
+		row("ListEntitlements prefix page after a write", n, measure(t, 5, func() {
+			held()
 			f.cached(whale)
 			_, err := client.CreateProductAccess(ctx, billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: whale, ProductID: common.ID, Hours: &day}}})
 			require.NoError(t, err)
-		}, check(held)))
+		}, held))
 	}
 	reverse := ""
-	row("ListEntitlementCustomers page 100 (20k hold)", 20_000, measure(t, 50, nil, func() {
-		page, err := client.ListEntitlementCustomers(ctx, "common:1", billing.EntitlementCustomerListParams{PageRequest: billing.PageRequest{Limit: 100, Cursor: reverse}})
+	row("ListEntitlements holders page 100 (20k hold)", 20_000, measure(t, 50, nil, func() {
+		page, err := client.ListEntitlements(ctx, billing.EntitlementListParams{Entitlements: []string{"common:1"}, PageRequest: billing.PageRequest{Limit: 100, Cursor: reverse}})
 		require.NoError(t, err)
 		reverse = page.Next
 	}))

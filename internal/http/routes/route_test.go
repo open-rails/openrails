@@ -51,7 +51,7 @@ var documents = []string{"Application", "DeclaredBilling", "MetricsQuery", "Sola
 // Every catalog entry is a complete declaration: a tier with the permission
 // it checks, at least one success, registered error codes.
 func TestCatalogDeclarations(t *testing.T) {
-	require.Len(t, Catalog(), 194)
+	require.Len(t, Catalog(), 182)
 	for _, r := range Catalog() {
 		key := r.Key()
 		require.Contains(t, []string{GET, POST, PUT, PATCH, DELETE}, r.Method, key)
@@ -96,7 +96,7 @@ func TestCatalogDeclarations(t *testing.T) {
 			require.True(t, ok, "%s: %s is not a registered error code", key, code)
 		}
 		for _, p := range r.Query {
-			require.Contains(t, []string{"string", "integer", "boolean", "date-time", "ids"}, p.Kind, key)
+			require.Contains(t, []string{"string", "integer", "boolean", "date-time", "ids", "strings"}, p.Kind, key)
 		}
 		got, ok := Lookup(r.Method, r.Path)
 		require.True(t, ok, key)
@@ -128,7 +128,7 @@ func TestMerchantListsTakeIDs(t *testing.T) {
 		lists++
 		require.Contains(t, r.Query, idsParam, "%s lists records with ids: declare idsParam", r.Key())
 	}
-	require.Equal(t, 20, lists)
+	require.Equal(t, 19, lists)
 }
 
 type recorder struct {
@@ -227,7 +227,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds")
 	require.NotContains(t, staff, "POST /v1/admin/catalog/products")
 	require.Contains(t, staff, "GET /v1/admin/catalog/products")
-	require.Contains(t, staff, "POST /v1/admin/catalog/offers/lookup", "a lookup is a read")
+	require.Contains(t, staff, "GET /v1/admin/entitlements", "a lookup is a read")
 	require.Contains(t, edits, "POST /v1/admin/catalog/products")
 	require.Contains(t, edits, "GET /v1/admin/catalog/products", "catalog reads are AdminRead's")
 	require.NotContains(t, edits, "POST /v1/admin/payments/{id}/refunds")

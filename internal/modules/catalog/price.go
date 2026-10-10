@@ -232,11 +232,13 @@ func (s *PriceService) priceWithProduct(ctx context.Context, p gen.BillingPrice,
 // PriceFilter contains optional filters for listing prices
 // IDs, when not nil, reads those prices instead, in one page.
 type PriceFilter struct {
-	IDs       []uuid.UUID
-	Archived  *bool
-	Currency  string
-	ProductID *uuid.UUID
-	Recurring *bool
+	IDs        []uuid.UUID
+	Archived   *bool
+	Currency   string
+	ProductID  *uuid.UUID
+	ProductKey string
+	Key        string
+	Recurring  *bool
 }
 
 // List returns one keyset page of prices, newest first.
@@ -272,8 +274,15 @@ func (s *PriceService) List(ctx context.Context, filter PriceFilter, page billin
 	if filter.Currency != "" {
 		currency = &filter.Currency
 	}
+	var productKey, key *string
+	if filter.ProductKey != "" {
+		productKey = &filter.ProductKey
+	}
+	if filter.Key != "" {
+		key = &filter.Key
+	}
 	rows, err := s.db.Gen(ctx).ListPricesFiltered(ctx, gen.ListPricesFilteredParams{MerchantID: queryMerchant.UUID(),
-		Archived: filter.Archived, Currency: currency, ProductID: filter.ProductID, Recurring: filter.Recurring,
+		Archived: filter.Archived, Currency: currency, ProductID: filter.ProductID, ProductKey: productKey, Key: key, Recurring: filter.Recurring,
 		AfterAt: afterAt, AfterID: afterID, FetchLimit: pagination.Fetch(limit)})
 	if err != nil {
 		return billing.ListPage[*models.Price]{}, err

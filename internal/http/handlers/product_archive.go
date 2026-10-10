@@ -93,19 +93,10 @@ func validateProductArchive(req *billing.ArchiveProductParams) *api.APIError {
 	if len(strings.TrimSpace(req.Reason)) > productArchiveMaxReason {
 		return invalid("reason", "reason is too long")
 	}
-	if req.PurchaseAction == "" {
-		req.PurchaseAction = billing.PurchaseActionNone
-	}
-	windowed := !req.PurchaseWindowStartsAt.IsZero() || req.WindowSeconds != 0
 	switch req.PurchaseAction {
-	case billing.PurchaseActionNone:
-		if windowed {
-			return invalid("purchase_action", "purchase_action none takes no purchase window")
-		}
-		return nil
 	case billing.PurchaseActionRefund, billing.PurchaseActionReview:
 	default:
-		return invalid("purchase_action", `purchase_action must be "none", "refund" or "review"`)
+		return invalid("purchase_action", `purchase_action must be "refund" or "review"; archive a product alone with PATCH {archived: true}`)
 	}
 	if req.PurchaseWindowStartsAt.IsZero() == (req.WindowSeconds == 0) {
 		return invalid("purchase_window_starts_at", "exactly one of purchase_window_starts_at or window_seconds is required")
@@ -302,7 +293,7 @@ type qualifyingPurchase struct {
 }
 
 func qualifyingPurchases(ctx context.Context, d *db.DB, op productArchiveOperation) ([]qualifyingPurchase, error) {
-	if op.Action == billing.PurchaseActionNone || op.PurchaseWindowStartsAt == nil {
+	if op.PurchaseWindowStartsAt == nil {
 		return nil, nil
 	}
 	mid, err := merchant.Require(ctx)

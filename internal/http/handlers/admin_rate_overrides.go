@@ -4,6 +4,7 @@ import (
 	"net/http"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	billingservice "github.com/open-rails/openrails/internal/service"
@@ -43,10 +44,12 @@ func SetRateOverride(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// ListRateOverrides lists a customer's negotiated prices, by meter.
+// ListRateOverrides lists customers' negotiated prices, by customer then
+// meter: of ?customer_id= and ?meter_key= when given.
 func ListRateOverrides(r *httprequest.Request) {
-	customer, ok := rateOverrideCustomer(r)
-	if !ok {
+	customer, err := parseServiceCustomerID(r.Query("customer_id"))
+	if err != nil {
+		r.APIError(api.Coded(billing.CodeInvalidQuery, "invalid customer_id").WithParam("customer_id"))
 		return
 	}
 	page, ok := r.Page()
@@ -57,7 +60,7 @@ func ListRateOverrides(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListPayerRateCards(r.Request.Context(), customer, page)
+	out, err := svc.ListRateOverrides(r.Request.Context(), customer, r.Query("meter_key"), page)
 	if err != nil {
 		writeMeteringError(r, err)
 		return

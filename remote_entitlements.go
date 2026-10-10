@@ -3,59 +3,53 @@ package openrails
 import (
 	"context"
 	"net/http"
+	"net/url"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/open-rails/openrails/billing"
 )
 
-// CheckProductAccess reports, for each product named by exactly one of
-// params.ProductIDs and params.ProductKeys, whether the customer has access to
-// it now and the seats they hold. Keys of the result are the ids or keys the
-// request named.
-func (c *Client) CheckProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.CheckProductAccessParams, requestOptions ...RequestOption) (*billing.ProductAccessCheck, error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
+// ListProductAccess returns one page of product-access windows, newest
+// first: bought, subscribed and granted, of params.CustomerIDs and
+// params.ProductIDs (each 1 to billing.MaxBatchItems; none: any).
+// params.LiveOnly keeps those live now. params.IDs instead reads named
+// windows.
+func (c *Client) ListProductAccess(ctx context.Context, params billing.ProductAccessListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ProductAccessGrant], error) {
+	query := pageValues(nil, params.PageRequest)
+	if err := setIDs(query, params.IDs); err != nil {
 		return nil, err
 	}
-	if (params.ProductIDs == nil) == (params.ProductKeys == nil) {
-		return nil, invalidErr("exactly one of product_ids and product_keys is required")
-	}
-	if err := batchSize(len(params.ProductIDs)+len(params.ProductKeys), billing.MaxProductAccessChecks); err != nil {
+	if err := setIDList(query, "customer_id", params.CustomerIDs); err != nil {
 		return nil, err
 	}
-	for _, key := range params.ProductKeys {
-		if !validProductKey(key) {
-			return nil, invalidErr("product_key is invalid")
-		}
+	if err := setIDList(query, "product_id", params.ProductIDs); err != nil {
+		return nil, err
 	}
-	var out billing.ProductAccessCheck
-	if err := c.do(ctx, http.MethodPost, path+"/product-access/check", params, &out, requestOptions...); err != nil {
+	if params.LiveOnly {
+		query.Set("live", "true")
+	}
+	var out billing.ListPage[billing.ProductAccessGrant]
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/product-access?"+query.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
 }
 
-// ListProductAccess returns one page of the customer's product-access
-// windows, newest first: bought, subscribed and granted. params.LiveOnly keeps
-// those live now.
-func (c *Client) ListProductAccess(ctx context.Context, customerID billing.CustomerID, params billing.ProductAccessListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.ProductAccessGrant], error) {
-	path, err := customerIDPath(customerID)
-	if err != nil {
-		return nil, err
+// setIDList sets a comma-separated id filter of 1 to billing.MaxBatchItems
+// ids; nil sets none.
+func setIDList[T wireID](q url.Values, name string, ids []T) error {
+	if ids == nil {
+		return nil
 	}
-	query := pageValues(nil, params.PageRequest)
-	if params.LiveOnly {
-		query.Set("live", "true")
+	if err := batchIDs(name, ids, billing.MaxBatchItems); err != nil {
+		return err
 	}
-	if err := setIDs(query, params.IDs); err != nil {
-		return nil, err
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = id.String()
 	}
-	var out billing.ListPage[billing.ProductAccessGrant]
-	if err := c.do(ctx, http.MethodGet, path+"/product-access?"+query.Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
+	q.Set(name, strings.Join(parts, ","))
+	return nil
 }
 
 // CreateProductAccess grants 1 to billing.MaxBatchItems products free, across
@@ -96,8 +90,4 @@ func (c *Client) DeleteProductAccess(ctx context.Context, customerID billing.Cus
 		return err
 	}
 	return c.do(ctx, http.MethodDelete, path+"/product-access/"+grant, nil, nil, requestOptions...)
-}
-
-func validProductKey(key string) bool {
-	return strings.TrimSpace(key) != "" && utf8.ValidString(key) && !strings.ContainsRune(key, 0)
 }

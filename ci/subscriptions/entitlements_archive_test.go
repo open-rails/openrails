@@ -91,7 +91,7 @@ func TestLegacyArchiveConvertsToProductAccess(t *testing.T) {
 			original, err := archivewire.Read(bytes.NewReader(legacy), nil, nil)
 			require.NoError(t, err)
 			require.Equal(t, original.Digest, result.Digest)
-			access, err := target.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{MerchantID: mid.UUID(), CustomerID: payer, AtTime: start, FetchLimit: 10})
+			access, err := target.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{payer}, AtTime: start, FetchLimit: 10})
 			require.NoError(t, err)
 			require.Len(t, access, 1)
 			require.Equal(t, product.UUID(), access[0].ProductID)
@@ -100,13 +100,10 @@ func TestLegacyArchiveConvertsToProductAccess(t *testing.T) {
 			require.Equal(t, "migration", *access[0].GrantReason)
 			for _, at := range []time.Time{start.Add(time.Hour), start.Add(1000 * time.Hour)} {
 				held, err := target.Gen(ctx).CheckDerivedEntitlements(ctx, gen.CheckDerivedEntitlementsParams{
-					MerchantID: mid.UUID(), CustomerID: payer, AtTime: at, Entitlements: []string{"asset:timed", "service:permanent"},
+					MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{payer}, AtTime: at, Entitlements: []string{"asset:timed", "service:permanent"}, RowLimit: 2,
 				})
 				require.NoError(t, err)
-				require.Len(t, held, 2)
-				for _, row := range held {
-					require.True(t, row.HasAccess, row.Entitlement)
-				}
+				require.Len(t, held, 2, "a held key is a row")
 			}
 			var live int
 			require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*) FROM "+quoted+`.grants g WHERE g.kind = 'entitlement' AND g.event = 'grant'

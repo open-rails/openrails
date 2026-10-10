@@ -82,10 +82,10 @@ func TestProductKeysKeepValidTimeHistory(t *testing.T) {
 	require.Equal(t, "c", history[2].key)
 	require.True(t, history[2].addedAt.Equal(edited))
 
-	granting, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlement: "c"})
+	granting, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"c"}})
 	require.NoError(t, err)
 	require.Equal(t, []string{"history"}, productKeys(t, granting))
-	dropped, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlement: "a"})
+	dropped, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"a"}})
 	require.NoError(t, err)
 	require.Empty(t, dropped.Items, "only live keys select a product")
 
@@ -95,11 +95,11 @@ func TestProductKeysKeepValidTimeHistory(t *testing.T) {
 	require.ErrorContains(t, err, "immutable")
 }
 
-// ReplaceEntitlements moves a key across every product granting it in one
-// catalog edit: each product loses From and gains To, a product already
-// granting To keeps one row, an empty To removes, and the receipt lists each
-// changed product. It is recorded as a catalog application.
-func TestReplaceEntitlementsMovesKeysAcrossProducts(t *testing.T) {
+// An application's entitlement_replacements move a key across every product
+// granting it in the same catalog edit: each product loses From and gains To,
+// a product already granting To keeps one row, an empty To removes, and the
+// receipt lists each changed product.
+func TestEntitlementReplacementsMoveKeysAcrossProducts(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	for _, tp := range []topology{embedded, remote} {
@@ -116,7 +116,10 @@ func TestReplaceEntitlementsMovesKeysAcrossProducts(t *testing.T) {
 			before, err := c.GetCatalogRevision(t.Context())
 			require.NoError(t, err)
 
-			receipt, err := c.ReplaceEntitlements(t.Context(), billing.ReplaceEntitlementsParams{Pairs: []billing.EntitlementReplacement{{From: a, To: b}, {From: gone}}})
+			replace := func(pairs ...catalog.EntitlementReplacement) (*billing.CatalogApplicationReceipt, error) {
+				return c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion, EntitlementReplacements: pairs})
+			}
+			receipt, err := replace(catalog.EntitlementReplacement{From: a, To: b}, catalog.EntitlementReplacement{From: gone})
 			require.NoError(t, err)
 			require.Equal(t, before.Revision, receipt.BaseRevision)
 			require.Equal(t, before.Revision+1, receipt.AppliedRevision, "one catalog edit")
@@ -132,10 +135,10 @@ func TestReplaceEntitlementsMovesKeysAcrossProducts(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, want, got.Entitlements)
 			}
-			withA, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlement: a})
+			withA, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{a}})
 			require.NoError(t, err)
 			require.Empty(t, withA.Items)
-			withB, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlement: b})
+			withB, err := c.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{b}})
 			require.NoError(t, err)
 			require.Equal(t, []string{both.Key, bundle.Key, single.Key}, productKeys(t, withB))
 			for _, row := range w.keyHistory(bundle.ID) {
@@ -151,18 +154,20 @@ func TestReplaceEntitlementsMovesKeysAcrossProducts(t *testing.T) {
 			require.NoError(t, w.pool.QueryRow(t.Context(), w.sql(`SELECT count(*) FROM billing.catalog_applications WHERE application_id = $1`), receipt.ApplicationID).Scan(&recorded))
 			require.Equal(t, 1, recorded)
 
-			again, err := c.ReplaceEntitlements(t.Context(), billing.ReplaceEntitlementsParams{Pairs: []billing.EntitlementReplacement{{From: a, To: b}}})
+			again, err := replace(catalog.EntitlementReplacement{From: gone}, catalog.EntitlementReplacement{From: a, To: b})
 			require.NoError(t, err)
-			require.Zero(t, again.ProductsChanged, "nothing grants the key any more")
-			require.NotEqual(t, receipt.ApplicationID, again.ApplicationID, "each call applies anew")
+			require.True(t, again.Replayed, "the same replacements are the same application")
+			require.Equal(t, receipt.ApplicationID, again.ApplicationID)
+			later, err := replace(catalog.EntitlementReplacement{From: a, To: b})
+			require.NoError(t, err)
+			require.Zero(t, later.ProductsChanged, "nothing grants the key any more")
 
-			for name, pairs := range map[string][]billing.EntitlementReplacement{
-				"empty":      nil,
+			for name, pairs := range map[string][]catalog.EntitlementReplacement{
 				"duplicate":  {{From: x, To: b}, {From: x, To: "y"}},
 				"chained":    {{From: x, To: b}, {From: b, To: "y"}},
 				"blank from": {{From: " ", To: b}},
 			} {
-				_, err := c.ReplaceEntitlements(t.Context(), billing.ReplaceEntitlementsParams{Pairs: pairs})
+				_, err := replace(pairs...)
 				require.ErrorIs(t, err, billing.ErrInvalid, name)
 			}
 		})

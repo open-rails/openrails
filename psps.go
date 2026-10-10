@@ -113,16 +113,6 @@ func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOptio
 	return &out, nil
 }
 
-// ListRails lists the rails a merchant can arm a PSP on, with the credential
-// and setting keys a PSP on each takes.
-func (c *Client) ListRails(ctx context.Context, requestOptions ...RequestOption) (*billing.ListPage[billing.RailDefinition], error) {
-	var out billing.ListPage[billing.RailDefinition]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/rails", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 func pspPath(id billing.PSPID) (string, error) {
 	if id.IsZero() {
 		return "", invalidErr("PSP id is required")

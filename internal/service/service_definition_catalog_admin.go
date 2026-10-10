@@ -79,7 +79,10 @@ func (s *Service) ListProducts(ctx context.Context, params billing.ProductListPa
 	if err != nil {
 		return billing.ListPage[billing.Product]{}, err
 	}
-	filter := catalog.ProductFilter{IDs: uuidutil.Of(params.IDs), Archived: params.Archived, TierGroup: params.TierGroup, Entitlement: params.Entitlement, ForSale: params.ForSale}
+	if len(params.Keys) > billing.MaxBatchItems || len(params.Entitlements) > billing.MaxBatchItems {
+		return billing.ListPage[billing.Product]{}, apperr.Invalidf("keys and entitlement each name at most %d values", billing.MaxBatchItems)
+	}
+	filter := catalog.ProductFilter{IDs: uuidutil.Of(params.IDs), Keys: params.Keys, Archived: params.Archived, TierGroup: params.TierGroup, Entitlements: params.Entitlements, ForSale: params.ForSale}
 	page, err := products.List(ctx, filter, params.PageRequest)
 	if err != nil {
 		return billing.ListPage[billing.Product]{}, err
@@ -261,7 +264,8 @@ func (s *Service) ListPrices(ctx context.Context, params billing.PriceListParams
 	if err != nil {
 		return billing.ListPage[billing.Price]{}, err
 	}
-	filter := catalog.PriceFilter{IDs: uuidutil.Of(params.IDs), Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency), Recurring: params.Recurring}
+	filter := catalog.PriceFilter{IDs: uuidutil.Of(params.IDs), Archived: params.Archived, Currency: moneyutil.NormalizeCurrency(params.Currency),
+		ProductKey: strings.TrimSpace(params.ProductKey), Key: strings.TrimSpace(params.Key), Recurring: params.Recurring}
 	if !params.ProductID.IsZero() {
 		id := params.ProductID.UUID()
 		filter.ProductID = &id

@@ -16,7 +16,8 @@ type Notification struct {
 }
 
 // CustomerNotificationLookup answers every notification a customer marked
-// read; one that is unknown or not theirs is null.
+// read by id; one that is unknown or not theirs is null. Marking all read
+// names none.
 type CustomerNotificationLookup struct {
 	Notifications map[NotificationID]*Notification `json:"notifications"`
 }

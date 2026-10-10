@@ -65,9 +65,9 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	}
 	entitled := func() bool {
 		t.Helper()
-		got, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckEntitlementsParams{Entitlements: []string{"content:refunded"}})
+		got, err := heldKeys(t.Context(), client, billing.CustomerID(uuid.MustParse(userID)), time.Time{}, "content:refunded")
 		require.NoError(t, err)
-		return got.Entitlements["content:refunded"]
+		return got["content:refunded"]
 	}
 
 	now := time.Now()
@@ -93,9 +93,9 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID, now.Add(time.Duration(i+2)*time.Second).Unix()))
 		require.False(t, entitled(), "%s after the refund must not grant again", kind)
 	}
-	access, err := client.CheckProductAccess(t.Context(), billing.CustomerID(uuid.MustParse(userID)), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product.ID}})
+	access, err := heldProducts(t.Context(), client, billing.CustomerID(uuid.MustParse(userID)), product.ID)
 	require.NoError(t, err)
-	require.False(t, access.Access[product.ID.String()], "the refunded product is not owned")
+	require.False(t, access[product.ID], "the refunded product is not owned")
 	payments, err := client.ListPayments(t.Context(), billing.PaymentListParams{CustomerID: billing.CustomerID(uuid.MustParse(userID))})
 	require.NoError(t, err)
 	var charged int

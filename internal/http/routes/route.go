@@ -132,7 +132,8 @@ type Stream struct{ ContentType string }
 // Param is one query parameter.
 type Param struct {
 	Name string
-	// Kind is string, integer, boolean, date-time or ids.
+	// Kind is string, integer, boolean, date-time, ids or strings (a
+	// repeated parameter).
 	Kind string
 	// Checked: the mount refuses a value that is not a non-negative integer
 	// (400 invalid_query) before the handler reads it.
@@ -141,6 +142,10 @@ type Param struct {
 
 func text(name string) Param    { return Param{Name: name, Kind: "string"} }
 func integer(name string) Param { return Param{Name: name, Kind: "integer", Checked: true} }
+
+// repeated is a parameter given once per value, for values that may hold a
+// comma.
+func repeated(name string) Param { return Param{Name: name, Kind: "strings"} }
 
 // pageParams are a cursor-paged list's query: Request.Page reads them.
 var pageParams = []Param{text("cursor"), integer("limit")}

@@ -38,7 +38,7 @@ func GetMySubscriptions(r *httprequest.Request) {
 		writeRefusal(r, err, "failed to retrieve subscriptions")
 		return
 	}
-	r.SuccessJSON(pagination.Map(subs, func(sub *subscriptions.UserSubscriptionResponse) billing.Subscription { return sub.View() }))
+	writeSubscriptions(r, pagination.Map(subs, func(sub *subscriptions.UserSubscriptionResponse) billing.Subscription { return sub.View() }))
 }
 
 // GetSubscription reads one of the customer's own subscriptions, with its

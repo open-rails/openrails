@@ -38,8 +38,11 @@ func (c *Client) GetMeter(ctx context.Context, key string, requestOptions ...Req
 }
 
 // SetMeter declares the meter under key, creating it or changing its
-// definition. A meter with recorded usage keeps its definition
-// (billing.ErrConflict, code meter_in_use).
+// definition, and with params.RateCard sets or (null) removes the rate card
+// that prices its usage for every customer without a rate override. A meter
+// with recorded usage keeps its definition (billing.ErrConflict, code
+// meter_in_use); a rate card with overrides is not removed (code
+// rate_card_has_overrides).
 func (c *Client) SetMeter(ctx context.Context, key string, params billing.SetMeterParams, requestOptions ...RequestOption) (*billing.Meter, error) {
 	path, err := meterPath(key)
 	if err != nil {
@@ -52,61 +55,30 @@ func (c *Client) SetMeter(ctx context.Context, key string, params billing.SetMet
 	return &out, nil
 }
 
-// SetMeterRateCard sets the rate card that prices the meter's usage for every
-// customer without a rate override.
-func (c *Client) SetMeterRateCard(ctx context.Context, key string, params billing.SetMeterRateCardParams, requestOptions ...RequestOption) (*billing.Meter, error) {
-	path, err := meterPath(key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Meter
-	if err := c.do(ctx, http.MethodPut, path+"/rate-card", params, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// DeleteMeterRateCard removes a meter's rate card once no customer has a rate
-// override of it.
-func (c *Client) DeleteMeterRateCard(ctx context.Context, key string, requestOptions ...RequestOption) error {
-	path, err := meterPath(key)
-	if err != nil {
-		return err
-	}
-	return c.do(ctx, http.MethodDelete, path+"/rate-card", nil, nil, requestOptions...)
-}
-
-// ListMeterRateOverrides returns one page of the customers whose negotiated
-// price replaces the meter's rate card, by customer.
-func (c *Client) ListMeterRateOverrides(ctx context.Context, key string, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.RateOverride], error) {
-	path, err := meterPath(key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.ListPage[billing.RateOverride]
-	if err := c.do(ctx, http.MethodGet, path+"/rate-overrides?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-func rateOverridesPath(customerID billing.CustomerID) (string, error) {
+func rateOverridePath(customerID billing.CustomerID, meterKey string) (string, error) {
 	customer, err := requireTypedID("customer_id", customerID)
 	if err != nil {
 		return "", err
 	}
-	return "/v1/admin/customers/" + customer + "/rate-overrides", nil
+	key, err := pathID("meter_key", meterKey)
+	if err != nil {
+		return "", err
+	}
+	return "/v1/admin/catalog/rate-overrides/" + customer + "/" + key, nil
 }
 
-// ListRateOverrides returns one page of a customer's negotiated prices, by
-// meter.
-func (c *Client) ListRateOverrides(ctx context.Context, customerID billing.CustomerID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.RateOverride], error) {
-	path, err := rateOverridesPath(customerID)
-	if err != nil {
-		return nil, err
+// ListRateOverrides returns one page of customers' negotiated prices, by
+// customer then meter: of params.CustomerID and params.MeterKey when set.
+func (c *Client) ListRateOverrides(ctx context.Context, params billing.RateOverrideListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.RateOverride], error) {
+	q := pageValues(nil, params.PageRequest)
+	if !params.CustomerID.IsZero() {
+		q.Set("customer_id", params.CustomerID.String())
+	}
+	if params.MeterKey != "" {
+		q.Set("meter_key", params.MeterKey)
 	}
 	var out billing.ListPage[billing.RateOverride]
-	if err := c.do(ctx, http.MethodGet, path+"?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/rate-overrides?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -114,16 +86,12 @@ func (c *Client) ListRateOverrides(ctx context.Context, customerID billing.Custo
 
 // SetRateOverride sets a customer's negotiated price for one meter's usage.
 func (c *Client) SetRateOverride(ctx context.Context, customerID billing.CustomerID, meterKey string, params billing.SetRateOverrideParams, requestOptions ...RequestOption) (*billing.RateOverride, error) {
-	path, err := rateOverridesPath(customerID)
-	if err != nil {
-		return nil, err
-	}
-	key, err := pathID("meter_key", meterKey)
+	path, err := rateOverridePath(customerID, meterKey)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.RateOverride
-	if err := c.do(ctx, http.MethodPut, path+"/"+key, params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPut, path, params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -132,13 +100,9 @@ func (c *Client) SetRateOverride(ctx context.Context, customerID billing.Custome
 // DeleteRateOverride removes a customer's negotiated price; the meter's rate
 // card prices their usage again.
 func (c *Client) DeleteRateOverride(ctx context.Context, customerID billing.CustomerID, meterKey string, requestOptions ...RequestOption) error {
-	path, err := rateOverridesPath(customerID)
+	path, err := rateOverridePath(customerID, meterKey)
 	if err != nil {
 		return err
 	}
-	key, err := pathID("meter_key", meterKey)
-	if err != nil {
-		return err
-	}
-	return c.do(ctx, http.MethodDelete, path+"/"+key, nil, nil, requestOptions...)
+	return c.do(ctx, http.MethodDelete, path, nil, nil, requestOptions...)
 }

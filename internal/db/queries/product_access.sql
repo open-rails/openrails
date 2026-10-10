@@ -240,37 +240,6 @@ ON CONFLICT (merchant_id, supersedes_id)
 WHERE supersedes_id IS NOT NULL AND event IN ('revoke', 'expire', 'supersede')
 DO NOTHING;
 
--- name: CheckProductAccess :many
--- Whether the customer holds each product at at, and the most seats a live
--- window gives: one indexed range of the customer's windows of each product.
-SELECT candidate.product_id::uuid AS product_id, (held.windows > 0)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest(sqlc.arg(product_ids)::uuid[]) AS candidate(product_id)
-CROSS JOIN LATERAL (
-    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
-    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
-      AND pa.product_id = candidate.product_id
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-) held;
-
--- name: CheckProductAccessKeys :many
--- Resolve product keys and current access in one bounded query. Archived
--- products stay readable for their holders.
-SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.windows > 0)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest(sqlc.arg(product_keys)::text[]) AS candidate(product_key)
-LEFT JOIN billing.products p ON p.merchant_id = sqlc.arg(merchant_id)::uuid AND p.key = candidate.product_key
-CROSS JOIN LATERAL (
-    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
-    WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
-      AND pa.product_id = p.id
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at_time)::timestamptz)
-) held;
-
 -- name: HasPermanentProductAccess :one
 -- Whether the customer holds the product indefinitely from at on.
 SELECT EXISTS (
@@ -282,13 +251,16 @@ SELECT EXISTS (
 );
 
 -- name: ListProductAccessPage :many
--- One keyset page of a customer's windows, newest first: live at at_time when
--- live_only, else every window that was not removed.
+-- One keyset page of windows, newest first, of the named customers and
+-- products (null: any): live at at_time when live_only, else every window
+-- that was not removed.
 SELECT pa.*, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
 FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg(customer_id)::uuid
+WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid
+  AND (sqlc.narg(customer_ids)::uuid[] IS NULL OR pa.customer_id = ANY (sqlc.narg(customer_ids)::uuid[]))
+  AND (sqlc.narg(product_ids)::uuid[] IS NULL OR pa.product_id = ANY (sqlc.narg(product_ids)::uuid[]))
   AND pa.deleted_at IS NULL
   AND (NOT sqlc.arg(live_only)::boolean OR (pa.revoked_at IS NULL
        AND pa.starts_at <= sqlc.arg(at_time)::timestamptz
@@ -303,16 +275,6 @@ FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
 WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = ANY(sqlc.arg(ids)::uuid[]) AND pa.deleted_at IS NULL;
-
--- name: ListCustomerProductAccessByIDs :many
--- A customer's named windows, newest first.
-SELECT pa.*, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
-FROM billing.product_access pa
-JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
-JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
-WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.id = ANY(sqlc.arg(ids)::uuid[])
-  AND pa.customer_id = sqlc.arg(customer_id)::uuid AND pa.deleted_at IS NULL
-ORDER BY pa.id DESC;
 
 -- name: GetLatestLiveProductEnd :one
 -- The latest end of the customer's live windows of a product (NULL:

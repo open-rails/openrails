@@ -27,7 +27,7 @@ import (
 func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount int64, hours int) *billing.Price {
 	w.t.Helper()
 	client := w.client[tp]
-	product, err := client.GetProductByKey(w.t.Context(), productKey)
+	product, err := productByKey(w.t.Context(), client, productKey)
 	if err != nil {
 		group := benefitGroup(entitlement)
 		product, err = client.CreateProduct(w.t.Context(), billing.CreateProductParams{Key: productKey, DisplayName: "Cadence " + productKey, TierGroup: &group, Entitlements: []string{entitlement}})
@@ -62,12 +62,12 @@ func TestCadencePriceKeys(t *testing.T) {
 				price, err := w.client[tp].GetPrice(t.Context(), typedPriceID(t, id), billing.GetPriceParams{})
 				require.NoError(t, err)
 				require.False(t, price.Archived, "%dh price stays current", hours)
-				current, err := w.client[tp].GetPriceByKey(t.Context(), product, product+"-"+want[hours])
+				current, err := priceByKey(t.Context(), w.client[tp], product, product+"-"+want[hours])
 				require.NoError(t, err)
 				require.Equal(t, id, current.ID.String(), "%dh key names its own price", hours)
 			}
 
-			products, err := w.client[tp].GetProductByKey(t.Context(), product)
+			products, err := productByKey(t.Context(), w.client[tp], product)
 			require.NoError(t, err)
 			explicit := 36
 			held, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: products.ID, Key: product + "-2d", UnitAmount: 5_000_000, Currency: "USD", BillingIntervalHours: &explicit, AccessDurationHours: &explicit})
@@ -80,7 +80,7 @@ func TestCadencePriceKeys(t *testing.T) {
 			if errors.As(err, &status) {
 				require.Equal(t, "price_key_cadence_conflict", status.Code)
 			}
-			still, err := w.client[tp].GetPriceByKey(t.Context(), product, product+"-2d")
+			still, err := priceByKey(t.Context(), w.client[tp], product, product+"-2d")
 			require.NoError(t, err)
 			require.Equal(t, held.ID, still.ID)
 			require.False(t, still.Archived)

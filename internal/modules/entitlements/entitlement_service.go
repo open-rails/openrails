@@ -123,7 +123,7 @@ func (s *EntitlementService) FirstLiveAccess(ctx context.Context, customer uuid.
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{MerchantID: mid.UUID(), CustomerID: customer, LiveOnly: true, AtTime: at, FetchLimit: 1})
+	rows, err := s.db.Gen(ctx).ListProductAccessPage(ctx, gen.ListProductAccessPageParams{MerchantID: mid.UUID(), CustomerIds: []uuid.UUID{customer}, LiveOnly: true, AtTime: at, FetchLimit: 1})
 	if err != nil || len(rows) == 0 {
 		return nil, err
 	}

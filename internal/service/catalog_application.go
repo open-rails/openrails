@@ -135,6 +135,9 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 				}
 			}
 		}
+		if err := scoped.replaceEntitlements(ctx, params.EntitlementReplacements, receipt); err != nil {
+			return nil, err
+		}
 		if err := scoped.applyCatalogProducts(ctx, params, receipt); err != nil {
 			return nil, err
 		}

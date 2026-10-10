@@ -199,9 +199,30 @@ func (f *fixture) cached(customer billing.CustomerID) bool {
 	return valid
 }
 
-func (f *fixture) check(customer billing.CustomerID, params billing.CheckEntitlementsParams) *billing.EntitlementCheck {
+// under is every key the customer holds under prefix at at (zero: now), in
+// byte order, read page by page.
+func (f *fixture) under(customer billing.CustomerID, prefix string, at time.Time) []string {
 	f.t.Helper()
-	got, err := f.client.CheckEntitlements(f.t.Context(), customer, params)
+	var out []string
+	for cursor := ""; ; {
+		page, err := f.client.ListEntitlements(f.t.Context(), billing.EntitlementListParams{
+			CustomerIDs: []billing.CustomerID{customer}, Prefix: prefix, At: at, PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit, Cursor: cursor},
+		})
+		require.NoError(f.t, err)
+		for _, row := range page.Items {
+			out = append(out, row.Entitlement)
+		}
+		if page.Next == "" {
+			return out
+		}
+		cursor = page.Next
+	}
+}
+
+// held answers which of keys the customer holds at at (zero: now).
+func (f *fixture) held(customer billing.CustomerID, at time.Time, keys ...string) map[string]bool {
+	f.t.Helper()
+	got, err := heldKeys(f.t.Context(), f.client, customer, at, keys...)
 	require.NoError(f.t, err)
 	return got
 }
@@ -216,20 +237,19 @@ func TestHeavyBuyerCacheNeverAnswersStale(t *testing.T) {
 	start := f.clock.Now()
 	f.seed(whale, "w:", entitlements.HeavyBuyerProducts, 1, start.Add(-time.Hour))
 	f.seed(small, "s:", 3, 1, start.Add(-time.Hour))
-	prefix := billing.CheckEntitlementsParams{Prefixes: []string{"w:"}, PrefixLimit: billing.MaxHeldEntitlements}
-	held := func() []string { return f.check(whale, prefix).Held["w:"].Keys }
+	held := func() []string { return f.under(whale, "w:", time.Time{}) }
 
 	f.executed.ran()
 	require.Len(t, held(), entitlements.HeavyBuyerProducts)
 	ran := f.executed.ran()
-	require.Equal(t, 1, ran["ListDerivedEntitlementsByPrefix"], "a cold read derives live: %v", ran)
+	require.Equal(t, 1, ran["ListDerivedEntitlementsPage"], "a cold read derives live: %v", ran)
 	require.True(t, f.cached(whale), "and caches the heavy buyer in the background")
 	f.executed.ran()
 	require.Len(t, held(), entitlements.HeavyBuyerProducts)
 	ran = f.executed.ran()
-	require.Equal(t, 1, ran["ListCachedEntitlementsByPrefix"], "a warm read is one range of the cache: %v", ran)
-	require.Zero(t, ran["ListDerivedEntitlementsByPrefix"])
-	f.check(small, billing.CheckEntitlementsParams{Prefixes: []string{"s:"}})
+	require.Equal(t, 1, ran["ListCachedEntitlementsPage"], "a warm read is one range of the cache: %v", ran)
+	require.Zero(t, ran["ListDerivedEntitlementsPage"])
+	f.under(small, "s:", time.Time{})
 	require.Zero(t, f.executed.ran()["SyncEntitlementCache"], "a light buyer is never cached")
 
 	// A key edit of a product they hold.
@@ -245,11 +265,10 @@ func TestHeavyBuyerCacheNeverAnswersStale(t *testing.T) {
 	keys := held()
 	require.Contains(t, keys, "w:zz:2", "a key added to a held product shows at once")
 	require.NotContains(t, keys, "w:zz:1", "a key removed from it goes at once")
-	got := f.check(whale, billing.CheckEntitlementsParams{Entitlements: []string{"w:zz:1", "w:zz:2"}, At: before})
-	require.Equal(t, map[string]bool{"w:zz:1": true, "w:zz:2": false}, got.Entitlements, "a past instant reads the product as it was")
+	require.Equal(t, map[string]bool{"w:zz:1": true, "w:zz:2": false}, f.held(whale, before, "w:zz:1", "w:zz:2"), "a past instant reads the product as it was")
 
 	// A revocation, then a window that ends with no write at all.
-	access, err := f.client.ListProductAccess(ctx, whale, billing.ProductAccessListParams{PageRequest: billing.PageRequest{Limit: 1}})
+	access, err := f.client.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{whale}, PageRequest: billing.PageRequest{Limit: 1}})
 	require.NoError(t, err)
 	require.NoError(t, f.client.DeleteProductAccess(ctx, whale, access.Items[0].ID))
 	require.NotContains(t, held(), "w:zz:2", "a revoked window's keys go at once")
@@ -262,13 +281,15 @@ func TestHeavyBuyerCacheNeverAnswersStale(t *testing.T) {
 	require.True(t, f.cached(whale))
 	f.executed.ran()
 	require.Contains(t, held(), "w:rent:1")
-	require.Equal(t, 1, f.executed.ran()["ListCachedEntitlementsByPrefix"], "the rental is cached")
+	ran = f.executed.ran()
+	require.NotZero(t, ran["ListCachedEntitlementsPage"], "the rental is cached: %v", ran)
+	require.Zero(t, ran["ListDerivedEntitlementsPage"])
 	f.clock.Advance(2 * time.Hour)
 	require.NotContains(t, held(), "w:rent:1", "the cache ends with the next window boundary")
 }
 
-// Racing edits and grants never produce a stale or mixed answer: a check
-// after a write returns sees it, and a check during writes sees one product
+// Racing edits and grants never produce a stale or mixed answer: a read
+// after a write returns sees it, and a read during writes sees one product
 // definition, never a mix.
 func TestHeavyBuyerCacheRaces(t *testing.T) {
 	f := newFixture(t)
@@ -297,19 +318,18 @@ func TestHeavyBuyerCacheRaces(t *testing.T) {
 					return
 				default:
 				}
-				got, err := f.client.CheckEntitlements(ctx, whale, billing.CheckEntitlementsParams{Entitlements: all, Prefixes: []string{"race:"}})
+				exact, err := f.client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{whale}, Entitlements: all})
 				if err != nil {
 					mixed.Store(err.Error(), true)
 					continue
 				}
-				exact := 0
-				for _, has := range got.Entitlements {
-					if has {
-						exact++
-					}
+				ranged, err := f.client.ListEntitlements(ctx, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{whale}, Prefix: "race:"})
+				if err != nil {
+					mixed.Store(err.Error(), true)
+					continue
 				}
-				if exact != 1 || len(got.Held["race:"].Keys) != 1 || !got.Entitlements[got.Held["race:"].Keys[0]] {
-					mixed.Store(fmt.Sprintf("%v %v", got.Entitlements, got.Held), true)
+				if len(exact.Items) != 1 || len(ranged.Items) != 1 {
+					mixed.Store(fmt.Sprintf("%v %v", exact.Items, ranged.Items), true)
 				}
 			}
 		}()
@@ -317,16 +337,16 @@ func TestHeavyBuyerCacheRaces(t *testing.T) {
 	for i := 1; i <= versions; i++ {
 		_, err := f.client.UpdateProduct(ctx, product.ID, billing.UpdateProductParams{Entitlements: catalog.Value([]string{all[i]})})
 		require.NoError(t, err)
-		got := f.check(whale, billing.CheckEntitlementsParams{Entitlements: []string{all[i-1], all[i]}})
-		require.Equal(t, map[string]bool{all[i-1]: false, all[i]: true}, got.Entitlements, "a check after an edit returns sees it")
+		require.Equal(t, map[string]bool{all[i-1]: false, all[i]: true}, f.held(whale, time.Time{}, all[i-1], all[i]), "a read after an edit returns sees it")
 		if i%5 == 0 {
-			granted, err := f.client.CreateProduct(ctx, billing.CreateProductParams{Key: fmt.Sprintf("race-grant-%d", i), DisplayName: "Grant", Entitlements: []string{fmt.Sprintf("grant:%d", i)}})
+			key := fmt.Sprintf("grant:%d", i)
+			granted, err := f.client.CreateProduct(ctx, billing.CreateProductParams{Key: fmt.Sprintf("race-grant-%d", i), DisplayName: "Grant", Entitlements: []string{key}})
 			require.NoError(t, err)
 			windows, err := f.client.CreateProductAccess(ctx, billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: whale, ProductID: granted.ID}}})
 			require.NoError(t, err)
-			require.True(t, f.check(whale, billing.CheckEntitlementsParams{Entitlements: []string{fmt.Sprintf("grant:%d", i)}}).Entitlements[fmt.Sprintf("grant:%d", i)], "a grant shows at once")
+			require.True(t, f.held(whale, time.Time{}, key)[key], "a grant shows at once")
 			require.NoError(t, f.client.DeleteProductAccess(ctx, whale, windows[0].ID))
-			require.False(t, f.check(whale, billing.CheckEntitlementsParams{Entitlements: []string{fmt.Sprintf("grant:%d", i)}}).Entitlements[fmt.Sprintf("grant:%d", i)], "a refund shows at once")
+			require.False(t, f.held(whale, time.Time{}, key)[key], "a refund shows at once")
 		}
 	}
 	close(stop)
@@ -344,20 +364,25 @@ func TestHeavyBuyerReadsStayBounded(t *testing.T) {
 	whale := billing.CustomerID(uuid.New())
 	f.seed(whale, "w:", owned, 1, f.clock.Now().Add(-time.Hour))
 	f.crowd(40_000)
-	keys := make([]string, billing.MaxEntitlementChecks)
+	keys := make([]string, billing.MaxBatchItems)
 	for i := range keys {
 		keys[i] = fmt.Sprintf("w:%06d:1", i*97+1)
 	}
-	prefixes := []string{"w:00", "w:005", "w:0099"}
-	params := billing.CheckEntitlementsParams{Entitlements: keys, Prefixes: prefixes}
-
-	got := f.check(whale, params)
-	for _, key := range keys {
-		require.True(t, got.Entitlements[key], key)
+	read := func() (map[string]bool, *billing.ListPage[billing.CustomerEntitlement]) {
+		t.Helper()
+		exact := f.held(whale, time.Time{}, keys...)
+		page, err := f.client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{whale}, Prefix: "w:00", PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit}})
+		require.NoError(t, err)
+		return exact, page
 	}
-	require.Len(t, got.Held["w:00"].Keys, billing.DefaultHeldEntitlements)
-	require.True(t, got.Held["w:00"].Truncated)
-	plan, live := f.executedPlan("ListDerivedEntitlementsByPrefix")
+
+	exact, page := read()
+	for _, key := range keys {
+		require.True(t, exact[key], key)
+	}
+	require.Len(t, page.Items, billing.MaxPageLimit)
+	require.NotEmpty(t, page.Next, "more are held than one page")
+	plan, live := f.executedPlan("ListDerivedEntitlementsPage")
 	require.LessOrEqual(t, live, 4*owned, "a live prefix read touches at most 4 blocks per held product")
 	require.NotContains(t, plan, "Seq Scan", plan)
 	require.NotContains(t, plan, "product_entitlements_entitlement_idx", "the read probes each held product, never the catalog keyspace: %s", plan)
@@ -372,25 +397,60 @@ func TestHeavyBuyerReadsStayBounded(t *testing.T) {
 	require.Empty(t, rescannedCTEs(t, rebuild), "a rebuild compares held and cached keys in one pass: %s", rebuild)
 	_, err := f.pool.Exec(t.Context(), "ANALYZE "+pgx.Identifier{f.schema}.Sanitize()+".customer_entitlement_cache")
 	require.NoError(t, err)
-	warm := f.check(whale, params)
-	require.Equal(t, got, warm, "the cache answers exactly what the live read did")
-	returned := 0
-	for _, h := range warm.Held {
-		returned += len(h.Keys) + 1
-	}
+	warmExact, warmPage := read()
+	require.Equal(t, exact, warmExact, "the cache answers exactly what the live read did")
+	require.Equal(t, page, warmPage)
 	// A cached read costs a few blocks per key it answers, whatever the
-	// customer holds: one index descent per key or prefix, one block per row.
-	for name, bound := range map[string]int{"EntitlementCacheValid": 12, "CheckCachedEntitlements": 4 * billing.MaxEntitlementChecks, "ListCachedEntitlementsByPrefix": 2*returned + 60} {
+	// customer holds: one index descent per key, one block per row.
+	for name, bound := range map[string]int{"ListValidEntitlementCaches": 12, "CheckCachedEntitlements": 4 * billing.MaxBatchItems, "ListCachedEntitlementsPage": 2*(billing.MaxPageLimit+1) + 60} {
 		used := f.buffers(name)
 		require.LessOrEqual(t, used, bound, "%s touched %d blocks", name, used)
 	}
-	page, err := f.client.ListCustomerEntitlements(t.Context(), whale, billing.CustomerEntitlementListParams{Prefix: "w:", PageRequest: billing.PageRequest{Limit: 100}})
+	first, err := f.client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{whale}, Prefix: "w:", PageRequest: billing.PageRequest{Limit: 100}})
 	require.NoError(t, err)
-	require.Len(t, page.Items, 100)
-	require.NotEmpty(t, page.Next)
+	require.Len(t, first.Items, 100)
+	require.NotEmpty(t, first.Next)
 	require.LessOrEqual(t, f.buffers("ListCachedEntitlementsPage"), 2*101+20, "a cached page is one short range")
-	next, err := f.client.ListCustomerEntitlements(t.Context(), whale, billing.CustomerEntitlementListParams{Prefix: "w:", PageRequest: billing.PageRequest{Limit: 100, Cursor: page.Next}})
+	next, err := f.client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{whale}, Prefix: "w:", PageRequest: billing.PageRequest{Limit: 100, Cursor: first.Next}})
 	require.NoError(t, err)
-	require.Greater(t, next.Items[0].Entitlement, page.Items[99].Entitlement, "keyset pages follow on")
+	require.Greater(t, next.Items[0].Entitlement, first.Items[99].Entitlement, "keyset pages follow on")
 	require.True(t, strings.HasPrefix(next.Items[0].Entitlement, "w:"))
+}
+
+// A page of customers reads in one query per path: the host minting tokens
+// for many users reads all of their keys at once, cached and live alike.
+func TestEntitlementsOfManyCustomersAreOneRead(t *testing.T) {
+	f := newFixture(t)
+	whale := billing.CustomerID(uuid.New())
+	f.seed(whale, "w:", entitlements.HeavyBuyerProducts, 1, f.clock.Now().Add(-time.Hour))
+	f.under(whale, "w:", time.Time{})
+	require.True(t, f.cached(whale))
+	customers := []billing.CustomerID{whale}
+	for i := range 40 {
+		c := billing.CustomerID(uuid.New())
+		f.seed(c, fmt.Sprintf("c%02d:", i), 2, 1, f.clock.Now().Add(-time.Hour))
+		customers = append(customers, c)
+	}
+	f.executed.ran()
+	var rows []billing.CustomerEntitlement
+	pages := 0
+	for cursor := ""; ; {
+		page, err := f.client.ListEntitlements(f.t.Context(), billing.EntitlementListParams{CustomerIDs: customers, PageRequest: billing.PageRequest{Limit: billing.MaxPageLimit, Cursor: cursor}})
+		require.NoError(t, err)
+		pages++
+		rows = append(rows, page.Items...)
+		if page.Next == "" {
+			break
+		}
+		cursor = page.Next
+	}
+	ran := f.executed.ran()
+	require.Len(t, rows, entitlements.HeavyBuyerProducts+40*2, "every key of every customer")
+	require.Equal(t, pages, ran["ListValidEntitlementCaches"], "one cache check a page: %v", ran)
+	require.LessOrEqual(t, ran["ListDerivedEntitlementsPage"], pages, "the light customers are one derived read a page: %v", ran)
+	require.LessOrEqual(t, ran["ListCachedEntitlementsPage"], pages, "the whale is one cached read a page: %v", ran)
+	for i := 1; i < len(rows); i++ {
+		a, b := rows[i-1], rows[i]
+		require.True(t, a.CustomerID.String() < b.CustomerID.String() || a.CustomerID == b.CustomerID && a.Entitlement < b.Entitlement, "by customer, then key")
+	}
 }

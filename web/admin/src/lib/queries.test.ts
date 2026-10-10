@@ -38,14 +38,14 @@ it("scopes cached server state before a merchant is selected", () => {
 it("keeps same-named price histories and price migrations separate by product", async () => {
   selectMerchant("merchant-a")
   const requests = await server({
-    "/admin/catalog/products/by-key/premium/prices/by-key/monthly/history": { data: [{ price_id: "premium_price" }] },
-    "/admin/catalog/products/by-key/basic/prices/by-key/monthly/history": { data: [{ price_id: "basic_price" }] },
+    "/admin/catalog/prices/price_premium/history": { data: [{ price_id: "premium_price" }] },
+    "/admin/catalog/prices/price_basic/history": { data: [{ price_id: "basic_price" }] },
     "/admin/price-migrations": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
   })
   const queries = client({ staleTime: Infinity })
   try {
-    const premiumHistory = await queries.fetchQuery(adminQueries.priceHistory("premium", "monthly"))
-    const basicHistory = await queries.fetchQuery(adminQueries.priceHistory("basic", "monthly"))
+    const premiumHistory = await queries.fetchQuery(adminQueries.priceHistory("price_premium"))
+    const basicHistory = await queries.fetchQuery(adminQueries.priceHistory("price_basic"))
     const premiumBatches = await queries.fetchQuery(adminQueries.priceMigrations("premium", "monthly"))
     const basicBatches = await queries.fetchQuery(adminQueries.priceMigrations("basic", "monthly"))
 
@@ -54,8 +54,8 @@ it("keeps same-named price histories and price migrations separate by product", 
     expect(premiumBatches.data).toEqual([{ id: "premium" }])
     expect(basicBatches.data).toEqual([{ id: "basic" }])
     expect(calls(requests)).toEqual([
-      "GET /admin/catalog/products/by-key/premium/prices/by-key/monthly/history",
-      "GET /admin/catalog/products/by-key/basic/prices/by-key/monthly/history",
+      "GET /admin/catalog/prices/price_premium/history",
+      "GET /admin/catalog/prices/price_basic/history",
       "GET /admin/price-migrations",
       "GET /admin/price-migrations",
     ])
@@ -66,12 +66,32 @@ it("keeps same-named price histories and price migrations separate by product", 
   }
 })
 
-it("waits for both product and price before loading price history or batches", () => {
-  for (const query of [adminQueries.priceHistory, adminQueries.priceMigrations]) {
-    expect(query(undefined, "monthly").enabled).toBe(false)
-    expect(query("premium", undefined).enabled).toBe(false)
-    expect(query("premium", "monthly").enabled).toBe(true)
+it("reads a customer's entitlements and product access from the batch lists", async () => {
+  selectMerchant("merchant-a")
+  const requests = await server({
+    "/admin/entitlements": { data: [{ customer_id: "cus_1", entitlement: "pro", quantity: 3 }], next_cursor: null },
+    "/admin/product-access": { data: [], next_cursor: null },
+  })
+  const queries = client({ staleTime: Infinity })
+  try {
+    const held = await queries.fetchQuery(adminQueries.customerEntitlements("cus_1", 50, ""))
+    await queries.fetchQuery(adminQueries.customerProductAccess("cus_1", 50, ""))
+    expect(held.data[0].quantity).toBe(3)
+    expect(calls(requests)).toEqual(["GET /admin/entitlements", "GET /admin/product-access"])
+    for (const request of requests) {
+      expect(new URLSearchParams(request.query).get("customer_id")).toBe("cus_1")
+    }
+  } finally {
+    queries.clear()
   }
+})
+
+it("waits for the price before loading its history, and for both keys before migrations", () => {
+  expect(adminQueries.priceHistory(undefined).enabled).toBe(false)
+  expect(adminQueries.priceHistory("price_1").enabled).toBe(true)
+  expect(adminQueries.priceMigrations(undefined, "monthly").enabled).toBe(false)
+  expect(adminQueries.priceMigrations("premium", undefined).enabled).toBe(false)
+  expect(adminQueries.priceMigrations("premium", "monthly").enabled).toBe(true)
 })
 
 it("retries transient failures at most twice and never a client error", () => {

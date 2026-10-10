@@ -123,10 +123,12 @@ func TestFreshBootstrapAndReplay(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, price.UnitAmount, stored.UnitAmount, "PostgreSQL and the embedded API preserve amounts above 2^53")
 
-	offers, err := client.ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"content:welcome"}, Kind: billing.OfferPermanent})
+	forSale := true
+	offers, err := client.ListProducts(t.Context(), billing.ProductListParams{Entitlements: []string{"content:welcome"}, ForSale: &forSale})
 	require.NoError(t, err)
-	require.Len(t, offers["content:welcome"].Items, 1)
-	require.Equal(t, price.ID, offers["content:welcome"].Items[0].PriceID)
+	require.Len(t, offers.Items, 1)
+	require.Len(t, offers.Items[0].Prices, 1)
+	require.Equal(t, price.ID, offers.Items[0].Prices[0].ID)
 }
 
 func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
@@ -150,13 +152,13 @@ func TestMerchantCatalogAndCustomerIsolation(t *testing.T) {
 	_, err = alice.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(customerA)), ProductID: productA.ID}}})
 	require.NoError(t, err)
 
-	check := billing.CheckEntitlementsParams{Entitlements: []string{"content:" + productA.Key}}
-	owned, err := alice.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), check)
+	key := "content:" + productA.Key
+	owned, err := heldKeys(t.Context(), alice, billing.CustomerID(uuid.MustParse(customerA)), time.Time{}, key)
 	require.NoError(t, err)
-	require.True(t, owned.Entitlements["content:"+productA.Key])
-	foreign, err := bob.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customerA)), check)
+	require.True(t, owned[key])
+	foreign, err := heldKeys(t.Context(), bob, billing.CustomerID(uuid.MustParse(customerA)), time.Time{}, key)
 	require.NoError(t, err)
-	require.Equal(t, map[string]bool{"content:" + productA.Key: false}, foreign.Entitlements)
+	require.Equal(t, map[string]bool{key: false}, foreign)
 }
 
 func TestCatalogEnsureIsIdempotent(t *testing.T) {
@@ -171,10 +173,11 @@ func TestCatalogEnsureIsIdempotent(t *testing.T) {
 	require.Equal(t, first.ID, second.ID)
 	require.Equal(t, first.DisplayName, second.DisplayName)
 
-	read, err := client.GetProductByKey(t.Context(), key)
+	read, err := client.ListProducts(t.Context(), billing.ProductListParams{Keys: []string{key}})
 	require.NoError(t, err)
-	require.Equal(t, first.ID, read.ID)
-	require.Equal(t, first.DisplayName, read.DisplayName)
+	require.Len(t, read.Items, 1)
+	require.Equal(t, first.ID, read.Items[0].ID)
+	require.Equal(t, first.DisplayName, read.Items[0].DisplayName)
 }
 
 // A catalog application's meters and rate cards land in the runtime's own schema.
@@ -267,15 +270,14 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.Equal(t, "requires_action", read.Status)
 	require.Equal(t, first.NextAction, read.NextAction)
 
-	premium := billing.CheckEntitlementsParams{Entitlements: []string{"content:premium"}}
-	before, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
+	before, err := heldKeys(t.Context(), client, billing.CustomerID(uuid.MustParse(customer)), time.Time{}, "content:premium")
 	require.NoError(t, err)
-	require.False(t, before.Entitlements["content:premium"])
+	require.False(t, before["content:premium"])
 	_, err = client.CreateProductAccess(t.Context(), billing.CreateProductAccessBatchParams{Items: []billing.CreateProductAccessParams{{CustomerID: billing.CustomerID(uuid.MustParse(customer)), ProductID: product.ID}}})
 	require.NoError(t, err)
-	after, err := client.CheckEntitlements(t.Context(), billing.CustomerID(uuid.MustParse(customer)), premium)
+	after, err := heldKeys(t.Context(), client, billing.CustomerID(uuid.MustParse(customer)), time.Time{}, "content:premium")
 	require.NoError(t, err)
-	require.True(t, after.Entitlements["content:premium"], "the public access check observes the entitlement granted for the product")
+	require.True(t, after["content:premium"], "the public access check observes the entitlement granted for the product")
 }
 
 // recordUsage records one usage event; the item's refusal is the error.

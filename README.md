@@ -362,7 +362,7 @@ If your app already has an authenticated Vault client, pass it as
 #### Integrate OpenRails into your server
 
 Start OpenRails' background work, mount the billing routes next to AuthKit's,
-and gate your content with `CheckEntitlements`:
+and gate your content with `ListEntitlements`:
 
 ```go
 func main() { log.Fatal(run(context.Background())) }
@@ -436,12 +436,12 @@ func run(ctx context.Context) error {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		held, err := bill.CheckEntitlements(c, customer, billing.CheckEntitlementsParams{Entitlements: []string{entitlement}, At: time.Now()})
+		held, err := bill.ListEntitlements(c, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customer}, Entitlements: []string{entitlement}})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
-		if !held.Entitlements[entitlement] {
+		if len(held.Items) == 0 { // a key not listed is not held
 			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required"})
 			return
 		}
@@ -479,7 +479,7 @@ That is the whole server integration, and it is the program in
 [`examples/embedded`](examples/embedded). Your server never touches a card
 number: the browser hands the card to the processor's tokenization iframe, and
 OpenRails charges the stored token, rebills memberships at their interval,
-retries failed renewals, and keeps `CheckEntitlements` current. A rental's access
+retries failed renewals, and keeps `ListEntitlements` current. A rental's access
 ends after its 3 days; a canceled membership keeps access until its paid term ends.
 
 #### Admin dashboard
@@ -664,7 +664,7 @@ Mounting gives your users these routes under `/billing`:
 | `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
 | `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
 | `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
-| `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, and the payment methods a buyer can use with their browser config (always mounted) |
+| `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, the rails a PSP can be declared on, the payment methods a buyer can use with their browser config, and the captcha to solve when asked (always mounted) |
 
 **Your customers' own billing** (always mounted; signed in, always as the caller)
 
@@ -701,7 +701,7 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/me/usage` | metered usage |
 | `GET /billing/v1/me/spend-limits` | spending limits |
 | `GET /billing/v1/me/notifications` | billing notices ("your card was declined") |
-| `POST /billing/v1/me/notifications/read` | mark up to 100 read |
+| `POST /billing/v1/me/notifications/read` | mark up to 100 read, or all |
 
 **Webhooks and provisioning** (other systems pushing to OpenRails; no user signs in)
 
@@ -733,7 +733,7 @@ What you will set next:
 ### How access and billing work
 
 
-**Access and ownership.** Use `CheckEntitlements` to check whether the customer may
+**Access and ownership.** Use `ListEntitlements` to check whether the customer may
 access content now. That includes individual purchases, bundles and unexpired
 rentals. `ListProductAccess` identifies the product actually acquired and its
 expiry: a bundle purchase records the bundle product, while its entitlement
@@ -1183,13 +1183,12 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 | Operation | Reference contract |
 | --- | --- |
 | `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
-| `ListOffers` | Up to 100 exact resource keys in one request; explicit kind, currency preference, per-key limit and cursors |
-| `CheckEntitlements` / `ListCustomerEntitlements` | Keys derived from the products a customer holds; `CheckEntitlements` checks up to 100 keys and 10 prefixes of one customer, `ListCustomerEntitlements` pages their keys |
-| `CheckProductAccess` | Product IDs or keys; archived purchase access remains readable |
+| `ListEntitlements` | Keys derived from the products customers hold: up to 100 customers and 100 keys, or one prefix, in one page; without customers, one key's holders |
+| `ListProductAccess` | Customer and product IDs; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
 | `ListCheckoutOptions` | `CheckoutOptionListParams`: `PriceID` or `ProductKey` + `PriceKey` names the price whose options it lists |
 | `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
-| Catalog reads | `GetProduct` / `GetPrice` (ID) or `GetProductByKey` / `GetPriceByKey` |
+| Catalog reads | `GetProduct` / `GetPrice` (ID), or `ListProducts` by `Keys` and `ListPrices` by `ProductKey` + `Key` |
 | Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |
 
 Keys are opaque, including UUID-shaped keys: a field that takes an ID never

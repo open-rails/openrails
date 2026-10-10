@@ -60,12 +60,12 @@ func TestOwnerCourseBundleFollowsTheProduct(t *testing.T) {
 	require.Equal(t, []string{"course:102"}, events[1].Removed)
 	require.EqualValues(t, 2, events[1].Holders)
 
-	page, err := client.ListCustomerEntitlements(t.Context(), buyer.customerID(), billing.CustomerEntitlementListParams{Prefix: "course:"})
+	page, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{buyer.customerID()}, Prefix: "course:"})
 	require.NoError(t, err)
-	require.Equal(t, []billing.CustomerEntitlement{{Entitlement: "course:101"}, {Entitlement: "course:103"}}, page.Items)
-	holders, err := client.ListEntitlementCustomers(t.Context(), "course:102", billing.EntitlementCustomerListParams{})
+	require.Equal(t, []billing.CustomerEntitlement{{CustomerID: buyer.customerID(), Entitlement: "course:101"}, {CustomerID: buyer.customerID(), Entitlement: "course:103"}}, page.Items)
+	holders, err := client.ListEntitlements(t.Context(), billing.EntitlementListParams{Entitlements: []string{"course:102"}})
 	require.NoError(t, err)
-	require.Equal(t, []billing.CustomerID{single.customerID()}, holders.Items)
+	require.Equal(t, []billing.CustomerEntitlement{{CustomerID: single.customerID(), Entitlement: "course:102"}}, holders.Items)
 }
 
 // The owner's scenario: content moves from key A to key B across every
@@ -79,7 +79,8 @@ func TestOwnerReplaceContentMovesEveryHolder(t *testing.T) {
 	c, other := w.newCustomer(), w.newCustomer()
 	c.grant(first, nil, nil)
 	other.grant(second, nil, nil)
-	receipt, err := client.ReplaceEntitlements(t.Context(), billing.ReplaceEntitlementsParams{Pairs: []billing.EntitlementReplacement{{From: "content:a", To: "content:b"}}})
+	receipt, err := client.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion,
+		EntitlementReplacements: []catalog.EntitlementReplacement{{From: "content:a", To: "content:b"}}})
 	require.NoError(t, err)
 	require.Len(t, receipt.EntitlementChanges, 2)
 	for _, change := range receipt.EntitlementChanges {
@@ -167,10 +168,10 @@ func TestProductAccessCoversSubscriptionsArchivesAndHistory(t *testing.T) {
 	client := w.client[embedded]
 	e := enroll(t, w, "stripe", embedded)
 	sub := w.subscription(embedded, e.sub)
-	access, err := client.CheckProductAccess(t.Context(), e.c.customerID(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{sub.ProductID}})
+	access, err := heldProducts(t.Context(), client, e.c.customerID(), sub.ProductID)
 	require.NoError(t, err)
-	require.True(t, access.Access[sub.ProductID.String()], "a subscription is product access")
-	live, err := client.ListProductAccess(t.Context(), e.c.customerID(), billing.ProductAccessListParams{LiveOnly: true})
+	require.True(t, access[sub.ProductID], "a subscription is product access")
+	live, err := client.ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{e.c.customerID()}, LiveOnly: true})
 	require.NoError(t, err)
 	require.Len(t, live.Items, 1)
 	require.Equal(t, billing.ProductAccessSourceSubscription, live.Items[0].SourceType)

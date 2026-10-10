@@ -128,10 +128,6 @@ var pendingNumericMoney = map[string]string{
 	"billing/invoices.go:InvoiceProfile.Tax tax": notMoneyTaxFacts,
 
 	"internal/query/query.go:QueryOptions.Limit limit": notMoneyPageSize,
-
-	"billing/resource_offers.go:OfferListParams.Limit limit": notMoneyPageSize,
-
-	"billing/entitlements.go:CheckEntitlementsParams.PrefixLimit prefix_limit": notMoneyPageSize,
 }
 
 const (

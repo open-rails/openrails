@@ -38,16 +38,23 @@ func (w *world) seatPrice(group string, rank int, cents int64, bounds catalog.Qu
 }
 
 // seatsHeld is the seats the customer holds of an entitlement and of a
-// product, as the merchant's checks answer.
+// product, as the merchant's reads answer: the entitlement's row, and the
+// most a live window of the product gives.
 func (w *world) seatsHeld(c *customer, entitlement string, product billing.ProductID) (*int, *int) {
 	w.t.Helper()
-	check, err := w.client[remote].CheckEntitlements(w.t.Context(), c.cid(), billing.CheckEntitlementsParams{Entitlements: []string{entitlement}})
+	held, err := w.client[remote].ListEntitlements(w.t.Context(), billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{c.cid()}, Entitlements: []string{entitlement}})
 	require.NoError(w.t, err)
-	require.True(w.t, check.Entitlements[entitlement])
-	access, err := w.client[embedded].CheckProductAccess(w.t.Context(), c.cid(), billing.CheckProductAccessParams{ProductIDs: []billing.ProductID{product}})
+	require.Len(w.t, held.Items, 1)
+	windows, err := w.client[embedded].ListProductAccess(w.t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{c.cid()}, ProductIDs: []billing.ProductID{product}, LiveOnly: true})
 	require.NoError(w.t, err)
-	require.True(w.t, access.Access[product.String()])
-	return check.Quantities[entitlement], access.Quantities[product.String()]
+	require.NotEmpty(w.t, windows.Items)
+	var productSeats *int
+	for _, window := range windows.Items {
+		if window.Quantity != nil && (productSeats == nil || *window.Quantity > *productSeats) {
+			productSeats = window.Quantity
+		}
+	}
+	return held.Items[0].Quantity, productSeats
 }
 
 func (w *world) latestCycleSeats(sub billing.SubscriptionID) *int {

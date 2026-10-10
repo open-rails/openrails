@@ -47,9 +47,7 @@ export function PriceDetailPage() {
     refetch: reload,
   } = useQuery(adminQueries.price(id, { verify, errorAction: "Load price" }))
   const { data: product } = useQuery(adminQueries.product(price?.product_id))
-  const { data: history } = useQuery(
-    adminQueries.priceHistory(product?.key, price?.key)
-  )
+  const { data: history } = useQuery(adminQueries.priceHistory(price?.id))
   const { data: migrations } = useQuery(
     adminQueries.priceMigrations(product?.key, price?.key)
   )

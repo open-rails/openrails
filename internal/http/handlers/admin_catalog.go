@@ -30,18 +30,19 @@ func writeCatalogError(r *httprequest.Request, err error) {
 
 // ProductListQuery filters ListProducts.
 type ProductListQuery struct {
-	Archived    *bool  `form:"archived"`
-	TierGroup   string `form:"tier_group"`
-	Entitlement string `form:"entitlement"`
-	ForSale     *bool  `form:"for_sale"`
+	Archived  *bool  `form:"archived"`
+	TierGroup string `form:"tier_group"`
+	ForSale   *bool  `form:"for_sale"`
 }
 
 // PriceListQuery filters ListPrices.
 type PriceListQuery struct {
-	ProductID billing.ProductID `form:"product_id"`
-	Currency  string            `form:"currency"`
-	Recurring *bool             `form:"recurring"`
-	Archived  *bool             `form:"archived"`
+	ProductID  billing.ProductID `form:"product_id"`
+	ProductKey string            `form:"product_key"`
+	Key        string            `form:"key"`
+	Currency   string            `form:"currency"`
+	Recurring  *bool             `form:"recurring"`
+	Archived   *bool             `form:"archived"`
 }
 
 // PriceQuery is GetPrice's query.
@@ -110,8 +111,9 @@ func ListProducts(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, IDs: ids, Archived: query.Archived, TierGroup: strings.TrimSpace(query.TierGroup),
-		Entitlement: query.Entitlement, ForSale: query.ForSale})
+	values := r.Request.URL.Query()
+	out, err := svc.ListProducts(r.Request.Context(), billing.ProductListParams{PageRequest: page, IDs: ids, Keys: values["keys"], Archived: query.Archived,
+		TierGroup: strings.TrimSpace(query.TierGroup), Entitlements: values["entitlement"], ForSale: query.ForSale})
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -133,19 +135,6 @@ func GetProduct(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.GetProduct(r.Request.Context(), id)
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	writeProduct(r, svc, http.StatusOK, out)
-}
-
-func GetProductByKey(r *httprequest.Request) {
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.GetProductByKey(r.Request.Context(), r.Param("product_key"))
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -230,7 +219,7 @@ func ListPrices(r *httprequest.Request) {
 		return
 	}
 	out, err := svc.ListPrices(r.Request.Context(), billing.PriceListParams{PageRequest: page, IDs: ids, ProductID: query.ProductID,
-		Currency: query.Currency, Recurring: query.Recurring, Archived: query.Archived})
+		ProductKey: query.ProductKey, Key: query.Key, Currency: query.Currency, Recurring: query.Recurring, Archived: query.Archived})
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -266,23 +255,13 @@ func GetPrice(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetPriceByKey reads the price a key currently names.
-func GetPriceByKey(r *httprequest.Request) {
-	svc, ok := newAdminBillingService(r)
+// ListPriceHistory lists when the price's key moved to which price, most
+// recent first.
+func ListPriceHistory(r *httprequest.Request) {
+	id, ok := priceIDParam(r)
 	if !ok {
 		return
 	}
-	out, err := svc.GetPriceByKey(r.Request.Context(), r.Param("product_key"), r.Param("key"))
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, out)
-}
-
-// ListPriceKeyHistory lists when a key moved to which price, most recent
-// first.
-func ListPriceKeyHistory(r *httprequest.Request) {
 	page, ok := r.Page()
 	if !ok {
 		return
@@ -291,7 +270,7 @@ func ListPriceKeyHistory(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	out, err := svc.ListPriceKeyHistory(r.Request.Context(), r.Param("product_key"), r.Param("key"), page)
+	out, err := svc.ListPriceHistory(r.Request.Context(), id, page)
 	if err != nil {
 		writeCatalogError(r, err)
 		return

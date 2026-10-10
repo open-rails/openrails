@@ -34,22 +34,23 @@ through `CreatePrice` with `ProductID` and `UpdatePrice`. Provider writes never
 run inside the local transaction.
 
 Updates are merge patches (`catalog.Field`): omitted fields keep their values,
-`catalog.Null` clears one. Reads are `GetProduct`/`GetPrice` by ID or
-`GetProductByKey`/`GetPriceByKey`; lists return `billing.ListPage` with a cursor.
+`catalog.Null` clears one. Reads are `GetProduct`/`GetPrice` by ID, or
+`ListProducts` with `Keys` and `ListPrices` with `ProductKey` and `Key` (a key's
+current price is its one not archived); lists return `billing.ListPage` with a cursor.
 
 ## Access and checkout
 
-Check only the products already selected for a host page. `CheckProductAccess`
-returns a map for that bounded input; it does not load the customer's complete
-purchase history. Use `ListProductAccess` with its cursor only when displaying
-purchase history itself.
+Check only the products already selected for a host page: `ListProductAccess`
+with those `ProductIDs` and `LiveOnly` lists the live windows of that bounded
+input, without loading the customer's complete purchase history. A product with
+no window listed is not held.
 
 ```go
-access, err := client.CheckProductAccess(ctx, customerID, billing.CheckProductAccessParams{
-    ProductIDs: pageProductIDs,
+access, err := client.ListProductAccess(ctx, billing.ProductAccessListParams{
+    CustomerIDs: []billing.CustomerID{customerID}, ProductIDs: pageProductIDs, LiveOnly: true,
 })
 if err != nil { return err }
-_ = access[productID]
+_ = access.Items
 
 session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
     Customer:   billing.CheckoutCustomerIdentity{ID: customerID},

@@ -37,7 +37,6 @@ import type {
   MerchantWebhook,
   PSP,
   PSPRoutingPreview,
-  RailDefinition,
   RawProductAccessGrant,
   PriceMigration,
   PriceMigrationCancel,
@@ -71,20 +70,20 @@ export const listCustomerEntitlements = (
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<CustomerEntitlement>>(
-    `/admin/customers/${customerId}/entitlements`,
-    { query: { ...page }, signal }
-  )
+  api<ListPage<CustomerEntitlement>>("/admin/entitlements", {
+    query: { customer_id: customerId, ...page },
+    signal,
+  })
 
 export const listCustomerProductAccess = (
   customerId: string,
   page: PageRequest,
   signal?: AbortSignal
 ) =>
-  api<ListPage<RawProductAccessGrant>>(
-    `/admin/customers/${customerId}/product-access`,
-    { query: { ...page }, signal }
-  )
+  api<ListPage<RawProductAccessGrant>>("/admin/product-access", {
+    query: { customer_id: customerId, ...page },
+    signal,
+  })
 
 export const listCustomerPaymentMethods = (
   customerId: string,
@@ -106,29 +105,28 @@ export const listCustomerUsageRateOverrides = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<RateOverride>>(`/admin/customers/${customerId}/rate-overrides`, {
-    query: { limit: PAGE_MAX, cursor },
+  api<ListPage<RateOverride>>("/admin/catalog/rate-overrides", {
+    query: { customer_id: customerId, limit: PAGE_MAX, cursor },
     signal,
   })
+
+const rateOverridePath = (customerId: string, meterKey: string) =>
+  `/admin/catalog/rate-overrides/${customerId}/${encodeURIComponent(meterKey)}`
 
 export const putCustomerUsageRateOverride = (
   customerId: string,
   meterKey: string,
   body: CustomerUsageRateOverrideRequest
 ) =>
-  api<RateOverride>(
-    `/admin/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
-    { method: "PUT", body }
-  )
+  api<RateOverride>(rateOverridePath(customerId, meterKey), {
+    method: "PUT",
+    body,
+  })
 
 export const deleteCustomerUsageRateOverride = (
   customerId: string,
   meterKey: string
-) =>
-  api<void>(
-    `/admin/customers/${customerId}/rate-overrides/${encodeURIComponent(meterKey)}`,
-    { method: "DELETE" }
-  )
+) => api<void>(rateOverridePath(customerId, meterKey), { method: "DELETE" })
 
 export interface ProductGrant {
   productId: string
@@ -414,6 +412,8 @@ export interface UsageMeterRequest {
   aggregation: "sum" | "count"
   unit?: string
   group_by: Record<string, string>
+  // Omitted keeps the meter's rate card; null removes it.
+  rate_card?: DefaultUsageRateCardRequest | null
 }
 
 export interface DefaultUsageRateCardRequest {
@@ -444,10 +444,10 @@ export const listUsageMeterOverrides = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<RateOverride>>(
-    `/admin/catalog/meters/${encodeURIComponent(key)}/rate-overrides`,
-    { query: { limit, cursor }, signal }
-  )
+  api<ListPage<RateOverride>>("/admin/catalog/rate-overrides", {
+    query: { meter_key: key, limit, cursor },
+    signal,
+  })
 
 export const putUsageMeter = (key: string, body: UsageMeterRequest) =>
   api<Meter>(`/admin/catalog/meters/${encodeURIComponent(key)}`, {
@@ -455,18 +455,19 @@ export const putUsageMeter = (key: string, body: UsageMeterRequest) =>
     body,
   })
 
-export const putDefaultUsageRateCard = (
-  key: string,
-  body: DefaultUsageRateCardRequest
+// putUsageMeterRateCard sets a meter's rate card, or removes it with null.
+// The rate card is a field of the meter, so the meter is restated with it.
+export const putUsageMeterRateCard = (
+  meter: Meter,
+  rateCard: DefaultUsageRateCardRequest | null
 ) =>
-  api<Meter>(`/admin/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
-    method: "PUT",
-    body,
-  })
-
-export const deleteDefaultUsageRateCard = (key: string) =>
-  api<void>(`/admin/catalog/meters/${encodeURIComponent(key)}/rate-card`, {
-    method: "DELETE",
+  putUsageMeter(meter.key, {
+    event_type: meter.event_type,
+    value_property: meter.value_property,
+    aggregation: meter.aggregation as UsageMeterRequest["aggregation"],
+    unit: meter.unit,
+    group_by: meter.group_by ?? {},
+    rate_card: rateCard,
   })
 
 export const listPrices = (
@@ -494,27 +495,29 @@ export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
     signal,
   })
 
-export const getPriceByKey = (productKey: string, key: string) =>
-  api<Price>(
-    `/admin/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}`
-  )
+// getProductByKey reads the product a key names, with its current prices:
+// a products list filtered by key.
+export const getProductByKey = async (productKey: string) => {
+  const page = await api<ListPage<Product>>("/admin/catalog/products", {
+    query: { keys: productKey },
+  })
+  const product = page.data[0]
+  if (!product) throw new Error(`No product ${productKey}`)
+  return product
+}
 
 // updatePrice archives or restores a price, or changes its PSP links
 // (a PSP set to null is unlinked).
 export const updatePrice = (id: string, body: UpdatePriceParams) =>
   api<Price>(`/admin/catalog/prices/${id}`, { method: "PATCH", body })
 
-// getPriceKeyHistory returns a price key's history, most recent first: when
-// the key moved to which price.
-export const getPriceKeyHistory = (
-  productKey: string,
-  key: string,
-  signal?: AbortSignal
-) =>
-  api<ListPage<PriceKeyMovement>>(
-    `/admin/catalog/products/by-key/${encodeURIComponent(productKey)}/prices/by-key/${encodeURIComponent(key)}/history`,
-    { query: { limit: PAGE_MAX }, signal }
-  )
+// getPriceHistory returns the history of a price's key, most recent first:
+// when the key moved to which price.
+export const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
+  api<ListPage<PriceKeyMovement>>(`/admin/catalog/prices/${priceId}/history`, {
+    query: { limit: PAGE_MAX },
+    signal,
+  })
 
 // --- Price migrations ---
 
@@ -632,8 +635,9 @@ export const applyMerchantSettings = (
 export const listPSPs = (signal?: AbortSignal) =>
   api<ListPage<PSP>>("/admin/psps?limit=500", { signal })
 
-export const listRails = (signal?: AbortSignal) =>
-  api<ListPage<RailDefinition>>("/admin/rails", { signal })
+// The rail registry is static per build: it arrives with the configuration.
+export const listRails = async (signal?: AbortSignal) =>
+  (await getConfig(signal)).rails
 
 // Credentials are write-only and checked with the provider before anything
 // is stored. operation_id makes a retried submission return the first result.

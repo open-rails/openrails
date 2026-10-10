@@ -97,6 +97,10 @@ func canonicalWireFixtures() map[string]any {
 				ID: billing.MandateID(uuid.MustParse("66666666-6666-4666-8666-666666666666")), CustomerID: customerFixture, PaymentMethodID: ptr(methodFixture),
 				PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")), Kind: billing.MandateCardOnFile, Status: billing.MandateActive,
 				CardBrand: ptr("visa"), InitialTransactionID: ptr("10000001"), AcceptedAt: when, CreatedAt: when,
+			}, {
+				ID: mandateFixture, CustomerID: customerFixture, PaymentMethodID: &methodFixture, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
+				Kind: billing.MandateRecurring, SubscriptionID: &subscriptionFixture, Status: billing.MandateActive, CardBrand: ptr("visa"), InitialTransactionID: ptr("txn-1"),
+				AcceptedAt: when, CreatedAt: when,
 			}},
 			BillingDetails:    &billing.BillingDetails{Name: ptr("Ada Lovelace"), Address: &billing.BillingAddress{PostalCode: ptr("80202"), Country: ptr("US")}},
 			Health:            billing.PaymentMethodHealth{ExpiryStatus: ptr(billing.CardExpiryValid), LastChargedAt: &when, LastChargeOutcome: ptr(billing.ChargeSucceeded), Active: true},
@@ -125,7 +129,7 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 	return billing.Subscription{
 		CollectionPolicy: "nmi_schedule",
 		ID:               subscriptionFixture, CustomerID: customerFixture, ProductID: productFixture, PriceID: priceFixture, PSPID: billing.PSPID(uuid.MustParse("55555555-5555-5555-5555-555555555555")),
-		Rail: "nmi", RailSubscriptionID: ptr("rail-sub-1"), Status: "past_due", PaymentMethodID: &methodFixture,
+		Rail: "nmi", RailSubscriptionID: ptr("rail-sub-1"), Status: "past_due", PaymentMethodID: &methodFixture, MandateID: &mandateFixture,
 		Dunning:   &billing.SubscriptionDunning{Attempts: 2, RetriesLeft: ptr(3), NextRetryAt: &when, FinalRetryAt: &when, LastFailureReason: ptr(billing.DeclineInsufficientFunds)},
 		StartedAt: when, CurrentPeriodStartsAt: &when, CurrentPeriodEndsAt: &when, CancelMode: "reversible", CancelPortalURL: &portal, CreatedAt: when, UpdatedAt: when,
 		Price:   &price,
@@ -134,9 +138,8 @@ func subscriptionFixtureValue(when time.Time, price billing.Price, card *billing
 			PriceID: scheduledPriceFixture, EffectiveAt: when, Source: billing.ScheduledChangeChange, CreatedAt: when,
 			Price: &scheduled, Product: &billing.ProductSummary{ID: productFixture, Key: "pro", DisplayName: "Pro"},
 		},
-		Card:     card,
-		Access:   &billing.SubscriptionAccess{Kind: "subscription", ProductID: productFixture, SourceType: "subscription", SourceID: subscriptionFixture.String(), SubscriptionID: subscriptionFixture, Rail: "nmi", StartsAt: when, EndsAt: &when},
-		Payments: []billing.Payment{paymentFixtureValue(when, price, card)},
+		Card:   card,
+		Access: &billing.SubscriptionAccess{Kind: "subscription", ProductID: productFixture, SourceType: "subscription", SourceID: subscriptionFixture.String(), SubscriptionID: subscriptionFixture, Rail: "nmi", StartsAt: when, EndsAt: &when},
 	}
 }
 
@@ -161,6 +164,7 @@ var (
 	paymentFixture        = billing.PaymentID(uuid.MustParse("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
 	sessionFixture        = billing.CheckoutAttemptID(uuid.MustParse("ffffffff-ffff-4fff-8fff-ffffffffffff"))
 	invoiceFixture        = billing.InvoiceID(uuid.MustParse("99999999-9999-4999-8999-999999999999"))
+	mandateFixture        = billing.MandateID(uuid.MustParse("12121212-1212-4121-8121-121212121212"))
 )
 
 func TestCanonicalWireFixtures(t *testing.T) {

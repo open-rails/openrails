@@ -535,7 +535,7 @@ function DefaultRateSection({
   const blocked = meter.override_count > 0
   const handleDelete = async () => {
     try {
-      await remove.mutateAsync(meter.key)
+      await remove.mutateAsync(meter)
       toast.success("Default rate removed")
       setDeleteOpen(false)
     } catch (error) {

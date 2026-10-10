@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -35,41 +34,9 @@ func defaultKeyCadenceConflict(defaulted bool, holder *models.Price, req billing
 	return fmt.Errorf("%w: default key %q is held by price %s on another cadence; supply an explicit key", ErrPriceKeyCadenceConflict, key, holder.ID)
 }
 
-// GetPriceByKey resolves a price by its #774 key — the CURRENT (non-archived)
-// row for that key. Used wherever checkout/API accept a price_key alongside a
-// price UUID.
-func (s *Service) GetPriceByKey(ctx context.Context, productKey, key string) (*billing.Price, error) {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return nil, pinErr
-	}
-	defer release()
-
-	prices, err := s.requirePriceService()
-	if err != nil {
-		return nil, err
-	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return nil, apperr.Invalidf("key required")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	p, err := prices.GetCurrentByProductKey(ctx, tid.UUID(), productKey, key)
-	if err != nil {
-		if db.IsNotFound(err) {
-			return nil, ErrPriceKeyNotFound
-		}
-		return nil, err
-	}
-	return priceToCatalogPrice(p), nil
-}
-
-// ListPriceKeyHistory returns one page of a price key's history, most recent
-// first: when the key moved to which price, or was retired.
-func (s *Service) ListPriceKeyHistory(ctx context.Context, productKey, key string, page billing.PageRequest) (billing.ListPage[billing.PriceKeyMovement], error) {
+// ListPriceHistory returns one page of the history of a price's key, most
+// recent first: when the key moved to which price, or was retired.
+func (s *Service) ListPriceHistory(ctx context.Context, id billing.PriceID, page billing.PageRequest) (billing.ListPage[billing.PriceKeyMovement], error) {
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, pinErr
@@ -80,30 +47,26 @@ func (s *Service) ListPriceKeyHistory(ctx context.Context, productKey, key strin
 	if err != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
-	key = strings.TrimSpace(key)
-	if key == "" {
-		return billing.ListPage[billing.PriceKeyMovement]{}, apperr.Invalidf("key required")
+	if id.IsZero() {
+		return billing.ListPage[billing.PriceKeyMovement]{}, apperr.Invalidf("price_id required")
 	}
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, err
 	}
-	product, err := s.GetProductByKey(ctx, productKey)
+	price, err := prices.GetByID(ctx, id.UUID())
+	if err != nil {
+		return billing.ListPage[billing.PriceKeyMovement]{}, priceLookup(err)
+	}
+	movements, err := prices.ListKeyMovements(ctx, tid.UUID(), price.ProductID, price.Key, page)
 	if err != nil {
 		return billing.ListPage[billing.PriceKeyMovement]{}, err
-	}
-	movements, err := prices.ListKeyMovements(ctx, tid.UUID(), product.ID.UUID(), key, page)
-	if err != nil {
-		return billing.ListPage[billing.PriceKeyMovement]{}, err
-	}
-	if len(movements.Items) == 0 && page.Cursor == "" {
-		return billing.ListPage[billing.PriceKeyMovement]{}, ErrPriceKeyNotFound
 	}
 	out := billing.ListPage[billing.PriceKeyMovement]{Items: make([]billing.PriceKeyMovement, 0, len(movements.Items)), Next: movements.Next}
 	for _, m := range movements.Items {
 		p, err := prices.GetByID(ctx, m.PriceID)
 		if err != nil {
-			return billing.ListPage[billing.PriceKeyMovement]{}, fmt.Errorf("resolve price %s for key %q movement: %w", m.PriceID, key, err)
+			return billing.ListPage[billing.PriceKeyMovement]{}, fmt.Errorf("resolve price %s for key %q movement: %w", m.PriceID, price.Key, err)
 		}
 		out.Items = append(out.Items, billing.PriceKeyMovement{EffectiveAt: m.EffectiveAt, Archived: m.Archived, Price: *priceToCatalogPrice(p)})
 	}

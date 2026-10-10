@@ -2,6 +2,7 @@ package openrails
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -57,29 +58,22 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 	return &out, nil
 }
 
-// GetProductByKey reads the product with a merchant-unique key.
-func (c *Client) GetProductByKey(ctx context.Context, key string, requestOptions ...RequestOption) (*billing.Product, error) {
-	key, err := pathID("key", key)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Product
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/by-key/"+key, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // ListProducts returns one page of products, newest first, each with its
-// current prices.
+// current prices. params.Keys reads products by key.
 func (c *Client) ListProducts(ctx context.Context, params billing.ProductListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Product], error) {
 	q := pageValues(nil, params.PageRequest)
 	setBool(q, "archived", params.Archived)
 	if params.TierGroup != "" {
 		q.Set("tier_group", params.TierGroup)
 	}
-	if params.Entitlement != "" {
-		q.Set("entitlement", params.Entitlement)
+	if len(params.Keys) > billing.MaxBatchItems || len(params.Entitlements) > billing.MaxBatchItems {
+		return nil, invalidErr(fmt.Sprintf("keys and entitlements each name at most %d values", billing.MaxBatchItems))
+	}
+	for _, key := range params.Keys {
+		q.Add("keys", key)
+	}
+	for _, key := range params.Entitlements {
+		q.Add("entitlement", key)
 	}
 	setBool(q, "for_sale", params.ForSale)
 	if err := setIDs(q, params.IDs); err != nil {
@@ -142,27 +136,18 @@ func (c *Client) GetPrice(ctx context.Context, id billing.PriceID, params billin
 	return &out, nil
 }
 
-// GetPriceByKey reads the current price under the given product and price keys.
-func (c *Client) GetPriceByKey(ctx context.Context, productKey, key string, requestOptions ...RequestOption) (*billing.Price, error) {
-	key, err := pathID("key", key)
-	if err != nil {
-		return nil, err
-	}
-	productKey, err = pathID("product_key", productKey)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.Price
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/by-key/"+productKey+"/prices/by-key/"+key, nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// ListPrices returns one page of prices, newest first.
+// ListPrices returns one page of prices, newest first. params.ProductKey and
+// params.Key read prices by key: a key's current price is its one not
+// archived.
 func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Price], error) {
 	q := pageValues(nil, params.PageRequest)
 	setID(q, "product_id", params.ProductID)
+	if params.ProductKey != "" {
+		q.Set("product_key", params.ProductKey)
+	}
+	if params.Key != "" {
+		q.Set("key", params.Key)
+	}
 	if params.Currency != "" {
 		q.Set("currency", normalizeCurrency(params.Currency))
 	}
@@ -178,19 +163,15 @@ func (c *Client) ListPrices(ctx context.Context, params billing.PriceListParams,
 	return &out, nil
 }
 
-// ListPriceKeyHistory returns one page of a price key's history, most recent
-// first: when the key moved to which price, or was retired.
-func (c *Client) ListPriceKeyHistory(ctx context.Context, productKey, key string, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PriceKeyMovement], error) {
-	key, err := pathID("key", key)
-	if err != nil {
-		return nil, err
-	}
-	productKey, err = pathID("product_key", productKey)
+// ListPriceHistory returns one page of the history of a price's key, most
+// recent first: when the key moved to which price, or was retired.
+func (c *Client) ListPriceHistory(ctx context.Context, id billing.PriceID, page billing.PageRequest, requestOptions ...RequestOption) (*billing.ListPage[billing.PriceKeyMovement], error) {
+	path, err := requireTypedID("price_id", id)
 	if err != nil {
 		return nil, err
 	}
 	var out billing.ListPage[billing.PriceKeyMovement]
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/products/by-key/"+productKey+"/prices/by-key/"+key+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/prices/"+path+"/history?"+pageValues(nil, page).Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

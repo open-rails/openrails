@@ -23,121 +23,6 @@ func (q *Queries) AcquireAccessTimelineLock(ctx context.Context, key int64) erro
 	return err
 }
 
-const checkProductAccess = `-- name: CheckProductAccess :many
-SELECT candidate.product_id::uuid AS product_id, (held.windows > 0)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest($1::uuid[]) AS candidate(product_id)
-CROSS JOIN LATERAL (
-    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
-    WHERE pa.merchant_id = $2::uuid AND pa.customer_id = $3::uuid
-      AND pa.product_id = candidate.product_id
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $4::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
-) held
-`
-
-type CheckProductAccessParams struct {
-	ProductIds []uuid.UUID
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	AtTime     time.Time
-}
-
-type CheckProductAccessRow struct {
-	ProductID uuid.UUID
-	HasAccess bool
-	Quantity  int32
-}
-
-// Whether the customer holds each product at at, and the most seats a live
-// window gives: one indexed range of the customer's windows of each product.
-func (q *Queries) CheckProductAccess(ctx context.Context, arg CheckProductAccessParams) ([]CheckProductAccessRow, error) {
-	rows, err := q.db.Query(ctx, checkProductAccess,
-		arg.ProductIds,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.AtTime,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CheckProductAccessRow
-	for rows.Next() {
-		var i CheckProductAccessRow
-		if err := rows.Scan(&i.ProductID, &i.HasAccess, &i.Quantity); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const checkProductAccessKeys = `-- name: CheckProductAccessKeys :many
-SELECT candidate.product_key::text AS product_key, p.id AS product_id, (held.windows > 0)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest($1::text[]) AS candidate(product_key)
-LEFT JOIN billing.products p ON p.merchant_id = $2::uuid AND p.key = candidate.product_key
-CROSS JOIN LATERAL (
-    SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_access pa
-    WHERE pa.merchant_id = $2::uuid AND pa.customer_id = $3::uuid
-      AND pa.product_id = p.id
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $4::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
-) held
-`
-
-type CheckProductAccessKeysParams struct {
-	ProductKeys []string
-	MerchantID  uuid.UUID
-	CustomerID  uuid.UUID
-	AtTime      time.Time
-}
-
-type CheckProductAccessKeysRow struct {
-	ProductKey string
-	ProductID  *uuid.UUID
-	HasAccess  bool
-	Quantity   int32
-}
-
-// Resolve product keys and current access in one bounded query. Archived
-// products stay readable for their holders.
-func (q *Queries) CheckProductAccessKeys(ctx context.Context, arg CheckProductAccessKeysParams) ([]CheckProductAccessKeysRow, error) {
-	rows, err := q.db.Query(ctx, checkProductAccessKeys,
-		arg.ProductKeys,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.AtTime,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CheckProductAccessKeysRow
-	for rows.Next() {
-		var i CheckProductAccessKeysRow
-		if err := rows.Scan(
-			&i.ProductKey,
-			&i.ProductID,
-			&i.HasAccess,
-			&i.Quantity,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const countLiveProductHolders = `-- name: CountLiveProductHolders :many
 SELECT candidate.product_id::uuid AS product_id, (
     SELECT count(DISTINCT pa.customer_id) FROM billing.product_access pa
@@ -420,93 +305,6 @@ func (q *Queries) HasPermanentProductAccess(ctx context.Context, arg HasPermanen
 	return exists, err
 }
 
-const listCustomerProductAccessByIDs = `-- name: ListCustomerProductAccessByIDs :many
-SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.source_type, pa.source_id, pa.payment_id, pa.starts_at, pa.ends_at, pa.revoked_at, pa.revoke_reason, pa.deleted_at, pa.destructive_run_id, pa.destructive_run_class, pa.created_at, pa.updated_at, pa.quantity, p.key AS product_key, p.display_name AS product_name, g.grant_reason, g.actor, g.reason AS note
-FROM billing.product_access pa
-JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
-JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
-WHERE pa.merchant_id = $1::uuid AND pa.id = ANY($2::uuid[])
-  AND pa.customer_id = $3::uuid AND pa.deleted_at IS NULL
-ORDER BY pa.id DESC
-`
-
-type ListCustomerProductAccessByIDsParams struct {
-	MerchantID uuid.UUID
-	Ids        []uuid.UUID
-	CustomerID uuid.UUID
-}
-
-type ListCustomerProductAccessByIDsRow struct {
-	ID                  uuid.UUID
-	MerchantID          uuid.UUID
-	CustomerID          uuid.UUID
-	ProductID           uuid.UUID
-	GrantID             uuid.UUID
-	SourceType          string
-	SourceID            string
-	PaymentID           *uuid.UUID
-	StartsAt            time.Time
-	EndsAt              *time.Time
-	RevokedAt           *time.Time
-	RevokeReason        *string
-	DeletedAt           *time.Time
-	DestructiveRunID    *uuid.UUID
-	DestructiveRunClass *string
-	CreatedAt           time.Time
-	UpdatedAt           time.Time
-	Quantity            *int32
-	ProductKey          string
-	ProductName         string
-	GrantReason         *string
-	Actor               *string
-	Note                *string
-}
-
-// A customer's named windows, newest first.
-func (q *Queries) ListCustomerProductAccessByIDs(ctx context.Context, arg ListCustomerProductAccessByIDsParams) ([]ListCustomerProductAccessByIDsRow, error) {
-	rows, err := q.db.Query(ctx, listCustomerProductAccessByIDs, arg.MerchantID, arg.Ids, arg.CustomerID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListCustomerProductAccessByIDsRow
-	for rows.Next() {
-		var i ListCustomerProductAccessByIDsRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.ProductID,
-			&i.GrantID,
-			&i.SourceType,
-			&i.SourceID,
-			&i.PaymentID,
-			&i.StartsAt,
-			&i.EndsAt,
-			&i.RevokedAt,
-			&i.RevokeReason,
-			&i.DeletedAt,
-			&i.DestructiveRunID,
-			&i.DestructiveRunClass,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Quantity,
-			&i.ProductKey,
-			&i.ProductName,
-			&i.GrantReason,
-			&i.Actor,
-			&i.Note,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLiveAccessBySubscriptions = `-- name: ListLiveAccessBySubscriptions :many
 SELECT id, merchant_id, customer_id, product_id, grant_id, source_type, source_id, payment_id, starts_at, ends_at, revoked_at, revoke_reason, deleted_at, destructive_run_id, destructive_run_class, created_at, updated_at, quantity FROM billing.product_access pa
 WHERE pa.merchant_id = $1::uuid
@@ -603,23 +401,26 @@ SELECT pa.id, pa.merchant_id, pa.customer_id, pa.product_id, pa.grant_id, pa.sou
 FROM billing.product_access pa
 JOIN billing.products p ON p.merchant_id = pa.merchant_id AND p.id = pa.product_id
 JOIN billing.grants g ON g.merchant_id = pa.merchant_id AND g.customer_id = pa.customer_id AND g.id = pa.grant_id
-WHERE pa.merchant_id = $1::uuid AND pa.customer_id = $2::uuid
+WHERE pa.merchant_id = $1::uuid
+  AND ($2::uuid[] IS NULL OR pa.customer_id = ANY ($2::uuid[]))
+  AND ($3::uuid[] IS NULL OR pa.product_id = ANY ($3::uuid[]))
   AND pa.deleted_at IS NULL
-  AND (NOT $3::boolean OR (pa.revoked_at IS NULL
-       AND pa.starts_at <= $4::timestamptz
-       AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)))
-  AND ($5::uuid IS NULL OR pa.id < $5::uuid)
+  AND (NOT $4::boolean OR (pa.revoked_at IS NULL
+       AND pa.starts_at <= $5::timestamptz
+       AND (pa.ends_at IS NULL OR pa.ends_at > $5::timestamptz)))
+  AND ($6::uuid IS NULL OR pa.id < $6::uuid)
 ORDER BY pa.id DESC
-LIMIT $6::int
+LIMIT $7::int
 `
 
 type ListProductAccessPageParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	LiveOnly   bool
-	AtTime     time.Time
-	AfterID    *uuid.UUID
-	FetchLimit int32
+	MerchantID  uuid.UUID
+	CustomerIds []uuid.UUID
+	ProductIds  []uuid.UUID
+	LiveOnly    bool
+	AtTime      time.Time
+	AfterID     *uuid.UUID
+	FetchLimit  int32
 }
 
 type ListProductAccessPageRow struct {
@@ -648,12 +449,14 @@ type ListProductAccessPageRow struct {
 	Note                *string
 }
 
-// One keyset page of a customer's windows, newest first: live at at_time when
-// live_only, else every window that was not removed.
+// One keyset page of windows, newest first, of the named customers and
+// products (null: any): live at at_time when live_only, else every window
+// that was not removed.
 func (q *Queries) ListProductAccessPage(ctx context.Context, arg ListProductAccessPageParams) ([]ListProductAccessPageRow, error) {
 	rows, err := q.db.Query(ctx, listProductAccessPage,
 		arg.MerchantID,
-		arg.CustomerID,
+		arg.CustomerIds,
+		arg.ProductIds,
 		arg.LiveOnly,
 		arg.AtTime,
 		arg.AfterID,

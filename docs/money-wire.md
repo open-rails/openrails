@@ -53,7 +53,7 @@ another kind's prefix is `400 invalid_param`.
 | `par_` | product archive | | |
 
 Customer and merchant ids are plain UUIDs. A price or product *key* is a
-separate, opaque handle (`price_key`, `product_key`, the `by-key` routes); a
+separate, opaque handle (`price_key`, `product_key`, the `keys` and `key` list filters); a
 field that takes an id never accepts a key. In Go the ids are types
 (`billing.PriceID`, `billing.CustomerID`, …): the zero id marshals as `""`, and
 a Client refuses one before any request.

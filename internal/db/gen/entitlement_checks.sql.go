@@ -14,48 +14,53 @@ import (
 
 const checkDerivedEntitlements = `-- name: CheckDerivedEntitlements :many
 
-SELECT k.key::text AS entitlement, (held.windows > 0)::boolean AS has_access,
-       COALESCE(held.quantity, 0)::int AS quantity
-FROM unnest($1::text[]) AS k(key)
+SELECT c.customer_id::uuid AS customer_id, k.key::text AS entitlement, COALESCE(held.quantity, 0)::int AS quantity
+FROM unnest($1::uuid[]) AS c(customer_id)
+CROSS JOIN unnest($2::text[]) AS k(key)
 CROSS JOIN LATERAL (
     SELECT count(*) AS windows, max(pa.quantity) AS quantity FROM billing.product_entitlements pe
     JOIN billing.product_access pa ON pa.merchant_id = pe.merchant_id AND pa.product_id = pe.product_id
-    WHERE pe.merchant_id = $2::uuid AND pe.entitlement = k.key
-      AND pe.added_at <= $3::timestamptz
-      AND (pe.removed_at IS NULL OR pe.removed_at > $3::timestamptz)
-      AND pa.customer_id = $4::uuid
+    WHERE pe.merchant_id = $3::uuid AND pe.entitlement = k.key
+      AND pe.added_at <= $4::timestamptz
+      AND (pe.removed_at IS NULL OR pe.removed_at > $4::timestamptz)
+      AND pa.customer_id = c.customer_id
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $3::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
+      AND pa.starts_at <= $4::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $4::timestamptz)
 ) held
+WHERE held.windows > 0
+LIMIT $5::int
 `
 
 type CheckDerivedEntitlementsParams struct {
+	CustomerIds  []uuid.UUID
 	Entitlements []string
 	MerchantID   uuid.UUID
 	AtTime       time.Time
-	CustomerID   uuid.UUID
+	RowLimit     int32
 }
 
 type CheckDerivedEntitlementsRow struct {
+	CustomerID  uuid.UUID
 	Entitlement string
-	HasAccess   bool
 	Quantity    int32
 }
 
 // Derived entitlements: a customer holds a key at an instant when a live
 // product_access window of theirs covers it and the product granted the key
 // then (product_entitlements valid time). Nothing per customer stores keys.
-// Key-first: for each key, the products granting it, then the customer's
-// live windows of each, for the most seats one gives. Cost: keys x products
-// granting each key; the LATERAL keeps the planner from scanning every window
-// the customer holds instead.
+// Which of the keys each customer holds, with the most seats a live window
+// gives (0: none per seat): one row per (customer, key) held, at most
+// row_limit (customers x keys). Key-first: for each pair, the products
+// granting the key, then the customer's live windows of each; the LATERAL
+// keeps the planner from scanning every window the customer holds instead.
 func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerivedEntitlementsParams) ([]CheckDerivedEntitlementsRow, error) {
 	rows, err := q.db.Query(ctx, checkDerivedEntitlements,
+		arg.CustomerIds,
 		arg.Entitlements,
 		arg.MerchantID,
 		arg.AtTime,
-		arg.CustomerID,
+		arg.RowLimit,
 	)
 	if err != nil {
 		return nil, err
@@ -64,7 +69,7 @@ func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerived
 	var items []CheckDerivedEntitlementsRow
 	for rows.Next() {
 		var i CheckDerivedEntitlementsRow
-		if err := rows.Scan(&i.Entitlement, &i.HasAccess, &i.Quantity); err != nil {
+		if err := rows.Scan(&i.CustomerID, &i.Entitlement, &i.Quantity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -76,20 +81,22 @@ func (q *Queries) CheckDerivedEntitlements(ctx context.Context, arg CheckDerived
 }
 
 const listDerivedEntitlementHolders = `-- name: ListDerivedEntitlementHolders :many
-SELECT DISTINCT x.customer_id FROM billing.product_entitlements pe
+SELECT x.customer_id, COALESCE(max(x.quantity), 0)::int AS quantity FROM billing.product_entitlements pe
 CROSS JOIN LATERAL (
-    SELECT pa.customer_id FROM billing.product_access pa
+    SELECT pa.customer_id, max(pa.quantity) AS quantity FROM billing.product_access pa
     WHERE pa.merchant_id = $1::uuid AND pa.product_id = pe.product_id
       AND (pa.product_id, pa.customer_id) > (pe.product_id, $2::uuid)
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
       AND pa.starts_at <= $3::timestamptz
       AND (pa.ends_at IS NULL OR pa.ends_at > $3::timestamptz)
+    GROUP BY pa.customer_id
     ORDER BY pa.customer_id
     LIMIT $4::int
 ) x
 WHERE pe.merchant_id = $1::uuid AND pe.entitlement = $5::text
   AND pe.added_at <= $3::timestamptz
   AND (pe.removed_at IS NULL OR pe.removed_at > $3::timestamptz)
+GROUP BY 1
 ORDER BY 1
 LIMIT $4::int
 `
@@ -102,12 +109,17 @@ type ListDerivedEntitlementHoldersParams struct {
 	Entitlement string
 }
 
-// The reverse lookup: customers holding a key at at_time, keyset by customer
-// id after after_id. Key-first: the products granting it, then each
-// product's holders in customer order, stopping at the limit per product.
-// The cursor bounds (product, customer) rows, so only the per-product index
-// serves the probe.
-func (q *Queries) ListDerivedEntitlementHolders(ctx context.Context, arg ListDerivedEntitlementHoldersParams) ([]uuid.UUID, error) {
+type ListDerivedEntitlementHoldersRow struct {
+	CustomerID uuid.UUID
+	Quantity   int32
+}
+
+// The reverse lookup: customers holding a key at at_time, with the most seats
+// a live window gives (0: none per seat), keyset by customer id after
+// after_id. Key-first: the products granting it, then each product's first
+// row_limit holders in customer order. The cursor bounds (product, customer)
+// rows, so only the per-product index serves the probe.
+func (q *Queries) ListDerivedEntitlementHolders(ctx context.Context, arg ListDerivedEntitlementHoldersParams) ([]ListDerivedEntitlementHoldersRow, error) {
 	rows, err := q.db.Query(ctx, listDerivedEntitlementHolders,
 		arg.MerchantID,
 		arg.AfterID,
@@ -119,93 +131,10 @@ func (q *Queries) ListDerivedEntitlementHolders(ctx context.Context, arg ListDer
 		return nil, err
 	}
 	defer rows.Close()
-	var items []uuid.UUID
+	var items []ListDerivedEntitlementHoldersRow
 	for rows.Next() {
-		var customer_id uuid.UUID
-		if err := rows.Scan(&customer_id); err != nil {
-			return nil, err
-		}
-		items = append(items, customer_id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listDerivedEntitlementsByPrefix = `-- name: ListDerivedEntitlementsByPrefix :many
-WITH owned AS MATERIALIZED (
-    SELECT DISTINCT pa.product_id FROM billing.product_access pa
-    WHERE pa.merchant_id = $4::uuid AND pa.customer_id = $5::uuid
-      AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $6::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $6::timestamptz)
-), keys AS MATERIALIZED (
-    SELECT DISTINCT k.entitlement FROM owned o
-    CROSS JOIN LATERAL (
-        SELECT pe.entitlement FROM billing.product_entitlements pe
-        WHERE pe.merchant_id = $4::uuid AND pe.product_id = o.product_id
-          AND (pe.product_id, pe.entitlement) >= (o.product_id, $7::text)
-          AND (pe.product_id, pe.entitlement) < (o.product_id, $8::text)
-          AND pe.added_at <= $6::timestamptz
-          AND (pe.removed_at IS NULL OR pe.removed_at > $6::timestamptz)
-        OFFSET 0
-    ) k
-)
-SELECT r.prefix::text AS prefix, h.entitlement::text AS entitlement
-FROM unnest($1::text[], $2::text[]) AS r(prefix, upper)
-CROSS JOIN LATERAL (
-    SELECT keys.entitlement FROM keys
-    WHERE keys.entitlement >= r.prefix COLLATE "C" AND keys.entitlement < r.upper COLLATE "C"
-    ORDER BY keys.entitlement COLLATE "C"
-    LIMIT $3::int
-) h
-ORDER BY r.prefix COLLATE "C", h.entitlement COLLATE "C"
-`
-
-type ListDerivedEntitlementsByPrefixParams struct {
-	Prefixes   []string
-	Uppers     []string
-	RowLimit   int32
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	AtTime     time.Time
-	Low        string
-	High       string
-}
-
-type ListDerivedEntitlementsByPrefixRow struct {
-	Prefix      string
-	Entitlement string
-}
-
-// Customer-first, one pass: the products the customer holds, then one probe
-// of each product's keys within [low, high), then the first row_limit keys
-// of each prefix in byte order (callers pass limit+1 to detect truncation).
-// The OFFSET 0 fence keeps the planner from scanning the catalog keyspace.
-// The key range is bounded as (product, key) rows: only the per-product index
-// can use it, so no plan scans a key range of the catalog once per held
-// product. Callers plan it for their parameters (a generic plan prices a
-// 3-product and a 50,000-product customer alike).
-func (q *Queries) ListDerivedEntitlementsByPrefix(ctx context.Context, arg ListDerivedEntitlementsByPrefixParams) ([]ListDerivedEntitlementsByPrefixRow, error) {
-	rows, err := q.db.Query(ctx, listDerivedEntitlementsByPrefix,
-		arg.Prefixes,
-		arg.Uppers,
-		arg.RowLimit,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.AtTime,
-		arg.Low,
-		arg.High,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListDerivedEntitlementsByPrefixRow
-	for rows.Next() {
-		var i ListDerivedEntitlementsByPrefixRow
-		if err := rows.Scan(&i.Prefix, &i.Entitlement); err != nil {
+		var i ListDerivedEntitlementHoldersRow
+		if err := rows.Scan(&i.CustomerID, &i.Quantity); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -218,63 +147,77 @@ func (q *Queries) ListDerivedEntitlementsByPrefix(ctx context.Context, arg ListD
 
 const listDerivedEntitlementsPage = `-- name: ListDerivedEntitlementsPage :many
 WITH owned AS MATERIALIZED (
-    SELECT DISTINCT pa.product_id FROM billing.product_access pa
-    WHERE pa.merchant_id = $1::uuid AND pa.customer_id = $7::uuid
+    SELECT pa.customer_id, pa.product_id, max(pa.quantity) AS quantity FROM billing.product_access pa
+    WHERE pa.merchant_id = $1::uuid AND pa.customer_id = ANY ($8::uuid[])
+      AND pa.customer_id >= $3::uuid
       AND pa.revoked_at IS NULL AND pa.deleted_at IS NULL
-      AND pa.starts_at <= $5::timestamptz
-      AND (pa.ends_at IS NULL OR pa.ends_at > $5::timestamptz)
+      AND pa.starts_at <= $6::timestamptz
+      AND (pa.ends_at IS NULL OR pa.ends_at > $6::timestamptz)
+    GROUP BY pa.customer_id, pa.product_id
 )
-SELECT DISTINCT k.entitlement FROM owned o
+SELECT o.customer_id::uuid AS customer_id, k.entitlement::text AS entitlement, COALESCE(max(o.quantity), 0)::int AS quantity FROM owned o
 CROSS JOIN LATERAL (
     SELECT pe.entitlement FROM billing.product_entitlements pe
     WHERE pe.merchant_id = $1::uuid AND pe.product_id = o.product_id
       AND (pe.product_id, pe.entitlement) >= (o.product_id, $2::text)
-      AND (pe.product_id, pe.entitlement) > (o.product_id, $3::text)
-      AND ($4::text = '' OR pe.entitlement < $4::text)
-      AND pe.added_at <= $5::timestamptz
-      AND (pe.removed_at IS NULL OR pe.removed_at > $5::timestamptz)
+      AND (pe.product_id, pe.entitlement) > (o.product_id, CASE WHEN o.customer_id = $3::uuid THEN $4::text ELSE '' END)
+      AND ($5::text = '' OR pe.entitlement < $5::text)
+      AND pe.added_at <= $6::timestamptz
+      AND (pe.removed_at IS NULL OR pe.removed_at > $6::timestamptz)
     ORDER BY pe.entitlement COLLATE "C"
-    LIMIT $6::int
+    LIMIT $7::int
 ) k
-ORDER BY 1
-LIMIT $6::int
+GROUP BY 1, 2
+ORDER BY 1, 2
+LIMIT $7::int
 `
 
 type ListDerivedEntitlementsPageParams struct {
-	MerchantID uuid.UUID
-	LowKey     string
-	AfterKey   string
-	BeforeKey  string
-	AtTime     time.Time
-	RowLimit   int32
-	CustomerID uuid.UUID
+	MerchantID    uuid.UUID
+	LowKey        string
+	AfterCustomer uuid.UUID
+	AfterKey      string
+	BeforeKey     string
+	AtTime        time.Time
+	RowLimit      int32
+	CustomerIds   []uuid.UUID
 }
 
-// One keyset page of the keys a customer holds at at_time, in byte order:
-// from low_key, after after_key (exclusive; ” starts) and below before_key
-// (exclusive; ” is unbounded). Customer-first, one probe per held product;
-// the bounds are (product, key) rows, as in ListDerivedEntitlementsByPrefix.
-func (q *Queries) ListDerivedEntitlementsPage(ctx context.Context, arg ListDerivedEntitlementsPageParams) ([]string, error) {
+type ListDerivedEntitlementsPageRow struct {
+	CustomerID  uuid.UUID
+	Entitlement string
+	Quantity    int32
+}
+
+// One keyset page of the keys customers hold at at_time, with the most seats
+// a live window gives (0: none per seat), in (customer, key) byte order: after (after_customer, after_key), from low_key and below
+// before_key (” is unbounded). Customer-first, one probe per held product;
+// the key bounds are (product, key) rows, so only the per-product index
+// serves them and no plan scans a key range of the catalog per held
+// product. Callers plan it for their parameters (a generic plan prices a
+// 3-product and a 50,000-product customer alike).
+func (q *Queries) ListDerivedEntitlementsPage(ctx context.Context, arg ListDerivedEntitlementsPageParams) ([]ListDerivedEntitlementsPageRow, error) {
 	rows, err := q.db.Query(ctx, listDerivedEntitlementsPage,
 		arg.MerchantID,
 		arg.LowKey,
+		arg.AfterCustomer,
 		arg.AfterKey,
 		arg.BeforeKey,
 		arg.AtTime,
 		arg.RowLimit,
-		arg.CustomerID,
+		arg.CustomerIds,
 	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []string
+	var items []ListDerivedEntitlementsPageRow
 	for rows.Next() {
-		var entitlement string
-		if err := rows.Scan(&entitlement); err != nil {
+		var i ListDerivedEntitlementsPageRow
+		if err := rows.Scan(&i.CustomerID, &i.Entitlement, &i.Quantity); err != nil {
 			return nil, err
 		}
-		items = append(items, entitlement)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

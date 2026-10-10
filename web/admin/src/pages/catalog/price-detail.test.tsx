@@ -34,7 +34,7 @@ it("shows qualified price revisions while history links keep the immutable price
       key: "premium",
       display_name: "Premium",
     }),
-    "/admin/catalog/products/by-key/premium/prices/by-key/monthly/history": {
+    "/admin/catalog/prices/price_current/history": {
       data: [current, previous].map((price) => ({
         price,
         effective_at: price.created_at,

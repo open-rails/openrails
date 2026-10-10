@@ -28,22 +28,6 @@ type EntitlementChange struct {
 	Holders int64 `json:"holders"`
 }
 
-// MaxEntitlementReplacements bounds the pairs of one ReplaceEntitlements call.
-const MaxEntitlementReplacements = 100
-
-// ReplaceEntitlementsParams moves every product granting From to grant To
-// instead, in one catalog edit. An empty To removes From. A key may not be
-// both replaced and a replacement in one call.
-type ReplaceEntitlementsParams struct {
-	Pairs []EntitlementReplacement `json:"pairs"`
-}
-
-// EntitlementReplacement is one key moved across every product granting it.
-type EntitlementReplacement struct {
-	From string `json:"from"`
-	To   string `json:"to"`
-}
-
 // CatalogRevision is the merchant's catalog revision, which every catalog
 // write advances, and whether this deployment accepts catalog writes.
 type CatalogRevision struct {

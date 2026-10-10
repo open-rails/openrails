@@ -507,9 +507,24 @@ export const paymentConfigSchema = z.object({
 export type PaymentConfig = z.infer<typeof paymentConfigSchema>
 
 /**
+ * The challenge to solve when a request answers 403 `captcha_required`: load
+ * `script_url`, solve with `site_key` and `action`, and resend the request
+ * with the token in the `token_header` header.
+ */
+export const captchaConfigSchema = z.object({
+  provider: z.string(),
+  site_key: z.string(),
+  script_url: z.string(),
+  action: z.string(),
+  token_header: z.string(),
+})
+export type CaptchaConfig = z.infer<typeof captchaConfigSchema>
+
+/**
  * What a browser needs to know about the deployment and its merchant
- * (`GET /config`): the mount's capabilities, the currency registry and the
- * merchant's payment setup (null when the request resolves no merchant).
+ * (`GET /config`): the mount's capabilities, the currency registry, the
+ * merchant's payment setup (null when the request resolves no merchant) and
+ * the captcha (null when the deployment challenges nobody).
  */
 export const publicConfigSchema = z.object({
   capabilities: z.object({
@@ -521,6 +536,7 @@ export const publicConfigSchema = z.object({
     .nullish()
     .transform((v) => v ?? []),
   payment: paymentConfigSchema.nullish(),
+  captcha: captchaConfigSchema.nullish(),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>
 
