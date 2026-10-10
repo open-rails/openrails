@@ -178,14 +178,14 @@ First let's define permissions and two staff roles; staff are just regular users
 ```go
 rbac := authkit.NewRoles()
 
-customersRead := rbac.Root.Permission("customers", "read")
-customersUpdate := rbac.Root.Permission("customers", "update")
-catalogUpdate := rbac.Root.Permission("catalog", "update")
-billingConfig := rbac.Root.Permission("billing-config", "update")
+billingRead := rbac.Root.Permission("billing", "read")
+billingManage := rbac.Root.Permission("billing", "manage")
+catalogManage := rbac.Root.Permission("catalog", "manage")
+configManage := rbac.Root.Permission("config", "manage")
 metricsRead := rbac.Root.Permission("metrics", "read")
 
-rbac.Root.Role("support", customersRead, customersUpdate)
-rbac.Root.Role("operator", customersRead, customersUpdate, catalogUpdate, billingConfig, metricsRead)
+rbac.Root.Role("support", billingRead, billingManage)
+rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configManage, metricsRead)
 ```
 
 Then build AuthKit with those roles. AuthKit signs your users in, and says
@@ -213,7 +213,7 @@ if err != nil {
 }
 err = openrailsgin.Mount(r, bill, openrails.Routes{
 	Auth:   ak.Authenticator(), // says who a request is; required. Public, customer (/v1/me) and webhook routes are always on
-	Scope:  staff,              // where callers must hold Permissions; required with any staff group on
+	Scope:  staff,              // where callers must hold Permissions; required with any permission given
 	Prefix: "/billing",         // the API is served at /billing/v1/*
 
 	// Every other route group is off unless you turn it on here.
@@ -222,16 +222,17 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 		Catalog:        true,  // the catalog: update products and prices
 		MerchantConfig: true,  // merchant config: PSPs and their credentials, settings, billing import and export
 		Metrics:        true,  // business metrics, read-only: revenue, sales, the dashboard's charts
-		Programmatic:   false, // /v1/app: your backend's own calls over HTTP, and SCIM user provisioning; embedded, your Go code calls the Client instead
+		Programmatic:   false, // /v1/app: your backend's own calls over HTTP, each with its permission, and SCIM user provisioning; embedded, your Go code calls the Client instead
 	},
 
-	// What a caller must hold for each staff group that is on. Mount fails when a
-	// group is on without its permission, or a permission is given for one that is off.
+	// What a caller must hold for each staff group that is on (and for the /v1/app
+	// routes: Entitlements, Usage, Costs, Events). Mount fails when a group is on
+	// without its permission, or a permission is given for one that is off.
 	Permissions: openrails.Permissions{
-		AdminRead:      customersRead,   // the admin group's reads
-		AdminUpdate:    customersUpdate, // its changes: cancellations, refunds, credit grants; leave out for read-only
-		Catalog:        catalogUpdate,
-		MerchantConfig: billingConfig,
+		AdminRead:      billingRead,   // the admin group's reads
+		AdminUpdate:    billingManage, // its changes: cancellations, refunds, credit grants; leave out for read-only
+		Catalog:        catalogManage,
+		MerchantConfig: configManage,
 		Metrics:        metricsRead,
 	},
 
@@ -255,7 +256,7 @@ you turn it on, embedded or standalone:
 | catalog (`/v1/admin/catalog`, `/v1/admin/price-migrations`) | `RouteGroups.Catalog`; with `Config.Catalog`, the file skips what an edit changed | `Permissions.Catalog` | staff |
 | merchant config (`/v1/admin`) | `RouteGroups.MerchantConfig` | `Permissions.MerchantConfig` | staff |
 | business metrics, read-only (`/v1/admin/metrics`, `/v1/admin/dashboard`) | `RouteGroups.Metrics` | `Permissions.Metrics` | staff, or your backend |
-| programmatic (`/v1/app`) | `RouteGroups.Programmatic` | an application credential | your backend, never a person |
+| programmatic (`/v1/app`) | `RouteGroups.Programmatic`; each route only with its permission | an application credential holding `Permissions.Entitlements`, `Usage`, `Costs` or `Events` | your backend, never a person |
 | user provisioning (`/v1/app/scim/v2`) | `RouteGroups.Programmatic`, without `Deps.UserInfo` | an application credential or a provisioning token | your user directory |
 | admin console (`/admin`) | `AdminConsole: true`, with at least one staff group on | each area's permission | staff, in the browser |
 
@@ -411,14 +412,14 @@ func run(ctx context.Context) error {
 
 	rbac := authkit.NewRoles()
 
-	customersRead := rbac.Root.Permission("customers", "read")
-	customersUpdate := rbac.Root.Permission("customers", "update")
-	catalogUpdate := rbac.Root.Permission("catalog", "update")
-	billingConfig := rbac.Root.Permission("billing-config", "update")
+	billingRead := rbac.Root.Permission("billing", "read")
+	billingManage := rbac.Root.Permission("billing", "manage")
+	catalogManage := rbac.Root.Permission("catalog", "manage")
+	configManage := rbac.Root.Permission("config", "manage")
 	metricsRead := rbac.Root.Permission("metrics", "read")
 
-	rbac.Root.Role("support", customersRead, customersUpdate)
-	rbac.Root.Role("operator", customersRead, customersUpdate, catalogUpdate, billingConfig, metricsRead)
+	rbac.Root.Role("support", billingRead, billingManage)
+	rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configManage, metricsRead)
 
 	ak, err := newAuth(ctx, db, rbac) // authkit.New, as above
 	if err != nil {
@@ -455,10 +456,10 @@ func run(ctx context.Context) error {
 		Prefix:      "/billing",         // the API is served at /billing/v1/*
 		RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true},
 		Permissions: openrails.Permissions{
-			AdminRead:      customersRead,
-			AdminUpdate:    customersUpdate,
-			Catalog:        catalogUpdate, // edits share the catalog with catalog.yaml
-			MerchantConfig: billingConfig,
+			AdminRead:      billingRead,
+			AdminUpdate:    billingManage,
+			Catalog:        catalogManage, // edits share the catalog with catalog.yaml
+			MerchantConfig: configManage,
 			Metrics:        metricsRead,
 		},
 	})
@@ -534,15 +535,21 @@ until `RouteGroups` turns it on:
   the dashboard's charts. Callers need `Permissions.Metrics`.
 - `RouteGroups.Programmatic`: the routes at `/billing/v1/app`, for your own
   backend when it talks to OpenRails over HTTP (a standalone or hosted
-  OpenRails, or a service of yours not written in Go): usage, admissions,
-  provider operations, host events, and user provisioning. They take any
-  application your auth says a request is (an API key, a client's own token)
-  and refuse a person. Embedded,
+  OpenRails, or a service of yours not written in Go): the content gate,
+  usage and admissions, provider operations, host events, and user
+  provisioning. They take an application your auth says a request is (an API
+  key, a client's own token) holding the route's permission, and refuse a
+  person; each mounts only with its permission, so a program gets only what
+  its task needs. Embedded,
   your Go code calls the same operations on the `Client` and you can leave this
   off.
-- `Permissions`: what a caller must hold for each staff group. `Mount` fails
-  when a staff group is on without its permission, or a permission is given
-  for a group that is off or your auth does not know.
+- `Permissions`: what a caller must hold for each staff group, and for each
+  programmatic task: `Entitlements` (`root:entitlements:read`), `Usage`
+  (`root:usage:manage`), `Costs` (`root:costs:manage`), `Events`
+  (`root:events:read`). Name them `persona:resource:action`, the persona being
+  where they are held: `root:` in AuthKit's root group. `Mount` fails when a
+  staff group is on without its permission, or a permission is given for a
+  group that is off or your auth does not know.
 - `AdminConsole`: `true` serves the staff dashboard at `/billing/admin` (below);
   off by default.
 
@@ -570,7 +577,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 	Scope:        staff,
 	Prefix:       "/billing",
 	RouteGroups:  openrails.RouteGroups{Admin: true},
-	Permissions:  openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
+	Permissions:  openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage},
 	AdminConsole: true,
 })
 ```
@@ -791,7 +798,10 @@ Mounting gives your users these routes under `/billing`:
 **Programmatic** (with `RouteGroups.Programmatic`; your backend, never a person)
 
 Your backend calls these with its own credential: a client-credentials token
-from your issuer (AuthKit issues them) for this deployment. A person is refused.
+from your issuer (AuthKit issues them) for this deployment, holding the route's
+permission: `Permissions.Entitlements` for the content gate, `Usage` for usage
+events and admissions, `Costs` for provider operations, `Events` for host
+events. A route mounts only with its permission. A person is refused.
 Writes take an `Idempotency-Key`, so a retry never double-counts. Embedded, call
 the same `Client` methods in process instead. The `scim/v2` routes also take a
 merchant provisioning token, for directories like Okta or Entra ID that can't
@@ -831,7 +841,7 @@ What you will set next:
 | To | Set |
 |---|---|
 | Send billing email (receipts, failed-payment notices) | `Config.SMTP` (`Host`, `Port`, `Username`, `Password`, `From`: any SMTP server) or your own `Deps.Email`, plus where addresses come from: `Deps.UserInfo` (embedded) or SCIM provisioning (standalone) |
-| Turn on the staff and programmatic routes | `Routes.RouteGroups` (admin, catalog, merchant config, metrics, programmatic) and, for the staff ones, `Routes.Permissions` |
+| Turn on the staff and programmatic routes | `Routes.RouteGroups` (admin, catalog, merchant config, metrics, programmatic) and `Routes.Permissions` |
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
@@ -1139,7 +1149,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 	Scope:       staff,
 	Prefix:      "/billing",
 	RouteGroups: openrails.RouteGroups{Catalog: true},
-	Permissions: openrails.Permissions{Catalog: catalogUpdate}, // a permission of your own for the catalog
+	Permissions: openrails.Permissions{Catalog: catalogManage}, // a permission of your own for the catalog
 })
 ```
 
