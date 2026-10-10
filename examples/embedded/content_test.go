@@ -8,13 +8,18 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
@@ -31,46 +36,109 @@ import (
 	"github.com/open-rails/openrails/openrailstest/nmimock"
 )
 
-// A customer without access, signed out included, gets 402 and the page
-// where they can buy it; buying through the routes billing-ui's Buy calls (a
-// checkout session for the catalog price, paid with a new card) makes the
-// content route serve them.
+// A customer without access, signed out included, gets 402 and where to buy
+// it; buying through the routes billing-ui's Buy calls (a checkout session for
+// the catalog price, paid with a new card) gets them the course's signed
+// video URL.
 func TestGatedContent(t *testing.T) {
 	app := startApp(t)
+	const css, tailwind, qa = "/api/courses/css-101", "/api/courses/tailwind-102", "/api/members/qa"
 
 	t.Run("signed out", func(t *testing.T) {
-		app.requireBuy(t, "", "/api/courses/css-101", "/courses/css-101/buy")
-		app.requireBuy(t, "", "/api/members/qa", "/join")
+		app.requireBuy(t, "", css, "course:101", "/courses/css-101/buy")
+		app.requireBuy(t, "", qa, "channel:membership", "/join")
 	})
 	t.Run("an unknown course", func(t *testing.T) {
-		res := app.get(t, "", "/api/courses/no-such-course")
-		require.Equal(t, http.StatusNotFound, res.StatusCode)
+		require.Equal(t, http.StatusNotFound, app.get(t, "", "/api/courses/no-such-course").StatusCode)
 	})
 	t.Run("a course bought alone", func(t *testing.T) {
 		alice := app.signUp(t, "alice")
-		app.requireBuy(t, alice, "/api/courses/css-101", "/courses/css-101/buy")
+		app.requireBuy(t, alice, css, "course:101", "/courses/css-101/buy")
 		app.buy(t, alice, "course-101", "purchase")
-		app.requireContent(t, alice, "/api/courses/css-101", "The box model")
-		app.requireBuy(t, alice, "/api/courses/tailwind-102", "/courses/tailwind-102/buy")
-		app.requireBuy(t, alice, "/api/members/qa", "/join")
+		app.requireVideo(t, alice, css, "media/courses/css-101.mp4")
+		app.requireBuy(t, alice, tailwind, "course:102", "/courses/tailwind-102/buy")
+		app.requireBuy(t, alice, qa, "channel:membership", "/join")
 	})
 	t.Run("a rental", func(t *testing.T) {
 		dave := app.signUp(t, "dave")
 		app.buy(t, dave, "course-102", "rent")
-		app.requireContent(t, dave, "/api/courses/tailwind-102", "Utility classes")
+		app.requireVideo(t, dave, tailwind, "media/courses/tailwind-102.mp4")
 	})
 	t.Run("the bundle", func(t *testing.T) {
 		bob := app.signUp(t, "bobby")
 		app.buy(t, bob, "course-bundle", "purchase")
-		app.requireContent(t, bob, "/api/courses/css-101", "The box model")
-		app.requireContent(t, bob, "/api/courses/tailwind-102", "Utility classes")
+		app.requireVideo(t, bob, css, "media/courses/css-101.mp4")
+		app.requireVideo(t, bob, tailwind, "media/courses/tailwind-102.mp4")
 	})
 	t.Run("a member", func(t *testing.T) {
 		carol := app.signUp(t, "carol")
 		app.buy(t, carol, "channel-membership", "monthly")
-		app.requireContent(t, carol, "/api/members/qa", "How do I center a div?")
-		app.requireBuy(t, carol, "/api/courses/css-101", "/courses/css-101/buy")
+		app.requireQuestions(t, carol, qa)
+		app.requireBuy(t, carol, css, "course:101", "/courses/css-101/buy")
 	})
+}
+
+// A media URL is good only as signed, and only until it expires.
+func TestMediaURLs(t *testing.T) {
+	app := startApp(t)
+	signed := testMediaKey.url("courses/css-101.mp4")
+	require.Equal(t, http.StatusOK, app.get(t, "", signed).StatusCode)
+
+	tampered := strings.Replace(signed, "css-101", "tailwind-102", 1)
+	require.Equal(t, http.StatusForbidden, app.get(t, "", tampered).StatusCode)
+	past := strconv.FormatInt(time.Now().Add(-time.Minute).Unix(), 10)
+	expired := "/media/courses/css-101.mp4?" + url.Values{"expires": {past}, "sig": {testMediaKey.sign("courses/css-101.mp4", past)}}.Encode()
+	require.Equal(t, http.StatusForbidden, app.get(t, "", expired).StatusCode)
+	require.Equal(t, http.StatusForbidden, app.get(t, "", "/media/courses/css-101.mp4").StatusCode)
+	other := mediaKey("another key").url("courses/css-101.mp4")
+	require.Equal(t, http.StatusForbidden, app.get(t, "", other).StatusCode)
+}
+
+// The course list pages over the host's courses. Each page joins in its
+// products' live prices and what the user owns with one product read and one
+// entitlement read, never one per course; signed out, it reads no
+// entitlements at all.
+func TestCourseList(t *testing.T) {
+	app := startApp(t)
+	type price struct{ Key, Amount, Currency, Terms string }
+	type row struct {
+		Slug, Title string
+		ProductKey  string `json:"product_key"`
+		Owned       bool
+		Prices      []price
+	}
+	var page struct {
+		Data       []row
+		NextCursor *string `json:"next_cursor"`
+	}
+	read := func(token, query string, entitlementReads int) {
+		t.Helper()
+		page.Data, page.NextCursor = nil, nil
+		app.queries.reset()
+		app.call(t, token, http.MethodGet, "/api/courses?"+query, nil, &page)
+		require.Equal(t, 1, app.queries.count("ListProductsFiltered"), "one product read per page")
+		require.Equal(t, 1, app.queries.count("ListCurrentPricesByProducts"), "its prices with it")
+		require.Equal(t, entitlementReads, app.queries.count("ListValidEntitlementCaches"), "entitlement reads per page")
+	}
+	cssPrices := []price{{"rent", "1990000", "USD", "for 3 days"}, {"purchase", "4990000", "USD", "to keep"}}
+
+	read("", "limit=1", 0)
+	require.Equal(t, []row{{"css-101", "Intro to CSS", "course-101", false, cssPrices}}, page.Data)
+	require.NotNil(t, page.NextCursor)
+	read("", "limit=1&cursor="+*page.NextCursor, 0)
+	require.Len(t, page.Data, 1)
+	require.Equal(t, "tailwind-102", page.Data[0].Slug)
+	require.Nil(t, page.NextCursor)
+
+	alice := app.signUp(t, "alice")
+	app.buy(t, alice, "course-101", "purchase")
+	read(alice, "", 1)
+	require.Len(t, page.Data, 2)
+	require.True(t, page.Data[0].Owned, "she bought css-101")
+	require.False(t, page.Data[1].Owned)
+	require.Nil(t, page.NextCursor)
+
+	require.Equal(t, http.StatusBadRequest, app.get(t, "", "/api/courses?limit=0").StatusCode)
 }
 
 // The browser e2e in web/e2e against this server: the React app built into
@@ -82,7 +150,7 @@ func TestBrowser(t *testing.T) {
 		t.Skip("the app is not installed: cd web && pnpm install && pnpm build")
 	}
 	app := startApp(t)
-	users := []string{"reader1", "reader2", "reader3"}
+	users := []string{"reader1", "reader2", "reader3", "reader4"}
 	for _, name := range users {
 		_, err := app.auth.CreateUser(context.Background(), iam.NewUser{Email: name + "@example.com", EmailVerified: true, Username: name, Password: password})
 		require.NoError(t, err)
@@ -94,10 +162,43 @@ func TestBrowser(t *testing.T) {
 	require.NoError(t, cmd.Run())
 }
 
+var testMediaKey = mediaKey("test media key")
+
 type app struct {
 	*httptest.Server
-	auth *authkit.Client
-	nmi  *nmimock.Mock
+	auth    *authkit.Client
+	nmi     *nmimock.Mock
+	queries *queryCount
+}
+
+// queryCount counts the sqlc queries run on the app's pool, by name.
+type queryCount struct {
+	mu    sync.Mutex
+	names map[string]int
+}
+
+func (q *queryCount) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	if name, ok := strings.CutPrefix(data.SQL, "-- name: "); ok {
+		name, _, _ = strings.Cut(name, " ")
+		q.mu.Lock()
+		q.names[name]++
+		q.mu.Unlock()
+	}
+	return ctx
+}
+
+func (q *queryCount) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (q *queryCount) reset() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.names = map[string]int{}
+}
+
+func (q *queryCount) count(name string) int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.names[name]
 }
 
 // startApp serves main.go's mount (its admin group), gateContent and serveApp
@@ -110,7 +211,8 @@ func startApp(t *testing.T) *app {
 		t.Skip("OPENRAILS_E2E_DSN names no PostgreSQL 18 server")
 	}
 	ctx := context.Background()
-	db := freshDatabase(t, dsn)
+	queries := &queryCount{names: map[string]int{}}
+	db := freshDatabase(t, dsn, queries)
 
 	rbac := authkit.NewRoles()
 	customersRead := rbac.Root.Permission("customers", "read")
@@ -156,16 +258,16 @@ func startApp(t *testing.T) *app {
 		RouteGroups: openrails.RouteGroups{Admin: true},
 		Permissions: openrails.Permissions{AdminRead: customersRead, AdminUpdate: customersUpdate},
 	}))
-	gateContent(r, ak, bill)
+	courseRoutes(r, ak, bill, testMediaKey)
 	serveApp(r, "web/dist")
 	server := httptest.NewServer(r)
 	t.Cleanup(server.Close)
-	return &app{Server: server, auth: ak, nmi: gateway}
+	return &app{Server: server, auth: ak, nmi: gateway, queries: queries}
 }
 
 // freshDatabase creates a database for this test on dsn's server and drops it
 // afterwards.
-func freshDatabase(t *testing.T, dsn string) *pgxpool.Pool {
+func freshDatabase(t *testing.T, dsn string, tracer pgx.QueryTracer) *pgxpool.Pool {
 	t.Helper()
 	ctx := context.Background()
 	admin, err := pgx.Connect(ctx, dsn)
@@ -182,6 +284,7 @@ func freshDatabase(t *testing.T, dsn string) *pgxpool.Pool {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	require.NoError(t, err)
 	cfg.ConnConfig.Database = name
+	cfg.ConnConfig.Tracer = tracer
 	db, err := pgxpool.NewWithConfig(ctx, cfg)
 	require.NoError(t, err)
 	t.Cleanup(db.Close)
@@ -237,28 +340,57 @@ func (a *app) buy(t *testing.T, token, product, price string) {
 	require.Equal(t, "succeeded", paid.Status)
 }
 
-// requireBuy: path answers 402 naming buy.
-func (a *app) requireBuy(t *testing.T, token, path, buy string) {
+// requireBuy: path answers 402 naming the entitlement and the buy page.
+func (a *app) requireBuy(t *testing.T, token, path, entitlement, buy string) {
 	t.Helper()
 	res := a.get(t, token, path)
 	require.Equal(t, http.StatusPaymentRequired, res.StatusCode, path)
-	var body struct{ Error, Buy string }
+	var body struct{ Error, Entitlement, Buy string }
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	require.Equal(t, "access_required", body.Error)
+	require.Equal(t, entitlement, body.Entitlement)
 	require.Equal(t, buy, body.Buy)
 }
 
-// requireContent: path serves content listing item.
-func (a *app) requireContent(t *testing.T, token, path, item string) {
+// requireVideo: path answers a signed URL that serves file, ranges included.
+func (a *app) requireVideo(t *testing.T, token, path, file string) {
 	t.Helper()
 	res := a.get(t, token, path)
 	require.Equal(t, http.StatusOK, res.StatusCode, path)
-	var content map[string][]string
-	require.NoError(t, json.NewDecoder(res.Body).Decode(&content))
-	require.Len(t, content, 1)
-	for _, items := range content {
-		require.Contains(t, items, item)
+	var body struct {
+		VideoURL string `json:"video_url"`
 	}
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
+	want, err := os.ReadFile(file)
+	require.NoError(t, err)
+
+	video := a.get(t, "", body.VideoURL) // the URL is the credential
+	require.Equal(t, http.StatusOK, video.StatusCode)
+	require.Equal(t, "video/mp4", video.Header.Get("Content-Type"))
+	got, err := io.ReadAll(video.Body)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+
+	req, err := http.NewRequest(http.MethodGet, a.URL+body.VideoURL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Range", "bytes=0-99")
+	ranged, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer func() { _ = ranged.Body.Close() }()
+	require.Equal(t, http.StatusPartialContent, ranged.StatusCode)
+	part, err := io.ReadAll(ranged.Body)
+	require.NoError(t, err)
+	require.Equal(t, want[:100], part)
+}
+
+// requireQuestions: path serves the members' Q&A.
+func (a *app) requireQuestions(t *testing.T, token, path string) {
+	t.Helper()
+	res := a.get(t, token, path)
+	require.Equal(t, http.StatusOK, res.StatusCode, path)
+	var body struct{ Questions []string }
+	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
+	require.Contains(t, body.Questions, "How do I center a div?")
 }
 
 // get requests path without following redirects.

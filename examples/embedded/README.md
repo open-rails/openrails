@@ -1,27 +1,30 @@
 # Embedded example
 
 The root README's program: a creator site on one Go server. Users sign in with
-AuthKit, buy CSS courses one at a time or as a bundle (or rent one for 3
+AuthKit, buy video courses one at a time or as a bundle (or rent one for 3
 days), and join a channel membership, monthly or yearly. The walkthrough is
 the root README's [Sell Your Content](../../README.md#sell-your-content).
 
 | File | What it is |
 |---|---|
 | `main.go` | AuthKit, the OpenRails client (`newBilling`) and the mounted routes |
-| `content.go` | the gate: `/api/courses/:course` and `/api/members/qa` serve a customer who holds the entitlement, and answer anyone else `402` with the page where they can buy it |
-| `web/` | the React app: the course and Q&A pages fetch that content with `auth.authFetch`; `/courses/:course/buy` and `/join` sell with billing-ui |
+| `content.go` | the app's API: `/api/courses` lists the courses with prices and what the user owns (one product read and one entitlement read per page); `/api/courses/:course` answers a holder its video's signed URL and anyone else `402` with where to buy it; `/media/*path` serves signed, unexpired URLs |
+| `web/` | the React app: the store, each course's player, and buy pages that sell with billing-ui's `<Offers>` |
+| `media/` | the courses' sample videos |
 | `catalog.yaml`, `merchant.example.yaml` | the catalog and the merchant |
 
-AuthKit's token rides `fetch`, not page loads, so content is an API the pages
-fetch. Media can't carry it either (`<video src>` sends no token): real video
-would play from a short-lived signed URL that the gated route returns.
+AuthKit's token rides `fetch`, not page loads or `<video src>`, so pages fetch
+the API with `auth.authFetch` and play a short-lived signed URL. In production,
+sign with an S3/R2 presigned GET, a CloudFront signed URL or ContentKit's media
+tokens. In a real app, content and its previews come from ContentKit, whose
+paywall names the entitlement to sell, and `<Offers>` takes it from there.
 
 ## Run it
 
 ```sh
 cp merchant.example.yaml merchant.yaml    # your NMI sandbox gateway's IDs and keys
 (cd web && pnpm install && pnpm build)    # the React app, into web/dist
-DATABASE_URL=postgres://… go run .        # http://localhost:8080
+DATABASE_URL=postgres://… go run .        # http://localhost:8080 (MEDIA_KEY signs video URLs)
 ```
 
 ## Tests
@@ -30,10 +33,13 @@ DATABASE_URL=postgres://… go run .        # http://localhost:8080
 server. Each run creates and drops its own database, and NMI is
 `openrailstest/nmimock`.
 
-- `TestGatedContent` drives the routes billing-ui calls. Signed out, or signed
-  in without access, is `402`. A course bought alone, a rental, the bundle and
-  a membership each admit their content and nothing else.
-- `TestBrowser` serves the same app and runs `web/e2e` in Chromium: sign in
-  with auth-ui, pay in billing-ui's `CheckoutModal`, land back on the content.
+- `TestCourseList` pages the courses and counts queries: one product read and
+  one entitlement read per page, none of the latter signed out.
+- `TestGatedContent` buys through the routes billing-ui calls: a course, a
+  rental, the bundle and a membership each unlock their own content, and the
+  signed URL serves the video, ranges included.
+- `TestMediaURLs` refuses a tampered, expired or unsigned media URL.
+- `TestBrowser` serves the same app and runs `web/e2e` in Chromium: buy from the
+  store or a course's buy page, sign in with auth-ui, pay, and the video plays.
   It skips until `web/` is installed and built, and Playwright needs its
   browser (`pnpm exec playwright install chromium`).

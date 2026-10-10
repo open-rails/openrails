@@ -2,8 +2,9 @@
 // creator site where users sign in with AuthKit, buy courses individually or
 // as a bundle, and buy a monthly or yearly channel membership. newBilling and
 // the mount are the README's code; newAuth is a development AuthKit. The
-// server gates the courses and members-only pages by entitlement (content.go)
-// and serves the React app in web/, whose buy pages sell with billing-ui.
+// server lists its courses with prices from OpenRails, gates them by
+// entitlement (content.go) and serves the React app in web/, which sells
+// with billing-ui.
 //
 // Run it from this directory with DATABASE_URL, after building the app
 // (cd web && pnpm install && pnpm build). It reads catalog.yaml and
@@ -15,6 +16,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"log"
 	"net/http"
@@ -151,8 +153,14 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	gateContent(r, ak, bill) // the courses and members-only pages, by entitlement
-	serveApp(r, "web/dist")  // the React app: content pages and their buy pages
+	// The key media URLs are signed with: MEDIA_KEY in production, else one per run.
+	media := mediaKey(os.Getenv("MEDIA_KEY"))
+	if len(media) == 0 {
+		media = make(mediaKey, 32)
+		_, _ = rand.Read(media)
+	}
+	courseRoutes(r, ak, bill, media) // the course list, the gate on each course and its media
+	serveApp(r, "web/dist")          // the React app: its pages, the buy page among them
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
 		return bill.Ready(ctx)

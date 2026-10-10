@@ -1,70 +1,64 @@
 import { useEffect, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import { SignInDialog } from "@openrails/auth-ui"
 import { createAuthClient } from "@openrails/auth-ui/client"
 import { useAuth } from "@openrails/auth-ui/react"
-import { createBillingClient } from "@openrails/billing-ui/client"
-import { BillingUiProvider, CheckoutModal } from "@openrails/billing-ui"
+import { createBillingClient, formatAmount } from "@openrails/billing-ui/client"
+import { BillingProvider } from "@openrails/billing-ui/react"
+import { BillingUiProvider, CheckoutModal, Offers } from "@openrails/billing-ui"
 import "@openrails/billing-ui/styles.css"
 
 export const auth = createAuthClient() // AuthKit's browser client, at /api/v1: authFetch attaches the signed-in user's token
 const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
 
-const courses: Record<string, { title: string; product: string }> = {
-  "css-101": { title: "Intro to CSS", product: "course-101" },
-  "tailwind-102": { title: "Intro to Tailwind", product: "course-102" },
+// A course as the app's API lists it: the host's own, priced by OpenRails.
+type Course = {
+  slug: string
+  title: string
+  product_key: string
+  owned: boolean
+  prices: { key: string; amount: string; currency: string; terms: string }[]
 }
 
-export function CoursePage() {
-  const { course = "" } = useParams()
-  const lessons = useGated<{ lessons: string[] }>(`/api/courses/${course}`)?.lessons
-  return <ol>{lessons?.map((lesson) => <li key={lesson}>{lesson}</li>)}</ol>
-}
-
-export function MembersQAPage() {
-  const questions = useGated<{ questions: string[] }>("/api/members/qa")?.questions
-  return <ul>{questions?.map((question) => <li key={question}>{question}</li>)}</ul>
-}
-
-// useGated reads gated content as the signed-in user; without access the
-// server answers 402 with where to buy it, and the page goes there.
-function useGated<T>(api: string): T | undefined {
+// StorePage lists the courses a page at a time: Watch for those the user
+// owns, a button per price for the rest.
+export function StorePage() {
   const navigate = useNavigate()
-  const [body, setBody] = useState<T>()
+  const [cursor, setCursor] = useState("0")
+  const [pages, setPages] = useState<{ data: Course[]; next_cursor: string | null }[]>([])
   useEffect(() => {
-    auth.authFetch(api).then(async (res) => {
-      if (res.status === 402) navigate((await res.json()).buy, { replace: true }) // no access: go buy it
-      else if (res.ok) setBody(await res.json())
-    })
-  }, [api, navigate])
-  return body
-}
-
-export function BuyCoursePage() {
-  const { course = "" } = useParams()
-  const navigate = useNavigate()
-  const item = courses[course]
-  if (!item) return <p>Not found</p>
-  const paid = () => navigate(`/courses/${course}`) // the gate now lets them in
+    let current = true
+    auth
+      .authFetch(`/api/courses?cursor=${cursor}`)
+      .then((res) => res.json())
+      .then((page) => current && setPages((pages) => [...pages, page]))
+    return () => {
+      current = false
+    }
+  }, [cursor])
+  const next = pages.at(-1)?.next_cursor
   return (
     <BillingUiProvider appearance={{ theme: "auto" }}>
-      <h1>{item.title}</h1>
-      <p>Three lessons, yours to keep.</p>
-      <Buy product={item.product} price="purchase" label="Buy for $4.99" onPaid={paid} />
-      <Buy product={item.product} price="rent" label="Rent for 3 days, $1.99" onPaid={paid} />
-      <Buy product="course-bundle" price="purchase" label="Both courses for $8.99" onPaid={paid} />
-    </BillingUiProvider>
-  )
-}
-
-export function JoinPage() {
-  const navigate = useNavigate()
-  const paid = () => navigate("/members/qa")
-  return (
-    <BillingUiProvider appearance={{ theme: "auto" }}>
-      <h1>Channel membership</h1>
-      <Buy product="channel-membership" price="monthly" label="$10 every 30 days" onPaid={paid} />
-      <Buy product="channel-membership" price="yearly" label="$99 every 365 days" onPaid={paid} />
+      {pages.flatMap((page) => page.data).map((course) => (
+        <section key={course.slug}>
+          <h2>{course.title}</h2>
+          {course.owned ? (
+            <Link to={`/courses/${course.slug}`}>Watch</Link>
+          ) : (
+            course.prices.map((price) => (
+              <Buy
+                key={price.key}
+                product={course.product_key}
+                price={price.key}
+                label={`${formatAmount(price.amount, price.currency, billing.currencies[price.currency])} ${price.terms}`}
+                onPaid={() => navigate(`/courses/${course.slug}`)}
+              />
+            ))
+          )}
+        </section>
+      ))}
+      {next && <button onClick={() => setCursor(next)}>Load more</button>}
+      <Link to="/members/qa">Members-only Q&A</Link>
     </BillingUiProvider>
   )
 }
@@ -74,7 +68,7 @@ function Buy({ product, price, label, onPaid }: { product: string; price: string
   const [signingIn, setSigningIn] = useState(false)
   const [session, setSession] = useState<string>()
   async function start() {
-    if (!signedIn) return setSigningIn(true) // anyone sees the page; buying needs an account
+    if (!signedIn) return setSigningIn(true) // anyone sees the prices; buying needs an account
     // OpenRails prices the offer from the catalog; card entry happens in the processor's iframe.
     setSession((await billing.createCheckoutSession({ productKey: product, priceKey: price })).id)
   }
@@ -91,5 +85,68 @@ function Buy({ product, price, label, onPaid }: { product: string; price: string
         />
       )}
     </>
+  )
+}
+
+// CoursePage plays the course: the API answers its signed video URL, or 402
+// and where to buy it.
+export function CoursePage() {
+  const { course = "" } = useParams()
+  const navigate = useNavigate()
+  const [videoURL, setVideoURL] = useState<string>()
+  useEffect(() => {
+    auth.authFetch(`/api/courses/${course}`).then(async (res) => {
+      const body = await res.json()
+      if (res.status === 402) navigate(body.buy, { replace: true }) // no access: go buy it
+      else if (res.ok) setVideoURL(body.video_url)
+    })
+  }, [course, navigate])
+  return videoURL ? <video src={videoURL} controls /> : null
+}
+
+export function MembersQAPage() {
+  const navigate = useNavigate()
+  const [questions, setQuestions] = useState<string[]>()
+  useEffect(() => {
+    auth.authFetch("/api/members/qa").then(async (res) => {
+      const body = await res.json()
+      if (res.status === 402) navigate(body.buy, { replace: true })
+      else if (res.ok) setQuestions(body.questions)
+    })
+  }, [navigate])
+  return <ul>{questions?.map((question) => <li key={question}>{question}</li>)}</ul>
+}
+
+export function CourseBuyPage() {
+  const { course = "" } = useParams()
+  return <BuyPage api={`/api/courses/${course}`} back={`/courses/${course}`} />
+}
+
+export function JoinPage() {
+  return <BuyPage api="/api/members/qa" back="/members/qa" />
+}
+
+// BuyPage asks api what unlocks it (its 402 names the entitlement) and offers
+// everything on sale that grants it: the course, a bundle, a membership.
+// Paid, the buyer goes back, which now lets them in.
+function BuyPage({ api, back }: { api: string; back: string }) {
+  const navigate = useNavigate()
+  const { signedIn } = useAuth()
+  const [signingIn, setSigningIn] = useState(false)
+  const [entitlement, setEntitlement] = useState<string>()
+  useEffect(() => {
+    auth.authFetch(api).then(async (res) => {
+      if (res.status === 402) setEntitlement((await res.json()).entitlement)
+      else if (res.ok) navigate(back, { replace: true }) // already theirs
+    })
+  }, [api, back, navigate])
+  if (!entitlement) return null
+  return (
+    <BillingUiProvider appearance={{ theme: "auto" }}>
+      <BillingProvider client={billing}>
+        <Offers entitlement={entitlement} signedIn={signedIn} onSignInRequired={() => setSigningIn(true)} onPaid={() => navigate(back)} />
+      </BillingProvider>
+      <SignInDialog open={signingIn} onOpenChange={setSigningIn} />
+    </BillingUiProvider>
   )
 }
