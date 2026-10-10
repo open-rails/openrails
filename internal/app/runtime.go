@@ -214,7 +214,8 @@ type Runtime struct {
 	SolanaMintDecimals  *solanamodule.MintDecimals
 	SolanaPriceProvider solanamodule.TokenPriceProvider
 	FXProvider          fx.Provider
-	// FXRates is FXProvider; its Refresh is the fleet's FX refresh job.
+	// FXRates is FXProvider: rates held in memory, refreshed from the
+	// process's first cross-currency quote until Close.
 	FXRates *fx.Rates
 	// SolanaCranker drives recurring Solana pulls (#256). Injected by the
 	// composition root once the merchant secret store is available; nil -> the
@@ -352,6 +353,10 @@ func (r *Runtime) Close(ctx context.Context) error {
 
 	if r.Verifier != nil {
 		r.Verifier.Close()
+	}
+
+	if r.FXRates != nil {
+		r.FXRates.Close()
 	}
 
 	// Stop Solana Pay poller

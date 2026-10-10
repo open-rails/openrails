@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/fxfake"
-	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -30,66 +29,70 @@ func (f *fixture) fxEngine(t *testing.T, fx *fxfake.Server, start bool) *openrai
 	return client
 }
 
-// One refresh serves the fleet: both replicas schedule the period's refresh,
-// which runs once and reads each currency's file once (34 requests, not one
-// per pair), and both quote every pair from PostgreSQL. A failing primary is
-// read from the fallback.
-func TestFXRefreshOncePerFleet(t *testing.T) {
+// Starting reads no rates. A refresh reads each currency's file once (34
+// requests, not one per pair), the fallback for a failing primary, and the
+// instance then quotes every pair from memory. A base that fails keeps the
+// rates it holds.
+func TestFXRefreshWarmsTheInstance(t *testing.T) {
 	fx, f := fxfake.New(), newFixture(t)
 	t.Cleanup(fx.Close)
-	a, b := f.fxEngine(t, fx, true), f.fxEngine(t, fx, true)
+	rt := engine.Graph(f.fxEngine(t, fx, true)).Runtime
 	codes := moneyutil.CurrencyCodes()
-	for _, replica := range []*openrails.Client{a, b} {
-		_, err := engine.Graph(replica).Runtime.RiverClient.Insert(t.Context(), riverjobs.FXRefreshArgs{}, riverjobs.FXRefreshInsertOpts())
-		require.NoError(t, err)
-	}
-	require.Eventually(t, func() bool { return fx.Requests(fxfake.Primary, "") >= len(codes) }, 60*time.Second, 50*time.Millisecond, "the refresh ran")
-	require.Never(t, func() bool { return fx.Requests(fxfake.Primary, "") > len(codes) }, 3*time.Second, 100*time.Millisecond, "once for the fleet")
+	require.Zero(t, fx.Requests(fxfake.Primary, "")+fx.Requests(fxfake.Fallback, ""), "Start reads no rates")
+
+	require.NoError(t, rt.FXRates.Refresh(t.Context()))
+	require.Equal(t, len(codes), fx.Requests(fxfake.Primary, ""), "a refresh is one request per currency")
 	for _, code := range codes {
 		require.Equal(t, 1, fx.Requests(fxfake.Primary, strings.ToLower(code)), code)
 	}
-
-	for _, client := range []*openrails.Client{a, b} {
-		rates := engine.Graph(client).Runtime.FXProvider
-		for _, from := range codes {
-			for _, to := range codes {
-				q, err := rates.Quote(t.Context(), from, to)
-				require.NoError(t, err, "%s -> %s", from, to)
-				require.Positive(t, q.Rate)
-			}
+	for _, from := range codes {
+		for _, to := range codes {
+			q, err := rt.FXProvider.Quote(t.Context(), from, to)
+			require.NoError(t, err, "%s -> %s", from, to)
+			require.Positive(t, q.Rate)
 		}
 	}
-	require.Equal(t, len(codes), fx.Requests(fxfake.Primary, ""), "every quote read the table, none the source")
+	require.Equal(t, len(codes), fx.Requests(fxfake.Primary, ""), "every quote read memory, none the source")
 	require.Zero(t, fx.Requests(fxfake.Fallback, ""))
 
 	fx.Fail(fxfake.Primary, "eur")
-	require.NoError(t, engine.Graph(a).Runtime.FXRates.Refresh(t.Context()))
-	require.Equal(t, 2*len(codes), fx.Requests(fxfake.Primary, ""), "a refresh is one request per currency")
-	require.Equal(t, 1, fx.Requests(fxfake.Fallback, "eur"), "the failing one read from the fallback")
-	require.Equal(t, 1, fx.Requests(fxfake.Fallback, ""))
+	require.NoError(t, rt.FXRates.Refresh(t.Context()))
+	require.Equal(t, 2*len(codes), fx.Requests(fxfake.Primary, ""))
+	require.Equal(t, 1, fx.Requests(fxfake.Fallback, ""), "only the failing one read from the fallback")
+	require.Equal(t, 1, fx.Requests(fxfake.Fallback, "eur"))
 
 	fx.Fail(fxfake.Fallback, "eur")
-	err := engine.Graph(a).Runtime.FXRates.Refresh(t.Context())
+	err := rt.FXRates.Refresh(t.Context())
 	require.ErrorContains(t, err, fmt.Sprintf("1 of %d FX base currencies failed; first FX rates for EUR: ", len(codes)), "one line, however many fail")
 	require.NotContains(t, err.Error(), "\n")
+	q, err := rt.FXProvider.Quote(t.Context(), "EUR", "USD")
+	require.NoError(t, err, "today's held rate stands")
+	require.Positive(t, q.Rate)
+	require.Equal(t, 3*len(codes), fx.Requests(fxfake.Primary, ""))
 }
 
-// With no refresh running, a quote reads its base currency's file itself,
-// once however many quote at the same time, and stores every rate in it for
-// the other replicas. A stale file is refused, and a failing one is not asked
-// again within the negative window.
-func TestFXQuoteReadsItsBaseOnce(t *testing.T) {
+// A cold instance reads a base's file when a quote first needs it, once
+// however many quote at the same time. Each instance holds its own rates.
+func TestFXColdInstanceReadsEachBaseOnce(t *testing.T) {
 	fx, f := fxfake.New(), newFixture(t)
 	t.Cleanup(fx.Close)
-	a, b := f.fxEngine(t, fx, false), f.fxEngine(t, fx, false)
-	ra, rb := engine.Graph(a).Runtime.FXProvider, engine.Graph(b).Runtime.FXProvider
+	a, b := engine.Graph(f.fxEngine(t, fx, false)).Runtime, engine.Graph(f.fxEngine(t, fx, false)).Runtime
 
+	type pair struct{ from, to string }
+	var pairs []pair
+	for range 4 {
+		for _, to := range []string{"USD", "GBP", "JPY", "CHF"} {
+			pairs = append(pairs, pair{"EUR", to})
+		}
+		for _, to := range []string{"USD", "EUR"} {
+			pairs = append(pairs, pair{"JPY", to})
+		}
+	}
 	var wg sync.WaitGroup
-	targets := []string{"USD", "GBP", "JPY", "CHF", "USD", "GBP", "JPY", "CHF"}
-	errs := make(chan error, len(targets))
-	for _, to := range targets {
+	errs := make(chan error, len(pairs))
+	for _, p := range pairs {
 		wg.Go(func() {
-			_, err := ra.Quote(t.Context(), "EUR", to)
+			_, err := a.FXProvider.Quote(t.Context(), p.from, p.to)
 			errs <- err
 		})
 	}
@@ -98,20 +101,48 @@ func TestFXQuoteReadsItsBaseOnce(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	require.Equal(t, 1, fx.Requests(fxfake.Primary, ""), "one read of EUR's file")
-	_, err := rb.Quote(t.Context(), "EUR", "CAD")
+	require.Equal(t, 1, fx.Requests(fxfake.Primary, "eur"), "one read of EUR's file")
+	require.Equal(t, 1, fx.Requests(fxfake.Primary, "jpy"), "one read of JPY's file")
+	require.Equal(t, 2, fx.Requests(fxfake.Primary, ""))
+
+	_, err := a.FXProvider.Quote(t.Context(), "EUR", "CAD")
 	require.NoError(t, err)
-	require.Equal(t, 1, fx.Requests(fxfake.Primary, ""), "the other replica quotes the stored rates")
+	require.Equal(t, 2, fx.Requests(fxfake.Primary, ""), "the held file lists every currency")
+	_, err = b.FXProvider.Quote(t.Context(), "EUR", "CAD")
+	require.NoError(t, err)
+	require.Equal(t, 2, fx.Requests(fxfake.Primary, "eur"), "the other instance reads its own")
+}
+
+// A file published days ago, or one neither host serves, is no rate: the
+// quote fails and nothing stands in for it. A failure is not asked again
+// within the negative window, and a refresh holds nothing it refused.
+func TestFXRefusesStaleOrFailedSource(t *testing.T) {
+	fx, f := fxfake.New(), newFixture(t)
+	t.Cleanup(fx.Close)
+	rt := engine.Graph(f.fxEngine(t, fx, false)).Runtime
 
 	fx.Date("gbp", time.Now().Add(-5*24*time.Hour))
+	q, err := rt.FXProvider.Quote(t.Context(), "GBP", "USD")
+	require.ErrorContains(t, err, "stale")
+	require.Nil(t, q)
+
 	fx.Fail(fxfake.Primary, "jpy")
 	fx.Fail(fxfake.Fallback, "jpy")
-	_, err = ra.Quote(t.Context(), "GBP", "USD")
-	require.ErrorContains(t, err, "stale", "a file published days ago is no rate")
 	for range 3 {
-		_, err = ra.Quote(t.Context(), "JPY", "USD")
-		require.Error(t, err)
+		q, err = rt.FXProvider.Quote(t.Context(), "JPY", "USD")
+		require.ErrorContains(t, err, "FX rate unavailable for JPY -> USD")
+		require.Nil(t, q)
 	}
 	require.Equal(t, 1, fx.Requests(fxfake.Primary, "jpy"), "a failure is remembered")
 	require.Equal(t, 1, fx.Requests(fxfake.Fallback, "jpy"))
+
+	err = rt.FXRates.Refresh(t.Context())
+	require.ErrorContains(t, err, "2 of ")
+	_, err = rt.FXProvider.Quote(t.Context(), "USD", "GBP")
+	require.NoError(t, err, "the other bases refreshed")
+	for _, base := range []string{"GBP", "JPY"} {
+		q, err = rt.FXProvider.Quote(t.Context(), base, "USD")
+		require.Error(t, err, base)
+		require.Nil(t, q)
+	}
 }

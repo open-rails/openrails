@@ -103,7 +103,7 @@ explicit:
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
-| `StripeTransport`, `NMITransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
+| `StripeTransport`, `NMITransport`, `FXTransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no

@@ -61,12 +61,13 @@ func TestConvertAmount(t *testing.T) {
 type fxServer struct {
 	*httptest.Server
 	requests atomic.Int64
-	date     string
+	date     atomic.Value
 	failing  map[string]bool
 }
 
 func newFXServer(t *testing.T, date string, failing ...string) *fxServer {
-	s := &fxServer{date: date, failing: map[string]bool{}}
+	s := &fxServer{failing: map[string]bool{}}
+	s.date.Store(date)
 	for _, base := range failing {
 		s.failing[base] = true
 	}
@@ -78,8 +79,8 @@ func newFXServer(t *testing.T, date string, failing ...string) *fxServer {
 			return
 		}
 		dated := ""
-		if s.date != "" {
-			dated = fmt.Sprintf(`"date":%q,`, s.date)
+		if date := s.date.Load().(string); date != "" {
+			dated = fmt.Sprintf(`"date":%q,`, date)
 		}
 		_, _ = fmt.Fprintf(w, `{%s%q:{"usd":1.25,"eur":0.8,"gbp":0.7,"jpy":150,"xyz":3}}`, dated, base)
 	}))
@@ -188,5 +189,101 @@ func TestFlightsSingleFlightAndRememberFailure(t *testing.T) {
 	_, _ = f.do(context.Background(), "GBP", fail)
 	if calls.Load() != 3 {
 		t.Fatalf("calls = %d, want a retry after the window", calls.Load())
+	}
+}
+
+// The refresh starts with the first cross-currency quote, reads every
+// currency each interval, and stops at Close; quotes then read only what
+// they miss.
+func TestRatesRefreshFromFirstQuoteUntilClose(t *testing.T) {
+	srv := newFXServer(t, time.Now().UTC().Format(time.DateOnly))
+	src := srv.source(nil)
+	sent := &countingTransport{next: src.client.Transport}
+	src.client = &http.Client{Transport: sent}
+	r := NewRates(src)
+	r.currencies, r.interval = []string{"USD", "EUR", "GBP"}, 20*time.Millisecond
+	if _, err := r.Quote(context.Background(), "USD", "USD"); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * r.interval)
+	if n := sent.n.Load(); n != 0 {
+		t.Fatalf("no cross-currency quote, yet %d requests", n)
+	}
+
+	q, err := r.Quote(context.Background(), "EUR", "USD")
+	if err != nil || q.Rate != 1.25 || sent.n.Load() != 1 {
+		t.Fatalf("quote %+v err %v requests %d", q, err, sent.n.Load())
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, usd := r.held("USD")
+		_, gbp := r.held("GBP")
+		if usd && gbp && sent.n.Load() >= 1+int64(len(r.currencies)) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("no refresh: %d requests", sent.n.Load())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	r.Close()
+	n := sent.n.Load()
+	time.Sleep(5 * r.interval)
+	if _, err := r.Quote(context.Background(), "GBP", "EUR"); err != nil {
+		t.Fatal(err)
+	}
+	if sent.n.Load() != n {
+		t.Fatalf("requests after Close: %d, then %d", n, sent.n.Load())
+	}
+}
+
+// countingTransport counts the requests a client sends.
+type countingTransport struct {
+	next http.RoundTripper
+	n    atomic.Int64
+}
+
+func (c *countingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	c.n.Add(1)
+	return c.next.RoundTrip(r)
+}
+
+// A held table is quoted until 48 hours after publication, then read again
+// and refused while the source is no fresher. A refresh never replaces a
+// later publication with an earlier one.
+func TestRatesNeverQuoteAStaleTable(t *testing.T) {
+	srv := newFXServer(t, "2026-09-01")
+	r := NewRates(srv.source(nil))
+	r.currencies, r.flights.negativeTTL = []string{"USD", "EUR"}, 0
+	now := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
+	r.now = func() time.Time { return now }
+	defer r.Close()
+
+	for range 2 {
+		if _, err := r.Quote(context.Background(), "EUR", "USD"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if srv.requests.Load() != 1 {
+		t.Fatalf("requests = %d, want the table held", srv.requests.Load())
+	}
+
+	now = now.Add(48 * time.Hour)
+	q, err := r.Quote(context.Background(), "EUR", "USD")
+	if q != nil || err == nil || !strings.Contains(err.Error(), "stale") || srv.requests.Load() != 2 {
+		t.Fatalf("stale table: quote %+v err %v requests %d", q, err, srv.requests.Load())
+	}
+
+	srv.date.Store("2026-09-04")
+	if q, err = r.Quote(context.Background(), "EUR", "USD"); err != nil || !q.AsOf.Equal(time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("fresh table: quote %+v err %v", q, err)
+	}
+	srv.date.Store("2026-09-03")
+	if err := r.Refresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if q, _ = r.Quote(context.Background(), "EUR", "USD"); !q.AsOf.Equal(time.Date(2026, 9, 4, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("an earlier publication replaced the held one: %+v", q)
 	}
 }

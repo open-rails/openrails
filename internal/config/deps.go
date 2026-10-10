@@ -44,9 +44,10 @@ type Deps struct {
 	UserInfo UserInfo
 
 	// Test seams, refused with Config.TestMode live. StripeTransport and
-	// NMITransport replace the provider wires and FXTransport the FX
-	// sources'; DNSResolver answers api_host proofs; Clock drives renewal
-	// dates, retries and entitlement windows.
+	// NMITransport replace the provider wires; FXTransport replaces the FX
+	// source's, which each process reads its rates from into memory;
+	// DNSResolver answers api_host proofs; Clock drives renewal dates,
+	// retries and entitlement windows.
 	StripeTransport http.RoundTripper
 	NMITransport    http.RoundTripper
 	FXTransport     http.RoundTripper

@@ -92,9 +92,8 @@ and the `TestReplicas` suites run several instances on one database.
   they are counted in PostgreSQL, once for the whole fleet either way. A
   declared Redis that stops answering costs speed, not correctness: requests
   count in PostgreSQL meanwhile and readiness reports it degraded without
-  failing. Only Redis carries the card-abuse captcha accelerator, the
-  admission-denial statistics and the shared FX quote cache: without it each
-  instance fetches and caches its own rates for five minutes.
+  failing. Only Redis carries the card-abuse captcha accelerator and the
+  admission-denial statistics.
 - The standalone server records spent DPoP proofs in PostgreSQL. Its AuthKit
   still counts its own rate limits in Redis: without Redis, `auth.allow_memory`
   keeps them in the process, for one instance only.
@@ -136,7 +135,8 @@ whichever replica leads schedules them.
 
 Outside River, every instance runs the Solana Pay poller, which shares
 references through leased claims, and verifies its own PSP credentials at
-start.
+start. From its first cross-currency quote until it closes, an instance reads
+FX rates into its own memory every 2 hours, whether or not it calls `Start`.
 
 ### Caches
 
@@ -148,7 +148,7 @@ instance is read by every other on its next request. Per-instance caches:
 |---|---|
 | Merchant secrets (database backend) | at once for PSP credentials (read by version); up to 15 minutes for other secrets |
 | Solana keypair signer | 60 seconds |
-| FX quotes without Redis | 5 minutes |
+| FX rates | the instance's next refresh (every 2 hours); a rate published 48 hours ago is never quoted |
 | `GET /v1/config` in browsers and CDNs | 5 minutes (`Cache-Control`) |
 | PSP posture verdicts | the instance's next start: restart every instance after fixing a PSP that started disarmed |
 
@@ -1090,17 +1090,10 @@ of leader neither delays nor repeats a period's run.
 | Convergence sweep (+ start) · arrears delinquency evaluation · Solana Pay reference GC | 15 min |
 | Credit-ledger reconcile (alert-only) | 30 min |
 | Price-migration re-driver (+ start) · cleanup · credit expiry · Solana crank · Stripe webhook reconcile · invoice collection | 1 h |
-| FX refresh | 2 h |
 | Dunning · Provider Refresh scheduler (+ start; fans out per-merchant jobs) | 4 h |
 | Solana gas alert · Solana ledger reconcile | 6 h |
 | Catalog reconciliation pull (alert-only) | `catalog_reconciliation_interval` (default 1h; `0` disables) |
 | Invoice period finalize / monthly-floor sweep | daily / 30 d |
-
-The FX refresh reads each currency's published rates, one request per
-currency (the fallback mirror when the primary fails), into `billing.fx_rates`,
-which every replica quotes from. A stored rate is quoted for 3 hours after it
-was read; a quote that finds none fresh reads its base currency itself and
-stores it for the other replicas.
 
 The health checker seeds `billing.worker_state` and raises a critical
 `life.worker.stalled` finding in every merchant when a periodic kind stops
@@ -1153,7 +1146,7 @@ trusted issuers' JWKS URIs, `llm.base_url`), the server calls:
 
 | Destination | What for |
 |---|---|
-| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes: once per fleet every 2 hours, one request per currency (the FX refresh job), and by a quote that finds no fresh stored rate. Boot never waits for them: a failed refresh is retried with backoff, and a rate it cannot fetch fails only the quote that needed it. |
+| `latest.currency-api.pages.dev`, then `cdn.jsdelivr.net` | FX rates for cross-currency quotes, held in each instance's memory: each instance reads 34 files, one per currency (the fallback mirror when the primary fails), every 2 hours from its first cross-currency quote, and a quote reads the one file it finds missing or stale. An instance that never quotes across currencies never calls them. Boot never waits for them: a failed read is retried at the next refresh or quote, and a rate it cannot fetch fails only the quote that needed it. |
 | `hermes.pyth.network` | Solana token prices, when a Solana rail quotes a token. |
 | `api.stripe.com` | Stripe PSPs. |
 | `secure.nmi.com`, `sandbox.nmi.com` | NMI PSPs, by `test_mode`. |

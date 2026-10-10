@@ -261,7 +261,7 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if overrides != nil {
 		fxTransport = overrides.FXTransport
 	}
-	fxRates := fx.NewRates(database, fx.NewSource(fxTransport))
+	fxRates := fx.NewRates(fx.NewSource(fxTransport))
 	serviceInstances, err := createServices(database, leaseDB, cfg, railConfigs, collectionResolver, solanaRPCResolver, fxRates, clock, solanaPriceProvider, customers, stripeClients)
 	if err != nil {
 		return nil, err
@@ -627,8 +627,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 	})
 	railCustomerService := payments.NewRailCustomerService(database)
 	// FX for Solana token quotes and policy-currency admission: live rates
-	// from billing.fx_rates, which the FX refresh job fills once for the fleet
-	// (riverjobs.FXRefreshWorker). Never a flat 1.0 rate.
+	// held in process memory. Never a flat 1.0 rate.
 	fxProvider := fxRates
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later

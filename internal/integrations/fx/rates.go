@@ -2,53 +2,46 @@ package fx
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
 const (
-	// RefreshInterval is the fleet's refresh cadence (one River job).
+	// RefreshInterval is how often a quoting process reads every currency's
+	// rates again.
 	RefreshInterval = 2 * time.Hour
-	// rateTTL is how long a stored rate is quoted before a quote reads its
-	// base currency again: a refresh missed, or none running.
-	rateTTL = 3 * time.Hour
-	// memoryTTL bounds how long a replica quotes a rate without reading the
-	// table.
-	memoryTTL = 5 * time.Minute
+	// refreshReads bounds a refresh's concurrent source reads.
+	refreshReads = 8
 )
 
-// Rates quotes from billing.fx_rates, which one refresh fills for the whole
-// fleet. A pair missing or older than rateTTL is read inline, its whole base
-// currency in one request, and stored for every replica. It fails closed: no
-// fresh rate, no quote.
+// Rates quotes from rate tables held in process memory. A quote that finds
+// its base currency's table missing or stale reads it, one request however
+// many ask at once. From a process's first cross-currency quote until Close,
+// every currency's table is read again each RefreshInterval. A table
+// published more than 48 hours ago is never quoted: no fresh rate, no quote.
 type Rates struct {
-	db         *db.DB
 	source     *Source
 	currencies []string
+	interval   time.Duration
 	now        func() time.Time
 	flights    *flights[Table]
 
-	mu     sync.Mutex
-	memory map[string]memoryRate
+	mu      sync.Mutex
+	tables  map[string]Table
+	closed  bool
+	stop    context.CancelFunc
+	stopped chan struct{}
 }
 
-type memoryRate struct {
-	quote Quote
-	until time.Time
-}
-
-// NewRates quotes from d's fx_rates, reading source when it must.
-func NewRates(d *db.DB, source *Source) *Rates {
-	return &Rates{db: d, source: source, currencies: moneyutil.CurrencyCodes(), now: time.Now, flights: newFlights[Table](), memory: map[string]memoryRate{}}
+// NewRates quotes from source's tables.
+func NewRates(source *Source) *Rates {
+	return &Rates{source: source, currencies: moneyutil.CurrencyCodes(), interval: RefreshInterval, now: time.Now, flights: newFlights[Table](), tables: map[string]Table{}}
 }
 
 func (r *Rates) Quote(ctx context.Context, from, to string) (*Quote, error) {
@@ -56,32 +49,16 @@ func (r *Rates) Quote(ctx context.Context, from, to string) (*Quote, error) {
 	if from == "" || to == "" {
 		return nil, fmt.Errorf("from_currency and to_currency are required")
 	}
-	now := r.now()
 	if from == to {
-		return &Quote{FromCurrency: from, ToCurrency: to, Rate: 1, AsOf: now}, nil
+		return &Quote{FromCurrency: from, ToCurrency: to, Rate: 1, AsOf: r.now()}, nil
 	}
-	if q, ok := r.recall(from, to, now); ok {
-		return q, nil
-	}
-	row, err := r.db.GenDirectory().GetFXRate(ctx, gen.GetFXRateParams{FromCurrency: from, ToCurrency: to})
-	switch {
-	case err == nil && now.Sub(row.FetchedAt) < rateTTL && !staleRate(row.AsOf, now):
-		return r.remember(Quote{FromCurrency: from, ToCurrency: to, Rate: row.Rate, AsOf: row.AsOf}, row.FetchedAt.Add(rateTTL), now), nil
-	case err != nil && !db.IsNotFound(err):
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
+	r.startRefresh()
+	t, ok := r.held(from)
+	if !ok {
+		var err error
+		if t, err = r.flights.do(ctx, from, func(ctx context.Context) (Table, error) { return r.read(ctx, from) }); err != nil {
+			return nil, fmt.Errorf("FX rate unavailable for %s -> %s: %w", from, to, err)
 		}
-		log.WithError(err).Warn("fx: stored rates unreadable; reading the source")
-	}
-	// A read of the same base may have finished since the first look.
-	if q, ok := r.recall(from, to, now); ok {
-		return q, nil
-	}
-	t, err := r.flights.do(ctx, from, func(ctx context.Context) (Table, error) {
-		return r.read(ctx, from)
-	})
-	if err != nil {
-		return nil, fmt.Errorf("FX rate unavailable for %s -> %s: %w", from, to, err)
 	}
 	rate, ok := t.Rates[to]
 	if !ok {
@@ -94,14 +71,10 @@ func (r *Rates) QuoteToUSD(ctx context.Context, currency string) (*Quote, error)
 	return r.Quote(ctx, currency, money.DefaultCurrency)
 }
 
-// refreshReads bounds a refresh's concurrent source reads.
-const refreshReads = 8
-
-// Refresh reads every currency's table, one request each, and stores every
-// pair for the fleet. A base that fails keeps its stored rates; the error
-// names how many failed.
+// Refresh reads every currency's table, refreshReads at a time: one request
+// each, two when the primary fails. A base that fails keeps its held table;
+// the error names how many failed.
 func (r *Rates) Refresh(ctx context.Context) error {
-	results := make([]Table, len(r.currencies))
 	failures := make([]error, len(r.currencies))
 	slots := make(chan struct{}, refreshReads)
 	var wg sync.WaitGroup
@@ -109,31 +82,23 @@ func (r *Rates) Refresh(ctx context.Context) error {
 		wg.Go(func() {
 			slots <- struct{}{}
 			defer func() { <-slots }()
-			t, err := r.source.Table(ctx, base, r.currencies)
-			if err == nil && staleRate(t.AsOf, r.now()) {
-				err = fmt.Errorf("FX rates for %s are stale (as of %s)", base, t.AsOf.Format(time.DateOnly))
+			t, err := r.fetch(ctx, base)
+			if err == nil {
+				r.hold(t)
+				r.flights.forget(base)
 			}
-			results[i], failures[i] = t, err
+			failures[i] = err
 		})
 	}
 	wg.Wait()
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	var tables []Table
 	var errs []error
-	for i := range r.currencies {
-		if failures[i] != nil {
-			errs = append(errs, failures[i])
-			continue
+	for _, err := range failures {
+		if err != nil {
+			errs = append(errs, err)
 		}
-		tables = append(tables, results[i])
-	}
-	if err := r.store(ctx, r.now(), tables...); err != nil {
-		return err
-	}
-	for _, t := range tables {
-		r.flights.forget(t.Base)
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%d of %d FX base currencies failed; first %w", len(errs), len(r.currencies), errs[0])
@@ -141,8 +106,62 @@ func (r *Rates) Refresh(ctx context.Context) error {
 	return nil
 }
 
-// read is base's table from the source, stored for the fleet.
+// Close stops the refresh. Quotes still read what they miss.
+func (r *Rates) Close() {
+	r.mu.Lock()
+	r.closed = true
+	stop, stopped := r.stop, r.stopped
+	r.mu.Unlock()
+	if stop != nil {
+		stop()
+		<-stopped
+	}
+}
+
+// startRefresh starts the periodic refresh once.
+func (r *Rates) startRefresh() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed || r.stop != nil {
+		return
+	}
+	ctx, stop := context.WithCancel(context.Background())
+	r.stop, r.stopped = stop, make(chan struct{})
+	go r.refreshEvery(ctx, r.stopped)
+}
+
+func (r *Rates) refreshEvery(ctx context.Context, stopped chan<- struct{}) {
+	defer close(stopped)
+	tick := time.NewTicker(r.interval)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			if err := r.Refresh(ctx); err != nil && ctx.Err() == nil {
+				log.WithError(err).Warn("fx: refresh failed; held rates are quoted until 48 hours after publication")
+			}
+		}
+	}
+}
+
+// read is base's table for a quote that missed it: held when a read just
+// finished, else from the source.
 func (r *Rates) read(ctx context.Context, base string) (Table, error) {
+	if t, ok := r.held(base); ok {
+		return t, nil
+	}
+	t, err := r.fetch(ctx, base)
+	if err != nil {
+		return Table{}, err
+	}
+	r.hold(t)
+	return t, nil
+}
+
+// fetch is base's table from the source, refused when stale.
+func (r *Rates) fetch(ctx context.Context, base string) (Table, error) {
 	t, err := r.source.Table(ctx, base, r.currencies)
 	if err != nil {
 		return Table{}, err
@@ -150,56 +169,26 @@ func (r *Rates) read(ctx context.Context, base string) (Table, error) {
 	if staleRate(t.AsOf, r.now()) {
 		return Table{}, fmt.Errorf("FX rates for %s are stale (as of %s)", base, t.AsOf.Format(time.DateOnly))
 	}
-	now := r.now()
-	if err := r.store(ctx, now, t); err != nil {
-		// The quote stands; the next one reads the source again.
-		log.WithError(err).Warn("fx: storing rates failed")
-	}
-	for to, rate := range t.Rates {
-		r.remember(Quote{FromCurrency: base, ToCurrency: to, Rate: rate, AsOf: t.AsOf}, now.Add(rateTTL), now)
-	}
 	return t, nil
 }
 
-func (r *Rates) store(ctx context.Context, fetchedAt time.Time, tables ...Table) error {
-	var p gen.PutFXRatesParams
-	for _, t := range tables {
-		for to, rate := range t.Rates {
-			p.FromCurrencies = append(p.FromCurrencies, t.Base)
-			p.ToCurrencies = append(p.ToCurrencies, to)
-			p.Rates = append(p.Rates, rate)
-			p.AsOfs = append(p.AsOfs, t.AsOf)
-		}
+// hold keeps t unless a later publication is held.
+func (r *Rates) hold(t Table) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if held, ok := r.tables[t.Base]; ok && held.AsOf.After(t.AsOf) {
+		return
 	}
-	if len(p.Rates) == 0 {
-		return nil
-	}
-	p.FetchedAt = fetchedAt
-	if err := r.db.GenDirectory().PutFXRates(ctx, p); err != nil {
-		return errors.Join(errors.New("fx: store rates"), err)
-	}
-	return nil
+	r.tables[t.Base] = t
 }
 
-// recall is a remembered rate still good at now.
-func (r *Rates) recall(from, to string, now time.Time) (*Quote, bool) {
+// held is base's table while it is fresh.
+func (r *Rates) held(base string) (Table, bool) {
 	r.mu.Lock()
-	m, ok := r.memory[from+":"+to]
+	t, ok := r.tables[base]
 	r.mu.Unlock()
-	if !ok || !now.Before(m.until) || staleRate(m.quote.AsOf, now) {
-		return nil, false
+	if !ok || staleRate(t.AsOf, r.now()) {
+		return Table{}, false
 	}
-	q := m.quote
-	return &q, true
-}
-
-// remember keeps q until the stored rate's own expiry, memoryTTL at most.
-func (r *Rates) remember(q Quote, until, now time.Time) *Quote {
-	if limit := now.Add(memoryTTL); until.After(limit) {
-		until = limit
-	}
-	r.mu.Lock()
-	r.memory[q.FromCurrency+":"+q.ToCurrency] = memoryRate{quote: q, until: until}
-	r.mu.Unlock()
-	return &q
+	return t, true
 }

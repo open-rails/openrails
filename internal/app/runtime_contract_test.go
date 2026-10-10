@@ -8,7 +8,6 @@ import (
 	"unsafe"
 
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/integrations/fx"
 	"github.com/open-rails/openrails/internal/providerrecovery"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
@@ -55,7 +54,6 @@ func TestPeriodicScheduleContract(t *testing.T) {
 		riverjobs.SolanaPayGCArgs{}.Kind():               {15 * time.Minute, false},
 		riverjobs.CreditExpiryArgs{}.Kind():              {time.Hour, false},
 		riverjobs.AdmissionDenialFlushArgs{}.Kind():      {5 * time.Minute, false},
-		riverjobs.FXRefreshArgs{}.Kind():                 {fx.RefreshInterval, false},
 		riverjobs.CatalogReconciliationPullArgs{}.Kind(): {time.Hour, false},
 		riverjobs.StripeWebhookReconcileArgs{}.Kind():    {time.Hour, false},
 		riverjobs.InvoiceArgs{}.Kind():                   {time.Hour, true}, // hourly + daily + monthly; shortest wins

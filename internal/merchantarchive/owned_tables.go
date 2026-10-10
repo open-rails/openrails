@@ -37,7 +37,6 @@ var ownedTables = []string{
 	"document_sequences",
 	"failed_usage_windows",
 	"federated_grants",
-	"fx_rates",
 	"grants",
 	"host_outbox",
 	"idempotency_keys",

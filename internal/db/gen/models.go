@@ -524,17 +524,6 @@ type BillingFederatedGrant struct {
 	UpdatedAt  time.Time
 }
 
-// Global by design: the latest published rate of each currency pair, read once for the fleet and quoted by every replica. One row per pair, replaced in place.
-type BillingFxRate struct {
-	FromCurrency string
-	ToCurrency   string
-	Rate         float64
-	// The source's publication date for the rate.
-	AsOf time.Time
-	// When the rate was read; a quote reads its base currency again once this is 3 hours old.
-	FetchedAt time.Time
-}
-
 // Append-only grant ledger: the access-domain sibling of the money ledger. Immutable events (grant/revoke/expire/supersede); the live entitlement windows, product ownership, and credit lots are DERIVED projections folded from this log. A credit grant carries the lot amount and currency and is the FIFO credit lot; its deposit transfer is tagged source=grant. Retention: permanent, never pruned.
 type BillingGrant struct {
 	ID         uuid.UUID
