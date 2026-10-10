@@ -8498,7 +8498,7 @@
         ]
       }
     },
-    "/v1/me/billing-portal-sessions": {
+    "/v1/me/stripe/billing-portal-sessions": {
       "post": {
         "tags": [
           "customer"
@@ -8509,7 +8509,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PortalResponse"
+                  "$ref": "#/components/schemas/StripePortalSession"
                 }
               }
             }
@@ -8527,7 +8527,8 @@
         "x-openrails-mounted-when": "stripe_portal",
         "x-openrails-errors": [
           "invalid_param",
-          "resource_not_found"
+          "resource_not_found",
+          "route_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:customer"
@@ -18400,17 +18401,6 @@
           }
         }
       },
-      "PortalResponse": {
-        "type": "object",
-        "properties": {
-          "url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ]
-      },
       "PreviewOrderParams": {
         "type": "object",
         "properties": {
@@ -20647,6 +20637,17 @@
         },
         "required": [
           "operation"
+        ]
+      },
+      "StripePortalSession": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
         ]
       },
       "Subscription": {

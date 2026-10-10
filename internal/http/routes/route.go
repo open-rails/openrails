@@ -105,7 +105,9 @@ const (
 	FeatureSolana Feature = "solana"
 	// FeatureSolanaSigning: OpenRails can sign Solana transactions.
 	FeatureSolanaSigning Feature = "solana_signing"
-	// FeatureStripePortal: a Stripe PSP is armed.
+	// FeatureStripePortal: a Stripe PSP is armed. Where it is mounted before
+	// that is known (a server's many merchants, PSPs added later), a request
+	// whose merchant has none answers route_not_found.
 	FeatureStripePortal Feature = "stripe_portal"
 	// FeatureMerchantDirectory: the deployment has a merchant directory.
 	FeatureMerchantDirectory Feature = "merchant_directory"

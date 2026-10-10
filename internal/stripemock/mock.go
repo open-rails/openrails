@@ -452,6 +452,13 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 			s["status"], s["canceled_at"] = "canceled", m.now().Unix()
 		}
 		return 200, s
+	case r.Method == http.MethodPost && p == "/v1/billing_portal/sessions":
+		if _, ok := m.customers[form.Get("customer")]; !ok {
+			return 400, stripeErr("resource_missing")
+		}
+		id := m.id("bps")
+		return 200, Object{"object": "billing_portal.session", "id": id, "customer": form.Get("customer"), "return_url": form.Get("return_url"),
+			"url": "https://billing.stripe.com/p/session/test_" + id, "livemode": false}
 	case r.Method == http.MethodPost && p == "/v1/checkout/sessions":
 		return m.createCheckoutSession(form)
 	case seg[0] == "checkout" && len(seg) >= 3 && seg[1] == "sessions":

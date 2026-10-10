@@ -201,6 +201,10 @@ status. `unpaid`, `paused`, and a `past_due` subscription whose open invoice has
 no further payment attempt grant no access. A `past_due` subscription Stripe is
 still retrying keeps access until Stripe cancels it or stops retrying.
 
+The customer manages them in Stripe's own portal:
+`POST /v1/me/stripe/billing-portal-sessions` answers its `url`. A merchant
+without an armed Stripe PSP answers `404 route_not_found`.
+
 A portal cancel at period end and a portal resume are mirrored as the member's
 own cancel and resume; a subscription whose paid period is over is not resumed
 by Stripe's status alone. A price change takes effect only once Stripe's paid

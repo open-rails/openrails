@@ -1394,11 +1394,11 @@
       "type MintCheckoutSessionParams struct {\n\tPriceID    billing.PriceID `json:\"price_id\"`\n\tPriceKey   string          `json:\"price_key\"`\n\tProductKey string          `json:\"product_key,omitempty\"`\n\tAmount     *int64          `json:\"amount,string,omitempty\"`\n\tAutoRenew  *bool           `json:\"auto_renew,omitempty\"`\n\tSuccessURL string          `json:\"success_url\" binding:\"omitempty,url\"`\n}",
       "type PaginatedResponse[T any] struct {\n\tItems  []T   `json:\"items\"`\n\tTotal  int64 `json:\"total\"`\n\tLimit  int   `json:\"limit\"`\n\tOffset int   `json:\"offset\"`\n}",
       "type PaymentMethodSetupParams struct {\n\tPSPID   billing.PSPID `json:\"psp_id\"`\n\tConsent bool          `json:\"consent\"`\n}",
-      "type PortalResponse struct {\n\tURL string `json:\"url\"`\n}",
       "type PreviewSubscriptionChangeParams struct {\n\tPriceID  *billing.PriceID `json:\"price_id\"`\n\tQuantity *int             `json:\"quantity\"`\n}",
       "type SolanaPayGetResponse struct {\n\tLabel string `json:\"label\"`\n\tIcon  string `json:\"icon\"`\n}",
       "type SolanaPayPostRequest struct {\n\tAccount string `json:\"account\" binding:\"required\"`\n}",
       "type SolanaPayPostResponse struct {\n\tTransaction string `json:\"transaction\"`\n\tMessage     string `json:\"message,omitempty\"`\n}",
+      "type StripePortalSession struct {\n\tURL string `json:\"url\"`\n}",
       "type SupportedTokensResponse struct {\n\tTokens []TokenInfo `json:\"tokens\"`\n}",
       "type TokenBalance struct {\n\tAmount     string `json:\"amount\"`\n\tUnits      uint64 `json:\"units,string\"`\n\tSufficient bool   `json:\"sufficient\"`\n}",
       "type TokenInfo struct {\n\tSymbol   string `json:\"symbol\"`\n\tName     string `json:\"name\"`\n\tMint     string `json:\"mint\"`\n\tDecimals int    `json:\"decimals\"`\n\tPrice    string `json:\"price,omitempty\"`\n\n\tPreferred bool `json:\"preferred\"`\n\n\tRecurringEligible bool          `json:\"recurring_eligible\"`\n\tQuote             *TokenQuote   `json:\"quote,omitempty\"`\n\tBalance           *TokenBalance `json:\"balance,omitempty\"`\n}",
@@ -2468,14 +2468,6 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil"
     },
-    "internal/http/handlers/portal.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "config": "github.com/open-rails/openrails/internal/config",
-      "httprequest": "github.com/open-rails/openrails/internal/http/request",
-      "slices": "slices",
-      "strings": "strings",
-      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
-    },
     "internal/http/handlers/solana_pay.go": {
       "billing": "github.com/open-rails/openrails/billing",
       "checkout": "github.com/open-rails/openrails/internal/modules/checkout",
@@ -2512,6 +2504,15 @@
       "billing": "github.com/open-rails/openrails/billing",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "intents": "github.com/open-rails/openrails/internal/intents"
+    },
+    "internal/http/handlers/stripe_portal.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "config": "github.com/open-rails/openrails/internal/config",
+      "httprequest": "github.com/open-rails/openrails/internal/http/request",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "slices": "slices",
+      "strings": "strings",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions"
     },
     "internal/http/handlers/subscription_change.go": {
       "api": "github.com/open-rails/openrails/internal/api",

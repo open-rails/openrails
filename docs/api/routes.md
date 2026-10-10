@@ -79,7 +79,7 @@ A customer acting on its own account.
 | POST | `/v1/me/payment-method-setups` | customer | — | `PaymentMethodSetupParams` | 200 `PaymentMethodSetup` | `Idempotency-Key` |
 | GET | `/v1/me/payment-method-setups/{id}` | customer | — | — | 200 `PaymentMethodSetup` |  |
 | POST | `/v1/me/payment-method-setups/{id}/confirm` | customer | — | — | 200 `PaymentMethodSetup` |  |
-| POST | `/v1/me/billing-portal-sessions` | customer | — | — | 200 `PortalResponse` | when `stripe_portal` |
+| POST | `/v1/me/stripe/billing-portal-sessions` | customer | — | — | 200 `StripePortalSession` | when `stripe_portal` |
 | GET | `/v1/me/notifications` | customer | — | — | 200 `ListPage<Notification>` |  |
 | POST | `/v1/me/notifications/read` | customer | — | `MarkNotificationsReadParams` | 200 `CustomerNotificationLookup` |  |
 

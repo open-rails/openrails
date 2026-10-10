@@ -263,7 +263,7 @@ default not set is `400 default_payment_method_required`.
   `409 payment_method_update_retry_required` when a fresh token is needed.
 - **Delete**: `204` when the provider and the local record are both gone, `202`
   while that converges. Stripe cards are managed in Stripe's billing portal
-  (`POST /v1/me/billing-portal-sessions`).
+  (`POST /v1/me/stripe/billing-portal-sessions`).
 - **Stripe cards** are saved through a setup: `POST /v1/me/payment-method-setups`,
   Stripe.js confirms it in the page, then `…/{id}/confirm`.
 

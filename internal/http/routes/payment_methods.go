@@ -33,6 +33,6 @@ var paymentMethodsRoutes = []Route{
 		Responses: []Reply{{200, checkout.PaymentMethodSetup{}}}, Errors: cardSetupErrors, Handler: h(handlers.GetPaymentMethodSetup)},
 	{Method: POST, Path: "/v1/me/payment-method-setups/{id}/confirm", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, checkout.PaymentMethodSetup{}}}, Errors: cardSetupErrors, Handler: h(handlers.ConfirmPaymentMethodSetup)},
-	{Method: POST, Path: "/v1/me/billing-portal-sessions", Group: Customer, Auth: AuthCustomer, When: FeatureStripePortal,
-		Responses: []Reply{{200, handlers.PortalResponse{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.CreatePortalSession)},
+	{Method: POST, Path: "/v1/me/stripe/billing-portal-sessions", Group: Customer, Auth: AuthCustomer, When: FeatureStripePortal,
+		Responses: []Reply{{200, handlers.StripePortalSession{}}}, Errors: codes("invalid_param", "resource_not_found", "route_not_found"), Handler: h(handlers.CreateStripePortalSession)},
 }

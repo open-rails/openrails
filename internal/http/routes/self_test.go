@@ -85,7 +85,7 @@ func TestCustomerRouteInventories(t *testing.T) {
 		return CustomerMount{Auth: authtest.Deny{}, Providers: providers}
 	}
 	require.Subset(t, collect(func(r router.Router) { RegisterCustomerRoutes(r, nil, mount(all)) }), []string{
-		"POST /me/checkout-sessions", "POST /me/billing-portal-sessions",
+		"POST /me/checkout-sessions", "POST /me/stripe/billing-portal-sessions",
 		"POST /me/subscriptions/{id}/change", "POST /me/subscriptions/{id}/cancel", "PUT /me/default-payment-methods/{currency}",
 	})
 
@@ -99,6 +99,6 @@ func TestCustomerRouteInventories(t *testing.T) {
 		{routesurface.ProviderRoutes{SolanaSigning: true}, false},
 	} {
 		self := collect(func(r router.Router) { RegisterCustomerRoutes(r, nil, mount(tc.providers)) })
-		require.Equal(t, tc.portal, slices.Contains(self, "POST /me/billing-portal-sessions"), "%+v", tc.providers)
+		require.Equal(t, tc.portal, slices.Contains(self, "POST /me/stripe/billing-portal-sessions"), "%+v", tc.providers)
 	}
 }

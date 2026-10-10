@@ -66,7 +66,7 @@ PUT  /v1/me/subscriptions/{id}/payment-method  its own saved card, or null to fo
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
 PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
-POST /v1/me/billing-portal-sessions       → {"url": ...} (Stripe-portal deployments)
+POST /v1/me/stripe/billing-portal-sessions → {"url": ...} Stripe's portal (merchants with a Stripe PSP)
 GET  /v1/me/notifications                 billing notifications
 ```
 

@@ -778,7 +778,7 @@ Mounting gives your users these routes under `/billing`:
 | `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its invoices and every subscription without its own card |
 | `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
 | `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
-| `POST /billing/v1/me/billing-portal-sessions` | open Stripe's billing portal (when a Stripe PSP is declared) |
+| `POST /billing/v1/me/stripe/billing-portal-sessions` | open Stripe's billing portal (when a Stripe PSP is declared) |
 | `GET /billing/v1/me/payments` | payment and refund history |
 | `GET /billing/v1/me/invoices` | invoices |
 | `GET /billing/v1/me/invoices/{id}` | one invoice |

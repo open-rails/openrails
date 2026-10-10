@@ -7,21 +7,39 @@ import (
 	"github.com/open-rails/openrails/billing"
 
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-type PortalResponse struct {
+// StripePortalSession is where the customer manages the subscriptions Stripe
+// runs: Stripe's own customer portal.
+type StripePortalSession struct {
 	URL string `json:"url"`
 }
 
-func CreatePortalSession(r *httprequest.Request) {
+// CreateStripePortalSession opens Stripe's customer portal. A merchant
+// without an armed Stripe PSP does not serve the route.
+func CreateStripePortalSession(r *httprequest.Request) {
 	user := r.GetUser()
 	if user == nil || user.ID == "" {
 		r.ErrorCode(billing.CodeAuthenticationRequired, "User authentication required")
 		return
 	}
-	customerID, err := r.State.RailCustomerService.GetCustomerID(r.Request.Context(), user.ID, "stripe")
+	if r.State.RailConfigs == nil {
+		r.ErrorCode(billing.CodeRouteNotFound, "")
+		return
+	}
+	armed, err := r.State.RailConfigs.Armed(r.Request.Context(), string(models.RailStripe))
+	if err != nil {
+		r.InternalError("stripe configuration unavailable", err)
+		return
+	}
+	if !armed {
+		r.ErrorCode(billing.CodeRouteNotFound, "")
+		return
+	}
+	customerID, err := r.State.RailCustomerService.GetCustomerID(r.Request.Context(), user.ID, string(models.RailStripe))
 	if err != nil || strings.TrimSpace(customerID) == "" {
 		r.ErrorCode(billing.CodeResourceNotFound, "stripe customer not found")
 		return
@@ -38,7 +56,7 @@ func CreatePortalSession(r *httprequest.Request) {
 		writeRefusal(r, err, "billing portal unavailable")
 		return
 	}
-	r.SuccessJSON(PortalResponse{URL: urlStr})
+	r.SuccessJSON(StripePortalSession{URL: urlStr})
 }
 
 // portalReturnOrigin returns the browser's origin only when it is an allowed

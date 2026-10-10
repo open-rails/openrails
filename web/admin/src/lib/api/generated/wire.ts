@@ -1712,10 +1712,6 @@ export type PerUnitPrice = {
   matrix?: Matrix
 }
 
-export type PortalResponse = {
-  url: string
-}
-
 export type PreviewOrderParams = {
   lines?: OrderLineParams[]
 }
@@ -2211,6 +2207,10 @@ export type StripeEngineAuthentication = {
   payment_intent_id?: string
   client_secret?: string
   provider_payment_method_id?: string
+}
+
+export type StripePortalSession = {
+  url: string
 }
 
 export type Subscription = {
