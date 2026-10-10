@@ -3,14 +3,12 @@
 package ci_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -19,6 +17,7 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/open-rails/helpers/smtp/smtptest"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
@@ -33,44 +32,17 @@ import (
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
-// inbox is an EmailSender that keeps what it is given.
-type inbox struct {
-	mu   sync.Mutex
-	sent []openrails.Email
-}
-
-func (o *inbox) Send(_ context.Context, m openrails.Email) error {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.sent = append(o.sent, m)
-	return nil
-}
-
-func (*inbox) CheckHealth(context.Context) error { return nil }
-
-func (o *inbox) to(address string) int {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	n := 0
-	for _, m := range o.sent {
-		if m.To == address {
-			n++
-		}
-	}
-	return n
-}
-
 // On a standalone server a customer's verified access token carries who it
 // is: a user who registers and buys at once gets the receipt at the token's
-// email with no SCIM push. Newest wins: an older push leaves the claims, a
-// newer one replaces them.
+// email with no SCIM push, through the built-in SMTP sender. Newest wins: an
+// older push leaves the claims, a newer one replaces them.
 func TestStandaloneRecordsVerifiedContactClaims(t *testing.T) {
 	f := newFixture(t)
 	vault := vaultfake.New("e2e-root")
 	t.Cleanup(vault.Close)
 	gateway := nmimock.New(nmimock.Options{})
 	t.Cleanup(gateway.Close)
-	mail := &inbox{}
+	mail := smtptest.Start(t, smtptest.Options{Username: "apikey", Password: "SG.e2e-key"})
 	host := newIssuerKey(t, "https://claims-"+strings.ReplaceAll(f.schema, "_", "-")+".e2e.test")
 	shop := uniqueName("claims")
 	cp := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
@@ -81,7 +53,8 @@ func TestStandaloneRecordsVerifiedContactClaims(t *testing.T) {
 			Identifier: resourceID, DPoPNonceKey: strings.Repeat("n", 32),
 			TrustedIssuers: []server.TrustedIssuerConfig{{Name: "host", Issuer: host.iss, Keys: host.pinned(t), Merchants: []string{shop}, Permissions: []string{staffperm.Read}}},
 		}
-		deps.Engine.Email = mail
+		cfg.Engine.SMTP = &openrails.SMTPConfig{Host: mail.Host, Port: mail.Port, Username: "apikey", Password: "SG.e2e-key",
+			From: openrails.EmailAddress{Name: "Claims", Address: "billing@claims.test"}}
 	})
 	scimToken := "declared-" + uuid.NewString()
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
@@ -152,7 +125,10 @@ merchants:
 
 	sweep := riverjobs.NotificationEmailSweepWorker{DB: graph.Runtime.DB, Notifications: graph.Runtime.NotificationService}
 	require.NoError(t, sweep.Work(ctx, &river.Job[riverjobs.NotificationEmailSweepArgs]{}))
-	require.Positive(t, mail.to("new@claims.test"), "the receipt goes to the token's email at once")
+	receipt := mail.Wait(t, 1, 10*time.Second)[0]
+	require.Equal(t, []string{"new@claims.test"}, receipt.To, "the receipt goes to the token's email at once")
+	require.Equal(t, "apikey", receipt.Username)
+	require.Contains(t, receipt.Text+receipt.HTML, "9.99")
 
 	// The directory pushes later. An older report leaves the claims; a newer one wins.
 	scim := scimClient{t: t, handler: handler, base: "/scim/v2", token: scimToken}
