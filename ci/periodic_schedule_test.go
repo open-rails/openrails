@@ -43,7 +43,7 @@ func TestPeriodicWorkKeepsItsBoundariesAcrossLeaders(t *testing.T) {
 	clock := riverClock{offset: hour.Add(-12 * time.Second).Sub(now)}
 
 	start := func(id string) (stop func()) {
-		rt, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+		rt, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		require.NoError(t, err)
 		fleet, err := riverkit.New(t.Context(), f.pool, &river.Config{
 			ID: id, Schema: f.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},

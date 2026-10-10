@@ -30,7 +30,7 @@ func redisEngine(t *testing.T, f *fixture, rc openrails.RedisConfig) (*openrails
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: "redis-" + uuid.NewString()[:8], DisplayName: "Redis"}
 	cfg.Redis = &rc
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 	require.NoError(t, client.Start(t.Context()))
@@ -146,7 +146,7 @@ func TestDeclaredRedisOutageDegrades(t *testing.T) {
 
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: "noredis-" + uuid.NewString()[:8], DisplayName: "No Redis"}
-	none, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	none, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, none.Close(context.Background())) })
 	require.NoError(t, none.Start(t.Context()))

@@ -25,7 +25,7 @@ func TestDeclaredMerchantSettings(t *testing.T) {
 		return openrails.New(ctx, openrails.Config{
 			Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchant: openrails.MerchantDeclaration{Slug: slug, DisplayName: "Declared", Settings: settings},
-		}, openrails.Deps{Postgres: w.pool, Clock: w.clock})
+		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, Clock: w.clock})
 	}
 	merchants := func() int {
 		var n int

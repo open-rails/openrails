@@ -43,7 +43,7 @@ func TestReplicasShareAbuseLimitsWithoutRedis(t *testing.T) {
 	// Each replica serves buyers, and its staff on another mount.
 	public, staff := make([]http.Handler, 3), make([]http.Handler, 3)
 	for i := range public {
-		client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+		client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 		buyers, admins := http.NewServeMux(), http.NewServeMux()

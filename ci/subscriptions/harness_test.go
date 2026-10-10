@@ -374,7 +374,7 @@ func (w *world) start() {
 		w.mount(&routes)
 	}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: w.slug, DisplayName: w.slug, PSPs: psps, Custodians: w.custodians}
-	deps := openrails.Deps{Postgres: pool, StripeTransport: stripe, NMITransport: nmi, Clock: w.clock}
+	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, StripeTransport: stripe, NMITransport: nmi, Clock: w.clock}
 	if w.deps != nil {
 		w.deps(&deps)
 	}

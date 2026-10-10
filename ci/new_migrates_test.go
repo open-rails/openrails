@@ -60,7 +60,7 @@ func TestMinimalNewOnAnEmptyDatabase(t *testing.T) {
 	client, err := openrails.New(t.Context(), openrails.Config{
 		TestMode:          openrails.Sandbox,
 		ProviderWriteMode: openrails.ProviderWritesReadOnly,
-	}, openrails.Deps{Postgres: pool})
+	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
 
@@ -89,7 +89,7 @@ func TestNewRefusesUnknownPSPKeys(t *testing.T) {
 		_, err := openrails.New(t.Context(), openrails.Config{
 			TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 			Merchant: openrails.MerchantDeclaration{Slug: "host-one", DisplayName: "Host One", PSPs: map[string]openrails.PSPConfig{"p": psp}},
-		}, openrails.Deps{Postgres: pool})
+		}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 		require.EqualError(t, err, want)
 	}
 	var found *string
@@ -115,7 +115,7 @@ func TestReplicasRaceNewOnAnEmptyDatabase(t *testing.T) {
 		for i, pool := range pools {
 			wg.Go(func() {
 				<-start
-				client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: pool})
+				client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 				if err == nil {
 					err = client.Close(context.Background())
 				}
@@ -179,7 +179,7 @@ func TestOlderBuildBootsOnANewerSchema(t *testing.T) {
 	require.Equal(t, 1, kept, "the newer migration stays applied")
 
 	// And the newer build boots again on the same schema.
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
 }

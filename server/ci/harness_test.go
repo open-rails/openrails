@@ -47,7 +47,7 @@ func newFixture(t *testing.T) *fixture {
 		}
 		f.pool.Close()
 	})
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: pool})
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
 	return f
@@ -66,7 +66,7 @@ func (f *fixture) runtime(t *testing.T, slug string) *openrails.Client {
 	t.Helper()
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close(context.Background())) })
 	return client

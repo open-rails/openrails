@@ -57,7 +57,7 @@ func TestNMIRecoveryWorkerProcess(t *testing.T) {
 		TestMode: openrails.Sandbox, ProviderWriteMode: input.Mode,
 		DB:       &openrails.DBConfig{URL: input.DSN},
 		Merchant: openrails.MerchantDeclaration{Slug: input.Slug, DisplayName: input.Slug, PSPs: input.PSPs},
-	}, openrails.Deps{Postgres: pool, Clock: clock, NMITransport: restartNMITransport{gateway: gateway}})
+	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, Clock: clock, NMITransport: restartNMITransport{gateway: gateway}})
 	require.NoError(t, err)
 	defer func() { _ = rt.Close(context.Background()) }()
 	jobs, err := riverkit.New(t.Context(), pool, &river.Config{Schema: input.Schema, ID: input.ID, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 4}}}, rt.RiverJobs())

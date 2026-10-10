@@ -499,7 +499,7 @@ func TestProviderBillingRefusalBackfill(t *testing.T) {
 	exec(`UPDATE `+table("operation_authorizations")+` SET state = 'released', terminal_reference = 'ticket:1', released_at = now()
 		WHERE merchant_id = $1 AND operation_id = 'resolved'`, merchantID)
 
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: pool})
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err, "the migration applies over resolved and stuck refused holds")
 	require.NoError(t, client.Close(t.Context()))
 

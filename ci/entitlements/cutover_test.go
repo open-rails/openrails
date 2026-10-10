@@ -30,7 +30,7 @@ func TestAccessCutoverAppliesOnlyTheApprovedPreflight(t *testing.T) {
 	pool, schema := cutoverSchema(t, os.Getenv("OPENRAILS_E2E_DSN"))
 	database := openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}
 	boot := func() error {
-		client, err := openrails.New(ctx, openrails.Config{Database: database, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}, openrails.Deps{Postgres: pool})
+		client, err := openrails.New(ctx, openrails.Config{Database: database, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 		if err == nil {
 			require.NoError(t, client.Close(context.Background()))
 		}

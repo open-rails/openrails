@@ -135,7 +135,7 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
-	staff := openrails.Deps{Postgres: f.pool}
+	staff := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}
 	deny := authtest.Deny{}
 	boot := func(assets fstest.MapFS) *openrails.Client {
 		deps := staff

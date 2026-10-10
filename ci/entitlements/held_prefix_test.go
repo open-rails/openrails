@@ -86,7 +86,7 @@ func newFixture(t *testing.T) *fixture {
 		Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}, TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesReadOnly,
 		Merchant: openrails.MerchantDeclaration{Slug: "held-" + uuid.NewString()[:8], DisplayName: "Held"},
 	}
-	f.client, err = openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Clock: f.clock})
+	f.client, err = openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Clock: f.clock})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, f.client.Close(context.Background())) })
 	return f

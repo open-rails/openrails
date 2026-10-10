@@ -50,7 +50,7 @@ func newFixture(t *testing.T) *fixture {
 
 	// The fixture owns no migration files: New applies OpenRails' own, and
 	// every client a test builds replays them.
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: pool})
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
 	return f
@@ -76,7 +76,7 @@ func (f *fixture) runtimeWithStripe(t *testing.T, slug string, transport http.Ro
 	t.Helper()
 	cfg := f.config()
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug}
-	deps := openrails.Deps{Postgres: f.pool}
+	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}
 	if transport != nil {
 		cfg.ProviderWriteMode = openrails.ProviderWritesFull
 		deps.StripeTransport = transport

@@ -38,7 +38,7 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, PSPs: map[string]openrails.PSPConfig{
 		"stripe": openrails.StripePSP{AccountID: "acct_test", SecretKey: "sk_test_x", WebhookSigningSecret: "whsec_test"}.PSPConfig(),
 	}}
-	client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, client.Close(t.Context())) })
 

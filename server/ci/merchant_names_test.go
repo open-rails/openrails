@@ -48,7 +48,7 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 		Schema: f.authSchema(),
 	}}
-	deps := server.Deps{Engine: openrails.Deps{Postgres: f.pool}}
+	deps := server.Deps{Engine: openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool}}
 	if edit != nil {
 		edit(&cfg, &deps)
 	}

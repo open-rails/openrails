@@ -101,7 +101,7 @@ func (f *fixture) resilientRuntime(t *testing.T, b resilientBoot) *openrails.Cli
 	}
 	cfg.Merchant = openrails.MerchantDeclaration{Slug: b.slug, DisplayName: b.slug, PSPs: psps}
 	start := time.Now()
-	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
+	rt, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, Redis: rdb, StripeTransport: historylessStripe{b.stripe}, NMITransport: b.nmi})
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), 20*time.Second, "construction never waits on an optional provider")
 	t.Cleanup(func() { _ = rt.Close(context.Background()) })

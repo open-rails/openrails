@@ -140,7 +140,7 @@ func (w *world) declaredPSPs() map[string]openrails.PSPConfig {
 // peer is another process on this database, guarded by v.
 func (w *world) peer(slug string, v *verifier, psps map[string]openrails.PSPConfig) *rival {
 	t := w.t
-	deps := openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
+	deps := openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock}
 	rt, err := openrails.New(t.Context(), openrails.Config{
 		Database: openrails.DatabaseConfig{Schema: w.schema, RiverSchema: w.schema},
 		TestMode: openrails.Sandbox, ProviderWriteMode: openrails.ProviderWritesFull,

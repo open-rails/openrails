@@ -106,7 +106,7 @@ products:
 		pool := connect(t, dsn)
 		wg.Go(func() {
 			<-start
-			client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: pool, StripeTransport: stripe})
+			client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: pool, StripeTransport: stripe})
 			if err != nil {
 				errs[i] = err
 				return

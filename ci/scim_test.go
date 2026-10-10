@@ -267,7 +267,7 @@ func TestSCIMProvisioningTokensIsolateMerchants(t *testing.T) {
 	mount := func(slug, declared string) (*openrails.Client, http.Handler) {
 		cfg := f.config()
 		cfg.Merchant = openrails.MerchantDeclaration{Slug: slug, DisplayName: slug, Secrets: openrails.MerchantSecrets{SCIMToken: declared}}
-		client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: f.pool})
+		client, err := openrails.New(ctx, cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		require.NoError(t, err)
 		t.Cleanup(func() { require.NoError(t, client.Close(t.Context())) })
 		mux := http.NewServeMux()

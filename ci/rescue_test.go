@@ -26,7 +26,7 @@ func TestRescuerSurvivesItsOwnInterruptedJob(t *testing.T) {
 	f := newFixture(t)
 	jobsTable := pgx.Identifier{f.schema, "river_job"}.Sanitize()
 	start := func(at time.Time) func() {
-		rt, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+		rt, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 		require.NoError(t, err)
 		jobs, err := riverkit.New(t.Context(), f.pool, &river.Config{
 			Schema: f.schema, Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 2}},
@@ -88,7 +88,7 @@ func TestNewCreatesTheRiverSchema(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = f.pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{cfg.Database.RiverSchema}.Sanitize()+" CASCADE")
 	})
-	client, err := openrails.New(t.Context(), cfg, openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
 	var jobs *string
@@ -102,7 +102,7 @@ func TestNewCreatesTheRiverSchema(t *testing.T) {
 // Start started.
 func TestStartRunsItsOwnRiver(t *testing.T) {
 	f := newFixture(t)
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
 	require.ErrorContains(t, client.Ready(t.Context()), "River is not running")
@@ -121,7 +121,7 @@ func TestStartRunsItsOwnRiver(t *testing.T) {
 // River is refused.
 func TestStartWithTheHostFleet(t *testing.T) {
 	f := newFixture(t)
-	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = client.Close(context.Background()) })
 	other, err := river.NewClient(riverpgxv5.New(f.pool), &river.Config{Schema: f.schema})
@@ -136,7 +136,7 @@ func TestStartWithTheHostFleet(t *testing.T) {
 	require.NoError(t, client.Start(t.Context(), openrails.WithRiverClient(fleet)))
 	require.ErrorContains(t, client.Start(t.Context(), openrails.WithRiverClient(fleet)), "already started")
 
-	elsewhere, err := openrails.New(t.Context(), f.config(), openrails.Deps{Postgres: f.pool})
+	elsewhere, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = elsewhere.Close(context.Background()) })
 	_, err = riverkit.New(t.Context(), f.pool, &river.Config{Schema: "public"}, elsewhere.RiverJobs())
