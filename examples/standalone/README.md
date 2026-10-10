@@ -52,8 +52,8 @@ DATABASE_URL=postgres://… OPENRAILS_CLIENT_SECRET=… EMAIL_SMTP_HOST=… go r
 server, and `OPENRAILS_E2E_REDIS` a Redis if you want one. Each test runs
 the `openrails` binary (`OPENRAILS_BIN`, else built from `../../server`)
 with `openrails/config.yaml` and `merchant.example.yaml`, only their ports
-changed (and without Redis when none is named, with `AUTH_ALLOW_MEMORY=true`:
-one server counting its limits in memory), applies the catalog with
+changed (and without Redis when none is named: one server counting its limits
+in memory), applies the catalog with
 `apply-catalog`, and plays NMI with `openrailstest/nmimock` and SMTP with
 `smtptest`.
 

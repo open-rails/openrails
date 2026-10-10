@@ -94,7 +94,6 @@ services:
       PORT: "3053"
       PUBLIC_BILLING_BASE_URL: "${PUBLIC_BILLING_BASE_URL:-http://localhost:3053}"
       AUTH_ALLOW_LOOPBACK_HTTP: "true"
-      AUTH_ALLOW_MEMORY: "true"
       AUTH_ALLOW_MISSING_SENDERS: "true"
       AUTH_ALLOW_EPHEMERAL_SIGNING_KEY: "true"
       AUTH_DIRECT_PEER_IP: "true"

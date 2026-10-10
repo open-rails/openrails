@@ -94,9 +94,10 @@ and the `TestReplicas` suites run several instances on one database.
   count in PostgreSQL meanwhile and readiness reports it degraded without
   failing. Only Redis carries the card-abuse captcha accelerator and the
   admission-denial statistics.
-- The standalone server records spent DPoP proofs in PostgreSQL. Its AuthKit
-  still counts its own rate limits in Redis: without Redis, `auth.allow_memory`
-  keeps them in the process, for one instance only.
+- The standalone server's AuthKit counts its rate limits and records spent
+  DPoP proofs in Redis, or without it in the process's memory: several
+  instances need Redis. While a declared Redis fails, each instance keeps its
+  own.
 
 ### What must be identical
 
@@ -1169,7 +1170,7 @@ constructor validation requires an explicit policy. Sandbox validates test
 credentials and never relaxes issuer, signing, storage or proxy protections.
 
 Narrow local exceptions are configured explicitly under `auth` (for example
-`allow_loopback_http`, `allow_memory`, `allow_missing_senders`, `direct_peer_ip`).
+`allow_loopback_http`, `allow_missing_senders`, `direct_peer_ip`).
 Managed DB credentials always require encryption. `public_billing_base_url` is
 only the public callback/link mount base; issuer, `auth.request_origin`, remote
 Client server URL and `dashboard_base_url` are independent.

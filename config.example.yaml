@@ -59,7 +59,6 @@ redis:
 
 auth:
   allow_loopback_http: true # explicit local issuer exception
-  allow_memory: true # local single-process AuthKit store
   allow_missing_senders: true # no email delivery in this local example
   allow_ephemeral_signing_key: true # disposable local signing key
   request_origin: http://localhost:3053 # public HTTP origin, no billing mount path

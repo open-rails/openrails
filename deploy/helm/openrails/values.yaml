@@ -3,7 +3,8 @@
 # walkthrough.
 
 # Every pod serves the API and runs the workers. More than one needs Redis
-# (config.redis) for AuthKit's rate limits and its keys from secrets.authKeys.
+# (config.redis) for AuthKit's rate limits and DPoP proofs, and its keys from
+# secrets.authKeys.
 replicaCount: 1
 
 image:
@@ -29,7 +30,7 @@ config:
   #   issuer: https://billing.example.com # https, required
   #   request_origin: https://billing.example.com
   # Optional, no default; without it OpenRails counts its limits in Postgres.
-  # AuthKit's limits need it unless auth.allow_memory (one replica only).
+  # AuthKit's limits and DPoP proofs need it for more than one replica.
   # redis:
   #   addr: redis:6379 # or url: rediss://…; username, tls, ca_cert
   # The ingress controller's pod or node CIDR: without it the client IP is the

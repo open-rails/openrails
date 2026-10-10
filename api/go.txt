@@ -3557,7 +3557,6 @@ pkg openrails/server, type AuthConfig struct, ActiveKeyID string
 pkg openrails/server, type AuthConfig struct, ActivePrivateKeyPEM string
 pkg openrails/server, type AuthConfig struct, AllowEphemeralSigningKey bool
 pkg openrails/server, type AuthConfig struct, AllowLoopbackHTTP bool
-pkg openrails/server, type AuthConfig struct, AllowMemory bool
 pkg openrails/server, type AuthConfig struct, AllowMissingSenders bool
 pkg openrails/server, type AuthConfig struct, AllowPrivateNetworkJWKS bool
 pkg openrails/server, type AuthConfig struct, DirectPeerIP bool

@@ -287,8 +287,6 @@ func startStack(t *testing.T) *stack {
 	}
 	if redisAddr != "" {
 		env = append(env, "REDIS_ADDR="+redisAddr)
-	} else {
-		env = append(env, "AUTH_ALLOW_MEMORY=true")
 	}
 	bin := openrailsBinary(t)
 	server := exec.Command(bin, "run-server", "--config", "config.yaml", "--merchant-manifest", "merchant.yaml")

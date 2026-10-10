@@ -44,7 +44,7 @@ func (f *fixture) buildServer(t *testing.T, edit func(*server.Config, *server.De
 	// Each test's AuthKit has its own schema, as its billing tables do: its
 	// accounts, and the sign-in limits AuthKit counts per device, are its own.
 	cfg := server.Config{Engine: f.config(), LocalSignIn: true, Auth: server.AuthConfig{
-		Issuer: "http://127.0.0.1/" + f.schema, AllowMemory: true, AllowMissingSenders: true,
+		Issuer: "http://127.0.0.1/" + f.schema, AllowMissingSenders: true,
 		AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, DirectPeerIP: true, KeysPath: t.TempDir(),
 		Schema: f.authSchema(),
 	}, RouteGroups: openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}}

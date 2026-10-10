@@ -50,7 +50,7 @@ merchants:
 			cfg.Engine.Vault = &openrails.VaultConfig{Address: fake.URL(), Token: fake.Token}
 			cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: "http://127.0.0.1:1"}
 			cfg.Auth = server.AuthConfig{
-				Issuer: "http://127.0.0.1/" + slug, AllowMemory: true, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
+				Issuer: "http://127.0.0.1/" + slug, AllowMissingSenders: true, AllowEphemeralSigningKey: true, AllowLoopbackHTTP: true, MintDisabled: true, DirectPeerIP: true,
 				Schema: f.authSchema(),
 			}
 		})

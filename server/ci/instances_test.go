@@ -44,7 +44,7 @@ func TestServersShareOneDatabase(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(keys, "totp.key"), []byte(hex.EncodeToString(totp)), 0o600))
 	shared := func(cfg *server.Config, _ *server.Deps) {
 		cfg.Engine.Redis = &openrails.RedisConfig{Addr: redis}
-		cfg.Auth.AllowMemory, cfg.Auth.AllowEphemeralSigningKey = false, false
+		cfg.Auth.AllowEphemeralSigningKey = false
 		cfg.Auth.ActiveKeyID, cfg.Auth.ActivePrivateKeyPEM, cfg.Auth.KeysPath = "e2e-shared", signing, keys
 	}
 

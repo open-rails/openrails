@@ -18,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
-	"github.com/open-rails/openrails/internal/modules/ratelimit"
 	userauth "github.com/open-rails/openrails/server/internal/auth"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
@@ -73,7 +72,6 @@ type options struct {
 	redis                        *redis.Client
 	merchantCreation             *MerchantCreationConfig
 	resourceServer               *hostconfig.ResourceServerConfig
-	proofClaims                  *ratelimit.Windows
 }
 
 // Option configures the control plane.
@@ -150,8 +148,8 @@ func WithRateLimitOverrides(overrides map[string]authkit.RateLimit) Option {
 	return func(o *options) { o.rateLimitOverrides = overrides }
 }
 
-// WithRedis shares AuthKit's rate-limit counters across replicas. Without it
-// the host must declare a single replica (auth.allow_memory).
+// WithRedis shares AuthKit's rate limits and spent DPoP proofs across
+// replicas. Without it each process keeps its own: one node only.
 func WithRedis(rd *redis.Client) Option {
 	return func(o *options) { o.redis = rd }
 }
@@ -329,13 +327,8 @@ func AuthKit(cfg *config.Config, auth *hostconfig.AuthConfig, pool *pgxpool.Pool
 		SMS:           options.sms,
 		NameAdmission: options.nameAdmission,
 	}
-	// AuthKit's rate limits are shared through Redis, or per process only
-	// when the operator declared a single replica.
-	switch {
-	case options.redis != nil:
+	if options.redis != nil {
 		deps.Redis = options.redis
-	case !auth.AllowMemory:
-		return authkit.Config{}, authkit.Deps{}, errors.New("controlplane: AuthKit rate limits need Redis (shared by replicas); set auth.allow_memory=true only for a single-process deployment")
 	}
 	return authConfig(auth, options, cp.naming, &httpCfg, config.RiverSchemaName(cfg)), deps, nil
 }
@@ -353,7 +346,7 @@ func New(client *authkit.Client, cfg *config.Config, auth *hostconfig.AuthConfig
 	cp.client = client
 	cp.users = userauth.NewAuthenticator(client)
 	if options.resourceServer != nil {
-		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.proofClaims); err != nil {
+		if cp.resource, err = newResourceServer(*options.resourceServer, auth, options.redis); err != nil {
 			return nil, err
 		}
 	}

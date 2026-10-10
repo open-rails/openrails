@@ -288,7 +288,7 @@ func TestAuthTransportIsExplicit(t *testing.T) {
 			require.ErrorContains(t, err, row.want, row.issuer)
 		}
 	}
-	require.False(t, cfg.Auth.AllowMemory || cfg.Auth.AllowPrivateNetworkJWKS || cfg.Auth.AllowMissingSenders || cfg.Auth.AllowEphemeralSigningKey)
+	require.False(t, cfg.Auth.AllowPrivateNetworkJWKS || cfg.Auth.AllowMissingSenders || cfg.Auth.AllowEphemeralSigningKey)
 	require.ErrorContains(t, Validate(&Config{}), "standalone config is required")
 }
 
