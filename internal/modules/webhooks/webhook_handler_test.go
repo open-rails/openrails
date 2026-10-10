@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// Every rail normalizes onto the same rail-agnostic WebhookEvent (#296).
+// Every rail normalizes onto the same rail-agnostic WebhookEvent.
 func TestWebhookNormalize(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -84,7 +84,7 @@ func TestWebhookHandlerRegistry(t *testing.T) {
 		require.True(t, ok, rail)
 		require.Equal(t, want, h.Rail())
 	}
-	// "mobius" is folded onto "nmi" at the HTTP boundary; the registry never sees it.
+	// "mobius" is refused at the HTTP boundary; the registry never sees it.
 	for _, rail := range []string{"mobius", "unknown", ""} {
 		_, ok := reg.Handler(rail)
 		require.False(t, ok, rail)

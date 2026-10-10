@@ -1,8 +1,6 @@
-// Package webhookhealth records inbound-webhook liveness per event source, a
-// PSP or a custodian (#786): verified-accepted watermark, verification-reject
-// counter, and the pull-drift signal the PSP refresh job stamps. The #733
-// metrics engine reads the tables; the #736 webhook_* alert templates ride
-// those metrics.
+// Package webhookhealth records inbound-webhook liveness per event source (a
+// PSP or a custodian): the verified-accepted watermark, the verification-reject
+// counter and the pull-drift signal. The metrics engine reads these tables.
 package webhookhealth
 
 import (

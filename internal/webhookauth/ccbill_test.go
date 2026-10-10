@@ -11,8 +11,8 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 )
 
-// SEC-19: CCBill signs nothing, so the source IP is its only authentication.
-// Outside CCBill's ranges a source passes only when declared AND sandbox AND the
+// CCBill signs nothing, so the source IP is its only authentication. Outside
+// CCBill's ranges a source passes only when declared AND sandbox AND the
 // catalog proves no live CCBill PSP exists; anything unproven refuses.
 func TestCCBillIPAllowed(t *testing.T) {
 	probe := func(p merchants.LiveRailPresence, err error) LiveRailProbe {

@@ -41,7 +41,7 @@ const (
 // fills them when the native payload makes them cheaply available and leaves
 // them zero otherwise.
 type WebhookEvent struct {
-	Rail            string           // "stripe", "ccbill", or the NMI rail name
+	Rail            string           // "stripe", "nmi", "ccbill", or a custodian event source
 	Type            WebhookEventType // normalized classification
 	RawType         string           // native rail event type, verbatim
 	RailRef         string           // rail's event id / primary reference
@@ -52,26 +52,19 @@ type WebhookEvent struct {
 	Raw             []byte           // original payload, verbatim
 }
 
-// WebhookHandler is the per-rail contract. Adding a new rail's
-// webhooks becomes "implement this interface + register it" rather than adding
-// a branch to the dispatcher. Verify authenticates the raw message; Normalize
-// parses it into a unified WebhookEvent.
+// WebhookHandler is the per-rail contract: Verify authenticates the raw
+// message, Normalize parses it into a WebhookEvent, Apply runs it.
 type WebhookHandler interface {
 	Rail() string
 	Verify(msg *WebhookMessage) error
 	Normalize(msg *WebhookMessage) (WebhookEvent, error)
-	// Apply runs the rail-specific business logic (subscription/ledger
-	// updates, dedup, notifications) for the message. The dispatcher resolves the
-	// handler by rail and calls Apply, so adding a rail is "implement
-	// the interface + register" rather than adding a branch. The apply logic
-	// remains rail-specific by necessity — it consumes native payload fields
-	// the unified WebhookEvent does not carry, and each rail owns its own
-	// deduplication semantics.
+	// Apply runs the rail-specific logic (subscription/ledger updates, dedup,
+	// notifications); it reads native payload fields WebhookEvent does not
+	// carry, and each rail owns its dedup semantics.
 	Apply(ctx context.Context, d *WebhookDispatcher, msg *WebhookMessage) error
 }
 
-// WebhookHandlerRegistry resolves a WebhookHandler by rail name. NMI-backed
-// gateway aliases all resolve to the single registered "nmi" handler.
+// WebhookHandlerRegistry resolves a WebhookHandler by rail name.
 type WebhookHandlerRegistry struct {
 	handlers map[string]WebhookHandler
 }
@@ -90,7 +83,7 @@ func (r *WebhookHandlerRegistry) Register(h WebhookHandler) {
 }
 
 // Handler resolves the registered handler for a rail. The rail value is already
-// canonical (webhookutil.CanonicalRail folds the legacy "mobius" path onto "nmi").
+// canonical (webhookutil.CanonicalRail).
 func (r *WebhookHandlerRegistry) Handler(rail string) (WebhookHandler, bool) {
 	if r == nil {
 		return nil, false
@@ -99,10 +92,6 @@ func (r *WebhookHandlerRegistry) Handler(rail string) (WebhookHandler, bool) {
 	h, ok := r.handlers[key]
 	return h, ok
 }
-
-// ---------------------------------------------------------------------------
-// Stripe
-// ---------------------------------------------------------------------------
 
 // StripeWebhookHandler verifies + normalizes Stripe webhooks.
 type StripeWebhookHandler struct {
@@ -119,9 +108,8 @@ func (h StripeWebhookHandler) Verify(msg *WebhookMessage) error {
 	if strings.TrimSpace(h.Secret) == "" {
 		return fmt.Errorf("stripe webhook secret not configured")
 	}
-	// Delegate to the canonical verifier (single source of truth). Tolerance is
-	// the configured replay window; the queued path may legitimately pass 0 to
-	// skip it for delayed/retried jobs while still checking the HMAC.
+	// Tolerance is the replay window; the queued path may pass 0 to skip it
+	// while still checking the HMAC.
 	return sigverify.VerifyStripe(h.Secret, msg.Signature, msg.Payload, h.Tolerance)
 }
 
@@ -197,13 +185,8 @@ func mapStripeEventType(t string) WebhookEventType {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// NMI (and NMI-backed gateways, e.g. Mobius)
-// ---------------------------------------------------------------------------
-
-// NMIWebhookHandler verifies + normalizes NMI webhooks. SecretFor resolves the
-// signing secret for the concrete rail name on the message (NMI deployments
-// can run multiple gateway aliases, each with its own secret).
+// NMIWebhookHandler verifies + normalizes NMI webhooks. The secret is the
+// message's (the routed account's); SecretFor resolves one by rail otherwise.
 type NMIWebhookHandler struct {
 	SecretFor func(rail string) string
 }
@@ -285,13 +268,9 @@ func mapNMIEventType(t string) WebhookEventType {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// CCBill
-// ---------------------------------------------------------------------------
-
-// CCBillWebhookHandler normalizes CCBill webhooks. CCBill events are
-// authenticated at ingestion (account-number match), reflected in
-// WebhookMessage.SignatureValid, so there is no per-message HMAC to re-check.
+// CCBillWebhookHandler normalizes CCBill webhooks. CCBill signs nothing:
+// ingestion gates the source IP and the service matches the armed account,
+// so there is no per-message HMAC to re-check.
 type CCBillWebhookHandler struct{}
 
 func (CCBillWebhookHandler) Rail() string { return "ccbill" }

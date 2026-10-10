@@ -15,7 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
-// GAP-1: NMI ids may arrive as bare JSON numbers; they must never pass through float64.
+// NMI ids may arrive as bare JSON numbers; they must never pass through float64.
 func TestStringishKeepsExactDigits(t *testing.T) {
 	t.Parallel()
 	for raw, want := range map[string]string{
@@ -207,7 +207,7 @@ func (e *recordingConvergeEnqueuer) EnqueueSubscriptionConverge(_ context.Contex
 	return nil
 }
 
-// #684: NMI subscription events only mark the subscription dirty for fetch-and-converge.
+// NMI subscription events only mark the subscription dirty for fetch-and-converge.
 func TestNMIWebhookMarksSubscriptionDirty(t *testing.T) {
 	t.Parallel()
 	merchantID, pspID := uuid.New(), uuid.New()

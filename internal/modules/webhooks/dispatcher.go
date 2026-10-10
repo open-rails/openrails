@@ -22,9 +22,9 @@ import (
 	"github.com/open-rails/openrails/internal/railresolve"
 )
 
-// CheckoutAttemptStore is the exported alias of the checkout-session surface
-// webhook/converge paths use, so the River converge worker can inject the
-// runtime's checkout attempt service without importing the checkout package.
+// CheckoutAttemptStore is the exported alias of the checkout-attempt surface
+// the webhook/converge paths use, so the River converge worker can inject it
+// without importing the checkout package.
 type CheckoutAttemptStore = webhookCheckoutAttemptStore
 
 type webhookCheckoutAttemptStore interface {
@@ -48,12 +48,12 @@ type WebhookMessage struct {
 	SigningSecret  string
 	SignatureValid *bool
 	ReceivedAt     time.Time
-	// PspID (#641) is the account_id the event was routed to, so
-	// dispatch selects that account's rail client. Empty = primary.
+	// PspID is the account_id the event was routed to, so dispatch selects
+	// that account's rail client. Empty = primary.
 	PspID string
-	// CustodianAccountID (or#880) is the CUSTODIAN-native account id a custody
-	// event was routed by (Basis Theory: the tenant id). Custody is not a
-	// rail, so it is a field of its own and never overloads PspID.
+	// CustodianAccountID is the custodian-native account id a custody event
+	// was routed by (Basis Theory: the tenant id). Custody is not a rail, so
+	// it never overloads PspID.
 	CustodianAccountID string
 }
 
@@ -73,26 +73,24 @@ type WebhookDispatcher struct {
 	DeduplicationService         *DeduplicationService
 	RailCustomerService          *payments.RailCustomerService
 	// RailConfigs resolves per-merchant armed rail credentials at dispatch
-	// time (Layer C, #788): the ONLY rail-credential source in this package.
-	// The merchant comes from ctx; an unarmed rail fails closed.
+	// time: the only rail-credential source in this package. The merchant
+	// comes from ctx; an unarmed rail fails closed.
 	RailConfigs railresolve.Source
 	// NMIResolver arms an NMI account's client for the reads a notice needs.
 	NMIResolver            railresolve.NMIClientResolver
 	PurchaseRegistrar      stripePurchaseRegistrar
 	CheckoutAttemptService webhookCheckoutAttemptStore
 	MoneyService           *money.MoneyService
-	// ConvergeEnqueuer (#684): schedules the coalesced fetch-and-converge job
-	// the slimmed Stripe/NMI subscription-state handlers enqueue.
+	// ConvergeEnqueuer schedules the coalesced fetch-and-converge job the
+	// Stripe/NMI subscription-state handlers enqueue.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 	// StripePaymentStateReaderFactory is a test seam for exact-account provider
 	// reads. Production leaves it nil and uses the HTTP reader.
 	StripePaymentStateReaderFactory func(secretKey string) payments.StripePaymentStateReader
 }
 
-// webhookRegistry resolves WebhookHandlers by rail. The dispatcher is fully
-// registry-driven: Process looks up the handler and calls Apply, so adding a
-// rail is "implement the WebhookHandler interface + register here" rather
-// than adding a branch (issue #296).
+// webhookRegistry resolves WebhookHandlers by rail: adding a rail means
+// implementing WebhookHandler and registering it here.
 func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 	reg := NewWebhookHandlerRegistry()
 	reg.Register(StripeWebhookHandler{})
@@ -103,7 +101,7 @@ func (d *WebhookDispatcher) webhookRegistry() *WebhookHandlerRegistry {
 }
 
 // Process resolves the registered handler for the message's rail and runs
-// its Apply. No rail switch lives here anymore.
+// its Apply.
 func (d *WebhookDispatcher) Process(ctx context.Context, event *WebhookMessage) error {
 	if event == nil {
 		return fmt.Errorf("webhook event is required")
@@ -116,11 +114,10 @@ func (d *WebhookDispatcher) Process(ctx context.Context, event *WebhookMessage) 
 }
 
 // Apply builds the CCBill webhook service from the dispatcher and runs it.
-// The CCBill client is built PER MERCHANT at dispatch time from the armed
-// psps state (#788): the ctx merchant plus the routed
-// account id (empty = the active account) resolve through RailConfigs. An
-// unarmed rail or a resolution failure rejects the webhook — retryable, so
-// the provider redelivers once the rail is armed; never default-allow.
+// The CCBill client is built per merchant at dispatch time: the ctx merchant
+// plus the routed account id resolve through RailConfigs. An unarmed rail or a
+// resolution failure rejects the webhook, retryably, so the provider
+// redelivers once the rail is armed; never default-allow.
 func (h CCBillWebhookHandler) Apply(ctx context.Context, d *WebhookDispatcher, event *WebhookMessage) error {
 	if d.RailConfigs == nil {
 		return fmt.Errorf("ccbill webhook rejected: rail resolution is not configured")

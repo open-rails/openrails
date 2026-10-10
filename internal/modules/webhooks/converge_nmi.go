@@ -28,15 +28,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
-// NMIConvergeService is the #684 fetch-and-converge implementation for one NMI
-// subscription: probe provider truth (query.php sale actions by order
-// reference + the v5 recurring GET — the #665 SubscriptionProber sources), then
-//  1. activation leg — a PENDING row (signup awaiting settlement) activates
-//     only off a FETCHED settled charge; a fetched decline fails it. The
-//     decider deliberately does not own pending (signup path doctrine).
-//  2. decider convergence — reconcile.Decide/ApplyDecision over the probe
+// NMIConvergeService fetch-and-converges one NMI subscription: it probes
+// provider truth (query.php sale actions by order reference + the v5 recurring
+// GET), then
+//  1. activation leg: a pending row (signup awaiting settlement) activates
+//     only off a fetched settled charge; a fetched decline fails it. The
+//     decider does not own pending.
+//  2. decider convergence: reconcile.Decide/ApplyDecision over the probe
 //     snapshot for active/past_due/unknown rows. An NMI v5 404 is
-//     provider-confirmed-gone (#679 certainty).
+//     provider-confirmed gone.
 type NMIConvergeService struct {
 	DB                           *db.DB
 	Clock                        clockwork.Clock
@@ -77,8 +77,8 @@ func (s *NMIConvergeService) Converge(ctx context.Context, reference string) (uu
 	if err != nil {
 		if db.IsNotFound(err) {
 			// One-time sale, foreign object, or the checkout row hasn't landed
-			// yet. The webhook was never a state source for those — the
-			// checkout path and the pull sweep own them.
+			// yet. The webhook is no state source for those: the checkout path
+			// and the pull sweep own them.
 			log.WithContext(ctx).WithFields(log.Fields{
 				"rail": rail, "subscription_reference": reference,
 			}).Info("nmi converge: reference resolves to no local subscription; nothing to converge")
@@ -159,7 +159,7 @@ func (s *NMIConvergeService) activateFromSettledCharge(ctx context.Context, rail
 	}
 
 	// Fetched amount and currency, verbatim; the subscription's price is the
-	// declared fallback when the report omitted them (#651: never fabricate).
+	// declared fallback when the report omitted them (never fabricated).
 	currency := normalizeNMICurrencyValue(probe.SuccessCurrency, price.Currency)
 	if moneyutil.NormalizeCurrency(currency) != moneyutil.NormalizeCurrency(price.Currency) {
 		return fmt.Errorf("nmi converge: fetched charge currency %s does not match price currency %s", currency, price.Currency)
@@ -239,11 +239,11 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 		SubscriptionID: &sub.ID,
 		FailureReason:  failureReason,
 		FailureCode:    failureCode,
-		// or#870: the same ONE classifier the dunning worker uses, so a decline
-		// arriving over the webhook plane gets the identical three-way answer.
+		// The dunning worker's classifier, so a decline arriving over the
+		// webhook plane gets the same three-way answer.
 		Decline: decline.Classify(rail, normalize.FromPtr(failureCode)).Action,
 		// The attempt was recorded above: a real provider attempt underlies
-		// this failure (#840 certainty input).
+		// this failure.
 		AttemptRecorded: true,
 	}); err != nil {
 		return fmt.Errorf("nmi converge: fail pending membership: %w", err)
@@ -254,13 +254,8 @@ func (s *NMIConvergeService) failPendingFromDecline(ctx context.Context, rail st
 	return nil
 }
 
-// resolveNMISubscriptionByReference resolves an NMI event reference to the
-// local subscription: rail subscription id first, then the order-id metadata
-// stamped at signup, then the signup attempt's payment metadata. Identity
-// resolution only — shared by the converge path and the payload-apply money
-// handlers (refund/void). Returns db.IsNotFound-style error when unresolved.
 // recordInitialDecline records the fetched decline of a pending
-// subscription's first charge as its initial attempt (#1111).
+// subscription's first charge as its initial attempt.
 func (s *NMIConvergeService) recordInitialDecline(ctx context.Context, rail string, sub *models.Subscription, probe nmi.SaleProbeResult) error {
 	currency := normalizeNMICurrencyValue(probe.DeclineCurrency)
 	if currency == "" && sub.Price != nil {
@@ -297,6 +292,10 @@ func (s *NMIConvergeService) recordInitialDecline(ctx context.Context, rail stri
 	})
 }
 
+// resolveNMISubscriptionByReference resolves an NMI event reference to the
+// local subscription: rail subscription id first, then the order-id metadata
+// stamped at signup, then the signup attempt's payment metadata. Unresolved is
+// a db.IsNotFound error.
 func resolveNMISubscriptionByReference(ctx context.Context, rail string, subSvc *subscriptions.SubscriptionService, paySvc *payments.PaymentService, reference string) (*models.Subscription, error) {
 	if subSvc == nil {
 		return nil, fmt.Errorf("subscription service is required")

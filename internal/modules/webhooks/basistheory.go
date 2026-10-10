@@ -22,16 +22,11 @@ import (
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
-// BasisTheoryWebhookHandler folds Basis Theory custody events (#795) into
-// instrument state. Signature verification (RSA-PSS vs the CDN key) happens at
-// HTTP ingestion — like Stripe — so Apply trusts the ingestion-set flag.
-//
-// The event SOURCE is the custodian, not a rail (or#879): Basis Theory holds
-// the card, NMI charges it, and only the custodian emits these events.
-//
-// Doctrine: custody-side instrument problems PARK the instrument
-// (cancellation-last-resort) — charges fail loudly and the operator is
-// notified; nothing is terminally canceled and nothing rail-side is deleted.
+// BasisTheoryWebhookHandler folds Basis Theory custody events into instrument
+// state. HTTP ingestion verifies the signature (RSA-PSS vs the CDN key), so
+// Verify trusts the ingestion-set flag. The event source is the custodian, not
+// a rail. Custody-side problems park the instrument: nothing is terminally
+// canceled and nothing rail-side is deleted.
 type BasisTheoryWebhookHandler struct{}
 
 func (BasisTheoryWebhookHandler) Rail() string { return string(models.EventSourceBasisTheory) }
@@ -100,10 +95,9 @@ type basisTheoryWebhookService struct {
 	accountID string
 }
 
-// btClient arms the merchant's BT client from the resolved CUSTODIAN (or#880).
-// accountID is the custodian's own tenant id — the identity the event carries.
-// It deliberately does not go through a PSP: one custodian may back several,
-// and a token/network-token event is about the instrument, not a gateway.
+// btClient arms the merchant's BT client from the resolved custodian, never a
+// PSP: one custodian may back several, and a token event is about the
+// instrument, not a gateway.
 func (s *basisTheoryWebhookService) btClient(ctx context.Context) (*basistheory.Client, error) {
 	if s.d.RailConfigs == nil {
 		return nil, fmt.Errorf("basistheory webhook rejected: custodian resolution is not configured")
@@ -166,9 +160,9 @@ func (s *basisTheoryWebhookService) apply(ctx context.Context, evt basistheory.E
 	}
 }
 
-// parkInstrumentFromTokenEvent: the custody-side credential is GONE (deleted or
-// expired). Park — never terminal-cancel, never delete (cancellation-last-
-// resort): subscriptions keep their access posture and the operator decides.
+// parkInstrumentFromTokenEvent parks an instrument whose custodian token is
+// gone (deleted or expired). Never terminal-cancel, never delete: subscriptions
+// keep their access posture and the operator decides.
 func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Context, evt basistheory.Event) error {
 	mid, cid, err := custodianScopeIDs(ctx)
 	if err != nil {
@@ -188,8 +182,8 @@ func (s *basisTheoryWebhookService) parkInstrumentFromTokenEvent(ctx context.Con
 		return fmt.Errorf("park custodian-held instrument for %s: %w", evt.Type, err)
 	}
 	if len(rows) > 0 {
-		// Operator-visible: a parked instrument means renewals on it will fail
-		// loudly until re-collection (#657 cutover) or vault repair.
+		// Renewals on a parked instrument fail loudly until re-collection or
+		// vault repair.
 		log.WithContext(ctx).Error("basistheory webhook: instrument PARKED — custodian token gone; operator action required (never auto-canceled)")
 	}
 	return nil
@@ -232,9 +226,8 @@ func (s *basisTheoryWebhookService) refreshInstrumentFromToken(ctx context.Conte
 	return nil
 }
 
-// reconcileIntentConversion is the crash-window signal for B5.5: conversion
-// happened at BT but the instrument row may be missing (crash between charge
-// approval and the local write). An existing row = no-op; a missing row is
+// reconcileIntentConversion catches the crash window between a BT conversion
+// and the local instrument write: an existing row is a no-op, a missing one is
 // surfaced loudly for repair.
 func (s *basisTheoryWebhookService) reconcileIntentConversion(ctx context.Context, evt basistheory.Event) error {
 	var data basistheory.TokenIntentConvertedData
@@ -302,10 +295,9 @@ func (s *basisTheoryWebhookService) foldNetworkTokenStatus(ctx context.Context, 
 	return nil
 }
 
-// foldAccountUpdaterJob fetches the completed job's result CSV and folds it:
-// UPD_* rows rotate rail_method_ref to new_token + refresh metadata;
-// WRN_CLOSED_ACCOUNT parks the instrument. Work scales with the job's rows
-// (the request CSV the runner uploaded), never all instruments.
+// foldAccountUpdaterJob fetches the completed job's result CSV and folds it
+// through FoldAccountUpdaterResults. Work scales with the job's rows, never all
+// instruments.
 func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, evt basistheory.Event) error {
 	var data basistheory.AccountUpdaterJobEventData
 	if err := json.Unmarshal(evt.Data, &data); err != nil {
@@ -337,9 +329,8 @@ func (s *basisTheoryWebhookService) foldAccountUpdaterJob(ctx context.Context, e
 	if err != nil {
 		return err
 	}
-	// or#795: the same job may have been submitted by the batch runner, which
-	// holds a durable row for it. Whoever ingests first closes it; the other
-	// side then finds nothing open and re-submits nothing.
+	// The batch runner may hold a durable row for the same job. Whoever ingests
+	// first closes it; the other finds nothing open and re-submits nothing.
 	return CloseAccountUpdaterBatch(ctx, s.gen(ctx), jobID, stats)
 }
 
@@ -351,12 +342,11 @@ func (s *basisTheoryWebhookService) FoldAccountUpdaterRows(ctx context.Context, 
 }
 
 // AccountUpdaterFoldStats reports what one fold did. ResultCounts holds the
-// VERBATIM wire codes (#651) — including ones this build does not recognize —
-// and is what the durable batch row records.
+// verbatim wire codes, including unrecognized ones, and is what the durable
+// batch row records.
 type AccountUpdaterFoldStats struct {
 	Rows int
-	// Adopted: instruments the network refreshed. or#872: this is the number
-	// that proves the updater pays for itself — cards recovered before dunning.
+	// Adopted: instruments the network refreshed (cards recovered before dunning).
 	Adopted int
 	Rotated int
 	// Closed and Contacted: cards the issuer closed, and cards whose issuer
@@ -366,11 +356,11 @@ type AccountUpdaterFoldStats struct {
 }
 
 // FoldAccountUpdaterResults applies parsed account-updater result rows, one
-// card version per instrument and row (#1168): a reissue adopts the custodian's
-// new token on the same method; a closed account closes the method; a
+// card version per instrument and row: a reissue adopts the custodian's new
+// token on the same method; a closed account closes the method; a
 // contact-cardholder answer prompts the customer, or closes a Mastercard card.
-// The batch runner (or#795) and the account-updater.job.completed webhook
-// both land here. Nothing is deleted and nothing is canceled.
+// The batch runner and the account-updater.job.completed webhook both land
+// here. Nothing is deleted and nothing is canceled.
 func FoldAccountUpdaterResults(ctx context.Context, database *db.DB, life *subscriptions.SubscriptionLifecycleService, jobRef string, rows []basistheory.AccountUpdaterResultRow, now time.Time) (AccountUpdaterFoldStats, error) {
 	stats := AccountUpdaterFoldStats{Rows: len(rows), ResultCounts: map[string]int{}}
 	mid, cid, err := custodianScopeIDs(ctx)
@@ -451,10 +441,9 @@ func applyCardEvent(ctx context.Context, database *db.DB, life *subscriptions.Su
 	return applied, nil
 }
 
-// CloseAccountUpdaterBatch marks the durable batch (or#795) that carried this
-// job as completed and records the verbatim result tally. A job with no local
-// batch row — an operator-created job, or one whose row was already closed by
-// the other ingestion path — is a no-op, never an error.
+// CloseAccountUpdaterBatch marks the durable batch that carried this job as
+// completed with the verbatim result tally. A job with no open batch row (an
+// operator-created job, or one the other ingestion path closed) is a no-op.
 func CloseAccountUpdaterBatch(ctx context.Context, q *gen.Queries, jobRef string, stats AccountUpdaterFoldStats) error {
 	jobRef = strings.TrimSpace(jobRef)
 	if jobRef == "" {
@@ -507,8 +496,8 @@ func auExpiry(month, year string) string {
 	return month + "/" + year
 }
 
-// BasisTheoryWebhookKeyURL selects the CDN public key for a deployment posture
-// (config-level helper; tests override the URL through the rail settings).
+// BasisTheoryWebhookKeyURL selects BT's CDN webhook public key for the
+// deployment posture.
 func BasisTheoryWebhookKeyURL(cfg *config.Config) string {
 	if cfg != nil && config.IsTestMode(cfg) {
 		return basistheory.TestWebhookKeyURL

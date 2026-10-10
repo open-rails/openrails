@@ -46,11 +46,11 @@ type NMIWebhookService struct {
 	DeduplicationService         *DeduplicationService
 	SubscriptionLifecycleService *subscriptions.SubscriptionLifecycleService
 	// NMIResolver arms the account's NMI client for the reads a notice needs
-	// (the vault behind an Account Updater notice, #1115).
+	// (the vault behind an Account Updater notice).
 	NMIResolver railresolve.NMIClientResolver
-	// ConvergeEnqueuer (#684): subscription-state events are wake-up signals —
-	// the handler marks the subscription dirty and the coalesced River job
-	// fetches provider truth and converges via the #665 decider.
+	// ConvergeEnqueuer: subscription-state events are wake-up signals; the
+	// handler marks the subscription dirty and the coalesced River job fetches
+	// provider truth and converges it.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 }
 
@@ -152,11 +152,6 @@ func transactionSubscriptionID(body *NMITransactionEventBody) string {
 	if body.TransactionDetail != nil {
 		candidates = append(candidates, body.TransactionDetail.PONumber.Trimmed())
 	}
-	/*
-		candidates = append(candidates, body.CustomerID.Trimmed())
-		if body.TransactionDetail != nil {
-			candidates = append(candidates, body.TransactionDetail.CustomerID.Trimmed())
-		}*/
 
 	for _, candidate := range candidates {
 		if strings.TrimSpace(candidate) != "" {
@@ -175,7 +170,7 @@ func nmiAmountMatchesExpected(currency string, amountCents moneyutil.Cents, expe
 	if err != nil {
 		return false
 	}
-	tolerance := expectedAmountCents * 2 / 100 // 2% tolerance, integer-only (#818)
+	tolerance := expectedAmountCents * 2 / 100 // 2% tolerance, integer-only
 	return amountCents >= expectedAmountCents-tolerance && amountCents <= expectedAmountCents+tolerance
 }
 
@@ -292,7 +287,6 @@ func newNMIBillingError(errorType string, message string, context map[string]int
 }
 
 func (s *NMIWebhookService) HandleNMIWebhook(ctx context.Context) error {
-	// Use deduplication service if available
 	if s.DeduplicationService != nil {
 		return s.DeduplicationService.ProcessWebhook(
 			ctx,
@@ -308,22 +302,19 @@ func (s *NMIWebhookService) HandleNMIWebhook(ctx context.Context) error {
 
 func (s *NMIWebhookService) handleWebhook(ctx context.Context) error {
 	switch s.Data.EventType {
-	// #684: subscription-state events are WAKE-UP SIGNALS. The handler parses
-	// ONLY the dirty subscription's identity, then enqueues the coalesced
-	// fetch-and-converge job; FETCHED provider truth (query.php + v5 GET),
-	// never the payload, decides the transition.
+	// Subscription-state events are wake-up signals: parse only the dirty
+	// subscription's identity and enqueue fetch-and-converge. Fetched provider
+	// truth (query.php + v5 GET), never the payload, decides the transition.
 	case EventTypeNMIAddSubscription, EventTypeNMIUpdateSubscription, EventTypeNMIDeleteSubscription:
 		return s.markDirtyFromRecurringEvent(ctx)
 	case EventTypeNMITransactionSuccess, EventTypeNMITransactionFailure, EventTypeNMITransactionUnknown:
 		return s.markDirtyFromTransactionEvent(ctx)
 
-	// Refund events
 	case EventTypeNMIRefundSuccess:
 		return s.handleRefundSuccess(ctx)
 	case EventTypeNMIRefundFailure:
 		return s.handleRefundFailure(ctx)
 
-	// Void events
 	case EventTypeNMIVoidSuccess:
 		return s.handleVoidSuccess(ctx)
 	case EventTypeNMIVoidFailure:
@@ -684,7 +675,7 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 		if reconcileErr == nil && match == nil {
 			unmatchedCount++
 			cbMetadata["requires_manual_review"] = true
-			// SEC-33: an unmatched chargeback is durable operator work, never a log line.
+			// An unmatched chargeback is durable operator work, never a log line.
 			if err := alerting.RecordLedgerRepair(ctx, s.DB, s.now(), alerting.LedgerRepair{
 				Provider:      rail,
 				Operation:     "chargeback_unmatched",
@@ -743,8 +734,8 @@ func (s *NMIWebhookService) handleChargebackComplete(ctx context.Context) error 
 			}
 
 			if match.SubscriptionID == uuid.Nil {
-				// SEC-33: a charged-back one-time purchase loses what it bought,
-				// exactly as a Stripe dispute of a one-off does.
+				// A charged-back one-time purchase loses what it bought, exactly
+				// as a Stripe dispute of a one-off does.
 				if err := s.revokeNMIChargedBackPurchase(ctx, match.PaymentID); err != nil {
 					reconcileErrors++
 					cbMetadata["termination_status"] = "failed"
@@ -933,9 +924,8 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 		}
 	}
 
-	// #675: no local subscription (one-time purchase, or refund raced the
-	// sale) — resolve by transaction id and reverse, mirroring Stripe's
-	// one-off path. Previously this ACKed with zero effect.
+	// No local subscription (a one-time purchase, or the refund raced the
+	// sale): resolve by transaction id and reverse, as Stripe's one-off path does.
 	if subscription == nil {
 		return s.handleNMIOneOffRefund(ctx, body, txnID, originalTxnID)
 	}
@@ -951,8 +941,7 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	}
 	var refunded *models.Payment
 
-	// Persist refund in the payments ledger as a negative payment linked to the original payment.
-	// This complements analytics/event logging and keeps reconciliation/auditing consistent.
+	// Record the refund as a negative payment linked to the original payment.
 	if s.PaymentService != nil && subscription != nil && txnID != "" {
 		rail := models.Rail(s.Rail)
 		existingRefund, lookupErr := s.PaymentService.GetByPSPTransactionID(ctx, rail, txnID)
@@ -1036,10 +1025,10 @@ func (s *NMIWebhookService) handleRefundSuccess(ctx context.Context) error {
 	return nil
 }
 
-// handleNMIOneOffRefund reverses a refund that has no local subscription
-// (dashboard refunds of one-time purchases) — mirrors the Stripe one-off path:
-// resolve the original payment by transaction id, record the negative payment,
-// and revoke what the payment funded once fully refunded (#675).
+// handleNMIOneOffRefund reverses a refund with no local subscription (dashboard
+// refunds of one-time purchases), as the Stripe one-off path does: resolve the
+// original payment by transaction id, record the negative payment, and revoke
+// what the payment funded once fully refunded.
 func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMITransactionEventBody, txnID, originalTxnID string) error {
 	if s.PaymentService == nil {
 		return fmt.Errorf("payment service is required for NMI refund")
@@ -1090,8 +1079,8 @@ func (s *NMIWebhookService) handleNMIOneOffRefund(ctx context.Context, body *NMI
 }
 
 // refundAmount reads a refund in the refunded payment's currency. An unreadable
-// amount is a durable alert, never a 0-amount no-op (#675), and terminal:
-// redelivery resends the same bytes.
+// amount is a durable alert, never a 0-amount no-op, and terminal: redelivery
+// resends the same bytes.
 func (s *NMIWebhookService) refundAmount(ctx context.Context, body *NMITransactionEventBody, original *models.Payment) (int64, error) {
 	amount, err := nmiRefundAmount(body, original.Currency)
 	if err == nil {
@@ -1200,9 +1189,8 @@ func (s *NMIWebhookService) handleVoidSuccess(ctx context.Context) error {
 				voidedSubscriptionID = &id
 			}
 		} else {
-			// #675: void may race the sale webhook — retryable error (NMI
-			// redelivers on non-2xx) so redelivery wins once the sale lands;
-			// a plain ACK would leave the reversed charge invisible.
+			// The void may race the sale webhook: a retryable error (NMI
+			// redelivers on non-2xx) applies it once the sale lands.
 			log.WithContext(ctx).WithField("transaction_id", txnID).Warn("Unable to resolve original payment for NMI void")
 			return fmt.Errorf("unable to resolve original payment for NMI void transaction %q", txnID)
 		}

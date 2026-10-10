@@ -24,7 +24,7 @@ var acuAdvice = map[string]paymentmethods.CardAdvice{
 }
 
 // handleACUEvent applies an NMI Account Updater notice to each stored card on
-// one vault through ApplyCardLifecycle (#1115, #1168):
+// one vault through ApplyCardLifecycle:
 //   - updated: the card takes the details NMI now holds, read from the vault
 //     rather than the notice. A same-brand reissue keeps billing; another
 //     brand holds the card's mandates for the customer's consent;

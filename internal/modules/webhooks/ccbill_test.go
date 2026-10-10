@@ -92,7 +92,7 @@ func TestCCBillBilledAmountTolerance(t *testing.T) {
 	require.NoError(t, validateCCBillBilledAmount(ctx, nil, "JPY", 1000, 10_000_000, nil, nil))
 }
 
-// CUR-6: the ingestion boundary returns the canonical upper-case alpha code.
+// The ingestion boundary returns the canonical upper-case alpha code.
 func TestCCBillCurrencyIngestion(t *testing.T) {
 	t.Parallel()
 	for raw, want := range map[Stringish]string{"840": "USD", " 978 ": "EUR", "036": "AUD", "392": "JPY", "usd": "USD", "xyz": "XYZ"} {
@@ -147,7 +147,7 @@ func TestCCBillDates(t *testing.T) {
 	require.Nil(t, capCCBillRetryAt(nil, &paidEnd))
 }
 
-// SEC-33 fail-closed branches; the bounded happy path is e2e TestSecurityCCBillPeriodEndsAreBounded.
+// Fail-closed branches; the bounded happy path is e2e TestSecurityCCBillPeriodEndsAreBounded.
 func TestBoundCCBillPeriodEndFailsClosed(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)

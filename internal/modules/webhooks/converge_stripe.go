@@ -28,16 +28,15 @@ import (
 	"github.com/open-rails/openrails/internal/shared/normalize"
 )
 
-// StripeConvergeService is the #684 fetch-and-converge implementation for one
-// Stripe subscription: GET the subscription (+ latest invoice) through the
-// stripeapi choke point, then
-//  1. creation leg — no local row yet: create the membership from FETCHED
+// StripeConvergeService fetch-and-converges one Stripe subscription: it GETs
+// the subscription (+ latest invoice) through the stripeapi choke point, then
+//  1. creation leg: no local row yet, so create the membership from fetched
 //     identity (subscription metadata / items / latest invoice), never from a
 //     webhook payload;
-//  2. mirror facts — fetch-sourced row facts outside the decider's vocabulary
+//  2. mirror facts: fetch-sourced row facts outside the decider's vocabulary
 //     (price remap, scheduled-cancel/resume marks);
-//  3. decider convergence — reconcile.Decide/ApplyDecision over the fetched
-//     snapshot (renewals, failures, provider-confirmed-gone), with payment
+//  3. decider convergence: reconcile.Decide/ApplyDecision over the fetched
+//     snapshot (renewals, failures, provider-confirmed gone), with payment
 //     backfill as the money record.
 type StripeConvergeService struct {
 	DB                           *db.DB
@@ -62,9 +61,8 @@ func (s *StripeConvergeService) now() time.Time {
 
 // Converge fetches provider truth for one Stripe subscription and converges
 // the local row to it. Idempotent; any error is retryable (the job backs off
-// and the row keeps its current state — access intact, #664 posture). Returns
-// the affected customer id (uuid.Nil when nothing local was touched) so the
-// caller can run the inline convergence pass.
+// and the row keeps its state, access intact). Returns the affected customer
+// id (uuid.Nil when nothing local was touched) for the inline convergence pass.
 func (s *StripeConvergeService) Converge(ctx context.Context, railSubID string) (uuid.UUID, error) {
 	railSubID = strings.TrimSpace(railSubID)
 	if railSubID == "" {
@@ -161,8 +159,8 @@ func (s *StripeConvergeService) createFromFetchedRecord(ctx context.Context, rai
 	if recorded, err := s.fetchedInvoicePaymentAlreadyRecorded(ctx, rec); err != nil {
 		return uuid.Nil, err
 	} else if recorded {
-		// Cross-key dedup (#675): the payment already exists under another key
-		// (backfill/charge id vs invoice id) — extend without a second row.
+		// Cross-key dedup: the payment already exists under another key
+		// (backfill/charge id vs invoice id); extend without a second row.
 		transactionID = ""
 	}
 
@@ -223,9 +221,9 @@ func (s *StripeConvergeService) resolveFetchedPrice(ctx context.Context, rec sub
 	return uuid.Nil, nil, fmt.Errorf("unable to resolve price from fetched subscription")
 }
 
-// validateStripeFetchedInvoicePrice ports validateStripeInvoicePrice onto the
-// fetched record: exact list-price match except for proration invoices
-// (billing_reason=subscription_update — Model B upgrades) and settled
+// validateStripeFetchedInvoicePrice checks the fetched invoice against the
+// price: same currency and exact list price, except proration invoices
+// (billing_reason=subscription_update, any positive amount) and settled
 // zero-amount invoices (trials).
 func validateStripeFetchedInvoicePrice(rec subscriptions.StripeLivenessRecord, price *models.Price) error {
 	if price == nil {
@@ -320,8 +318,7 @@ func (s *StripeConvergeService) markCheckoutAttemptSucceeded(ctx context.Context
 // vocabulary, under the row lock and through the lifecycle machine:
 //   - a portal cancel at period end is the user's period-end cancel;
 //   - a portal resume undoes only that user cancel, inside the paid period;
-//   - a price move takes effect only with a paid invoice for the new price
-//     (#1089 audit 11).
+//   - a price move takes effect only with a paid invoice for the new price.
 func (s *StripeConvergeService) applyFetchedMirrorFacts(ctx context.Context, railSubID string, rec subscriptions.StripeLivenessRecord, now time.Time) error {
 	var (
 		updatedSub *models.Subscription

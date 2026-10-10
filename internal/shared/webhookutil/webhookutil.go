@@ -38,17 +38,13 @@ type Prepared struct {
 	SignatureVerified bool
 }
 
-// ErrWebhookRailRetired reports a webhook URL segment that is no longer a rail.
+// ErrWebhookRailRetired reports a retired webhook URL rail segment.
 var ErrWebhookRailRetired = errors.New("retired webhook rail segment")
 
-// retiredRailSegments maps a URL segment that used to fold onto a rail to the
-// canonical segment. or#893: the webhook path's segment is the gateway KIND —
-// a PSP key is not a rail, and folding one onto the other made two URLs mean
-// the same endpoint while implying the PSP was routable by name.
+// retiredRailSegments maps a retired URL segment to the canonical one. The
+// segment is the gateway kind; a PSP key is not a rail.
 var retiredRailSegments = map[string]string{
-	"mobius": "nmi",
-	// #795 accepted both spellings of the Basis Theory endpoint; the URL is
-	// /webhooks/basistheory.
+	"mobius":       "nmi",
 	"basis_theory": "basistheory",
 }
 
@@ -62,9 +58,7 @@ func CanonicalRail(rail string) (string, error) {
 	if canonical, retired := retiredRailSegments[rail]; retired {
 		return "", fmt.Errorf("%w: /webhooks/%s was removed (or#893) — post to /webhooks/%s/{account_id}; a provider account is named by the required account_id path segment, not by the rail segment", ErrWebhookRailRetired, rail, canonical)
 	}
-	// #795: the event source of a Basis Theory event is the CUSTODIAN itself
-	// (or#879) — Basis Theory holds the card, NMI charges it, and only the
-	// custodian emits these events.
+	// A Basis Theory event's source is the custodian itself, not a rail.
 	if rail == "basistheory" {
 		return string(models.EventSourceBasisTheory), nil
 	}
@@ -230,11 +224,8 @@ func VerifyNMISignature(secret, header string, body []byte) error {
 
 // VerifyNMISignatureWithTolerance authenticates an NMI webhook's HMAC and, when
 // tolerance > 0, rejects timestamps outside that window. A non-positive
-// tolerance verifies the HMAC only and SKIPS the replay-window check — used by
-// the queued re-verification path, where a job may legitimately be processed
-// (or retried) long after the original delivery, so the window no longer
-// applies but signature integrity must still hold. This is the single source of
-// truth for NMI signature verification; do not reimplement it elsewhere.
+// tolerance skips the window (queued re-verify may run long after delivery)
+// but still checks the HMAC.
 func VerifyNMISignatureWithTolerance(secret, header string, body []byte, tolerance time.Duration) error {
 	return sigverify.VerifyNMI(secret, header, body, tolerance)
 }

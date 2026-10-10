@@ -13,20 +13,17 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// #684: for the fetchable rails (Stripe, NMI) a verified webhook is a WAKE-UP
-// SIGNAL, not a state source. The handler keeps four jobs — signature
-// verification, dedup key, identifying the dirty object, the event timestamp —
-// then marks the subscription dirty by enqueueing a coalesced fetch-and-
-// converge job. All state writes flow through fetch → reconcile.Decide →
-// ApplyDecision. CCBill has no read API and stays payload-apply (the
-// documented exception).
+// For the fetchable rails (Stripe, NMI) a verified webhook is a wake-up signal,
+// not a state source: the handler verifies, dedups, identifies the dirty object
+// and enqueues a coalesced fetch-and-converge job. All state writes flow
+// through fetch → reconcile.Decide → ApplyDecision. CCBill has no read API and
+// applies its payload.
 
 // ConvergeRequest identifies one dirty subscription for fetch-and-converge.
 type ConvergeRequest struct {
 	MerchantID uuid.UUID
 	PSPID      uuid.UUID
-	// Rail is the canonical rail/provider key the event arrived on (the NMI
-	// alias key selects the gateway client).
+	// Rail is the canonical rail the event arrived on.
 	Rail string
 	// SubscriptionReference is the provider subscription id, or (NMI) an
 	// order/PO reference that resolves to one — identity only, never state.

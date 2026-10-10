@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-// -------------------------------- Utility Types --------------------------------
-
 // Stringish handles inconsistent NMI payload encoding where identifiers might be
 // transmitted as strings or bare numbers.
 type Stringish string
@@ -31,10 +29,9 @@ func (s *Stringish) UnmarshalJSON(data []byte) error {
 		*s = Stringish(str)
 		return nil
 	}
-	// UseNumber keeps a bare JSON number as its literal digits. Decoding into
-	// `any` yields float64, which silently mangles an id past 2^53 and would
-	// route a webhook to the wrong subscription — and MONEY-3 forbids the same
-	// round-trip for any amount-shaped field.
+	// UseNumber keeps a bare JSON number as its literal digits: decoding into
+	// `any` yields float64, which mangles an id past 2^53 and would route a
+	// webhook to the wrong subscription. Amounts never round-trip through float.
 	dec := json.NewDecoder(strings.NewReader(string(data)))
 	dec.UseNumber()
 	var raw any
@@ -124,16 +121,14 @@ func (i Intish) Int() int {
 	return int(i)
 }
 
-// -------------------------------- NMI Webhook Types --------------------------------
-
 type NMIWebhookEvent struct {
 	EventID   string              `json:"event_id" validate:"required"`
 	EventType NMIWebhookEventType `json:"event_type" validate:"required"`
 	EventBody json.RawMessage     `json:"event_body" validate:"required"`
 }
 
-// NMI webhooks are wake-ups (#1114): OpenRails reads what happened from the
-// Query API, so a body carries only the references that find it.
+// NMI webhooks are wake-ups: OpenRails reads what happened from the Query API,
+// so a body carries only the references that find it.
 type NMIRecurringEventBody struct {
 	SubscriptionID Stringish `json:"subscription_id"`
 }
@@ -164,7 +159,7 @@ type NMITransactionDetail struct {
 }
 
 // NMIACUEventBody is an Account Updater notice. It is a wake-up: only the
-// vault it names is read; the card comes from NMI's vault (#1115).
+// vault it names is read; the card comes from NMI's vault.
 type NMIACUEventBody struct {
 	VaultID         Stringish `json:"vault_id"`
 	CustomerVaultID Stringish `json:"customer_vault_id"`
@@ -178,9 +173,9 @@ func (b NMIACUEventBody) Vault() string {
 	return b.CustomerVaultID.Trimmed()
 }
 
-// NMIChargebackBatchEventBody represents NMI's chargeback.batch.complete webhook payload
-// Note: NMI chargeback webhooks are batch-based and do NOT include transaction_id or subscription info
-// This makes automatic subscription termination impossible without additional API lookups
+// NMIChargebackBatchEventBody is NMI's chargeback.batch.complete payload. It
+// carries no transaction or subscription id, so each entry is matched to a
+// charge by card last4, amount and date.
 type NMIChargebackBatchEventBody struct {
 	Merchant         *NMIMerchant         `json:"merchant"`
 	Rail             *NMIRailRef          `json:"processor"`
@@ -224,8 +219,6 @@ type NMIMerchant struct {
 	ID   Stringish `json:"id"`
 	Name string    `json:"name"`
 }
-
-// -------------------------------- CCBill Webhook Types --------------------------------
 
 type CCBillWebhookEvent struct {
 	EventType CCBillWebhookEventType

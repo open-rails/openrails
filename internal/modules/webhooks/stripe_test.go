@@ -145,7 +145,7 @@ func stripeEventJSON(t *testing.T, eventType string, object any) []byte {
 	return payload
 }
 
-// #684: subscription-state events only identify the dirty subscription; the rest route by type.
+// Subscription-state events only identify the dirty subscription; the rest route by type.
 func TestStripeWebhookRouting(t *testing.T) {
 	t.Parallel()
 	merchantID, pspID := uuid.New(), uuid.New()

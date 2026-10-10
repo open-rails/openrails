@@ -18,8 +18,8 @@ func sign(secret, ts string, body []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-// FC-7/FC-8: HMAC over "t.body", constant-time compare, and a symmetric replay
-// window that a non-positive tolerance (queued re-verify) skips.
+// HMAC over "t.body", constant-time compare, and a symmetric replay window that
+// a non-positive tolerance (queued re-verify) skips.
 func TestVerify(t *testing.T) {
 	const secret = "whsec"
 	body := []byte(`{"id":"evt"}`)

@@ -26,7 +26,7 @@ func TestCanonicalRail(t *testing.T) {
 		require.NoError(t, err, in)
 		require.Equal(t, want, got, in)
 	}
-	// or#893: a PSP key is not a rail; the refusal names the replacement URL.
+	// A PSP key is not a rail; the refusal names the replacement URL.
 	for in, canonical := range map[string]string{"mobius": "nmi", " MOBIUS/": "nmi", "basis_theory": "basistheory"} {
 		got, err := CanonicalRail(in)
 		require.Empty(t, got)
@@ -35,7 +35,7 @@ func TestCanonicalRail(t *testing.T) {
 	}
 }
 
-// FC-7: no unsigned path; every refusal is typed so handlers map it to a status.
+// No unsigned path; every refusal is typed so handlers map it to a status.
 func TestPrepareSignedRails(t *testing.T) {
 	const secret = "whsec_test"
 	now := time.Now()
@@ -76,7 +76,7 @@ func TestPrepareSignedRails(t *testing.T) {
 		{"nmi no secret", nmi, nmiBody, "", signed("s", secret, now, nmiBody), ErrNMIWebhookSecretMissing},
 		{"nmi no header", nmi, nmiBody, secret, "", ErrNMIWebhookSignatureMissing},
 		{"nmi bad signature", nmi, nmiBody, secret, signed("s", "attacker", now, nmiBody), ErrNMIWebhookSignatureInvalid},
-		// FC-8: public ingestion enforces the 5 minute window.
+		// Public ingestion enforces the replay window.
 		{"nmi outside window", nmi, nmiBody, secret, signed("s", secret, now.Add(-NMISignatureTolerance-time.Minute), nmiBody), ErrNMIWebhookSignatureInvalid},
 		{"nmi missing event id", nmi, []byte(`{"event_id":" "}`), secret, signed("s", secret, now, []byte(`{"event_id":" "}`)), ErrWebhookEventIDMissing},
 		{"nmi bad json", nmi, []byte(`{"event_id":`), secret, signed("s", secret, now, []byte(`{"event_id":`)), ErrWebhookPayloadInvalid},
@@ -117,8 +117,8 @@ func TestPrepareCCBill(t *testing.T) {
 	}
 }
 
-// IDEM-11: the provider event id is the dedup identity; without one, the key is
-// a stable hash of rail, type and body.
+// The provider event id is the dedup identity; without one, the key is a
+// stable hash of rail, type and body.
 func TestComputeUniqueKey(t *testing.T) {
 	require.Equal(t, "webhook:nmi:evt_1", ComputeUniqueKey(" NMI ", " evt_1 ", "a", []byte(`{}`)))
 	require.Equal(t, ComputeUniqueKey("nmi", "evt_1", "a", []byte(`{}`)), ComputeUniqueKey("nmi", "evt_1", "b", []byte(`{"x":1}`)))

@@ -50,9 +50,9 @@ type StripeWebhookService struct {
 	RailCustomerService          *payments.RailCustomerService
 	CheckoutAttemptService       webhookCheckoutAttemptStore
 	Clock                        clockwork.Clock
-	// ConvergeEnqueuer (#684): subscription-state events are wake-up signals —
-	// the handler marks the subscription dirty and the coalesced River job
-	// fetches provider truth and converges via the #665 decider.
+	// ConvergeEnqueuer: subscription-state events are wake-up signals; the
+	// handler marks the subscription dirty and the coalesced River job fetches
+	// provider truth and converges it.
 	ConvergeEnqueuer SubscriptionConvergeEnqueuer
 	// StripePaymentState reads the exact routed Stripe account. Payment-method
 	// events are wake-up signals; fetched provider truth owns the local link.
@@ -107,8 +107,8 @@ func (li stripeInvoiceLineItem) priceID() string {
 
 type stripeInvoice struct {
 	ID string `json:"id"`
-	// Created is the invoice's own creation time (Unix sec) — the provider's
-	// transaction timestamp (#651), recorded instead of webhook-processing now().
+	// Created is the invoice's creation time (Unix sec): the provider's
+	// transaction timestamp, recorded instead of the processing time.
 	Created       int64  `json:"created"`
 	Subscription  string `json:"subscription"`
 	Customer      string `json:"customer"`
@@ -118,11 +118,8 @@ type stripeInvoice struct {
 	AmountPaid    int64  `json:"amount_paid"`
 	AmountDue     int64  `json:"amount_due"`
 	Currency      string `json:"currency"`
-	// BillingReason is Stripe's reason for the invoice ("subscription_create",
-	// "subscription_cycle", "subscription_update", ...). "subscription_update"
-	// marks a mid-cycle change (a Model B upgrade) whose total is a PRORATED
-	// amount rather than the plan's list price; validateStripeInvoicePrice keys
-	// off it to skip the exact list-price match.
+	// BillingReason is Stripe's reason for the invoice; "subscription_update"
+	// marks a mid-cycle change whose total is prorated, not the list price.
 	BillingReason string            `json:"billing_reason"`
 	Metadata      map[string]string `json:"metadata"`
 	Lines         struct {
@@ -131,10 +128,9 @@ type stripeInvoice struct {
 	SubscriptionDetails struct {
 		Metadata map[string]string `json:"metadata"`
 	} `json:"subscription_details"`
-	// The 2026-04-22.preview API moved subscription details (including the
-	// metadata we propagate via subscription_data.metadata, and the subscription
-	// id itself) under `parent`. The top-level `subscription`, `charge`, and
-	// `payment_intent` fields are no longer present on preview invoice events.
+	// The 2026-04-22.preview shape nests subscription details (the subscription
+	// id and the metadata propagated via subscription_data.metadata) under
+	// `parent`; it has no top-level `subscription`, `charge` or `payment_intent`.
 	Parent struct {
 		SubscriptionDetails struct {
 			Subscription string            `json:"subscription"`
@@ -269,10 +265,9 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 		return fmt.Errorf("stripe event missing id or type")
 	}
 
-	// Inbound events don't pass through the outbound client, so the webhook
-	// endpoint's API version is pinned in the Stripe dashboard, not by us. Warn
-	// (don't reject — the parsers tolerate adjacent shapes) when it drifts from
-	// the version we're coded against, so the dashboard pin can be corrected (#587).
+	// Inbound events don't pass through the outbound client, so the endpoint's
+	// API version is pinned in the Stripe dashboard. Warn (don't reject: the
+	// parsers tolerate adjacent shapes) when it drifts from stripeapi.APIVersion.
 	if v := strings.TrimSpace(evt.APIVersion); v != "" && v != stripeapi.APIVersion {
 		log.WithContext(ctx).WithFields(log.Fields{
 			"event_id":           eventID,
@@ -291,9 +286,8 @@ func (s *StripeWebhookService) HandleStripeWebhook(ctx context.Context, payload 
 }
 
 // HandledStripeEventTypes is the canonical list of Stripe event types OpenRails
-// acts on — the single source of truth for what a managed webhook endpoint should
-// subscribe to (#590 auto-registration reads this for enabled_events). KEEP IN
-// SYNC with the handleEvent switch below.
+// acts on, and the enabled_events of a managed webhook endpoint. Keep in sync
+// with the handleEvent switch below.
 var HandledStripeEventTypes = []string{
 	"payment_intent.succeeded",
 	"payment_intent.payment_failed",
@@ -325,10 +319,9 @@ func (s *StripeWebhookService) handleEvent(ctx context.Context, eventType string
 	switch eventType {
 	case "payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.requires_action":
 		return s.wakeStripeEngineOperation(ctx, obj)
-	// #684: subscription-state events are WAKE-UP SIGNALS. The handler parses
-	// ONLY the dirty object's identity, then enqueues the coalesced fetch-and-
-	// converge job; FETCHED provider truth (never the payload) decides the
-	// transition, so event ordering is structurally irrelevant.
+	// Subscription-state events are wake-up signals: parse only the dirty
+	// object's identity and enqueue fetch-and-converge. Fetched provider truth,
+	// never the payload, decides the transition, so event order is irrelevant.
 	case "invoice.paid", "invoice.payment_failed":
 		return s.markDirtyFromInvoice(ctx, eventType, obj, evt.Created)
 	case "customer.subscription.updated", "customer.subscription.deleted":
@@ -456,11 +449,11 @@ func (s *StripeWebhookService) handlePaymentMethodAttached(ctx context.Context, 
 	return s.foldPaymentMethod(ctx, eventID, obj, paymentmethods.SourceProviderRead)
 }
 
-// handlePaymentMethodAutomaticallyUpdated folds Stripe's card updater (#1168):
-// the same method takes the card Stripe now holds, read from Stripe rather
-// than the payload, as a card version. A same-brand reissue keeps billing and
-// wakes members waiting on the card; another brand holds the card's mandates
-// until the customer verifies it, and its members are asked to act.
+// handlePaymentMethodAutomaticallyUpdated folds Stripe's card updater: the
+// same method takes the card Stripe now holds, read from Stripe rather than
+// the payload, as a card version. A same-brand reissue keeps billing and wakes
+// members waiting on the card; another brand holds the card's mandates until
+// the customer verifies it, and its members are asked to act.
 func (s *StripeWebhookService) handlePaymentMethodAutomaticallyUpdated(ctx context.Context, eventID string, obj json.RawMessage) error {
 	return s.foldPaymentMethod(ctx, eventID, obj, paymentmethods.SourceStripeUpdater)
 }
@@ -900,10 +893,9 @@ func parseCheckoutAttemptID(metadata map[string]string) uuid.UUID {
 	return id.UUID()
 }
 
-// Stripe invoice amounts are CENTS on the wire; payment rows store micros.
-// Success rows record amount_paid (what actually settled); failed rows record
-// amount_due (what was attempted) — #671 1f. Wire-pinned in
-// stripe_test.go (TestStripeInvoiceWireShapes).
+// Stripe invoice amounts are cents on the wire; payment rows store micros.
+// Success rows record amount_paid (what settled); failed rows record
+// amount_due (what was attempted). Wire-pinned in TestStripeInvoiceWireShapes.
 func stripeInvoicePaidAmountMicros(inv stripeInvoice) int64 {
 	return int64(moneyutil.CentsToMicros(moneyutil.Cents(inv.AmountPaid)))
 }
@@ -930,9 +922,8 @@ func (s *StripeWebhookService) handleChargeRefunded(ctx context.Context, obj jso
 	}
 	for _, refund := range charge.Refunds.Data {
 		if strings.TrimSpace(refund.Status) == "" {
-			// #651: Stripe always sends a refund status; empty is malformed. Don't
-			// assume "succeeded" — reject as non-retryable instead of recording a
-			// refund outcome we never confirmed.
+			// Stripe always sends a refund status; empty is malformed. Never
+			// assume "succeeded": reject as non-retryable.
 			return MarkWebhookErrorNonRetryable(fmt.Errorf("stripe charge.refunded missing refund status (charge %s)", charge.ID))
 		}
 		if strings.TrimSpace(refund.Charge) == "" {
@@ -1006,8 +997,8 @@ func (s *StripeWebhookService) handleDispute(ctx context.Context, eventType stri
 		}
 		return s.handleStripeDisputeWon(ctx, dispute)
 	}
-	// SEC-33: Stripe delivers out of order. A dispute already won never
-	// reverses, whatever notice about it arrives later.
+	// Stripe delivers out of order. A dispute already won never reverses,
+	// whatever notice about it arrives later.
 	if won, err := s.stripeDisputeAlreadyWon(ctx, dispute.ID); err != nil {
 		return err
 	} else if won {
@@ -1149,7 +1140,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			Currency:          original.Currency,
 			ReversalKind:      func() *string { k := payments.ReversalDisputeReversal; return &k }(),
 			Status:            payments.PaymentStatusSucceededValue,
-			MoneyMovement:     models.MoneyMovementRail, // or#827: Stripe returned the disputed funds.
+			MoneyMovement:     models.MoneyMovementRail, // Stripe returned the disputed funds.
 			PurchasedAt:       s.now(),
 			CreatedAt:         s.now(),
 		}
@@ -1188,8 +1179,8 @@ func (s *StripeWebhookService) reactivateStripeSubscriptionAfterWonDispute(ctx c
 	if sub.Status != models.StatusCanceled {
 		return nil
 	}
-	// SEC-33: only the cancellation this dispute caused is undone; a user,
-	// merchant or other chargeback cancellation stays terminal.
+	// Only the cancellation this dispute caused is undone; a user, merchant or
+	// other chargeback cancellation stays terminal.
 	if sub.CancelType == nil || *sub.CancelType != models.CancelTypeChargeback || sub.CancelFeedback == nil ||
 		!strings.HasPrefix(*sub.CancelFeedback, "STRIPE DISPUTE "+disputeID+":") {
 		log.WithContext(ctx).WithFields(log.Fields{"subscription_id": sub.ID, "dispute_id": disputeID}).

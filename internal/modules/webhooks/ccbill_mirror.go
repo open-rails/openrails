@@ -20,12 +20,11 @@ import (
 )
 
 // ccbillMirrorTransition applies one CCBill fact to a subscription the caller
-// holds locked in d's transaction (#1094): the lifecycle machine decides, the
-// row is persisted and the effects run in the same transaction. An outcome
-// OpenRails decides (refund, void, chargeback) queues the CCBill cancel with
-// it (#1102); one CCBill reported (notice.providerStopped) needs none.
-// It reports whether the row changed and returns the customer notices to
-// deliver after commit.
+// holds locked in d's transaction: the lifecycle machine decides, and the row
+// and effects persist in the same transaction. An outcome OpenRails decides
+// (refund, void, chargeback) queues the CCBill cancel with it; one CCBill
+// reported (notice.providerStopped) needs none. It returns whether the row
+// changed and the customer notices to deliver after commit.
 func (s *CCBillWebhookService) ccbillMirrorTransition(ctx context.Context, d *db.DB, sub *models.Subscription, ev lifecycle.Event, notice ccbillNotice) (bool, []*models.NotificationQueue, error) {
 	now := s.now().UTC()
 	before := *sub

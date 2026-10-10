@@ -1,8 +1,4 @@
-// Package webhookauth holds the transport-level authentication gates shared by
-// EVERY webhook ingress surface — the HTTP handlers and the embedded Service
-// API. One gate, one place: SEC-19 found the embedded surface still running the
-// pre-hardening version of the CCBill IP check because each surface owned its
-// own copy.
+// Package webhookauth holds the transport-level webhook authentication gates.
 package webhookauth
 
 import (
@@ -21,20 +17,17 @@ import (
 // catalog?". A nil probe, an error, or LiveRailUnknown all mean "assume yes".
 type LiveRailProbe func(ctx context.Context) (merchants.LiveRailPresence, error)
 
-// CCBillIPAllowed is THE CCBill webhook source-IP gate. CCBill signs nothing —
-// no HMAC, no shared secret on the callback — so the source IP is the only
-// transport-level authentication that exists for this rail.
+// CCBillIPAllowed is the CCBill webhook source-IP gate. CCBill signs nothing,
+// so the source IP is this rail's only transport authentication.
 //
 // Accepted when EITHER:
 //  1. the source is inside CCBill's documented ranges, or
-//  2. all three hold: the operator explicitly declared the source in
-//     ccbill_webhook_ip_allowlist, the posture is sandbox (test_mode), and the
-//     catalog PROVES no live CCBill PSP exists anywhere.
+//  2. all three hold: the source is declared in ccbill_webhook_ip_allowlist,
+//     the posture is sandbox (test_mode), and the catalog proves no live
+//     CCBill PSP exists anywhere.
 //
-// Anything unproven — no probe wired, probe error, LiveRailUnknown — refuses.
-// There is no test_mode-alone bypass any more (SEC-19): it read as protective
-// while in fact accepting every source IP on earth, and the live-account guard
-// that was supposed to constrain it could never fire under the since-removed RLS.
+// Anything unproven (no probe, probe error, LiveRailUnknown) refuses; test_mode
+// alone never bypasses the gate.
 func CCBillIPAllowed(ctx context.Context, cfg *config.Config, probe LiveRailProbe, clientIP string) bool {
 	if iputil.IsValidCCBillIP(clientIP) {
 		return true

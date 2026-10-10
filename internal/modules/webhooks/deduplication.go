@@ -32,10 +32,10 @@ const (
 	webhookDuplicatePollMax = 2 * time.Second
 )
 
-// DeduplicationService dedups webhook deliveries across replicas (#1099).
-// A delivery is claimed in billing.idempotency_keys, so exactly one replica
-// processes an event at a time. The applied fact is billing.webhook_events
-// (#678), written with the handler's effects where it can be.
+// DeduplicationService dedups webhook deliveries across replicas. A delivery
+// is claimed in billing.idempotency_keys, so exactly one replica processes an
+// event at a time. The applied fact is billing.webhook_events, written with
+// the handler's effects where it can be.
 type DeduplicationService struct {
 	claims *idempotency.Store
 	db     *db.DB
@@ -185,7 +185,7 @@ func (s *DeduplicationService) writeMark(ctx context.Context, m *dedupMark) erro
 var ErrWebhookAlreadyApplied = errors.New("webhook event already applied")
 
 // MarkWebhookProcessedInTx writes the applied mark in the handler's own effect
-// tx, so mark and effects commit (or roll back) together (#678). When the mark
+// tx, so mark and effects commit (or roll back) together. When the mark
 // already exists the tx must roll back (ErrWebhookAlreadyApplied). No-op
 // without a dedup mark in flight; ProcessWebhook still writes the mark after
 // the handler, so this is an atomicity upgrade, never a requirement.
@@ -205,8 +205,8 @@ func MarkWebhookProcessedInTx(ctx context.Context, tx pgx.Tx) error {
 }
 
 // ProcessWebhook handles webhook deduplication and processing coordination.
-// source is WHO sent the event — a rail, or a custodian that emits its own
-// instrument events (or#879); the dedup namespace is per-source either way.
+// source is who sent the event (a rail, or a custodian emitting its own
+// instrument events); the dedup namespace is per source.
 func (s *DeduplicationService) ProcessWebhook(ctx context.Context, eventID, eventType string, source models.EventSource, processingFunc func(ctx context.Context) error) error {
 	trimmedEventID := strings.TrimSpace(eventID)
 	op := fmt.Sprintf("webhook.%s.%s", source, eventType)
@@ -339,8 +339,8 @@ func (s *DeduplicationService) run(ctx context.Context, claim *idempotency.Claim
 		return fmt.Errorf("webhook processing failed: %w", processingErr)
 	}
 	// TRUTH: verify-or-write the mark, still under the claim. A no-op when the
-	// handler committed it with its effects. Failure is retryable: #675
-	// replay-safety makes the redelivered effects converge.
+	// handler committed it with its effects. Failure is retryable: replay-safe
+	// handlers make the redelivered effects converge.
 	if mark != nil {
 		if err := s.writeMark(work, mark); err != nil {
 			stop()
