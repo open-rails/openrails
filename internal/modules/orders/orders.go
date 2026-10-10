@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"time"
 
@@ -173,12 +174,15 @@ func intPtr(v *int32) *int {
 	return &out
 }
 
-func int32Ptr(v *int) *int32 {
+func int32Ptr(v *int) (*int32, error) {
 	if v == nil {
-		return nil
+		return nil, nil
+	}
+	if *v < math.MinInt32 || *v > math.MaxInt32 {
+		return nil, fmt.Errorf("order line value %d is out of range", *v)
 	}
 	out := int32(*v)
-	return &out
+	return &out, nil
 }
 
 // creditOf reads a line's frozen credit benefit.

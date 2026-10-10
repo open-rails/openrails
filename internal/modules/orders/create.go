@@ -94,10 +94,22 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 			if l.ClaimKey != "" {
 				claim = &l.ClaimKey
 			}
+			quantity, err := int32Ptr(l.Quantity)
+			if err != nil {
+				return err
+			}
+			interval, err := int32Ptr(l.Price.RecurringCycleHours())
+			if err != nil {
+				return err
+			}
+			access, err := int32Ptr(l.Price.AccessDurationHours)
+			if err != nil {
+				return err
+			}
 			if err := q.CreateOrderLine(ctx, gen.CreateOrderLineParams{MerchantID: mid.UUID(), ID: uuidutil.NewV7(), OrderID: id, CustomerID: in.CustomerID,
-				Position: int32(i), PriceID: l.Price.ID, ProductID: l.Product.ID, Description: l.Product.DisplayName, Quantity: int32Ptr(l.Quantity),
+				Position: int32(i), PriceID: l.Price.ID, ProductID: l.Product.ID, Description: l.Product.DisplayName, Quantity: quantity,
 				UnitAmount: l.UnitAmount, Amount: l.Amount, Ownership: string(l.Ownership), ClaimKey: claim,
-				BillingIntervalHours: int32Ptr(l.Price.RecurringCycleHours()), AccessDurationHours: int32Ptr(l.Price.AccessDurationHours),
+				BillingIntervalHours: interval, AccessDurationHours: access,
 				CreditGrant: credit, Now: now}); err != nil {
 				return err
 			}
