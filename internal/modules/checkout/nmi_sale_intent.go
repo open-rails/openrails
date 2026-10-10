@@ -25,6 +25,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -118,7 +119,16 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 	if err != nil {
 		return intents.Ambiguous(err.Error())
 	}
-	response, callErr := client.RunSale(ctx, nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: credential})
+	params := nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: credential}
+	if p.NewCard {
+		// One sale charges the card and, unless it is kept for this purchase
+		// only, saves it in a new vault.
+		params.PaymentToken = p.Token
+		if p.SavesCard() {
+			params.SaveCard = newCardVault(p.Billing)
+		}
+	}
+	response, callErr := client.RunSale(ctx, params)
 	if callErr != nil {
 		duplicate := errors.Is(callErr, nmi.ErrDuplicateTransaction)
 		if !duplicate && nmi.RequiresVerification(callErr) {
@@ -135,6 +145,13 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		} else if errors.As(callErr, &refusal) {
 			evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
 			reason = "sale declined"
+			// A declined card is no stored credential: drop a vault the
+			// gateway made anyway.
+			if p.NewCard && refusal.CustomerVaultID != "" {
+				if err := client.DeleteCustomerVault(ctx, nmi.DeleteCustomerVaultData{CustomerVaultID: refusal.CustomerVaultID}); err != nil {
+					log.WithContext(ctx).WithError(err).WithField("vault_id", refusal.CustomerVaultID).Warn("delete the declined new card's vault")
+				}
+			}
 		}
 		if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
 			return intents.Ambiguous("cannot retain sale refusal: " + err.Error())
@@ -151,6 +168,10 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 // submission fence. Only the fence winner may send money.
 func (h *NMISaleIntentHandler) fenceSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload) (intents.Outcome, bool) {
 	err := h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		// A new card is saved by the sale itself: no method exists yet.
+		if p.NewCard && p.OrderID != uuid.Nil {
+			return nil
+		}
 		method, err := h.database().NewWithPgxTx(tx).Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: in.MerchantID, ID: p.PaymentMethodID})
 		if err != nil {
 			return err
@@ -292,6 +313,12 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	ctx, cancel := intents.LedgerWriteContext(ctx)
 	defer cancel()
 	ctx = db.WithPSPID(ctx, *in.PspID)
+	var saved *models.PaymentMethod
+	if p.OrderID != uuid.Nil && outcome.Class == intents.OutcomeSucceeded {
+		if saved, err = h.newCardMethod(ctx, in, p, receipt); err != nil {
+			return intents.Ambiguous("sale receipt retained; the new card's method is unread: " + err.Error())
+		}
+	}
 	var declined *models.PaymentMethod
 	err = h.database().MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
 		declined = nil
@@ -348,7 +375,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		purchase := h.Sale.PurchaseService.transactionBound(d)
 		now := purchase.now().UTC()
 		if p.OrderID != uuid.Nil {
-			if err := h.completeOrder(ctx, d, in, p, customer, receipt, success, evidence, outcome, now); err != nil {
+			if err := h.completeOrder(ctx, d, in, p, customer, receipt, success, evidence, outcome, now, saved); err != nil {
 				return err
 			}
 		} else if success {
@@ -366,7 +393,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 			if err != nil {
 				return err
 			}
-			if err := recordSaleAttempt(ctx, d, in, p, customer, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &result.PaymentID}, now); err != nil {
+			if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &result.PaymentID}, now); err != nil {
 				return err
 			}
 			if in.Rail != string(models.RailStripe) && p.Instrument.Mandate == nil {
@@ -391,7 +418,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 				avs, _ := evidence["avs_response"].(string)
 				cvv, _ := evidence["cvv_response"].(string)
 				transaction, _ := evidence["decline_transaction_id"].(string)
-				if err := recordSaleAttempt(ctx, d, in, p, customer, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
+				if err := recordSaleAttempt(ctx, d, in, p, customer, &p.PaymentMethodID, attempts.Attempt{Answer: decline.Evidence{Code: code, AVS: avs, CVV: cvv}, TransactionID: transaction}, now); err != nil {
 					return err
 				}
 			}
@@ -399,7 +426,7 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		if record := intents.OperatorResolutionRecord(ctx); record != nil {
 			evidence["operator_resolution"] = record
 		}
-		if !success && p.NewCard {
+		if !success && p.NewCard && p.OrderID == uuid.Nil {
 			if declined, err = declinedCard(ctx, d, in.MerchantID, p.PaymentMethodID); err != nil {
 				return err
 			}
@@ -424,6 +451,16 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 	}
 	discardCard(ctx, h.Sale.RailPaymentMethodService, declined)
 	return outcome
+}
+
+// newCardVault is a new NMI card's vault details.
+func newCardVault(b *payments.NewCardBilling) *nmi.CreateCustomerVaultData {
+	out := &nmi.CreateCustomerVaultData{}
+	if b != nil {
+		out.FirstName, out.LastName, out.Address1, out.Address2, out.City = b.FirstName, b.LastName, b.Address1, b.Address2, b.City
+		out.State, out.Zip, out.Country, out.Phone, out.Email = b.State, b.Zip, b.Country, b.Phone, b.Email
+	}
+	return out
 }
 
 // nmiSaleRefusal is the only non-execution proof a submitted NMI sale has:
@@ -453,14 +490,15 @@ func saleResultEvidence(evidence map[string]any) map[string]any {
 }
 
 // recordSaleAttempt records the sale's answer in its completion transaction.
-// Its target is the order an order sale pays, else the price.
-func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, a attempts.Attempt, at time.Time) error {
+// Its target is the order an order sale pays, else the price; method is the
+// card charged, nil for a new card that was not saved.
+func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID, method *uuid.UUID, a attempts.Attempt, at time.Time) error {
 	a.MerchantID, a.CustomerID, a.PSPID, a.Rail = in.MerchantID, customer, *in.PspID, in.Rail
 	a.Kind, a.At, a.Target, a.Step = attempts.Initial, at, p.PriceID.String(), "charge"
 	if p.OrderID != uuid.Nil {
-		a.Target, a.OrderID = p.OrderID.String(), &p.OrderID
+		a.Target, a.OrderID, a.NewCard = p.OrderID.String(), &p.OrderID, p.NewCard
 	}
-	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, &p.PaymentMethodID, &in.ID
+	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, method, &in.ID
 	a.TokenType = charge.TokenTypePSPToken
 	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)

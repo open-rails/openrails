@@ -37,24 +37,26 @@ const (
 	// HostEventProductEntitlementsChanged is a product gaining or losing keys:
 	// every holder's access changed with it.
 	HostEventProductEntitlementsChanged HostEventType = "product.entitlements_changed"
-	// Order transitions: fulfil on order.paid.
-	HostEventOrderPaid           HostEventType = "order.paid"
+	// Order transitions: fulfil on order.completed.
+	HostEventOrderCompleted      HostEventType = "order.completed"
 	HostEventOrderRequiresAction HostEventType = "order.requires_action"
 	HostEventOrderPaymentFailed  HostEventType = "order.payment_failed"
 	HostEventOrderCanceled       HostEventType = "order.canceled"
 	HostEventOrderExpired        HostEventType = "order.expired"
 )
 
-// OrderHostEvent is one order transition. Number and PaymentID are set on
-// order.paid.
+// OrderHostEvent is one order transition: the order's status and its
+// payment's as the transition left them. Number and PaymentID are set on
+// order.completed.
 type OrderHostEvent struct {
-	OrderID    OrderID     `json:"order_id"`
-	CustomerID CustomerID  `json:"customer_id"`
-	Status     OrderStatus `json:"status"`
-	Total      int64       `json:"total,string"`
-	Currency   string      `json:"currency"`
-	Number     *string     `json:"number"`
-	PaymentID  *PaymentID  `json:"payment_id"`
+	OrderID       OrderID            `json:"order_id"`
+	CustomerID    CustomerID         `json:"customer_id"`
+	Status        OrderStatus        `json:"status"`
+	PaymentStatus OrderPaymentStatus `json:"payment_status"`
+	Total         int64              `json:"total,string"`
+	Currency      string             `json:"currency"`
+	Number        *string            `json:"number"`
+	PaymentID     *PaymentID         `json:"payment_id"`
 }
 
 // ProductEntitlementsChangedEvent is one key edit of a product. Holders is how

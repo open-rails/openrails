@@ -54,6 +54,9 @@ type Charge struct {
 	// agreement's storing transaction, referenced by StoringRef.
 	Cites      *paycharge.Mandate
 	StoringRef string
+	// Reuse: the charge stored the card for the customer's one-click buys,
+	// its card_on_file agreement.
+	Reuse bool
 }
 
 // lineage is the agreement references the charge leaves on the card.
@@ -68,8 +71,8 @@ func (c *Charge) lineage() *paycharge.Mandate {
 type Outcome string
 
 const (
-	// OutcomePaid: the order is paid (now, or by an earlier delivery).
-	OutcomePaid Outcome = "paid"
+	// OutcomeComplete: the order is complete (now, or by an earlier delivery).
+	OutcomeComplete Outcome = "complete"
 	// OutcomeRefunded: the order had closed and what it bought is owned
 	// meanwhile; the payment is recorded and its refund queued.
 	OutcomeRefunded Outcome = "refunded"
@@ -77,7 +80,7 @@ const (
 
 // Paid settles an order a charge paid, in d's transaction (the caller's
 // provider-intent completion): the payment, the number, the claims handed
-// to what the lines produce, fulfilment and the order.paid event. A charge
+// to what the lines produce, fulfilment and the order.completed event. A charge
 // on a canceled or expired order revives it while its claims are free;
 // otherwise the payment is refunded with a finding.
 func (s *Service) Paid(ctx context.Context, d *db.DB, orderID uuid.UUID, charge Charge) (Outcome, error) {
@@ -102,11 +105,11 @@ func (s *Service) Paid(ctx context.Context, d *db.DB, orderID uuid.UUID, charge 
 func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Charge) (Outcome, error) {
 	q := d.Gen(ctx)
 	now := s.now()
-	if order.Status == string(billing.OrderPaid) {
+	if order.Status == string(billing.OrderComplete) {
 		if charge != nil && uuidOf(order.PaymentID) != charge.PaymentID {
 			return "", errLateApprovalDup
 		}
-		return OutcomePaid, nil
+		return OutcomeComplete, nil
 	}
 	var payment *models.Payment
 	if charge != nil {
@@ -147,22 +150,19 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	if payment != nil {
 		paymentID = &payment.ID
 	}
-	if n, err := q.SetOrderPaid(ctx, gen.SetOrderPaidParams{MerchantID: order.MerchantID, ID: order.ID, Number: FormatNumber(number), PaymentID: paymentID, Now: now}); err != nil || n != 1 {
+	if n, err := q.SetOrderComplete(ctx, gen.SetOrderCompleteParams{MerchantID: order.MerchantID, ID: order.ID, Number: FormatNumber(number), PaymentID: paymentID, Now: now}); err != nil || n != 1 {
 		if err == nil {
-			err = fmt.Errorf("order %s did not move to paid", order.ID)
+			err = fmt.Errorf("order %s did not complete", order.ID)
 		}
 		return "", err
 	}
-	recurring := false
+	order.Status, order.PaymentStatus = string(billing.OrderComplete), string(billing.OrderPaymentSucceeded)
 	for _, line := range order.Lines {
-		recurring = recurring || line.BillingIntervalHours != nil
 		if err := s.fulfil(ctx, d, order, line, charge, now); err != nil {
 			return "", fmt.Errorf("fulfil order line %s: %w", line.ID, err)
 		}
 	}
-	// A one-time order's storing charge on a PSP vault is the card's
-	// card-on-file consent; a Stripe card has its own from its setup.
-	if charge != nil && !charge.Manual && !recurring && charge.Cites == nil && charge.Rail != string(models.RailStripe) {
+	if charge != nil && !charge.Manual && charge.Reuse {
 		if err := mandates.RecordStored(ctx, q, mandates.Stored{MerchantID: order.MerchantID, CustomerID: order.CustomerID, PaymentMethodID: charge.PaymentMethodID, PSPID: charge.PSPID,
 			Rail: charge.Rail, Currency: order.Currency, Lineage: *charge.lineage(), AcceptedAt: now}); err != nil {
 			return "", err
@@ -184,7 +184,7 @@ func (s *Service) settle(ctx context.Context, d *db.DB, order *Order, charge *Ch
 	if paymentID != nil {
 		extra["payment_id"] = paymentID.String()
 	}
-	return OutcomePaid, s.event(ctx, q, &order.BillingOrder, "order.paid", now, extra)
+	return OutcomeComplete, s.event(ctx, q, &order.BillingOrder, "order.completed", now, extra)
 }
 
 // FormatNumber spells a document number.
@@ -407,26 +407,27 @@ func (s *Service) Declined(ctx context.Context, d *db.DB, orderID, attemptID uui
 	if _, err := q.SetOrderDeclined(ctx, gen.SetOrderDeclinedParams{MerchantID: order.MerchantID, ID: order.ID, AttemptID: attemptID, LastPaymentError: raw, Now: now}); err != nil {
 		return err
 	}
+	order.Status, order.PaymentStatus = string(billing.OrderOpen), string(billing.OrderPaymentRequiresPaymentMethod)
 	return s.event(ctx, q, &order.BillingOrder, "order.payment_failed", now, map[string]any{"reason": failure.Reason})
 }
 
 // Pending records that the order's live attempt waits for the customer
 // (requires_action) or the provider (processing).
-func (s *Service) Pending(ctx context.Context, orderID, attemptID uuid.UUID, status billing.OrderStatus) error {
+func (s *Service) Pending(ctx context.Context, orderID, attemptID uuid.UUID, status billing.OrderPaymentStatus) error {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
 		return err
 	}
 	q := s.DB.Gen(ctx)
 	now := s.now()
-	n, err := q.SetOrderPending(ctx, gen.SetOrderPendingParams{MerchantID: mid.UUID(), ID: orderID, AttemptID: attemptID, Status: string(status), Now: now})
+	n, err := q.SetOrderPending(ctx, gen.SetOrderPendingParams{MerchantID: mid.UUID(), ID: orderID, AttemptID: attemptID, PaymentStatus: string(status), Now: now})
 	if err != nil || n == 0 {
 		return err
 	}
 	if _, err := q.SetOrderAttemptStatus(ctx, gen.SetOrderAttemptStatusParams{MerchantID: mid.UUID(), ID: attemptID, Status: string(status), Now: now}); err != nil {
 		return err
 	}
-	if status != billing.OrderRequiresAction {
+	if status != billing.OrderPaymentRequiresAction {
 		return nil
 	}
 	order, err := s.load(ctx, q, mid.UUID(), orderID, false)
@@ -492,7 +493,7 @@ func (s *Service) RecordRemittance(ctx context.Context, in Remittance) (payment 
 		switch {
 		case order.HasRecurring():
 			return ErrRecurringLine
-		case order.Status == string(billing.OrderRequiresAction) || order.Status == string(billing.OrderProcessing):
+		case order.AwaitsCustomer() || order.Status == string(billing.OrderProcessing):
 			return ErrInProgress
 		case order.Status != string(billing.OrderOpen) || !order.ExpiresAt.After(now):
 			return ErrNotPayable

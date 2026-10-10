@@ -283,6 +283,7 @@ func (m *model) openAPI() ([]byte, error) {
 			"request_id", newObj("type", "string"),
 			"param", newObj("type", "string"),
 			"metadata", newObj("type", "object"),
+			"order", newObj("$ref", "#/components/schemas/Order", "description", "The order a failed payment left open (402 card_error)."),
 		),
 		"required", []string{"type", "code", "message"}))
 

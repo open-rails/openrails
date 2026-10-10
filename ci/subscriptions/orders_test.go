@@ -112,6 +112,23 @@ func errorMeta(call orderCall, key string) string {
 	return ""
 }
 
+// orderOf is the order an answer carries: its body, or a failed payment's
+// error.order.
+func orderOf(call orderCall) map[string]any {
+	if e, ok := call.body["error"].(map[string]any); ok {
+		if o, ok := e["order"].(map[string]any); ok {
+			return o
+		}
+	}
+	return call.body
+}
+
+// paymentOf is the payment of the order an answer carries.
+func paymentOf(call orderCall) map[string]any {
+	p, _ := orderOf(call)["payment"].(map[string]any)
+	return p
+}
+
 func orderLines(call orderCall) []map[string]any {
 	var out []map[string]any
 	for _, l := range call.body["lines"].([]any) {
@@ -173,7 +190,10 @@ func TestOrderOneCallBuy(t *testing.T) {
 	bought := c.order(http.MethodPost, "/orders", key, body)
 	require.Equal(t, http.StatusCreated, bought.status, "%v", bought.body)
 	require.False(t, bought.replayed)
-	require.Equal(t, "paid", bought.body["status"], "%v", bought.body)
+	require.Equal(t, "complete", bought.body["status"], "%v", bought.body)
+	require.Equal(t, "succeeded", paymentOf(bought)["status"])
+	require.Equal(t, card, paymentOf(bought)["payment_method_id"])
+	require.NotNil(t, paymentOf(bought)["payment_id"])
 	require.NotEmpty(t, bought.body["number"])
 	require.Equal(t, micros(35_000_000), bought.body["total"])
 	id := bought.body["id"].(string)
@@ -189,10 +209,10 @@ func TestOrderOneCallBuy(t *testing.T) {
 	require.Len(t, w.nmi.saleOrders(), 1, "one charge for the whole order")
 
 	replay := c.order(http.MethodPost, "/orders", key, body)
-	require.Equal(t, http.StatusOK, replay.status, "%v", replay.body)
+	require.Equal(t, http.StatusCreated, replay.status, "the stored answer: %v", replay.body)
 	require.True(t, replay.replayed)
 	require.Equal(t, id, replay.body["id"])
-	require.Equal(t, "paid", replay.body["status"])
+	require.Equal(t, "complete", replay.body["status"])
 	require.Len(t, w.nmi.saleOrders(), 1, "a replay never charges")
 	other := map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(25_000_000), "payment": body["payment"]}
 	reused := c.order(http.MethodPost, "/orders", key, other)
@@ -211,15 +231,17 @@ func TestOrderOneCallBuy(t *testing.T) {
 	require.Equal(t, "already_owned", orderLines(refused)[0]["refusal"].(map[string]any)["code"])
 
 	read := c.order(http.MethodGet, "/orders/"+id, "", nil)
-	require.Equal(t, "paid", read.body["status"])
+	require.Equal(t, "complete", read.body["status"])
 	list := c.order(http.MethodGet, "/orders", "", nil)
 	require.Equal(t, id, list.body["data"].([]any)[0].(map[string]any)["id"])
 
-	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventOrderPaid})
+	events, err := w.client[embedded].ListHostEvents(ctx, billing.HostEventListParams{Type: billing.HostEventOrderCompleted})
 	require.NoError(t, err)
 	require.Len(t, events.Items, 1)
 	require.Equal(t, id, events.Items[0].Order.OrderID.String())
 	require.Equal(t, bought.body["number"], *events.Items[0].Order.Number)
+	require.Equal(t, billing.OrderComplete, events.Items[0].Order.Status)
+	require.Equal(t, billing.OrderPaymentSucceeded, events.Items[0].Order.PaymentStatus)
 
 	// The membership renews from the order's paid period.
 	sub, err := billing.ParseSubscriptionID(lines[0]["subscription_id"].(string))
@@ -236,9 +258,10 @@ func TestOrderOneCallBuy(t *testing.T) {
 	require.Equal(t, int64(10_000_000), renewal.Amount)
 }
 
-// A decline leaves the order open with the reason; paying again with a good
-// card pays it, and a paid order takes no more payment. Another customer
-// cannot read, pay or cancel it.
+// A decline answers 402 card_error with the order, open with the reason, as
+// Stripe answers with its PaymentIntent; the key replays that same answer.
+// Paying again with a good card completes it, and a complete order takes no
+// more payment. Another customer cannot read, pay or cancel it.
 func TestOrderDeclineThenPay(t *testing.T) {
 	t.Parallel()
 	w := orderWorld(t)
@@ -246,12 +269,23 @@ func TestOrderDeclineThenPay(t *testing.T) {
 	c := w.newCustomer()
 	card := c.saveCard("nmi", visa)
 	w.nmi.SetDecline(visa.Last4, "202")
-	declined := c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(9_000_000), "payment": map[string]any{"payment_method_id": card}})
-	require.Equal(t, http.StatusCreated, declined.status, "a decline is not an HTTP error: %v", declined.body)
-	require.Equal(t, "open", declined.body["status"])
-	require.Equal(t, "insufficient_funds", declined.body["last_payment_error"].(map[string]any)["reason"])
+	buyKey := "buy-" + uuid.NewString()
+	buy := map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(9_000_000), "payment": map[string]any{"payment_method_id": card}}
+	declined := c.order(http.MethodPost, "/orders", buyKey, buy)
+	require.Equal(t, http.StatusPaymentRequired, declined.status, "%v", declined.body)
+	require.Equal(t, "card_declined", orderError(declined))
+	require.Equal(t, "card_error", declined.body["error"].(map[string]any)["type"])
+	require.Equal(t, "open", orderOf(declined)["status"])
+	require.Equal(t, "requires_payment_method", paymentOf(declined)["status"])
+	require.Equal(t, "insufficient_funds", paymentOf(declined)["last_payment_error"].(map[string]any)["reason"])
 	require.False(t, c.entitled("orders:declined"))
-	id := declined.body["id"].(string)
+	id := orderOf(declined)["id"].(string)
+	again := c.order(http.MethodPost, "/orders", buyKey, buy)
+	require.Equal(t, http.StatusPaymentRequired, again.status, "the replay is the stored 402: %v", again.body)
+	require.True(t, again.replayed)
+	require.Equal(t, id, orderOf(again)["id"])
+	require.Equal(t, "card_declined", orderError(again))
+	require.Len(t, w.nmi.saleOrders(), 1, "a replay never charges")
 
 	b := w.newCustomer()
 	bCard := b.saveCard("nmi", mastercard)
@@ -263,12 +297,12 @@ func TestOrderDeclineThenPay(t *testing.T) {
 	key := "pay-" + uuid.NewString()
 	paid := c.order(http.MethodPost, "/orders/"+id+"/pay", key, map[string]any{"payment": map[string]any{"payment_method_id": good}, "expected_total": micros(9_000_000)})
 	require.Equal(t, http.StatusOK, paid.status, "%v", paid.body)
-	require.Equal(t, "paid", paid.body["status"])
-	require.Nil(t, paid.body["last_payment_error"])
+	require.Equal(t, "complete", paid.body["status"])
+	require.Nil(t, paymentOf(paid)["last_payment_error"])
 	require.True(t, c.entitled("orders:declined"))
 	replay := c.order(http.MethodPost, "/orders/"+id+"/pay", key, map[string]any{"payment": map[string]any{"payment_method_id": good}, "expected_total": micros(9_000_000)})
 	require.True(t, replay.replayed)
-	require.Equal(t, "paid", replay.body["status"])
+	require.Equal(t, "complete", replay.body["status"])
 	more := c.order(http.MethodPost, "/orders/"+id+"/pay", "more-"+uuid.NewString(), map[string]any{"payment": map[string]any{"payment_method_id": good}, "expected_total": micros(9_000_000)})
 	require.Equal(t, "order_not_payable", orderError(more))
 	require.Len(t, w.nmi.ledger(""), 1, "one charge moved money")
@@ -285,19 +319,20 @@ func TestOrderStripeAuthentication(t *testing.T) {
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
 	bought := c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{"lines": []any{line(member, 0)}, "expected_total": micros(12_000_000), "payment": map[string]any{"payment_method_id": challenged}})
 	require.Equal(t, http.StatusCreated, bought.status, "%v", bought.body)
-	require.Equal(t, "requires_action", bought.body["status"], "%v", bought.body)
-	next := bought.body["next_action"].(map[string]any)
+	require.Equal(t, "open", bought.body["status"], "%v", bought.body)
+	require.Equal(t, "requires_action", paymentOf(bought)["status"], "%v", bought.body)
+	next := paymentOf(bought)["next_action"].(map[string]any)
 	require.Equal(t, "authenticate", next["type"])
 	payload := next["payload"].(map[string]any)
 	require.NotEmpty(t, payload["client_secret"])
 	id := bought.body["id"].(string)
 
 	still := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
-	require.Equal(t, "requires_action", still.body["status"], "confirm before authenticating changes nothing: %v", still.body)
+	require.Equal(t, "requires_action", paymentOf(still)["status"], "confirm before authenticating changes nothing: %v", still.body)
 	require.True(t, w.stripe.Authenticate(payload["payment_intent_id"].(string)))
 	confirmed := c.order(http.MethodPost, "/orders/"+id+"/confirm", "", nil)
 	require.Equal(t, http.StatusOK, confirmed.status, "%v", confirmed.body)
-	require.Equal(t, "paid", confirmed.body["status"], "%v", confirmed.body)
+	require.Equal(t, "complete", confirmed.body["status"], "%v", confirmed.body)
 	require.True(t, c.entitled("orders:challenged"))
 }
 
@@ -313,6 +348,7 @@ func TestOrderCancelExpireAndLatePayment(t *testing.T) {
 	open := c.order(http.MethodPost, "/orders", "open-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}})
 	require.Equal(t, http.StatusCreated, open.status, "%v", open.body)
 	require.Equal(t, "open", open.body["status"])
+	require.Equal(t, "requires_payment_method", paymentOf(open)["status"])
 	require.NotEmpty(t, open.body["payment_options"])
 	held := c.order(http.MethodPost, "/orders", "held-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}})
 	require.Equal(t, "already_owned", orderError(held), "an unpaid order holds its claim")
@@ -332,12 +368,12 @@ func TestOrderCancelExpireAndLatePayment(t *testing.T) {
 	// back, and cancels; the payment had landed, so the order is paid.
 	authCard := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
 	challenged := c.order(http.MethodPost, "/orders", "late-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(7_000_000), "payment": map[string]any{"payment_method_id": authCard}})
-	require.Equal(t, "requires_action", challenged.body["status"], "%v", challenged.body)
-	pi := challenged.body["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
+	require.Equal(t, "requires_action", paymentOf(challenged)["status"], "%v", challenged.body)
+	pi := paymentOf(challenged)["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
 	id := challenged.body["id"].(string)
 	require.True(t, w.stripe.Authenticate(pi))
 	require.Equal(t, http.StatusOK, c.order(http.MethodPost, "/orders/"+id+"/cancel", "", nil).status)
-	w.until(func() bool { return c.order(http.MethodGet, "/orders/"+id, "", nil).body["status"] == "paid" }, "the late payment revives the order")
+	w.until(func() bool { return c.order(http.MethodGet, "/orders/"+id, "", nil).body["status"] == "complete" }, "the late payment revives the order")
 	require.True(t, c.entitled("orders:late"))
 
 	// Refunded: canceling closes the challenged payment at Stripe; the
@@ -346,8 +382,8 @@ func TestOrderCancelExpireAndLatePayment(t *testing.T) {
 	d := w.newCustomer()
 	dCard := d.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
 	lost := d.order(http.MethodPost, "/orders", "lost-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(7_000_000), "payment": map[string]any{"payment_method_id": dCard}})
-	require.Equal(t, "requires_action", lost.body["status"])
-	lostPI := lost.body["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
+	require.Equal(t, "requires_action", paymentOf(lost)["status"])
+	lostPI := paymentOf(lost)["next_action"].(map[string]any)["payload"].(map[string]any)["payment_intent_id"].(string)
 	lostID := lost.body["id"].(string)
 	g := w.stripe.hold(newGate(func(r *http.Request) bool {
 		return r.Method == http.MethodPost && r.URL.Path == "/v1/payment_intents/"+lostPI+"/cancel"
@@ -367,14 +403,15 @@ func TestOrderCancelExpireAndLatePayment(t *testing.T) {
 	}
 	nmiCard := d.saveCard("nmi", visa)
 	kept := d.order(http.MethodPost, "/orders", "kept-"+uuid.NewString(), map[string]any{"lines": []any{line(life, 0)}, "expected_total": micros(7_000_000), "payment": map[string]any{"payment_method_id": nmiCard}})
-	require.Equal(t, "paid", kept.body["status"], "%v", kept.body)
+	require.Equal(t, "complete", kept.body["status"], "%v", kept.body)
 	require.True(t, w.stripe.Authenticate(lostPI))
 	close(g.release)
 	w.until(func() bool { return len(w.openFindings("life.order.late_payment")) == 1 }, "the late payment is refunded with a finding")
 	w.stripe.unhold()
 	after := d.order(http.MethodGet, "/orders/"+lostID, "", nil)
 	require.Equal(t, "canceled", after.body["status"])
-	require.NotNil(t, after.body["payment_id"], "the money that moved is recorded")
+	require.Equal(t, "succeeded", paymentOf(after)["status"], "the money moved, and was refunded")
+	require.NotNil(t, paymentOf(after)["payment_id"], "the money that moved is recorded")
 }
 
 // Two concurrent buys of one product: one order claims it, the other is
