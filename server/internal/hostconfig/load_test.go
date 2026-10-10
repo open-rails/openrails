@@ -300,3 +300,21 @@ func TestLoadRequiresDatabase(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "postgresql://openrails:secret@db.internal:5432/openrails?sslmode=require", cfg.DB.URL)
 }
+
+// The binary drains by default; both settings come from env too.
+func TestShutdownSettings(t *testing.T) {
+	bootEnv(t)
+	cfg, err := Load("")
+	require.NoError(t, err)
+	require.Equal(t, [2]time.Duration{5 * time.Second, 20 * time.Second}, [2]time.Duration{cfg.DrainDelay, cfg.ShutdownTimeout})
+
+	t.Setenv("DRAIN_DELAY", "0s")
+	t.Setenv("SHUTDOWN_TIMEOUT", "45s")
+	cfg, err = Load("")
+	require.NoError(t, err)
+	require.Equal(t, [2]time.Duration{0, 45 * time.Second}, [2]time.Duration{cfg.DrainDelay, cfg.ShutdownTimeout})
+
+	t.Setenv("DRAIN_DELAY", "-1s")
+	_, err = Load("")
+	require.ErrorContains(t, err, "must not be negative")
+}

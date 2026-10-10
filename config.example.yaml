@@ -18,6 +18,10 @@ credential_read_only: false # may restrict a managed backend; cannot grant stora
 host: 0.0.0.0
 port: 3053
 # private_port: 9090 # the operator's /metrics, apart from the public port; unset serves none
+# On SIGTERM: readiness fails at once, serving continues for drain_delay, then
+# in-flight requests and workers finish within shutdown_timeout.
+# drain_delay: 5s
+# shutdown_timeout: 20s
 public_billing_base_url: http://localhost:3053
 
 # Minimum separation between two equal post-absence provider-billing reads.

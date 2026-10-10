@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"strconv"
 	"strings"
+	"time"
 
 	billing "github.com/open-rails/openrails/internal/config"
 )
@@ -29,6 +30,9 @@ type Config struct {
 	// PrivatePort is the private listener's, on Host: the operator's
 	// /metrics. 0 serves none.
 	PrivatePort int
+	// DrainDelay and ShutdownTimeout are server.Config's.
+	DrainDelay      time.Duration
+	ShutdownTimeout time.Duration
 	// MerchantManifestOverlays are YAML files in the merchant manifest's own
 	// shape (secrets rendered by Vault Agent or a Kubernetes Secret volume),
 	// merged over the boot manifest in order; later wins.
@@ -64,6 +68,9 @@ type fileConfig struct {
 	Port        port   `koanf:"port"`
 	Host        string `koanf:"host"`
 	PrivatePort port   `koanf:"private_port"`
+
+	DrainDelay      time.Duration `koanf:"drain_delay"`
+	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
 
 	ProviderWriteMode string `koanf:"provider_write_mode"`
 	TestMode          string `koanf:"test_mode"`
@@ -115,10 +122,14 @@ type fileConfig struct {
 // default database: one is always named (databaseURL).
 func defaults() *fileConfig {
 	return &fileConfig{
-		Host:     "0.0.0.0",
-		Port:     3053,
-		DB:       &billing.DBConfig{},
-		Database: billing.DatabaseConfig{Schema: billing.DefaultSchema},
+		Host: "0.0.0.0",
+		Port: 3053,
+		// Long enough for endpoints to drop the instance before it stops
+		// accepting; together within Kubernetes' default 30s grace period.
+		DrainDelay:      5 * time.Second,
+		ShutdownTimeout: 20 * time.Second,
+		DB:              &billing.DBConfig{},
+		Database:        billing.DatabaseConfig{Schema: billing.DefaultSchema},
 		// Match docker-compose's host-published Garnet port.
 		Redis:      &billing.RedisConfig{Addr: "localhost:6380"},
 		Logger:     &billing.LoggerConfig{Level: "info"},
@@ -255,6 +266,8 @@ func (f *fileConfig) config() (*Config, error) {
 		Host:                     f.Host,
 		Port:                     int(f.Port),
 		PrivatePort:              int(f.PrivatePort),
+		DrainDelay:               f.DrainDelay,
+		ShutdownTimeout:          f.ShutdownTimeout,
 		MerchantManifestOverlays: f.MerchantManifestOverlays,
 		AdminConsole:             f.AdminConsole.mount(),
 		ConsoleIssuer:            f.AdminConsole.issuer(),
@@ -305,6 +318,9 @@ func Validate(cfg *Config) error {
 	}
 	if cfg.PrivatePort < 0 || cfg.PrivatePort > 65535 || (cfg.PrivatePort != 0 && cfg.PrivatePort == cfg.Port) {
 		return fmt.Errorf("invalid private_port %d: must be 1-65535 and not port", cfg.PrivatePort)
+	}
+	if cfg.DrainDelay < 0 || cfg.ShutdownTimeout < 0 {
+		return fmt.Errorf("drain_delay and shutdown_timeout must not be negative")
 	}
 	if err := billing.Validate(cfg.Config); err != nil {
 		return err

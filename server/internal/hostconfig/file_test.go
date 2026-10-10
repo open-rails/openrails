@@ -26,7 +26,7 @@ func TestFileReachesConfig(t *testing.T) {
 			field.SetString("sandbox")
 		case reflect.Bool:
 			field.SetBool(true)
-		case reflect.Int:
+		case reflect.Int, reflect.Int64:
 			field.SetInt(1)
 		case reflect.Slice:
 			field.Set(reflect.ValueOf([]string{"x"}))

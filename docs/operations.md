@@ -1011,6 +1011,13 @@ embedded host's own River fleet (`WithRiverClient`) is outside that
 local-process check and is observed through the `openrails_job_progress` probe
 (`Client.Probes`).
 
+On SIGTERM or SIGINT the server drains: readiness answers 503 at once, while
+the listener keeps serving for `drain_delay` (default 5s), so load balancers
+and Kubernetes endpoints drop the instance before it stops accepting. Then it
+finishes in-flight requests and stops its workers within `shutdown_timeout`
+(default 20s). Keep their sum under the orchestrator's grace period
+(Kubernetes' `terminationGracePeriodSeconds`, 30s by default).
+
 `GET /metrics` exports `openrails_dependency_up{dependency,class}` for every
 dependency readiness reports, optional ones included. The authenticated
 `/v1/admin/metrics` query and schema routes expose merchant business

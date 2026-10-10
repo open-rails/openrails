@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
 
@@ -56,7 +57,9 @@ type Dependencies struct {
 type Server struct {
 	cfg     *config.Config
 	runtime *app.Runtime
-	rdb     *redis.Client
+	// draining fails readiness while the process stops (Drain).
+	draining atomic.Bool
+	rdb      *redis.Client
 	// authenticator is the framework-neutral auth boundary (issue #282/#670 —
 	// there is no gin auth provider any more; every surface uses this directly).
 	authenticator billingauth.Authenticator
@@ -443,3 +446,7 @@ func (s *Server) billingCredentialsHTTP(next http.Handler) http.Handler {
 func (s *Server) HTTPRoutes() *router.Table {
 	return &router.Table{Entries: append([]router.Entry(nil), s.nativeRoutes.Entries...)}
 }
+
+// Drain fails /health/ready from now on, so load balancers stop routing here
+// while the process finishes what it serves.
+func (s *Server) Drain() { s.draining.Store(true) }

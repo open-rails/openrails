@@ -73,9 +73,13 @@ func (s *Server) capabilities() *billing.Capabilities {
 }
 
 // readyHandler serves /health/ready with the checks embedded Client.Ready
-// runs (#748). Which dependency failed, and why, goes to the log: the route
-// is public.
+// runs (#748), and 503 once the process drains. Which dependency failed, and
+// why, goes to the log: the route is public.
 func (s *Server) readyHandler(w http.ResponseWriter, r *http.Request) {
+	if s != nil && s.draining.Load() {
+		httprequest.NewHTTP(w, r, nil).ErrorCode(billing.CodeServiceUnavailable, "draining")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()
 

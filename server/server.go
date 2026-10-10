@@ -127,6 +127,13 @@ type Config struct {
 	// PrivateAddr is where Run and Serve also serve PrivateHandler, the
 	// operator's /metrics, apart from the public surface. Empty serves none.
 	PrivateAddr string
+	// DrainDelay is how long Run and Serve keep serving once ctx ends, with
+	// /health/ready failing, so load balancers stop routing here before the
+	// listener closes. 0 closes it at once.
+	DrainDelay time.Duration
+	// ShutdownTimeout bounds finishing in-flight requests and closing the
+	// server, background work included, after the drain; 0 is 30s.
+	ShutdownTimeout time.Duration
 }
 
 // Deps is everything a standalone server reaches outside its process.
@@ -307,18 +314,29 @@ func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error
 }
 
 // Run serves Handler at Config.Addr and runs the background work until ctx
-// ends or serving fails, then drains requests and closes the server.
+// ends or serving fails, then drains (Config.DrainDelay), finishes in-flight
+// requests and closes the server.
 func (s *Server) Run(ctx context.Context) error { return s.run(ctx, true) }
 
 // Serve is Run without the background work, which another process runs.
 func (s *Server) Serve(ctx context.Context) error { return s.run(ctx, false) }
 
-// shutdownGrace bounds draining requests and stopping workers.
-const shutdownGrace = 30 * time.Second
+// shutdownTimeout is Config.ShutdownTimeout, defaulted.
+func (s *Server) shutdownTimeout() time.Duration {
+	if s.cfg.ShutdownTimeout > 0 {
+		return s.cfg.ShutdownTimeout
+	}
+	return 30 * time.Second
+}
 
 func (s *Server) run(ctx context.Context, workers bool) (err error) {
+	// One ShutdownTimeout bounds the HTTP shutdown and Close together.
+	var deadline time.Time
 	defer func() {
-		closeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
+		if deadline.IsZero() {
+			deadline = time.Now().Add(s.shutdownTimeout())
+		}
+		closeCtx, cancel := context.WithDeadline(context.WithoutCancel(ctx), deadline)
 		defer cancel()
 		err = errors.Join(err, s.Close(closeCtx))
 	}()
@@ -364,23 +382,54 @@ func (s *Server) run(ctx context.Context, workers bool) (err error) {
 	if err == nil {
 		select {
 		case <-ctx.Done():
+			err = drain(s.surface.Drain, s.cfg.DrainDelay, served, hs)
 		case err = <-served:
 		}
 	}
-	shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), shutdownGrace)
-	defer cancel()
-	if serr := hs.Shutdown(shutdownCtx); serr != nil {
-		log.WithError(serr).Error("server: HTTP shutdown")
-	}
-	if private != nil {
-		if serr := private.Shutdown(shutdownCtx); serr != nil {
-			log.WithError(serr).Error("server: private listener shutdown")
-		}
-	}
+	deadline = time.Now().Add(s.shutdownTimeout())
+	shutdown(deadline, hs, private)
 	if errors.Is(err, http.ErrServerClosed) {
 		err = nil
 	}
 	return err
+}
+
+// drain marks the process unready and keeps serving for delay, with
+// keep-alives off so clients reconnect to another instance. A server failing
+// meanwhile ends it early.
+func drain(unready func(), delay time.Duration, served <-chan error, servers ...*http.Server) error {
+	if delay <= 0 {
+		return nil
+	}
+	unready()
+	for _, hs := range servers {
+		hs.SetKeepAlivesEnabled(false)
+	}
+	log.Infof("server: draining for %s", delay)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case err := <-served:
+		return err
+	}
+}
+
+// shutdown stops the servers accepting and lets in-flight requests finish
+// by deadline, then closes whatever is left.
+func shutdown(deadline time.Time, servers ...*http.Server) {
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	for _, hs := range servers {
+		if hs == nil {
+			continue
+		}
+		if err := hs.Shutdown(ctx); err != nil {
+			log.WithError(err).Error("server: HTTP shutdown; closing the remaining connections")
+			_ = hs.Close()
+		}
+	}
 }
 
 // Close stops the background work and closes the engine, AuthKit and the
