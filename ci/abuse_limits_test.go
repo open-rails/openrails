@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -64,6 +65,7 @@ func TestReplicasShareAbuseLimitsWithoutRedis(t *testing.T) {
 	}
 
 	t.Run("rate limit", func(t *testing.T) {
+		oneMinute(t, 10*time.Second)
 		const addr = "198.51.100.7:4711"
 		for i := range 10 { // the checkout bucket's 10 a minute
 			require.NotEqual(t, http.StatusTooManyRequests, pay(i, addr).Code, "request %d", i+1)
@@ -75,6 +77,7 @@ func TestReplicasShareAbuseLimitsWithoutRedis(t *testing.T) {
 	})
 
 	t.Run("admin lockout", func(t *testing.T) {
+		oneMinute(t, 10*time.Second)
 		remove := func(replica int) *httptest.ResponseRecorder {
 			return call(staff, replica, http.MethodDelete, "/v1/admin/catalog/rate-overrides/"+uuid.NewString()+"/meter", "198.51.100.8:4711")
 		}
@@ -92,6 +95,7 @@ func TestReplicasShareAbuseLimitsWithoutRedis(t *testing.T) {
 	})
 
 	t.Run("captcha challenge", func(t *testing.T) {
+		oneMinute(t, 10*time.Second)
 		const addr = "198.51.100.9:4711"
 		var last *httptest.ResponseRecorder
 		for range 30 { // three times the limit challenges the address

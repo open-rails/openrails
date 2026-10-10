@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -95,6 +96,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 		}},
 	} {
 		t.Run(feature.path, func(t *testing.T) {
+			oneMinute(t, 5*time.Second)
 			for i, mounted := range []struct {
 				handler http.Handler
 				prefix  string

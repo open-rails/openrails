@@ -222,6 +222,7 @@ products:
 	})
 
 	t.Run("one rate limit", func(t *testing.T) {
+		oneMinute(t, 10*time.Second)
 		// Redis outlives the test: a fresh client address.
 		addr := fmt.Sprintf("198.18.%d.%d:4711", rand.IntN(256), 1+rand.IntN(254))
 		pay := func(in *instance) *httptest.ResponseRecorder {
@@ -300,6 +301,15 @@ products:
 		}, 60*time.Second, 50*time.Millisecond, "the new leader runs its start-up passes")
 		oncePerPeriod()
 	})
+}
+
+// oneMinute waits out a minute with less than burst left: rate limits count
+// clock minutes, and a burst straddling two would start over halfway.
+func oneMinute(t *testing.T, burst time.Duration) {
+	t.Helper()
+	if left := time.Until(time.Now().Truncate(time.Minute).Add(time.Minute)); left < burst {
+		time.Sleep(left + 100*time.Millisecond)
+	}
 }
 
 func connect(t *testing.T, dsn string) *pgxpool.Pool {
