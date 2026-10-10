@@ -51,26 +51,22 @@ const price = {
 }
 
 describe("catalog", () => {
-  it("lists products with their embedded prices", async () => {
+  it("looks products up with their embedded prices", async () => {
     const { client, request } = served(
       json(
         200,
-        list(
-          [
-            product({ id: "prod_1", display_name: "Plus", prices: [price] }),
-            product({ id: "prod_2", display_name: "Bare", prices: [] }),
-          ],
-          "next"
-        )
-      ),
-      json(200, list([]))
+        list([
+          product({ id: "prod_1", display_name: "Plus", prices: [price] }),
+          product({ id: "prod_2", display_name: "Bare", prices: [] }),
+        ])
+      )
     )
-    const page = await client.listProducts()
+    const page = await client.listProducts({ keys: ["plus", "bare"] })
     expect(request()).toMatchObject({
-      url: "/billing/v1/catalog/products?limit=100",
+      url: "/billing/v1/catalog/products?keys=plus&keys=bare",
       method: "GET",
     })
-    expect(page.next_cursor).toBe("next")
+    expect(page.next_cursor).toBeNull()
     expect(page.data[0]).toMatchObject({
       id: "prod_1",
       display_name: "Plus",
@@ -88,15 +84,13 @@ describe("catalog", () => {
     })
     expect(page.data[1].prices).toEqual([])
 
-    await client.listProducts({ limit: 5, cursor: "next" })
-    expect(request(1).url).toBe("/billing/v1/catalog/products?limit=5&cursor=next")
   })
 
   it("rejects a price whose amount is not an exact string", async () => {
     const { client } = served(
       json(200, list([product({ prices: [{ ...price, unit_amount: 999 }] })]))
     )
-    await expect(client.listProducts()).rejects.toMatchObject({
+    await expect(client.listProducts({ keys: ["plus"] })).rejects.toMatchObject({
       code: "invalid_response",
     })
   })

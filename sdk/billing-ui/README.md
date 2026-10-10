@@ -44,8 +44,9 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 </BillingProvider>
 ```
 
-`<BuyButton>` buys one price, `<Offers>` everything on sale that grants any of
-some entitlements (a course, and the membership that also unlocks it): a
+`<BuyButton>` buys one price, `<Offers>` the products your server names by
+key (a course, its bundle and the membership that also unlocks it; the Go
+`Client.ListOffers` finds the products granting an entitlement): a
 `BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
 "$10.00 every 30 days"). The purchase is theirs from start to payment, so the
 app never handles a checkout session: today a button opens one in a checkout
@@ -65,7 +66,7 @@ own API (your gate) before granting anything.
 />
 
 <Offers
-  entitlements={["course:101", "channel:membership"]} // or products={...} from your server's Client.ListOffers
+  keys={["course-101", "course-bundle", "channel-membership"]} // from your server, or products={...} from its Client.ListOffers
   signedIn={signedIn}
   onSignInRequired={() => openSignIn()}
   onPaid={() => navigate("/courses/css-101")}
@@ -179,7 +180,7 @@ mounts OpenRails' checkout routes; `GET /config` is always served.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts({ entitlements?, keys? })`: the products on sale granting any of `entitlements` and named by `keys` (one is required), each with its prices; `useProducts` reads the same | `GET /catalog/products` |
+| `listProducts({ keys })`: the products on sale named by `keys` (1 to 100 product keys), each with its prices, in one page; `useProducts` reads the same | `GET /catalog/products` |
 | `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
 | `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |
@@ -249,8 +250,8 @@ provider:
   subscription row; `useBillingRefresh()` refetches after host-side changes.
 - Hooks: `useSubscriptions` (`cancel`, `resume`, `setPaymentMethod`,
   `changeSubscription`, per-row `pending`, `nextCursor`), `usePaymentMethods` (`add`,
-  `remove`, `setDefault`), `usePayments` (cursor pages), `useProducts` (the
-  catalog).
+  `remove`, `setDefault`), `usePayments` (cursor pages), `useProducts` (a
+  catalog lookup by product key).
   Actions resolve to `null` or a `BillingError`; they never throw.
   `changeSubscription` resolves to the `SubscriptionChange` instead of `null`. Cancel, resume
   and the card change answer the subscription, which replaces the row.

@@ -353,8 +353,9 @@ resource_server:
   once gets the receipt ([customer contacts](customer-contacts.md)).
 - A client-credentials token (an application) calls the programmatic routes,
   `/v1/app/*` with `route_groups.programmatic`, each holding its permission
-  (`merchant:entitlements:read`, `merchant:usage:manage`,
-  `merchant:costs:manage`, `merchant:events:read`), and provisions the
+  (`merchant:entitlements:read`, `merchant:catalog:read`,
+  `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`),
+  and provisions the
   merchant's users at `/v1/app/scim/v2`, as a provisioning token does; a
   person's token is refused there.
 - Refusals: `access_token_issuer_unknown` (untrusted `iss`),

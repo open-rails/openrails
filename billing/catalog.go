@@ -90,7 +90,7 @@ type ProductListParams struct {
 // OfferListParams asks what a customer may buy: the products on sale granting
 // any of Entitlements, or named by Keys, or both when both are given (at
 // least one is required, each at most MaxBatchItems), each with its live
-// prices.
+// prices. It is the host backend's read; the public catalog takes keys only.
 type OfferListParams struct {
 	PageRequest
 	Entitlements []string

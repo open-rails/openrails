@@ -70,10 +70,12 @@ POST /v1/me/billing-portal-sessions       → {"url": ...} (Stripe-portal deploy
 GET  /v1/me/notifications                 billing notifications
 ```
 
-The public catalog needs no auth: `GET /v1/catalog/products?entitlement=course:101` returns
-each product on sale granting that key, with its current prices; `?keys=` names products
-(given both, a product matches both). One of them is required: there is no unfiltered listing. A host's server reads the
-same with the Go `Client.ListOffers`.
+The public catalog needs no auth and is a lookup by product key:
+`GET /v1/catalog/products?keys=course-101&keys=course-bundle` returns each named product on
+sale, with its current prices, in one page. It takes `keys` alone, 1 to 100 of them: no
+entitlement filter, no listing, and any other parameter is `400 invalid_query`. Which
+products to offer is your server's call: the Go `Client.ListOffers` (`GET
+/v1/app/catalog/products`) finds the products on sale granting an entitlement.
 
 ### Public configuration: `GET /v1/config`
 

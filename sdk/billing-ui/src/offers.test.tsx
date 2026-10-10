@@ -79,11 +79,11 @@ function mount(ui: ReactNode, server: FakeBilling) {
 }
 
 describe("Offers", () => {
-  it("offers every product granting the entitlement, a button per price", async () => {
+  it("offers each product it names, a button per price", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlements={["course:101"]}
+        keys={["course-101", "course-bundle"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -103,15 +103,15 @@ describe("Offers", () => {
     expect(screen.queryByText("Membership")).toBeNull()
     const urls = server.fetch.mock.calls.map(([url]) => String(url))
     expect(urls).toContain(
-      "/billing/v1/catalog/products?entitlement=course%3A101&limit=100"
+      "/billing/v1/catalog/products?keys=course-101&keys=course-bundle"
     )
   })
 
-  it("offers everything granting any of its entitlements, in one read", async () => {
+  it("looks every key up in one read", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlements={["course:101", "channel:membership"]}
+        keys={["course-101", "course-bundle", "channel-membership"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -125,7 +125,7 @@ describe("Offers", () => {
       .map(([url]) => String(url))
       .filter((url) => url.includes("/catalog/products"))
     expect(reads).toEqual([
-      "/billing/v1/catalog/products?entitlement=course%3A101&entitlement=channel%3Amembership&limit=100",
+      "/billing/v1/catalog/products?keys=course-101&keys=course-bundle&keys=channel-membership",
     ])
   })
 
@@ -133,7 +133,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlements={["channel:membership"]}
+        keys={["channel-membership"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -149,7 +149,7 @@ describe("Offers", () => {
     const onPaid = vi.fn()
     mount(
       <Offers
-        entitlements={["course:101"]}
+        keys={["course-101"]}
         onPaid={onPaid}
         onSignInRequired={vi.fn()}
       />,
@@ -180,7 +180,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
-        entitlements={["course:101"]}
+        keys={["course-101"]}
         signedIn={false}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
@@ -202,7 +202,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
-        entitlements={["course:101"]}
+        keys={["course-101"]}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
       />,
@@ -224,7 +224,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
-        entitlements={["course:101"]}
+        keys={["course-101"]}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
       />,
@@ -254,11 +254,11 @@ describe("Offers", () => {
     expect(server.calls).not.toContain("GET /catalog/products")
   })
 
-  it("says when nothing on sale unlocks the entitlement", async () => {
+  it("says when none of its products is on sale", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
-        entitlements={["course:999"]}
+        keys={["course-999"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
       />,
@@ -267,5 +267,17 @@ describe("Offers", () => {
     expect(
       await screen.findByText("Nothing on sale unlocks this")
     ).toBeInTheDocument()
+  })
+
+  it("asks nothing for no keys", async () => {
+    const server = fakeBilling({ products: catalog() })
+    mount(
+      <Offers keys={[]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />,
+      server
+    )
+    expect(
+      await screen.findByText("Nothing on sale unlocks this")
+    ).toBeInTheDocument()
+    expect(server.calls).not.toContain("GET /catalog/products")
   })
 })

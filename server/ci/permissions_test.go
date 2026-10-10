@@ -40,11 +40,11 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 
 	every := []string{
 		server.MerchantBillingRead, server.MerchantBillingManage, server.MerchantCatalogManage, server.MerchantConfigManage, server.MerchantMetricsRead,
-		server.MerchantEntitlementsRead, server.MerchantUsageManage, server.MerchantCostsManage, server.MerchantEventsRead,
+		server.MerchantEntitlementsRead, server.MerchantCatalogRead, server.MerchantUsageManage, server.MerchantCostsManage, server.MerchantEventsRead,
 	}
 	require.Equal(t, []string{
 		"merchant:billing:read", "merchant:billing:manage", "merchant:catalog:manage", "merchant:config:manage", "merchant:metrics:read",
-		"merchant:entitlements:read", "merchant:usage:manage", "merchant:costs:manage", "merchant:events:read",
+		"merchant:entitlements:read", "merchant:catalog:read", "merchant:usage:manage", "merchant:costs:manage", "merchant:events:read",
 	}, every)
 	backend := func(perms []string) string {
 		return host.mint(t, func(c jwt.MapClaims) { c["sub"], c["client_id"], c["permissions"] = "backend", "backend", perms })
@@ -73,6 +73,7 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		{server.MerchantConfigManage, http.MethodGet, "/v1/admin/psps", "", http.StatusOK},
 		{server.MerchantMetricsRead, http.MethodGet, "/v1/admin/metrics/schema", "", http.StatusOK},
 		{server.MerchantEntitlementsRead, http.MethodPost, "/v1/app/entitlements/check", `{"customer_id":"` + customer + `","entitlements":["content:any"]}`, http.StatusOK},
+		{server.MerchantCatalogRead, http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", "", http.StatusOK},
 		{server.MerchantUsageManage, http.MethodPost, "/v1/app/admissions/release", `{"request_ids":["req-1"]}`, http.StatusOK},
 		{server.MerchantCostsManage, http.MethodPost, "/v1/app/provider-operations/op-missing/release", `{"release_reference":"never-opened"}`, http.StatusNotFound},
 		{server.MerchantEventsRead, http.MethodGet, "/v1/app/host-events", "", http.StatusOK},

@@ -238,33 +238,25 @@ export function useSubscriptions(
 
 export interface ProductsState {
   products: Product[] | null
-  /** The cursor of the next page; null on the last. */
-  nextCursor: string | null
   loading: boolean
   error: BillingError | null
   refetch: () => void
 }
 
-/** The catalog's filters and page size: `ProductListOptions`. */
-export type ProductsOptions = Pick<
-  ProductListOptions,
-  "entitlements" | "keys" | "limit"
->
+/** The product keys to look up: `ProductListOptions`. */
+export type ProductsOptions = Pick<ProductListOptions, "keys">
 
 /**
- * The catalog: products on sale with their active prices, those granting
- * any of `entitlements` or named by `keys` when given.
+ * The products on sale named by `keys`, each with its active prices: a
+ * public catalog lookup.
  */
-export function useProducts(options: ProductsOptions = {}): ProductsState {
+export function useProducts({ keys }: ProductsOptions): ProductsState {
   const { client } = useBillingContext()
-  const { entitlements, keys } = options
-  const limit = options.limit ?? 100
-  const remote = useRemote(JSON.stringify([entitlements, keys, limit]), (signal) =>
-    client.listProducts({ entitlements, keys, limit, signal })
+  const remote = useRemote(JSON.stringify(keys), (signal) =>
+    client.listProducts({ keys, signal })
   )
   return {
     products: remote.data?.data ?? null,
-    nextCursor: remote.data?.next_cursor ?? null,
     loading: remote.loading,
     error: remote.error,
     refetch: remote.refetch,

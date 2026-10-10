@@ -37,13 +37,15 @@ import (
 )
 
 // A visitor without a key that unlocks a video, signed out included, gets
-// 402 with those keys and its buy page. Buying from the server as billing-ui
-// does (a DPoP-bound token for /v1/me, then the checkout session) gets the
-// signed video URL: a course for its buyers, every video for members.
+// 402 with the products on sale that unlock it and its buy page. Buying from
+// the server as billing-ui does (a DPoP-bound token for /v1/me, then the
+// checkout session) gets the signed video URL: a course for its buyers, every
+// video for members.
 func TestGatedContent(t *testing.T) {
 	app := startStack(t)
 	const css, tailwind, qa = "/api/courses/css-101", "/api/courses/tailwind-102", "/api/courses/live-qa"
-	cssKeys, tailwindKeys, qaKeys := []string{"course:101", "channel:membership"}, []string{"course:102", "channel:membership"}, []string{"channel:membership"}
+	// The products on sale that unlock each: the course, the bundle, the membership.
+	cssKeys, tailwindKeys, qaKeys := []string{"channel-membership", "course-101", "course-bundle"}, []string{"channel-membership", "course-102", "course-bundle"}, []string{"channel-membership"}
 
 	t.Run("signed out", func(t *testing.T) {
 		app.requireBuy(t, "", css, cssKeys, "/courses/css-101/buy")
@@ -484,18 +486,19 @@ func (a *stack) webhook(t *testing.T, body []byte, secret string) int {
 	return res.StatusCode
 }
 
-// requireBuy: path answers 402 naming the keys that unlock it and the buy page.
-func (a *stack) requireBuy(t *testing.T, token, path string, unlock []string, buy string) {
+// requireBuy: path answers 402 naming the products that unlock it and the
+// buy page.
+func (a *stack) requireBuy(t *testing.T, token, path string, products []string, buy string) {
 	t.Helper()
 	res := a.get(t, token, path)
 	require.Equal(t, http.StatusPaymentRequired, res.StatusCode, path)
 	var body struct {
 		Error, Buy string
-		Unlock     []string
+		Products   []string
 	}
 	require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 	require.Equal(t, "access_required", body.Error)
-	require.Equal(t, unlock, body.Unlock)
+	require.Equal(t, products, body.Products)
 	require.Equal(t, buy, body.Buy)
 }
 

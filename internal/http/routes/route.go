@@ -305,9 +305,9 @@ func (r Route) Staff() bool {
 }
 
 // ClientMethod reports a route the Go Client calls: the staff, programmatic
-// and access routes, and the public reads it names (the catalog's offers).
+// and access routes.
 func (r Route) ClientMethod() bool {
-	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn || r.Auth == AuthPublic && r.Name != ""
+	return r.Staff() || r.Auth == AuthApplication || r.Auth == AuthSignedIn
 }
 
 // CatalogUpdate reports a catalog edit or document application.

@@ -30,7 +30,7 @@ func TestPublicRoutesFindTheirMerchantByHost(t *testing.T) {
 		handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://"+host+path, nil))
 		return w
 	}
-	for _, path := range []string{"/v1/catalog/products?keys=course-101", "/v1/catalog/products?keys=course-101&limit=1"} {
+	for _, path := range []string{"/v1/catalog/products?keys=course-101", "/v1/catalog/products?keys=course-101&keys=course-102"} {
 		w := get("nobody.e2e.test", path)
 		require.Equal(t, http.StatusNotFound, w.Code, w.Body.String())
 		require.Equal(t, billing.CodeMerchantNotFound, errorCode(t, w))

@@ -181,8 +181,8 @@ captcha:
 # turned on here. Each route checks the server's own merchant permission
 # (merchant:<resource>:<action>); programmatic (/v1/app, with SCIM
 # provisioning) takes a merchant's application credential, never a person,
-# holding merchant:entitlements:read, usage:manage, costs:manage or
-# events:read for each route.
+# holding merchant:entitlements:read, catalog:read, usage:manage,
+# costs:manage or events:read for each route.
 route_groups:
   admin: true            # customer support: customers, subscriptions, payments, refunds, invoices
   catalog: true          # products, prices, meters, price migrations

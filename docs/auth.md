@@ -65,11 +65,12 @@ so they are `merchant:…`, the server's constants below.
 | `MerchantConfig` | `root:config:manage` | `server.MerchantConfigManage` | PSPs, settings |
 | `Metrics` | `root:metrics:read` | `server.MerchantMetricsRead` | metrics and their assistants |
 | `Entitlements` | `root:entitlements:read` | `server.MerchantEntitlementsRead` | `POST /v1/app/entitlements/check` |
+| `Offers` | `root:catalog:read` | `server.MerchantCatalogRead` | `GET /v1/app/catalog/products` (`ListOffers`) |
 | `Usage` | `root:usage:manage` | `server.MerchantUsageManage` | admissions and usage events |
 | `Costs` | `root:costs:manage` | `server.MerchantCostsManage` | provider operations |
 | `Events` | `root:events:read` | `server.MerchantEventsRead` | host events |
 
-The last four are the programmatic routes' (`RouteGroups.Programmatic`): each
+The last five are the programmatic routes' (`RouteGroups.Programmatic`): each
 `/v1/app` route mounts only with its permission, so a program gets only what
 its task needs. `Mount` refuses a permission for a group that is off.
 

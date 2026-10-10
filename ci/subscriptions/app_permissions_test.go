@@ -59,6 +59,7 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 		{appEntitlements, http.MethodPost, "/v1/app/entitlements/check", func() any {
 			return map[string]any{"customer_id": c.id, "entitlements": []string{"content:any"}}
 		}, http.StatusOK},
+		{appOffers, http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", func() any { return nil }, http.StatusOK},
 		{appUsage, http.MethodPost, "/v1/app/admissions/release", func() any { return map[string]any{"request_ids": []string{"req-1"}} }, http.StatusOK},
 		{appCosts, http.MethodPost, "/v1/app/provider-operations", func() any { return openOperation() }, http.StatusCreated},
 		{appEvents, http.MethodGet, "/v1/app/host-events", func() any { return nil }, http.StatusOK},

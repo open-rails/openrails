@@ -38,7 +38,7 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		grants := held(role)
 		for _, p := range []string{
 			staffperm.CatalogManage, staffperm.ConfigManage, staffperm.MetricsRead, staffperm.CredentialsManage, staffperm.MembersRead, staffperm.MembersManage,
-			staffperm.EntitlementsRead, staffperm.UsageManage, staffperm.CostsManage, staffperm.EventsRead,
+			staffperm.EntitlementsRead, staffperm.CatalogRead, staffperm.UsageManage, staffperm.CostsManage, staffperm.EventsRead,
 		} {
 			require.False(t, (&controlplane.ResolvedServiceCredential{Permissions: grants}).HasPermission(p), "%s must not hold %s", role, p)
 		}

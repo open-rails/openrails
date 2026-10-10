@@ -124,7 +124,8 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 	})
 
 	// A video: its signed URL to whoever holds any key that unlocks it, 402
-	// with those keys and where to buy one to anyone else, signed out included.
+	// with the products on sale that unlock it and where to buy one to anyone
+	// else, signed out included.
 	r.GET("/api/courses/:course", authkitgin.Optional(ak), func(c *gin.Context) {
 		i := slices.IndexFunc(courses, func(course course) bool { return course.Slug == c.Param("course") })
 		if i < 0 {
@@ -133,14 +134,27 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 		}
 		course := courses[i]
 		owned, err := held(c, bill, course.unlock()...)
-		switch {
-		case err != nil:
+		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
-		case anyHeld(owned, course.unlock()):
-			c.JSON(http.StatusOK, gin.H{"video_url": media.url(course.Video)})
-		default:
-			c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "unlock": course.unlock(), "buy": "/courses/" + course.Slug + "/buy"})
+			return
 		}
+		if anyHeld(owned, course.unlock()) {
+			c.JSON(http.StatusOK, gin.H{"video_url": media.url(course.Video)})
+			return
+		}
+		// Everything on sale granting a key that unlocks it: the course, the
+		// bundle, the membership. The buy page offers them by product key.
+		offers, err := bill.ListOffers(c, billing.OfferListParams{Entitlements: course.unlock(), PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}})
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
+		products := []string{}
+		for _, product := range offers.Items {
+			products = append(products, product.Key)
+		}
+		slices.Sort(products)
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "products": products, "buy": "/courses/" + course.Slug + "/buy"})
 	})
 
 	// GET /media/*path serves a file under media/ to a signed, unexpired URL;

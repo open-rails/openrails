@@ -91,15 +91,15 @@ export function CoursePage() {
   return <video src={videoURL} controls />
 }
 
-// CourseBuyPage asks the course what unlocks it and offers everything on sale
-// that grants any of those keys: the course, the bundle, the membership. Paid,
-// the buyer goes back to the course, which now lets them in.
+// CourseBuyPage asks the server which products on sale unlock the course (the
+// course, the bundle, the membership) and offers them. Paid, the buyer goes
+// back to the course, which now lets them in.
 export function CourseBuyPage() {
   const { course = "" } = useParams()
   const navigate = useNavigate()
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
-  const [unlock, setUnlock] = useState<string[]>()
+  const [products, setProducts] = useState<string[]>()
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     auth.authFetch(`/api/courses/${course}`).then(async (res) => {
@@ -107,8 +107,8 @@ export function CourseBuyPage() {
         case 200: // already theirs: back to it
           navigate(`/courses/${course}`, { replace: true })
           break
-        case 402: // not theirs yet: the server names the keys that unlock it
-          setUnlock((await res.json()).unlock)
+        case 402: // not theirs yet: the server names the products that unlock it
+          setProducts((await res.json()).products)
           break
         default: // unknown course, or the server is unavailable
           setFailed(true)
@@ -116,11 +116,11 @@ export function CourseBuyPage() {
     })
   }, [course, navigate])
   if (failed) return <p>Couldn't load this course.</p>
-  if (!unlock) return <p>Loading…</p>
+  if (!products) return <p>Loading…</p>
   return (
     <>
       <Offers
-        entitlements={unlock}
+        keys={products}
         signedIn={signedIn}
         onSignInRequired={() => setSigningIn(true)}
         onPaid={() => navigate(`/courses/${course}`)}

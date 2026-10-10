@@ -350,16 +350,14 @@ export function fakeBilling(
           payment: { psps: state.psps, solana: null },
         })
       if (key === "GET /catalog/products") {
-        const entitlements = url.searchParams.getAll("entitlement")
+        // A lookup by product key: keys alone, 1 to 100 of them.
+        const other = [...url.searchParams.keys()].find((n) => n !== "keys")
+        if (other)
+          return apiError(400, "invalid_query", `the public catalog takes only keys, not ${other}`)
         const keys = url.searchParams.getAll("keys")
-        if (!entitlements.length && !keys.length)
-          return apiError(400, "invalid_param", "entitlement or keys is required")
-        const data = state.products.filter(
-          (p) =>
-            (!keys.length || keys.includes(String(p.key))) &&
-            (!entitlements.length ||
-              (p.entitlements as string[]).some((e) => entitlements.includes(e)))
-        )
+        if (!keys.length || keys.length > 100 || keys.includes(""))
+          return apiError(400, "invalid_query", "keys names 1 to 100 products")
+        const data = state.products.filter((p) => keys.includes(String(p.key)))
         return json(200, { data, next_cursor: null })
       }
       if (key === "POST /me/checkout-sessions")

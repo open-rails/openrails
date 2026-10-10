@@ -44,11 +44,11 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 	return &out, nil
 }
 
-// ListOffers lists what a customer may buy, as the public catalog shows it
-// (GET /v1/catalog/products): the products on sale granting any of
-// params.Entitlements and named by params.Keys (either may be empty, not
-// both), each with its live prices.
-// A host's server reads it to decide what its storefront offers.
+// ListOffers lists what a customer may buy: the products on sale granting
+// any of params.Entitlements and named by params.Keys (either may be empty,
+// not both), each with its live prices as a buyer sees them. A host's server
+// reads it to decide what its storefront offers; a browser looks products up
+// by key in the public catalog.
 func (c *Client) ListOffers(ctx context.Context, params billing.OfferListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Product], error) {
 	if len(params.Entitlements) == 0 && len(params.Keys) == 0 {
 		return nil, invalidErr("entitlements or keys is required")
@@ -64,7 +64,7 @@ func (c *Client) ListOffers(ctx context.Context, params billing.OfferListParams,
 		q.Add("keys", key)
 	}
 	var out billing.ListPage[billing.Product]
-	if err := c.do(ctx, http.MethodGet, "/v1/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/app/catalog/products?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

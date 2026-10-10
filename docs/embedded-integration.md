@@ -344,7 +344,8 @@ OpenRails names no permissions: you turn route groups on in
 `root:<resource>:<action>` as [auth](auth.md#permissions) lists:
 `root:billing:read`, `root:billing:manage`, `root:catalog:manage`,
 `root:config:manage`, `root:metrics:read`, `root:entitlements:read`,
-`root:usage:manage`, `root:costs:manage`, `root:events:read`. The admin
+`root:catalog:read`, `root:usage:manage`, `root:costs:manage`,
+`root:events:read`. The admin
 group's reads need `AdminRead` and its updates `AdminUpdate` (each route's
 level is OpenRails'; without `AdminUpdate` the group is read-only), the catalog
 `Catalog`, the merchant's own configuration `MerchantConfig` and the business
@@ -396,7 +397,7 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
 | `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
-| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each mounts only with its permission, `Permissions.Entitlements`, `Usage`, `Costs` or `Events` (SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
+| `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each mounts only with its permission, `Permissions.Entitlements`, `Offers`, `Usage`, `Costs` or `Events` (SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |
 
 The customer surface, `/v1/me`, serves `Config.Merchant`. Every customer route
@@ -435,7 +436,7 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration`, `GetAPIHost` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements` (programmatic), `ListEntitlements`, `ListProductAccess`, `CreateProductAccess`, `RevokeProductAccess` |
-| Catalog (API hosts) | `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride` |
+| Catalog (API hosts) | `ListOffers` (programmatic: what a customer may buy, by entitlement or product key), `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride` |
 | Checkout | `CreateCheckoutSession`, `ListCheckoutOptions` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
 | Orders | `ListOrders`, `GetOrder` (staff read; only the customer pays) |

@@ -3,8 +3,10 @@
 package subscriptions_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"slices"
 	"testing"
 	"time"
@@ -265,10 +267,12 @@ func TestProductKeyCap(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrInvalid)
 }
 
-// The public catalog is a narrow read: the products on sale granting an
-// entitlement or named by key, never the whole catalog. The Go client's
-// ListOffers reads the same, in process and remote.
-func TestOffersAreAFilteredRead(t *testing.T) {
+// The public catalog is a lookup by product key: the products on sale named
+// by ?keys=, at most billing.MaxBatchItems, in one page. It refuses a missing
+// keys, an entitlement filter and any other parameter. The Go client's
+// ListOffers is the host backend's read: by entitlement too, in process and
+// remote.
+func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.client[embedded]
@@ -289,30 +293,55 @@ func TestOffersAreAFilteredRead(t *testing.T) {
 	course := product("course-101", []string{"course:101"}, true, false)
 	bundle := product("bundle", []string{"course:101", "course:102"}, true, false)
 	member := product("membership", []string{"channel:membership"}, true, false)
-	product("granted", []string{"course:101"}, false, false)
-	product("retired", []string{"course:101"}, true, true)
+	granted := product("granted", []string{"course:101"}, false, false)
+	retired := product("retired", []string{"course:101"}, true, true)
 
-	public := func(query string) []string {
-		var keys []string
-		for _, item := range w.public("/v1/catalog/products?" + query)["data"].([]any) {
-			keys = append(keys, item.(map[string]any)["key"].(string))
-		}
-		slices.Sort(keys)
-		return keys
+	get := func(query string) (int, map[string]any) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/catalog/products?"+query, nil)
+		require.NoError(t, err)
+		req.Header.Set("OpenRails-Merchant", w.slug)
+		res, err := http.DefaultClient.Do(req)
+		require.NoError(t, err)
+		defer res.Body.Close()
+		var body map[string]any
+		require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
+		return res.StatusCode, body
 	}
 	sorted := func(keys ...string) []string { slices.Sort(keys); return keys }
-	require.Equal(t, sorted(course.Key, bundle.Key), public("entitlement=course:101"), "on sale and granting it")
-	require.Equal(t, sorted(bundle.Key, member.Key), public("entitlement=course:102&entitlement=channel:membership"), "granting any of them")
-	require.Equal(t, []string{member.Key}, public("keys="+member.Key))
-	require.Equal(t, []string{bundle.Key}, public("entitlement=course:102&keys="+bundle.Key+"&keys="+course.Key), "both filters apply")
+	public := func(keys ...string) []string {
+		t.Helper()
+		q := url.Values{"keys": keys}
+		status, body := get(q.Encode())
+		require.Equal(t, http.StatusOK, status, body)
+		require.Nil(t, body["next_cursor"], "one page")
+		var listed []string
+		for _, item := range body["data"].([]any) {
+			listed = append(listed, item.(map[string]any)["key"].(string))
+		}
+		return sorted(listed...)
+	}
+	require.Equal(t, sorted(course.Key, bundle.Key), public(course.Key, bundle.Key, granted.Key, retired.Key), "the named products on sale")
+	require.Equal(t, []string{member.Key}, public(member.Key))
+	atCap := []string{course.Key}
+	for i := 1; i < billing.MaxBatchItems; i++ {
+		atCap = append(atCap, fmt.Sprintf("absent-%d-%s", i, n))
+	}
+	require.Equal(t, []string{course.Key}, public(atCap...), "up to the cap")
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/catalog/products", nil)
-	require.NoError(t, err)
-	req.Header.Set("OpenRails-Merchant", w.slug)
-	res, err := http.DefaultClient.Do(req)
-	require.NoError(t, err)
-	defer res.Body.Close()
-	require.Equal(t, http.StatusBadRequest, res.StatusCode, "no unfiltered listing")
+	for _, refused := range []struct{ query, param string }{
+		{"", "keys"},
+		{"entitlement=course:101", "entitlement"},
+		{"entitlement=course:102&keys=" + bundle.Key, "entitlement"},
+		{"keys=", "keys"},
+		{"keys=" + course.Key + "&limit=1", "limit"},
+		{url.Values{"keys": append(atCap, "one-more")}.Encode(), "keys"},
+	} {
+		status, body := get(refused.query)
+		require.Equal(t, http.StatusBadRequest, status, refused.query)
+		require.Equal(t, billing.CodeInvalidQuery, errorCode(body), refused.query)
+		require.Equal(t, refused.param, body["error"].(map[string]any)["param"], refused.query)
+	}
 
 	for _, top := range []topology{embedded, remote} {
 		page, err := w.client[top].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"course:101"}})
@@ -321,7 +350,13 @@ func TestOffersAreAFilteredRead(t *testing.T) {
 		for _, p := range page.Items {
 			require.Len(t, p.Prices, 1, top)
 		}
+		page, err = w.client[top].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"course:102", "channel:membership"}, Keys: []string{bundle.Key, course.Key}})
+		require.NoError(t, err, top)
+		require.Equal(t, []string{bundle.Key}, productKeys(t, page), "%s: both filters apply", top)
 		_, err = w.client[top].ListOffers(t.Context(), billing.OfferListParams{})
 		require.Error(t, err, top)
 	}
+	status, body := w.merchantCall(w.auth.hostToken(t), http.MethodGet, "/v1/app/catalog/products")
+	require.Equal(t, http.StatusBadRequest, status, body)
+	require.Contains(t, body, billing.CodeInvalidQuery, "the backend's read needs a filter too")
 }

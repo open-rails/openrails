@@ -153,7 +153,7 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 // naming it.
 var staffPermissions = Permissions{
 	AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage", Catalog: "root:catalog:manage", MerchantConfig: "root:config:manage", Metrics: "root:metrics:read",
-	Entitlements: "root:entitlements:read", Usage: "root:usage:manage", Costs: "root:costs:manage", Events: "root:events:read",
+	Entitlements: "root:entitlements:read", Offers: "root:catalog:read", Usage: "root:usage:manage", Costs: "root:costs:manage", Events: "root:events:read",
 }
 
 // testScope is where recordingAuth's subjects hold their permissions.

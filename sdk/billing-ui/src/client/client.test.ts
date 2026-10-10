@@ -425,7 +425,7 @@ describe("checkout sessions", () => {
 })
 
 describe("listProducts", () => {
-  it("sends the catalog's filters, a key per value", async () => {
+  it("looks products up by key, a parameter per key", async () => {
     const server = fakeBilling({
       products: [
         product({ id: "prod_a", key: "a", entitlements: ["course:101"] }),
@@ -433,9 +433,16 @@ describe("listProducts", () => {
       ],
     })
     const client = createBillingClient({ fetch: server.fetch })
-    const page = await client.listProducts({ entitlements: ["course:101", "course:102"], keys: ["a", "c"] })
+    const page = await client.listProducts({ keys: ["a", "c"] })
     expect(page.data.map((p) => p.key)).toEqual(["a"])
     const [url] = server.fetch.mock.calls[0]!
-    expect(String(url)).toBe("/billing/v1/catalog/products?entitlement=course%3A101&entitlement=course%3A102&keys=a&keys=c&limit=100")
+    expect(String(url)).toBe("/billing/v1/catalog/products?keys=a&keys=c")
+  })
+
+  it("asks nothing for no keys", async () => {
+    const server = fakeBilling()
+    const client = createBillingClient({ fetch: server.fetch })
+    expect(await client.listProducts({ keys: [] })).toEqual({ data: [], next_cursor: null })
+    expect(server.fetch).not.toHaveBeenCalled()
   })
 })

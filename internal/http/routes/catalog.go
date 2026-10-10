@@ -22,13 +22,16 @@ var (
 )
 
 // catalogRoutes is what a merchant sells: products, prices, meters and their
-// rate cards. The public product list, each with its current prices, is what a
-// buyer may see; the merchant routes administer the catalog. A document
-// applies as the apply manager and the edits as the edit manager: a document
-// skips an object whose field an edit set differently.
+// rate cards. A buyer looks products up by key, each with its current prices;
+// the host's backend reads what is on sale by entitlement too; the merchant
+// routes administer the catalog. A document applies as the apply manager and
+// the edits as the edit manager: a document skips an object whose field an
+// edit set differently.
 var catalogRoutes = []Route{
-	{Method: GET, Path: "/v1/catalog/products", Group: Checkout, Auth: AuthPublic, Name: "ListOffers",
-		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Handler: h(handlers.ListPublicProducts)},
+	{Method: GET, Path: "/v1/catalog/products", Group: Checkout, Auth: AuthPublic,
+		Query: params(repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_query"), Handler: h(handlers.ListPublicProducts)},
+	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: NeedOffers, Name: "ListOffers",
+		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.AppListOffers)},
 
 	{Method: GET, Path: "/v1/admin/catalog/revision", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetCatalogRevision", Level: LevelRead,
 		Responses: []Reply{{200, billing.CatalogRevision{}}}, Handler: h(handlers.GetCatalogRevision)},

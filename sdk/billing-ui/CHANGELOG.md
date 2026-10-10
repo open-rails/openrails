@@ -1,5 +1,15 @@
 # Changelog
 
+## Offers sell products by key
+
+- The public catalog is a lookup by product key: `listProducts({ keys })` and
+  `useProducts({ keys })` take the keys alone (1 to 100) and read one page;
+  `entitlements`, `limit` and `cursor` are gone, and so is
+  `ProductsState.nextCursor`. No keys fetch nothing.
+- `<Offers keys>` replaces `<Offers entitlements>`: your server names the
+  products, with the Go `Client.ListOffers` when it finds them by
+  entitlement.
+
 ## Apps buy through BuyButton and Offers
 
 - `Checkout` and `CheckoutModal` (and their props), the fixture sources and

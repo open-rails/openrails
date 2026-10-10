@@ -60,11 +60,11 @@ type RouteGroups struct {
 	// the metrics queries and the dashboard. It needs Permissions.Metrics.
 	Metrics bool
 	// Programmatic is the routes the host's backend calls over HTTP at
-	// /v1/app: entitlement checks, usage and admissions, provider
+	// /v1/app: entitlement checks, offers, usage and admissions, provider
 	// operations, host events and SCIM provisioning. They take an
 	// application Auth says a request is (its Identity's SubjectKind) and
 	// refuse a person. Each route mounts only with its permission
-	// (Permissions.Entitlements, Usage, Costs, Events), which the
+	// (Permissions.Entitlements, Offers, Usage, Costs, Events), which the
 	// application holds in Routes.Scope, so a program gets only what its
 	// task needs. SCIM takes any application at the merchant or the
 	// merchant's provisioning token, and is not mounted with Deps.UserInfo,
@@ -98,6 +98,9 @@ type Permissions struct {
 	// only its routes. Entitlements is the content gate
 	// (POST /v1/app/entitlements/check).
 	Entitlements fmt.Stringer
+	// Offers is what a customer may buy, by entitlement or product key
+	// (GET /v1/app/catalog/products, the Client's ListOffers).
+	Offers fmt.Stringer
 	// Usage charges customers: admissions and usage events.
 	Usage fmt.Stringer
 	// Costs is provider operations: the host's own upstream costs.

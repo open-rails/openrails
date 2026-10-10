@@ -339,6 +339,7 @@ pkg openrails, type Permissions struct, Entitlements fmt.Stringer
 pkg openrails, type Permissions struct, Events fmt.Stringer
 pkg openrails, type Permissions struct, MerchantConfig fmt.Stringer
 pkg openrails, type Permissions struct, Metrics fmt.Stringer
+pkg openrails, type Permissions struct, Offers fmt.Stringer
 pkg openrails, type Permissions struct, Usage fmt.Stringer
 pkg openrails, type Probe struct
 pkg openrails, type Probe struct, Check func(context.Context) error
@@ -3480,6 +3481,7 @@ pkg openrails/server, const FormerNamesImmediate config.FormerNamesMode = "immed
 pkg openrails/server, const MerchantBillingManage untyped string = "merchant:billing:manage"
 pkg openrails/server, const MerchantBillingRead untyped string = "merchant:billing:read"
 pkg openrails/server, const MerchantCatalogManage untyped string = "merchant:catalog:manage"
+pkg openrails/server, const MerchantCatalogRead untyped string = "merchant:catalog:read"
 pkg openrails/server, const MerchantConfigManage untyped string = "merchant:config:manage"
 pkg openrails/server, const MerchantCostsManage untyped string = "merchant:costs:manage"
 pkg openrails/server, const MerchantEntitlementsRead untyped string = "merchant:entitlements:read"

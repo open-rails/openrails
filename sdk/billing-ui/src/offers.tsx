@@ -1,6 +1,6 @@
-// Offers sells what unlocks something: every product on sale granting any of
-// its entitlements, one BuyButton per price. The host decides what to sell
-// (its gate's 402, or ContentKit's paywall) and what happens once it's paid.
+// Offers sells products by key: each one on sale, one BuyButton per price.
+// The host decides what to sell (its server names the products, say from its
+// gate's 402) and what happens once it's paid.
 import * as React from "react"
 import { cn } from "cn"
 
@@ -25,11 +25,12 @@ import type { PayResult } from "#orck/types"
 
 export interface OffersProps {
   /**
-   * What to sell: every product on sale granting any of these keys, such as
-   * a course and the membership that also unlocks it,
-   * read from OpenRails' public catalog.
+   * What to sell: these product keys, such as a course, its bundle and the
+   * membership that also unlocks it, looked up in OpenRails' public catalog.
+   * The host's server names them (the Go Client's ListOffers finds the
+   * products granting an entitlement).
    */
-  entitlements?: string[]
+  keys?: string[]
   /**
    * The products to offer instead, from the host's own server (the Go
    * Client's ListOffers): nothing is fetched.
@@ -63,7 +64,7 @@ export function Offers({ products, ...props }: OffersProps) {
 }
 
 function FetchedOffers(props: OffersProps) {
-  const state = useProducts({ entitlements: props.entitlements })
+  const state = useProducts({ keys: props.keys ?? [] })
   return <OfferList {...props} state={state} />
 }
 

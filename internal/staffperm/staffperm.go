@@ -12,6 +12,7 @@ const (
 	MetricsRead   = "merchant:metrics:read"   // Metrics: revenue, sales; support does not hold it
 
 	EntitlementsRead = "merchant:entitlements:read" // Entitlements: the content gate
+	CatalogRead      = "merchant:catalog:read"      // Offers: what is on sale
 	UsageManage      = "merchant:usage:manage"      // Usage: admissions and usage events
 	CostsManage      = "merchant:costs:manage"      // Costs: provider operations
 	EventsRead       = "merchant:events:read"       // Events: host events
@@ -30,5 +31,5 @@ const (
 // Routes.Permissions field.
 var Declared = []string{
 	BillingRead, BillingManage, CatalogManage, ConfigManage, MetricsRead,
-	EntitlementsRead, UsageManage, CostsManage, EventsRead,
+	EntitlementsRead, CatalogRead, UsageManage, CostsManage, EventsRead,
 }

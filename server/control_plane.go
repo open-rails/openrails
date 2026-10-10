@@ -98,7 +98,7 @@ func (s *Server) ListActiveMerchantIDs(ctx context.Context, page billing.PageReq
 // The permissions the server's merchant persona declares, held in each
 // merchant's group: its staff routes' (AdminRead, AdminUpdate, Catalog,
 // MerchantConfig, Metrics) and its programmatic routes' (Entitlements,
-// Usage, Costs, Events). Owners hold them all, support MerchantBillingRead
+// Offers, Usage, Costs, Events). Owners hold them all, support MerchantBillingRead
 // and MerchantBillingManage, viewers MerchantBillingRead.
 const (
 	MerchantBillingRead   = staffperm.BillingRead
@@ -108,6 +108,7 @@ const (
 	MerchantMetricsRead   = staffperm.MetricsRead
 
 	MerchantEntitlementsRead = staffperm.EntitlementsRead
+	MerchantCatalogRead      = staffperm.CatalogRead
 	MerchantUsageManage      = staffperm.UsageManage
 	MerchantCostsManage      = staffperm.CostsManage
 	MerchantEventsRead       = staffperm.EventsRead

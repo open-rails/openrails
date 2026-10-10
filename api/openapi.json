@@ -1323,6 +1323,70 @@
         ],
         "parameters": [
           {
+            "name": "keys",
+            "in": "query",
+            "style": "form",
+            "explode": true,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Product"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "x-openrails-auth": "public",
+        "x-openrails-errors": [
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:public",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/catalog/products": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
             "name": "cursor",
             "in": "query",
             "schema": {
@@ -1396,11 +1460,19 @@
             "$ref": "#/components/responses/Error"
           }
         },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Offers",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_query"
+        ],
         "x-openrails-error-sets": [
-          "tier:public",
+          "tier:application",
           "request"
         ]
       }

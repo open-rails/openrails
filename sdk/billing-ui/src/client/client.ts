@@ -73,16 +73,11 @@ export interface BillingClientOptions {
 }
 
 /**
- * The public catalog's filters, one required: `entitlements` keeps the
- * products granting any of those keys, `keys` those products; given both, a
- * product must match both.
+ * A public catalog lookup: the products named by `keys` (at most 100 product
+ * keys), in one page.
  */
 export interface ProductListOptions {
-  entitlements?: string[]
-  keys?: string[]
-  limit?: number
-  /** The previous page's `next_cursor`. */
-  cursor?: string
+  keys: string[]
   signal?: AbortSignal
 }
 
@@ -569,15 +564,14 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(invoiceSchema, `/me/invoices/${id(invoiceId)}`, { signal })
     },
 
-    /** Products on sale, each with its current prices. */
-    listProducts(opts: ProductListOptions = {}): Promise<Page<Product>> {
+    /**
+     * The products on sale named by `keys`, each with its current prices.
+     * No keys name no products: nothing is fetched.
+     */
+    async listProducts(opts: ProductListOptions): Promise<Page<Product>> {
+      if (opts.keys.length === 0) return { data: [], next_cursor: null }
       return json(productPage, "/catalog/products", {
-        query: {
-          entitlement: opts.entitlements,
-          keys: opts.keys,
-          limit: opts.limit ?? 100,
-          cursor: opts.cursor,
-        },
+        query: { keys: opts.keys },
         signal: opts.signal,
       })
     },
