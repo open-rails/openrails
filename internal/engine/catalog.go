@@ -117,8 +117,8 @@ func logCatalogConflicts(receipt *billing.CatalogApplicationReceipt) {
 }
 
 // transientDatabaseError is a database failure worth retrying: a lost or
-// refused connection, a timeout, a serialization or deadlock rollback, or a
-// server out of connections or restarting.
+// refused connection, a timeout, a serialization or deadlock rollback, a row
+// another replica holds, or a server out of connections or restarting.
 func transientDatabaseError(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -126,7 +126,7 @@ func transientDatabaseError(err error) bool {
 		case strings.HasPrefix(pgErr.Code, "08"), strings.HasPrefix(pgErr.Code, "40"), strings.HasPrefix(pgErr.Code, "53"):
 			return true
 		}
-		return pgErr.Code == "57P01" || pgErr.Code == "57P02" || pgErr.Code == "57P03"
+		return pgErr.Code == "55P03" || pgErr.Code == "57P01" || pgErr.Code == "57P02" || pgErr.Code == "57P03"
 	}
 	var connectErr *pgconn.ConnectError
 	var netErr net.Error
