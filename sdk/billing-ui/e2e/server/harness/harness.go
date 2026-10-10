@@ -13,7 +13,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/iam"
-	"github.com/open-rails/authkit/verify"
 	"github.com/open-rails/openrails"
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
@@ -177,16 +176,9 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 		return err
 	}
 	routes := billingRoutes
-	routes.Auth = customerAuth{r.Auth}
+	routes.Auth = r.Auth.Authenticator() // says who a request is; OpenRails decides what to admit
 	return openrailshttp.Mount(mux, r.Client, routes)
 }
-
-// customerAuth is AuthKit as OpenRails' Auth. Its users hold tokens minted
-// outside a sign-in (CreateUser), so Required verifies the token without a
-// session; the rest is AuthKit's own.
-type customerAuth struct{ *authkit.Client }
-
-func (a customerAuth) Required() func(http.Handler) http.Handler { return verify.Required(a.Client) }
 
 // PaymentPage wraps the handler serving the hosted checkout page.
 func (r *Runtime) PaymentPage(page http.Handler) http.Handler {

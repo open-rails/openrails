@@ -1,8 +1,13 @@
 package harness
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"math/rand/v2"
+	"net/http"
+	"net/http/httptest"
 	"time"
 
 	"github.com/open-rails/authkit/iam"
@@ -158,19 +163,35 @@ type User struct {
 	AccessToken string `json:"access_token"`
 }
 
-// CreateUser registers a native AuthKit user and mints its access token.
+// CreateUser registers a native AuthKit user and signs them in through
+// AuthKit's login route: OpenRails admits a user's token only while its
+// sign-in stands, and a minted one has none. Each sign-in comes from its own
+// address, so the login limit never counts the suite as one client.
 func (r *Runtime) CreateUser(ctx context.Context) (User, error) {
 	id := uuid.NewString()[:12]
-	email := "e2e-" + id + "@example.test"
-	u, err := r.Auth.CreateUser(ctx, iam.NewUser{Email: email, Username: "u" + id})
+	email, password := "e2e-"+id+"@example.test", "e2e-password-"+uuid.NewString()
+	u, err := r.Auth.CreateUser(ctx, iam.NewUser{Email: email, Username: "u" + id, Password: password})
 	if err != nil {
 		return User{}, err
 	}
-	token, err := r.Auth.MintAccessToken(ctx, u.ID, iam.AccessTokenOptions{})
+	body, err := json.Marshal(map[string]string{"identifier": email, "password": password})
 	if err != nil {
 		return User{}, err
 	}
-	return User{ID: u.ID, Email: email, AccessToken: token.Value}, nil
+	req := httptest.NewRequestWithContext(ctx, http.MethodPost, r.Auth.APIBase()+"/password/login", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.RemoteAddr = fmt.Sprintf("10.%d.%d.%d:1234", rand.IntN(256), rand.IntN(256), rand.IntN(256))
+	w := httptest.NewRecorder()
+	r.Auth.Handler().ServeHTTP(w, req)
+	var out struct {
+		TokenSet struct {
+			AccessToken string `json:"access_token"`
+		} `json:"token_set"`
+	}
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &out) != nil || out.TokenSet.AccessToken == "" {
+		return User{}, fmt.Errorf("sign in %s: %d %s", email, w.Code, w.Body.String())
+	}
+	return User{ID: u.ID, Email: email, AccessToken: out.TokenSet.AccessToken}, nil
 }
 
 type Seeded struct {
