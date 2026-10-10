@@ -143,4 +143,4 @@ jobs:
           # Provenance names this run's commit, so only a tarball built in it gets one.
           provenance=true
           [[ "$GITHUB_EVENT_NAME" == workflow_dispatch ]] && provenance=false
-          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag" --provenance="$provenance"
+          npm publish "openrails-billing-ui-$v.tgz" --tag "$dist_tag" --access public --provenance="$provenance"
