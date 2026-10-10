@@ -1,24 +1,13 @@
--- Financial operation ledger: accepted authorization, submission claims,
--- provider evidence and terminal accounting are always merchant scoped.
--- Production dispatch is one typed River job per accepted operation; legacy
--- batch claims remain only for the existing financial regression harness.
+-- Financial operation ledger, always merchant-scoped. Production dispatch is one
+-- typed River job per accepted operation; batch claims remain only for
+-- regression fixtures.
 
--- =====================================================================
--- Enqueue (effectively-once per logical intent)
--- =====================================================================
--- Idempotent on (merchant_id, idempotency_key). Conflict semantics by current
--- status:
---   pending, attempts=0  -> refresh schedule/payload (no possible submission)
---   pending, attempts>0  -> preserve the original operation after reclaimed park
---   superseded | expired -> REVIVE: the intent became relevant again (e.g. a
---                           re-cancel after a resume superseded the delete);
---                           attempts/failure state reset
---   anything else        -> untouched (in_flight is owned by its lease;
---                           succeeded must never re-execute; failed_* keep
---                           their backoff/terminal state)
--- Frozen-payload tier changes (nmi_upgrade, stripe_tier_change) are never
--- refreshed: a same-key race must not replace the frozen commercial decision.
--- Always RETURNs the canonical row for the key.
+-- Idempotent on (merchant_id, idempotency_key); returns the canonical row. On
+-- conflict a pending intent with attempts=0 refreshes its schedule and payload;
+-- a superseded or expired one revives with attempts reset; anything else is
+-- untouched. Frozen operations (tier changes, collections, manual rebills,
+-- sales, initial membership) are never refreshed or revived: a same-key race
+-- must not replace a frozen commercial decision.
 -- name: EnqueueProviderIntent :one
 INSERT INTO billing.provider_intents (
     id, merchant_id, rail, intent_type, subscription_id, payment_id, price_id,
@@ -84,15 +73,10 @@ ON CONFLICT (merchant_id, idempotency_key) DO UPDATE SET
     updated_at = now()
 RETURNING *;
 
--- =====================================================================
--- Executor / verifier claims (single-executor lease, SKIP LOCKED)
--- =====================================================================
--- Claims due executable intents: pending/failed_retryable whose
--- next_attempt_at arrived, plus orphaned in_flight rows whose lease elapsed
--- (crashed executor; per-type semantics make the reclaim safe). Never claims
--- past the relevance window — those rows are swept by
--- ExpireOverdueProviderIntents. Abandoned in-flight attempts are still claimed
--- after their deadline so possible submissions can be reconciled.
+-- Claims due executable intents (SKIP LOCKED): pending/failed_retryable past
+-- next_attempt_at, plus in_flight rows whose lease elapsed (crashed executor).
+-- Never past the relevance window (ExpireOverdueProviderIntents sweeps those),
+-- except abandoned attempts, claimed so possible submissions reconcile.
 -- name: ClaimDueProviderIntents :many
 WITH due AS (
     SELECT id FROM billing.provider_intents
@@ -114,12 +98,9 @@ FROM due
 WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND pi.id = due.id
 RETURNING pi.*;
 
--- Claims ONE specific intent for the synchronous execute path (#358 phase B):
--- a producer that just enqueued an intent leases it immediately and runs it
--- through the same execute/classify pipeline. Deliberately ignores
--- next_attempt_at — the interactive caller asked for the attempt NOW — but
--- honors the relevance window and existing leases; anything not claimable here
--- is drained by the scheduled executor instead.
+-- Claims one intent for the synchronous execute path: a producer leases what it
+-- just enqueued. Ignores next_attempt_at but honors the relevance window and
+-- live leases; anything not claimable is left to the scheduled executor.
 -- name: ClaimProviderIntentByID :one
 UPDATE billing.provider_intents pi
 SET status = 'in_flight',
@@ -176,12 +157,10 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
   AND lease_expires_at IS NOT NULL
 RETURNING next_attempt_at;
 
--- Renews a live claim while its handler runs (xs-007 row 32): the executor
--- beats this every lease/4, so lease_expires_at measures SILENCE from a dead
--- executor rather than how long a provider call may take. Renewal is refused
--- once the lease has lapsed — by then another executor may hold the row, and a
--- late beat must not steal it back. Only the claim's own (status, attempts)
--- fencing token renews. Returns rows affected (0 = lost).
+-- Renews a live claim while its handler runs: the executor beats every lease/4,
+-- so lease_expires_at measures silence from a dead executor, not provider
+-- latency. A lapsed lease is never renewed (another executor may hold the row);
+-- only the claim's own (status, attempts) fencing token renews. 0 rows = lost.
 -- name: RenewProviderIntentClaim :execrows
 UPDATE billing.provider_intents
 SET lease_expires_at = sqlc.arg(lease_expires_at)::timestamptz,
@@ -192,9 +171,7 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
   AND lease_expires_at IS NOT NULL
   AND lease_expires_at > sqlc.arg(now)::timestamptz;
 
--- =====================================================================
--- Outcome transitions (always release the lease)
--- =====================================================================
+-- Outcome transitions; each releases the lease.
 -- name: MarkProviderIntentSucceeded :execrows
 UPDATE billing.provider_intents
 SET status = 'succeeded',
@@ -293,9 +270,6 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.a
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
 
--- =====================================================================
--- Supersede-by-subject + relevance-window expiry
--- =====================================================================
 -- Supersedes every live intent of one type for one subscription (e.g. a
 -- resume superseding the pending deferred delete). in_flight rows are left to
 -- their executor: its per-type relevance check re-verifies before acting, so
@@ -311,9 +285,9 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND intent_type
   AND NOT (intent_type='initial_membership' AND coalesce(result_evidence,'{}'::jsonb) ? 'initial_submitted')
   AND intent_type <> 'subscription_collection';
 
--- #679: destructive intents held by the volume breaker (an OPEN
--- life.provider_intent.held_bulk finding for their merchant) never expire out
--- of the ledger while held — the operator's resolution decides their fate.
+-- Destructive intents held by the volume breaker (an open
+-- life.provider_intent.held_bulk finding) never expire while held: the
+-- operator's resolution decides.
 -- name: ExpireOverdueProviderIntents :execrows
 UPDATE billing.provider_intents pi
 SET status = 'expired',
@@ -337,24 +311,15 @@ WHERE pi.merchant_id = sqlc.arg(merchant_id)::uuid AND (pi.status = 'failed_retr
       )
   AND pi.intent_type <> 'subscription_collection';
 
--- =====================================================================
--- Reconcile (#107 PS-10): stuck-intent detection
--- =====================================================================
--- Non-terminal intents that have sat in the ledger beyond the reconcile
--- engine's hardcoded stuck thresholds: pending/failed_retryable older than the
--- action cutoff (24h), in_flight/unknown_needs_verify older than the verify
--- cutoff (2h — a healthy verifier resolves unknowns in minutes; an in_flight
--- lease outliving hours means a dead executor). Read-only; runs tenant-scoped
--- on the engine's tenant-pinned connection.
+-- Non-terminal intents older than the converge engine's stuck thresholds:
+-- pending/failed_retryable before action_cutoff, in_flight/unknown_needs_verify
+-- before verify_cutoff (a healthy verifier resolves unknowns in minutes).
 -- name: ListStuckProviderIntents :many
 SELECT * FROM billing.provider_intents
 WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND ( (status IN ('pending', 'failed_retryable') AND created_at <= sqlc.arg(action_cutoff)::timestamptz)
    OR (status IN ('in_flight', 'unknown_needs_verify') AND created_at <= sqlc.arg(verify_cutoff)::timestamptz)
 ) ORDER BY created_at, id;
 
--- =====================================================================
--- Reads
--- =====================================================================
 -- name: GetProviderIntent :one
 SELECT * FROM billing.provider_intents WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1;
 
@@ -374,14 +339,10 @@ WHERE provider_intents.merchant_id = sqlc.arg(merchant_id)::uuid AND (sqlc.narg(
 ORDER BY created_at DESC, id
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
--- =====================================================================
--- #679 destructive-volume circuit breaker
--- =====================================================================
--- Destructive intents that REACHED the provider in the rolling window:
--- succeeded rows count by executed_at; unresolved attempt outcomes
--- (unknown_needs_verify / failed_*) count by their last transition. in_flight
--- rows are deliberately EXCLUDED — the batch claim marks whole batches
--- in_flight before anything executes, and parks (pending) were never attempted.
+-- Destructive intents that reached the provider in the rolling window: succeeded
+-- by executed_at, unresolved outcomes (unknown_needs_verify, failed_*) by last
+-- transition, and in_flight ones only once their current attempt is logged (a
+-- claim alone sends nothing). Parks were never attempted.
 -- name: CountDestructiveProviderIntentsExecutedSince :one
 SELECT count(*) FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -416,12 +377,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND finding_type = sqlc.arg(finding_type)
   AND subject_key = sqlc.arg(subject_key);
 
--- =====================================================================
--- #732 anti-credential-compromise rate ceiling (per-actor + per-merchant)
--- =====================================================================
--- The durable provider_intents ledger is the counter: every destructive user/admin
--- operation posts a row before it executes, so a rolling-window count over
--- created_at is the burst gauge, stopping a burst at the producer.
+-- Anti-credential-compromise rate ceiling: every destructive user/admin
+-- operation posts an intent before it executes, so a rolling-window count over
+-- created_at stops a burst at the producer.
 
 -- Destructive user/admin intents this invoker created in the window, across
 -- merchants: one stolen credential operating across merchants is the shape
@@ -458,7 +416,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = sqlc.arg(s
   AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable');
 
 -- name: LockProviderIntentForCollectionCompletion :one
--- Call after acquiring the domain's payer/invoice locks, matching admission's
+-- Call after acquiring the domain's customer/invoice locks, matching admission's
 -- invoice-before-operation order.
 SELECT * FROM billing.provider_intents
 WHERE id = sqlc.arg(id)::uuid AND merchant_id = sqlc.arg(merchant_id)::uuid

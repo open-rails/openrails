@@ -30,7 +30,7 @@ INSERT INTO billing.subscriptions (
 
 -- name: UpdateSubscriptionAt :execrows
 -- Full-column update (nil pointers CLEAR fields like canceled_at) against the
--- row version it was read at (#1102): a stale image never reverts a change.
+-- row version it was read at: a stale image never reverts a change.
 UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
@@ -61,10 +61,9 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- name: UpdateSubscriptionDecided :execrows
--- A lifecycle decision (#1091 part C): the full-row write that may change
--- status, paid period and cancellation, against the revision it was decided on.
--- Full-column update (the bun version listed every column explicitly so nil
--- pointers CLEAR fields like canceled_at on reactivation).
+-- A lifecycle decision: the full-row write that may change status, paid period
+-- and cancellation, against the revision it was decided on. Nil pointers clear
+-- fields like canceled_at on reactivation.
 UPDATE billing.subscriptions SET
     price_id = $2,
     product_id = $3,
@@ -95,7 +94,7 @@ WHERE subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND lifecycle_rev = sqlc.arg(expected_rev)
   AND row_version = sqlc.arg(expected_version)
   AND deleted_at IS NULL
-  -- The status-transition audit records this decision's name (0021).
+  -- The status-transition audit records this decision's name.
   AND set_config('openrails.subscription_decision', sqlc.arg(decision)::text, true) IS NOT NULL;
 
 -- name: GetSubscriptionByID :one
@@ -153,8 +152,8 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(ps
 LIMIT 1;
 
 -- name: GetSubscriptionByPSPSubIDForUpdate :one
--- Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
--- UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
+-- Row-locked variant for webhook apply read-modify-writes: FOR UPDATE across
+-- the read so a concurrent full-row UpdateAt can't clobber it.
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.psp_id = sqlc.arg(psp_id)::uuid
   AND sub.rail = $1 AND sub.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
@@ -263,9 +262,9 @@ WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.
 ORDER BY sub.current_period_ends_at DESC NULLS FIRST
 LIMIT 1;
 
--- #691 checkout guard: an `unknown` sub does NOT hold the lifecycle slot, but it
--- may still be alive (and billing) at the provider — a re-purchase would
--- double-bill. These lookups back the subscribe-time rejection.
+-- Checkout guard: an unverified subscription holds no lifecycle slot but may
+-- still bill at the provider, so a re-purchase would double-bill. These lookups
+-- back the subscribe-time rejection.
 -- name: GetUnknownSubscriptionByCustomerAndProduct :one
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.customer_id = $1
@@ -379,17 +378,11 @@ ORDER BY MIN(d.due_at), d.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListDueDunningSubscriptions :many
--- Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
--- inside one merchant's scope (see ListDueDunningMerchants above).
---
--- or#837: URGENCY ORDER + LIMIT. This was the flagship unbounded scan — no cap
--- at all, and each returned row can charge a card and terminate a subscription.
--- Most-overdue first, so a merchant whose backlog exceeds one pass retries the
--- subscriptions that have waited longest instead of an arbitrary slice; the
--- claim lease means the next pass picks up where this one stopped.
--- An engine renewal whose stored method is unusable is due too, so admission
--- routes it to awaiting_method (never the default card); a membership
--- awaiting a method past its dunning window is due to end.
+-- Dunning work due in one merchant (see ListDueDunningMerchants): NMI retries
+-- due, awaiting_method past grace (due to end), and engine collections due,
+-- including one whose stored method is unusable, which admission routes to
+-- awaiting_method (never the default card). Most overdue first, capped; the
+-- claim lease lets the next pass continue.
 SELECT * FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.rail = ANY(sqlc.arg(rails)::text[])
   AND ((sub.collection_policy <> 'engine' AND sub.rail='nmi' AND sub.status='past_due' AND sub.next_retry_at IS NOT NULL AND sub.next_retry_at <= sqlc.arg(now)::timestamptz)
@@ -456,8 +449,8 @@ WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.arg(payment_
 ORDER BY s.id;
 
 -- name: ListLiveSubscriptionsOnMethod :many
--- #1115: the memberships a stored card pays for, as their own card or as the
--- default they follow.
+-- The memberships a stored card pays for, as their own card or as the default
+-- they follow.
 SELECT s.id FROM billing.payment_methods pm
 JOIN billing.subscriptions s ON s.merchant_id = pm.merchant_id AND s.customer_id = pm.customer_id
 WHERE pm.merchant_id = sqlc.arg(merchant_id)::uuid AND pm.id = sqlc.arg(payment_method_id)::uuid

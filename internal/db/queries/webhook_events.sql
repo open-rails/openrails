@@ -1,6 +1,6 @@
--- Webhook dedup truth (#678): a row = the event's effects are durably applied.
--- The source is a PSP or a custodian; explicit merchant_id predicates scope
--- every statement.
+-- Webhook dedup truth: a row = the event's effects are durably applied. The
+-- source is a PSP or a custodian; explicit merchant_id predicates scope every
+-- statement.
 
 -- name: WebhookEventCompleted :one
 SELECT EXISTS(
@@ -16,7 +16,7 @@ INSERT INTO billing.webhook_events (merchant_id, psp_id, custodian_id, op, event
 VALUES (sqlc.arg(merchant_id)::uuid, sqlc.narg(psp_id)::uuid, sqlc.narg(custodian_id)::uuid, sqlc.arg(op)::text, sqlc.arg(event_id)::text)
 ON CONFLICT (merchant_id, psp_id, custodian_id, op, event_id) DO NOTHING;
 
--- or#837: batched — row_limit bounds one statement, the caller loops.
+-- Batched: row_limit bounds one statement, the caller loops.
 -- name: DeleteCompletedWebhookEventsBefore :execrows
 DELETE FROM billing.webhook_events
 WHERE ctid IN (

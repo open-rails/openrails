@@ -50,7 +50,7 @@ type ConvertEntitlementWindowsParams struct {
 
 // The cutover from per-key entitlement windows to product access. source names
 // the relation holding the per-key windows: billing.entitlements before
-// migration 17, or an older archive's rows during its restore.
+// migration 20, or an older archive's rows during its restore.
 func (q *Queries) ConvertEntitlementWindows(ctx context.Context, arg ConvertEntitlementWindowsParams) (int64, error) {
 	row := q.db.QueryRow(ctx, convertEntitlementWindows, arg.MerchantID, arg.Source, arg.At)
 	var converted int64

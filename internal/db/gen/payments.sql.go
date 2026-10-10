@@ -28,9 +28,8 @@ type CompleteProviderAttemptParams struct {
 	MerchantID    uuid.UUID
 }
 
-// The attempt row becomes the real charge here: it takes the rail's own
-// transaction id, so it declares money movement (or#827) — this is the update
-// the settlement trigger fires on.
+// The attempt row becomes the real charge: it takes the rail's transaction id
+// and so declares money movement. The settlement trigger fires on this update.
 func (q *Queries) CompleteProviderAttempt(ctx context.Context, arg CompleteProviderAttemptParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeProviderAttempt,
 		arg.ID,
@@ -60,12 +59,10 @@ type CompleteProviderAttemptInPlaceParams struct {
 }
 
 // Resolves a provider attempt row whose real payment is recorded separately
-// (NMI subscription checkout): the row keeps its synthetic transaction_id and
-// is excluded from listings via the nmi_subscription_order_id metadata key,
-// but its status must still reach a terminal state — leaving it 'pending'
-// forever reads as a stuck payment. It keeps money_movement = 'none' (or#827):
-// the money moved on the separate real charge row, and this anchor reaching
-// 'succeeded' must not publish a second settlement to the host.
+// (NMI subscription checkout), so it never reads as stuck pending. It keeps its
+// synthetic transaction_id, is hidden from listings by the
+// nmi_subscription_order_id metadata key, and keeps money_movement = 'none':
+// the money moved on the real charge row, so no second settlement publishes.
 func (q *Queries) CompleteProviderAttemptInPlace(ctx context.Context, arg CompleteProviderAttemptInPlaceParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeProviderAttemptInPlace, arg.ID, arg.Metadata, arg.MerchantID)
 	if err != nil {
@@ -91,6 +88,8 @@ type CompleteRefundReservationParams struct {
 	MerchantID    uuid.UUID
 }
 
+// The rail confirmed and named the reversal: the row records real (negative)
+// money movement.
 func (q *Queries) CompleteRefundReservation(ctx context.Context, arg CompleteRefundReservationParams) (int64, error) {
 	result, err := q.db.Exec(ctx, completeRefundReservation,
 		arg.ID,
@@ -1457,8 +1456,6 @@ type RecordRefundProviderReceiptParams struct {
 	ReservationID    uuid.UUID
 }
 
-// The rail confirmed the reversal and named it, so the row now records real
-// (negative) money movement (or#827).
 // Capture the provider's exact success before retryable local finalization.
 func (q *Queries) RecordRefundProviderReceipt(ctx context.Context, arg RecordRefundProviderReceiptParams) error {
 	_, err := q.db.Exec(ctx, recordRefundProviderReceipt, arg.ProviderRefundID, arg.MerchantID, arg.ReservationID)

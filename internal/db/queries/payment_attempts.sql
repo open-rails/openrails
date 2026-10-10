@@ -1,5 +1,5 @@
 -- name: InsertPaymentAttempt :execrows
--- #1110: idempotent on the gateway transaction id, else on the operation step.
+-- Idempotent on the gateway transaction id, else on the operation step.
 INSERT INTO billing.payment_attempts (
     id, merchant_id, customer_id, psp_id, rail, kind, owner, card_entry, source, observed_via,
     category, reason, action, response_code, response_text, transaction_id, avs_result, cvv_result,
@@ -57,7 +57,7 @@ ORDER BY MIN(a.attempted_at), a.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListUnenrichedNMIAttempts :many
--- #1114: NMI attempts in [since, before) the enrichment pass has not read.
+-- NMI attempts in [since, before) the enrichment pass has not read.
 SELECT id, psp_id, transaction_id::text AS transaction_id, attempted_at
 FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -67,8 +67,8 @@ ORDER BY attempted_at, id
 LIMIT sqlc.arg(row_limit)::int;
 
 -- name: EnrichPaymentAttempt :execrows
--- #1114: fills what the attempt's own reply lacked from the PSP's
--- transaction read, once. A network token used replaces the token type.
+-- Fills what the attempt's own reply lacked from the PSP's transaction read,
+-- once. A network token used replaces the token type.
 UPDATE billing.payment_attempts SET
     card_bin = COALESCE(card_bin, sqlc.narg(card_bin)::text),
     card_brand = COALESCE(card_brand, sqlc.narg(card_brand)::text),
@@ -82,9 +82,8 @@ UPDATE billing.payment_attempts SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND enriched_at IS NULL;
 
 -- name: ListPaymentAttempts :many
--- #1116: one page of the merchant's attempts, newest first, after an
--- (attempted_at, id) cursor; every filter is optional and a text filter
--- matches any of its values.
+-- One page of the merchant's attempts, newest first, after an (attempted_at, id)
+-- cursor; every filter is optional and a text filter matches any of its values.
 SELECT a.*
 FROM billing.payment_attempts a
 WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -122,13 +121,13 @@ SELECT * FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: ListCycleAttempts :many
--- #1116: a rebill cycle's attempts, oldest first.
+-- A rebill cycle's attempts, oldest first.
 SELECT * FROM billing.payment_attempts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND cycle_id = sqlc.arg(cycle_id)::uuid
 ORDER BY attempted_at, id;
 
--- #1118: attempts past their retention, batched: row_limit bounds one
--- statement and the cleanup worker loops.
+-- Attempts past their retention, batched: row_limit bounds one statement and
+-- the cleanup worker loops.
 -- name: DeletePaymentAttemptsBefore :execrows
 DELETE FROM billing.payment_attempts
 WHERE id IN (

@@ -1,4 +1,4 @@
--- Orders (#1168): purchases, their lines, ownership claims and numbers.
+-- Orders: purchases, their lines, ownership claims and numbers.
 
 -- name: CreateOrder :exec
 INSERT INTO billing.orders (

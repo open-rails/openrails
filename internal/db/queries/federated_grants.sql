@@ -1,5 +1,5 @@
--- billing.federated_grants — #1140 merchant roles granted by invitation to
--- users of trusted issuers. An explicit merchant_id scopes every statement.
+-- billing.federated_grants: merchant roles granted by invitation to users of
+-- trusted issuers. An explicit merchant_id scopes every statement.
 
 -- name: CreateFederatedGrant :one
 INSERT INTO billing.federated_grants (merchant_id, email, role)

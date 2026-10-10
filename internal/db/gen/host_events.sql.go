@@ -87,7 +87,7 @@ type ListHostEventsRow struct {
 	PaymentOrderID        *uuid.UUID
 }
 
-// A settled payment carries its payer, price and subscription from the
+// A settled payment carries its customer, price and subscription from the
 // authoritative payment row so a host never re-reads the payment to route it.
 func (q *Queries) ListHostEvents(ctx context.Context, arg ListHostEventsParams) ([]ListHostEventsRow, error) {
 	rows, err := q.db.Query(ctx, listHostEvents,

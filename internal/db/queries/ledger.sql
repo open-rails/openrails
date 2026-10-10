@@ -1,5 +1,5 @@
--- #512 double-entry immutable money ledger (ledger_accounts + ledger_transfers).
--- Balances are O(1) maintained counters on accounts; transfers are append-only.
+-- The double-entry money ledger (ledger_accounts + ledger_transfers). Balances
+-- are maintained counters on accounts; transfers are append-only.
 
 -- name: GetLedgerAccount :one
 SELECT * FROM billing.ledger_accounts
@@ -19,13 +19,11 @@ INSERT INTO billing.ledger_accounts (
 )
 RETURNING *;
 
--- InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
--- NOTHING against ledger_transfers_operation_once_key makes once-only a
--- DATABASE fact: a replay at the same (merchant, customer, currency,
--- transfer_type, operation, source, source_id, grant_id) inserts nothing and
--- returns zero rows, whatever order the caller took its locks in. Zero rows is
--- therefore "already applied", not an error — ledger.Apply reads the committed
--- row and reports Replayed.
+-- InsertLedgerTransfer is the one durable money write. ON CONFLICT DO NOTHING
+-- on ledger_transfers_operation_once_key makes once-only a database fact: a
+-- replay at the same coordinate inserts nothing and returns zero rows, whatever
+-- the caller's lock order. Zero rows means already applied: ApplyIdempotent
+-- reads the committed row.
 -- name: InsertLedgerTransfer :one
 INSERT INTO billing.ledger_transfers (
     merchant_id, debit_account_id, credit_account_id, amount, currency, transfer_type,
@@ -56,17 +54,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND source_id = sqlc.arg(source_id)::text
   AND grant_id IS NOT DISTINCT FROM sqlc.narg(grant_id)::uuid;
 
--- LedgerAccountBalance: net credit (credits - debits) from maintained account
--- counters. This is the Phase H O(1) replacement for summing ledger_transfers.
+-- LedgerAccountBalance: net credit (credits - debits) from the maintained
+-- account counters.
 -- name: LedgerAccountBalance :one
 SELECT (credits_posted - debits_posted)::bigint AS balance
 FROM billing.ledger_accounts
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND id = sqlc.arg(account_id)::uuid;
 
--- ListLedgerTransfersByCustomer: a customer's money-movement history (newest
--- first, paginated) — the source for GetTransactions after the single-entry
--- money_transactions table was retired (#512 hard cut).
 -- name: ListLedgerTransfersByCustomer :many
 -- A customer's movements in one currency, newest first.
 SELECT * FROM billing.ledger_transfers
@@ -85,11 +80,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = ANY(sqlc.arg(ids)::uuid
   AND customer_id = sqlc.arg(customer_id)::uuid
 ORDER BY created_at DESC, id DESC;
 
--- GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
--- coordinate (merchant, customer, currency, transfer_type, operation, source,
--- source_id). `operation` is the or#894 discriminator: without it a capture and
--- a wasted-spend usage charge sharing one (source, source_id) alias here.
--- Newest-first so a replay returns the latest row.
+-- GetLedgerTransferByCoords: the latest transfer at the full operation
+-- coordinate. `operation` keeps a capture and a wasted-spend usage charge that
+-- share one (source, source_id) apart.
 -- name: GetLedgerTransferByCoords :one
 SELECT * FROM billing.ledger_transfers
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -175,11 +168,10 @@ WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid
     OR a.debits_posted <> COALESCE(l.debits, 0))
 ORDER BY a.merchant_id, a.currency, a.id;
 
--- SumLedgerSpendByCoords: the TOTAL money already posted at one operation
--- coordinate. A spend fans out into one credit_spend transfer per FIFO credit
--- lot drawn plus at most one owed_accrual, so the first transfer's amount is NOT
--- the operation's amount — only the sum is. or#891 item 3 compares this against
--- a retry's amount to refuse a reused key carrying a changed body.
+-- SumLedgerSpendByCoords: the total posted at one operation coordinate. A spend
+-- fans out into one credit_spend per FIFO lot drawn plus at most one
+-- owed_accrual, so only the sum is the operation's amount: a retry carrying a
+-- different amount reuses the key with a changed body.
 -- name: SumLedgerSpendByCoords :one
 SELECT COALESCE(SUM(amount), 0)::bigint AS total, count(*)::bigint AS transfers
 FROM billing.ledger_transfers

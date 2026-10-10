@@ -98,7 +98,7 @@ type CreateOrderParams struct {
 	Now            time.Time
 }
 
-// Orders (#1168): purchases, their lines, ownership claims and numbers.
+// Orders: purchases, their lines, ownership claims and numbers.
 func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) error {
 	_, err := q.db.Exec(ctx, createOrder,
 		arg.MerchantID,

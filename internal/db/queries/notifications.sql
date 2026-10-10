@@ -52,14 +52,9 @@ WHERE nq.recipient_kind = 'customer' AND nq.merchant_id = billing.current_mercha
 ORDER BY nq.created_at DESC
 LIMIT NULLIF(sqlc.arg(page_limit)::int, 0) OFFSET sqlc.arg(page_offset)::int;
 
--- Retention sweeps (or#877 B4). The merchant predicate is explicit, not
--- implied: the sweep walks the merchant directory and runs one pass per
--- merchant, and an unqualified DELETE would be a cross-merchant delete.
---
--- or#837: BATCHED. row_limit bounds one statement (and so one transaction);
--- the caller loops until a short batch comes back. A merchant with a year of
--- unswept notifications used to be one DELETE holding a transaction — and the
--- table's dead tuples — open for as long as it took.
+-- Retention sweeps, one merchant per pass: the explicit merchant predicate keeps
+-- a DELETE from crossing merchants. row_limit bounds one statement and
+-- transaction; the caller loops until a short batch.
 -- name: DeleteSeenNotificationsBefore :execrows
 DELETE FROM billing.notifications
 WHERE ctid IN (
@@ -78,8 +73,8 @@ WHERE ctid IN (
     LIMIT sqlc.arg(row_limit)::int
 );
 
--- #789: dedupe guard for the converge NOTIFY pass — any premium_ended row
--- created at/after the window close means the customer was already told.
+-- Dedupe guard for the converge NOTIFY pass: a premium_ended row created at or
+-- after the window close means the customer was already told.
 -- name: PremiumEndedNotificationExistsSince :one
 SELECT EXISTS (
     SELECT 1 FROM billing.notifications nq
@@ -89,7 +84,7 @@ SELECT EXISTS (
       AND nq.created_at >= sqlc.arg(since)::timestamptz
 )::boolean AS found;
 
--- #789: undelivered rows for the notification email sweep (emailed_at NULL).
+-- Undelivered rows for the notification email sweep (emailed_at NULL).
 -- name: ListUndeliveredNotifications :many
 SELECT * FROM billing.notifications nq
 WHERE nq.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -129,8 +124,8 @@ UPDATE billing.notifications SET read_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND recipient_kind = 'customer'
   AND customer_id = sqlc.arg(customer_id)::uuid AND read_at IS NULL;
 
--- #1069: renewal-receipt throttle — a receipt for this subscription whose
--- renewal period started after since.
+-- Renewal-receipt throttle: a receipt for this subscription whose renewal
+-- period started after since.
 -- name: RenewalReceiptSince :one
 SELECT EXISTS (
     SELECT 1 FROM billing.notifications nq

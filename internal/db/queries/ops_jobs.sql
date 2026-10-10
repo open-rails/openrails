@@ -1,5 +1,4 @@
--- Operational job state: catalog drift events (reconciliation). Manual rebill
--- attempts were folded into billing.provider_intents (#358 phase C).
+-- Operational job state: catalog drift events (reconciliation).
 
 -- Catalog drift events are the catalog.* reconciliation findings; kind is the
 -- finding type without its "catalog." prefix.

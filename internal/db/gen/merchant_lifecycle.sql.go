@@ -16,10 +16,8 @@ const countMerchantRowsCatalogDriftEvents = `-- name: CountMerchantRowsCatalogDr
 SELECT count(*) FROM billing.reconciliation_findings WHERE merchant_id = $1 AND finding_type LIKE 'catalog.%'
 `
 
-// Tenant lifecycle (#225): per-table purge/count queries for tenant
-// export + gated delete. One static query per tenant-owned table — the
-// generated replacement for the bun-era fmt.Sprintf(`openrails.%s`)
-// identifier interpolation (#334's 'unsafe SQL' kill target).
+// Merchant lifecycle: per-table count/purge queries for merchant export and
+// gated delete, one static query per merchant-owned table.
 func (q *Queries) CountMerchantRowsCatalogDriftEvents(ctx context.Context, merchantID uuid.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, countMerchantRowsCatalogDriftEvents, merchantID)
 	var count int64

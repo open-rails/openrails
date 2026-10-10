@@ -1,4 +1,4 @@
--- Dunning forensics from the recorded declined attempts (#1111).
+-- Dunning forensics from the recorded declined attempts.
 -- name: ListDunningHistoryEvents :many
 SELECT
     ev.source_table::text AS source_table,

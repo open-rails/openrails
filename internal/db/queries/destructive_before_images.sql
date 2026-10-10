@@ -1,11 +1,6 @@
--- or#859 tier 1, slice 2: converge-enforce reversibility.
---
--- or#858's prune reverses DELETEs (`SET deleted_at = NULL WHERE
--- destructive_run_id = $1`). These reverse UPDATEs, which is the damage the
--- empty-roster mass cancellation actually did, plus the provider writes it
--- queued behind them.
-
--- --- capture (inside the run, immediately before each write) ------------------
+-- Converge-enforce reversibility: before-images captured inside the run right
+-- before each update, and the provider writes it queued. Prune reverses by
+-- clearing deleted_at.
 
 -- name: CaptureSubscriptionBeforeImage :execrows
 -- The row verbatim, server-side, so the image cannot drift from the table.
@@ -18,18 +13,14 @@ SELECT s.merchant_id, sqlc.arg(run_id)::uuid, 'subscriptions', s.id, to_jsonb(s)
 FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.id = sqlc.arg(subscription_id)::uuid
-  -- A pruned row is prune's to reverse (or#858), never converge's: capturing
-  -- it here would hand the converge rollback an image it must not write back.
+  -- A pruned row is prune's to reverse, never converge's.
   AND s.deleted_at IS NULL
 ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 
 -- name: CaptureSubscriptionAccessBeforeImages :execrows
--- Every LIVE access window the transition is about to revoke or bound.
--- Captured as EVIDENCE only: the reverse never replays these (or#859 §3.3 —
--- access windows are Class D, recomputed by Converge from the append-only grant
--- log, never restored; a restored effect can silently disagree with its grant,
--- a re-derived one cannot). What they buy is the ability to say exactly which
--- windows a bad pass closed, and to check the recomputation against them.
+-- Every live access window the transition is about to revoke or bound. Evidence
+-- only: the reverse never replays these, Converge re-derives access from the
+-- grant log. They show which windows a bad pass closed.
 INSERT INTO billing.destructive_run_before_images (
     merchant_id, destructive_run_id, table_name, row_id, before, captured_at
 )
@@ -42,14 +33,9 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
   AND e.deleted_at IS NULL
 ON CONFLICT (merchant_id, destructive_run_id, table_name, row_id) DO NOTHING;
 
--- --- intent attribution -------------------------------------------------------
-
 -- name: StampProviderIntentsForRun :execrows
--- Attribute the provider writes this pass queued for one subscription to the
--- run that queued them. `since` is the instant the run captured that
--- subscription's before-image, so anything newer for that subject is this
--- pass's doing; `destructive_run_id IS NULL` keeps an earlier run's intent from
--- being re-attributed. Attribution only — no status is changed here.
+-- Attributes to the run the provider writes it queued for one subscription:
+-- unattributed intents created since its before-image (`since`).
 UPDATE billing.provider_intents
 SET destructive_run_id = sqlc.arg(run_id)::uuid
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -58,22 +44,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND created_at >= sqlc.arg(since)::timestamptz;
 
 -- name: SupersedeUnfiredProviderIntentsForRun :many
--- STEP ONE of the reverse, before a single row is restored, because it is the
--- only step racing a live actor: the intent runner may claim a queued NMI vault
--- delete at any moment.
---
--- Only `pending` and `failed_retryable` are unfired. `in_flight` is leased by an
--- executor that may already be on the wire; `unknown_needs_verify` means an
--- attempt was MADE and its outcome is unresolved. Neither may be called undone,
--- so neither is touched here — they are reported instead.
---
--- The race is decided by Postgres row locks: this UPDATE and the executor's
--- claim (ClaimDueProviderIntents / ClaimProviderIntentByID) contend for the same row,
--- and under READ COMMITTED the loser re-evaluates its WHERE against the winner's
--- committed row and matches nothing. So exactly one of {superseded, in_flight}
--- happens per intent, never both, and whichever way it goes the reverse's
--- report is truthful. The reverse also disarms the destructive-action switch
--- first, which is what stops NEW claims from starting during the reversal.
+-- First step of the reverse, racing the intent runner: supersedes the run's
+-- unfired intents (pending, failed_retryable). in_flight and
+-- unknown_needs_verify may have reached the provider and are reported instead.
+-- Row locks decide the race with the executor's claim: under READ COMMITTED the
+-- loser re-checks its WHERE and matches nothing, so each intent ends superseded
+-- or in_flight, never both. The merchant's destructive stop, tripped
+-- beforehand, keeps new claims from starting.
 UPDATE billing.provider_intents
 SET status = 'superseded',
     last_failure_reason = sqlc.arg(reason)::text,
@@ -85,17 +62,14 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 RETURNING id, intent_type, subscription_id, rail;
 
 -- name: ListProviderIntentsForRun :many
--- The divergence manifest. Read AFTER the supersede so every row's status is
--- final: superseded = neutralised; succeeded = it reached the provider and is
--- IRREVERSIBLE (the vault entry is gone, the remote subscription is canceled);
--- in_flight / unknown_needs_verify = ambiguous, may have reached the provider.
+-- The divergence manifest, read after the supersede: superseded = neutralised;
+-- succeeded = reached the provider, irreversible; in_flight /
+-- unknown_needs_verify = may have reached it.
 SELECT id, intent_type, status, subscription_id, rail, executed_at, last_failure_reason
 FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid
 ORDER BY created_at;
-
--- --- restore ------------------------------------------------------------------
 
 -- name: StampSubscriptionAfterImage :execrows
 -- Right after the run's own write: the revision the reverse requires to find.
@@ -112,22 +86,11 @@ WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.deleted_at IS NULL;
 
 -- name: RestoreSubscriptionsFromBeforeImages :execrows
--- Re-assert the columns a converge-enforce pass can move, and only those, on
--- rows unchanged since the run's own write. A row a renewal, cancel or payment
--- moved later keeps that newer state: restoring over it could make a paid
--- period due again. Its image stays unrestored and the reverse reports it.
---
--- Upsert-shaped by necessity, not by preference: `grants` FK-pins the payments
--- and products it justifies, so a rollback physically cannot delete-and-reinsert
--- (or#859 §2.3; merchant purge already hit this wall as
--- ErrPurgeBlockedByRetainedHistory). It is also the safer shape — a whole-row
--- rewrite from the image would re-stamp identity and FK columns this run never
--- touched, and clobber whatever another plane legitimately advanced meanwhile.
---
--- Not restored on purpose: deleted_at / destructive_run_id (or#858's soft-delete
--- pair, owned by prune — a converge run must never resurrect a pruned row), and
--- psp_id / customer_id / product_id / price_id (identity, which no transition
--- moves).
+-- Re-asserts the columns a converge-enforce pass can move, only on rows
+-- unchanged since the run's own write: a row a renewal, cancel or payment moved
+-- later keeps its state (restoring could make a paid period due again) and its
+-- image stays unrestored. Updates in place: identity, FK columns and
+-- deleted_at/destructive_run_id (prune's) are never rewritten.
 WITH restorable AS (
     SELECT b.id, b.row_id, b.before
     FROM billing.destructive_run_before_images b
@@ -137,8 +100,7 @@ WITH restorable AS (
       AND b.table_name = 'subscriptions'
       AND b.restored_at IS NULL
       AND s.lifecycle_rev = b.after_lifecycle_rev
-      -- deleted_at is prune's (or#858). A converge reverse must not rewrite the
-      -- state of a row prune has since tombstoned.
+      -- A row prune has since tombstoned is prune's to reverse.
       AND s.deleted_at IS NULL
     FOR UPDATE OF s
 ), marked AS (
@@ -167,22 +129,11 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.id = b.row_id;
 
 -- name: InvalidateAccessFromBeforeImages :execrows
--- Class D is INVALIDATED, never restored (or#859 §3.3, §4).
---
--- The measured damage to access windows is not a delete and not always a revoke:
--- a terminal cancel BOUNDS the access window (ends_at pulled back to the
--- cancellation instant, revoked_at often still NULL). Leaving those rows in
--- place would defeat the recomputation, because derive-2 treats an existing
--- unrevoked row as the effect already being present — the subscription would
--- come back and the customer's runway would not.
---
--- So the reverse soft-deletes exactly the rows this run touched and stamps them
--- with it. That is the invalidate half of "invalidate and re-derive": Converge
--- then rebuilds the window from the append-only grant log, which no rollback
--- touches. A re-derived effect cannot silently disagree with its grant; a
--- restored one can. The stamp keeps the invalidation itself attributable to one
--- run, and or#858's uniques/exclusion already ignore soft-deleted rows so the
--- rebuilt window does not collide with the invalidated one.
+-- Soft-deletes and stamps the access windows this run captured; Converge then
+-- rebuilds them from the grant log (a re-derived window cannot disagree with its
+-- grant, a restored one can). Left in place, a bounded but unrevoked window
+-- would read as already present and block the rebuild. Uniques ignore
+-- soft-deleted rows, so the rebuilt window does not collide.
 UPDATE billing.product_access e
 SET deleted_at = sqlc.arg(now)::timestamptz,
     destructive_run_id = sqlc.arg(run_id)::uuid,
@@ -204,24 +155,18 @@ FROM billing.destructive_run_before_images
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND destructive_run_id = sqlc.arg(run_id)::uuid;
 
--- --- post-rollback quiesce / re-arm gates ------------------------------------
-
 -- name: ResetReconciliationStateUnproven :execrows
--- or#859 §2.2(1): after a rollback the book is definitionally incomplete, so a
--- stale `fully_reconciled = true` licenses mass retraction against a book that
--- is missing rows — i.e. it re-creates the very incident being recovered from.
--- The single most dangerous post-rollback state in the system; cleared here.
+-- After a rollback the book is incomplete: a stale fully_reconciled = true would
+-- license mass retraction against it.
 UPDATE billing.reconciliation_state
 SET fully_reconciled = false, updated_at = now()
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND fully_reconciled = true;
 
 -- name: DisarmMerchantEnforcement :exec
--- or#859 §2.2(2): clear the #835 first-enforce arming so the post-rollback pull
--- runs ADVISORY — findings persisted, nothing mutated — until an operator reads
--- them and re-arms by hand. Also trips the per-merchant destructive stop, which
--- is the quiesce half: it is read by the same gate the intent runner checks, so
--- no new provider write starts while the reversal runs.
+-- Clears first-enforce arming, so post-rollback pulls run advisory until an
+-- operator re-arms, and trips the merchant's destructive stop, which the intent
+-- runner's gate reads: no new provider write starts during the reversal.
 INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
 VALUES (sqlc.arg(merchant_id)::uuid, false, NULL, sqlc.narg(updated_by)::text, sqlc.narg(reason)::text, now())
 ON CONFLICT (merchant_id) DO UPDATE SET

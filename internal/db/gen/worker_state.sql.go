@@ -148,16 +148,11 @@ type SeedWorkerHealthParams struct {
 	ExpectedPeriodSeconds *int64
 }
 
-// billing.worker_state (#689) — operator-global, no merchant scope.
-//
-// Health writes are monotonic. Job completions reach the row out of order
-// (concurrent completions of one kind, a late-finishing attempt), so a write
-// may only add what is newer than the row already holds: timestamps never
-// move backwards, last_error is the text of the newest failure, a success
-// resets the streak only when no newer failure is recorded and a failure
-// counts only when no newer success is recorded. Under reordering the streak
-// never under-counts (an alert is never suppressed); it can over-count by the
-// stale failures a late success could not retract.
+// billing.worker_state: operator-global, no merchant scope. Health writes are
+// monotonic because job completions arrive out of order: timestamps never move
+// back, last_error is the newest failure's, and a success resets (or a failure
+// bumps) the streak only when nothing newer is recorded. Under reordering the
+// streak can over-count but never under-counts, so no alert is suppressed.
 func (q *Queries) SeedWorkerHealth(ctx context.Context, arg SeedWorkerHealthParams) error {
 	_, err := q.db.Exec(ctx, seedWorkerHealth, arg.WorkerKind, arg.ExpectedPeriodSeconds)
 	return err

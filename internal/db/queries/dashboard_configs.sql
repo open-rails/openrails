@@ -1,5 +1,5 @@
--- billing.dashboard_configs — #741 per-merchant dashboard widget layout.
--- An explicit merchant_id scopes every statement to the request's merchant.
+-- billing.dashboard_configs: per-merchant dashboard widget layout. An explicit
+-- merchant_id scopes every statement to the request's merchant.
 
 -- name: GetDashboardConfig :one
 SELECT merchant_id, layout, updated_at, updated_by
@@ -17,7 +17,7 @@ RETURNING merchant_id, layout, updated_at, updated_by;
 
 -- name: HasUsageActivity :one
 -- Any usage-stream signal for the merchant: metered events or purchased credit
--- lots. Drives seeding usage widgets into the #741 default dashboard template.
+-- lots. Decides whether the default dashboard seeds usage widgets.
 SELECT (EXISTS (SELECT 1 FROM billing.usage_events
 WHERE usage_events.merchant_id = sqlc.arg(merchant_id)::uuid
 )

@@ -35,9 +35,8 @@ JOIN billing.products prod ON prod.id = price.product_id
 WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND prod.merchant_id = sqlc.arg(merchant_id)::uuid AND price.id = ANY(sqlc.arg(ids)::uuid[])
 ORDER BY price.created_at DESC, price.id DESC;
 
--- All prices for a product, archived included — the catalog converge needs
--- archived rows to reconcile legacy_import prices instead of re-creating them
--- (would violate unique_prices_product_amount_cycle).
+-- All prices for a product, archived included: the catalog apply matches
+-- archived rows rather than re-creating them (prices_product_amount_window_key).
 -- name: ListPricesByProduct :many
 SELECT * FROM billing.prices price
 WHERE price.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = $1;
@@ -111,12 +110,8 @@ JOIN billing.psps psp ON psp.merchant_id = binding.merchant_id AND psp.id = bind
 WHERE binding.merchant_id = sqlc.arg(merchant_id)::uuid AND binding.psp_id = sqlc.arg(psp_id)::uuid
   AND psp.rail = 'stripe' AND binding.price_ref = sqlc.arg(stripe_price_id)::text;
 
--- #662: a price's money/identity columns (product_id, amount, currency,
--- access_duration_hours, billing_interval_hours, trial_*) are IMMUTABLE — a reprice creates
--- a new row and archives the old. Only the two mutable fields are settable, and
--- each has its own narrow query so the immutable columns cannot be SET at the DB
--- layer at all (not merely by caller convention). A change to any immutable
--- column is, by construction, a different price with a different deterministic id.
+-- A price's money and identity columns are immutable: a reprice creates a new
+-- row and archives the old. Only archived is settable, by its own narrow query.
 
 -- name: UpdatePriceStatus :execrows
 UPDATE billing.prices AS price SET
@@ -139,7 +134,7 @@ SELECT * FROM billing.prices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text
 ORDER BY created_at ASC;
 
--- The archived members of a key's chain — #773's "all prior versions of key K".
+-- The archived members of a key's chain: its prior versions.
 -- name: ListPriorVersionsByKey :many
 SELECT * FROM billing.prices
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND product_id = sqlc.arg(product_id)::uuid AND key = sqlc.arg(key)::text AND archived

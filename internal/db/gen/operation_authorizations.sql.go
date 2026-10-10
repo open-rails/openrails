@@ -29,7 +29,7 @@ type ExtendOperationAuthorizationParams struct {
 	ExtendedAmount int64
 }
 
-// Grows an open hold from the extended total the caller read under the payer
+// Grows an open hold from the extended total the caller read under the customer
 // lock; a stale total or a terminal state matches no row.
 func (q *Queries) ExtendOperationAuthorization(ctx context.Context, arg ExtendOperationAuthorizationParams) (BillingOperationAuthorization, error) {
 	row := q.db.QueryRow(ctx, extendOperationAuthorization,

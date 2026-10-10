@@ -208,7 +208,7 @@ type InsertUsageEventParams struct {
 
 // billing.usage_events: append-only metered usage, partitioned by month on
 // occurred_at. Every read names a time range. The idempotency coordinate
-// (merchant, payer, currency, event_type, source, source_id) is claimed under
+// (merchant, customer, currency, event_type, source, source_id) is claimed under
 // the customer spend lock by GetUsageEventByCoords over the ingest window.
 // pricing_authority is explicit: host is already final money (including capture zero); catalog is an unpriced meter input.
 func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventParams) error {
@@ -261,10 +261,8 @@ type ResourceRevenueDailyRow struct {
 	Amount   int64
 }
 
-// Per-day revenue for a resource across ALL payers in the tenant (#410).
-// ue.amount is already in ledger internal precision (#337/#463): no conversion. The old
-// ceil-divide-by-10 was the internal-units-to-millicents conversion and survived the
-// rename as a 10x revenue under-report.
+// Per-day revenue for a resource across the merchant's customers. ue.amount is
+// already in the currency's ledger scale: no conversion.
 func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueDailyParams) ([]ResourceRevenueDailyRow, error) {
 	rows, err := q.db.Query(ctx, resourceRevenueDaily,
 		arg.MerchantID,
@@ -324,9 +322,8 @@ type ServiceUsageRollupRow struct {
 	TotalAmount int64
 }
 
-// Per-dimension-VALUE spend grouped by a fixed selector (#311). group_by is
-// validated against the allowlist in Go; unknown selectors group everything
-// under ” (the CASE yields NULL).
+// Per-dimension-value spend grouped by a fixed selector. group_by is validated
+// against the allowlist in Go; unknown selectors group everything under ”.
 func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollupParams) ([]ServiceUsageRollupRow, error) {
 	rows, err := q.db.Query(ctx, serviceUsageRollup,
 		arg.MerchantID,
@@ -373,10 +370,9 @@ type SumUsageAmountSinceParams struct {
 	Since      time.Time
 }
 
-// or#897 accrual_rate_cap: the payer's rated usage over a LOOKBACK WINDOW, for
-// the measured accrual rate. Window-bounded by construction — it reads what the
-// payer did in the last N seconds, never its history — and served by
-// usage_events_customer_id_occurred_at_idx (merchant_id, customer_id, occurred_at).
+// accrual_rate_cap: the customer's rated usage over a lookback window, for the
+// measured accrual rate. Window-bounded, never history; served by
+// usage_events_customer_id_occurred_at_idx.
 func (q *Queries) SumUsageAmountSince(ctx context.Context, arg SumUsageAmountSinceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, sumUsageAmountSince,
 		arg.MerchantID,

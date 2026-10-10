@@ -1,4 +1,4 @@
--- billing.solana_subscriptions — on-chain recurring subscription state (#255).
+-- billing.solana_subscriptions: on-chain recurring subscription state.
 
 -- name: UpsertSolanaSubscription :exec
 INSERT INTO billing.solana_subscriptions (
@@ -28,14 +28,14 @@ SELECT * FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_i
 SELECT * FROM billing.solana_subscriptions WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = $1;
 
 -- name: ListDueSolanaSubscriptions :many
--- or#893: the crank's recurring-pull intent must name the PSP it executes
--- against, and the local subscription is where that provenance lives.
+-- The crank's recurring-pull intent names the PSP it executes against; the
+-- local subscription carries it.
 SELECT sqlc.embed(s), sub.psp_id
 FROM billing.solana_subscriptions s
 JOIN billing.subscriptions sub ON sub.id = s.subscription_id
--- A subscription a prune tombstoned is not due for anything: the join is a
--- LIVE read, so it carries the or#858 predicate. The parent terminal guard is
--- defence in depth if a failed/legacy cascade ever leaves its mirror active.
+-- A subscription a prune tombstoned is not due: the join is a live read. The
+-- parent terminal guard is defence in depth should a cascade leave its mirror
+-- active.
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND sub.merchant_id = sqlc.arg(merchant_id)::uuid AND s.status = 'active' AND s.next_pull_at <= sqlc.arg(now)::timestamptz
   AND sub.deleted_at IS NULL
   AND sub.status <> 'canceled'

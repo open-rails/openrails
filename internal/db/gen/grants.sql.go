@@ -223,10 +223,8 @@ type GetCreditLotRemainingParams struct {
 	GrantID    uuid.UUID
 }
 
-// GetCreditLotRemaining: a single credit lot's derived unspent remainder
-// (amount − spent − expired − already-revoked). Deducting `credit_revoke` makes
-// the revoke clawback idempotent: once clawed, remaining is 0 and re-running the
-// projection is a no-op.
+// GetCreditLotRemaining: a credit lot's unspent remainder, net of every transfer
+// drawn from it. Deducting credit_revoke makes the revoke clawback idempotent.
 func (q *Queries) GetCreditLotRemaining(ctx context.Context, arg GetCreditLotRemainingParams) (int64, error) {
 	row := q.db.QueryRow(ctx, getCreditLotRemaining, arg.MerchantID, arg.GrantID)
 	var remaining int64
@@ -285,8 +283,8 @@ type GrantCreditDepositedParams struct {
 	GrantID    uuid.UUID
 }
 
-// GrantCreditDeposited: has derive-2 already emitted this credit grant's #512
-// deposit transfer? (idempotency for the credit projection)
+// GrantCreditDeposited: whether derive-2 already posted this credit grant's
+// deposit transfer (the credit projection's idempotency).
 func (q *Queries) GrantCreditDeposited(ctx context.Context, arg GrantCreditDepositedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, grantCreditDeposited, arg.MerchantID, arg.GrantID)
 	var deposited bool
@@ -422,8 +420,8 @@ type InsertGrantParams struct {
 	Quantity     *int32
 }
 
-// #514 append-only grant ledger (billing.grants). derive-1 appends events here;
-// derive-2 folds them into projections (product_access windows, #512 credit
+// The append-only grant ledger (billing.grants). derive-1 appends events here;
+// derive-2 folds them into projections (product_access windows, credit
 // deposits). entitlement and ownership events are history.
 func (q *Queries) InsertGrant(ctx context.Context, arg InsertGrantParams) (BillingGrant, error) {
 	row := q.db.QueryRow(ctx, insertGrant,
@@ -980,10 +978,9 @@ type ListLiveGrantsMissingEffectsParams struct {
 	CustomerID *uuid.UUID
 }
 
-// #511/#575 DERIVE `derive.grant_effect.missing` as a single set query: live
-// (un-terminated) access/credit grants whose derived effect is missing:
-// access: no window (revoked windows still count); credit: no #512 deposit.
-// customer_id nullable: NULL = merchant-wide sweep. Repair = MaterializeGrant.
+// derive.grant_effect.missing: live access/credit grants without their effect:
+// access has no window (revoked windows count), credit has no deposit transfer.
+// NULL customer_id = merchant-wide. Repair = MaterializeGrant.
 func (q *Queries) ListLiveGrantsMissingEffects(ctx context.Context, arg ListLiveGrantsMissingEffectsParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listLiveGrantsMissingEffects, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -1054,12 +1051,9 @@ type ListLiveGrantsWithRefundedPaymentRow struct {
 	PaymentID *uuid.UUID
 }
 
-// #511 DERIVE `derive.grant.excess`: a customer's LIVE grants whose backing
-// payment was refunded — the source no longer justifies the grant (money came
-// back, access is still live). Surface-only ADMIN: a refund that intentionally
-// keeps access (goodwill) is legitimate, so an operator decides; the source
-// (refund) is a PRESENT recorded fact, so this is NOT confirmed-absence-gated.
-// customer_id is nullable (#575): NULL = merchant-wide sweep.
+// derive.grant.excess: live grants whose payment was refunded. Surface-only: a
+// goodwill refund may keep access, so an operator decides. NULL customer_id =
+// merchant-wide.
 func (q *Queries) ListLiveGrantsWithRefundedPayment(ctx context.Context, arg ListLiveGrantsWithRefundedPaymentParams) ([]ListLiveGrantsWithRefundedPaymentRow, error) {
 	rows, err := q.db.Query(ctx, listLiveGrantsWithRefundedPayment, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -1239,9 +1233,9 @@ type ListSpendableCreditLotsRow struct {
 	Remaining int64
 }
 
-// ListSpendableCreditLots: live (started, unexpired, non-terminated) credit-lot
-// grants with derived remaining = lot amount − Σ(credit_spend + credit_expire
-// transfers tagged to the lot). FIFO order: soonest expiry first.
+// ListSpendableCreditLots: live (started, unexpired, non-terminated) credit lots
+// with their remainder, less the share a pending refund reserves. FIFO:
+// soonest expiry first.
 func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendableCreditLotsParams) ([]ListSpendableCreditLotsRow, error) {
 	rows, err := q.db.Query(ctx, listSpendableCreditLots,
 		arg.MerchantID,
@@ -1302,13 +1296,10 @@ type ListUngrantedGrantablePaymentsRow struct {
 	Currency string
 }
 
-// #511 DERIVE `derive.grant.missing` (grant tier): a customer's completed,
-// positive, one-off (non-subscription) payments that produced NO grant at all:
-// every purchase grants its product (or a credit lot). Refund rows are
-// negative (amount > 0 excludes them); a refunded purchase keeps its grant
-// event (existence, not liveness), so it is not flagged. Surface-only ADMIN:
-// auto-granting re-runs derive-1 (owned by the purchase path). customer_id is
-// nullable (#575): NULL = merchant-wide sweep.
+// derive.grant.missing: succeeded, positive, non-subscription payments that
+// produced no grant (every purchase grants its product or a credit lot). A
+// refunded purchase keeps its grant event, so it is not flagged. Surface-only:
+// re-granting re-runs derive-1. NULL customer_id = merchant-wide.
 func (q *Queries) ListUngrantedGrantablePayments(ctx context.Context, arg ListUngrantedGrantablePaymentsParams) ([]ListUngrantedGrantablePaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listUngrantedGrantablePayments, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -1372,21 +1363,10 @@ type ListUngrantedSubscriptionsRow struct {
 	AccessDurationHoursSnapshot *int32
 }
 
-// #631 DERIVE `derive.subscription.missing`: subscriptions in an access-
-// granting state (active/canceled/unknown) for a product that PROMISES entitlements,
-// with NO subscription-sourced grant yet. After the migrate/convergence split the
-// host-one migrate moves subscriptions as source-of-truth (#724) but no longer
-// writes their entitlements — derive-1 materializes the grant + entitlement window
-// from the stored subscription. Window is computed Go-side (mirrors the retired
-// migrate logic): [COALESCE(current_period_starts_at,started_at),
-// COALESCE(current_period_ends_at,ended_at)). active+canceled+unknown grant
-// access (pending/expired/failed/past_due do not). #716 fail-open: `unknown`
-// an imported-as-unknown sub gets
-// its entitlement while the resolution machinery finds the truth. #717:
-// cancel_type='chargeback' grants NO runway — money reversed = access reversed.
-// Bounded to windows ending within
-// scan_since (3y) — a past-ended window is harmless but skipping ancient ones
-// keeps the sweep cheap. customer_id nullable (#575): NULL = merchant-wide sweep.
+// derive.subscription.missing: subscriptions in an access-granting state with no
+// subscription-sourced grant; derive-1 materializes the grant and its window
+// (computed Go-side). A chargeback cancel grants no runway. scan_since skips
+// windows that ended long ago. NULL customer_id = merchant-wide.
 func (q *Queries) ListUngrantedSubscriptions(ctx context.Context, arg ListUngrantedSubscriptionsParams) ([]ListUngrantedSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listUngrantedSubscriptions, arg.MerchantID, arg.CustomerID, arg.ScanSince)
 	if err != nil {
@@ -1455,14 +1435,10 @@ type ListUngrantedWalletPaymentsRow struct {
 	ProductID   uuid.UUID
 }
 
-// #631 DERIVE `derive.wallet.missing`: completed solana wallet payments
-// carrying a stored access window (metadata.expiration_rfc3339) for a grantable
-// product, with NO grant yet. The host-one migrate moved these payments as
-// source-of-truth (rail=solana, amount>0) but no longer derives their membership
-// entitlement — derive-1 materializes grant + window [purchased_at,
-// expiration_rfc3339). Distinct from the general `derive.grant.missing` (payments)
-// ADMIN finding: the explicit stored expiration makes the window unambiguous, so
-// this migrated cohort auto-repairs instead of waiting for an operator.
+// derive.wallet.missing: succeeded Solana wallet payments with a stored access
+// window (metadata.expiration_rfc3339) and no grant. The stored expiry makes the
+// window [purchased_at, expiration) unambiguous, so unlike derive.grant.missing
+// this auto-repairs.
 func (q *Queries) ListUngrantedWalletPayments(ctx context.Context, arg ListUngrantedWalletPaymentsParams) ([]ListUngrantedWalletPaymentsRow, error) {
 	rows, err := q.db.Query(ctx, listUngrantedWalletPayments, arg.MerchantID, arg.CustomerID, arg.ScanSince)
 	if err != nil {
@@ -1520,10 +1496,9 @@ type ListUnretractedTerminationsParams struct {
 	CustomerID *uuid.UUID
 }
 
-// #511/#575 DERIVE `derive.grant_effect.excess` as a single set query: TERMINATED
-// grants whose derived effect is still live: access: a live window; credit:
-// lot remainder > 0. customer_id nullable: NULL = merchant-wide sweep.
-// Repair = MaterializeGrant (retracts) — idempotent.
+// derive.grant_effect.excess: terminated grants whose effect is still live (an
+// unrevoked window, or a credit remainder > 0). NULL customer_id =
+// merchant-wide. Repair = MaterializeGrant, idempotent.
 func (q *Queries) ListUnretractedTerminations(ctx context.Context, arg ListUnretractedTerminationsParams) ([]BillingGrant, error) {
 	rows, err := q.db.Query(ctx, listUnretractedTerminations, arg.MerchantID, arg.CustomerID)
 	if err != nil {

@@ -84,8 +84,8 @@ type EndActiveProductAccessBySubscriptionParams struct {
 	SourceID   string
 }
 
-// #691 closure write: bound a subscription's live windows to a PROVEN end.
-// Future-start windows are removed by SoftDeleteFutureProductAccessBySubscription.
+// Bounds a subscription's live windows to a proven end. Future-start windows are
+// removed by SoftDeleteFutureProductAccessBySubscription.
 func (q *Queries) EndActiveProductAccessBySubscription(ctx context.Context, arg EndActiveProductAccessBySubscriptionParams) error {
 	_, err := q.db.Exec(ctx, endActiveProductAccessBySubscription,
 		arg.EndsAt,

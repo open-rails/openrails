@@ -15,8 +15,7 @@ INSERT INTO billing.provider_mutation_logs (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 );
 
--- Operator read surface (#735: replaced the ClickHouse mirror; this table is
--- the durable mutation log).
+-- Operator read surface: this table is the durable mutation log.
 
 -- name: ListProviderMutationLogs :many
 SELECT * FROM billing.provider_mutation_logs

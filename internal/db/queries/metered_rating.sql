@@ -1,7 +1,7 @@
--- Metered rating: the rate cards that apply to a payer, usage aggregation for
--- a rated window, and the per-period accrual watermark.
+-- Metered rating: the rate cards that apply to a customer, usage aggregation
+-- for a rated window, and the per-period accrual watermark.
 
--- A payer-scoped card (customer_id set) later replaces the default for its meter.
+-- A customer-scoped card (customer_id set) later replaces the default for its meter.
 -- name: ListPayerArrearsRateCards :many
 SELECT rc.id,
        rc.meter_key::text AS meter_key,

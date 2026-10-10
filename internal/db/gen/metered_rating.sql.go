@@ -88,9 +88,9 @@ type ListPayerArrearsRateCardsRow struct {
 	Price         []byte
 }
 
-// Metered rating: the rate cards that apply to a payer, usage aggregation for
-// a rated window, and the per-period accrual watermark.
-// A payer-scoped card (customer_id set) later replaces the default for its meter.
+// Metered rating: the rate cards that apply to a customer, usage aggregation
+// for a rated window, and the per-period accrual watermark.
+// A customer-scoped card (customer_id set) later replaces the default for its meter.
 func (q *Queries) ListPayerArrearsRateCards(ctx context.Context, arg ListPayerArrearsRateCardsParams) ([]ListPayerArrearsRateCardsRow, error) {
 	rows, err := q.db.Query(ctx, listPayerArrearsRateCards, arg.MerchantID, arg.CustomerID, arg.Currency)
 	if err != nil {

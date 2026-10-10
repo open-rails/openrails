@@ -1,4 +1,4 @@
--- or#837: batched — row_limit bounds one statement, the caller loops.
+-- Batched: row_limit bounds one statement, the caller loops.
 -- name: DeleteDeliveredPaymentSettlementsBefore :execrows
 DELETE FROM billing.host_outbox
  WHERE ctid IN (

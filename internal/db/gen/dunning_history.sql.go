@@ -65,7 +65,7 @@ type ListDunningHistoryEventsRow struct {
 	OccurredAt         time.Time
 }
 
-// Dunning forensics from the recorded declined attempts (#1111).
+// Dunning forensics from the recorded declined attempts.
 func (q *Queries) ListDunningHistoryEvents(ctx context.Context, arg ListDunningHistoryEventsParams) ([]ListDunningHistoryEventsRow, error) {
 	rows, err := q.db.Query(ctx, listDunningHistoryEvents,
 		arg.MerchantID,

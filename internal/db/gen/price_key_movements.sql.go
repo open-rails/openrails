@@ -32,7 +32,7 @@ type InsertPriceKeyMovementParams struct {
 	EffectiveAt time.Time
 }
 
-// billing.price_key_movements (#774): pointer-movement history log.
+// billing.price_key_movements: pointer-movement history log.
 func (q *Queries) InsertPriceKeyMovement(ctx context.Context, arg InsertPriceKeyMovementParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertPriceKeyMovement,
 		arg.MerchantID,

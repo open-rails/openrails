@@ -1,16 +1,10 @@
--- #836 destructive-action kill switch / #835 first-enforce gate.
---
--- destructive_action_switch is instance-level (no merchant) so the no-GUC
--- background connections (intent runner, sweep scheduler) can read it — a kill
--- switch scoped by the connection it polices is not a kill switch.
--- merchant_destructive_policy is ordinary merchant-owned tenant data.
+-- Destructive-action kill switch and first-enforce gate. destructive_action_switch
+-- is one instance-wide row; merchant_destructive_policy is per merchant.
 
 -- name: GetDestructivePolicy :one
--- The effective policy for one merchant in ONE read:
---   switch_enabled   the instance kill switch (false = everything destructive halts)
---   merchant_enabled the per-merchant stop; no row = inherit (true)
---   enforce_armed_at #835: NULL (including "no row") = this merchant's pulls run advisory
--- Must be run merchant-scoped: merchant_destructive_policy is merchant-owned.
+-- The effective policy for one merchant in one read: switch_enabled (instance
+-- kill switch), merchant_enabled (per-merchant stop; no row = true) and
+-- enforce_armed_at (NULL or no row = pulls run advisory).
 SELECT
     COALESCE(s.enabled, false)::boolean AS switch_enabled,
     COALESCE(m.destructive_actions_enabled, true)::boolean AS merchant_enabled,
@@ -24,8 +18,7 @@ LEFT JOIN billing.merchant_destructive_policy m ON m.merchant_id = sqlc.arg(merc
 SELECT COALESCE((SELECT enabled FROM billing.destructive_action_switch LIMIT 1), false)::boolean AS enabled;
 
 -- name: SetDestructiveActionSwitch :exec
--- The 3am kill switch: one UPDATE halts every destructive plane on every node
--- at its next gate check — no deploy, no restart, no scaling workers to zero.
+-- One UPDATE halts every destructive plane on every node at its next gate check.
 UPDATE billing.destructive_action_switch
 SET enabled = sqlc.arg(enabled)::boolean,
     updated_by = sqlc.narg(updated_by)::text,
@@ -33,8 +26,8 @@ SET enabled = sqlc.arg(enabled)::boolean,
     updated_at = now();
 
 -- name: ArmMerchantEnforcement :exec
--- #835: bless a merchant for ENFORCING pulls, after an operator reviewed the
--- findings its first advisory pull produced.
+-- Arms a merchant for enforcing pulls once an operator has reviewed its first
+-- advisory pull's findings.
 INSERT INTO billing.merchant_destructive_policy (merchant_id, destructive_actions_enabled, enforce_armed_at, updated_by, reason, updated_at)
 VALUES (sqlc.arg(merchant_id)::uuid, true, sqlc.arg(armed_at)::timestamptz, sqlc.narg(updated_by)::text, sqlc.narg(reason)::text, now())
 ON CONFLICT (merchant_id) DO UPDATE SET
@@ -54,10 +47,9 @@ ON CONFLICT (merchant_id) DO UPDATE SET
     first_pull_completed_at = COALESCE(billing.merchant_destructive_policy.first_pull_completed_at, EXCLUDED.first_pull_completed_at),
     updated_at = now();
 
--- #834/#837 denominator: the merchant's LIVE linked book on one rail. Live =
--- the statuses that still bill or still grant access; linked = it carries a
--- rail handle, so provider absence could be read as death. Both the
--- cancellation cap and the roster ratio breaker are measured against this.
+-- The merchant's live linked book on one rail: statuses that still bill or grant
+-- access, with a rail handle. The cancellation cap and roster ratio breaker are
+-- measured against it.
 -- name: CountLiveLinkedSubscriptionsForRail :one
 SELECT count(*) FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid

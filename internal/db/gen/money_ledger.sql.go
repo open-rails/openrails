@@ -23,14 +23,11 @@ type LockCustomerForSpendParams struct {
 	MerchantID uuid.UUID
 }
 
-// modules/money serialization. After the #512 hard cut the single-entry
-// money_blocks / money_transactions tables are gone: balance is derived from the
-// #512 ledger (internal/db/queries/ledger.sql), credit lots are #514 grants
-// (grants.sql), and the per-customer spend mutex is a FOR UPDATE lock on the
-// customers row. Admission holds live in Redis (#513), not Postgres.
-// The per-customer spend mutex (#491): every spend/capture/deposit path locks
-// this row FOR UPDATE before reading/mutating the customer's ledger, serializing
-// all money mutations per customer. Returns the customer id.
+// modules/money serialization: balance comes from the ledger (ledger.sql),
+// credit lots are grants (grants.sql), and the per-customer spend mutex is a
+// FOR UPDATE lock on the customers row.
+// The per-customer spend mutex: every spend, capture and deposit path locks this
+// row FOR UPDATE before touching the customer's ledger. Returns the customer id.
 func (q *Queries) LockCustomerForSpend(ctx context.Context, arg LockCustomerForSpendParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, lockCustomerForSpend, arg.ID, arg.MerchantID)
 	var id uuid.UUID

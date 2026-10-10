@@ -172,14 +172,9 @@ type DeleteSeenNotificationsBeforeParams struct {
 	RowLimit   int32
 }
 
-// Retention sweeps (or#877 B4). The merchant predicate is explicit, not
-// implied: the sweep walks the merchant directory and runs one pass per
-// merchant, and an unqualified DELETE would be a cross-merchant delete.
-//
-// or#837: BATCHED. row_limit bounds one statement (and so one transaction);
-// the caller loops until a short batch comes back. A merchant with a year of
-// unswept notifications used to be one DELETE holding a transaction — and the
-// table's dead tuples — open for as long as it took.
+// Retention sweeps, one merchant per pass: the explicit merchant predicate keeps
+// a DELETE from crossing merchants. row_limit bounds one statement and
+// transaction; the caller loops until a short batch.
 func (q *Queries) DeleteSeenNotificationsBefore(ctx context.Context, arg DeleteSeenNotificationsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteSeenNotificationsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -388,7 +383,7 @@ type ListUndeliveredNotificationsParams struct {
 	PageLimit      int32
 }
 
-// #789: undelivered rows for the notification email sweep (emailed_at NULL).
+// Undelivered rows for the notification email sweep (emailed_at NULL).
 func (q *Queries) ListUndeliveredNotifications(ctx context.Context, arg ListUndeliveredNotificationsParams) ([]BillingNotification, error) {
 	rows, err := q.db.Query(ctx, listUndeliveredNotifications,
 		arg.MerchantID,
@@ -530,8 +525,8 @@ type PremiumEndedNotificationExistsSinceParams struct {
 	Since      time.Time
 }
 
-// #789: dedupe guard for the converge NOTIFY pass — any premium_ended row
-// created at/after the window close means the customer was already told.
+// Dedupe guard for the converge NOTIFY pass: a premium_ended row created at or
+// after the window close means the customer was already told.
 func (q *Queries) PremiumEndedNotificationExistsSince(ctx context.Context, arg PremiumEndedNotificationExistsSinceParams) (bool, error) {
 	row := q.db.QueryRow(ctx, premiumEndedNotificationExistsSince, arg.MerchantID, arg.CustomerID, arg.Since)
 	var found bool
@@ -557,8 +552,8 @@ type RenewalReceiptSinceParams struct {
 	Since          time.Time
 }
 
-// #1069: renewal-receipt throttle — a receipt for this subscription whose
-// renewal period started after since.
+// Renewal-receipt throttle: a receipt for this subscription whose renewal
+// period started after since.
 func (q *Queries) RenewalReceiptSince(ctx context.Context, arg RenewalReceiptSinceParams) (bool, error) {
 	row := q.db.QueryRow(ctx, renewalReceiptSince, arg.CustomerID, arg.SubscriptionID, arg.Since)
 	var found bool

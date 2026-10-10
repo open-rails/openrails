@@ -1,6 +1,6 @@
--- billing.customer_invoice_profiles: per-payer enterprise invoicing profile
--- (#798) — net-N terms, collection method and the document fields snapshotted
--- onto invoices at finalize.
+-- billing.customer_invoice_profiles: per-customer enterprise invoicing profile:
+-- net-N terms, collection method and the document fields snapshotted onto
+-- invoices at finalize.
 
 -- name: UpsertCustomerInvoiceProfile :exec
 INSERT INTO billing.customer_invoice_profiles (

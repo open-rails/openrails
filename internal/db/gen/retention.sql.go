@@ -474,7 +474,7 @@ type ListRetentionWorkMerchantsParams struct {
 	CostObservationCutoff  time.Time
 }
 
-// or#837 retention sweep: due-work discovery + the durable resume cursor.
+// Retention sweep: due-work discovery and the durable resume cursor.
 // CROSS-MERCHANT: merchants holding at least one row past a retention cutoff.
 // Ids only; every delete runs per merchant in bounded batches. Capped and
 // cursored: one pass is bounded work and the next resumes after the last

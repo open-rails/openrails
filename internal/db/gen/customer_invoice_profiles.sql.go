@@ -130,9 +130,9 @@ type UpsertCustomerInvoiceProfileParams struct {
 	Now              time.Time
 }
 
-// billing.customer_invoice_profiles: per-payer enterprise invoicing profile
-// (#798) — net-N terms, collection method and the document fields snapshotted
-// onto invoices at finalize.
+// billing.customer_invoice_profiles: per-customer enterprise invoicing profile:
+// net-N terms, collection method and the document fields snapshotted onto
+// invoices at finalize.
 func (q *Queries) UpsertCustomerInvoiceProfile(ctx context.Context, arg UpsertCustomerInvoiceProfileParams) error {
 	_, err := q.db.Exec(ctx, upsertCustomerInvoiceProfile,
 		arg.MerchantID,

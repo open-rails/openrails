@@ -1,5 +1,5 @@
--- billing.custody_migrations + the payment_methods writes that move an
--- instrument between custodians (or#297 Phase C).
+-- billing.custody_migrations and the payment_methods writes that move an
+-- instrument between custodians.
 
 -- name: LockPaymentMethodForCustodyRemap :one
 -- The flip is atomic per instrument: take the row lock first so a concurrent
@@ -10,14 +10,9 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
 FOR UPDATE;
 
 -- name: CountInFlightChargeIntentsForPaymentMethod :one
--- or#297 Phase C refusal predicate: NO charge may straddle the flip. An intent
--- that is in_flight is being executed right now; one parked as
--- unknown_needs_verify was SENT and its outcome is not yet known. Either way
--- the money-mover is mid-attempt against the PSP vault, and moving custody
--- underneath it would leave the verifier resolving an attempt whose instrument
--- no longer describes how the charge was made. Both states clear on their own
--- (the executor finishes, the verifier resolves), so this is a "come back
--- later", not a failure.
+-- In-flight or unknown_needs_verify intents of subscriptions charging this
+-- method: no charge may straddle the custody flip. Both states clear on their
+-- own, so a non-zero count means retry later, not failure.
 SELECT count(*)::bigint FROM billing.provider_intents ri
 JOIN billing.subscriptions s ON s.merchant_id = ri.merchant_id AND s.id = ri.subscription_id
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -26,13 +21,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND ri.merchant_id = sqlc.arg(
   AND ri.status = ANY (ARRAY['in_flight'::text, 'unknown_needs_verify'::text]);
 
 -- name: CountUnresolvedOperationsNamingPaymentMethod :one
--- or#297 refusal predicate, second arm: an operation pins the instrument its
--- frozen payload names until it resolves, whether or not
--- a subscription links it (an invoice collection has none). Every unresolved
--- state counts: pending and failed_retryable re-run from the executor,
--- in_flight is mid-attempt, unknown_needs_verify was sent. Its submission,
--- verification and operator resolution are all judged against the custody it
--- froze; moving custody underneath would strand them on a dead instrument.
+-- Unresolved intents whose frozen payload names this method, with or without a
+-- subscription (an invoice collection has none). They are judged against the
+-- custody they froze, so the flip waits for them.
 SELECT count(*)::bigint FROM billing.provider_intents ri
 WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
   AND ri.status = ANY (ARRAY['pending'::text, 'in_flight'::text, 'failed_retryable'::text, 'unknown_needs_verify'::text])
@@ -41,24 +32,11 @@ WHERE ri.merchant_id = sqlc.arg(merchant_id)::uuid
            AND sqlc.arg(payment_method_id)::uuid::text IN (ri.payload->>'new_payment_method_id', ri.payload->>'old_payment_method_id')));
 
 -- name: RemapPaymentMethodCustody :execrows
--- The custody flip. What moves: who holds the card (custodian), the handle that
--- addresses it there (rail_method_ref), the custodian's fingerprint, the charge
--- transport, and the PSP that settles it — a deplatformed merchant's whole
--- point is that this may be a DIFFERENT gateway account.
---
--- What deliberately does NOT move:
---   * id — subscriptions reference the instrument, so they never notice;
---   * rail — the proxy changes how the card reaches the gateway, never which
---     gateway kind charges it (or#879);
---   * rail_customer_ref — the old PSP vault handle stays on the row. It is
---     dead as an address the moment custody changes, and it is the only
---     forensic link to charges that settled before the flip;
---   * the card's mandates — their references belong to the gateway account
---     that ran the storing transaction, and a charge cites them only through
---     that same account.
---
--- Guarded on the CURRENT custody so a concurrent second flip cannot apply
--- twice: the WHERE clause is the compare-and-swap.
+-- The custody flip: moves the custodian, its handle (rail_method_ref),
+-- fingerprint, charge transport and network token, and clears psp_id (routing
+-- picks the PSP per charge). id, rail, rail_customer_ref (the forensic link to
+-- pre-flip charges) and the card's mandates stay. The WHERE on the current
+-- custody is the compare-and-swap against a concurrent second flip.
 UPDATE billing.payment_methods SET
     custodian = sqlc.arg(to_custodian)::text,
     custodian_id = sqlc.arg(to_custodian_id)::uuid,
@@ -95,10 +73,8 @@ INSERT INTO billing.custody_migrations (
 RETURNING *;
 
 -- name: GetPaymentMethodForCustodianToken :one
--- Conflict guard: a custodian token addresses exactly one instrument. If the
--- export maps two source vault entries onto one token (or onto a token another
--- instrument already holds), the second is refused rather than silently
--- pointing two instruments at one card.
+-- A custodian token addresses exactly one instrument: a second mapping onto it
+-- is refused rather than pointing two instruments at one card.
 SELECT * FROM billing.payment_methods
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND custodian_id = sqlc.arg(custodian_id)::uuid

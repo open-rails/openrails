@@ -1,7 +1,7 @@
--- or#878 delinquency writes to host_outbox: merchant-scoped, explicitly acked,
--- pruned after delivery. A missed cut-off signal is a revenue leak and a missed
--- restore signal is an outage, so neither may be a fire-and-forget webhook.
--- Hosts read and acknowledge through host_events.sql.
+-- Delinquency writes to host_outbox: merchant-scoped, explicitly acked, pruned
+-- after delivery. A missed cut-off is a revenue leak and a missed restore an
+-- outage, so neither is a fire-and-forget webhook. Hosts read and ack through
+-- host_events.sql.
 
 -- name: EnqueueHostLifecycleEvent :execrows
 -- Idempotent on the transition's dedupe key: re-announcing a transition is a
@@ -14,7 +14,7 @@ VALUES (
     sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
 
--- or#837: batched — row_limit bounds one statement, the caller loops.
+-- Batched: row_limit bounds one statement, the caller loops.
 -- name: DeleteDeliveredHostLifecycleEventsBefore :execrows
 DELETE FROM billing.host_outbox
 WHERE ctid IN (

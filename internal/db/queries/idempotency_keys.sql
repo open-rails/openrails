@@ -1,6 +1,6 @@
--- Durable request and webhook-delivery claims (#1099). Every statement names
--- the merchant, and every time is the database's now(): replicas' clocks
--- never decide who owns a key.
+-- Durable request and webhook-delivery claims. Every statement names the
+-- merchant, and every time is the database's now(): replicas' clocks never
+-- decide who owns a key.
 
 -- name: ClaimIdempotencyKey :one
 INSERT INTO billing.idempotency_keys (merchant_id, operation, idempotency_key, status, token, lease_expires_at, expires_at)

@@ -113,12 +113,8 @@ type CountPruneRestorableForRunRow struct {
 	ProductAccess    int64
 }
 
-// or#859 tier 1: the READ side of `openrails undo-run`.
-//
-// An undo is dry-run by default, so everything the operator is asked to confirm
-// must be countable without mutating anything. These queries are that plan, and
-// they are deliberately the same predicates the apply path uses — a plan derived
-// from different predicates than the write is a plan that can lie.
+// The read side of `openrails undo-run`: the dry-run plan, counted with the same
+// predicates the apply path uses so the plan cannot disagree with the write.
 // What `kind='prune'` would bring back: rows this run tombstoned that are still
 // tombstoned. A row someone already restored by hand is not counted twice.
 func (q *Queries) CountPruneRestorableForRun(ctx context.Context, arg CountPruneRestorableForRunParams) (CountPruneRestorableForRunRow, error) {
@@ -147,12 +143,8 @@ SELECT
     -- operation reaches it.
     (SELECT count(*) FROM billing.payment_methods
       WHERE merchant_id = $1::uuid AND psp_id IS NULL AND custodian = 'psp')::bigint AS payment_methods,
-    -- provider_intents excludes the CUSTODIAN-addressed lane (or#795's batch
-    -- account updater): those rows carry no psp_id because the write goes to a
-    -- custodian that backs many PSPs, so no PSP-scoped operation was ever
-    -- supposed to reach them. provider_intents_addressed_check guarantees they name a
-    -- custodian instead, which is what makes the exclusion safe rather than a
-    -- second blind spot.
+    -- Custodian-addressed intents name a custodian instead of a PSP
+    -- (provider_intents_addressed_check), so they are excluded.
     (SELECT count(*) FROM billing.provider_intents
       WHERE merchant_id = $1::uuid AND psp_id IS NULL
         AND custodian_id IS NULL
@@ -167,18 +159,9 @@ type CountUnattributedProviderRowsRow struct {
 	UnfiredIntents   int64
 }
 
-// or#859 §3.2, hole 1, CLOSED by or#893: PSP provenance is required on every
-// PROVIDER row, so a PSP-scoped predicate can no longer skip one. This is
-// therefore no longer a blind-spot count to report — it is the INVARIANT,
-// asserted where the rollback relies on it. Every count is structurally zero
-// (NOT NULL, or payments' CHECK); a non-zero answer means the schema was
-// reopened underneath this code and the undo refuses rather than silently
-// under-covering.
-//
-// `payments` excludes the OFF-RAIL channels (manual/admin). Those rows carry no
-// PSP because no provider took the money, so no PSP-scoped operation was ever
-// supposed to reach them — counting them here would report the exemption as a
-// hole. Live rows only.
+// Provider rows lacking PSP provenance. Structurally zero (NOT NULL or CHECK): a
+// non-zero count means the schema changed under the undo, which then refuses.
+// Off-rail (manual) payments carry no PSP by design and are excluded.
 func (q *Queries) CountUnattributedProviderRows(ctx context.Context, merchantID uuid.UUID) (CountUnattributedProviderRowsRow, error) {
 	row := q.db.QueryRow(ctx, countUnattributedProviderRows, merchantID)
 	var i CountUnattributedProviderRowsRow

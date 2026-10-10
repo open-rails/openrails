@@ -98,9 +98,9 @@ type CreateCheckoutSessionParams struct {
 	Now        time.Time
 }
 
-// billing.checkout_sessions (#1124). The row is immutable after mint
-// except for the payment attempt and the engine session it created. Times are
-// the engine clock's, passed in.
+// billing.checkout_sessions. The row is immutable after mint except for the
+// payment attempt and the engine session it created. Times are the engine
+// clock's, passed in.
 func (q *Queries) CreateCheckoutSession(ctx context.Context, arg CreateCheckoutSessionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, createCheckoutSession,
 		arg.MerchantID,

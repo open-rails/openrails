@@ -773,9 +773,8 @@ type ListPricesByProductParams struct {
 	MerchantID uuid.UUID
 }
 
-// All prices for a product, archived included — the catalog converge needs
-// archived rows to reconcile legacy_import prices instead of re-creating them
-// (would violate unique_prices_product_amount_cycle).
+// All prices for a product, archived included: the catalog apply matches
+// archived rows rather than re-creating them (prices_product_amount_window_key).
 func (q *Queries) ListPricesByProduct(ctx context.Context, arg ListPricesByProductParams) ([]BillingPrice, error) {
 	rows, err := q.db.Query(ctx, listPricesByProduct, arg.ProductID, arg.MerchantID)
 	if err != nil {
@@ -989,7 +988,7 @@ type ListPriorVersionsByKeyParams struct {
 	Key        string
 }
 
-// The archived members of a key's chain — #773's "all prior versions of key K".
+// The archived members of a key's chain: its prior versions.
 func (q *Queries) ListPriorVersionsByKey(ctx context.Context, arg ListPriorVersionsByKeyParams) ([]BillingPrice, error) {
 	rows, err := q.db.Query(ctx, listPriorVersionsByKey, arg.MerchantID, arg.ProductID, arg.Key)
 	if err != nil {
@@ -1040,12 +1039,8 @@ type UpdatePriceStatusParams struct {
 	ID         uuid.UUID
 }
 
-// #662: a price's money/identity columns (product_id, amount, currency,
-// access_duration_hours, billing_interval_hours, trial_*) are IMMUTABLE — a reprice creates
-// a new row and archives the old. Only the two mutable fields are settable, and
-// each has its own narrow query so the immutable columns cannot be SET at the DB
-// layer at all (not merely by caller convention). A change to any immutable
-// column is, by construction, a different price with a different deterministic id.
+// A price's money and identity columns are immutable: a reprice creates a new
+// row and archives the old. Only archived is settable, by its own narrow query.
 func (q *Queries) UpdatePriceStatus(ctx context.Context, arg UpdatePriceStatusParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updatePriceStatus, arg.Archived, arg.MerchantID, arg.ID)
 	if err != nil {

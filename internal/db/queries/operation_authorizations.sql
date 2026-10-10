@@ -119,7 +119,7 @@ INSERT INTO billing.operation_authorization_extensions (
 RETURNING *;
 
 -- name: ExtendOperationAuthorization :one
--- Grows an open hold from the extended total the caller read under the payer
+-- Grows an open hold from the extended total the caller read under the customer
 -- lock; a stale total or a terminal state matches no row.
 UPDATE billing.operation_authorizations
 SET extended_amount = extended_amount + sqlc.arg(granted_amount)::bigint

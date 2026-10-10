@@ -1,6 +1,6 @@
 -- The cutover from per-key entitlement windows to product access. source names
 -- the relation holding the per-key windows: billing.entitlements before
--- migration 17, or an older archive's rows during its restore.
+-- migration 20, or an older archive's rows during its restore.
 
 -- name: ConvertEntitlementWindows :one
 SELECT billing.convert_entitlement_windows(sqlc.arg(merchant_id)::uuid, sqlc.arg(source)::text::regclass, sqlc.arg(at)::timestamptz)::bigint AS converted;

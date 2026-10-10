@@ -20,8 +20,8 @@ WHERE dashboard_configs.merchant_id = $1::uuid
 LIMIT 1
 `
 
-// billing.dashboard_configs — #741 per-merchant dashboard widget layout.
-// An explicit merchant_id scopes every statement to the request's merchant.
+// billing.dashboard_configs: per-merchant dashboard widget layout. An explicit
+// merchant_id scopes every statement to the request's merchant.
 func (q *Queries) GetDashboardConfig(ctx context.Context, merchantID uuid.UUID) (BillingDashboardConfig, error) {
 	row := q.db.QueryRow(ctx, getDashboardConfig, merchantID)
 	var i BillingDashboardConfig
@@ -42,7 +42,7 @@ WHERE usage_events.merchant_id = $1::uuid
 `
 
 // Any usage-stream signal for the merchant: metered events or purchased credit
-// lots. Drives seeding usage widgets into the #741 default dashboard template.
+// lots. Decides whether the default dashboard seeds usage widgets.
 func (q *Queries) HasUsageActivity(ctx context.Context, merchantID uuid.UUID) (bool, error) {
 	row := q.db.QueryRow(ctx, hasUsageActivity, merchantID)
 	var has_activity bool

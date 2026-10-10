@@ -1,4 +1,4 @@
--- th-045 OpenRails-owned provider billing evidence and qualification.
+-- Provider billing evidence and qualification.
 
 -- name: InsertProviderBillingQualification :one
 INSERT INTO billing.cost_qualifications (

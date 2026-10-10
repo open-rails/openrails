@@ -1,4 +1,4 @@
--- billing.price_key_movements (#774): pointer-movement history log.
+-- billing.price_key_movements: pointer-movement history log.
 
 -- name: InsertPriceKeyMovement :execrows
 INSERT INTO billing.price_key_movements (

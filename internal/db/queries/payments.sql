@@ -119,8 +119,6 @@ WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.refunded_payment
   AND purch.deleted_at IS NULL
 LIMIT 1;
 
--- The rail confirmed the reversal and named it, so the row now records real
--- (negative) money movement (or#827).
 -- name: RecordRefundProviderReceipt :exec
 -- Capture the provider's exact success before retryable local finalization.
 UPDATE billing.payments
@@ -132,6 +130,8 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND deleted_at IS NULL;
 
 -- name: CompleteRefundReservation :execrows
+-- The rail confirmed and named the reversal: the row records real (negative)
+-- money movement.
 UPDATE billing.payments
 SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
@@ -154,9 +154,8 @@ WHERE purch.merchant_id = sqlc.arg(merchant_id)::uuid AND purch.psp_id = sqlc.ar
   AND purch.deleted_at IS NULL
 LIMIT 1;
 
--- The attempt row becomes the real charge here: it takes the rail's own
--- transaction id, so it declares money movement (or#827) — this is the update
--- the settlement trigger fires on.
+-- The attempt row becomes the real charge: it takes the rail's transaction id
+-- and so declares money movement. The settlement trigger fires on this update.
 -- name: CompleteProviderAttempt :execrows
 UPDATE billing.payments
 SET transaction_id = $2, status = 'succeeded', metadata = $3, money_movement = 'rail'
@@ -166,12 +165,10 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = $1
   AND deleted_at IS NULL;
 
 -- Resolves a provider attempt row whose real payment is recorded separately
--- (NMI subscription checkout): the row keeps its synthetic transaction_id and
--- is excluded from listings via the nmi_subscription_order_id metadata key,
--- but its status must still reach a terminal state — leaving it 'pending'
--- forever reads as a stuck payment. It keeps money_movement = 'none' (or#827):
--- the money moved on the separate real charge row, and this anchor reaching
--- 'succeeded' must not publish a second settlement to the host.
+-- (NMI subscription checkout), so it never reads as stuck pending. It keeps its
+-- synthetic transaction_id, is hidden from listings by the
+-- nmi_subscription_order_id metadata key, and keeps money_movement = 'none':
+-- the money moved on the real charge row, so no second settlement publishes.
 -- name: CompleteProviderAttemptInPlace :execrows
 UPDATE billing.payments
 SET metadata = $2, status = 'succeeded', money_movement = 'none'

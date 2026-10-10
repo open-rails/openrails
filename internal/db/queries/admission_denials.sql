@@ -1,5 +1,5 @@
--- billing.admission_denials_hourly — #733 aggregated admission-denial
--- counters, flushed periodically from Redis (never per-request).
+-- billing.admission_denials_hourly: admission-denial counters, flushed
+-- periodically from Redis (never per-request).
 
 -- name: UpsertAdmissionDenials :exec
 INSERT INTO billing.admission_denials_hourly (merchant_id, customer_id, denial_reason, hour_at, denials, updated_at)

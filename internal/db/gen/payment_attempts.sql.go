@@ -62,8 +62,8 @@ type DeletePaymentAttemptsBeforeParams struct {
 	RowLimit   int32
 }
 
-// #1118: attempts past their retention, batched: row_limit bounds one
-// statement and the cleanup worker loops.
+// Attempts past their retention, batched: row_limit bounds one statement and
+// the cleanup worker loops.
 func (q *Queries) DeletePaymentAttemptsBefore(ctx context.Context, arg DeletePaymentAttemptsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deletePaymentAttemptsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -100,8 +100,8 @@ type EnrichPaymentAttemptParams struct {
 	ID           uuid.UUID
 }
 
-// #1114: fills what the attempt's own reply lacked from the PSP's
-// transaction read, once. A network token used replaces the token type.
+// Fills what the attempt's own reply lacked from the PSP's transaction read,
+// once. A network token used replaces the token type.
 func (q *Queries) EnrichPaymentAttempt(ctx context.Context, arg EnrichPaymentAttemptParams) (int64, error) {
 	result, err := q.db.Exec(ctx, enrichPaymentAttempt,
 		arg.CardBin,
@@ -249,7 +249,7 @@ type InsertPaymentAttemptParams struct {
 	OrderID                  *uuid.UUID
 }
 
-// #1110: idempotent on the gateway transaction id, else on the operation step.
+// Idempotent on the gateway transaction id, else on the operation step.
 func (q *Queries) InsertPaymentAttempt(ctx context.Context, arg InsertPaymentAttemptParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertPaymentAttempt,
 		arg.ID,
@@ -409,7 +409,7 @@ type ListCycleAttemptsParams struct {
 	CycleID    uuid.UUID
 }
 
-// #1116: a rebill cycle's attempts, oldest first.
+// A rebill cycle's attempts, oldest first.
 func (q *Queries) ListCycleAttempts(ctx context.Context, arg ListCycleAttemptsParams) ([]BillingPaymentAttempt, error) {
 	rows, err := q.db.Query(ctx, listCycleAttempts, arg.MerchantID, arg.CycleID)
 	if err != nil {
@@ -527,9 +527,8 @@ type ListPaymentAttemptsParams struct {
 	RowLimit       int32
 }
 
-// #1116: one page of the merchant's attempts, newest first, after an
-// (attempted_at, id) cursor; every filter is optional and a text filter
-// matches any of its values.
+// One page of the merchant's attempts, newest first, after an (attempted_at, id)
+// cursor; every filter is optional and a text filter matches any of its values.
 func (q *Queries) ListPaymentAttempts(ctx context.Context, arg ListPaymentAttemptsParams) ([]BillingPaymentAttempt, error) {
 	rows, err := q.db.Query(ctx, listPaymentAttempts,
 		arg.MerchantID,
@@ -750,7 +749,7 @@ type ListUnenrichedNMIAttemptsRow struct {
 	AttemptedAt   time.Time
 }
 
-// #1114: NMI attempts in [since, before) the enrichment pass has not read.
+// NMI attempts in [since, before) the enrichment pass has not read.
 func (q *Queries) ListUnenrichedNMIAttempts(ctx context.Context, arg ListUnenrichedNMIAttemptsParams) ([]ListUnenrichedNMIAttemptsRow, error) {
 	rows, err := q.db.Query(ctx, listUnenrichedNMIAttempts,
 		arg.MerchantID,

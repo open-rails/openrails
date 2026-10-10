@@ -13,8 +13,7 @@ DELETE FROM billing.provisioning_tokens
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: DeleteDeclaredProvisioningTokens :exec
--- The declared token but the one the declaration names now (none when it
--- names none).
+-- Deletes the declared tokens except keep_sha256 (all of them when it is NULL).
 DELETE FROM billing.provisioning_tokens
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND declared
   AND token_sha256 IS DISTINCT FROM sqlc.narg(keep_sha256)::bytea;

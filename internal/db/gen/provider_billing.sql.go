@@ -388,7 +388,7 @@ type InsertProviderBillingQualificationParams struct {
 	QuiescenceSeconds        int64
 }
 
-// th-045 OpenRails-owned provider billing evidence and qualification.
+// Provider billing evidence and qualification.
 func (q *Queries) InsertProviderBillingQualification(ctx context.Context, arg InsertProviderBillingQualificationParams) (BillingCostQualification, error) {
 	row := q.db.QueryRow(ctx, insertProviderBillingQualification,
 		arg.MerchantID,

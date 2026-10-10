@@ -1,6 +1,6 @@
--- billing.money_settings: per-(tenant, payer, currency) spend policy + money-in
--- state (#237/#239/#240/#241/#298/#299/#302). amounts use the currency's internal
--- precision. currency is a system code; the Go registry is authority.
+-- billing.money_settings: per-(merchant, customer, currency) spend policy and
+-- money-in state. Amounts use the currency's registry scale; currency is a
+-- system code.
 
 -- name: GetMoneyAccountSettings :one
 SELECT * FROM billing.money_settings
@@ -13,11 +13,9 @@ WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency;
 
 -- name: GetAdmissionCapacity :one
--- Hot-path affordability snapshot for service admit. The customer_balance account
--- carries O(1) counters; money_settings is optional (missing = prepaid,
--- no credit line). Redis request-admission holds are subtracted by spendgate;
--- durable operation authorizations are financial reservations and therefore
--- travel in this Postgres snapshot.
+-- Hot-path affordability snapshot for service admit: customer_balance counters,
+-- the held total, money_settings (missing = prepaid, no credit line) and
+-- outstanding owed.
 SELECT
     (a.credits_posted - a.debits_posted)::bigint AS balance,
     -- Same hold total as GetFinancialHeldAmount.
@@ -48,9 +46,8 @@ SELECT
            AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
-    -- or#897: the payer's OWN arrears account, so outstanding owed stays part of
-    -- the same O(1) point lookup. Debt is a negative arrears balance, so the
-    -- exposure is (debits - credits), floored at 0.
+    -- The customer's own arrears account, in the same point lookup. Debt is a
+    -- negative arrears balance, so exposure is (debits - credits), floored at 0.
     COALESCE(GREATEST(ar.debits_posted - ar.credits_posted, 0), 0)::bigint AS outstanding_owed
 FROM billing.ledger_accounts a
 LEFT JOIN billing.money_settings s
@@ -90,9 +87,8 @@ ON CONFLICT (merchant_id, customer_id, currency) DO UPDATE SET
     updated_at = EXCLUDED.updated_at;
 
 -- name: SetMoneyAccountCreditLimit :exec
--- Admin-only arrears credit-line setter (#489). NOT part of the self-serve
--- UpsertMoneyAccountSettings — an operator path calls this. The settings row must
--- already exist (the caller ensures it).
+-- Admin-only credit-line setter, not part of UpsertMoneyAccountSettings. The
+-- settings row must already exist.
 UPDATE billing.money_settings
 SET credit_limit_amount = sqlc.arg(credit_limit)::bigint, updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
@@ -112,7 +108,7 @@ SET tier = NULLIF(sqlc.arg(tier)::text, ''), updated_at = sqlc.arg(now)
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency);
 
 
--- Every currency a payer holds a balance, settings, pending items or an open invoice in.
+-- Every currency a customer holds a balance, settings, pending items or an open invoice in.
 -- name: ListCustomerBalanceCurrencies :many
 SELECT currency::text AS currency
 FROM (

@@ -958,8 +958,8 @@ type GetSubscriptionByPSPSubIDForUpdateParams struct {
 	RailSubscriptionID string
 }
 
-// Row-locked variant for webhook apply read-modify-writes (#675): hold FOR
-// UPDATE across the read so a concurrent full-row UpdateAt can't clobber it.
+// Row-locked variant for webhook apply read-modify-writes: FOR UPDATE across
+// the read so a concurrent full-row UpdateAt can't clobber it.
 func (q *Queries) GetSubscriptionByPSPSubIDForUpdate(ctx context.Context, arg GetSubscriptionByPSPSubIDForUpdateParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getSubscriptionByPSPSubIDForUpdate,
 		arg.Rail,
@@ -1025,9 +1025,9 @@ type GetUnknownSubscriptionByCustomerAndProductParams struct {
 	MerchantID uuid.UUID
 }
 
-// #691 checkout guard: an `unknown` sub does NOT hold the lifecycle slot, but it
-// may still be alive (and billing) at the provider — a re-purchase would
-// double-bill. These lookups back the subscribe-time rejection.
+// Checkout guard: an unverified subscription holds no lifecycle slot but may
+// still bill at the provider, so a re-purchase would double-bill. These lookups
+// back the subscribe-time rejection.
 func (q *Queries) GetUnknownSubscriptionByCustomerAndProduct(ctx context.Context, arg GetUnknownSubscriptionByCustomerAndProductParams) (BillingSubscription, error) {
 	row := q.db.QueryRow(ctx, getUnknownSubscriptionByCustomerAndProduct, arg.CustomerID, arg.ProductID, arg.MerchantID)
 	var i BillingSubscription
@@ -1388,17 +1388,11 @@ type ListDueDunningSubscriptionsParams struct {
 	RowLimit      int32
 }
 
-// Dunning: past_due NMI-backed subscriptions whose next retry is due. Runs
-// inside one merchant's scope (see ListDueDunningMerchants above).
-//
-// or#837: URGENCY ORDER + LIMIT. This was the flagship unbounded scan — no cap
-// at all, and each returned row can charge a card and terminate a subscription.
-// Most-overdue first, so a merchant whose backlog exceeds one pass retries the
-// subscriptions that have waited longest instead of an arbitrary slice; the
-// claim lease means the next pass picks up where this one stopped.
-// An engine renewal whose stored method is unusable is due too, so admission
-// routes it to awaiting_method (never the default card); a membership
-// awaiting a method past its dunning window is due to end.
+// Dunning work due in one merchant (see ListDueDunningMerchants): NMI retries
+// due, awaiting_method past grace (due to end), and engine collections due,
+// including one whose stored method is unusable, which admission routes to
+// awaiting_method (never the default card). Most overdue first, capped; the
+// claim lease lets the next pass continue.
 func (q *Queries) ListDueDunningSubscriptions(ctx context.Context, arg ListDueDunningSubscriptionsParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listDueDunningSubscriptions,
 		arg.MerchantID,
@@ -1477,8 +1471,8 @@ type ListLiveSubscriptionsOnMethodParams struct {
 	PaymentMethodID uuid.UUID
 }
 
-// #1115: the memberships a stored card pays for, as their own card or as the
-// default they follow.
+// The memberships a stored card pays for, as their own card or as the default
+// they follow.
 func (q *Queries) ListLiveSubscriptionsOnMethod(ctx context.Context, arg ListLiveSubscriptionsOnMethodParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listLiveSubscriptionsOnMethod, arg.MerchantID, arg.PaymentMethodID)
 	if err != nil {
@@ -2241,7 +2235,7 @@ type UpdateSubscriptionAtParams struct {
 }
 
 // Full-column update (nil pointers CLEAR fields like canceled_at) against the
-// row version it was read at (#1102): a stale image never reverts a change.
+// row version it was read at: a stale image never reverts a change.
 func (q *Queries) UpdateSubscriptionAt(ctx context.Context, arg UpdateSubscriptionAtParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSubscriptionAt,
 		arg.ID,
@@ -2309,7 +2303,7 @@ WHERE subscriptions.merchant_id = $26::uuid AND id = $1
   AND lifecycle_rev = $27
   AND row_version = $28
   AND deleted_at IS NULL
-  -- The status-transition audit records this decision's name (0021).
+  -- The status-transition audit records this decision's name.
   AND set_config('openrails.subscription_decision', $29::text, true) IS NOT NULL
 `
 
@@ -2345,10 +2339,9 @@ type UpdateSubscriptionDecidedParams struct {
 	Decision                    string
 }
 
-// A lifecycle decision (#1091 part C): the full-row write that may change
-// status, paid period and cancellation, against the revision it was decided on.
-// Full-column update (the bun version listed every column explicitly so nil
-// pointers CLEAR fields like canceled_at on reactivation).
+// A lifecycle decision: the full-row write that may change status, paid period
+// and cancellation, against the revision it was decided on. Nil pointers clear
+// fields like canceled_at on reactivation.
 func (q *Queries) UpdateSubscriptionDecided(ctx context.Context, arg UpdateSubscriptionDecidedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, updateSubscriptionDecided,
 		arg.ID,

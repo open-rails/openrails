@@ -28,7 +28,7 @@ type DeleteCompletedWebhookEventsBeforeParams struct {
 	RowLimit   int32
 }
 
-// or#837: batched — row_limit bounds one statement, the caller loops.
+// Batched: row_limit bounds one statement, the caller loops.
 func (q *Queries) DeleteCompletedWebhookEventsBefore(ctx context.Context, arg DeleteCompletedWebhookEventsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteCompletedWebhookEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -84,9 +84,9 @@ type WebhookEventCompletedParams struct {
 	EventID     string
 }
 
-// Webhook dedup truth (#678): a row = the event's effects are durably applied.
-// The source is a PSP or a custodian; explicit merchant_id predicates scope
-// every statement.
+// Webhook dedup truth: a row = the event's effects are durably applied. The
+// source is a PSP or a custodian; explicit merchant_id predicates scope every
+// statement.
 func (q *Queries) WebhookEventCompleted(ctx context.Context, arg WebhookEventCompletedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, webhookEventCompleted,
 		arg.MerchantID,

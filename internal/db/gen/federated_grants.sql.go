@@ -63,8 +63,8 @@ type CreateFederatedGrantParams struct {
 	Role       string
 }
 
-// billing.federated_grants — #1140 merchant roles granted by invitation to
-// users of trusted issuers. An explicit merchant_id scopes every statement.
+// billing.federated_grants: merchant roles granted by invitation to users of
+// trusted issuers. An explicit merchant_id scopes every statement.
 func (q *Queries) CreateFederatedGrant(ctx context.Context, arg CreateFederatedGrantParams) (BillingFederatedGrant, error) {
 	row := q.db.QueryRow(ctx, createFederatedGrant, arg.MerchantID, arg.Email, arg.Role)
 	var i BillingFederatedGrant

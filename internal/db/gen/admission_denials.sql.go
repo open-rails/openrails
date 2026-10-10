@@ -28,8 +28,8 @@ type UpsertAdmissionDenialsParams struct {
 	Denials      int64
 }
 
-// billing.admission_denials_hourly — #733 aggregated admission-denial
-// counters, flushed periodically from Redis (never per-request).
+// billing.admission_denials_hourly: admission-denial counters, flushed
+// periodically from Redis (never per-request).
 func (q *Queries) UpsertAdmissionDenials(ctx context.Context, arg UpsertAdmissionDenialsParams) error {
 	_, err := q.db.Exec(ctx, upsertAdmissionDenials,
 		arg.MerchantID,

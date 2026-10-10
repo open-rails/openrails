@@ -65,8 +65,7 @@ type DeleteDeclaredProvisioningTokensParams struct {
 	KeepSha256 []byte
 }
 
-// The declared token but the one the declaration names now (none when it
-// names none).
+// Deletes the declared tokens except keep_sha256 (all of them when it is NULL).
 func (q *Queries) DeleteDeclaredProvisioningTokens(ctx context.Context, arg DeleteDeclaredProvisioningTokensParams) error {
 	_, err := q.db.Exec(ctx, deleteDeclaredProvisioningTokens, arg.MerchantID, arg.KeepSha256)
 	return err

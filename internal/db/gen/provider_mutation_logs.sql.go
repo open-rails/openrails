@@ -111,8 +111,7 @@ type ListProviderMutationLogsParams struct {
 	LimitRows        int64
 }
 
-// Operator read surface (#735: replaced the ClickHouse mirror; this table is
-// the durable mutation log).
+// Operator read surface: this table is the durable mutation log.
 func (q *Queries) ListProviderMutationLogs(ctx context.Context, arg ListProviderMutationLogsParams) ([]BillingProviderMutationLog, error) {
 	rows, err := q.db.Query(ctx, listProviderMutationLogs,
 		arg.MerchantID,

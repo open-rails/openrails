@@ -88,13 +88,10 @@ type ConDuplicateChargesSamePeriodRow struct {
 	LastDate       time.Time
 }
 
-// More than one captured charge for ONE subscription period. A charge carries
-// the period it paid for (metadata period_start); charges without it (older
-// rows, other writers) are judged by the subscription's cadence: two at one
-// price within half its shortest cycle (billing or trial) of each other; a
-// price change (upgrade, reprice) starts a new coverage. Distinct periods,
-// however close, are never a duplicate. One-time purchases are
-// consistency.duplicate.ownership's domain. Refunds net out both ways (#690).
+// More than one captured charge for one subscription period (metadata
+// period_start). A charge without one is judged by cadence: two at one price
+// within half the shortest cycle (billing or trial); a price change starts new
+// coverage. Distinct periods are never a duplicate. Refunds net out both ways.
 func (q *Queries) ConDuplicateChargesSamePeriod(ctx context.Context, arg ConDuplicateChargesSamePeriodParams) ([]ConDuplicateChargesSamePeriodRow, error) {
 	rows, err := q.db.Query(ctx, conDuplicateChargesSamePeriod, arg.MerchantID, arg.CustomerID)
 	if err != nil {
@@ -182,22 +179,11 @@ type ConDuplicateOwnershipGrantsRow struct {
 	Purchases  []byte
 }
 
-// #690 CON `consistency.duplicate.ownership` — more than one LIVE
-// (un-terminated, window covering now) PURCHASED access grant for the same
-// (customer, product): the cross-month one-off/lifetime double-purchase the
-// month-scoped duplicate.provider_charge check cannot see. Paid sources only
-// (purchase/subscription — admin/grace grants charge nobody twice) and
-// bundle-included child grants excluded (source_id 'include:%': two bundles
-// sharing a child is one charge per bundle, not a double charge for the
-// child). A refunded purchase no longer charges the customer, so grants whose
-// payment is refunded (status flip OR a linked refund row — the admin refund
-// path records a negative row and leaves the original 'succeeded') drop out:
-// the #692 approve→refund fix self-confirms on the next sweep instead of
-// reopening; the access-side residue is derive.grant.excess's domain.
-// Purchases ride as a jsonb array (payment linkage nullable) ordered
-// oldest-first, so the LAST element is the later purchase — the default
-// cancel/refund target. merchant_id scopes the merchant. customer_id nullable:
-// NULL = merchant-wide sweep.
+// consistency.duplicate.ownership: more than one live purchased access grant for
+// one (customer, product), which the per-period charge check cannot see.
+// Bundle-included grants (source_id 'include:%') are excluded; a grant whose
+// payment is refunded (status, or a linked refund row) drops out. Purchases are
+// a jsonb array, oldest first: the last is the default cancel/refund target.
 func (q *Queries) ConDuplicateOwnershipGrants(ctx context.Context, arg ConDuplicateOwnershipGrantsParams) ([]ConDuplicateOwnershipGrantsRow, error) {
 	rows, err := q.db.Query(ctx, conDuplicateOwnershipGrants, arg.MerchantID, arg.Now, arg.CustomerID)
 	if err != nil {
@@ -301,15 +287,10 @@ type ConOrphanAccessSubscriptionSourceRow struct {
 	SourceID   string
 }
 
-// #511 CON plane queries (conPass). Each takes an OPTIONAL customer_id: when set
-// (inline Converge(customer)), the scan is restricted to that one customer's rows
-// so an after-every-mutation invocation is O(customer), not O(merchant); when
-// NULL (the merchant-wide sweep) it scans the whole merchant. All are merchant-scoped.
-// These replace the retired internal/audit checks (#511 Phase F hard cut).
-// Partition (#690): a LIVE window with a dangling subscription source is the
-// freeloader case — derive.access.unjustified (severity high, revoke
-// recommendation) owns it. This check keeps only NON-LIVE dangling references
-// (revoked/expired history rows): referential hygiene, no access at stake.
+// CON plane (conPass) queries, all merchant-scoped. A non-NULL customer_id
+// restricts the scan to that customer (inline Converge); NULL scans the merchant.
+// A live window with a dangling subscription source is derive.access.unjustified's;
+// this reports only non-live dangling references (revoked/expired rows).
 func (q *Queries) ConOrphanAccessSubscriptionSource(ctx context.Context, arg ConOrphanAccessSubscriptionSourceParams) ([]ConOrphanAccessSubscriptionSourceRow, error) {
 	rows, err := q.db.Query(ctx, conOrphanAccessSubscriptionSource, arg.MerchantID, arg.Now, arg.CustomerID)
 	if err != nil {

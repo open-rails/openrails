@@ -1,11 +1,6 @@
--- #107 phase 2: reconciliation runs + findings persistence, the engine's
--- merchant-scoped local-state reads, and the enforce appliers' idempotent local
--- writes. merchant_id is stamped explicitly (multi-merchant writer pattern); all
--- statements run on a merchant-pinned connection.
-
--- ============================================================================
--- Run lifecycle
--- ============================================================================
+-- Reconciliation runs and findings, the engine's local-state reads, and the
+-- enforce appliers' idempotent local writes. Statements that read
+-- billing.current_merchant_id() need a merchant-pinned connection.
 
 -- name: CreateReconciliationRun :one
 INSERT INTO billing.maintenance_runs (
@@ -38,10 +33,6 @@ SELECT * FROM billing.maintenance_runs
 WHERE kind='reconciliation' AND merchant_id=billing.current_merchant_id()
 ORDER BY started_at DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
-
--- ============================================================================
--- Findings: stable-identity upsert + lifecycle
--- ============================================================================
 
 -- Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
 -- A previously fixed/auto_fixed finding that reappears is
@@ -83,10 +74,8 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
-    -- #787: an inline auto_fixed transition (the only resolution this upsert
-    -- itself can produce; fixed/ignored come via the separate admin/auto-
-    -- resolve statements below) is a resolution — clear the notify linkage so
-    -- a future reopen of this identity notifies again.
+    -- An inline auto_fixed is a resolution: clear the notify linkage so a
+    -- reopen of this identity notifies again.
     notified_at = CASE
         WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
@@ -115,20 +104,15 @@ WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id =
        COALESCE(array_position(ARRAY['critical','high','medium','low'], notified_severity), 5));
 
 -- name: MarkReconciliationFindingNotified :execrows
--- #787: dedupe linkage for the immediate notify path — set once a finding
--- pushes an operator notification, cleared by every resolution statement below
--- so a reopened finding notifies again.
+-- Dedupe linkage for the immediate notify path: set once a finding notifies,
+-- cleared by every resolution so a reopened finding notifies again.
 UPDATE billing.reconciliation_findings
 SET notified_at = sqlc.arg(notified_at)::timestamptz,
     notified_severity = sqlc.arg(severity)::text
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id);
 
--- SEC-18: the merchant predicate is this query's only merchant scope. This is a
--- merchant-admin by-id surface (GET /v1/admin/findings/:id, and the resolve
--- below EXECUTES cancel/refund/revoke/grant against whatever the finding
--- names); before this it was `WHERE id = $1`, which let merchant A's owner
--- address merchant B's finding on any connection the since-removed RLS did
--- not filter.
+-- By-id admin read. The resolve acts on whatever the finding names, so the
+-- merchant predicate (the pinned connection's merchant) is its only scope.
 -- name: GetReconciliationFinding :one
 SELECT * FROM billing.reconciliation_findings
 WHERE id = $1 AND merchant_id = billing.current_merchant_id();
@@ -149,16 +133,13 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND psp_id = sqlc.arg(psp_id)::u
 ORDER BY finding_type, subject_key;
 
 -- Findings of the given state-roster types absent from the just-completed run
--- covering their provider "vanished on their own" (design decision 1).
--- or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
--- no merchant predicate at all — a long transaction on a big backlog, and a
--- cross-merchant write.
+-- covering their PSP vanished on their own. Batched by row_limit.
 -- name: AutoResolveVanishedReconciliationFindings :execrows
 UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE ctid IN (
     SELECT f.ctid FROM billing.reconciliation_findings f
@@ -179,7 +160,7 @@ UPDATE billing.reconciliation_findings f
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE f.merchant_id = sqlc.arg(merchant_id)::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
@@ -197,7 +178,7 @@ UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'ignored');
 
@@ -207,7 +188,7 @@ SET status = 'auto_fixed',
     resolution = 'enforced',
     evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true),
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review');
 
@@ -217,7 +198,7 @@ SET status = 'fixed',
     resolution = 'admin_fixed',
     operator_notes = sqlc.narg(operator_notes),
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed');
 
@@ -227,18 +208,12 @@ SET status = 'ignored',
     resolution = 'ignored',
     operator_notes = sqlc.narg(operator_notes),
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed');
 
--- ============================================================================
--- #692 operator findings queue (admin API)
--- ============================================================================
-
--- The operator work list. Default view = OPEN findings only; an explicit
--- status filter overrides it (e.g. status=ignored). Sort: severity desc
--- (critical first) then age desc (oldest first). total_count rides every row
--- for pagination. merchant_id stamped explicitly (multi-merchant pattern).
+-- The operator work list: open findings unless a status filter is given,
+-- critical first, then oldest first; keyset-paged.
 -- name: AdminListReconciliationFindings :many
 SELECT f.*
 FROM billing.reconciliation_findings f
@@ -280,10 +255,10 @@ SET status = 'fixed',
         ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', sqlc.narg(resolution_evidence)::jsonb, true)
     END,
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
 
 -- Ignore: permanent silence for the subject (the upsert keeps ignored
@@ -296,10 +271,10 @@ SET status = 'ignored',
     operator_notes = sqlc.narg(operator_notes),
     resolved_by = sqlc.arg(resolved_by),
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
 
 -- Partial failure: append the execution error to operator_notes; the finding
@@ -312,12 +287,8 @@ SET operator_notes = CASE
     END,
     updated_at = now()
 WHERE id = sqlc.arg(id)
-  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review');
-
--- ============================================================================
--- Local-state reads for the diff engine
--- ============================================================================
 
 -- name: ReconcileListSubscriptionsByRails :many
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
@@ -354,9 +325,8 @@ WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND rail::text = ANY (s
   AND psp_id = sqlc.arg(psp_id)::uuid;
 
 -- name: ReconcileListPaymentMethodsByRails :many
--- rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
--- the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
--- for HashiCorp Vault, and the column already carries the right name.
+-- rail_customer_ref is the rail's handle on the stored instrument (on NMI the
+-- customer_vault_id).
 SELECT id, customer_id, rail, rail_customer_ref, rail_method_ref, card_brand, card_last4,
        card_exp_month, card_exp_year
 FROM billing.payment_methods
@@ -369,29 +339,19 @@ FROM billing.solana_subscriptions
 WHERE solana_subscriptions.merchant_id = sqlc.arg(merchant_id)::uuid
 ;
 
--- Billable prices with their rail link blobs (provider_links): the PS-1
--- materializer maps a remote plan id onto the local price whose psp_links
--- jsonb carries that id under the provider's key. Archived prices stay
--- (grandfathered subscriptions bill them).
+-- Prices bound to this PSP (price_psp_bindings), archived included:
+-- grandfathered subscriptions still bill them.
 -- name: ReconcileListPricesWithPSPLinks :many
 SELECT id, product_id, amount, currency, access_duration_hours, billing_interval_hours, archived
 FROM billing.prices
 WHERE prices.merchant_id = sqlc.arg(merchant_id)::uuid AND EXISTS (SELECT 1 FROM billing.price_psp_bindings b WHERE b.merchant_id = sqlc.arg(merchant_id)::uuid AND b.price_id = billing.prices.id AND b.merchant_id = billing.prices.merchant_id AND b.psp_id = sqlc.arg(psp_id)::uuid);
 
--- ============================================================================
--- Enforce appliers: idempotent LOCAL writes only (never a provider call)
--- ============================================================================
+-- Enforce appliers: idempotent local writes only, never a provider call.
+-- Subscription state transitions go through reconcile.Decide and
+-- reconcile.ApplyDecision instead.
 
--- #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
--- state transitions route through the ONE decider (reconcile.Decide) applied
--- via the shared lifecycle chokepoints (reconcile.ApplyDecision).
-
--- DERIVE-plane derive.grant_effect.mismatch revoke
--- repair: revoke the LIVE subscription-sourced entitlements of one
--- subscription. Admin grants and grace windows are different source types and
--- are untouchable by construction.
--- PS-4: backfill a rail charge that has no local payment record.
--- Dedupe rides the payments_psp_id_transaction_id_key identity.
+-- Backfills a rail charge that has no local payment record, deduped on
+-- payments_psp_id_transaction_id_key.
 -- name: ReconcileBackfillPayment :execrows
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
@@ -405,13 +365,13 @@ INSERT INTO billing.payments (
     'succeeded', sqlc.narg(subscription_id), sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid,
-    -- or#827: the row mirrors a charge the rail actually settled.
+    -- The row mirrors a charge the rail actually settled.
     'rail'
 )
 ON CONFLICT DO NOTHING;
 
--- PS-5: record a rail refund that is missing locally as a negative-
--- amount payment row linked to the refunded payment. Same dedupe identity.
+-- Records a rail refund missing locally as a negative-amount payment row linked
+-- to the refunded payment. Same dedupe identity.
 -- name: ReconcileRecordRefund :execrows
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
@@ -425,8 +385,8 @@ INSERT INTO billing.payments (
     'succeeded', sqlc.narg(subscription_id), sqlc.narg(refunded_payment_id),
     sqlc.narg(metadata),
     COALESCE(NULLIF(sqlc.arg(purchased_at)::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    -- or#827: a refund is real (negative) money movement at the rail; the
-    -- settlement feed excludes it on amount/refunded_payment_id, not on this.
+    -- A refund is real (negative) money movement at the rail; the settlement
+    -- feed excludes it on amount/refunded_payment_id, not on this.
     sqlc.arg(customer_id), sqlc.narg(psp_id)::uuid, 'refund', 'rail',
     -- A refund names what its charge paid.
     (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = sqlc.arg(merchant_id)::uuid AND o.id = sqlc.narg(refunded_payment_id)::uuid),
@@ -439,11 +399,9 @@ UPDATE billing.payments
 SET status = 'refunded'
 WHERE payments.merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id) AND status <> 'refunded' AND deleted_at IS NULL;
 
--- PS-1 materialization (bootstrap mode, --materialize): create the local
--- subscription for a rail subscription that resolved unambiguously to an
--- identity and a price. Its access follows the product like a normal signup. Idempotent: a second run inserts nothing
--- when any subscription already carries the rail subscription id (zero
--- rows returned = already materialized).
+-- Materialization (--materialize): creates the local subscription for a rail
+-- subscription resolved unambiguously to an identity and a price; access
+-- follows the product as on signup. Zero rows = already materialized.
 -- name: ReconcileMaterializeSubscription :many
 INSERT INTO billing.subscriptions (
     merchant_id, price_id, product_id, status, rail, rail_subscription_id,
@@ -464,14 +422,13 @@ WHERE pr.merchant_id = sqlc.arg(merchant_id)::uuid AND p.merchant_id = sqlc.arg(
       WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid AND s.rail_subscription_id = sqlc.arg(rail_subscription_id)::text
         AND s.deleted_at IS NULL
         AND s.rail = ANY (sqlc.arg(rails)::text[])
-        -- or#893: every writer resolves a PSP now, including the declared
-        -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
-        -- provider subscription id is only unique within a gateway account.
+        -- A provider subscription id is unique only within a gateway account,
+        -- so the dedupe is PSP-scoped.
         AND s.psp_id = sqlc.arg(psp_id)::uuid
   )
 RETURNING id, product_id, access_duration_hours_snapshot;
 
--- PS-7: adopt the rail's vault metadata for a stored payment method.
+-- Adopts the rail's vault metadata for a stored payment method.
 -- name: ReconcileAdoptPaymentMethod :execrows
 UPDATE billing.payment_methods
 SET card_last4 = COALESCE(sqlc.narg(card_last4)::text, card_last4),
@@ -484,13 +441,11 @@ WHERE id = sqlc.arg(id)
        OR (sqlc.narg(card_exp_month)::smallint IS NOT NULL AND card_exp_month IS DISTINCT FROM sqlc.narg(card_exp_month)::smallint)
        OR (sqlc.narg(card_exp_year)::smallint IS NOT NULL AND card_exp_year IS DISTINCT FROM sqlc.narg(card_exp_year)::smallint));
 
--- #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
--- WRITERS (#665): reconcile.MarkReconciledSourceDomains flips a domain
--- automatically after a pull PROVES it — exhaustive coverage
--- (SnapshotCoverage, not mere event-window watermark freshness) of EVERY
--- configured provider account whose rail could hold that domain's sources.
--- `grants` is admin/local-sourced, so no pull ever proves it — it stays a
--- manual/bulk-import decision. The flag is a ratchet: never auto-unset.
+-- The per-(merchant, source_domain) confirmed-absence gate.
+-- reconcile.MarkReconciledSourceDomains sets it once a pull proves exhaustive
+-- coverage of every PSP whose rail could hold the domain's sources. No pull
+-- proves the local-sourced grants domain; it stays a manual decision. Pulls
+-- never unset the flag.
 
 -- name: UpsertReconciliationState :one
 -- Mark a source domain's reconciliation watermark: pass fully_reconciled=true
@@ -507,18 +462,18 @@ ON CONFLICT (merchant_id, source_domain) DO UPDATE SET
 RETURNING *;
 
 -- name: IsSourceDomainReconciled :one
--- The confirmed-absence gate (§3.2): is this source domain proven fully
--- reconciled for the merchant? Absent row = not yet reconciled = false.
+-- The confirmed-absence gate: is this source domain proven fully reconciled for
+-- the merchant? No row = false.
 SELECT COALESCE((
     SELECT fully_reconciled FROM billing.reconciliation_state
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       AND source_domain = sqlc.arg(source_domain)::text
 ), false) AS fully_reconciled;
 
--- LIFE life.subscription.renewal_overdue (#1096): an active subscription a
--- provider bills whose paid period ended before overdue_before with no
--- renewal payment recorded. A clock reading only: the repair asks the
--- provider (RenewalOverdue -> unverified). Oldest lapse first, capped (or#837).
+-- LIFE life.subscription.renewal_overdue: an active provider-billed subscription
+-- whose paid period ended before overdue_before with no renewal payment. A clock
+-- reading only: the repair asks the provider (RenewalOverdue -> unverified).
+-- Oldest lapse first, capped.
 -- name: ListOverdueRenewals :many
 SELECT s.id, s.rail, s.current_period_ends_at
 FROM billing.subscriptions s
@@ -537,9 +492,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY s.current_period_ends_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- LIFE life.subscription.grace_exhausted (#1096): a provider-billed
--- subscription past_due whose grace ended with no attempt scheduled. The
--- repair asks the provider (DunningStale -> unverified). Capped (or#837).
+-- LIFE life.subscription.grace_exhausted: a provider-billed subscription
+-- past_due whose grace ended with no attempt scheduled. The repair asks the
+-- provider (DunningStale -> unverified). Capped.
 -- name: ListDunningPastGrace :many
 SELECT s.id, s.current_period_ends_at, s.grace_ends_at
 FROM billing.subscriptions s
@@ -553,8 +508,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY s.grace_ends_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
--- never confirmed within the threshold (cutoff = now - pendingStaleAfter).
+-- LIFE life.subscription.pending_stale: pending subscriptions unconfirmed past
+-- the threshold (cutoff = now - pendingStaleAfter).
 -- name: ListStalePendingSubscriptions :many
 SELECT s.id FROM billing.subscriptions s
 WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
@@ -567,7 +522,7 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
       WHERE p.merchant_id = s.merchant_id AND p.subscription_id = s.id
         AND p.status = 'succeeded' AND p.deleted_at IS NULL
   )
--- or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
+-- Oldest first, capped.
 ORDER BY s.created_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
@@ -589,9 +544,9 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY s.created_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
--- will not auto-retry (terminal/expired, or past their deadline) and need an
--- operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
+-- LIFE life.provider_intent.abandoned: provider actions that will not auto-retry
+-- (terminal, expired, or past their deadline). Surface-only; optional
+-- subscription filter.
 -- name: ListAbandonedProviderIntents :many
 SELECT id, intent_type, status, rail FROM billing.provider_intents
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -603,11 +558,10 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
       )
 ORDER BY created_at;
 
--- #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
--- period first, bounded per call so provider-pull (#633) windows them in batches.
--- NULLS FIRST (#665): NULL-period rows (legacy imports without local period
--- evidence) are resolvable only here — via the roster/per-sub probe — so they
--- must never starve behind a large dated cohort under the LIMIT.
+-- The unverified cohort awaiting provider verification, oldest period first,
+-- bounded per call so a provider pull windows it in batches. NULLS FIRST: rows
+-- without a local period (legacy imports) resolve only here and must not starve
+-- behind the dated cohort.
 -- name: ListUnknownSubscriptions :many
 SELECT id, rail, current_period_starts_at, current_period_ends_at, rail_subscription_id FROM billing.subscriptions
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid
@@ -635,12 +589,11 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND (grace_ends_at IS NULL OR grace_ends_at > sqlc.arg(now)::timestamptz)
 ORDER BY current_period_ends_at;
 
--- #665 DERIVE `derive.grant_effect.mismatch` (grant direction): an `active`
--- sub in a RUNNING period with a subscription grant but NO subscription window
--- (live OR revoked) of its product overlapping the period; a recorded revoke
--- is a recorded decision, never re-granted (spec §6). Excludes no-grant subs
--- (owned by derive.subscription.missing). Another source's overlapping access
--- does not satisfy this subscription. customer_id nullable: NULL = merchant-wide.
+-- derive.grant_effect.mismatch (grant direction): an active subscription in a
+-- running period with a subscription grant but no subscription window (live or
+-- revoked) of its product overlapping the period; a recorded revoke is never
+-- re-granted. Subscriptions without a grant are derive.subscription.missing's.
+-- NULL customer_id = merchant-wide.
 -- name: ListActiveSubsMissingAccessProjection :many
 SELECT s.id, s.customer_id, s.product_id, s.status,
        s.current_period_starts_at, s.current_period_ends_at, s.started_at, s.ended_at, s.access_duration_hours_snapshot
@@ -689,32 +642,12 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY s.canceled_at, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- #690 DERIVE `derive.access.unjustified` — the FREELOADER detector
--- (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
--- reserved for the paying-without-access category). A LIVE
--- window (not revoked/deleted, started, unbounded or ending in the future)
--- whose justification chain is PROVEN broken. Post-#691 fail-open, "live
--- window past paid-through" is NORMAL for a standing auto-renew projection
--- (stale ≠ freeloader) — a freeloader's SOURCE is proven absent or reversed:
---   missing_subscription           - source_type=subscription, no sub row at all
---   refunded_payment               - purchase window whose payment was refunded,
---                                    with no live grant justifying the access
--- Grant-justification guard: never fires when a live un-terminated entitlement
--- grant covers now (matches MaterializeGrant's standing-access projection:
--- per-period grants of a live sub lapse while the standing window persists —
--- that is verification pressure, not freeloading), and never when the window's
--- backing grant is TERMINATED (derive.grant_effect.excess owns that
--- retraction). Non-live windows with dangling sub sources stay with
--- consistency.reference.source_reference. ADMIN surface-only — revoking access
--- is an operator decision, never auto (policy, #690).
---
--- Verification SQL (2026-07-01 host-one analysis, measured ZERO on the full
--- re-import): (1) grant-justification by source — live windows LEFT JOIN live
--- grants on (customer, source) counting NULLs per source_type; (2)
--- window-vs-paid-through by status — live windows joined to subscriptions
--- grouped by status comparing ends_at against GREATEST(current_period_ends_at,
--- ended_at). This query is the union of both, restricted to proven-dead
--- sources. customer_id nullable: NULL = merchant-wide sweep.
+-- derive.access.unjustified (freeloader): a live window whose source is proven
+-- absent or reversed: missing_subscription or refunded_payment. Never fires while
+-- a live access grant covers now (a live window past paid-through is normal for
+-- auto-renew), nor when the backing grant is terminated
+-- (derive.grant_effect.excess's). Surface-only: revoking access is an operator
+-- decision. NULL customer_id = merchant-wide.
 -- name: ListUnjustifiedAccessWindows :many
 SELECT e.id AS access_id, e.customer_id, e.product_id,
        e.source_type, e.source_id, e.starts_at, e.ends_at,
@@ -762,23 +695,21 @@ WHERE e.merchant_id = sqlc.arg(merchant_id)::uuid
       (e.source_type = 'subscription' AND s.id IS NULL)
       OR (e.source_type = 'purchase' AND pay.id IS NOT NULL AND pay.status = 'refunded')
   )
--- or#837: oldest window first, capped. Surface-only findings, so truncation
--- delays an operator decision rather than losing one.
+-- Oldest window first, capped: truncation delays an operator decision rather
+-- than losing one.
 ORDER BY e.starts_at, e.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- #511 Phase E (Converge sweep worker): the no-GUC list of merchants
--- to sweep. merchants is a GLOBAL control-plane table.
+-- CROSS-MERCHANT: the active merchants the converge sweep walks.
 -- name: ListActiveMerchantIDs :many
 SELECT id FROM billing.merchants
 WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id;
 
--- #789 NOTIFY `notify.access_ended` detector: customers whose LAST access
--- window of a product closed inside (closed_after, now] — the close instant is
--- LEAST(ends_at, revoked_at) — with NO other live window of that product. One
--- row per customer (latest close): one email per customer, whatever ended the
--- access. customer_id nullable: NULL = merchant-wide sweep.
+-- notify.access_ended: customers whose last window of a product closed
+-- (LEAST(ends_at, revoked_at)) in (closed_after, now] with no other live window
+-- of it. One row per customer (latest close): one email, whatever ended the
+-- access. NULL customer_id = merchant-wide.
 -- name: ListRecentlyClosedLastAccessWindows :many
 SELECT DISTINCT ON (e.customer_id)
        e.id, e.customer_id, e.product_id,
@@ -845,8 +776,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
   AND s.current_period_ends_at + LEAST(interval '24 hours', GREATEST(interval '5 minutes',
       (s.current_period_ends_at - s.current_period_starts_at) / 10)) <= sqlc.arg(now)::timestamptz;
 
--- LIFE life.unverified.* (#1094/#1096): unverified subscriptions with the
--- instant they became unverified, oldest first, capped (or#837).
+-- LIFE life.unverified.*: unverified subscriptions with the instant they became
+-- unverified, oldest first, capped.
 -- name: ListUnverifiedSubscriptions :many
 SELECT s.id, s.psp_id, s.rail,
        COALESCE(v.unverified_at, s.updated_at)::timestamptz AS unverified_at,
@@ -860,8 +791,8 @@ WHERE s.merchant_id = sqlc.arg(merchant_id)::uuid
 ORDER BY 4, s.id
 LIMIT sqlc.arg(row_limit)::int;
 
--- LIFE life.dunning.funnel (#1096): live subscriptions by lifecycle state and
--- the age of the oldest unverified entry (0 when none).
+-- LIFE life.dunning.funnel: live subscriptions by lifecycle state and the age of
+-- the oldest unverified entry (0 when none).
 -- name: CountSubscriptionFunnel :one
 SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
        count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,

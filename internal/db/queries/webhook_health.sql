@@ -1,5 +1,4 @@
--- #786 webhook-health recording. All statements run merchant-scoped (MerchantTx
--- or a pinned merchant connection); INSERTs pass merchant_id explicitly.
+-- Webhook-health recording. Every statement names merchant_id explicitly.
 
 -- A source is a PSP or a custodian: exactly one of psp_id and custodian_id.
 

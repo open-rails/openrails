@@ -29,7 +29,7 @@ type DeleteDeliveredHostLifecycleEventsBeforeParams struct {
 	RowLimit   int32
 }
 
-// or#837: batched — row_limit bounds one statement, the caller loops.
+// Batched: row_limit bounds one statement, the caller loops.
 func (q *Queries) DeleteDeliveredHostLifecycleEventsBefore(ctx context.Context, arg DeleteDeliveredHostLifecycleEventsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteDeliveredHostLifecycleEventsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -60,10 +60,10 @@ type EnqueueHostLifecycleEventParams struct {
 	DedupeKey   string
 }
 
-// or#878 delinquency writes to host_outbox: merchant-scoped, explicitly acked,
-// pruned after delivery. A missed cut-off signal is a revenue leak and a missed
-// restore signal is an outage, so neither may be a fire-and-forget webhook.
-// Hosts read and acknowledge through host_events.sql.
+// Delinquency writes to host_outbox: merchant-scoped, explicitly acked, pruned
+// after delivery. A missed cut-off is a revenue leak and a missed restore an
+// outage, so neither is a fire-and-forget webhook. Hosts read and ack through
+// host_events.sql.
 // Idempotent on the transition's dedupe key: re-announcing a transition is a
 // no-op, never a second instruction to the host.
 func (q *Queries) EnqueueHostLifecycleEvent(ctx context.Context, arg EnqueueHostLifecycleEventParams) (int64, error) {

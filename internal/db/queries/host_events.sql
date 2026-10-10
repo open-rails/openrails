@@ -1,5 +1,5 @@
 -- name: ListHostEvents :many
--- A settled payment carries its payer, price and subscription from the
+-- A settled payment carries its customer, price and subscription from the
 -- authoritative payment row so a host never re-reads the payment to route it.
 SELECT h.*, p.customer_id AS payment_customer_id, p.price_id AS payment_price_id,
   p.subscription_id AS payment_subscription_id, p.order_id AS payment_order_id

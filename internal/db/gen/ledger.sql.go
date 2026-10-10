@@ -28,8 +28,8 @@ type GetLedgerAccountParams struct {
 	CustomerID  *uuid.UUID
 }
 
-// #512 double-entry immutable money ledger (ledger_accounts + ledger_transfers).
-// Balances are O(1) maintained counters on accounts; transfers are append-only.
+// The double-entry money ledger (ledger_accounts + ledger_transfers). Balances
+// are maintained counters on accounts; transfers are append-only.
 func (q *Queries) GetLedgerAccount(ctx context.Context, arg GetLedgerAccountParams) (BillingLedgerAccount, error) {
 	row := q.db.QueryRow(ctx, getLedgerAccount,
 		arg.MerchantID,
@@ -192,11 +192,9 @@ type GetLedgerTransferByCoordsParams struct {
 	SourceID     string
 }
 
-// GetLedgerTransferByCoords: idempotency / lookup by the FULL operation
-// coordinate (merchant, customer, currency, transfer_type, operation, source,
-// source_id). `operation` is the or#894 discriminator: without it a capture and
-// a wasted-spend usage charge sharing one (source, source_id) alias here.
-// Newest-first so a replay returns the latest row.
+// GetLedgerTransferByCoords: the latest transfer at the full operation
+// coordinate. `operation` keeps a capture and a wasted-spend usage charge that
+// share one (source, source_id) apart.
 func (q *Queries) GetLedgerTransferByCoords(ctx context.Context, arg GetLedgerTransferByCoordsParams) (BillingLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, getLedgerTransferByCoords,
 		arg.MerchantID,
@@ -311,13 +309,11 @@ type InsertLedgerTransferParams struct {
 	InvoiceID              *uuid.UUID
 }
 
-// InsertLedgerTransfer is the ONE durable money write (or#892). ON CONFLICT DO
-// NOTHING against ledger_transfers_operation_once_key makes once-only a
-// DATABASE fact: a replay at the same (merchant, customer, currency,
-// transfer_type, operation, source, source_id, grant_id) inserts nothing and
-// returns zero rows, whatever order the caller took its locks in. Zero rows is
-// therefore "already applied", not an error — ledger.Apply reads the committed
-// row and reports Replayed.
+// InsertLedgerTransfer is the one durable money write. ON CONFLICT DO NOTHING
+// on ledger_transfers_operation_once_key makes once-only a database fact: a
+// replay at the same coordinate inserts nothing and returns zero rows, whatever
+// the caller's lock order. Zero rows means already applied: ApplyIdempotent
+// reads the committed row.
 func (q *Queries) InsertLedgerTransfer(ctx context.Context, arg InsertLedgerTransferParams) (BillingLedgerTransfer, error) {
 	row := q.db.QueryRow(ctx, insertLedgerTransfer,
 		arg.MerchantID,
@@ -371,8 +367,8 @@ type LedgerAccountBalanceParams struct {
 	AccountID  uuid.UUID
 }
 
-// LedgerAccountBalance: net credit (credits - debits) from maintained account
-// counters. This is the Phase H O(1) replacement for summing ledger_transfers.
+// LedgerAccountBalance: net credit (credits - debits) from the maintained
+// account counters.
 func (q *Queries) LedgerAccountBalance(ctx context.Context, arg LedgerAccountBalanceParams) (int64, error) {
 	row := q.db.QueryRow(ctx, ledgerAccountBalance, arg.MerchantID, arg.AccountID)
 	var balance int64
@@ -522,9 +518,6 @@ type ListLedgerTransfersByCustomerParams struct {
 	RowLimit   int32
 }
 
-// ListLedgerTransfersByCustomer: a customer's money-movement history (newest
-// first, paginated) — the source for GetTransactions after the single-entry
-// money_transactions table was retired (#512 hard cut).
 // A customer's movements in one currency, newest first.
 func (q *Queries) ListLedgerTransfersByCustomer(ctx context.Context, arg ListLedgerTransfersByCustomerParams) ([]BillingLedgerTransfer, error) {
 	rows, err := q.db.Query(ctx, listLedgerTransfersByCustomer,
@@ -702,11 +695,10 @@ type SumLedgerSpendByCoordsRow struct {
 	Transfers int64
 }
 
-// SumLedgerSpendByCoords: the TOTAL money already posted at one operation
-// coordinate. A spend fans out into one credit_spend transfer per FIFO credit
-// lot drawn plus at most one owed_accrual, so the first transfer's amount is NOT
-// the operation's amount — only the sum is. or#891 item 3 compares this against
-// a retry's amount to refuse a reused key carrying a changed body.
+// SumLedgerSpendByCoords: the total posted at one operation coordinate. A spend
+// fans out into one credit_spend per FIFO lot drawn plus at most one
+// owed_accrual, so only the sum is the operation's amount: a retry carrying a
+// different amount reuses the key with a changed body.
 func (q *Queries) SumLedgerSpendByCoords(ctx context.Context, arg SumLedgerSpendByCoordsParams) (SumLedgerSpendByCoordsRow, error) {
 	row := q.db.QueryRow(ctx, sumLedgerSpendByCoords,
 		arg.MerchantID,

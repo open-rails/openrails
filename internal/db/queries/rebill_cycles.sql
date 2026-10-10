@@ -1,5 +1,5 @@
 -- name: UpsertRebillCycle :one
--- #1111: the cycle for a subscription's period that came due at due_at.
+-- The cycle for a subscription's period that came due at due_at.
 INSERT INTO billing.rebill_cycles (id, merchant_id, subscription_id, customer_id, psp_id, rail, owner, due_at, amount, currency, quantity)
 VALUES (sqlc.arg(id)::uuid, sqlc.arg(merchant_id)::uuid, sqlc.arg(subscription_id)::uuid, sqlc.arg(customer_id)::uuid,
     sqlc.arg(psp_id)::uuid, sqlc.arg(rail)::text, sqlc.arg(owner)::text, sqlc.arg(due_at)::timestamptz,
@@ -28,8 +28,8 @@ ORDER BY MIN(s.current_period_ends_at), s.merchant_id
 LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListOverdueRebills :many
--- #1112: auto-renewing subscriptions whose period ended before its owner's
--- deadline with neither an attempt nor a recorded miss for that cycle.
+-- Auto-renewing subscriptions whose period ended before its owner's deadline
+-- with neither an attempt nor a recorded miss for that cycle.
 SELECT sub.* FROM billing.subscriptions sub
 WHERE sub.merchant_id = sqlc.arg(merchant_id)::uuid
   AND sub.status IN ('active', 'unverified', 'awaiting_method') AND sub.deleted_at IS NULL
@@ -147,8 +147,8 @@ WITH cf AS (
 FROM cf
 ORDER BY cf.due_at DESC, cf.id DESC;
 
--- #1118: cycles due before the retention cutoff whose attempts are all gone,
--- batched like the attempt purge that runs first.
+-- Cycles due before the retention cutoff whose attempts are all gone, batched
+-- like the attempt purge that runs first.
 -- name: DeleteRebillCyclesBefore :execrows
 DELETE FROM billing.rebill_cycles
 WHERE id IN (

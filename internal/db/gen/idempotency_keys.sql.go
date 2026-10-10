@@ -31,9 +31,9 @@ type ClaimIdempotencyKeyParams struct {
 	TtlSeconds     float64
 }
 
-// Durable request and webhook-delivery claims (#1099). Every statement names
-// the merchant, and every time is the database's now(): replicas' clocks
-// never decide who owns a key.
+// Durable request and webhook-delivery claims. Every statement names the
+// merchant, and every time is the database's now(): replicas' clocks never
+// decide who owns a key.
 func (q *Queries) ClaimIdempotencyKey(ctx context.Context, arg ClaimIdempotencyKeyParams) (BillingIdempotencyKey, error) {
 	row := q.db.QueryRow(ctx, claimIdempotencyKey,
 		arg.MerchantID,

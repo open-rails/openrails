@@ -212,11 +212,11 @@ type ListDueSolanaSubscriptionsRow struct {
 	PspID                     uuid.UUID
 }
 
-// or#893: the crank's recurring-pull intent must name the PSP it executes
-// against, and the local subscription is where that provenance lives.
-// A subscription a prune tombstoned is not due for anything: the join is a
-// LIVE read, so it carries the or#858 predicate. The parent terminal guard is
-// defence in depth if a failed/legacy cascade ever leaves its mirror active.
+// The crank's recurring-pull intent names the PSP it executes against; the
+// local subscription carries it.
+// A subscription a prune tombstoned is not due: the join is a live read. The
+// parent terminal guard is defence in depth should a cascade leave its mirror
+// active.
 func (q *Queries) ListDueSolanaSubscriptions(ctx context.Context, arg ListDueSolanaSubscriptionsParams) ([]ListDueSolanaSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listDueSolanaSubscriptions, arg.MerchantID, arg.Now, arg.PageLimit)
 	if err != nil {
@@ -345,7 +345,7 @@ type UpsertSolanaSubscriptionParams struct {
 	LastSignature            *string
 }
 
-// billing.solana_subscriptions — on-chain recurring subscription state (#255).
+// billing.solana_subscriptions: on-chain recurring subscription state.
 func (q *Queries) UpsertSolanaSubscription(ctx context.Context, arg UpsertSolanaSubscriptionParams) error {
 	_, err := q.db.Exec(ctx, upsertSolanaSubscription,
 		arg.ID,

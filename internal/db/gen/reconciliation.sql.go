@@ -18,7 +18,7 @@ SET status = 'fixed',
     resolution = 'admin_fixed',
     operator_notes = $1,
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = $2::uuid AND id = $3 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed')
 `
@@ -44,10 +44,10 @@ SET status = 'ignored',
     operator_notes = $1,
     resolved_by = $2,
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE id = $3
-  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review')
 `
 
@@ -69,7 +69,6 @@ func (q *Queries) AdminIgnoreReconciliationFinding(ctx context.Context, arg Admi
 }
 
 const adminListReconciliationFindings = `-- name: AdminListReconciliationFindings :many
-
 SELECT f.id, f.merchant_id, f.finding_type, f.rail, f.psp_id, f.openrails_resource_type, f.openrails_resource_id, f.external_resource_id, f.field, f.openrails_value, f.external_value, f.subject_key, f.severity, f.status, f.recommended_action, f.first_seen_run, f.last_seen_run, f.last_seen_at, f.resolved_at, f.resolution, f.operator_notes, f.created_at, f.updated_at, f.evidence, f.resolved_by, f.notified_at, f.notified_severity, f.seen_run_class
 FROM billing.reconciliation_findings f
 WHERE f.merchant_id = $1::uuid
@@ -100,13 +99,8 @@ type AdminListReconciliationFindingsParams struct {
 	RowLimit    int32
 }
 
-// ============================================================================
-// #692 operator findings queue (admin API)
-// ============================================================================
-// The operator work list. Default view = OPEN findings only; an explicit
-// status filter overrides it (e.g. status=ignored). Sort: severity desc
-// (critical first) then age desc (oldest first). total_count rides every row
-// for pagination. merchant_id stamped explicitly (multi-merchant pattern).
+// The operator work list: open findings unless a status filter is given,
+// critical first, then oldest first; keyset-paged.
 func (q *Queries) AdminListReconciliationFindings(ctx context.Context, arg AdminListReconciliationFindingsParams) ([]BillingReconciliationFinding, error) {
 	rows, err := q.db.Query(ctx, adminListReconciliationFindings,
 		arg.MerchantID,
@@ -177,10 +171,10 @@ SET status = 'fixed',
         ELSE jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $3::jsonb, true)
     END,
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE id = $4
-  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review')
 `
 
@@ -216,7 +210,7 @@ SET operator_notes = CASE
     END,
     updated_at = now()
 WHERE id = $2
-  AND merchant_id = billing.current_merchant_id() -- SEC-18: defence in depth, see GetReconciliationFinding
+  AND merchant_id = billing.current_merchant_id() -- defence in depth, see GetReconciliationFinding
   AND status IN ('reconcile_required', 'requires_review')
 `
 
@@ -260,7 +254,7 @@ UPDATE billing.reconciliation_findings f
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE f.merchant_id = $1::uuid
   AND f.finding_type = 'life.provider_intent.stuck'
@@ -315,7 +309,7 @@ UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE ctid IN (
     SELECT f.ctid FROM billing.reconciliation_findings f
@@ -337,10 +331,7 @@ type AutoResolveVanishedReconciliationFindingsParams struct {
 }
 
 // Findings of the given state-roster types absent from the just-completed run
-// covering their provider "vanished on their own" (design decision 1).
-// or#837: batched and merchant-pinned. It used to be one unbounded UPDATE with
-// no merchant predicate at all — a long transaction on a big backlog, and a
-// cross-merchant write.
+// covering their PSP vanished on their own. Batched by row_limit.
 func (q *Queries) AutoResolveVanishedReconciliationFindings(ctx context.Context, arg AutoResolveVanishedReconciliationFindingsParams) (int64, error) {
 	result, err := q.db.Exec(ctx, autoResolveVanishedReconciliationFindings,
 		arg.MerchantID,
@@ -414,8 +405,8 @@ type CountSubscriptionFunnelRow struct {
 	OldestUnverifiedAgeSeconds int64
 }
 
-// LIFE life.dunning.funnel (#1096): live subscriptions by lifecycle state and
-// the age of the oldest unverified entry (0 when none).
+// LIFE life.dunning.funnel: live subscriptions by lifecycle state and the age of
+// the oldest unverified entry (0 when none).
 func (q *Queries) CountSubscriptionFunnel(ctx context.Context, arg CountSubscriptionFunnelParams) (CountSubscriptionFunnelRow, error) {
 	row := q.db.QueryRow(ctx, countSubscriptionFunnel, arg.Now, arg.MerchantID)
 	var i CountSubscriptionFunnelRow
@@ -458,7 +449,6 @@ func (q *Queries) CountUnknownOperations(ctx context.Context, arg CountUnknownOp
 
 const createReconciliationRun = `-- name: CreateReconciliationRun :one
 
-
 INSERT INTO billing.maintenance_runs (
     merchant_id, kind, mode, rails, window_starts_at, window_ends_at, started_at, status
 ) VALUES (
@@ -476,13 +466,9 @@ type CreateReconciliationRunParams struct {
 	WindowEndsAt   *time.Time
 }
 
-// #107 phase 2: reconciliation runs + findings persistence, the engine's
-// merchant-scoped local-state reads, and the enforce appliers' idempotent local
-// writes. merchant_id is stamped explicitly (multi-merchant writer pattern); all
-// statements run on a merchant-pinned connection.
-// ============================================================================
-// Run lifecycle
-// ============================================================================
+// Reconciliation runs and findings, the engine's local-state reads, and the
+// enforce appliers' idempotent local writes. Statements that read
+// billing.current_merchant_id() need a merchant-pinned connection.
 func (q *Queries) CreateReconciliationRun(ctx context.Context, arg CreateReconciliationRunParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, createReconciliationRun,
 		arg.MerchantID,
@@ -542,7 +528,7 @@ SET status = 'ignored',
     resolution = 'ignored',
     operator_notes = $1,
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = $2::uuid AND id = $3 AND status IN ('reconcile_required', 'requires_review', 'auto_fixed', 'fixed')
 `
@@ -634,12 +620,8 @@ SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, ope
 WHERE id = $1 AND merchant_id = billing.current_merchant_id()
 `
 
-// SEC-18: the merchant predicate is this query's only merchant scope. This is a
-// merchant-admin by-id surface (GET /v1/admin/findings/:id, and the resolve
-// below EXECUTES cancel/refund/revoke/grant against whatever the finding
-// names); before this it was `WHERE id = $1`, which let merchant A's owner
-// address merchant B's finding on any connection the since-removed RLS did
-// not filter.
+// By-id admin read. The resolve acts on whatever the finding names, so the
+// merchant predicate (the pinned connection's merchant) is its only scope.
 func (q *Queries) GetReconciliationFinding(ctx context.Context, id uuid.UUID) (BillingReconciliationFinding, error) {
 	row := q.db.QueryRow(ctx, getReconciliationFinding, id)
 	var i BillingReconciliationFinding
@@ -725,8 +707,8 @@ type IsSourceDomainReconciledParams struct {
 	SourceDomain string
 }
 
-// The confirmed-absence gate (§3.2): is this source domain proven fully
-// reconciled for the merchant? Absent row = not yet reconciled = false.
+// The confirmed-absence gate: is this source domain proven fully reconciled for
+// the merchant? No row = false.
 func (q *Queries) IsSourceDomainReconciled(ctx context.Context, arg IsSourceDomainReconciledParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, isSourceDomainReconciled, arg.MerchantID, arg.SourceDomain)
 	var fully_reconciled *bool
@@ -759,9 +741,9 @@ type ListAbandonedProviderIntentsRow struct {
 	Rail       string
 }
 
-// #511 LIFE plane (life.provider_intent.abandoned): desired provider actions that
-// will not auto-retry (terminal/expired, or past their deadline) and need an
-// operator/admin. Surface-only (no auto-repair). Scoped by merchant (+ optional sub).
+// LIFE life.provider_intent.abandoned: provider actions that will not auto-retry
+// (terminal, expired, or past their deadline). Surface-only; optional
+// subscription filter.
 func (q *Queries) ListAbandonedProviderIntents(ctx context.Context, arg ListAbandonedProviderIntentsParams) ([]ListAbandonedProviderIntentsRow, error) {
 	rows, err := q.db.Query(ctx, listAbandonedProviderIntents, arg.MerchantID, arg.SubscriptionID, arg.Now)
 	if err != nil {
@@ -854,8 +836,7 @@ WHERE status = 'active' AND deleted_at IS NULL
 ORDER BY id
 `
 
-// #511 Phase E (Converge sweep worker): the no-GUC list of merchants
-// to sweep. merchants is a GLOBAL control-plane table.
+// CROSS-MERCHANT: the active merchants the converge sweep walks.
 func (q *Queries) ListActiveMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listActiveMerchantIDs)
 	if err != nil {
@@ -923,12 +904,11 @@ type ListActiveSubsMissingAccessProjectionRow struct {
 	AccessDurationHoursSnapshot *int32
 }
 
-// #665 DERIVE `derive.grant_effect.mismatch` (grant direction): an `active`
-// sub in a RUNNING period with a subscription grant but NO subscription window
-// (live OR revoked) of its product overlapping the period; a recorded revoke
-// is a recorded decision, never re-granted (spec §6). Excludes no-grant subs
-// (owned by derive.subscription.missing). Another source's overlapping access
-// does not satisfy this subscription. customer_id nullable: NULL = merchant-wide.
+// derive.grant_effect.mismatch (grant direction): an active subscription in a
+// running period with a subscription grant but no subscription window (live or
+// revoked) of its product overlapping the period; a recorded revoke is never
+// re-granted. Subscriptions without a grant are derive.subscription.missing's.
+// NULL customer_id = merchant-wide.
 func (q *Queries) ListActiveSubsMissingAccessProjection(ctx context.Context, arg ListActiveSubsMissingAccessProjectionParams) ([]ListActiveSubsMissingAccessProjectionRow, error) {
 	rows, err := q.db.Query(ctx, listActiveSubsMissingAccessProjection, arg.MerchantID, arg.CustomerID, arg.Now)
 	if err != nil {
@@ -1053,9 +1033,9 @@ type ListDunningPastGraceRow struct {
 	GraceEndsAt         *time.Time
 }
 
-// LIFE life.subscription.grace_exhausted (#1096): a provider-billed
-// subscription past_due whose grace ended with no attempt scheduled. The
-// repair asks the provider (DunningStale -> unverified). Capped (or#837).
+// LIFE life.subscription.grace_exhausted: a provider-billed subscription
+// past_due whose grace ended with no attempt scheduled. The repair asks the
+// provider (DunningStale -> unverified). Capped.
 func (q *Queries) ListDunningPastGrace(ctx context.Context, arg ListDunningPastGraceParams) ([]ListDunningPastGraceRow, error) {
 	rows, err := q.db.Query(ctx, listDunningPastGrace,
 		arg.MerchantID,
@@ -1161,10 +1141,10 @@ type ListOverdueRenewalsRow struct {
 	CurrentPeriodEndsAt *time.Time
 }
 
-// LIFE life.subscription.renewal_overdue (#1096): an active subscription a
-// provider bills whose paid period ended before overdue_before with no
-// renewal payment recorded. A clock reading only: the repair asks the
-// provider (RenewalOverdue -> unverified). Oldest lapse first, capped (or#837).
+// LIFE life.subscription.renewal_overdue: an active provider-billed subscription
+// whose paid period ended before overdue_before with no renewal payment. A clock
+// reading only: the repair asks the provider (RenewalOverdue -> unverified).
+// Oldest lapse first, capped.
 func (q *Queries) ListOverdueRenewals(ctx context.Context, arg ListOverdueRenewalsParams) ([]ListOverdueRenewalsRow, error) {
 	rows, err := q.db.Query(ctx, listOverdueRenewals,
 		arg.MerchantID,
@@ -1307,11 +1287,10 @@ type ListRecentlyClosedLastAccessWindowsRow struct {
 	SourceID   string
 }
 
-// #789 NOTIFY `notify.access_ended` detector: customers whose LAST access
-// window of a product closed inside (closed_after, now] — the close instant is
-// LEAST(ends_at, revoked_at) — with NO other live window of that product. One
-// row per customer (latest close): one email per customer, whatever ended the
-// access. customer_id nullable: NULL = merchant-wide sweep.
+// notify.access_ended: customers whose last window of a product closed
+// (LEAST(ends_at, revoked_at)) in (closed_after, now] with no other live window
+// of it. One row per customer (latest close): one email, whatever ended the
+// access. NULL customer_id = merchant-wide.
 func (q *Queries) ListRecentlyClosedLastAccessWindows(ctx context.Context, arg ListRecentlyClosedLastAccessWindowsParams) ([]ListRecentlyClosedLastAccessWindowsRow, error) {
 	rows, err := q.db.Query(ctx, listRecentlyClosedLastAccessWindows,
 		arg.MerchantID,
@@ -1624,9 +1603,9 @@ type ListStalePendingSubscriptionsParams struct {
 	RowLimit   int32
 }
 
-// #511 LIFE plane (life.subscription.pending_stale): pending subscriptions that
-// never confirmed within the threshold (cutoff = now - pendingStaleAfter).
-// or#837: oldest first, capped (see ListLapsedSubscriptionsWithEvidence).
+// LIFE life.subscription.pending_stale: pending subscriptions unconfirmed past
+// the threshold (cutoff = now - pendingStaleAfter).
+// Oldest first, capped.
 func (q *Queries) ListStalePendingSubscriptions(ctx context.Context, arg ListStalePendingSubscriptionsParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listStalePendingSubscriptions,
 		arg.MerchantID,
@@ -1760,36 +1739,14 @@ type ListUnjustifiedAccessWindowsRow struct {
 	Cause            string
 }
 
-// #690 DERIVE `derive.access.unjustified` — the FREELOADER detector
-// (renamed from derive.entitlement.orphan in migration 066: "orphaned" is
-// reserved for the paying-without-access category). A LIVE
-// window (not revoked/deleted, started, unbounded or ending in the future)
-// whose justification chain is PROVEN broken. Post-#691 fail-open, "live
-// window past paid-through" is NORMAL for a standing auto-renew projection
-// (stale ≠ freeloader) — a freeloader's SOURCE is proven absent or reversed:
-//
-//	missing_subscription           - source_type=subscription, no sub row at all
-//	refunded_payment               - purchase window whose payment was refunded,
-//	                                 with no live grant justifying the access
-//
-// Grant-justification guard: never fires when a live un-terminated entitlement
-// grant covers now (matches MaterializeGrant's standing-access projection:
-// per-period grants of a live sub lapse while the standing window persists —
-// that is verification pressure, not freeloading), and never when the window's
-// backing grant is TERMINATED (derive.grant_effect.excess owns that
-// retraction). Non-live windows with dangling sub sources stay with
-// consistency.reference.source_reference. ADMIN surface-only — revoking access
-// is an operator decision, never auto (policy, #690).
-//
-// Verification SQL (2026-07-01 host-one analysis, measured ZERO on the full
-// re-import): (1) grant-justification by source — live windows LEFT JOIN live
-// grants on (customer, source) counting NULLs per source_type; (2)
-// window-vs-paid-through by status — live windows joined to subscriptions
-// grouped by status comparing ends_at against GREATEST(current_period_ends_at,
-// ended_at). This query is the union of both, restricted to proven-dead
-// sources. customer_id nullable: NULL = merchant-wide sweep.
-// or#837: oldest window first, capped. Surface-only findings, so truncation
-// delays an operator decision rather than losing one.
+// derive.access.unjustified (freeloader): a live window whose source is proven
+// absent or reversed: missing_subscription or refunded_payment. Never fires while
+// a live access grant covers now (a live window past paid-through is normal for
+// auto-renew), nor when the backing grant is terminated
+// (derive.grant_effect.excess's). Surface-only: revoking access is an operator
+// decision. NULL customer_id = merchant-wide.
+// Oldest window first, capped: truncation delays an operator decision rather
+// than losing one.
 func (q *Queries) ListUnjustifiedAccessWindows(ctx context.Context, arg ListUnjustifiedAccessWindowsParams) ([]ListUnjustifiedAccessWindowsRow, error) {
 	rows, err := q.db.Query(ctx, listUnjustifiedAccessWindows,
 		arg.MerchantID,
@@ -1853,11 +1810,10 @@ type ListUnknownSubscriptionsRow struct {
 	RailSubscriptionID    *string
 }
 
-// #632/#633 resolver: the `unknown` cohort awaiting provider verification, oldest
-// period first, bounded per call so provider-pull (#633) windows them in batches.
-// NULLS FIRST (#665): NULL-period rows (legacy imports without local period
-// evidence) are resolvable only here — via the roster/per-sub probe — so they
-// must never starve behind a large dated cohort under the LIMIT.
+// The unverified cohort awaiting provider verification, oldest period first,
+// bounded per call so a provider pull windows it in batches. NULLS FIRST: rows
+// without a local period (legacy imports) resolve only here and must not starve
+// behind the dated cohort.
 func (q *Queries) ListUnknownSubscriptions(ctx context.Context, arg ListUnknownSubscriptionsParams) ([]ListUnknownSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listUnknownSubscriptions,
 		arg.MerchantID,
@@ -2017,8 +1973,8 @@ type ListUnverifiedSubscriptionsRow struct {
 	LastReadAt   *time.Time
 }
 
-// LIFE life.unverified.* (#1094/#1096): unverified subscriptions with the
-// instant they became unverified, oldest first, capped (or#837).
+// LIFE life.unverified.*: unverified subscriptions with the instant they became
+// unverified, oldest first, capped.
 func (q *Queries) ListUnverifiedSubscriptions(ctx context.Context, arg ListUnverifiedSubscriptionsParams) ([]ListUnverifiedSubscriptionsRow, error) {
 	rows, err := q.db.Query(ctx, listUnverifiedSubscriptions, arg.MerchantID, arg.CustomerID, arg.RowLimit)
 	if err != nil {
@@ -2052,7 +2008,7 @@ SET status = 'auto_fixed',
     resolution = 'enforced',
     evidence = jsonb_set(COALESCE(evidence, '{}'::jsonb), '{resolution}', $1::jsonb, true),
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = $2::uuid AND id = $3 AND status IN ('reconcile_required', 'requires_review')
 `
@@ -2085,9 +2041,8 @@ type MarkReconciliationFindingNotifiedParams struct {
 	ID         uuid.UUID
 }
 
-// #787: dedupe linkage for the immediate notify path — set once a finding
-// pushes an operator notification, cleared by every resolution statement below
-// so a reopened finding notifies again.
+// Dedupe linkage for the immediate notify path: set once a finding notifies,
+// cleared by every resolution so a reopened finding notifies again.
 func (q *Queries) MarkReconciliationFindingNotified(ctx context.Context, arg MarkReconciliationFindingNotifiedParams) (int64, error) {
 	result, err := q.db.Exec(ctx, markReconciliationFindingNotified,
 		arg.NotifiedAt,
@@ -2106,7 +2061,7 @@ UPDATE billing.reconciliation_findings
 SET status = 'fixed',
     resolution = 'auto_vanished',
     resolved_at = now(),
-    notified_at = NULL, notified_severity = NULL, -- #787: resolution clears the notify linkage
+    notified_at = NULL, notified_severity = NULL, -- resolution clears the notify linkage
     updated_at = now()
 WHERE reconciliation_findings.merchant_id = $1::uuid AND id = $2 AND status IN ('reconcile_required', 'requires_review', 'ignored')
 `
@@ -2145,7 +2100,7 @@ type ReconcileAdoptPaymentMethodParams struct {
 	MerchantID   uuid.UUID
 }
 
-// PS-7: adopt the rail's vault metadata for a stored payment method.
+// Adopts the rail's vault metadata for a stored payment method.
 func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg ReconcileAdoptPaymentMethodParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileAdoptPaymentMethod,
 		arg.CardLast4,
@@ -2162,7 +2117,6 @@ func (q *Queries) ReconcileAdoptPaymentMethod(ctx context.Context, arg Reconcile
 
 const reconcileBackfillPayment = `-- name: ReconcileBackfillPayment :execrows
 
-
 INSERT INTO billing.payments (
     merchant_id, price_id, channel, rail, transaction_id, amount, list_amount, currency,
     status, subscription_id, metadata, purchased_at, customer_id, psp_id,
@@ -2175,7 +2129,7 @@ INSERT INTO billing.payments (
     'succeeded', $7, $8,
     COALESCE(NULLIF($9::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
     $10, $11::uuid,
-    -- or#827: the row mirrors a charge the rail actually settled.
+    -- The row mirrors a charge the rail actually settled.
     'rail'
 )
 ON CONFLICT DO NOTHING
@@ -2195,18 +2149,11 @@ type ReconcileBackfillPaymentParams struct {
 	PspID          *uuid.UUID
 }
 
-// ============================================================================
-// Enforce appliers: idempotent LOCAL writes only (never a provider call)
-// ============================================================================
-// #665: the PS-2 cancel / PS-3 adopt SQL appliers are gone — subscription
-// state transitions route through the ONE decider (reconcile.Decide) applied
-// via the shared lifecycle chokepoints (reconcile.ApplyDecision).
-// DERIVE-plane derive.grant_effect.mismatch revoke
-// repair: revoke the LIVE subscription-sourced entitlements of one
-// subscription. Admin grants and grace windows are different source types and
-// are untouchable by construction.
-// PS-4: backfill a rail charge that has no local payment record.
-// Dedupe rides the payments_psp_id_transaction_id_key identity.
+// Enforce appliers: idempotent local writes only, never a provider call.
+// Subscription state transitions go through reconcile.Decide and
+// reconcile.ApplyDecision instead.
+// Backfills a rail charge that has no local payment record, deduped on
+// payments_psp_id_transaction_id_key.
 func (q *Queries) ReconcileBackfillPayment(ctx context.Context, arg ReconcileBackfillPaymentParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileBackfillPayment,
 		arg.MerchantID,
@@ -2253,9 +2200,8 @@ type ReconcileListPaymentMethodsByRailsRow struct {
 	CardExpYear     *int16
 }
 
-// rail_customer_ref is the rail's handle on the stored instrument (on NMI it is
-// the customer_vault_id). or#871: no `AS vault_id` alias — `vault` is reserved
-// for HashiCorp Vault, and the column already carries the right name.
+// rail_customer_ref is the rail's handle on the stored instrument (on NMI the
+// customer_vault_id).
 func (q *Queries) ReconcileListPaymentMethodsByRails(ctx context.Context, arg ReconcileListPaymentMethodsByRailsParams) ([]ReconcileListPaymentMethodsByRailsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListPaymentMethodsByRails, arg.MerchantID, arg.Rails, arg.PspID)
 	if err != nil {
@@ -2375,10 +2321,8 @@ type ReconcileListPricesWithPSPLinksRow struct {
 	Archived             bool
 }
 
-// Billable prices with their rail link blobs (provider_links): the PS-1
-// materializer maps a remote plan id onto the local price whose psp_links
-// jsonb carries that id under the provider's key. Archived prices stay
-// (grandfathered subscriptions bill them).
+// Prices bound to this PSP (price_psp_bindings), archived included:
+// grandfathered subscriptions still bill them.
 func (q *Queries) ReconcileListPricesWithPSPLinks(ctx context.Context, arg ReconcileListPricesWithPSPLinksParams) ([]ReconcileListPricesWithPSPLinksRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListPricesWithPSPLinks, arg.MerchantID, arg.PspID)
 	if err != nil {
@@ -2440,7 +2384,6 @@ func (q *Queries) ReconcileListSolanaSubscriptionRefs(ctx context.Context, merch
 }
 
 const reconcileListSubscriptionsByRails = `-- name: ReconcileListSubscriptionsByRails :many
-
 SELECT subscriptions.id, subscriptions.customer_id, subscriptions.price_id, subscriptions.product_id,
        subscriptions.status, subscriptions.rail, subscriptions.collection_policy, subscriptions.rail_subscription_id,
        charged.id AS payment_method_id,
@@ -2499,9 +2442,6 @@ type ReconcileListSubscriptionsByRailsRow struct {
 	TierChangePending           bool
 }
 
-// ============================================================================
-// Local-state reads for the diff engine
-// ============================================================================
 func (q *Queries) ReconcileListSubscriptionsByRails(ctx context.Context, arg ReconcileListSubscriptionsByRailsParams) ([]ReconcileListSubscriptionsByRailsRow, error) {
 	rows, err := q.db.Query(ctx, reconcileListSubscriptionsByRails, arg.MerchantID, arg.Rails, arg.PspID)
 	if err != nil {
@@ -2586,9 +2526,8 @@ WHERE pr.merchant_id = $1::uuid AND p.merchant_id = $1::uuid AND pr.id = $11
       WHERE s.merchant_id = $1::uuid AND s.rail_subscription_id = $4::text
         AND s.deleted_at IS NULL
         AND s.rail = ANY ($12::text[])
-        -- or#893: every writer resolves a PSP now, including the declared
-        -- legacy-book import, so the dedupe is PSP-scoped like the reads. A
-        -- provider subscription id is only unique within a gateway account.
+        -- A provider subscription id is unique only within a gateway account,
+        -- so the dedupe is PSP-scoped.
         AND s.psp_id = $9::uuid
   )
 RETURNING id, product_id, access_duration_hours_snapshot
@@ -2615,11 +2554,9 @@ type ReconcileMaterializeSubscriptionRow struct {
 	AccessDurationHoursSnapshot *int32
 }
 
-// PS-1 materialization (bootstrap mode, --materialize): create the local
-// subscription for a rail subscription that resolved unambiguously to an
-// identity and a price. Its access follows the product like a normal signup. Idempotent: a second run inserts nothing
-// when any subscription already carries the rail subscription id (zero
-// rows returned = already materialized).
+// Materialization (--materialize): creates the local subscription for a rail
+// subscription resolved unambiguously to an identity and a price; access
+// follows the product as on signup. Zero rows = already materialized.
 func (q *Queries) ReconcileMaterializeSubscription(ctx context.Context, arg ReconcileMaterializeSubscriptionParams) ([]ReconcileMaterializeSubscriptionRow, error) {
 	rows, err := q.db.Query(ctx, reconcileMaterializeSubscription,
 		arg.MerchantID,
@@ -2666,8 +2603,8 @@ INSERT INTO billing.payments (
     'succeeded', $7, $8,
     $9,
     COALESCE(NULLIF($10::timestamptz, '0001-01-01 00:00:00+00'::timestamptz), now()),
-    -- or#827: a refund is real (negative) money movement at the rail; the
-    -- settlement feed excludes it on amount/refunded_payment_id, not on this.
+    -- A refund is real (negative) money movement at the rail; the settlement
+    -- feed excludes it on amount/refunded_payment_id, not on this.
     $11, $12::uuid, 'refund', 'rail',
     -- A refund names what its charge paid.
     (SELECT o.order_id FROM billing.payments o WHERE o.merchant_id = $1::uuid AND o.id = $8::uuid),
@@ -2691,8 +2628,8 @@ type ReconcileRecordRefundParams struct {
 	PspID             *uuid.UUID
 }
 
-// PS-5: record a rail refund that is missing locally as a negative-
-// amount payment row linked to the refunded payment. Same dedupe identity.
+// Records a rail refund missing locally as a negative-amount payment row linked
+// to the refunded payment. Same dedupe identity.
 func (q *Queries) ReconcileRecordRefund(ctx context.Context, arg ReconcileRecordRefundParams) (int64, error) {
 	result, err := q.db.Exec(ctx, reconcileRecordRefund,
 		arg.MerchantID,
@@ -2894,7 +2831,6 @@ func (q *Queries) SummarizeHeldEngineRenewals(ctx context.Context, arg Summarize
 }
 
 const upsertReconciliationFinding = `-- name: UpsertReconciliationFinding :one
-
 INSERT INTO billing.reconciliation_findings (
     merchant_id, finding_type, subject_key, severity, status,
     recommended_action, evidence, resolved_at, resolution,
@@ -2930,10 +2866,8 @@ ON CONFLICT (merchant_id, finding_type, psp_id, subject_key) DO UPDATE SET
         WHEN EXCLUDED.status = 'auto_fixed' THEN EXCLUDED.resolution
         ELSE NULL
     END,
-    -- #787: an inline auto_fixed transition (the only resolution this upsert
-    -- itself can produce; fixed/ignored come via the separate admin/auto-
-    -- resolve statements below) is a resolution — clear the notify linkage so
-    -- a future reopen of this identity notifies again.
+    -- An inline auto_fixed is a resolution: clear the notify linkage so a
+    -- reopen of this identity notifies again.
     notified_at = CASE
         WHEN billing.reconciliation_findings.status = 'ignored' THEN billing.reconciliation_findings.notified_at
         WHEN EXCLUDED.status = 'auto_fixed' THEN NULL
@@ -2962,9 +2896,6 @@ type UpsertReconciliationFindingParams struct {
 	PspID             *uuid.UUID
 }
 
-// ============================================================================
-// Findings: stable-identity upsert + lifecycle
-// ============================================================================
 // Re-runs UPDATE the standing finding for (merchant, finding_type, subject_key).
 // A previously fixed/auto_fixed finding that reappears is
 // REOPENED with the freshly computed status; an ignored finding stays ignored
@@ -3035,13 +2966,11 @@ type UpsertReconciliationStateParams struct {
 	FullyReconciled bool
 }
 
-// #511 Convergence Engine: per-(merchant, source_domain) confirmed-absence gate.
-// WRITERS (#665): reconcile.MarkReconciledSourceDomains flips a domain
-// automatically after a pull PROVES it — exhaustive coverage
-// (SnapshotCoverage, not mere event-window watermark freshness) of EVERY
-// configured provider account whose rail could hold that domain's sources.
-// `grants` is admin/local-sourced, so no pull ever proves it — it stays a
-// manual/bulk-import decision. The flag is a ratchet: never auto-unset.
+// The per-(merchant, source_domain) confirmed-absence gate.
+// reconcile.MarkReconciledSourceDomains sets it once a pull proves exhaustive
+// coverage of every PSP whose rail could hold the domain's sources. No pull
+// proves the local-sourced grants domain; it stays a manual decision. Pulls
+// never unset the flag.
 // Mark a source domain's reconciliation watermark: pass fully_reconciled=true
 // after a completed authoritative pull/import for that domain.
 func (q *Queries) UpsertReconciliationState(ctx context.Context, arg UpsertReconciliationStateParams) (BillingReconciliationState, error) {

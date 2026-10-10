@@ -36,10 +36,9 @@ type CreateDestructiveRunParams struct {
 	Note         *string
 }
 
-// --- or#858 / or#859 destructive-run ledger ----------------------------------
-// Deliberately the GENERAL run table (or#859 §5.1): kind='prune' is its first
-// user. Opened BEFORE anything is written, so a crash mid-run still leaves a
-// reversible record.
+// Destructive runs (maintenance_runs kinds prune, converge_enforce,
+// merchant_purge). A run is opened before anything is written, so a crash
+// mid-run still leaves a reversible record.
 func (q *Queries) CreateDestructiveRun(ctx context.Context, arg CreateDestructiveRunParams) (BillingMaintenanceRun, error) {
 	row := q.db.QueryRow(ctx, createDestructiveRun,
 		arg.ID,
@@ -304,21 +303,14 @@ type ListExcessSubscriptionsForPSPParams struct {
 	PresentIds []string
 }
 
-// #511 pull-provider --prune: account-bound EXCESS detection + or#858 reversible
-// soft deletion.
-// "Excess" = a local row attributed to the pulled psp_id whose
-// provider key is ABSENT from the freshly fetched provider snapshot. or#893
-// made psp_id NOT NULL everywhere, so there is no unattributed lane left to
-// preserve: every row belongs to exactly one PSP and is reachable by exactly
-// one PSP-scoped pass. Matching FAILS CLOSED — a row whose PSP was not pulled
-// is out of scope, never "maybe ours".
-//
-// or#858: nothing here DELETEs. A prune sets deleted_at and stamps the row with
-// the prune run that took it, so the whole pass reverses in one step.
-// An EMPTY present_ids is not "everything is excess" — it is a snapshot that
-// proved nothing, and `x <> ALL('{}')` is TRUE for every row. The cardinality
-// guard makes an empty remote set match NOTHING here, so even a caller that
-// skipped its own refusal cannot wipe a PSP's book (or#858).
+// pull-provider --prune: excess detection and reversible soft deletion. Excess =
+// a local row of the pulled psp_id whose provider key is absent from the fresh
+// snapshot. Every row belongs to exactly one PSP and matching fails closed: a
+// row whose PSP was not pulled is out of scope. Nothing here DELETEs: a prune
+// sets deleted_at and stamps the run, so the pass reverses in one step.
+// An empty present_ids proves nothing, yet `x <> ALL('{}')` is true for every
+// row: the cardinality guard makes it match nothing, so even a caller that
+// skipped its own refusal cannot wipe a PSP's book.
 func (q *Queries) ListExcessSubscriptionsForPSP(ctx context.Context, arg ListExcessSubscriptionsForPSPParams) ([]uuid.UUID, error) {
 	rows, err := q.db.Query(ctx, listExcessSubscriptionsForPSP, arg.MerchantID, arg.PspID, arg.PresentIds)
 	if err != nil {
@@ -484,9 +476,8 @@ type PaymentHasProtectedDependentsParams struct {
 	PaymentID  uuid.UUID
 }
 
-// A payment is unsafe to remove if it feeds the #514 grant ledger, backs a
-// refund, an admin grant, or a checkout attempt. Such rows are retracted through
-// convergence (grant revoke), never pruned.
+// A payment that feeds a grant or backs a refund or checkout attempt is
+// retracted through convergence (grant revoke), never pruned.
 func (q *Queries) PaymentHasProtectedDependents(ctx context.Context, arg PaymentHasProtectedDependentsParams) (*bool, error) {
 	row := q.db.QueryRow(ctx, paymentHasProtectedDependents, arg.MerchantID, arg.PaymentID)
 	var protected *bool
@@ -526,7 +517,6 @@ func (q *Queries) PruneSoftDeleteAccessBySubscription(ctx context.Context, arg P
 }
 
 const pruneSoftDeleteCheckoutAttemptsBySubscription = `-- name: PruneSoftDeleteCheckoutAttemptsBySubscription :execrows
-
 UPDATE billing.checkout_attempts
 SET deleted_at = $1::timestamptz,
     destructive_run_id = $2::uuid,
@@ -543,7 +533,6 @@ type PruneSoftDeleteCheckoutAttemptsBySubscriptionParams struct {
 	SubscriptionID uuid.UUID
 }
 
-// --- or#858 soft delete ------------------------------------------------------
 func (q *Queries) PruneSoftDeleteCheckoutAttemptsBySubscription(ctx context.Context, arg PruneSoftDeleteCheckoutAttemptsBySubscriptionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, pruneSoftDeleteCheckoutAttemptsBySubscription,
 		arg.Now,
@@ -690,10 +679,8 @@ type RestoreSubscriptionsByDestructiveRunParams struct {
 	RunID      uuid.UUID
 }
 
-// --- or#858 rollback ---------------------------------------------------------
-// Keyed on the run stamp, so a whole prune reverses as a unit. Restoring only
-// the rows THIS run took means an unrelated soft delete — an ordinary
-// access revocation — is never resurrected by a rollback.
+// Rollback is keyed on the run stamp: a whole prune reverses as a unit, and an
+// unrelated soft delete is never resurrected.
 func (q *Queries) RestoreSubscriptionsByDestructiveRun(ctx context.Context, arg RestoreSubscriptionsByDestructiveRunParams) (int64, error) {
 	result, err := q.db.Exec(ctx, restoreSubscriptionsByDestructiveRun, arg.Now, arg.MerchantID, arg.RunID)
 	if err != nil {
@@ -716,9 +703,9 @@ type SubscriptionHasGrantParams struct {
 	SubscriptionID uuid.UUID
 }
 
-// A subscription that fed the #514 grant ledger is entangled: it must be
-// retracted through convergence (grant revoke), never row-deleted (that would
-// orphan the grant). Such excess subs are surfaced by prune, not deleted.
+// A subscription that fed the grant ledger is retracted through convergence
+// (grant revoke), never row-deleted, which would orphan the grant: prune only
+// surfaces it.
 func (q *Queries) SubscriptionHasGrant(ctx context.Context, arg SubscriptionHasGrantParams) (bool, error) {
 	row := q.db.QueryRow(ctx, subscriptionHasGrant, arg.MerchantID, arg.SubscriptionID)
 	var has_grant bool

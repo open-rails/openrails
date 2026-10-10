@@ -100,8 +100,8 @@ type UpsertPSPCustomerParams struct {
 }
 
 // billing.psp_customers: a customer's customer object at one PSP.
-// or#893: the mapping is PER-PSP. Two Stripe accounts on one merchant hold two
-// independent rows for the same person.
+// The mapping is per PSP: two Stripe accounts on one merchant hold independent
+// rows for the same customer.
 func (q *Queries) UpsertPSPCustomer(ctx context.Context, arg UpsertPSPCustomerParams) error {
 	_, err := q.db.Exec(ctx, upsertPSPCustomer,
 		arg.MerchantID,

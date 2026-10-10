@@ -92,8 +92,8 @@ WHERE pa.merchant_id = sqlc.arg(merchant_id)::uuid AND pa.customer_id = sqlc.arg
   AND (pa.ends_at IS NULL OR pa.ends_at > sqlc.arg(at)::timestamptz);
 
 -- name: EndActiveProductAccessBySubscription :exec
--- #691 closure write: bound a subscription's live windows to a PROVEN end.
--- Future-start windows are removed by SoftDeleteFutureProductAccessBySubscription.
+-- Bounds a subscription's live windows to a proven end. Future-start windows are
+-- removed by SoftDeleteFutureProductAccessBySubscription.
 UPDATE billing.product_access pa SET
     ends_at = sqlc.arg(ends_at)::timestamptz,
     updated_at = sqlc.arg(now)::timestamptz

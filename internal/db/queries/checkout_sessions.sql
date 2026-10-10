@@ -1,6 +1,6 @@
--- billing.checkout_sessions (#1124). The row is immutable after mint
--- except for the payment attempt and the engine session it created. Times are
--- the engine clock's, passed in.
+-- billing.checkout_sessions. The row is immutable after mint except for the
+-- payment attempt and the engine session it created. Times are the engine
+-- clock's, passed in.
 
 -- name: CreateCheckoutSession :execrows
 INSERT INTO billing.checkout_sessions (

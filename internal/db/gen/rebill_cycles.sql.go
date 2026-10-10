@@ -68,8 +68,8 @@ type DeleteRebillCyclesBeforeParams struct {
 	RowLimit   int32
 }
 
-// #1118: cycles due before the retention cutoff whose attempts are all gone,
-// batched like the attempt purge that runs first.
+// Cycles due before the retention cutoff whose attempts are all gone, batched
+// like the attempt purge that runs first.
 func (q *Queries) DeleteRebillCyclesBefore(ctx context.Context, arg DeleteRebillCyclesBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteRebillCyclesBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
@@ -151,8 +151,8 @@ type ListOverdueRebillsParams struct {
 	RowLimit     int32
 }
 
-// #1112: auto-renewing subscriptions whose period ended before its owner's
-// deadline with neither an attempt nor a recorded miss for that cycle.
+// Auto-renewing subscriptions whose period ended before its owner's deadline
+// with neither an attempt nor a recorded miss for that cycle.
 func (q *Queries) ListOverdueRebills(ctx context.Context, arg ListOverdueRebillsParams) ([]BillingSubscription, error) {
 	rows, err := q.db.Query(ctx, listOverdueRebills,
 		arg.MerchantID,
@@ -546,7 +546,7 @@ type UpsertRebillCycleParams struct {
 	Quantity       *int32
 }
 
-// #1111: the cycle for a subscription's period that came due at due_at.
+// The cycle for a subscription's period that came due at due_at.
 func (q *Queries) UpsertRebillCycle(ctx context.Context, arg UpsertRebillCycleParams) (uuid.UUID, error) {
 	row := q.db.QueryRow(ctx, upsertRebillCycle,
 		arg.ID,

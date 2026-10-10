@@ -29,7 +29,7 @@ type DeleteDeliveredPaymentSettlementsBeforeParams struct {
 	RowLimit   int32
 }
 
-// or#837: batched — row_limit bounds one statement, the caller loops.
+// Batched: row_limit bounds one statement, the caller loops.
 func (q *Queries) DeleteDeliveredPaymentSettlementsBefore(ctx context.Context, arg DeleteDeliveredPaymentSettlementsBeforeParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteDeliveredPaymentSettlementsBefore, arg.MerchantID, arg.Cutoff, arg.RowLimit)
 	if err != nil {
