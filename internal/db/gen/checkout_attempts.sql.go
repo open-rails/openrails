@@ -671,7 +671,7 @@ func (q *Queries) GetCheckoutAttemptByReference(ctx context.Context, arg GetChec
 }
 
 const getCheckoutCaptureAccountsForShare = `-- name: GetCheckoutCaptureAccountsForShare :one
-SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.custodian_id, p.settings, p.signer, p.credential_custody, p.credential_refs, p.credential_versions, p.retired_credentials, p.credentials_validated_at, p.webhook_endpoint_id, p.webhook_overlap_expires_at, p.pending_signer_public_key, p.revision, p.archived, p.archived_at, p.created_at, p.updated_at,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
+SELECT p.id, p.merchant_id, p.key, p.rail, p.environment, p.account_id, p.custodian_id, p.settings, p.signer, p.credential_custody, p.credential_refs, p.credential_versions, p.retired_credentials, p.credentials_validated_at, p.webhook_endpoint_id, p.webhook_overlap_expires_at, p.pending_signer_public_key, p.revision, p.archived, p.archived_at, p.created_at, p.updated_at, p.credential_fingerprint, p.credential_duplicate_at,c.id, c.merchant_id, c.key, c.kind, c.environment, c.account_id, c.settings, c.credential_versions, c.archived, c.created_at, c.updated_at FROM billing.psps p
 JOIN billing.custodians c ON c.id=p.custodian_id AND c.merchant_id=p.merchant_id
 WHERE p.merchant_id=$1::uuid AND p.id=$2::uuid
 FOR SHARE OF p,c
@@ -715,6 +715,8 @@ func (q *Queries) GetCheckoutCaptureAccountsForShare(ctx context.Context, arg Ge
 		&i.BillingPsp.ArchivedAt,
 		&i.BillingPsp.CreatedAt,
 		&i.BillingPsp.UpdatedAt,
+		&i.BillingPsp.CredentialFingerprint,
+		&i.BillingPsp.CredentialDuplicateAt,
 		&i.BillingCustodian.ID,
 		&i.BillingCustodian.MerchantID,
 		&i.BillingCustodian.Key,

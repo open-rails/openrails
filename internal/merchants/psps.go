@@ -656,6 +656,9 @@ func (s *Service) refuseLiveNMIUnderTestMode(ctx context.Context, id billing.Mer
 	if err != nil {
 		return fmt.Errorf("construct NMI posture qualification client: %w", err)
 	}
+	if s.nmiWire != nil {
+		s.nmiWire(client)
+	}
 	if s.nmiProbeV5BaseURL != "" {
 		client.V5BaseURL = s.nmiProbeV5BaseURL
 	}

@@ -343,11 +343,18 @@ type PSPScope struct {
 	RetiredCredentials map[string]bool
 	// SignerChange is a pending, unapproved Transit signer public key (Solana).
 	SignerChange string
+	// DuplicateAccount: another live PSP already declares this gateway
+	// account; no credential of this one is read.
+	DuplicateAccount bool
 }
 
 // SecretRef returns the exact published name and physical backend version.
 // Legacy rows without published references retain their canonical-name floor.
 func (s PSPScope) SecretRef(key string) (SecretRef, error) {
+	if s.DuplicateAccount {
+		// Read as absent: nothing arms a duplicate declaration.
+		return SecretRef{Retired: true}, nil
+	}
 	if s.RetiredCredentials[NormalizeCredentialVersionKey(key)] {
 		return SecretRef{Retired: true}, nil
 	}
@@ -364,7 +371,7 @@ func (s PSPScope) SecretRef(key string) (SecretRef, error) {
 // PSPSecretRef is the published reference of one credential of a PSP row, for
 // the paths that hold the row rather than a resolved PSPScope.
 func PSPSecretRef(row gen.BillingPsp, key string) (SecretRef, error) {
-	return pspScopeFromRow(row).secretRef(key)
+	return pspScopeFromRow(row).publishedRef(key)
 }
 
 // NormalizeCredentialVersionKey is the canonical form credential-version keys

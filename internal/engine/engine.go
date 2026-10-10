@@ -156,6 +156,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		confirmSigner(application, declaration)
 	}
 	rt.CheckBookIdentity(ctx)
+	rt.StartCredentialFingerprints(declared...)
 	rt.StartProviderPosture(declared...)
 	return e, nil
 }

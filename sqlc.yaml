@@ -31,6 +31,7 @@ sql:
       - "internal/migrate/postgres/0032_mandates.up.sql"
       - "internal/migrate/postgres/0033_customer_contacts.up.sql"
       - "internal/migrate/postgres/0034_price_migrations.up.sql"
+      - "internal/migrate/postgres/0035_psp_credential_fingerprint.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -44,6 +44,9 @@ func (s *Service) probePaymentProviderCredentials(ctx context.Context, id billin
 		if err != nil {
 			return false, fmt.Errorf("merchants: build nmi credential probe: %w", err)
 		}
+		if s.nmiWire != nil {
+			s.nmiWire(client)
+		}
 		if s.nmiCredentialProbeQueryURL != "" {
 			client.QueryURL = s.nmiCredentialProbeQueryURL
 		}

@@ -203,6 +203,8 @@ type pspSecretScope struct {
 	// webhookOverlapUntil bounds webhook_signing_secret_previous (SEC-29).
 	webhookOverlapUntil time.Time
 	signerChange        string
+	// duplicate: another live PSP already declares this gateway account.
+	duplicate bool
 }
 
 // applyRow unpacks the PSP row's settings and credential state, including
@@ -224,6 +226,16 @@ func (s pspSecretScope) secretName(key string) (string, error) {
 // secretRef pairs the scoped secret name with the rotation version floor
 // recorded on the PSP row (or#812).
 func (s pspSecretScope) secretRef(key string) (SecretRef, error) {
+	if s.duplicate {
+		// Read as absent: nothing arms a duplicate declaration.
+		return SecretRef{Retired: true}, nil
+	}
+	return s.publishedRef(key)
+}
+
+// publishedRef is secretRef for credential publication, which may replace a
+// duplicate's credentials.
+func (s pspSecretScope) publishedRef(key string) (SecretRef, error) {
 	if s.retiredCredentials[NormalizeCredentialVersionKey(key)] {
 		return SecretRef{Retired: true}, nil
 	}
@@ -276,6 +288,7 @@ func (s pspSecretScope) exported() PSPScope {
 		RetiredCredentials: s.retiredCredentials,
 		CustodianID:        s.custodianID,
 		SignerChange:       s.signerChange,
+		DuplicateAccount:   s.duplicate,
 	}
 }
 
@@ -944,7 +957,7 @@ func PSPScopeFromRow(row gen.BillingPsp) PSPScope {
 }
 
 func pspScopeFromRow(row gen.BillingPsp) pspSecretScope {
-	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, key: row.Key, custodianID: row.CustodianID}
+	scope := pspSecretScope{id: row.ID, rail: row.Rail, environment: row.Environment, accountID: row.AccountID, key: row.Key, custodianID: row.CustodianID, duplicate: row.CredentialDuplicateAt != nil}
 	scope.applyRow(row)
 	if row.PendingSignerPublicKey != nil {
 		scope.signerChange = *row.PendingSignerPublicKey

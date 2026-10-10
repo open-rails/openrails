@@ -40,6 +40,16 @@ Three values, all found in (or issued for) the NMI merchant dashboard:
    ID"). It is **not** the ISO/reseller's id, and it is **not** fetchable from
    the security key — you must read it off the dashboard and declare it.
 
+Because the Gateway ID cannot be checked, the security key identifies the
+account: a second live NMI PSP holding a security key another one already
+holds is the same account under another label. It stays disarmed (nothing
+charges, refunds or cancels through it) and a
+`consistency.duplicate_gateway_account` finding names it; archive it or give it
+its own account's key. Declared PSPs are compared at startup; published ones
+store a fingerprint of the key, keyed by `encryption.master_key` (without a
+master key, published PSPs are not compared). The same holds for a Stripe PSP's
+`secret_key`.
+
 ### The PSP manifest entry
 
 Declare the account under your merchant in the config manifest

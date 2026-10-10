@@ -280,3 +280,20 @@ SELECT psp.id AS psp_id,
        )::bigint AS open_obligations
 FROM billing.psps psp
 WHERE psp.merchant_id = sqlc.arg(merchant_id)::uuid AND psp.id = ANY(sqlc.arg(psp_ids)::uuid[]);
+
+-- name: SetPSPCredentialFingerprint :exec
+-- Records the keyed fingerprint of the credential naming the PSP's gateway
+-- account. The live fingerprint index refuses it when another live PSP on the
+-- rail already holds it.
+UPDATE billing.psps SET credential_fingerprint = sqlc.arg(fingerprint)::text, credential_duplicate_at = NULL
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: MarkPSPCredentialDuplicate :exec
+-- The PSP declares a gateway account another live PSP already declares.
+UPDATE billing.psps SET credential_fingerprint = sqlc.narg(fingerprint)::text,
+    credential_duplicate_at = COALESCE(credential_duplicate_at, sqlc.arg(found_at)::timestamptz)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: ClearPSPCredentialDuplicate :exec
+UPDATE billing.psps SET credential_duplicate_at = NULL
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND credential_duplicate_at IS NOT NULL;

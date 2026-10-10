@@ -78,6 +78,8 @@ func ReconcileBootMerchantManifest(ctx context.Context, cfg *config.Config, appl
 		}
 	}
 	rt.NMIPostureV5BaseURL = nmiProbeV5BaseURL
+	rt.CheckBookIdentity(ctx)
+	rt.StartCredentialFingerprints(declared...)
 	rt.StartProviderPosture(declared...)
 	return nil
 }

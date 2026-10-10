@@ -148,7 +148,7 @@ func (q *Queries) LockCredentialPublicationResult(ctx context.Context, arg LockC
 }
 
 const lockPSPForCredentialPublication = `-- name: LockPSPForCredentialPublication :one
-SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at FROM billing.psps
+SELECT id, merchant_id, key, rail, environment, account_id, custodian_id, settings, signer, credential_custody, credential_refs, credential_versions, retired_credentials, credentials_validated_at, webhook_endpoint_id, webhook_overlap_expires_at, pending_signer_public_key, revision, archived, archived_at, created_at, updated_at, credential_fingerprint, credential_duplicate_at FROM billing.psps
 WHERE merchant_id = $1 AND rail = $2 AND environment = $3 AND account_id = $4
 FOR UPDATE
 `
@@ -191,6 +191,8 @@ func (q *Queries) LockPSPForCredentialPublication(ctx context.Context, arg LockP
 		&i.ArchivedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CredentialFingerprint,
+		&i.CredentialDuplicateAt,
 	)
 	return i, err
 }

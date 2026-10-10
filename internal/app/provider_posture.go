@@ -228,3 +228,25 @@ func (r *Runtime) CheckBookIdentity(ctx context.Context) {
 			"every provider write stays readonly. Once every other copy is stopped, run `openrails book arm --by NAME`")
 	}
 }
+
+// StartCredentialFingerprints records, in the background, the credential
+// fingerprint of each loaded merchant's PSPs that have none yet, so a gateway
+// account declared twice before fingerprints existed is caught too.
+func (r *Runtime) StartCredentialFingerprints(declared ...billing.MerchantID) {
+	if r == nil || r.Merchants == nil {
+		return
+	}
+	svc := r.Merchants
+	r.Go("credential fingerprints", func(ctx context.Context) {
+		seen := map[billing.MerchantID]bool{}
+		for _, mid := range append([]billing.MerchantID{r.ConfiguredMerchant()}, declared...) {
+			if mid.IsZero() || seen[mid] {
+				continue
+			}
+			seen[mid] = true
+			if err := svc.FingerprintPSPs(merchant.WithID(ctx, mid), mid); err != nil && ctx.Err() == nil {
+				log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Error("credential fingerprints: cannot record; duplicate gateway accounts are checked at the next publication")
+			}
+		}
+	})
+}

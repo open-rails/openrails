@@ -35,6 +35,7 @@ migration 0031_write_posture.up.sql sha256:37d271c1cae114b18051d36cd73e3355cbd37
 migration 0032_mandates.up.sql sha256:944db393b19078e1d44d1c0c7816189152d23c04ee4c2571b64472bbbe972ad9
 migration 0033_customer_contacts.up.sql sha256:a55bddd0d2832d76f7758c8127452b7dd48f783ec1e06b9b3ce6da7a110b2cec
 migration 0034_price_migrations.up.sql sha256:735de097e54d63bbbe0f019648714ce9516c07e888a1ae6933efd20a42860f3c
+migration 0035_psp_credential_fingerprint.up.sql sha256:26ed2be2aa9c819c86cfc7e29ad416368e5a584739f448847e57ef837dce3d6f
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2048,7 +2049,10 @@ table billing.psps
   column archived_at timestamp with time zone
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  column credential_fingerprint text
+  column credential_duplicate_at timestamp with time zone
   constraint psps_archived_at_check CHECK ((archived = (archived_at IS NOT NULL)))
+  constraint psps_credential_fingerprint_check CHECK ((credential_fingerprint ~ '^[0-9a-f]{64}$'::text))
   constraint psps_custodian_id_fkey FOREIGN KEY (merchant_id, custodian_id) REFERENCES billing.custodians(merchant_id, id) ON DELETE RESTRICT
   constraint psps_environment_check CHECK ((environment = ANY (ARRAY['live'::text, 'test'::text])))
   constraint psps_id_rail_key UNIQUE (merchant_id, id, rail)
@@ -2059,6 +2063,7 @@ table billing.psps
   index CREATE INDEX psps_custodian_id_idx ON billing.psps USING btree (merchant_id, custodian_id) WHERE (custodian_id IS NOT NULL)
   index CREATE INDEX psps_environment_archived_rail_created_at_id_idx ON billing.psps USING btree (merchant_id, environment, archived, rail, created_at DESC, id DESC)
   index CREATE UNIQUE INDEX psps_id_rail_key ON billing.psps USING btree (merchant_id, id, rail)
+  index CREATE UNIQUE INDEX psps_live_credential_fingerprint_key ON billing.psps USING btree (rail, environment, credential_fingerprint) WHERE ((NOT archived) AND (credential_duplicate_at IS NULL) AND (credential_fingerprint IS NOT NULL))
   index CREATE UNIQUE INDEX psps_live_key_key ON billing.psps USING btree (merchant_id, environment, lower(key)) WHERE (NOT archived)
   index CREATE UNIQUE INDEX psps_pkey ON billing.psps USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX psps_rail_environment_account_id_key ON billing.psps USING btree (rail, environment, account_id)

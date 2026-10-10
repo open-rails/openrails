@@ -51,7 +51,19 @@ func (r *Runtime) EnsureMerchantsService(ctx context.Context) error {
 		backend.Close()
 		return r.armingFailure(err)
 	}
-	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap)
+	masterKey := ""
+	if r.Config.Encryption != nil {
+		masterKey = r.Config.Encryption.MasterKey
+	}
+	fingerprints, err := merchants.NewCredentialFingerprinter(masterKey)
+	if err != nil {
+		backend.Close()
+		return r.armingFailure(err)
+	}
+	svc.WithClock(r.Clock).WithWebhookSecretOverlap(overlap).WithCredentialFingerprinter(fingerprints)
+	if r.NMIClients != nil {
+		svc.WithNMIWire(r.NMIClients.Wire)
+	}
 	r.ArmMerchantsService(svc, store)
 	r.MerchantSecretBackend = backend
 	r.RouteCapabilities = &routesurface.RuntimeCapabilities{SolanaCanSign: backend.SolanaCanSign, SecretWrite: backend.SecretWrite}

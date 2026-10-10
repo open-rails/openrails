@@ -12,6 +12,7 @@ import (
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 
 	"github.com/open-rails/openrails/billing"
@@ -95,12 +96,18 @@ type Service struct {
 	// read-only NMI Query API and CCBill DataLink checks.
 	nmiCredentialProbeQueryURL   string
 	ccbillCredentialProbeBaseURL string
+	// nmiWire points credential probes at the runtime's NMI gateway and
+	// transport, as every NMI client it builds.
+	nmiWire func(*nmi.NMIClient)
 	// destructive gates the merchant purge (or#858). Never nil: NewService seeds
 	// it with deniedPolicy so an unwired service cannot purge.
 	destructive DestructivePolicy
 	// clock and webhookSecretOverlap bound rotated webhook secrets (SEC-29).
 	clock                clockwork.Clock
 	webhookSecretOverlap time.Duration
+	// fingerprints keys the stored fingerprint of each published account
+	// credential; nil stores none.
+	fingerprints *CredentialFingerprinter
 }
 
 // WithDestructivePolicy wires the destructive-action gate the merchant purge
@@ -272,4 +279,12 @@ func toMerchant(id uuid.UUID, slug, status string, groupID *string, err error) (
 func (s *Service) merchantByID(ctx context.Context, id billing.MerchantID) (*Merchant, error) {
 	row, err := s.database.Gen(ctx).GetMerchantDirectoryByID(ctx, id.UUID())
 	return toMerchant(row.ID, row.Slug, row.Status, row.PermissionGroupID, err)
+}
+
+// WithNMIWire points credential probes at the runtime's NMI gateway.
+func (s *Service) WithNMIWire(wire func(*nmi.NMIClient)) *Service {
+	if s != nil {
+		s.nmiWire = wire
+	}
+	return s
 }

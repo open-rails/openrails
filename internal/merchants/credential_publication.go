@@ -254,6 +254,9 @@ func (s *Service) publishProviderCredentials(ctx context.Context, id billing.Mer
 		if err != nil {
 			return mapPSPWriteError(err)
 		}
+		if err := s.fingerprintPublication(ctx, tx, id.UUID(), result, names, keys); err != nil {
+			return err
+		}
 		receipt, err = json.Marshal(result)
 		if err != nil {
 			return err
@@ -376,4 +379,21 @@ func (s *Service) secretRefsDiffer(ctx context.Context, id billing.MerchantID, a
 		return false, err
 	}
 	return left.Value != right.Value, nil
+}
+
+// fingerprintPublication records the fingerprint of the account credential a
+// publication carries; a credential another live PSP holds disarms this one.
+func (s *Service) fingerprintPublication(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, row gen.BillingPsp, names, keys map[string]string) error {
+	accountKey := AccountCredentialKey(row.Rail)
+	if s.fingerprints == nil || accountKey == "" {
+		return nil
+	}
+	for name, value := range names {
+		if keys[name] != accountKey || value == "" {
+			continue
+		}
+		_, err := recordCredentialFingerprint(ctx, tx, merchantID, row.ID, s.fingerprints.Fingerprint(row.Rail, row.Environment, value), s.now())
+		return err
+	}
+	return nil
 }

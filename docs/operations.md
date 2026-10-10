@@ -308,6 +308,16 @@ PSP account on a rail, with an opaque declared `account_id`. There is NO
 runtime "whoami"/identity resolution — OpenRails never fetches or verifies
 the account identity behind a credential; the declaration is trusted.
 
+One local check stands: two live PSPs on a rail holding the same account
+credential (NMI `security_key`, Stripe `secret_key`) are one gateway account
+declared twice. The later one stays disarmed — its credentials read as absent,
+so its intents park and checkout never offers it — and a
+`consistency.duplicate_gateway_account` finding names it. Declared PSPs are
+compared at startup; published ones store `psps.credential_fingerprint`, an
+HMAC of the credential under a key derived from `encryption.master_key`
+(nothing is stored, and published PSPs are not compared, without one).
+Archiving the duplicate, or publishing its own credential, clears it.
+
 Every provider intent is stamped at enqueue with the `psp_id` it was produced
 against, and the executor/verifier arm the rail client for **that** PSP row
 from its scoped secrets at drain time. A PSP whose credentials cannot be

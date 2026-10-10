@@ -1412,6 +1412,10 @@ type BillingPsp struct {
 	ArchivedAt *time.Time
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	// HMAC-SHA256, under a key derived from encryption.master_key, of the credential naming the gateway account (NMI security_key, Stripe secret_key). Never the credential; NULL without a master key or before the credential is published.
+	CredentialFingerprint *string
+	// When this PSP was found to declare a gateway account another live PSP on its rail already declares. Its credentials are not read, so it stays disarmed, until it is archived or given its own.
+	CredentialDuplicateAt *time.Time
 }
 
 // A customer's customer object at one PSP. Two PSPs on one rail hold independent mappings.

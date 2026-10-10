@@ -8,6 +8,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/goccy/go-yaml"
@@ -826,6 +827,9 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 			return err
 		}
 	}
+	if err := reconcileDeclaredDuplicates(ctx, cfg, database, merchantID, mt); err != nil {
+		return err
+	}
 	if opts.Prune {
 		if secretStore == nil {
 			return fmt.Errorf("merchant bootstrap: prune requires a secret store")
@@ -835,6 +839,49 @@ func ReconcileManifestMerchantConfiguration(ctx context.Context, cfg *config.Con
 		}
 	}
 	return nil
+}
+
+// reconcileDeclaredDuplicates disarms a declared PSP whose account credential
+// an older declared PSP already holds: the same gateway account under two
+// labels. Declarations hold their credentials, so they compare in memory.
+func reconcileDeclaredDuplicates(ctx context.Context, cfg *config.Config, database *db.DB, merchantID billing.MerchantID, mt config.MerchantDeclaration) error {
+	if config.SecretStoreBackend(cfg) != config.SecretBackendSnapshot {
+		return nil
+	}
+	credentials := map[string]string{}
+	for _, entry := range PspEntries(mt.PSPs) {
+		rail := NormalizeManifestRail(entry.rail)
+		for key, value := range entry.config.Secrets {
+			normalized, err := merchants.NormalizePSPSecretKey(rail, key)
+			if err == nil && normalized == merchants.AccountCredentialKey(rail) && strings.TrimSpace(value) != "" {
+				credentials[rail+"\x00"+strings.TrimSpace(entry.config.AccountID)] = strings.TrimSpace(value)
+			}
+		}
+	}
+	if len(credentials) < 2 {
+		return nil
+	}
+	environment := ManifestProviderEnvironment(cfg)
+	return database.MerchantTx(merchant.WithID(ctx, merchantID), func(ctx context.Context, tx pgx.Tx) error {
+		q := gen.New(tx)
+		rows, err := q.ListPSPsForMerchant(ctx, merchantID.UUID())
+		if err != nil {
+			return err
+		}
+		sort.SliceStable(rows, func(i, j int) bool {
+			if !rows[i].CreatedAt.Equal(rows[j].CreatedAt) {
+				return rows[i].CreatedAt.Before(rows[j].CreatedAt)
+			}
+			return rows[i].ID.String() < rows[j].ID.String()
+		})
+		var declared []merchants.DeclaredCredential
+		for _, row := range rows {
+			if value, ok := credentials[row.Rail+"\x00"+row.AccountID]; ok && !row.Archived && row.Environment == environment {
+				declared = append(declared, merchants.DeclaredCredential{PSPID: row.ID, Rail: row.Rail, Credential: value})
+			}
+		}
+		return merchants.ReconcileDeclaredDuplicates(ctx, q, merchantID.UUID(), declared, time.Now())
+	})
 }
 
 // PruneManifestSecrets deletes secrets held for the merchant that the manifest

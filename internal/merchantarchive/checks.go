@@ -122,8 +122,9 @@ var excludedColumns = map[string]string{
 var omittedColumns = map[string]string{
 	"custodians": "credential_versions",
 	// Credential publication state belongs to the source deployment's secret
-	// custody; credentials are re-entered at the destination.
-	"psps":              "credential_custody credential_refs credential_versions retired_credentials credentials_validated_at webhook_endpoint_id webhook_overlap_expires_at revision",
+	// custody; credentials are re-entered at the destination, which
+	// fingerprints them under its own key.
+	"psps":              "credential_custody credential_refs credential_versions retired_credentials credentials_validated_at webhook_endpoint_id webhook_overlap_expires_at revision credential_fingerprint credential_duplicate_at",
 	"subscriptions":     "destructive_run_class lifecycle_rev row_version",
 	"customers":         "access_version",
 	"payments":          "destructive_run_class",

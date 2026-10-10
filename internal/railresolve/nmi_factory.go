@@ -111,6 +111,16 @@ func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope,
 		return nil, fmt.Errorf("build NMI client for PSP %s: %w", scope.ID, err)
 	}
 	client.ReadOnly = f != nil && f.Config != nil && config.IsProviderReadOnly(f.Config)
+	f.Wire(client)
+	return client, nil
+}
+
+// Wire points a client at the factory's loopback gateway and transport, as
+// every client the factory builds; a credential probe built elsewhere uses it.
+func (f *NMIFactory) Wire(client *nmi.NMIClient) {
+	if f == nil || client == nil {
+		return
+	}
 	if endpoints := f.endpoints(); endpoints != (NMIEndpoints{}) {
 		// Loopback fake gateways only: the client refuses any mutation whose
 		// destination is not a literal loopback IP.
@@ -125,10 +135,9 @@ func (f *NMIFactory) ClientFor(mid billing.MerchantID, scope merchants.PSPScope,
 			client.QueryURL = endpoints.QueryURL
 		}
 	}
-	if f != nil && f.Transport != nil {
+	if f.Transport != nil {
 		client.UseTransport(f.Transport)
 	}
-	return client, nil
 }
 
 // ProxyPosture is the posture identity of scope's credential forwarded by a
