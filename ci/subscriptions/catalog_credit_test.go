@@ -20,7 +20,7 @@ func TestCatalogCreditEvolution(t *testing.T) {
 		t.Helper()
 		doc, err := catalog.ParseApplicationYAML([]byte(raw))
 		require.NoError(t, err)
-		receipt, err := w.client[remote].ApplyCatalog(t.Context(), doc)
+		receipt, err := w.client[remote].ApplyCatalog(t.Context(), doc, billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 		return receipt
 	}
@@ -42,7 +42,7 @@ products:
 	require.Equal(t, 365, *p.CreditGrant.ExpiresAfterDays)
 	first, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
-	require.EqualValues(t, 0, first.Revision)
+	require.EqualValues(t, 0, first.Version)
 	apply(fmt.Sprintf(`schema_version: 1
 products:
   %s:
@@ -53,7 +53,7 @@ products:
 	second, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.NotEqual(t, first.ID, second.ID)
-	require.EqualValues(t, 1, second.Revision)
+	require.EqualValues(t, 1, second.Version)
 	old, err := w.client[embedded].GetPrice(t.Context(), first.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
 	require.True(t, old.Archived)
@@ -73,7 +73,7 @@ products:
 	restored, err := priceByKey(t.Context(), w.client[embedded], key, "deposit")
 	require.NoError(t, err)
 	require.Equal(t, first.ID, restored.ID)
-	require.EqualValues(t, 0, restored.Revision)
+	require.EqualValues(t, 0, restored.Version)
 	for _, tp := range []topology{embedded, remote} {
 		_, err := w.client[tp].UpdateProduct(t.Context(), p.ID, billing.UpdateProductParams{CreditGrant: catalog.Null[catalog.CreditGrantSpec]()})
 		require.Error(t, err)

@@ -439,7 +439,7 @@ func (s *MoneyService) ListRateOverrides(ctx context.Context, payer *identity.Cu
 		}
 		items := make([]billing.RateOverride, 0, len(rows))
 		for _, row := range rows {
-			item, err := rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.CreatedAt, row.UpdatedAt)
+			item, err := rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.Revision, row.CreatedAt, row.UpdatedAt)
 			if err != nil {
 				return err
 			}
@@ -471,7 +471,7 @@ func (s *MoneyService) GetPayerRateCard(ctx context.Context, payer identity.Cust
 		if err != nil {
 			return err
 		}
-		out, err = rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.CreatedAt, row.UpdatedAt)
+		out, err = rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.Revision, row.CreatedAt, row.UpdatedAt)
 		return err
 	})
 	if err != nil {

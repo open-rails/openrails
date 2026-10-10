@@ -42,7 +42,7 @@ products:
 `, key, key, strings.Join(lines, "\n    "))
 	params, err := catalog.ParseApplicationYAML([]byte(doc))
 	require.NoError(w.t, err)
-	_, err = client.ApplyCatalog(w.t.Context(), params)
+	_, err = client.ApplyCatalog(w.t.Context(), params, billing.ApplyCatalogParams{})
 	return key, err
 }
 

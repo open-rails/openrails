@@ -30,7 +30,7 @@ func (q *Queries) DeletePayerRateCard(ctx context.Context, arg DeletePayerRateCa
 }
 
 const getPayerRateCard = `-- name: GetPayerRateCard :one
-SELECT customer_id, meter_key, allowance, price, created_at, updated_at
+SELECT customer_id, meter_key, allowance, price, revision, created_at, updated_at
 FROM billing.catalog_rate_cards
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
   AND meter_key = $3::text
@@ -47,6 +47,7 @@ type GetPayerRateCardRow struct {
 	MeterKey   *string
 	Allowance  []byte
 	Price      []byte
+	Revision   int64
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -59,6 +60,7 @@ func (q *Queries) GetPayerRateCard(ctx context.Context, arg GetPayerRateCardPara
 		&i.MeterKey,
 		&i.Allowance,
 		&i.Price,
+		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -67,7 +69,7 @@ func (q *Queries) GetPayerRateCard(ctx context.Context, arg GetPayerRateCardPara
 
 const listRateOverrides = `-- name: ListRateOverrides :many
 
-SELECT customer_id, meter_key, allowance, price, created_at, updated_at
+SELECT customer_id, meter_key, allowance, price, revision, created_at, updated_at
 FROM billing.catalog_rate_cards
 WHERE merchant_id = $1::uuid AND customer_id IS NOT NULL AND meter_key IS NOT NULL
   AND ($2::uuid IS NULL OR customer_id = $2::uuid)
@@ -92,6 +94,7 @@ type ListRateOverridesRow struct {
 	MeterKey   *string
 	Allowance  []byte
 	Price      []byte
+	Revision   int64
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 }
@@ -122,6 +125,7 @@ func (q *Queries) ListRateOverrides(ctx context.Context, arg ListRateOverridesPa
 			&i.MeterKey,
 			&i.Allowance,
 			&i.Price,
+			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

@@ -45,7 +45,7 @@ products:
     entitlements: ["post:101", "premium", " private key "]
 `, key)))
 	require.NoError(t, err)
-	initial, err := w.client[embedded].ApplyCatalog(t.Context(), document)
+	initial, err := w.client[embedded].ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	var replay billing.CatalogApplicationReceipt
 	require.Equal(t, http.StatusOK, w.staffCall(http.MethodPost, "/v1/admin/catalog/applications", map[string]any{
@@ -65,7 +65,7 @@ products:
 
 	_, err = w.client[remote].ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{
 		key: {DisplayName: catalog.Value("Renamed")},
-	}})
+	}}, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	updated, err := w.client[embedded].GetProduct(t.Context(), product.ID)
 	require.NoError(t, err)

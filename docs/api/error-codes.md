@@ -35,7 +35,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `card_requires_https` | 400 | `invalid_request_error` | Card data is accepted only over HTTPS. |
 | `catalog_benefit_overlap` | 409 | `invalid_request_error` | Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group. |
 | `catalog_revision_conflict` | 409 | `invalid_request_error` | The catalog changed during the application; retry. |
-| `catalog_updates_disabled` | 403 | `invalid_request_error` | Catalog updates over HTTP are disabled in this deployment. |
 | `checkout_attempt_closed` | 409 | `invalid_request_error` | The checkout attempt already completed or was canceled. |
 | `checkout_attempt_expired` | 410 | `invalid_request_error` | The checkout attempt expired before it was paid. |
 | `checkout_offer_unavailable` | 422 | `invalid_request_error` | The purchase is not available. |
@@ -179,6 +178,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `resource_access_denied` | 403 | `authorization_error` | The credential may not access this resource. |
 | `resource_conflict` | 409 | `invalid_request_error` | The request conflicts with the resource's current state. |
 | `resource_not_found` | 404 | `invalid_request_error` | The addressed resource does not exist in this merchant. |
+| `revision_mismatch` | 409 | `invalid_request_error` | The object changed since the revision the edit expected; metadata.revision is the current one. |
 | `route_not_found` | 404 | `invalid_request_error` | No route matches the path. |
 | `scheduled_change_exists` | 409 | `invalid_request_error` | The subscription already has a scheduled change. |
 | `sender_proof_required` | 401 | `authentication_error` | A sender-constrained token arrived without its DPoP proof. |

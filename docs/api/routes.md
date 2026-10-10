@@ -176,7 +176,7 @@ Staff work on customers: staff, machines and the Go client alike. A read needs t
 
 ## Catalog edits
 
-Every catalog edit, behind the host's `Permissions.CatalogWrite`; each refuses while the deployment's catalog is not edited over HTTP (`catalog_updates_disabled`).
+Every catalog edit and document application, behind the host's `Permissions.CatalogWrite`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|

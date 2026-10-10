@@ -42,6 +42,7 @@ migration 0038_orders.up.sql sha256:f86c20901b76602ca48f6007250096be288b84bed1f3
 migration 0039_seat_changes.up.sql sha256:01cdc00df32eafff33a059e754d9a576a0f8f184d3bb0ef2aba86a6c89ceded6
 migration 0040_card_versions.up.sql sha256:4654ccd95d380f54bb07ad921881eca379ac7dd7f0a0f33da4d5addaeee21672
 migration 0041_default_payment_method.up.sql sha256:4e6679394ea9c66dcb912de3d13386186d0ad5ab18aeb4190932dfef98fc4974
+migration 0042_catalog_ownership.up.sql sha256:96658abd37cb76d7e3b4f53882888a85c5507d85ffc568e86bb498174416ffc3
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -213,6 +214,25 @@ table billing.catalog_applications
   index CREATE UNIQUE INDEX catalog_applications_pkey ON billing.catalog_applications USING btree (merchant_id, application_id)
   trigger CREATE TRIGGER immutable_catalog_application_receipt BEFORE DELETE OR UPDATE ON billing.catalog_applications FOR EACH ROW EXECUTE FUNCTION billing.guard_catalog_application_receipt()
 
+table billing.catalog_field_owners
+  column merchant_id uuid NOT NULL
+  column object text NOT NULL
+  column key text NOT NULL
+  column price_key text NOT NULL
+  column field text NOT NULL
+  column manager text NOT NULL
+  column actor text NOT NULL
+  column set_at timestamp with time zone NOT NULL
+  constraint catalog_field_owners_actor_check CHECK (((actor <> ''::text) AND (octet_length(actor) <= 255)))
+  constraint catalog_field_owners_field_check CHECK ((((object = 'product'::text) AND (field = ANY (ARRAY['display_name'::text, 'description'::text, 'tier_group'::text, 'tier_rank'::text, 'archived'::text, 'ownership'::text, 'entitlements'::text, 'credit_grant'::text, 'rate_cards'::text]))) OR ((object = 'price'::text) AND (field = ANY (ARRAY['currency'::text, 'unit_amount'::text, 'access_duration_hours'::text, 'billing_interval_hours'::text, 'trial_unit_amount'::text, 'trial_duration_hours'::text, 'customer_amount'::text, 'quantity'::text, 'archived'::text, 'psp_links'::text]))) OR ((object = 'meter'::text) AND (field = ANY (ARRAY['event_type'::text, 'value_property'::text, 'aggregation'::text, 'unit'::text, 'group_by'::text])))))
+  constraint catalog_field_owners_key_check CHECK (((key <> ''::text) AND (octet_length(key) <= 255)))
+  constraint catalog_field_owners_manager_check CHECK ((manager = ANY (ARRAY['apply'::text, 'edit'::text])))
+  constraint catalog_field_owners_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint catalog_field_owners_object_check CHECK ((object = ANY (ARRAY['product'::text, 'price'::text, 'meter'::text])))
+  constraint catalog_field_owners_pkey PRIMARY KEY (merchant_id, object, key, price_key, field, manager)
+  constraint catalog_field_owners_price_key_check CHECK ((((object = 'price'::text) = (price_key <> ''::text)) AND (octet_length(price_key) <= 255)))
+  index CREATE UNIQUE INDEX catalog_field_owners_pkey ON billing.catalog_field_owners USING btree (merchant_id, object, key, price_key, field, manager)
+
 table billing.catalog_meters
   column merchant_id uuid NOT NULL
   column key text NOT NULL
@@ -223,12 +243,15 @@ table billing.catalog_meters
   column aggregation text
   column unit text
   column group_by jsonb NOT NULL
+  column revision bigint NOT NULL
   constraint catalog_meters_aggregation_check CHECK (((aggregation IS NULL) OR (aggregation = ANY (ARRAY['sum'::text, 'count'::text, 'max'::text, 'min'::text, 'unique_count'::text, 'latest'::text]))))
   constraint catalog_meters_key_nonempty_check CHECK ((btrim(key) <> ''::text))
   constraint catalog_meters_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_meters_pkey PRIMARY KEY (merchant_id, key)
+  constraint catalog_meters_revision_check CHECK ((revision >= 1))
   index CREATE UNIQUE INDEX catalog_meters_pkey ON billing.catalog_meters USING btree (merchant_id, key)
   trigger CREATE TRIGGER catalog_authored_meter BEFORE INSERT OR DELETE OR UPDATE ON billing.catalog_meters FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
+  trigger CREATE TRIGGER catalog_meter_revision BEFORE INSERT OR UPDATE ON billing.catalog_meters FOR EACH ROW EXECUTE FUNCTION billing.assign_object_revision()
 
 table billing.catalog_rate_cards
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -243,6 +266,7 @@ table billing.catalog_rate_cards
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column customer_id uuid
+  column revision bigint NOT NULL
   constraint catalog_rate_cards_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
   constraint catalog_rate_cards_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_rate_cards_meter_key_fkey FOREIGN KEY (merchant_id, meter_key) REFERENCES billing.catalog_meters(merchant_id, key) ON DELETE RESTRICT
@@ -251,12 +275,14 @@ table billing.catalog_rate_cards
   constraint catalog_rate_cards_pkey PRIMARY KEY (merchant_id, id)
   constraint catalog_rate_cards_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE CASCADE
   constraint catalog_rate_cards_product_scope_check CHECK (((customer_id IS NOT NULL) OR (product_id IS NOT NULL)))
+  constraint catalog_rate_cards_revision_check CHECK ((revision >= 1))
   index CREATE UNIQUE INDEX catalog_rate_cards_customer_id_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, customer_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NOT NULL))
   index CREATE INDEX catalog_rate_cards_meter_key_customer_id_idx ON billing.catalog_rate_cards USING btree (merchant_id, meter_key, customer_id) WHERE (customer_id IS NOT NULL)
   index CREATE UNIQUE INDEX catalog_rate_cards_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NULL))
   index CREATE UNIQUE INDEX catalog_rate_cards_pkey ON billing.catalog_rate_cards USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX catalog_rate_cards_product_id_ordinal_key ON billing.catalog_rate_cards USING btree (merchant_id, product_id, ordinal)
   trigger CREATE TRIGGER catalog_authored_rate_card BEFORE INSERT OR DELETE OR UPDATE ON billing.catalog_rate_cards FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
+  trigger CREATE TRIGGER catalog_rate_card_revision BEFORE INSERT OR UPDATE ON billing.catalog_rate_cards FOR EACH ROW EXECUTE FUNCTION billing.assign_object_revision()
 
 table billing.catalog_restore_receipts
   column merchant_id uuid NOT NULL
@@ -1834,6 +1860,18 @@ table billing.price_key_movements
   index CREATE UNIQUE INDEX price_key_movements_pkey ON billing.price_key_movements USING btree (merchant_id, id)
   index CREATE INDEX price_key_movements_price_id_idx ON billing.price_key_movements USING btree (merchant_id, price_id)
 
+table billing.price_keys
+  column merchant_id uuid NOT NULL
+  column product_id uuid NOT NULL
+  column key text NOT NULL
+  column revision bigint NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint price_keys_pkey PRIMARY KEY (merchant_id, product_id, key)
+  constraint price_keys_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE CASCADE
+  constraint price_keys_revision_check CHECK ((revision >= 1))
+  index CREATE UNIQUE INDEX price_keys_pkey ON billing.price_keys USING btree (merchant_id, product_id, key)
+
 table billing.price_migrations
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1885,6 +1923,7 @@ table billing.price_psp_bindings
   index CREATE UNIQUE INDEX price_psp_bindings_psp_id_price_ref_key ON billing.price_psp_bindings USING btree (merchant_id, psp_id, price_ref) WHERE (price_ref IS NOT NULL)
   index CREATE UNIQUE INDEX price_psp_bindings_psp_id_recurring_billing_option_id_key ON billing.price_psp_bindings USING btree (merchant_id, psp_id, recurring_billing_option_id) WHERE (recurring_billing_option_id IS NOT NULL)
   trigger CREATE TRIGGER catalog_authored_binding BEFORE INSERT OR DELETE OR UPDATE ON billing.price_psp_bindings FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
+  trigger CREATE TRIGGER price_key_binding_revision AFTER INSERT OR DELETE OR UPDATE ON billing.price_psp_bindings FOR EACH ROW EXECUTE FUNCTION billing.step_price_key_binding()
 
 table billing.prices
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1932,6 +1971,7 @@ table billing.prices
   trigger CREATE TRIGGER catalog_price_retired AFTER UPDATE OF archived, key ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.catalog_price_retired()
   trigger CREATE TRIGGER immutable_price_terms BEFORE DELETE OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('archived', 'updated_at')
   trigger CREATE TRIGGER no_price_truncate BEFORE TRUNCATE ON billing.prices FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
+  trigger CREATE TRIGGER price_key_revision AFTER INSERT OR UPDATE ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.step_price_key()
   trigger CREATE TRIGGER price_revision BEFORE INSERT ON billing.prices FOR EACH ROW EXECUTE FUNCTION billing.assign_price_revision()
 
 table billing.product_access
@@ -2042,7 +2082,7 @@ table billing.products
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
   column merchant_id uuid NOT NULL
-  column revision bigint NOT NULL DEFAULT 0
+  column revision bigint NOT NULL
   column credit_grant jsonb
   column ownership text
   constraint products_credit_grant_object CHECK (((credit_grant IS NULL) OR ((jsonb_typeof(credit_grant) = 'object'::text) AND COALESCE(((credit_grant ->> 'currency'::text) ~ '^[A-Z0-9]{3,12}$'::text), false) AND COALESCE(((((credit_grant ->> 'expires_after_days'::text))::integer >= 1) AND (((credit_grant ->> 'expires_after_days'::text))::integer <= 36500)), false) AND ((COALESCE((((credit_grant ->> 'amount'::text))::bigint > 0), false) AND (NOT COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))) OR ((NOT (credit_grant ? 'amount'::text)) AND COALESCE(((credit_grant ->> 'from_payment'::text))::boolean, false))))))
@@ -2050,7 +2090,7 @@ table billing.products
   constraint products_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint products_ownership_check CHECK ((ownership = ANY (ARRAY['unique'::text, 'consumable'::text, 'extend'::text])))
   constraint products_pkey PRIMARY KEY (merchant_id, id)
-  constraint products_revision_check CHECK ((revision >= 0))
+  constraint products_revision_check CHECK ((revision >= 1))
   constraint products_tier_group_check CHECK (((char_length(tier_group) >= 1) AND (char_length(tier_group) <= 100)))
   index CREATE INDEX products_archived_idx ON billing.products USING btree (archived)
   index CREATE INDEX products_created_at_id_idx ON billing.products USING btree (merchant_id, created_at DESC, id DESC)
@@ -2063,7 +2103,7 @@ table billing.products
   trigger CREATE TRIGGER immutable_product_identity BEFORE UPDATE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.guard_product_identity()
   trigger CREATE TRIGGER no_product_delete BEFORE DELETE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
   trigger CREATE TRIGGER no_product_truncate BEFORE TRUNCATE ON billing.products FOR EACH STATEMENT EXECUTE FUNCTION billing.reject_immutable_billing_fact()
-  trigger CREATE TRIGGER product_revision BEFORE INSERT OR UPDATE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.assign_product_revision()
+  trigger CREATE TRIGGER product_revision BEFORE INSERT OR UPDATE ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.assign_object_revision()
   trigger CREATE TRIGGER trg_products_guard_tier_group BEFORE UPDATE OF tier_group ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.products_guard_tier_group()
   trigger CREATE TRIGGER trg_products_propagate_tier_group AFTER UPDATE OF tier_group ON billing.products FOR EACH ROW EXECUTE FUNCTION billing.products_propagate_tier_group()
 
@@ -2716,6 +2756,23 @@ function billing.arm_book(text,timestamp with time zone)
   END;
   $function$
 
+function billing.assign_object_revision()
+  CREATE OR REPLACE FUNCTION billing.assign_object_revision()
+   RETURNS trigger
+   LANGUAGE plpgsql
+  AS $function$
+  BEGIN
+      IF TG_OP='INSERT' THEN
+          NEW.revision := COALESCE(NEW.revision, 1);
+      ELSIF NEW.revision IS DISTINCT FROM OLD.revision
+         OR (to_jsonb(NEW)-ARRAY['updated_at','revision']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['updated_at','revision']) THEN
+          NEW.revision := OLD.revision + 1;
+      ELSE
+          NEW.revision := OLD.revision;
+      END IF;
+      RETURN NEW;
+  END $function$
+
 function billing.assign_price_revision()
   CREATE OR REPLACE FUNCTION billing.assign_price_revision()
    RETURNS trigger
@@ -2725,24 +2782,6 @@ function billing.assign_price_revision()
       IF NEW.revision IS NULL THEN
           SELECT COALESCE(MAX(revision) + 1, 0) INTO NEW.revision FROM billing.prices
           WHERE merchant_id=NEW.merchant_id AND product_id=NEW.product_id AND key=NEW.key;
-      END IF;
-      RETURN NEW;
-  END;
-  $function$
-
-function billing.assign_product_revision()
-  CREATE OR REPLACE FUNCTION billing.assign_product_revision()
-   RETURNS trigger
-   LANGUAGE plpgsql
-  AS $function$
-  BEGIN
-      IF TG_OP='INSERT' THEN
-          NEW.revision := COALESCE(NEW.revision, 0);
-      ELSIF NEW.revision IS DISTINCT FROM OLD.revision
-         OR (to_jsonb(NEW)-ARRAY['updated_at','revision']) IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['updated_at','revision']) THEN
-          NEW.revision := OLD.revision + 1;
-      ELSE
-          NEW.revision := OLD.revision;
       END IF;
       RETURN NEW;
   END;
@@ -3199,6 +3238,7 @@ function billing.guard_billing_restore_receipt()
                     'billing_policy_bindings',
                     'card_attempt_failures',
                     'catalog_applications',
+                    'catalog_field_owners',
                     'catalog_meters',
                     'catalog_rate_cards',
                     'catalog_restore_receipts',
@@ -3217,9 +3257,9 @@ function billing.guard_billing_restore_receipt()
                     'customer_invoice_profiles',
                     'customers',
                     'dashboard_configs',
+                    'destructive_run_before_images',
                     'document_sequences',
                     'failed_usage_windows',
-                    'destructive_run_before_images',
                     'grants',
                     'host_outbox',
                     'idempotency_keys',
@@ -3253,11 +3293,12 @@ function billing.guard_billing_restore_receipt()
                     'payment_methods',
                     'payments',
                     'price_key_movements',
+                    'price_keys',
                     'price_migrations',
                     'price_psp_bindings',
                     'prices',
-                    'product_archive_operations',
                     'product_access',
+                    'product_archive_operations',
                     'product_entitlements',
                     'products',
                     'provider_intents',
@@ -3813,6 +3854,41 @@ function billing.step_entitlement_generation()
       FOR mid IN SELECT DISTINCT merchant_id FROM changed LOOP
           UPDATE billing.merchants SET entitlement_generation = entitlement_generation + 1 WHERE id = mid;
       END LOOP;
+      RETURN NULL;
+  END $function$
+
+function billing.step_price_key()
+  CREATE OR REPLACE FUNCTION billing.step_price_key()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  BEGIN
+      IF TG_OP='UPDATE' AND (to_jsonb(NEW)-ARRAY['updated_at']) IS NOT DISTINCT FROM (to_jsonb(OLD)-ARRAY['updated_at']) THEN
+          RETURN NULL;
+      END IF;
+      INSERT INTO billing.price_keys AS k (merchant_id, product_id, key, revision)
+      VALUES (NEW.merchant_id, NEW.product_id, NEW.key, 1)
+      ON CONFLICT (merchant_id, product_id, key) DO UPDATE SET revision = k.revision + 1, updated_at = now();
+      RETURN NULL;
+  END $function$
+
+function billing.step_price_key_binding()
+  CREATE OR REPLACE FUNCTION billing.step_price_key_binding()
+   RETURNS trigger
+   LANGUAGE plpgsql
+   SET search_path TO 'pg_catalog', 'billing', 'pg_temp'
+  AS $function$
+  DECLARE binding billing.price_psp_bindings%ROWTYPE;
+  BEGIN
+      IF TG_OP='UPDATE' AND NEW IS NOT DISTINCT FROM OLD THEN
+          RETURN NULL;
+      END IF;
+      IF TG_OP='DELETE' THEN binding := OLD; ELSE binding := NEW; END IF;
+      UPDATE billing.price_keys k SET revision = k.revision + 1, updated_at = now()
+        FROM billing.prices p
+       WHERE p.merchant_id = binding.merchant_id AND p.id = binding.price_id
+         AND k.merchant_id = p.merchant_id AND k.product_id = p.product_id AND k.key = p.key;
       RETURN NULL;
   END $function$
 

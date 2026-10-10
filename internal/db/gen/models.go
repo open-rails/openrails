@@ -125,6 +125,21 @@ type BillingCatalogApplication struct {
 	AppliedAt       time.Time
 }
 
+// Which manager set each catalog field: apply (a catalog document) or edit (an individual edit), and who and when. Both own a field set to an equal value. A document skips an object whose field it names an edit set differently.
+type BillingCatalogFieldOwner struct {
+	MerchantID uuid.UUID
+	Object     string
+	// The product or meter key; a price's product key.
+	Key string
+	// A price's key; empty for a product or meter.
+	PriceKey string
+	Field    string
+	Manager  string
+	// apply: the document's application id; edit: the signed-in user, or api.
+	Actor string
+	SetAt time.Time
+}
+
 // Billing meter registry. Meters are billed-later usage streams, distinct from usage limits.
 type BillingCatalogMeter struct {
 	MerchantID uuid.UUID
@@ -140,6 +155,8 @@ type BillingCatalogMeter struct {
 	Unit        *string
 	// Dimension name -> event metadata/dimension property mapping for matrix pricing.
 	GroupBy []byte
+	// Advances on every change to the meter or its rate card.
+	Revision int64
 }
 
 // Rate cards: product usage and flat prices expressed as charge-model JSON. The only metered-pricing engine.
@@ -157,6 +174,8 @@ type BillingCatalogRateCard struct {
 	UpdatedAt   time.Time
 	// Negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.
 	CustomerID *uuid.UUID
+	// Advances on every change to the card: a rate override's revision.
+	Revision int64
 }
 
 // Local catalog snapshot restore receipts; one completed atomic restore per merchant. Identical artifact retries are no-ops even after later catalog edits. Excluded from exported snapshots. Retention: permanent, never pruned.
@@ -1285,6 +1304,16 @@ type BillingPrice struct {
 	Quantity []byte
 }
 
+// One row per price key of a product: its revision advances on every change to any of its versions or their PSP links. Written only by the prices and price_psp_bindings triggers, which rebuild it on restore.
+type BillingPriceKey struct {
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	Key        string
+	Revision   int64
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
 // Append-only log of when a price key's current pointer moved to which price row. History, not row identity — a row can appear more than once (reactivation). Retention: permanent, never pruned.
 type BillingPriceKeyMovement struct {
 	ID          uuid.UUID
@@ -1341,7 +1370,8 @@ type BillingProduct struct {
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	MerchantID uuid.UUID
-	Revision   int64
+	// Advances on every change to the product, its keys or its rate cards; never on a change to its prices.
+	Revision int64
 	// Purchased currency credit policy; accepted checkouts freeze amount and expiry duration.
 	CreditGrant []byte
 	// unique (one live holding per customer, per tier group when set), consumable (units stack, quantity counts them) or extend (a later purchase starts when the current window ends). NULL derives it: consumable for a credit product, extend when every price is one-time with an access duration, unique otherwise.

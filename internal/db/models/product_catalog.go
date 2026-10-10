@@ -50,11 +50,14 @@ func (p *Product) IsPurchasable() bool { return !p.Archived }
 type Price struct {
 	CustomerAmount *catalog.CustomerAmount `json:"customer_amount,omitempty"`
 	// Quantity makes a recurring price per seat; nil: no quantity.
-	Quantity   *catalog.Quantity `json:"quantity,omitempty"`
-	Revision   int64             `json:"revision"`
-	ID         uuid.UUID         `json:"id"`
-	MerchantID uuid.UUID         `json:"merchant_id"`
-	ProductID  uuid.UUID         `json:"product_id"`
+	Quantity *catalog.Quantity `json:"quantity,omitempty"`
+	// Revision numbers the terms within the key, from zero (the price's version).
+	Revision int64 `json:"revision"`
+	// KeyRevision is the price key's revision: every change to any version.
+	KeyRevision int64     `json:"key_revision"`
+	ID          uuid.UUID `json:"id"`
+	MerchantID  uuid.UUID `json:"merchant_id"`
+	ProductID   uuid.UUID `json:"product_id"`
 	// Archived: retired. Not purchasable, but grandfathered subscriptions keep
 	// billing it indefinitely.
 	Archived bool `json:"archived"`
@@ -355,7 +358,7 @@ func PublicPrice(p billing.Price) billing.Price {
 // View is the price as the API shows it, linked to every PSP in its links.
 // Sync status is unknown until a verifying read fills it.
 func (p *Price) View() billing.Price {
-	out := billing.Price{Revision: p.Revision,
+	out := billing.Price{Revision: p.KeyRevision, Version: p.Revision,
 		ID: billing.PriceID(p.ID), Key: p.Key, ProductID: billing.ProductID(p.ProductID), Archived: p.Archived,
 		UnitAmount: p.Amount, Currency: p.Currency, AccessDurationHours: p.AccessDurationHours, BillingIntervalHours: p.BillingIntervalHours,
 		TrialUnitAmount: p.TrialUnitAmount, TrialDurationHours: p.TrialDurationHours, CustomerAmount: p.CustomerAmount, Quantity: p.Quantity,

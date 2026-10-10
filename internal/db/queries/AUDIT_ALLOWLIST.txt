@@ -35,6 +35,10 @@ unbounded-many AddProductEntitlements          # product_entitlements: RETURNING
 unbounded-many ListLiveCatalogProducts          # products: the catalog dump, operator-declared
 unbounded-many ListLiveCatalogPricesWithPSPLinks # prices+bindings: the catalog dump, operator-declared
 unbounded-many ListCatalogProductRateCards      # catalog_rate_cards: declared product cards; payer overrides excluded by the query
+unbounded-many ListCatalogStateProducts         # products: the catalog state a catalog write diffs, operator-declared
+unbounded-many ListCatalogStatePrices           # prices+bindings+price_keys: the catalog state a catalog write diffs, operator-declared
+unbounded-many ListCatalogMeterRevisions        # catalog_meters: operator-declared, units per merchant
+unbounded-many ListCatalogFieldOwners           # catalog_field_owners: at most two managers per field of the declared catalog
 
 # Optional admin filters (`$n IS NULL OR col = $n`) on a paged listing: absent on
 # most calls so no index serves them generically; merchant index bounds the scan,

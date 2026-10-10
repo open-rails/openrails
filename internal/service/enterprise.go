@@ -6,13 +6,15 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/open-rails/openrails/billing"
-
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -49,9 +51,13 @@ func (s *Service) ensureUsageMeter(ctx context.Context, spec catalogrules.Meter)
 }
 
 // SetUsageMeter declares a meter and, in the same catalog edit, its rate
-// card: card sets it, removeCard removes it, neither keeps it.
-func (s *Service) SetUsageMeter(ctx context.Context, spec catalogrules.Meter, card *UsageRateCardInput, removeCard bool) error {
+// card: card sets it, removeCard removes it, neither keeps it. With
+// expectedRevision, only while the meter is at it (0: no meter yet).
+func (s *Service) SetUsageMeter(ctx context.Context, spec catalogrules.Meter, card *UsageRateCardInput, removeCard bool, expectedRevision *int64) error {
 	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		if err := scoped.expectCatalogRevision(meterObject(spec.Key), expectedRevision); err != nil {
+			return struct{}{}, err
+		}
 		if err := scoped.ensureUsageMeter(ctx, spec); err != nil {
 			return struct{}{}, err
 		}
@@ -79,21 +85,42 @@ type UsageRateCardInput struct {
 	Filter    map[string][]string
 	Price     catalog.RatePrice
 	Allowance *catalog.Allowance
+	// ExpectedRevision is a payer override's revision (0: none yet).
+	ExpectedRevision *int64
 }
 
 // SetUsageRateCard upserts an in_arrears usage rate card: the merchant
 // default (ProductID set) or a negotiated per-payer override (Payer set).
 func (s *Service) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) error {
-	write := func(ctx context.Context, scoped *Service) (struct{}, error) {
+	_, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (struct{}, error) {
+		if err := scoped.expectRateCardRevision(ctx, in); err != nil {
+			return struct{}{}, err
+		}
 		return struct{}{}, scoped.setUsageRateCard(ctx, in)
-	}
-	var err error
-	if in.Payer != nil {
-		_, err = catalogMutation(ctx, s, write)
-	} else {
-		_, err = catalogMutation(ctx, s, write)
-	}
+	})
 	return err
+}
+
+func (s *Service) expectRateCardRevision(ctx context.Context, in UsageRateCardInput) error {
+	if in.ExpectedRevision == nil {
+		return nil
+	}
+	if in.Payer == nil {
+		return s.expectCatalogRevision(meterObject(in.MeterKey), in.ExpectedRevision)
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	var current int64
+	row, err := s.catalogDatabase().Gen(ctx).GetPayerRateCard(ctx, gen.GetPayerRateCardParams{MerchantID: mid.UUID(), CustomerID: in.Payer.UUID(), MeterKey: in.MeterKey})
+	switch {
+	case err == nil:
+		current = row.Revision
+	case !errors.Is(err, pgx.ErrNoRows):
+		return err
+	}
+	return checkRevision("rate override "+in.MeterKey, in.ExpectedRevision, current)
 }
 
 func (s *Service) setUsageRateCard(ctx context.Context, in UsageRateCardInput) error {

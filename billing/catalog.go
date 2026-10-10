@@ -11,7 +11,9 @@ import (
 // group is one tier of a plan family, ranked by TierRank. Archived products
 // keep their purchases and subscribers but are not sold.
 type Product struct {
-	// Revision advances automatically when this product changes, without retaining product versions.
+	// Revision advances on every change to the product, its keys or its rate
+	// cards, never on a change to its prices. An edit may send it back as
+	// expected_revision.
 	Revision int64     `json:"revision"`
 	ID       ProductID `json:"id"`
 	// Key is the product's merchant-unique name.
@@ -64,6 +66,9 @@ type UpdateProductParams struct {
 	// Ownership declares the rule; null derives it again.
 	Ownership catalog.Field[catalog.Ownership] `json:"ownership,omitzero"`
 	Archived  catalog.Field[bool]              `json:"archived,omitzero"`
+	// ExpectedRevision refuses the edit with revision_mismatch unless the
+	// product is still at this revision.
+	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }
 
 // ProductListParams filters ListProducts. A nil Archived lists both live and
@@ -96,8 +101,12 @@ type Price struct {
 	// a subscription holds Quantity.Min to Quantity.Max seats. Null: the price
 	// has no quantity.
 	Quantity *catalog.Quantity `json:"quantity"`
-	// Revision is assigned automatically within this product/key, starting at zero.
-	Revision             int64                   `json:"revision"`
+	// Revision is the price key's: it advances on every change to any version
+	// of the key or its PSP links. An edit may send it back as
+	// expected_revision.
+	Revision int64 `json:"revision"`
+	// Version numbers this price's terms within its key, from zero.
+	Version              int64                   `json:"version"`
 	ID                   PriceID                 `json:"id"`
 	Key                  string                  `json:"key"`
 	ProductID            ProductID               `json:"product_id"`
@@ -210,6 +219,9 @@ type CreatePriceParams struct {
 	// Archived creates the price retired: subscribers keep paying it, nobody
 	// new can buy it.
 	Archived bool `json:"archived,omitempty"`
+	// ExpectedRevision, for a new version of an existing key, refuses it with
+	// revision_mismatch unless the key is still at this revision.
+	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }
 
 // CreatePriceProduct creates the price's product when no product holds Key;
@@ -227,6 +239,9 @@ type CreatePriceProduct struct {
 type UpdatePriceParams struct {
 	Archived catalog.Field[bool]                         `json:"archived,omitzero"`
 	PSPLinks map[string]catalog.Field[map[string]string] `json:"psp_links,omitempty"`
+	// ExpectedRevision refuses the edit with revision_mismatch unless the
+	// price key is still at this revision.
+	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }
 
 // GetPriceParams reads a price. Verify asks each linked PSP for its copy and

@@ -346,6 +346,24 @@ export type CatalogApplicationReceipt = {
   products_changed: number
   prices_changed: number
   entitlement_changes: EntitlementChange[]
+  changes: CatalogChange[]
+  conflicts: CatalogConflict[]
+}
+
+export type CatalogChange = {
+  object: "meter" | "price" | "product"
+  key: string
+  product_key: string | null
+  fields: string[]
+  revision: number
+}
+
+export type CatalogConflict = {
+  object: "meter" | "price" | "product"
+  key: string
+  product_key: string | null
+  currency: string | null
+  fields: CatalogFieldConflict[]
 }
 
 export type CatalogDraft = {
@@ -377,9 +395,16 @@ export type CatalogEvidence = {
   summary: string
 }
 
+export type CatalogFieldConflict = {
+  field: string
+  file_value: unknown | null
+  live_value: unknown | null
+  set_by: string
+  set_at: string
+}
+
 export type CatalogRevision = {
   revision: number
-  writes_allowed: boolean
 }
 
 export type ChangeSubscriptionParams = {
@@ -593,6 +618,7 @@ export type CreatePriceParams = {
   psps?: string[]
   psp_links?: Record<string, Record<string, string>>
   archived?: boolean
+  expected_revision?: number
 }
 
 export type CreatePriceProduct = {
@@ -1148,6 +1174,7 @@ export type Meter = {
   group_by: Record<string, string> | null
   billing_supported: boolean
   rate_card: MeterRateCard | null
+  revision: number
   override_count: number
   has_activity: boolean
   last_event_at: string | null
@@ -1722,6 +1749,7 @@ export type Price = {
   customer_amount?: CustomerAmount
   quantity: Quantity | null
   revision: number
+  version: number
   id: string
   key: string
   product_id: string
@@ -2005,6 +2033,7 @@ export type RateOverride = {
   meter_key: string
   price: RatePrice
   allowance: Allowance | null
+  revision: number
   created_at: string
   updated_at: string
 }
@@ -2148,11 +2177,13 @@ export type SetMeterParams = {
   unit?: string
   group_by?: Record<string, string>
   rate_card?: MeterRateCardParams | null
+  expected_revision?: number
 }
 
 export type SetRateOverrideParams = {
   price?: RatePrice
   allowance?: Allowance
+  expected_revision?: number
 }
 
 export type SetSpendDelegationsParams = {
@@ -2394,6 +2425,7 @@ export type UpdatePaymentMethodParams = {
 export type UpdatePriceParams = {
   archived?: boolean | null
   psp_links?: Record<string, Record<string, string>>
+  expected_revision?: number
 }
 
 export type UpdateProductParams = {
@@ -2405,6 +2437,7 @@ export type UpdateProductParams = {
   tier_rank?: number | null
   ownership?: "consumable" | "extend" | "unique" | null
   archived?: boolean | null
+  expected_revision?: number
 }
 
 export type Usage = {

@@ -526,11 +526,6 @@ type ReconcileResult struct {
 // ReconcilePrice walks every attached provider and re-applies OpenRails values
 // to the remote when drift is detected. OpenRails is authoritative.
 func (s *Service) ReconcilePrice(ctx context.Context, priceID uuid.UUID, opts ReconcileOptions) (*ReconcileResult, error) {
-	if !opts.DryRun {
-		if err := s.checkCatalogWritePolicy(ctx); err != nil {
-			return nil, err
-		}
-	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -673,11 +668,6 @@ type ProductReconcileResult struct {
 // provider link — the Stripe Product id is discovered via the product's prices.
 // This is the product-level analog of ReconcilePrice.
 func (s *Service) ReconcileProduct(ctx context.Context, productID uuid.UUID, opts ReconcileOptions) (*ProductReconcileResult, error) {
-	if !opts.DryRun {
-		if err := s.checkCatalogWritePolicy(ctx); err != nil {
-			return nil, err
-		}
-	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr

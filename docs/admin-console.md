@@ -7,7 +7,10 @@ A React SPA (`web/admin`, Vite), the staff dashboard, driving the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, settings. It holds no state and no privileges of its own; every
 action is an admin-API call its permission admits the caller for. Catalog
-editing appears only where catalog edits are mounted (`Permissions.CatalogWrite`),
+editing appears only where catalog edits are mounted (`Permissions.CatalogWrite`);
+each edit sends the revision it loaded, so a product, price, meter or rate
+another person changed meanwhile is refused and reloaded, and applying a
+catalog document lists what an edit kept,
 its PSP, settings and notification pages, and dashboard editing, only where the
 merchant's configuration is (`Permissions.MerchantConfig`); both are always on
 the standalone server.

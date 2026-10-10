@@ -6,14 +6,11 @@ import (
 	"io"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/reconcile"
-	"github.com/open-rails/openrails/internal/service"
 )
 
 // Local maintenance over an owned engine graph: process ownership is the
@@ -91,23 +88,6 @@ func ResolveMerchant(ctx context.Context, a *app.App, name string) (billing.Merc
 		return billing.MerchantID{}, "", err
 	}
 	return selected.ID, selected.Slug, nil
-}
-
-// ApplyCatalogAsOperator applies a catalog to one explicitly selected merchant
-// with operator authority; other callers' writes remain governed by the
-// mount (Routes.Permissions.CatalogWrite).
-func ApplyCatalogAsOperator(ctx context.Context, a *app.App, merchantID billing.MerchantID, params *catalog.Application) (*billing.CatalogApplicationReceipt, error) {
-	if err := initialized(a); err != nil {
-		return nil, err
-	}
-	if merchantID.IsZero() || params == nil {
-		return nil, fmt.Errorf("merchant and catalog application are required")
-	}
-	svc, err := service.New(a.Runtime)
-	if err != nil {
-		return nil, err
-	}
-	return svc.ApplyCatalog(catalogpolicy.OperatorContext(merchant.WithID(ctx, merchantID)), *params)
 }
 
 // RegisterMerchantForRestore registers a preserved merchant UUID for an

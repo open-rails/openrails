@@ -15,6 +15,7 @@
     {
       "quantity": null,
       "revision": 0,
+      "version": 0,
       "id": "price_bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
       "key": "pro-monthly",
       "product_id": "prod_aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",

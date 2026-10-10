@@ -13,12 +13,14 @@ import (
 )
 
 // Error is a typed refusal. Status and Code are frozen contract; Message is
-// diagnostic and free to change; Param names the offending field when known.
+// diagnostic and free to change; Param names the offending field when known;
+// Metadata carries what the code documents (revision_mismatch: revision).
 type Error struct {
-	Status  int
-	Code    string
-	Message string
-	Param   string
+	Status   int
+	Code     string
+	Message  string
+	Param    string
+	Metadata map[string]any
 }
 
 // New declares a refusal sentinel. Wrap it with %w to add call-site detail.
@@ -43,6 +45,13 @@ func ItemParam(i int, field string) string { return fmt.Sprintf("items[%d].%s", 
 func (e *Error) WithParam(param string) *Error {
 	out := *e
 	out.Param = param
+	return &out
+}
+
+// WithMetadata returns a copy carrying the code's documented metadata.
+func (e *Error) WithMetadata(metadata map[string]any) *Error {
+	out := *e
+	out.Metadata = metadata
 	return &out
 }
 

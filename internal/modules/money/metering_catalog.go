@@ -127,11 +127,11 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*bil
 }
 
 // rateOverride reads one customer rate card row.
-func rateOverride(customer *uuid.UUID, meterKey *string, price, allowance []byte, createdAt, updatedAt time.Time) (billing.RateOverride, error) {
+func rateOverride(customer *uuid.UUID, meterKey *string, price, allowance []byte, revision int64, createdAt, updatedAt time.Time) (billing.RateOverride, error) {
 	if customer == nil || meterKey == nil {
 		return billing.RateOverride{}, fmt.Errorf("rate override has no customer or meter")
 	}
-	out := billing.RateOverride{CustomerID: billing.CustomerID(*customer), MeterKey: *meterKey, CreatedAt: createdAt, UpdatedAt: updatedAt}
+	out := billing.RateOverride{CustomerID: billing.CustomerID(*customer), MeterKey: *meterKey, Revision: revision, CreatedAt: createdAt, UpdatedAt: updatedAt}
 	if err := decodeRateCard(price, allowance, &out.Price, &out.Allowance); err != nil {
 		return out, fmt.Errorf("decode rate override for customer %s meter %q: %w", *customer, *meterKey, err)
 	}
@@ -146,6 +146,7 @@ type usageMeterRecord struct {
 	aggregation        string
 	unit               string
 	groupBy            []byte
+	revision           int64
 	createdAt          time.Time
 	updatedAt          time.Time
 	overrideCount      int64
@@ -165,7 +166,7 @@ func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (billing.Meter
 	return usageMeterFromRecord(usageMeterRecord{
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
-		groupBy: row.GroupBy, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
+		groupBy: row.GroupBy, revision: row.Revision, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
 		overrideCount: row.OverrideCount, hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
 		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
 		filter: row.Filter, price: row.Price, allowance: row.Allowance,
@@ -177,7 +178,7 @@ func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (billing.Meter, e
 	return usageMeterFromRecord(usageMeterRecord{
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
-		groupBy: row.GroupBy, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
+		groupBy: row.GroupBy, revision: row.Revision, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
 		overrideCount: row.OverrideCount, hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
 		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
 		filter: row.Filter, price: row.Price, allowance: row.Allowance,
@@ -192,7 +193,7 @@ func usageMeterFromRecord(row usageMeterRecord) (billing.Meter, error) {
 		Key: row.key, EventType: row.effectiveEventType, ValueProperty: row.valueProperty,
 		Aggregation: catalog.Aggregation(row.aggregation), Unit: row.unit,
 		OverrideCount: row.overrideCount, HasActivity: row.hasActivity, LastEventAt: row.lastEventAt,
-		CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
+		Revision: row.revision, CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
 	}
 	if err := json.Unmarshal(row.groupBy, &meter.GroupBy); err != nil {
 		return meter, fmt.Errorf("decode meter %q group_by: %w", meter.Key, err)

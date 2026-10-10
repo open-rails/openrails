@@ -1457,6 +1457,15 @@
         "tags": [
           "catalog_write"
         ],
+        "parameters": [
+          {
+            "name": "force",
+            "in": "query",
+            "schema": {
+              "type": "boolean"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -1497,12 +1506,12 @@
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
-          "resource_conflict"
+          "resource_conflict",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       }
     },
@@ -1537,8 +1546,7 @@
         "x-openrails-catalog-write": true,
         "x-openrails-errors": null,
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "catalog_write"
+          "tier:merchant"
         ]
       }
     },
@@ -1658,6 +1666,7 @@
           "rate_card_currency_mismatch",
           "rate_card_has_overrides",
           "rate_card_product_not_found",
+          "revision_mismatch",
           "usage_meter_invalid",
           "usage_meter_not_found",
           "usage_rate_card_invalid"
@@ -1724,14 +1733,14 @@
           "rate_card_currency_mismatch",
           "rate_card_has_overrides",
           "rate_card_product_not_found",
+          "revision_mismatch",
           "usage_meter_invalid",
           "usage_meter_not_found",
           "usage_rate_card_invalid"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       }
     },
@@ -1888,14 +1897,14 @@
           "rate_card_currency_mismatch",
           "rate_card_has_overrides",
           "rate_card_product_not_found",
+          "revision_mismatch",
           "usage_meter_invalid",
           "usage_meter_not_found",
           "usage_rate_card_invalid"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       },
       "delete": {
@@ -1949,13 +1958,13 @@
           "rate_card_currency_mismatch",
           "rate_card_has_overrides",
           "rate_card_product_not_found",
+          "revision_mismatch",
           "usage_meter_invalid",
           "usage_meter_not_found",
           "usage_rate_card_invalid"
         ],
         "x-openrails-error-sets": [
-          "tier:merchant",
-          "catalog_write"
+          "tier:merchant"
         ]
       }
     },
@@ -2017,12 +2026,12 @@
           "provider_cancel_held",
           "rebill_terms_committed",
           "resource_conflict",
+          "revision_mismatch",
           "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       }
     },
@@ -2168,12 +2177,12 @@
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
-          "resource_conflict"
+          "resource_conflict",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       },
       "get": {
@@ -2302,7 +2311,8 @@
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
-          "resource_conflict"
+          "resource_conflict",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -2352,7 +2362,8 @@
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
-          "resource_conflict"
+          "resource_conflict",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
           "tier:merchant"
@@ -2410,12 +2421,12 @@
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
-          "resource_conflict"
+          "resource_conflict",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       }
     },
@@ -2472,12 +2483,12 @@
           "product_not_found",
           "product_tier_group_conflict",
           "product_tier_group_in_use",
-          "resource_conflict"
+          "resource_conflict",
+          "revision_mismatch"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       }
     },
@@ -2526,12 +2537,12 @@
           "price_not_found",
           "product_not_found",
           "resource_conflict",
+          "revision_mismatch",
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       },
       "get": {
@@ -2657,6 +2668,7 @@
           "price_not_found",
           "product_not_found",
           "resource_conflict",
+          "revision_mismatch",
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
@@ -2716,6 +2728,7 @@
           "price_not_found",
           "product_not_found",
           "resource_conflict",
+          "revision_mismatch",
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
@@ -2777,12 +2790,12 @@
           "price_not_found",
           "product_not_found",
           "resource_conflict",
+          "revision_mismatch",
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
-          "request",
-          "catalog_write"
+          "request"
         ]
       }
     },
@@ -2862,6 +2875,7 @@
           "price_not_found",
           "product_not_found",
           "resource_conflict",
+          "revision_mismatch",
           "trial_unsupported_on_rail"
         ],
         "x-openrails-error-sets": [
@@ -12511,6 +12525,18 @@
             "items": {
               "$ref": "#/components/schemas/EntitlementChange"
             }
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogChange"
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogConflict"
+            }
           }
         },
         "required": [
@@ -12520,7 +12546,100 @@
           "replayed",
           "products_changed",
           "prices_changed",
-          "entitlement_changes"
+          "entitlement_changes",
+          "changes",
+          "conflicts"
+        ]
+      },
+      "CatalogChange": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "meter",
+              "price",
+              "product"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "product_key": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "object",
+          "key",
+          "product_key",
+          "fields",
+          "revision"
+        ]
+      },
+      "CatalogConflict": {
+        "type": "object",
+        "properties": {
+          "object": {
+            "type": "string",
+            "enum": [
+              "meter",
+              "price",
+              "product"
+            ]
+          },
+          "key": {
+            "type": "string"
+          },
+          "product_key": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "currency": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CatalogFieldConflict"
+            }
+          }
+        },
+        "required": [
+          "object",
+          "key",
+          "product_key",
+          "currency",
+          "fields"
         ]
       },
       "CatalogDraft": {
@@ -12645,19 +12764,53 @@
           "summary"
         ]
       },
+      "CatalogFieldConflict": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "file_value": {
+            "oneOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "live_value": {
+            "oneOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "set_by": {
+            "type": "string"
+          },
+          "set_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "field",
+          "file_value",
+          "live_value",
+          "set_by",
+          "set_at"
+        ]
+      },
       "CatalogRevision": {
         "type": "object",
         "properties": {
           "revision": {
             "type": "integer"
-          },
-          "writes_allowed": {
-            "type": "boolean"
           }
         },
         "required": [
-          "revision",
-          "writes_allowed"
+          "revision"
         ]
       },
       "ChangeSubscriptionParams": {
@@ -13536,6 +13689,9 @@
           },
           "archived": {
             "type": "boolean"
+          },
+          "expected_revision": {
+            "type": "integer"
           }
         },
         "required": [
@@ -16123,6 +16279,9 @@
               }
             ]
           },
+          "revision": {
+            "type": "integer"
+          },
           "override_count": {
             "type": "integer"
           },
@@ -16158,6 +16317,7 @@
           "group_by",
           "billing_supported",
           "rate_card",
+          "revision",
           "override_count",
           "has_activity",
           "last_event_at",
@@ -18819,6 +18979,9 @@
           "revision": {
             "type": "integer"
           },
+          "version": {
+            "type": "integer"
+          },
           "id": {
             "type": "string"
           },
@@ -18910,6 +19073,7 @@
         "required": [
           "quantity",
           "revision",
+          "version",
           "id",
           "key",
           "product_id",
@@ -20313,6 +20477,9 @@
               }
             ]
           },
+          "revision": {
+            "type": "integer"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -20328,6 +20495,7 @@
           "meter_key",
           "price",
           "allowance",
+          "revision",
           "created_at",
           "updated_at"
         ]
@@ -20831,6 +20999,9 @@
                 "type": "null"
               }
             ]
+          },
+          "expected_revision": {
+            "type": "integer"
           }
         }
       },
@@ -20842,6 +21013,9 @@
           },
           "allowance": {
             "$ref": "#/components/schemas/Allowance"
+          },
+          "expected_revision": {
+            "type": "integer"
           }
         }
       },
@@ -21913,6 +22087,9 @@
                 "type": "string"
               }
             }
+          },
+          "expected_revision": {
+            "type": "integer"
           }
         }
       },
@@ -21999,6 +22176,9 @@
                 "type": "null"
               }
             ]
+          },
+          "expected_revision": {
+            "type": "integer"
           }
         }
       },
@@ -22309,9 +22489,6 @@
     }
   },
   "x-openrails-error-sets": {
-    "catalog_write": [
-      "catalog_updates_disabled"
-    ],
     "request": [
       "invalid_param",
       "invalid_query",
@@ -22552,11 +22729,6 @@
       "status": 409,
       "type": "invalid_request_error",
       "meaning": "The catalog changed during the application; retry."
-    },
-    "catalog_updates_disabled": {
-      "status": 403,
-      "type": "invalid_request_error",
-      "meaning": "Catalog updates over HTTP are disabled in this deployment."
     },
     "checkout_attempt_closed": {
       "status": 409,
@@ -23272,6 +23444,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The addressed resource does not exist in this merchant."
+    },
+    "revision_mismatch": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The object changed since the revision the edit expected; metadata.revision is the current one."
     },
     "route_not_found": {
       "status": 404,

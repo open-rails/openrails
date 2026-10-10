@@ -32,6 +32,11 @@ type Service struct {
 	// catalogKeyChanges collects the key changes of existing products made
 	// inside a catalog application, for its receipt.
 	catalogKeyChanges *[]billing.EntitlementChange
+	// catalogBefore is the catalog as the mutation found it, under its lock.
+	catalogBefore catalogState
+	// catalogApplying marks a document application: it records ownership
+	// itself, as the apply manager.
+	catalogApplying bool
 }
 
 func New(rt *app.Runtime) (*Service, error) {

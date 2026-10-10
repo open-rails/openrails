@@ -15,20 +15,22 @@ an editable `ApplyCatalog` declaration.
 
 ## What the snapshot retains
 
-Every row and stored column from these eight catalog tables is included:
+Every row and stored column from these nine catalog tables is included:
 
 | Table | Retained state |
 |---|---|
 | `products` | All products, including archived products, original UUIDs, current revisions, entitlements, credit grants and tiers |
-| `prices` | All immutable price revisions, including archived ones, original UUIDs, revisions, durations, trials and deposit bounds |
+| `prices` | All immutable price versions, including archived ones, original UUIDs, versions, durations, trials and deposit bounds |
 | `price_key_movements` | Complete retained price-key movement history |
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |
-| `catalog_meters` | Current meter definitions |
-| `catalog_rate_cards` | All current default and customer-specific rate cards, with IDs |
+| `catalog_meters` | Current meter definitions and revisions |
+| `catalog_rate_cards` | All current default and customer-specific rate cards, with IDs and revisions |
+| `catalog_field_owners` | Which manager, a document or an edit, set each field ([catalog ownership](catalog-ownership.md)) |
 | `catalog_applications` | Original application receipts, canonical hashes and revision coordinates |
 | `product_archive_operations` | Original product-archive request and replay receipts |
 
-The merchant's catalog revision is retained too. Product revisions are counters:
+The merchant's catalog revision is retained too. Price-key revisions
+(`price_keys`) are rebuilt as the prices are restored. Product revisions are counters:
 older mutable product bodies and deleted or overwritten meter/rate-card definitions
 were never retained in the database, so the snapshot cannot reconstruct them.
 

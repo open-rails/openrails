@@ -13,13 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/requestauth"
 )
 
 // deny admits everyone and refuses every permission but the allowed ones,
@@ -214,32 +211,11 @@ func TestCatalogWritePolicy(t *testing.T) {
 		require.Contains(t, routeKeys(edits), key)
 	}
 
-	called := false
-	closed := &app.Runtime{Config: &config.Config{}, CatalogEdits: &catalogpolicy.Exposure{}}
-	rec := httptest.NewRecorder()
-	catalogWriteGuardMW(closed)(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/products", nil), nil))
-	require.Equal(t, http.StatusForbidden, rec.Code, "the guard also refuses if a write is ever mounted")
-	require.Contains(t, rec.Body.String(), "catalog_updates_disabled")
-	require.False(t, called)
-
-	// The embedded Client's own handler registers mutations without a mount
-	// publishing them, and the guard admits only its host principal: the
-	// process owner.
+	// The embedded Client's own handler registers every mutation: the process
+	// owner edits its catalog whatever a mount publishes.
 	inProcess := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(inProcess, "", closed), closed, HostOptions())
+	RegisterStaffRoutes(router.NewMux(inProcess, "", rt), rt, HostOptions())
 	require.Contains(t, routeKeys(inProcess), "POST /admin/catalog/applications")
-	owner := httptest.NewRequest(http.MethodPost, "/products", nil)
-	owner = owner.WithContext(requestauth.WithHostPrincipal(owner.Context(), &requestauth.HostPrincipal{}))
-	rec = httptest.NewRecorder()
-	catalogWriteGuardMW(closed)(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, owner, nil))
-	require.True(t, called)
-
-	// Once a mount publishes catalog edits, the guard admits other callers.
-	require.NoError(t, closed.CatalogEdits.Decide(true))
-	called = false
-	rec = httptest.NewRecorder()
-	catalogWriteGuardMW(closed)(func(*httprequest.Request) { called = true })(httprequest.NewHTTP(rec, httptest.NewRequest(http.MethodPost, "/products", nil), nil))
-	require.True(t, called)
 }
 
 // Administrative velocity limits apply per operation class after

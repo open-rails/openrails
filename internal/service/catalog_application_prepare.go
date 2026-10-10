@@ -72,7 +72,7 @@ func (s *Service) catalogApplicationGate(ctx context.Context, digest [32]byte) (
 // local commit each fence the merchant, but no transaction spans provider I/O.
 // A committed retry returns before resolving targets or contacting a provider.
 func (s *Service) prepareCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, verify catalogReferenceVerifier) (*catalogApplicationPreparation, error) {
-	prepared, err := catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
+	prepared, err := catalogReadLocked(ctx, s, func(ctx context.Context, scoped *Service) (*catalogApplicationPreparation, error) {
 		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
 		if err != nil {
 			return nil, err

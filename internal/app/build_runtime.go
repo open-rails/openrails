@@ -7,7 +7,6 @@ import (
 
 	"github.com/open-rails/helpers/userinfo"
 
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/identity"
 	"github.com/open-rails/openrails/internal/migrate"
 
@@ -417,7 +416,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	if err := runtime.BindRiverProducer(ctx); err != nil {
 		return nil, err
 	}
-	runtime.CatalogEdits = &catalogpolicy.Exposure{}
 
 	// Wire the deferred NMI delete schedulers (issue 216). Since #358 phase A
 	// scheduling enqueues a durable nmi_delete_subscription intent on the

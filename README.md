@@ -465,8 +465,9 @@ permissions:
   access, usage and metrics. Each admin route reads or writes; OpenRails decides
   which. Leave both out and no admin route exists.
 - `Permissions.CatalogWrite`: catalog edits: products, prices, meters and their
-  rates, archiving a product. Refused while `Config.Catalog` is the catalog's
-  truth; your Go code can edit the catalog either way.
+  rates, archiving a product, applying a catalog document. With
+  `Config.Catalog` too, the file skips what an edit changed (below); your Go
+  code can edit the catalog either way.
 - `Permissions.MerchantConfig`: the merchant's own configuration: PSPs,
   settings, billing import and export, the dashboard layout.
 - `AdminConsole`: the staff dashboard (below). Leaving it out, the default,
@@ -938,17 +939,40 @@ because it is omitted. Complete terms, including explicit null trial fields, avo
 when a key has several archived revisions; a known immutable price `id` can also
 select a particular revision.
 
-**Replay is not rollback.** Each successful application's canonical content hash
-is remembered per merchant. Reapplying any of these files changes nothing, even
-after later edits. Reapplying the initial `catalog.yaml` therefore does not undo
-the price increase or restore an archived bundle. The same rule applies to already
-used archive and restore files. Comments, formatting, and product/price ordering
-do not make a new application. A new document is a new atomic batch; different,
-previously unseen documents have no ordering guarantee, so apply intended changes
-in order.
+**Replay is not rollback.** The canonical content hash of each document that
+applied whole is remembered per merchant. Reapplying any of these files changes
+nothing, even after later edits. Reapplying the initial `catalog.yaml` therefore
+does not undo the price increase or restore an archived bundle. The same rule
+applies to already used archive and restore files. Comments, formatting, and
+product/price ordering do not make a new application. Different, previously
+unseen documents have no ordering guarantee, so apply intended changes in order.
 
-All these examples preserve omitted entries. `prune: true` is an explicit
-bulk-archive option for omitted products and prices; it never deletes them.
+**A file and the console share the catalog.** OpenRails records which manager
+last set each field: the file (`Config.Catalog`, `ApplyCatalog`, the
+applications route, `openrails apply-catalog`) or an edit (the console, the
+product, price and meter routes, `UpdateProduct` and the other edit methods).
+A product, a price key and a meter each apply whole. When a document names a
+field whose live value an edit set differently, that object is skipped and
+reported, and the rest of the document applies:
+
+| Step | Result |
+|---|---|
+| The file sets prices `a` $1 and `b` $2 | Both apply; the file owns them |
+| Staff set `a` to $1.50 | The edit always succeeds and takes `a`'s amount |
+| The file changes `b` to $2.50 | `b` applies; `a` stays $1.50, listed in the receipt's `conflicts` |
+
+A document with conflicts is not recorded as applied, so the next start, or the
+next apply, retries it; what already applied is a no-op. One finding,
+`life.catalog.conflicts`, names the skipped objects until a document applies
+whole. To resolve one, change the file to agree (equal values are shared, never
+a conflict), drop the field or entry from the file (the live value stays), or
+apply with `ApplyCatalogParams{Force: true}`, `?force=true` or
+`openrails apply-catalog --force-conflicts`, which overwrites the edit and takes
+the field. `Config.Catalog` never forces, and a conflict never fails `New`.
+
+All these examples preserve omitted entries. `prune: true` makes a document the
+whole catalog: an omitted product or price is archived only when no edit set any
+of its fields; otherwise the file lets it go. Nothing is deleted.
 Changing existing subscribers' accepted prices requires an explicit scheduled
 reprice operation. A product's keys are not part of the accepted terms:
 editing a product's `entitlements` changes what every buyer and subscriber of
@@ -1001,7 +1025,7 @@ hash replay, so this workflow does not roll back later edits.
 ### Turning catalog HTTP writes on and off
 
 Catalog writes over HTTP are their own bundle: give `Permissions.CatalogWrite`
-to offer them:
+to offer them, with or without `Config.Catalog`:
 
 ```go
 err = openrailsgin.Mount(r, bill, openrails.Routes{
@@ -1018,16 +1042,18 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 | Mount | Catalog writes over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
 |---|---|---|
 | without `CatalogWrite` | Not mounted | Available |
-| `CatalogWrite`, with `Config.Catalog` | Refused (`catalog_updates_disabled`): the file is the truth | Available |
-| `CatalogWrite`, without `Config.Catalog` | Available to staff holding your `CatalogWrite` permission | Available |
+| with `CatalogWrite` | Available to staff holding your `CatalogWrite` permission | Available |
 
 Catalog reads stay on the admin routes at `AdminRead`. Turning HTTP writes off
-does not make the database read-only or prevent later client edits. Every mount
-in one process must agree on whether `CatalogWrite` is given; a conflicting
-mount fails. The startup example above gives no
-`CatalogWrite` and applies `catalog.yaml` through `Config.Catalog` on every
-boot. On the standalone server catalog writes follow `secret_backend`: a
-`vault` or `db` backend edits over HTTP, a `snapshot` one is read-only.
+does not make the database read-only or prevent later client edits. The
+startup example above gives no `CatalogWrite` and applies `catalog.yaml` through
+`Config.Catalog` on every boot; with it, staff edits and the file share the
+catalog as above. The standalone server always mounts them.
+
+Every product, price key, meter and rate override carries a `revision` that
+advances on each change. An edit may send the revision it read as
+`expected_revision`; if the object changed since, it is refused with
+`409 revision_mismatch` and `metadata.revision`. The console always sends it.
 
 ---
 

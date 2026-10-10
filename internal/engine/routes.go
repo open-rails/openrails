@@ -106,13 +106,6 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 	if err != nil {
 		return nil, err
 	}
-	if perms != (httproutes.Permissions{}) {
-		// Catalog edits reach staff when their bundle is mounted and the
-		// host's catalog document is not the truth.
-		if err := a.Runtime.CatalogEdits.Decide(perms.CatalogWrite != "" && a.Config.Catalog == nil); err != nil {
-			return nil, err
-		}
-	}
 	logMount(sel, perms, len(table.Entries))
 	return routebundle.FromTable(table), nil
 }

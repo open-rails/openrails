@@ -30,7 +30,6 @@ export type OpenRailsErrorCode =
   | "card_requires_https"
   | "catalog_benefit_overlap"
   | "catalog_revision_conflict"
-  | "catalog_updates_disabled"
   | "checkout_attempt_closed"
   | "checkout_attempt_expired"
   | "checkout_offer_unavailable"
@@ -174,6 +173,7 @@ export type OpenRailsErrorCode =
   | "resource_access_denied"
   | "resource_conflict"
   | "resource_not_found"
+  | "revision_mismatch"
   | "route_not_found"
   | "scheduled_change_exists"
   | "sender_proof_required"
@@ -253,7 +253,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   card_requires_https: { status: 400, type: "invalid_request_error", meaning: "Card data is accepted only over HTTPS." },
   catalog_benefit_overlap: { status: 409, type: "invalid_request_error", meaning: "Two recurring products would grant one entitlement outside a shared tier group; put them in one tier group." },
   catalog_revision_conflict: { status: 409, type: "invalid_request_error", meaning: "The catalog changed during the application; retry." },
-  catalog_updates_disabled: { status: 403, type: "invalid_request_error", meaning: "Catalog updates over HTTP are disabled in this deployment." },
   checkout_attempt_closed: { status: 409, type: "invalid_request_error", meaning: "The checkout attempt already completed or was canceled." },
   checkout_attempt_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout attempt expired before it was paid." },
   checkout_offer_unavailable: { status: 422, type: "invalid_request_error", meaning: "The purchase is not available." },
@@ -397,6 +396,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   resource_access_denied: { status: 403, type: "authorization_error", meaning: "The credential may not access this resource." },
   resource_conflict: { status: 409, type: "invalid_request_error", meaning: "The request conflicts with the resource's current state." },
   resource_not_found: { status: 404, type: "invalid_request_error", meaning: "The addressed resource does not exist in this merchant." },
+  revision_mismatch: { status: 409, type: "invalid_request_error", meaning: "The object changed since the revision the edit expected; metadata.revision is the current one." },
   route_not_found: { status: 404, type: "invalid_request_error", meaning: "No route matches the path." },
   scheduled_change_exists: { status: 409, type: "invalid_request_error", meaning: "The subscription already has a scheduled change." },
   sender_proof_required: { status: 401, type: "authentication_error", meaning: "A sender-constrained token arrived without its DPoP proof." },

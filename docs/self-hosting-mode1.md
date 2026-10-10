@@ -86,10 +86,9 @@ manifest and secret files before it can use those providers.
   edits and provider archive decisions retain their ordinary authorization checks.
 - External configuration routes require explicit publication; exposing a route
   does not make the credential backend writable.
-- Catalog writes over HTTP are refused (`403 catalog_updates_disabled`): with
-  snapshot custody the files are the truth, and a change is a new document and
-  a restart. Trusted operator catalog applications are declarative or guarded
-  by their document.
+- Catalog edits over HTTP and catalog documents share the catalog whatever the
+  credential backend: a document skips a product, price or meter whose field
+  an edit set differently, and reports it (see [catalog ownership](catalog-ownership.md)).
 - `openrails dump-merchant-config` exports redacted metadata with snapshot or
   managed credentials. Plaintext credential export is not supported.
 - Managed DB secrets require encryption in sandbox and live deployments.

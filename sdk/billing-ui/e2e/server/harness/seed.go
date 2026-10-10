@@ -78,7 +78,7 @@ products:
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := c.ApplyCatalog(ctx, params); err != nil {
+	if _, err := c.ApplyCatalog(ctx, params, billing.ApplyCatalogParams{}); err != nil {
 		return "", "", err
 	}
 	once, err := currentPrice(ctx, c, "e2e-card", "e2e-card-once")
@@ -125,7 +125,7 @@ products:
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := c.ApplyCatalog(ctx, params); err != nil {
+	if _, err := c.ApplyCatalog(ctx, params, billing.ApplyCatalogParams{}); err != nil {
 		return "", "", err
 	}
 	pass, err := currentPrice(ctx, c, "e2e-crypto", "e2e-crypto-pass")

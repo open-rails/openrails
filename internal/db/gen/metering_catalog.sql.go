@@ -210,6 +210,7 @@ SELECT meter.key,
        COALESCE(meter.aggregation, '') AS aggregation,
        COALESCE(meter.unit, '') AS unit,
        meter.group_by,
+       meter.revision,
        meter.created_at,
        meter.updated_at,
        COALESCE(override_counts.override_count, 0) AS override_count,
@@ -252,6 +253,7 @@ type GetUsageMeterWithCatalogRow struct {
 	Aggregation        string
 	Unit               string
 	GroupBy            []byte
+	Revision           int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	OverrideCount      int64
@@ -278,6 +280,7 @@ func (q *Queries) GetUsageMeterWithCatalog(ctx context.Context, arg GetUsageMete
 		&i.Aggregation,
 		&i.Unit,
 		&i.GroupBy,
+		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OverrideCount,
@@ -378,6 +381,7 @@ SELECT meter.key,
        COALESCE(meter.aggregation, '') AS aggregation,
        COALESCE(meter.unit, '') AS unit,
        meter.group_by,
+       meter.revision,
        meter.created_at,
        meter.updated_at,
        COALESCE(override_counts.override_count, 0) AS override_count,
@@ -423,6 +427,7 @@ type ListUsageMetersWithCatalogRow struct {
 	Aggregation        string
 	Unit               string
 	GroupBy            []byte
+	Revision           int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 	OverrideCount      int64
@@ -455,6 +460,7 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 			&i.Aggregation,
 			&i.Unit,
 			&i.GroupBy,
+			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.OverrideCount,

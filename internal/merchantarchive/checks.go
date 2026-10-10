@@ -61,6 +61,7 @@ var excludedTables = map[string]string{
 	"operation_authorization_extensions": "growth of unsupported operation authorizations, refused with them",
 	"customer_entitlement_cache":         "derived from product access and product keys; rebuilt on read",
 	"customer_entitlement_cache_stamps":  "derived from product access and product keys; rebuilt on read",
+	"price_keys":                         "derived: the prices and price_psp_bindings triggers rebuild it as the prices are restored",
 }
 
 // Explicit exclusions cover only these reviewed columns. A later column is
@@ -114,6 +115,7 @@ var excludedColumns = map[string]string{
 	"operation_authorization_extensions": "merchant_id operation_id ordinal requested_amount minimum_amount granted_amount authorized_amount created_at",
 	"customer_entitlement_cache":         "id merchant_id customer_id entitlement quantity",
 	"customer_entitlement_cache_stamps":  "id merchant_id customer_id entitlement_generation access_version valid_from valid_until keys held_products created_at updated_at",
+	"price_keys":                         "merchant_id product_id key revision created_at updated_at",
 }
 
 // Omitted columns are either reconstructed by PostgreSQL, deployment

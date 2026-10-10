@@ -60,7 +60,7 @@ func TestHostedCreditDepositSnapshot(t *testing.T) {
 	current, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
 	require.NoError(t, err)
 	require.Zero(t, current.UnitAmount, "each deposit must leave the shared offer unchanged")
-	require.Zero(t, current.Revision, "deposits are not catalog price revisions")
+	require.Zero(t, current.Version, "deposits are not catalog price versions")
 }
 
 // The selected amount is the session's, fixed at mint: a retried pay replays

@@ -620,6 +620,7 @@ export type Price = {
   customer_amount?: CustomerAmount
   quantity: Quantity | null
   revision: number
+  version: number
   id: string
   key: string
   product_id: string

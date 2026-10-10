@@ -255,24 +255,25 @@ with an operation ID and the expected PSP revision. `Permissions.MerchantConfig`
 publishes these routes with the rest of the merchant's configuration.
 
 **Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
-and set it as `Config.Catalog`; `New` applies it, like calling
-`client.ApplyCatalog(ctx, document)` once; with it, `Permissions.CatalogWrite`
-serves the catalog-write HTTP routes refused (the document is the truth). The
-in-process client still edits the catalog.
-YAML batches and individual client/API edits operate on the same merchant
-catalog.
+and set it as `Config.Catalog`; `New` applies it on every start, like calling
+`client.ApplyCatalog(ctx, document, billing.ApplyCatalogParams{})`. Documents
+and individual edits (the console, the catalog routes, the client's edit
+methods) share the merchant's catalog: a document skips a product, price or
+meter whose field an edit set differently, reports it, and applies the rest
+([catalog ownership](catalog-ownership.md)). A conflict never fails `New`.
 
-The server computes a canonical content hash and commits it with the batch. The
-same document replays forever, even after intervening API edits or an archive
-restore. Concurrent applications of identical content commit once. Failed batches
-are not marked applied. No caller `application_id`, `expected_revision`, or
+The server computes a canonical content hash and commits it with a batch that
+applied whole. That document replays forever, even after intervening API edits
+or an archive restore. Concurrent applications of identical content commit once.
+Failed batches, and batches that skipped an object, are not marked applied. No caller `application_id`, `expected_revision`, or
 `catalog_version` is needed or accepted. Hashes deduplicate; they do not order
 previously unseen batches. Intentionally restoring old state requires a new
 operation rather than replaying an already-applied document.
 
 Omitted products, prices and fields keep their stored values. Use `archived: true`
 to retire an entry and `archived: false` to restore it. `prune: true` explicitly
-opts into archiving omitted products/prices; no catalog operation deletes them.
+opts into archiving omitted products/prices that only documents set; no catalog
+operation deletes them.
 The apply makes no provider writes. It may read a provider to verify an explicit
 reference. `Config.Catalog` can finish a temporarily unavailable provider check in
 the background, with `Ready` failing until that startup batch succeeds.
@@ -281,10 +282,11 @@ the background, with `Ready` failing until that startup batch succeeds.
 The in-process Client is the process owner and writes its catalog directly
 (`ApplyCatalog`, or `CreateProduct`, `CreatePrice`, `UpdatePrice`);
 `Permissions.CatalogWrite` publishes catalog mutations to HTTP and delegated
-callers, unless `Config.Catalog` is the truth. YAML is decoded into the same `catalog.Application` as JSON
+callers. YAML is decoded into the same `catalog.Application` as JSON
 (`catalog.ReadFile`, `catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
-record, and `prune: true` archives omitted products and prices. Price keys are unique within their product. Key lookups and checkout selections
+record, and `prune: true` archives omitted products and prices that only
+documents set. Price keys are unique within their product. Key lookups and checkout selections
 therefore carry both `product_key` and `price_key`; price IDs select one immutable
 record directly. Each product/key chain has automatic price revisions starting at
 zero. New financial terms create a new revision; repeating or reactivating old
@@ -363,7 +365,7 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Auth` | Your auth (above); required. A checkout session shows saved cards only to its own customer, admitted by it |
 | `CustomerProfiles` | Further customer surfaces (`openrails.CustomerRoutes`): another `Prefix`, another `Merchant`, or their own `Auth` |
 | `Permissions.AdminRead`, `AdminWrite` | Staff work on customers (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, invoices, credits, access, usage, metrics, operations, catalog reads, checkout sessions; reads with `AdminRead`, writes with `AdminWrite` |
-| `Permissions.CatalogWrite` | Catalog edits: products, prices, meters and their rates, archiving a product. Refused while `Config.Catalog` is the catalog's truth. Every mount in one process must agree |
+| `Permissions.CatalogWrite` | Catalog edits: products, prices, meters and their rates, archiving a product, applying a catalog document. With `Config.Catalog`, the file skips what an edit changed |
 | `Permissions.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout |
 | `CookieOrigin` | Admits cookie-authenticated requests from this exact origin |
 | `AdminConsole` | The staff dashboard at its own `Path` (`/admin` by default); requires `AdminRead`. Nil mounts none |

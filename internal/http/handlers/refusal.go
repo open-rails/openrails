@@ -33,5 +33,8 @@ func refusalOf(err error) *api.APIError {
 	if refusal.Param != "" {
 		out.WithParam(refusal.Param)
 	}
+	if len(refusal.Metadata) > 0 {
+		out.Metadata = refusal.Metadata
+	}
 	return out
 }

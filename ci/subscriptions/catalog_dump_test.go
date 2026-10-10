@@ -97,7 +97,7 @@ products:
         archived: true
 `))
 	require.NoError(t, err)
-	_, err = source.client[embedded].ApplyCatalog(t.Context(), original)
+	_, err = source.client[embedded].ApplyCatalog(t.Context(), original, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	pack, err := productByKey(t.Context(), source.client[embedded], "api-pack")
 	require.NoError(t, err)
@@ -105,7 +105,7 @@ products:
 		ProductID: pack.ID, Key: "buy", Currency: "USD", UnitAmount: 90000000,
 	})
 	require.NoError(t, err)
-	require.EqualValues(t, 1, currentPack.Revision)
+	require.EqualValues(t, 1, currentPack.Version)
 
 	dump := func(w *world) ([]byte, *catalog.Application) {
 		t.Helper()
@@ -153,7 +153,7 @@ products:
 	require.True(t, slices.IsSorted(order) && order[0] > 0, "the dump writes keys sorted: %s", raw)
 
 	target := newWorld(t)
-	receipt, err := target.client[remote].ApplyCatalog(t.Context(), exported)
+	receipt, err := target.client[remote].ApplyCatalog(t.Context(), exported, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	require.False(t, receipt.Replayed)
 	restoredRaw, _ := dump(target)
@@ -161,14 +161,14 @@ products:
 	restoredPack, err := priceByKey(t.Context(), target.client[embedded], "api-pack", "buy")
 	require.NoError(t, err)
 	require.NotEqual(t, currentPack.ID, restoredPack.ID, "semantic copy uses destination identities")
-	require.EqualValues(t, 0, restoredPack.Revision, "full historical revision numbers require the billing archive")
+	require.EqualValues(t, 0, restoredPack.Version, "full historical version numbers require the billing archive")
 
 	// Content-addressed apply is a one-time batch, not a rollback command.
 	product, err := productByKey(t.Context(), target.client[embedded], "premium")
 	require.NoError(t, err)
 	_, err = target.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Later edit")})
 	require.NoError(t, err)
-	replay, err := target.client[remote].ApplyCatalog(t.Context(), exported)
+	replay, err := target.client[remote].ApplyCatalog(t.Context(), exported, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
 	product, err = productByKey(t.Context(), target.client[embedded], "premium")

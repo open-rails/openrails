@@ -282,13 +282,13 @@ func load(configPath string, databaseOnly bool, opts ...LoadOption) (*Config, er
 	// Merchant configuration authority is broader than provider secrets. Retired
 	// spellings must fail even if a new spelling is also supplied.
 	if _, present := os.LookupEnv("CATALOG_SOURCE"); k.Exists("catalog_source") || present {
-		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database, edited over HTTP when secret_backend is vault or db")
+		return nil, fmt.Errorf("catalog_source / CATALOG_SOURCE was removed: catalogs always use the database; documents and edits both change it")
 	}
 	if _, present := os.LookupEnv("VAULT_ENABLED"); k.Exists("vault.enabled") || present {
 		return nil, fmt.Errorf("vault.enabled / VAULT_ENABLED was removed: declaring vault (or a VAULT_* setting) connects to it")
 	}
 	if _, present := os.LookupEnv("CATALOG_EDITS"); k.Exists("catalog_edits") || present {
-		return nil, fmt.Errorf("catalog_edits / CATALOG_EDITS was removed: catalog edits over HTTP follow secret_backend (vault or db: on; snapshot: read-only)")
+		return nil, fmt.Errorf("catalog_edits / CATALOG_EDITS was removed: catalog edits over HTTP are always on; a document skips what an edit set")
 	}
 	if _, present := os.LookupEnv("MERCHANT_SOURCE"); k.Exists("merchant_source") || present {
 		return nil, fmt.Errorf("merchant_source / MERCHANT_SOURCE was removed: select secret_backend")

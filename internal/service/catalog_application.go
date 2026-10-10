@@ -14,17 +14,18 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	catalogwire "github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-// ApplyCatalog applies one durable local operation. It never invokes provider
-// network writes; unsupported provider-link changes fail before local mutation.
-func (s *Service) ApplyCatalog(ctx context.Context, params catalogwire.Application) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, params, s.verifyCatalogProviderReference)
+// ApplyCatalog applies a catalog document as the apply manager. It never
+// invokes provider network writes; unsupported provider-link changes fail
+// before local mutation. An object whose named field an edit set differently
+// is skipped and reported unless params.Force.
+func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
+	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference)
 }
 
 // ErrCatalogProviderUnconfirmed: a provider reference could not be confirmed
@@ -32,10 +33,11 @@ func (s *Service) ApplyCatalog(ctx context.Context, params catalogwire.Applicati
 // committed; the same application can be retried.
 var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference unconfirmed")
 
-// ApplyDeclaredCatalog applies the host's Config.Catalog startup batch. Provider reference reads end at deadline (zero:
-// none); one that fails without a provider refusal is
-// ErrCatalogProviderUnconfirmed.
-func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params catalogwire.Application, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
+// ApplyDeclaredCatalog applies the host's Config.Catalog on start. It never
+// forces: conflicting objects are skipped, reported and retried on the next
+// start. Provider reference reads end at deadline (zero: none); one that
+// fails without a provider refusal is ErrCatalogProviderUnconfirmed.
+func (s *Service) ApplyDeclaredCatalog(ctx context.Context, document catalogwire.Application, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
 	verify := func(ctx context.Context, provider, rail, account, product string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 		if !deadline.IsZero() {
 			var cancel context.CancelFunc
@@ -49,10 +51,10 @@ func (s *Service) ApplyDeclaredCatalog(ctx context.Context, params catalogwire.A
 		}
 		return out, err
 	}
-	return s.applyCatalog(catalogpolicy.OperatorContext(ctx), params, verify)
+	return s.applyCatalog(ctx, document, false, verify)
 }
 
-func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {
+func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -80,7 +82,7 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 		if prepared.replay != nil {
 			return prepared.replay, nil
 		}
-		receipt, err := s.commitCatalogApplication(ctx, params, digest, prepared)
+		receipt, err := s.commitCatalogApplication(ctx, params, digest, prepared, force)
 		if !errors.Is(err, errCatalogSnapshotMoved) {
 			return receipt, err
 		}
@@ -96,13 +98,18 @@ var errCatalogSnapshotMoved = errors.New("catalog changed after preparation")
 
 const maxCatalogSnapshotAttempts = 3
 
-func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, prepared *catalogApplicationPreparation) (*billing.CatalogApplicationReceipt, error) {
+// commitCatalogApplication applies every object of the document that no edit
+// contests, skips the rest whole, and records the document as applied only
+// when it skipped nothing.
+func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwire.Application, digest [32]byte, prepared *catalogApplicationPreparation, force bool) (*billing.CatalogApplicationReceipt, error) {
 	return catalogMutation(ctx, s, func(ctx context.Context, scoped *Service) (*billing.CatalogApplicationReceipt, error) {
+		scoped.catalogApplying = true
 		mid, err := merchant.Require(ctx)
 		if err != nil {
 			return nil, err
 		}
-		q := scoped.catalogDatabase().Gen(ctx)
+		tx := scoped.catalogDatabase()
+		q := tx.Gen(ctx)
 		revision, replay, err := scoped.catalogApplicationGate(ctx, digest)
 		if err != nil || replay != nil {
 			return replay, err
@@ -114,16 +121,6 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 		if err := scoped.revalidateCatalogApplicationProviders(ctx, prepared); err != nil {
 			return nil, err
 		}
-		// Scope is resolved only for a new operation. A committed replay does not
-		// depend on today's rows or provider state.
-		if err := q.SetCatalogBatchMerchant(ctx, mid.String()); err != nil {
-			return nil, err
-		}
-		scoped.localCatalogOnly = true
-		scoped.catalogPreparedLinks = prepared.links
-		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision, EntitlementChanges: []billing.EntitlementChange{}}
-		scoped.catalogKeyActor = receipt.ApplicationID
-		scoped.catalogKeyChanges = &receipt.EntitlementChanges
 		for _, product := range params.Products {
 			for _, price := range product.Prices {
 				if price.PSPLinks.Set {
@@ -135,20 +132,68 @@ func (s *Service) commitCatalogApplication(ctx context.Context, params catalogwi
 				}
 			}
 		}
-		if err := scoped.replaceEntitlements(ctx, params.EntitlementReplacements, receipt); err != nil {
-			return nil, err
-		}
-		if err := scoped.applyCatalogProducts(ctx, params, receipt); err != nil {
-			return nil, err
-		}
-		if err := scoped.applyCatalogBilling(ctx, params); err != nil {
-			return nil, err
-		}
-		receipt.AppliedRevision, err = q.AdvanceCatalogRevision(ctx, mid.UUID())
+		owners, err := readCatalogOwners(ctx, q, mid.UUID())
 		if err != nil {
 			return nil, err
 		}
-		if err := scoped.recordCatalogReceipt(ctx, receipt, params.SchemaVersion, digest); err != nil {
+		plan, err := planCatalogApplication(params, scoped.catalogBefore, owners, prepared.links, force)
+		if err != nil {
+			return nil, err
+		}
+		// Scope is resolved only for a new operation. A committed replay does not
+		// depend on today's rows or provider state.
+		if err := q.SetCatalogBatchMerchant(ctx, mid.String()); err != nil {
+			return nil, err
+		}
+		scoped.localCatalogOnly = true
+		scoped.catalogPreparedLinks = prepared.links
+		receipt := &billing.CatalogApplicationReceipt{ApplicationID: fmt.Sprintf("sha256:%x", digest), BaseRevision: revision,
+			EntitlementChanges: []billing.EntitlementChange{}, Changes: []billing.CatalogChange{}, Conflicts: plan.conflicts}
+		scoped.catalogKeyActor = receipt.ApplicationID
+		scoped.catalogKeyChanges = &receipt.EntitlementChanges
+		if err := scoped.replaceEntitlements(ctx, plan.document.EntitlementReplacements, receipt); err != nil {
+			return nil, err
+		}
+		if err := scoped.applyCatalogProducts(ctx, plan.document, receipt); err != nil {
+			return nil, err
+		}
+		if err := scoped.applyCatalogBilling(ctx, plan.document); err != nil {
+			return nil, err
+		}
+		if err := scoped.pruneCatalogObjects(ctx, plan.prune); err != nil {
+			return nil, err
+		}
+		after, err := readCatalogState(ctx, q, mid.UUID())
+		if err != nil {
+			return nil, err
+		}
+		changes, err := scoped.recordCatalogApply(ctx, q, mid.UUID(), scoped.catalogBefore, after, plan, receipt.ApplicationID)
+		if err != nil {
+			return nil, err
+		}
+		receipt.Changes = changes
+		receipt.ProductsChanged, receipt.PricesChanged = 0, 0
+		for _, change := range changes {
+			switch change.Object {
+			case billing.CatalogObjectProduct:
+				receipt.ProductsChanged++
+			case billing.CatalogObjectPrice:
+				receipt.PricesChanged++
+			}
+		}
+		recorded := len(plan.conflicts) == 0
+		receipt.AppliedRevision = revision
+		if recorded || len(changes) > 0 {
+			if receipt.AppliedRevision, err = q.AdvanceCatalogRevision(ctx, mid.UUID()); err != nil {
+				return nil, err
+			}
+		}
+		if recorded {
+			if err := scoped.recordCatalogReceipt(ctx, receipt, params.SchemaVersion, digest); err != nil {
+				return nil, err
+			}
+		}
+		if err := scoped.reportCatalogConflicts(ctx, receipt); err != nil {
 			return nil, err
 		}
 		if err := q.SetCatalogBatchMerchant(ctx, ""); err != nil {
@@ -245,27 +290,12 @@ func (s *Service) applyCatalogProducts(ctx context.Context, params catalogwire.A
 				receipt.ProductsChanged++
 			}
 		}
-		if err := s.applyCatalogPrices(ctx, p, decl.Prices, params.Prune, receipt); err != nil {
+		if err := s.applyCatalogPrices(ctx, p, decl.Prices, receipt); err != nil {
 			return err
 		}
 		if !p.Archived {
 			if err := s.validateProductCreditUpdate(ctx, p.ID, p.CreditGrant); err != nil {
 				return err
-			}
-		}
-	}
-	if params.Prune {
-		for key, p := range existing {
-			if _, kept := params.Products[key]; !kept {
-				if !p.Archived {
-					if _, err := s.DeactivateProduct(ctx, p.ID); err != nil {
-						return err
-					}
-					receipt.ProductsChanged++
-				}
-				if err := s.applyCatalogPrices(ctx, p, nil, true, receipt); err != nil {
-					return err
-				}
 			}
 		}
 	}
@@ -283,7 +313,7 @@ func productApplicationChanges(p *billing.Product, r UpdateProductRequest) bool 
 	return r.SetCreditGrant && !reflect.DeepEqual(r.CreditGrant, p.CreditGrant) || r.DisplayName != nil && *r.DisplayName != p.DisplayName || r.Description != nil && *r.Description != p.Description || r.TierRank != nil && *r.TierRank != p.TierRank || r.SetOwnership && r.Ownership != declaredOwnership(p) || r.Archived != nil && *r.Archived != p.Archived || r.SetTierGroup && !reflect.DeepEqual(r.TierGroup, p.TierGroup) || r.SetEntitlements && !reflect.DeepEqual(r.Entitlements, p.Entitlements)
 }
 
-func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations map[string]catalogwire.ApplyPrice, prune bool, receipt *billing.CatalogApplicationReceipt) error {
+func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Product, declarations map[string]catalogwire.ApplyPrice, receipt *billing.CatalogApplicationReceipt) error {
 	prices, err := s.ListPricesByProduct(ctx, product.ID, false)
 	if err != nil {
 		return err
@@ -336,16 +366,6 @@ func (s *Service) applyCatalogPrices(ctx context.Context, product *billing.Produ
 			return err
 		}
 		receipt.PricesChanged++
-	}
-	if prune {
-		for _, p := range prices {
-			if _, kept := declarations[p.Key]; !p.Archived && !kept {
-				if _, err := s.DeactivatePrice(ctx, p.ID); err != nil {
-					return err
-				}
-				receipt.PricesChanged++
-			}
-		}
 	}
 	return nil
 }

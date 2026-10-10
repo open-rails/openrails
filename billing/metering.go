@@ -21,11 +21,13 @@ type Meter struct {
 	// (sum and count).
 	BillingSupported bool           `json:"billing_supported"`
 	RateCard         *MeterRateCard `json:"rate_card"`
-	OverrideCount    int64          `json:"override_count"`
-	HasActivity      bool           `json:"has_activity"`
-	LastEventAt      *time.Time     `json:"last_event_at"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
+	// Revision advances on every change to the meter or its rate card.
+	Revision      int64      `json:"revision"`
+	OverrideCount int64      `json:"override_count"`
+	HasActivity   bool       `json:"has_activity"`
+	LastEventAt   *time.Time `json:"last_event_at"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // SetMeterParams declares a meter. EventType defaults to the meter's key; a
@@ -38,6 +40,9 @@ type SetMeterParams struct {
 	Unit          string                             `json:"unit,omitempty"`
 	GroupBy       map[string]string                  `json:"group_by,omitempty"`
 	RateCard      catalog.Field[MeterRateCardParams] `json:"rate_card,omitzero"`
+	// ExpectedRevision refuses the change with revision_mismatch unless the
+	// meter is at this revision; 0 expects no meter.
+	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }
 
 // MeterRateCard is the rate card that prices a meter's usage, under the
@@ -69,8 +74,10 @@ type RateOverride struct {
 	MeterKey      string             `json:"meter_key"`
 	Price         catalog.RatePrice  `json:"price"`
 	Allowance     *catalog.Allowance `json:"allowance"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	// Revision advances on every change to the override.
+	Revision  int64     `json:"revision"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // RateOverrideListParams pages customers' rate overrides, by customer then
@@ -85,4 +92,7 @@ type RateOverrideListParams struct {
 type SetRateOverrideParams struct {
 	Price     catalog.RatePrice  `json:"price"`
 	Allowance *catalog.Allowance `json:"allowance,omitempty"`
+	// ExpectedRevision refuses the change with revision_mismatch unless the
+	// override is at this revision; 0 expects no override.
+	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 }

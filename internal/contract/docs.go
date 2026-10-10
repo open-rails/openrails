@@ -20,7 +20,7 @@ var groupTitles = []struct {
 	{routes.Checkout, "Checkout (public)", "What a checkout page needs: the catalog a buyer may see, checkout, checkout sessions."},
 	{routes.Customer, "Customer (`/v1/me`)", "A customer acting on its own account."},
 	{routes.Admin, "Admin", "Staff work on customers: staff, machines and the Go client alike. A read needs the host's `Permissions.AdminRead`, a write its `Permissions.AdminWrite`."},
-	{routes.CatalogWrite, "Catalog edits", "Every catalog edit, behind the host's `Permissions.CatalogWrite`; each refuses while the deployment's catalog is not edited over HTTP (`catalog_updates_disabled`)."},
+	{routes.CatalogWrite, "Catalog edits", "Every catalog edit and document application, behind the host's `Permissions.CatalogWrite`. A document skips an object whose field an edit set differently; an edit may send `expected_revision` and is refused with `revision_mismatch` if the object moved on."},
 	{routes.MerchantConfig, "Merchant configuration", "The merchant's own configuration, every route behind the host's `Permissions.MerchantConfig`."},
 	{routes.Webhooks, "Provider webhooks", "Inbound provider callbacks."},
 	{routes.Provisioning, "Provisioning (SCIM 2.0)", "A merchant's directory (AuthKit, Okta, Entra ID) pushing its users, which become its customers' contacts (RFC 7643, RFC 7644). Each request carries the merchant's provisioning token, or a client-credentials access token with scope `scim` from its trusted issuer. Bodies are `application/scim+json`, described by the standard and the discovery routes, so `api/openapi.json` leaves these routes out. The standalone server serves them; an embedded host with `Routes.Provisioning`."},

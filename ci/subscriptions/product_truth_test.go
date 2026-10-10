@@ -80,7 +80,7 @@ func TestOwnerReplaceContentMovesEveryHolder(t *testing.T) {
 	c.grant(first, nil, nil)
 	other.grant(second, nil, nil)
 	receipt, err := client.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion,
-		EntitlementReplacements: []catalog.EntitlementReplacement{{From: "content:a", To: "content:b"}}})
+		EntitlementReplacements: []catalog.EntitlementReplacement{{From: "content:a", To: "content:b"}}}, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	require.Len(t, receipt.EntitlementChanges, 2)
 	for _, change := range receipt.EntitlementChanges {

@@ -72,7 +72,7 @@ func TestSolanaTierChangeStaysInGroupAndPaysForMore(t *testing.T) {
 	}
 	params, err := catalog.ParseApplicationYAML([]byte(doc.String()))
 	require.NoError(t, err)
-	_, err = w.client[embedded].ApplyCatalog(t.Context(), params)
+	_, err = w.client[embedded].ApplyCatalog(t.Context(), params, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	price := func(key string) string { return priceID(t, w, key+"-"+sfx, key+"-"+sfx+"-monthly") }
 

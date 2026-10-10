@@ -44,9 +44,10 @@ This is an availability probe, not a production cost benchmark. The populated
 `internal/db/querytest` performance suite retains normal planner settings and
 checks actual execution time and buffer work.
 An indexed equality is the structural rule's heuristic, not a hard row limit.
-Internal catalog `GetAll` operations and the catalog dump return the merchant's
-whole declared catalog; its size follows the merchant's configuration, not
-customer activity, so they are PERMANENT exemptions.
+Internal catalog `GetAll` operations, the catalog dump and the catalog state a
+catalog write diffs for field ownership return the merchant's whole declared
+catalog (and its field owners); its size follows the merchant's configuration,
+not customer activity, so they are PERMANENT exemptions.
 The session uses the normal test login with explicit merchant parameters and
 session state for queries that call current_merchant_id(). Merchant predicates
 must be index-backed; no RLS policy adds a missing predicate for the query.

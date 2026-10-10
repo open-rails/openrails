@@ -117,7 +117,7 @@ func TestEntitlementReplacementsMoveKeysAcrossProducts(t *testing.T) {
 			require.NoError(t, err)
 
 			replace := func(pairs ...catalog.EntitlementReplacement) (*billing.CatalogApplicationReceipt, error) {
-				return c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion, EntitlementReplacements: pairs})
+				return c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion, EntitlementReplacements: pairs}, billing.ApplyCatalogParams{})
 			}
 			receipt, err := replace(catalog.EntitlementReplacement{From: a, To: b}, catalog.EntitlementReplacement{From: gone})
 			require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestCatalogApplicationReportsKeyChanges(t *testing.T) {
 		t.Helper()
 		document, err := catalog.ParseApplicationYAML(fmt.Appendf(nil, "schema_version: 1\nproducts:\n  course-bundle:\n    display_name: Course bundle\n    entitlements: %s\n", keys))
 		require.NoError(t, err)
-		receipt, err := c.ApplyCatalog(t.Context(), document)
+		receipt, err := c.ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 		return receipt
 	}

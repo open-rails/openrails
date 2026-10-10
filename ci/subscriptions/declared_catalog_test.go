@@ -69,8 +69,8 @@ func (w *world) bootDeclared(ctx context.Context, catalog *catalog.Application) 
 	}, openrails.Deps{Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 }
 
-// A startup batch does not own the catalog: client edits remain available while
-// the host's file refuses HTTP writes, and rebooting the same file never undoes
+// A startup batch shares the catalog with edits: staff edit over HTTP while the
+// host's file applies on every start, and rebooting the same file never undoes
 // those edits.
 func TestDeclaredCatalog(t *testing.T) {
 	w := prepareWorld(t, 12)
@@ -87,26 +87,29 @@ func TestDeclaredCatalog(t *testing.T) {
 	require.NoError(t, err)
 	_, err = w.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Edited in code")})
 	require.NoError(t, err)
-	var refused map[string]any
-	status := w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &refused)
-	require.Equal(t, http.StatusForbidden, status, "Config.Catalog is the truth: HTTP writes are refused while reads remain available")
-	code, _ := errorOf(refused)
-	require.Equal(t, "catalog_updates_disabled", code)
+	var edited map[string]any
+	status := w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &edited)
+	require.Equal(t, http.StatusOK, status, "Config.Catalog never closes the catalog routes: %v", edited)
 	revision := w.catalogRevision()
 	w.restart()
-	require.Equal(t, revision, w.catalogRevision(), "reboot replays the batch despite a later programmatic edit")
+	require.Equal(t, revision, w.catalogRevision(), "reboot replays the batch despite later edits")
 	product, err = productByKey(t.Context(), w.client[embedded], key)
 	require.NoError(t, err)
-	require.Equal(t, "Edited in code", product.DisplayName)
+	require.Equal(t, "HTTP edit", product.DisplayName)
 
-	// Different content is a new partial batch; existing subscribers stay pinned.
+	// Different content applies on the next start, except the title an edit set;
+	// existing subscribers stay pinned.
 	title, amount = "Platinum", 12_000_000
 	w.restart()
 	current, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
 	require.NoError(t, err)
 	require.NotEqual(t, original.ID, current.ID)
+	product, err = productByKey(t.Context(), w.client[embedded], key)
+	require.NoError(t, err)
+	require.Equal(t, "HTTP edit", product.DisplayName)
+	require.Equal(t, []string{"catalog"}, w.openFindings(catalogConflictsFinding))
 	require.True(t, buyer.entitled(key))
-	replay, err := w.client[embedded].ApplyCatalog(t.Context(), declaredFile(t, key, "Gold", 9_990_000))
+	replay, err := w.client[embedded].ApplyCatalog(t.Context(), declaredFile(t, key, "Gold", 9_990_000), billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	require.True(t, replay.Replayed, "the original file cannot undo the newer batch")
 	currentAgain, err := priceByKey(t.Context(), w.client[embedded], key, key+"-monthly")
@@ -122,7 +125,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	for i := range clients {
 		wg.Go(func() {
 			<-start
-			clients[i], errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "Concurrent", amount))
+			clients[i], errs[i] = w.bootDeclared(t.Context(), declaredFile(t, key, "HTTP edit", 14_000_000))
 		})
 	}
 	close(start)
@@ -132,6 +135,7 @@ func TestDeclaredCatalog(t *testing.T) {
 		require.NoError(t, c.Close(t.Context()))
 	}
 	require.Equal(t, revision+1, w.catalogRevision())
+	require.Empty(t, w.openFindings(catalogConflictsFinding), "a file that agrees closes the finding")
 }
 
 // A provider reference New cannot confirm does not hold New: the application

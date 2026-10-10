@@ -204,7 +204,7 @@ products:
           unit_amount: "%[2]s"
 `, key, unitAmount)))
 		require.NoError(t, err)
-		_, err = client.ApplyCatalog(t.Context(), params)
+		_, err = client.ApplyCatalog(t.Context(), params, billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 	}
 	apply("10")

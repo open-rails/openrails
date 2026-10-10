@@ -34,7 +34,10 @@ through `CreatePrice` with `ProductID` and `UpdatePrice`. Provider writes never
 run inside the local transaction.
 
 Updates are merge patches (`catalog.Field`): omitted fields keep their values,
-`catalog.Null` clears one. Reads are `GetProduct`/`GetPrice` by ID, or
+`catalog.Null` clears one. Send the `Revision` you read as `ExpectedRevision`
+to refuse an update over someone else's change (`revision_mismatch`); see
+[catalog ownership](catalog-ownership.md) for how edits and catalog documents
+share fields. Reads are `GetProduct`/`GetPrice` by ID, or
 `ListProducts` with `Keys` and `ListPrices` with `ProductKey` and `Key` (a key's
 current price is its one not archived); lists return `billing.ListPage` with a cursor.
 

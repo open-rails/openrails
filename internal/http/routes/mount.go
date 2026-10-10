@@ -194,9 +194,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 	case AuthCustomer:
 		mw = append(e.customerGates(route), conn...)
 	case AuthMerchant:
-		if route.Group == CatalogWrite {
-			mw = append(mw, catalogWriteGuardMW(e.Runtime))
-		}
 		mw = append(mw, e.staffGates(route)...)
 		// The staff gate stays outermost; the actor-keyed operation limiter
 		// runs before any merchant DB connection is pinned.

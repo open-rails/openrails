@@ -47,7 +47,8 @@ not sufficient coverage.
   fields refuse. Reconciliation runs are diagnostic and excluded. Other run
   kinds refuse. The local billing-restore receipt is excluded from re-export.
 - Maintenance note/error text is diagnostic and excluded. Generated entitlement
-  periods and generated run-class columns are reconstructed by PostgreSQL.
+  periods, generated run-class columns and price-key revisions (`price_keys`)
+  are reconstructed by PostgreSQL. Catalog field owners are retained.
 - PSP settings, signer references and declared public configuration are retained.
   Source diagnostic labels, credential-version/validation markers, known API-key
   material and RPC API keys are excluded. Unknown evidence keys refuse. Custodian

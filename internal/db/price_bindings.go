@@ -24,8 +24,9 @@ func (d *DB) PriceFromGen(ctx context.Context, row gen.BillingPrice) (*models.Pr
 	return price, nil
 }
 
-// LoadPricePSPBindings includes archived accounts: their references still own
-// historical money and subscriptions. New checkout admission applies separately.
+// LoadPricePSPBindings loads each price's PSP bindings and its key's revision.
+// Bindings include archived accounts: their references still own historical
+// money and subscriptions. New checkout admission applies separately.
 func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, pspID *uuid.UUID) error {
 	if len(prices) == 0 {
 		return nil
@@ -43,6 +44,13 @@ func (d *DB) LoadPricePSPBindings(ctx context.Context, prices []*models.Price, p
 		price.PSPLinks = nil
 		ids = append(ids, price.ID)
 		byID[price.ID] = price
+	}
+	revisions, err := d.Gen(ctx).ListPriceKeyRevisions(ctx, gen.ListPriceKeyRevisionsParams{MerchantID: mid.UUID(), PriceIds: ids})
+	if err != nil {
+		return err
+	}
+	for _, row := range revisions {
+		byID[row.ID].KeyRevision = row.Revision
 	}
 	rows, err := d.Gen(ctx).ListPricePSPBindings(ctx, gen.ListPricePSPBindingsParams{MerchantID: mid.UUID(), PriceIds: ids, PspID: pspID})
 	if err != nil {

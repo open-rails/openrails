@@ -49,16 +49,18 @@ func declaredCatalog(cfg config.Config) (*catalog.Application, error) {
 }
 
 // applyDeclaredCatalog applies Config.Catalog before New returns. A refusal
-// fails New; a transient database error is retried within ctx. A provider
-// reference not confirmed in time leaves the application to the background,
-// and Ready fails until it commits.
+// fails New; a transient database error is retried within ctx. An object an
+// edit changed is skipped, not refused: New succeeds, the finding names it
+// and the next start retries it. A provider reference not confirmed in time
+// leaves the application to the background, and Ready fails until it commits.
 func (e *Engine) applyDeclaredCatalog(ctx context.Context, params catalog.Application) error {
 	rt := e.App.Runtime
 	mid := rt.ConfiguredMerchant()
 	for attempt := 0; ; attempt++ {
-		_, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Now().Add(declaredCatalogProviderWait))
+		receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Now().Add(declaredCatalogProviderWait))
 		switch {
 		case err == nil:
+			logCatalogConflicts(receipt)
 			return nil
 		case ctx.Err() != nil:
 			return fmt.Errorf("openrails: apply Config.Catalog: %w", ctx.Err())
@@ -84,7 +86,10 @@ func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, params catalog.Ap
 	rt.Go("declared catalog", func(ctx context.Context) {
 		last := ""
 		err := retry.Forever(ctx, func(ctx context.Context) error {
-			_, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Time{})
+			receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Time{})
+			if err == nil {
+				logCatalogConflicts(receipt)
+			}
 			return err
 		}, func(_ int, err error) {
 			rt.ReportDeclaredCatalog(fmt.Errorf("declared catalog not applied yet: %w", err))
@@ -98,6 +103,17 @@ func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, params catalog.Ap
 			log.Info("openrails: Config.Catalog applied")
 		}
 	})
+}
+
+// logCatalogConflicts warns of each object Config.Catalog skipped because an
+// edit set its fields; the catalog finding names them too.
+func logCatalogConflicts(receipt *billing.CatalogApplicationReceipt) {
+	if receipt == nil {
+		return
+	}
+	for _, line := range service.ReadableCatalogConflicts(receipt.Conflicts) {
+		log.Warn("openrails: Config.Catalog: " + line)
+	}
 }
 
 // transientDatabaseError is a database failure worth retrying: a lost or

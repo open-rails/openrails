@@ -12,19 +12,20 @@ var page = []Param{text("cursor"), integer("limit")}
 
 // Error codes of the catalog's nouns.
 var (
-	productErrors = []string{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict"}
-	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "trial_unsupported_on_rail"}
+	productErrors = []string{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict", "revision_mismatch"}
+	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "revision_mismatch", "trial_unsupported_on_rail"}
 	meterErrors   = []string{
 		"allowance_meter_not_found", "allowance_source_in_use", "allowance_source_invalid", "default_rate_card_not_found", "default_rate_card_required",
 		"meter_in_use", "meter_rate_card_conflict", "rate_card_currency_mismatch", "rate_card_has_overrides", "rate_card_product_not_found",
-		"usage_meter_invalid", "usage_meter_not_found", "usage_rate_card_invalid",
+		"revision_mismatch", "usage_meter_invalid", "usage_meter_not_found", "usage_rate_card_invalid",
 	}
 )
 
 // catalogRoutes is what a merchant sells: products, prices, meters and their
 // rate cards. The public product list, each with its current prices, is what a
-// buyer may see; the merchant routes administer the catalog. A write is mounted only where the deployment allows
-// catalog updates.
+// buyer may see; the merchant routes administer the catalog. A document
+// applies as the apply manager and the edits as the edit manager: a document
+// skips an object whose field an edit set differently.
 var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/catalog/products", Group: Checkout, Auth: AuthPublic,
 		Query: page, Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Handler: h(handlers.ListPublicProducts)},
@@ -32,7 +33,7 @@ var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/catalog/revision", Group: Admin, Auth: AuthMerchant, Name: "GetCatalogRevision", Level: LevelRead,
 		Responses: []Reply{{200, billing.CatalogRevision{}}}, Handler: h(handlers.GetCatalogRevision)},
 	{Method: POST, Path: "/v1/admin/catalog/applications", Group: CatalogWrite, Auth: AuthMerchant, Name: "ApplyCatalog", Sensitive: true,
-		Request: catalog.Application{}, Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
+		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 	{Method: POST, Path: "/v1/admin/catalog/drift/refresh", Group: CatalogWrite, Auth: AuthMerchant, Name: "RefreshCatalogDrift", Sensitive: true,
 		Responses: []Reply{{200, billing.CatalogDriftRefresh{}}}, Handler: h(handlers.RefreshCatalogDrift)},
 

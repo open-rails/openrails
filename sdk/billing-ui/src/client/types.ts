@@ -79,8 +79,10 @@ export const pspLinkStateSchema = z.object({
 export const priceSchema = z.object({
   id: z.string(),
   key: z.string(),
-  /** Revision within this product/key pair; absent on older servers. */
+  /** The price key's revision: every change to any of its versions; absent on older servers. */
   revision: z.number().int().nonnegative().optional(),
+  /** This price's terms within its key, from zero; absent on older servers. */
+  version: z.number().int().nonnegative().optional(),
   product_id: z.string(),
   archived: z.boolean(),
   unit_amount: amount,

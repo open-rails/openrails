@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/routebundle"
 )
@@ -29,7 +28,7 @@ import (
 // touches storage.
 func httpRuntime() *Engine {
 	c := &config.Config{ProviderWriteMode: config.ProviderWriteModeReadOnly}
-	rt := &app.Runtime{Config: c, CatalogEdits: &catalogpolicy.Exposure{}}
+	rt := &app.Runtime{Config: c}
 	rt.SetConfiguredMerchant(billing.MerchantID(uuid.MustParse("11111111-1111-4111-8111-111111111111")))
 	return &Engine{App: &app.App{Config: c, Runtime: rt}}
 }
@@ -187,31 +186,20 @@ func TestCatalogEditsFollowTheCatalogWriteMount(t *testing.T) {
 		return reads, writes
 	}
 	fake := &authtest.Fake{}
-	closed := httpRuntime()
-	reads, n := writes(closed, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()})
+	rt := httpRuntime()
+	reads, n := writes(rt, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()})
 	require.Positive(t, reads)
 	require.Zero(t, n, "catalog writes are CatalogWrite's")
-	require.False(t, closed.App.Runtime.CatalogEdits.Enabled())
-	mux := mountAt(t, closed, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()}, "/api/pay")
+	mux := mountAt(t, rt, config.Routes{Auth: fake, Permissions: authtest.AdminPermissions()}, "/api/pay")
 	for _, path := range []string{"/api/pay/v1/admin/catalog/products", "/api/pay/v1/admin/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
-	_, err := closed.Routes(config.Routes{Auth: fake, Permissions: authtest.Permissions()})
-	require.ErrorContains(t, err, "every mount must agree")
-	_, err = closed.Routes(config.Routes{Auth: fake})
-	require.NoError(t, err, "a mount without the admin API decides nothing")
-
-	open := httpRuntime()
-	_, n = writes(open, config.Routes{Auth: fake, Permissions: authtest.Permissions()})
+	// Mounts choose independently; a host's catalog document never closes them.
+	rt.App.Config.Catalog = &pkgcatalog.Application{}
+	_, n = writes(rt, config.Routes{Auth: fake, Permissions: authtest.Permissions()})
 	require.Positive(t, n)
-	require.True(t, open.App.Runtime.CatalogEdits.Enabled(), "the service guard follows the mount")
-
-	// A host whose catalog document is the truth serves the writes refused.
-	declared := httpRuntime()
-	declared.App.Config.Catalog = &pkgcatalog.Application{}
-	_, n = writes(declared, config.Routes{Auth: fake, Permissions: config.Permissions{AdminRead: authtest.Perm(authtest.StaffRead), CatalogWrite: authtest.Perm(authtest.StaffCatalog)}})
-	require.Positive(t, n)
-	require.False(t, declared.App.Runtime.CatalogEdits.Enabled(), "Config.Catalog is the truth")
+	_, err := rt.Routes(config.Routes{Auth: fake})
+	require.NoError(t, err)
 
 	_, err = httpRuntime().Routes(config.Routes{Permissions: authtest.AdminPermissions()})
 	require.ErrorContains(t, err, "Routes.Auth is required", "the admin API never mounts open")

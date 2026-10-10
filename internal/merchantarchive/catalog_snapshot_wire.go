@@ -42,11 +42,12 @@ type CatalogPSPIdentity struct {
 	AccountID   string `json:"account_id"`
 }
 
-// The order is also the foreign-key insertion order. These are all nine
+// The order is also the foreign-key insertion order. These are all ten
 // persisted catalog tables; product/rate-card state prior to updates was never
-// retained and cannot be reconstructed by an export.
+// retained and cannot be reconstructed by an export. Price keys are rebuilt
+// by the prices triggers.
 var catalogProfiles = func() []contract.Profile {
-	names := []string{"catalog_meters", "products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_rate_cards", "catalog_applications"}
+	names := []string{"catalog_meters", "products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_rate_cards", "catalog_field_owners", "catalog_applications"}
 	out := make([]contract.Profile, 0, len(names)+1)
 	for _, name := range names {
 		for _, p := range contract.Profiles {
@@ -171,6 +172,12 @@ func catalogDigest(document CatalogSnapshot) (string, error) {
 // each product's keys become rows valid from before key history, as
 // migration 15 converts them. The digest is the original document's.
 func upgradeCatalogSnapshot(document CatalogSnapshot) (CatalogSnapshot, error) {
+	if _, current := document.Tables["catalog_field_owners"]; !current {
+		// A snapshot from before field ownership: no field had an owner.
+		tables := maps.Clone(document.Tables)
+		tables["catalog_field_owners"] = []map[string]json.RawMessage{}
+		document.Tables = tables
+	}
 	if _, current := document.Tables["product_entitlements"]; current {
 		return document, nil
 	}

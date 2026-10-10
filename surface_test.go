@@ -57,7 +57,7 @@ var embeddedMethods = map[string]string{
 // routeArguments are the arguments of the methods that refuse a request with
 // every field set (they take one of several).
 var routeArguments = map[string][]any{
-	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}},
+	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}, billing.ApplyCatalogParams{}},
 	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
 	"ListCheckoutOptions":   {billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "monthly"}},

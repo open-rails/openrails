@@ -22,17 +22,20 @@ import (
 func (s *Service) keyEdit(ctx context.Context) catalog.KeyEdit {
 	actor := s.catalogKeyActor
 	if actor == "" {
-		if uc, ok := billingauth.FromContext(ctx); ok && strings.TrimSpace(uc.UserID) != "" {
-			actor = uc.UserID
-		}
-	}
-	if actor == "" {
-		actor = "api"
+		actor = editActor(ctx)
 	}
 	if len(actor) > 255 {
 		actor = actor[:255]
 	}
 	return catalog.KeyEdit{At: s.now().UTC(), Actor: actor}
+}
+
+// editActor is who made an edit: the signed-in user, or the API.
+func editActor(ctx context.Context) string {
+	if uc, ok := billingauth.FromContext(ctx); ok && strings.TrimSpace(uc.UserID) != "" && len(uc.UserID) <= 255 {
+		return uc.UserID
+	}
+	return "api"
 }
 
 func entitlementChange(p *models.Product, change catalog.KeyChange) billing.EntitlementChange {

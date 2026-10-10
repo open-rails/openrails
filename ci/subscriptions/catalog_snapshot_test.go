@@ -34,12 +34,12 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	declaration := func(amount int64) *catalog.Application {
 		return &catalog.Application{SchemaVersion: 1, Products: map[string]catalog.ApplyProduct{"retained-video": {DisplayName: catalog.Value("Video"), Entitlements: catalog.Value([]string{"video:101"}), Prices: map[string]catalog.ApplyPrice{"buy": {Currency: catalog.Value("USD"), UnitAmount: catalog.Value(amount)}}}}}
 	}
-	_, err := c.ApplyCatalog(t.Context(), declaration(4000000))
+	_, err := c.ApplyCatalog(t.Context(), declaration(4000000), billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	first, err := priceByKey(t.Context(), c, "retained-video", "buy")
 	require.NoError(t, err)
 	paid := buyer.mustCheckout(embedded, order{price: first.ID, rail: "nmi", method: method})
-	_, err = c.ApplyCatalog(t.Context(), declaration(7000000))
+	_, err = c.ApplyCatalog(t.Context(), declaration(7000000), billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	// A window that starts after the purchase leaves it alone: the archive only retires the product.
 	_, err = c.ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: first.ProductID, PurchaseAction: billing.PurchaseActionReview,
@@ -65,7 +65,7 @@ products:
       price: {model: per_unit, currency: USD, per_unit: {unit_amount: "1000"}}
 `))
 	require.NoError(t, err)
-	_, err = c.ApplyCatalog(t.Context(), rates)
+	_, err = c.ApplyCatalog(t.Context(), rates, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.catalog_rate_cards(merchant_id,customer_id,ordinal,meter_key,payment_term,filter,price) VALUES($1,$2,1,'requests','in_arrears','null','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"500"}}')`), mid.UUID(), uuid.MustParse(buyer.id))
 	require.NoError(t, err)

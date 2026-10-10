@@ -74,7 +74,7 @@ func SetMeter(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	if err := svc.SetUsageMeter(r.Request.Context(), meter, card, params.RateCard.Set && params.RateCard.Null); err != nil {
+	if err := svc.SetUsageMeter(r.Request.Context(), meter, card, params.RateCard.Set && params.RateCard.Null, params.ExpectedRevision); err != nil {
 		writeMeteringError(r, err)
 		return
 	}

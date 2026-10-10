@@ -32,7 +32,7 @@ func SetRateOverride(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	if err := svc.SetUsageRateCard(r.Request.Context(), billingservice.UsageRateCardInput{Payer: &customer, MeterKey: key, Price: params.Price, Allowance: params.Allowance}); err != nil {
+	if err := svc.SetUsageRateCard(r.Request.Context(), billingservice.UsageRateCardInput{Payer: &customer, MeterKey: key, Price: params.Price, Allowance: params.Allowance, ExpectedRevision: params.ExpectedRevision}); err != nil {
 		writeMeteringError(r, err)
 		return
 	}

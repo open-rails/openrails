@@ -7,12 +7,21 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 )
 
+// CatalogApplicationQuery is ApplyCatalog's query: force overwrites the
+// fields an edit set.
+type CatalogApplicationQuery struct {
+	Force bool `form:"force"`
+}
+
 // ApplyCatalog applies a catalog document, JSON or YAML.
 func ApplyCatalog(r *httprequest.Request) {
+	var query CatalogApplicationQuery
+	if !r.BindQuery(&query) {
+		return
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Request.Body, catalog.MaxApplicationBytes+1))
 	if err != nil {
 		r.ErrorCode(billing.CodeInvalidRequestBody, "could not read catalog application")
@@ -37,7 +46,7 @@ func ApplyCatalog(r *httprequest.Request) {
 	if !ok {
 		return
 	}
-	receipt, err := svc.ApplyCatalog(r.Request.Context(), *application)
+	receipt, err := svc.ApplyCatalog(r.Request.Context(), *application, billing.ApplyCatalogParams{Force: query.Force})
 	if err != nil {
 		writeCatalogError(r, err)
 		return
@@ -45,8 +54,7 @@ func ApplyCatalog(r *httprequest.Request) {
 	r.JSON(http.StatusOK, receipt)
 }
 
-// GetCatalogRevision reads the catalog revision and whether catalog writes
-// are accepted.
+// GetCatalogRevision reads the catalog revision.
 func GetCatalogRevision(r *httprequest.Request) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {
@@ -57,10 +65,5 @@ func GetCatalogRevision(r *httprequest.Request) {
 		writeCatalogError(r, err)
 		return
 	}
-	var exposure *catalogpolicy.Exposure
-	if r.State != nil {
-		exposure = r.State.CatalogEdits
-	}
-	allowed := catalogpolicy.Check(r.Request.Context(), exposure) == nil
-	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision, WritesAllowed: allowed})
+	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision})
 }

@@ -275,8 +275,11 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 }
 
 func readCatalogBilling(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID) (SyncCatalogSidecarsRequest, error) {
+	return readCatalogBillingQueries(ctx, gen.New(tx), merchantID)
+}
+
+func readCatalogBillingQueries(ctx context.Context, q *gen.Queries, merchantID uuid.UUID) (SyncCatalogSidecarsRequest, error) {
 	var out SyncCatalogSidecarsRequest
-	q := gen.New(tx)
 	meters, err := q.ListCatalogMeters(ctx, merchantID)
 	if err != nil {
 		return out, err

@@ -25,7 +25,6 @@ import (
 
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/routesurface"
@@ -138,10 +137,6 @@ type Runtime struct {
 	// ProviderRefreshQueue is where per-merchant provider refresh jobs run.
 	ProviderRefreshQueue string
 	RiverClient          *river.Client[pgx.Tx]
-	// CatalogEdits is whether catalog writes reach callers other than the
-	// process owner; the admin API's mount decides it (Routes.Permissions.CatalogWrite,
-	// or a standalone server's secret backend).
-	CatalogEdits *catalogpolicy.Exposure
 
 	SubscriptionService      *subscriptions.SubscriptionService
 	ProductService           *catalog.ProductService

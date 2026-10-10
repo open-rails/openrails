@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingimport"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/db"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
@@ -126,8 +125,8 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"metering", billingservice.ErrDefaultRateCardRequired, want{409, "default_rate_card_required", ""}},
 		{"metering", billingservice.ErrRateCardHasOverrides, want{409, "rate_card_has_overrides", ""}},
 		{"metering", billingservice.ErrRateCardCurrencyMismatch, want{409, "rate_card_currency_mismatch", ""}},
-		{"metering", catalogpolicy.ErrUpdatesDisabled, want{403, "catalog_updates_disabled", ""}},
-		{"catalog", catalogpolicy.ErrUpdatesDisabled, want{403, "catalog_updates_disabled", ""}},
+		{"metering", apperr.New(409, billing.CodeRevisionMismatch, "meter moved"), want{409, "revision_mismatch", ""}},
+		{"catalog", apperr.New(409, billing.CodeRevisionMismatch, "product moved"), want{409, "revision_mismatch", ""}},
 	}
 	reworded := func(err error) error {
 		var refusal *apperr.Error

@@ -98,14 +98,14 @@ It preserves subsequent API edits and archived providers. Explicit metadata
 applications carry a stable ID and revision precondition; managed credentials use
 separate publication operations. See [metadata applications](merchant-configuration-applications.md).
 
-Catalogs always use database state. Catalog mutations over HTTP (the remote
-Client included) follow the merchant's source: with `secret_backend: vault` or
-`db` (managed through the API) they are allowed; with `snapshot` (the files are
-the truth) they are refused read-only (`403 catalog_updates_disabled`). Reads
-remain available.
-Trusted operator application is still permitted and uses durable application IDs
-so an unchanged artifact does not overwrite later edits. This does not change
-provider permissions, sandbox/live posture, or `provider_write_mode`.
+Catalogs always use database state, edited over HTTP (the remote Client
+included) whatever the `secret_backend`. `openrails apply-catalog` and the
+applications route apply documents that share the catalog with those edits: a
+document skips a product, price or meter whose field an edit set differently,
+reports it and exits non-zero, unless `--force-conflicts` ([catalog
+ownership](catalog-ownership.md)). An already applied document replays, so it
+never overwrites later edits. This does not change provider permissions,
+sandbox/live posture, or `provider_write_mode`.
 
 Snapshot walkthrough (file layout, YAML secret overlays via
 `merchant_manifest_overlays`, rotation): [self-hosting-mode1.md](self-hosting-mode1.md).

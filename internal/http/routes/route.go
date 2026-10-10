@@ -41,9 +41,8 @@ const (
 	// alike, each route behind the host's AdminRead or AdminWrite by its
 	// Level.
 	Admin Group = "admin"
-	// CatalogWrite is every catalog edit, behind the host's CatalogWrite;
-	// each refuses while the deployment's catalog is not edited over HTTP
-	// (catalogpolicy).
+	// CatalogWrite is every catalog edit and document application, behind
+	// the host's CatalogWrite.
 	CatalogWrite Group = "catalog_write"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
 	// billing import and export, the dashboard layout, behind the host's
@@ -360,15 +359,12 @@ func TierErrors(tier Tier) []string {
 }
 
 // ErrorSets names the shared code sets a route answers besides its own
-// Errors: its tier's, and the request-shape and catalog-write codes where they
-// apply. ErrorSet lists each set's codes.
+// Errors: its tier's, and the request-shape codes where they apply. ErrorSet
+// lists each set's codes.
 func (r Route) ErrorSets() []string {
 	sets := []string{"tier:" + string(r.Auth)}
 	if r.Request != nil || len(r.Query) > 0 {
 		sets = append(sets, "request")
-	}
-	if r.Group == CatalogWrite {
-		sets = append(sets, "catalog_write")
 	}
 	return sets
 }
@@ -378,8 +374,6 @@ func ErrorSet(name string) []string {
 	switch name {
 	case "request":
 		return requestShapeErrors
-	case "catalog_write":
-		return []string{"catalog_updates_disabled"}
 	}
 	if tier, ok := strings.CutPrefix(name, "tier:"); ok {
 		return TierErrors(Tier(tier))

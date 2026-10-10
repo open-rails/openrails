@@ -173,8 +173,8 @@ func TestCatalogPatchSemantics(t *testing.T) {
 		second, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: first.Key, UnitAmount: 2_000_000, Currency: "USD"})
 		require.NoError(t, err)
 		require.Equal(t, first.Key, second.Key)
-		require.EqualValues(t, 0, first.Revision)
-		require.EqualValues(t, 1, second.Revision)
+		require.EqualValues(t, 0, first.Version)
+		require.EqualValues(t, 1, second.Version)
 		require.Equal(t, http.StatusBadRequest, w.staffCall(http.MethodPatch, "/v1/admin/catalog/prices/"+second.ID.String(), map[string]any{"key": "renamed"}, nil), "a key rename cannot rewrite price identity")
 		current, err := priceByKey(t.Context(), c, product.Key, first.Key)
 		require.NoError(t, err)
@@ -195,7 +195,7 @@ func TestCatalogPatchSemantics(t *testing.T) {
 		restored, err := c.UpdatePrice(t.Context(), first.ID, billing.UpdatePriceParams{Archived: catalog.Value(false)})
 		require.NoError(t, err)
 		require.False(t, restored.Archived)
-		require.Equal(t, first.Revision, restored.Revision)
+		require.Equal(t, first.Version, restored.Version)
 	}
 }
 

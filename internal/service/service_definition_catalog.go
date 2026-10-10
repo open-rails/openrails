@@ -80,7 +80,12 @@ func (s *Service) createProduct(ctx context.Context, req billing.CreateProductPa
 	if err := products.Create(ctx, p, s.keyEdit(ctx)); err != nil {
 		return nil, catalogWrite(err)
 	}
-	return productToCatalogProduct(p), nil
+	// The database assigns the revision.
+	created, err := products.GetByID(ctx, p.ID)
+	if err != nil {
+		return nil, productLookup(err)
+	}
+	return productToCatalogProduct(created), nil
 }
 
 // ErrProductTierGroupInUse reports a product identity conflict with live subscriptions.
@@ -107,6 +112,8 @@ type UpdateProductRequest struct {
 	SetOwnership               bool
 	Archived                   *bool
 	SkipRailSync               bool
+	// ExpectedRevision refuses the edit unless the product is at it.
+	ExpectedRevision *int64
 }
 
 // productPatch reads a merge patch: null clears description and tier_group.
@@ -149,6 +156,7 @@ func productPatch(p billing.UpdateProductParams) (UpdateProductRequest, error) {
 	if p.Archived.Set {
 		req.Archived = &p.Archived.Value
 	}
+	req.ExpectedRevision = p.ExpectedRevision
 	return req, nil
 }
 
@@ -180,6 +188,15 @@ func (s *Service) updateProduct(ctx context.Context, id billing.ProductID, req U
 	}
 	if id.IsZero() {
 		return nil, apperr.Invalidf("product_id required")
+	}
+	if req.ExpectedRevision != nil {
+		current, err := products.GetByID(ctx, id.UUID())
+		if err != nil {
+			return nil, productLookup(err)
+		}
+		if err := checkRevision("product "+current.Key, req.ExpectedRevision, current.Revision); err != nil {
+			return nil, err
+		}
 	}
 	if req.SetCreditGrant {
 		credit, err := normalizeCreditGrant(req.CreditGrant)
@@ -389,9 +406,6 @@ func priceRequestCycleDays(req billing.CreatePriceParams) *int {
 }
 
 func (s *Service) CreatePrice(ctx context.Context, req billing.CreatePriceParams) (*billing.Price, error) {
-	if err := s.checkCatalogWritePolicy(ctx); err != nil {
-		return nil, err
-	}
 	selectors := 0
 	if !req.ProductID.IsZero() {
 		selectors++
@@ -498,23 +512,23 @@ func (s *Service) createPrice(ctx context.Context, req billing.CreatePriceParams
 		if !reflect.DeepEqual(productToCatalogProduct(current), productToCatalogProduct(product)) {
 			return nil, ErrCatalogConflict
 		}
+		if err := scoped.expectCatalogRevision(priceObject(product.Key, key), req.ExpectedRevision); err != nil {
+			return nil, err
+		}
 		price, err := scoped.writeCatalogPrice(ctx, req, current, priceID, rails)
 		if err != nil {
 			return nil, err
 		}
-		if prepared, ok := scoped.catalogPreparedLinks[[2]string{product.Key, req.Key}]; scoped.localCatalogOnly && ok {
-			prices, err := scoped.requirePriceService()
-			if err != nil {
+		prices, err := scoped.requirePriceService()
+		if err != nil {
+			return nil, err
+		}
+		if prepared, ok := scoped.catalogPreparedLinks[[2]string{product.Key, req.Key}]; scoped.localCatalogOnly && ok && !sameCatalogLinks(price.PSPLinks, prepared) {
+			if err := prices.UpdatePSPLinks(ctx, price.ID, prepared); err != nil {
 				return nil, err
 			}
-			if !sameCatalogLinks(price.PSPLinks, prepared) {
-				if err := prices.UpdatePSPLinks(ctx, price.ID, prepared); err != nil {
-					return nil, err
-				}
-				return prices.GetByID(ctx, price.ID)
-			}
 		}
-		return price, nil
+		return prices.GetByID(ctx, price.ID)
 	})
 	if err != nil {
 		return nil, err
@@ -555,6 +569,8 @@ type UpdatePriceRequest struct {
 	Archived     *bool
 	PSPLinks     map[string]map[string]string
 	SkipRailSync bool
+	// ExpectedRevision refuses the edit unless the price key is at it.
+	ExpectedRevision *int64
 }
 
 // pricePatch reads a merge patch: a PSP link set to null is unlinked.
@@ -576,6 +592,7 @@ func pricePatch(p billing.UpdatePriceParams) (UpdatePriceRequest, error) {
 			req.PSPLinks[psp] = link.Value
 		}
 	}
+	req.ExpectedRevision = p.ExpectedRevision
 	return req, nil
 }
 
@@ -589,9 +606,6 @@ func (s *Service) UpdatePrice(ctx context.Context, id billing.PriceID, params bi
 }
 
 func (s *Service) patchPrice(ctx context.Context, id billing.PriceID, req UpdatePriceRequest) (*billing.Price, error) {
-	if err := s.checkCatalogWritePolicy(ctx); err != nil {
-		return nil, err
-	}
 	ctx, release, pinErr := s.pin(ctx)
 	if pinErr != nil {
 		return nil, pinErr
@@ -710,6 +724,9 @@ func (s *Service) updatePrice(ctx context.Context, id billing.PriceID, req Updat
 		current, err := prices.GetByID(ctx, priceID)
 		if err != nil {
 			return nil, priceLookup(err)
+		}
+		if err := checkRevision("price key "+current.Key, req.ExpectedRevision, current.KeyRevision); err != nil {
+			return nil, err
 		}
 		if !reflect.DeepEqual(current, existing) {
 			return nil, ErrCatalogConflict

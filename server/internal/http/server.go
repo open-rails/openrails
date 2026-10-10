@@ -243,12 +243,6 @@ func New(deps Dependencies) (*Server, error) {
 		browserTierRoutes:  middleware.NewBrowserTierRoutes(),
 		merchantTierRoutes: middleware.NewBrowserTierRoutes(),
 	}
-	// Catalog edits follow the merchant's source: API-managed merchants (a
-	// writable secret backend) edit over HTTP; a host-owned snapshot's are
-	// the files', read-only here.
-	if err := deps.Runtime.CatalogEdits.Decide(config.SecretStoreBackend(deps.Config) != config.SecretBackendSnapshot); err != nil {
-		return nil, err
-	}
 
 	// Build the merchant provisioning/lifecycle/secret service (issue #225). It
 	// uses the runtime data pool for request-time secret custody, matching the

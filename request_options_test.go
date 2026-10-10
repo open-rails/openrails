@@ -80,7 +80,7 @@ func TestMerchantSelectionRoutesOneTarget(t *testing.T) {
 			return http.MethodGet, readConfiguration(client, t.Context(), o...)
 		},
 		"POST /admin/catalog/applications": func(o []RequestOption) (string, error) {
-			_, err := client.ApplyCatalog(t.Context(), catalogApplication(), o...)
+			_, err := client.ApplyCatalog(t.Context(), catalogApplication(), billing.ApplyCatalogParams{}, o...)
 			return http.MethodPost, err
 		},
 		"GET /admin/catalog/revision": func(o []RequestOption) (string, error) {

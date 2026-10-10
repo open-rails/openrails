@@ -19,6 +19,7 @@ type catalogOptions struct {
 	file             string
 	merchant         string
 	merchantManifest string
+	forceConflicts   bool
 }
 
 // newApplyCatalogCmd executes the same atomic batch as the merchant Client
@@ -27,11 +28,13 @@ func newApplyCatalogCmd() *cobra.Command {
 	opts := catalogOptions{file: defaultCatalogManifestPath}
 	cmd := &cobra.Command{
 		Use:   "apply-catalog",
-		Short: "Apply one idempotent catalog batch to an explicitly selected merchant",
-		Long: "Loads one catalog application, applies it atomically, and prints its receipt. " +
-			"The canonical content hash is remembered permanently: applying the same document again " +
-			"returns the original receipt even after later catalog edits. A prior document is not a rollback. " +
-			"Omitted items are preserved unless the document explicitly sets prune: true.",
+		Short: "Apply one catalog document to an explicitly selected merchant",
+		Long: "Loads one catalog document, applies every product, price and meter in it that no edit contests, " +
+			"and prints what changed and what it skipped. An object with a field an edit set differently is skipped " +
+			"whole and the command exits non-zero; --force-conflicts overwrites those fields instead. " +
+			"A document that applied whole is remembered by its content hash: applying it again changes nothing, " +
+			"even after later edits. A prior document is not a rollback. " +
+			"Omitted items are kept unless the document sets prune: true, which archives only those it alone set.",
 		Args: validateCatalogArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runApplyCatalog(cmd, opts)
@@ -41,6 +44,7 @@ func newApplyCatalogCmd() *cobra.Command {
 	flags.StringVarP(&opts.file, "file", "f", defaultCatalogManifestPath, "catalog manifest YAML file")
 	flags.StringVar(&opts.merchant, "merchant", "", "merchant name")
 	flags.StringVar(&opts.merchantManifest, "merchant-manifest", "", "host-owned merchant credential snapshot (defaults to the conventional merchant manifest)")
+	flags.BoolVar(&opts.forceConflicts, "force-conflicts", false, "overwrite the fields an edit set, and take them")
 	return cmd
 }
 
@@ -74,7 +78,14 @@ func runApplyCatalog(cmd *cobra.Command, opts catalogOptions) error {
 		Out:                  cmd.OutOrStdout(),
 		Merchant:             opts.merchant,
 		MerchantManifestPath: opts.merchantManifest,
+		Force:                opts.forceConflicts,
 	}
-	_, err := hosttools.ApplyMerchantCatalog(cmd.Context(), push)
-	return err
+	receipt, err := hosttools.ApplyMerchantCatalog(cmd.Context(), push)
+	if err != nil {
+		return err
+	}
+	if n := len(receipt.Conflicts); n > 0 {
+		return fmt.Errorf("catalog document skipped %d object(s) an edit changed", n)
+	}
+	return nil
 }

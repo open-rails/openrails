@@ -38,7 +38,7 @@ products:
 	}
 	apply := func(tp topology, params *catalog.Application) *billing.CatalogApplicationReceipt {
 		t.Helper()
-		receipt, err := w.client[tp].ApplyCatalog(t.Context(), params)
+		receipt, err := w.client[tp].ApplyCatalog(t.Context(), params, billing.ApplyCatalogParams{})
 		require.NoError(t, err)
 		return receipt
 	}
@@ -112,13 +112,15 @@ products:
 	require.False(t, outside.Archived, "omitting a product from a partial batch preserves it")
 
 	// Content identity has no ordering semantics: previously unseen content can
-	// apply even when its author considers it an older declaration.
-	unseen := apply(remote, file("Earlier unseen title", 12_000_000))
+	// apply even when its author considers it an older declaration. It agrees
+	// with the console's title, so nothing conflicts.
+	unseen := apply(remote, file("Console title", 10_000_000))
 	require.False(t, unseen.Replayed)
+	require.Empty(t, unseen.Conflicts)
 	require.Equal(t, apiRevision, unseen.BaseRevision)
-	product, err = productByKey(t.Context(), w.client[embedded], key)
+	price, err = priceByKey(t.Context(), w.client[embedded], key, "monthly")
 	require.NoError(t, err)
-	require.Equal(t, "Earlier unseen title", product.DisplayName)
+	require.EqualValues(t, 10_000_000, price.UnitAmount)
 
 	// Deleted caller controls are refused, not silently ignored.
 	for _, body := range []map[string]any{
@@ -137,10 +139,10 @@ products:
 		err     error
 	}
 	outcomes := make(chan outcome, 2)
-	params := file("Concurrent title", 12_000_000)
+	params := file("Console title", 14_000_000)
 	for _, tp := range []topology{embedded, remote} {
 		go func() {
-			receipt, err := w.client[tp].ApplyCatalog(t.Context(), params)
+			receipt, err := w.client[tp].ApplyCatalog(t.Context(), params, billing.ApplyCatalogParams{})
 			outcomes <- outcome{receipt, err}
 		}()
 	}

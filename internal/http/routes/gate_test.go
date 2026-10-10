@@ -23,7 +23,6 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
-	"github.com/open-rails/openrails/internal/catalogpolicy"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/customerscope"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -198,12 +197,10 @@ func (a *recordingAuth) take() []string {
 	return out
 }
 
-// gatedRuntime is a database-free runtime bound to merchantA with catalog
-// edits open.
+// gatedRuntime is a database-free runtime bound to merchantA.
 func gatedRuntime(t *testing.T) *app.Runtime {
-	open := &catalogpolicy.Exposure{}
-	require.NoError(t, open.Decide(true))
-	rt := &app.Runtime{Config: &config.Config{}, CatalogEdits: open}
+	t.Helper()
+	rt := &app.Runtime{Config: &config.Config{}}
 	rt.SetConfiguredMerchant(merchantA)
 	return rt
 }

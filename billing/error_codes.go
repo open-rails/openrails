@@ -79,6 +79,10 @@ const (
 // entitlement outside a shared tier group.
 const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
 
+// CodeRevisionMismatch: an edit's expected_revision is not the object's
+// current revision; metadata.revision is the current one.
+const CodeRevisionMismatch = "revision_mismatch"
+
 // Request-shape codes: the request never reached its operation.
 const (
 	// CodeUnknownField: the JSON body names a field the route does not
@@ -335,7 +339,7 @@ var errorCodes = []ErrorCode{
 	{"trial_unsupported_on_rail", 400, invalid, "This rail cannot run a trial first phase."},
 	{"product_tier_group_conflict", 409, invalid, "A customer holds live subscriptions to more than one product of the tier group."},
 	{"product_tier_group_in_use", 409, invalid, "The tier group cannot change while a subscription has a plan change in flight."},
-	{"catalog_updates_disabled", 403, invalid, "Catalog updates over HTTP are disabled in this deployment."},
+	{CodeRevisionMismatch, 409, invalid, "The object changed since the revision the edit expected; metadata.revision is the current one."},
 	{"catalog_revision_conflict", 409, invalid, "The catalog changed during the application; retry."},
 	{"usage_meter_not_found", 404, invalid, "The usage meter does not exist."},
 	{"default_rate_card_not_found", 404, invalid, "The meter has no default rate card."},
