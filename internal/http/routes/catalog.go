@@ -29,8 +29,6 @@ var (
 var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/products", Group: Checkout, Auth: AuthPublic, Merchant: MerchantQuery,
 		Query: params(required(repeated("keys")), required(text("merchant"))), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_query", "resource_not_found"), Handler: h(handlers.ListPublicProducts)},
-	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: needOffers, Name: "ListOffers",
-		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.AppListOffers)},
 
 	{Method: POST, Path: "/v1/catalog/apply", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate, Sensitive: true,
 		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},

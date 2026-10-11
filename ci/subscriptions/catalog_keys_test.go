@@ -270,7 +270,7 @@ func TestProductKeyCap(t *testing.T) {
 // merchant ?merchant= names, named by ?keys=, at most billing.MaxBatchItems,
 // in one page. It refuses a missing or malformed merchant, a missing keys, an
 // entitlement filter and any other parameter, and answers 404 for a merchant
-// that does not exist. The Go client's ListOffers is the host backend's read:
+// that does not exist. The Go client's ListProducts is the host backend's read:
 // by entitlement too, in process and remote.
 func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 	t.Parallel()
@@ -351,19 +351,19 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 	require.Equal(t, billing.CodeResourceNotFound, errorCode(body))
 
 	for _, top := range []topology{embedded, remote} {
-		page, err := w.client[top].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"course:101"}})
+		page, err := w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: []string{"course:101"}})
 		require.NoError(t, err, top)
 		require.Equal(t, sorted(course.Key, bundle.Key), productKeys(t, page), top)
 		for _, p := range page.Items {
 			require.Len(t, p.Prices, 1, top)
 		}
-		page, err = w.client[top].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"course:102", "channel:membership"}, Keys: []string{bundle.Key, course.Key}})
+		page, err = w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true), Entitlements: []string{"course:102", "channel:membership"}, Keys: []string{bundle.Key, course.Key}})
 		require.NoError(t, err, top)
 		require.Equal(t, []string{bundle.Key}, productKeys(t, page), "%s: both filters apply", top)
-		_, err = w.client[top].ListOffers(t.Context(), billing.OfferListParams{})
-		require.Error(t, err, top)
+		_, err = w.client[top].ListProducts(t.Context(), billing.ProductListParams{Archived: new(false), ForSale: new(true), })
+		require.NoError(t, err, top)
 	}
 	appStatus, appBody := w.merchantCall(w.auth.hostToken(t), http.MethodGet, "/v1/app/catalog/products")
-	require.Equal(t, http.StatusBadRequest, appStatus, appBody)
-	require.Contains(t, appBody, billing.CodeInvalidQuery, "the backend's read needs a filter too")
+	require.Equal(t, http.StatusNotFound, appStatus, appBody)
+	require.Contains(t, appBody, "route_not_found", "the duplicate catalog route is removed")
 }

@@ -50,11 +50,11 @@ var (
 	needAdminRead      = Pair{billing.MerchantCustomerRead, billing.RootCustomerRead}
 	needAdminUpdate    = Pair{billing.MerchantCustomerManage, billing.RootCustomerManage}
 	needCatalog        = Pair{billing.MerchantCatalogManage, billing.RootCatalogManage}
+	needCatalogRead    = Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}
 	needMerchantConfig = Pair{billing.MerchantConfigManage, billing.RootConfigManage}
 	needMetrics        = Pair{billing.MerchantMetricsRead, billing.RootMetricsRead}
 
 	needEntitlements = Pair{billing.MerchantEntitlementsRead, billing.RootEntitlementsRead}
-	needOffers       = Pair{billing.MerchantCatalogRead, billing.RootCatalogRead}
 	needUsage        = Pair{billing.MerchantUsageManage, billing.RootUsageManage}
 	needEvents       = Pair{billing.MerchantEventsRead, billing.RootEventsRead}
 	needOrders       = Pair{billing.MerchantOrdersManage, billing.RootOrdersManage}
@@ -66,6 +66,9 @@ var (
 func (r Route) Needs() Pair {
 	switch r.Group {
 	case CatalogAdmin:
+		if r.Level == LevelRead {
+			return needCatalogRead
+		}
 		return needCatalog
 	case MerchantConfig:
 		return needMerchantConfig
