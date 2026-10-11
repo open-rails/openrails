@@ -69,7 +69,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/catalog/products",
 	"POST /v1/admin/credit-grants",
 	"POST /v1/admin/credit-grants/{id}/revoke",
-	"POST /v1/admin/findings/{id}/resolve",
 	"POST /v1/admin/orders/{id}/mark-uncollectible",
 	"POST /v1/admin/orders/{id}/retry-collection",
 	"POST /v1/admin/orders/{id}/void",

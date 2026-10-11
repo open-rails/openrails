@@ -133,9 +133,10 @@ export function CatalogDriftPage() {
   const merchantConfig = useMerchantConfig()
   if (!merchantConfig) return null
   return (
-    <CatalogSection title="Drift">
+    <div className="flex flex-col gap-4">
+      <h1 className="text-2xl font-semibold tracking-tight">Drift</h1>
       <DriftTab />
-    </CatalogSection>
+    </div>
   )
 }
 

@@ -270,7 +270,8 @@ you turn it on, embedded or standalone:
 Each permission is also admitted by its `merchant:` name, held in the scope of
 the merchant the request acts on.
 
-Writes that move money or remove access also ask a person for a recent sign-in.
+Routes marked `sensitive` in the [route reference](docs/api/routes.md) also ask
+a person for a recent sign-in; findings resolutions do not.
 
 #### Customer contact info
 
@@ -531,7 +532,7 @@ until `RouteGroups` turns it on:
 - `Auth`: your auth, which only says who a request is (`Authenticate`). Customer
   routes take a person acting for themself; staff routes ask the answer's
   `Can` for the route's permission and, for a person on a write that
-  moves money or removes access, its recent sign-in (helpers/auth
+  is marked `sensitive`, its recent sign-in (helpers/auth
   `RecentSignInChecker`). OpenRails answers
   every refusal: 401 with a `WWW-Authenticate` challenge (a stale sign-in is
   RFC 9470's `insufficient_user_authentication`, code `step_up_required`), 403,
@@ -556,8 +557,8 @@ until `RouteGroups` turns it on:
   too, the file skips what an edit changed (below); your Go code can edit the
   catalog either way.
 - `RouteGroups.MerchantConfig`: the merchant's own configuration: settings,
-  PSPs and their credentials, reading and resolving findings, pulling the PSPs' state again
-  (`POST /v1/admin/psps/refresh`), billing import and export, the metrics
+  PSPs and their credentials, reading and resolving findings, pulling the PSPs'
+  state again (`POST /v1/admin/psps/refresh`), billing import and export, the metrics
   dashboard's layout. Callers need `root:config:manage`. Hosts upgrading must
   enable this group to keep the findings routes available; `Admin` alone
   no longer mounts them.
@@ -622,8 +623,8 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 
 - **Who signs in**: your staff, with their AuthKit accounts, through your
   AuthKit at `/api/v1` on the same origin. Every page calls the routes of its
-  area, which check that the staff member holds that area's permission, and a
-  change after a stale sign-in asks them to confirm it is them.
+  area, which check that the staff member holds that area's permission. A
+  `sensitive` change after a stale sign-in asks them to confirm it is them.
 - **What each sees**: an area appears only when its group is on and the
   staff member holds its permission; on load the console asks
   `GET /v1/admin/access`, which any signed-in staff member may call. Customer

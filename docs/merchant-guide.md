@@ -243,9 +243,10 @@ reference: [api/routes.md](api/routes.md).
 | Metrics | `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | Dashboard |
 | Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/admin/findings` (`?type=`), counted by `open_findings` in `POST /v1/admin/metrics/query` | Ops, header bell |
 
-A user session needs a recent sign-in for every write here (403
-`step_up_required` otherwise); API keys and access tokens do not. A manual
-grant's `hours` is at most 2562047; with neither `hours` nor `ends_at` it has no
+A person needs a recent sign-in on routes marked `sensitive` in the
+[route reference](api/routes.md), otherwise `401 step_up_required`.
+Applications do not step up, and findings resolutions do not request a recent
+sign-in. A manual grant's `hours` is at most 2562047; with neither `hours` nor `ends_at` it has no
 end.
 
 Destructive semantics are deliberate: refunds and cancels require an explicit

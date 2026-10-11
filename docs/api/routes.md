@@ -115,9 +115,6 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | GET | `/v1/admin/renewals` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Renewal>` |  |
 | GET | `/v1/admin/renewals/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Renewal` |  |
 | GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<PaymentMethod>` |  |
-| GET | `/v1/admin/findings` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/admin/findings/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Finding` |  |
-| POST | `/v1/admin/findings/{id}/resolve` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `ResolveFindingParams` | 200 `FindingResolution` | sensitive |
 
 ## Catalog
 
@@ -167,6 +164,9 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 | POST | `/v1/admin/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
 | POST | `/v1/admin/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
 | PUT | `/v1/admin/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
+| GET | `/v1/admin/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/admin/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
+| POST | `/v1/admin/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
 | GET | `/v1/admin/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
 | POST | `/v1/admin/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
 | DELETE | `/v1/admin/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | sensitive |

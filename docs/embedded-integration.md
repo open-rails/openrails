@@ -424,9 +424,9 @@ if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
 | (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), the public catalog (`?merchant=<merchant id>`), Solana Pay, the customer routes (`/v1/me/*` at the customer's merchant, orders and the merchant's payment setup included) and signature-checked provider callbacks |
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
-| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) at the credential's merchant: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `root:billing:read`, updates `root:billing:manage` |
+| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) at the credential's merchant: payments and refunds, subscriptions, orders, credits, access, usage; reads need `root:billing:read`, updates `root:billing:manage` |
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With a declared merchant's `Catalog`, the file skips what an edit changed |
-| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), settings, billing import and export, the dashboard layout; needs `root:config:manage` |
+| `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), reading and resolving findings, settings, billing import and export, the dashboard layout; needs `root:config:manage` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
 | `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, running charges, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`, for the one merchant whose `Issuer` you declare; needs a staff group on. Over several merchants bound by group, `Mount` refuses it |
@@ -451,7 +451,7 @@ not the default), else `/api/v1`. It
 needs a staff group on and a console build (`Deps.ConsoleAssets`); `Mount` fails
 without either. Each area appears only to staff holding its group's permission
 (`GET /v1/admin/access`): customer support, read-only without `root:billing:manage`;
-the catalog; the PSP, settings and notification pages; and the metrics
+the catalog; the PSP, findings, settings and notification pages; and the metrics
 dashboard, whose layout editing also needs `MerchantConfig`.
 See [admin-console.md](admin-console.md).
 

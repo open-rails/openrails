@@ -10,7 +10,7 @@ action is a staff-route call its permission admits the caller for.
 
 It has four areas, one per staff route group: customer support
 (`RouteGroups.Admin`), the catalog (`Catalog`), merchant config
-(`MerchantConfig`: PSPs, settings, notifications) and business metrics
+(`MerchantConfig`: PSPs, findings, settings, notifications) and business metrics
 (`Metrics`: the dashboard's charts, the Ops gauges). On load it asks
 `GET /v1/admin/access`, which any signed-in staff member may call, and shows an
 area only when its group is on and the staff member holds its permission.
