@@ -7820,6 +7820,126 @@
         ]
       }
     },
+    "/v1/me/agreements": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agreement"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
+    "/v1/me/agreements/{id}/revoke": {
+      "post": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementRevocation"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "cancel_unsupported_on_rail",
+          "customer_action_required",
+          "invalid_param",
+          "payment_in_progress",
+          "provider_cancel_held",
+          "resource_not_found",
+          "service_unavailable",
+          "subscription_not_active"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
     "/v1/admin/psps": {
       "get": {
         "tags": [
@@ -10108,52 +10228,6 @@
         ]
       }
     },
-    "/v1/network/links/{link_id}/revoke-authority": {
-      "post": {
-        "tags": [
-          "network"
-        ],
-        "parameters": [
-          {
-            "name": "link_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentAuthorityRevocation"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "network",
-        "x-openrails-sensitive": true,
-        "x-openrails-mounted-when": "customer_network",
-        "x-openrails-errors": [
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:network"
-        ]
-      }
-    },
     "/v1/network/links/{link_id}/subscriptions/{id}": {
       "get": {
         "tags": [
@@ -10814,6 +10888,145 @@
           "tier:network"
         ]
       }
+    },
+    "/v1/network/links/{link_id}/agreements": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Agreement"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/agreements/{id}/revoke": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgreementRevocation"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "cancel_unsupported_on_rail",
+          "customer_action_required",
+          "invalid_param",
+          "payment_in_progress",
+          "provider_cancel_held",
+          "resource_not_found",
+          "service_unavailable",
+          "subscription_not_active"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
     }
   },
   "components": {
@@ -11132,6 +11345,166 @@
             }
           }
         }
+      },
+      "Agreement": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "card_on_file",
+              "recurring",
+              "unscheduled"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "ended",
+              "requires_reconsent",
+              "revoked"
+            ]
+          },
+          "currency": {
+            "type": "string"
+          },
+          "payment_method_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "card": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CardDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AgreementSubscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "accepted_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "ended_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "currency",
+          "payment_method_id",
+          "card",
+          "subscription",
+          "accepted_at",
+          "ended_at"
+        ]
+      },
+      "AgreementRevocation": {
+        "type": "object",
+        "properties": {
+          "agreement": {
+            "$ref": "#/components/schemas/Agreement"
+          },
+          "subscription": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Subscription"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "usage_order": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Order"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "agreement",
+          "subscription",
+          "usage_order"
+        ]
+      },
+      "AgreementSubscription": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "product": {
+            "type": "string"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "billing_interval_hours": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "next_charge_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "product",
+          "amount",
+          "billing_interval_hours",
+          "next_charge_at"
+        ]
       },
       "AlertWebhook": {
         "type": "object",
@@ -14877,10 +15250,10 @@
               "balance.low",
               "customer.network_linked",
               "customer.network_unlinked",
-              "customer.payment_authority_revoked",
               "delinquency.cleared",
               "delinquency.entered",
               "delinquency.grace",
+              "mandate.revoked",
               "order.canceled",
               "order.completed",
               "order.expired",
@@ -14956,10 +15329,10 @@
               }
             ]
           },
-          "payment_authority": {
+          "mandate": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/PaymentAuthorityHostEvent"
+                "$ref": "#/components/schemas/MandateHostEvent"
               },
               {
                 "type": "null"
@@ -14988,7 +15361,7 @@
           "product_entitlements",
           "order",
           "customer_network",
-          "payment_authority",
+          "mandate",
           "balance"
         ]
       },
@@ -15268,6 +15641,50 @@
           "created_at"
         ]
       },
+      "MandateHostEvent": {
+        "type": "object",
+        "properties": {
+          "mandate_id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "card_on_file",
+              "recurring",
+              "unscheduled"
+            ]
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "subscription_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "mandate_id",
+          "kind",
+          "customer_id",
+          "currency",
+          "subscription_id",
+          "revoked_at"
+        ]
+      },
       "MarkNotificationsReadParams": {
         "type": "object",
         "properties": {
@@ -15369,6 +15786,9 @@
             "type": "string"
           },
           "signup_url": {
+            "type": "string"
+          },
+          "billing_url": {
             "type": "string"
           }
         }
@@ -18013,51 +18433,6 @@
           "enriched_at",
           "mandate_id",
           "sent_initial_transaction_id"
-        ]
-      },
-      "PaymentAuthorityHostEvent": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "revoked_mandates": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          }
-        },
-        "required": [
-          "customer_id",
-          "revoked_mandates"
-        ]
-      },
-      "PaymentAuthorityRevocation": {
-        "type": "object",
-        "properties": {
-          "merchant_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "revoked_mandates": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "revoked_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "merchant_id",
-          "customer_id",
-          "revoked_mandates",
-          "revoked_at"
         ]
       },
       "PaymentConfig": {

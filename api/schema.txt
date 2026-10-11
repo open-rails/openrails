@@ -67,6 +67,7 @@ migration 0063_running_charges.up.sql sha256:8c834227903ff7b607c51d288140b0e7787
 migration 0064_orders_id_index.up.sql sha256:81f306bb5a9112ac65feb459a4c518102c71de7a4b1b1a8c48e97558cad736b2
 migration 0065_drop_merchant_api_hosts.up.sql sha256:517658ca10c3079ecc62657147ae1da8711de44aced2eed7796c41822fcff4ec
 migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346d017fbe2c11260dad37f6b729f397f139d0f424c7bf21d0249ee26
+migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -787,9 +788,9 @@ table billing.host_outbox
   column data jsonb NOT NULL DEFAULT '{}'::jsonb
   column delivered_at timestamp with time zone
   column dedupe_key text NOT NULL
-  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'customer.payment_authority_revoked'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
+  constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'mandate.revoked'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text, 'customer.payment_authority_revoked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
+  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'mandate.revoked'::text) AND (subject_type = 'mandate'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
@@ -1070,6 +1071,7 @@ table billing.money_settings
   column currency text NOT NULL
   column credit_limit_amount bigint NOT NULL DEFAULT 0
   column default_payment_method_id uuid
+  column collection_revoked_at timestamp with time zone
   constraint money_settings_billing_mode_check CHECK ((billing_mode = ANY (ARRAY['prepaid'::text, 'arrears'::text])))
   constraint money_settings_credit_limit_amount_nonneg_check CHECK ((credit_limit_amount >= 0))
   constraint money_settings_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))

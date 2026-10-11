@@ -6,6 +6,32 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
+export type Agreement = {
+  id: string
+  kind: "card_on_file" | "recurring" | "unscheduled"
+  status: "active" | "ended" | "requires_reconsent" | "revoked"
+  currency: string
+  payment_method_id: string | null
+  card: CardDetails | null
+  subscription: AgreementSubscription | null
+  accepted_at: string
+  ended_at: string | null
+}
+
+export type AgreementRevocation = {
+  agreement: Agreement
+  subscription: Subscription | null
+  usage_order: Order | null
+}
+
+export type AgreementSubscription = {
+  id: string
+  product: string
+  amount: string
+  billing_interval_hours: number | null
+  next_charge_at: string | null
+}
+
 export type Balance = {
   customer_id: string
   currency: string

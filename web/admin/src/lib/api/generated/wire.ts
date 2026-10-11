@@ -73,6 +73,32 @@ export type AdmitParams = {
   roles?: string[]
 }
 
+export type Agreement = {
+  id: string
+  kind: "card_on_file" | "recurring" | "unscheduled"
+  status: "active" | "ended" | "requires_reconsent" | "revoked"
+  currency: string
+  payment_method_id: string | null
+  card: CardDetails | null
+  subscription: AgreementSubscription | null
+  accepted_at: string
+  ended_at: string | null
+}
+
+export type AgreementRevocation = {
+  agreement: Agreement
+  subscription: Subscription | null
+  usage_order: Order | null
+}
+
+export type AgreementSubscription = {
+  id: string
+  product: string
+  amount: string
+  billing_interval_hours: number | null
+  next_charge_at: string | null
+}
+
 export type AlertWebhook = {
   id: string
   name: string | null
@@ -907,7 +933,7 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "customer.payment_authority_revoked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
+  type: "balance.depleted" | "balance.low" | "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "mandate.revoked" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
@@ -915,7 +941,7 @@ export type HostEvent = {
   product_entitlements: ProductEntitlementsChangedEvent | null
   order: OrderHostEvent | null
   customer_network: CustomerNetworkHostEvent | null
-  payment_authority: PaymentAuthorityHostEvent | null
+  mandate: MandateHostEvent | null
   balance: BalanceHostEvent | null
 }
 
@@ -964,6 +990,15 @@ export type Mandate = {
   created_at: string
 }
 
+export type MandateHostEvent = {
+  mandate_id: string
+  kind: "card_on_file" | "recurring" | "unscheduled"
+  customer_id: string
+  currency: string
+  subscription_id: string | null
+  revoked_at: string
+}
+
 export type MarkNotificationsReadParams = {
   notification_ids?: string[]
   all?: boolean
@@ -995,6 +1030,7 @@ export type MerchantProfile = {
   from_email?: string
   support_url?: string
   signup_url?: string
+  billing_url?: string
 }
 
 export type MerchantSettings = {
@@ -1529,18 +1565,6 @@ export type PaymentAttempt = {
   enriched_at: string | null
   mandate_id: string | null
   sent_initial_transaction_id: string
-}
-
-export type PaymentAuthorityHostEvent = {
-  customer_id: string
-  revoked_mandates: string[]
-}
-
-export type PaymentAuthorityRevocation = {
-  merchant_id: string
-  customer_id: string
-  revoked_mandates: string[]
-  revoked_at: string
 }
 
 export type PaymentConfig = {

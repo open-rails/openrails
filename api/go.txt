@@ -638,11 +638,11 @@ pkg openrails/billing, const HostEventBalanceDepleted HostEventType = "balance.d
 pkg openrails/billing, const HostEventBalanceLow HostEventType = "balance.low"
 pkg openrails/billing, const HostEventCustomerNetworkLinked HostEventType = "customer.network_linked"
 pkg openrails/billing, const HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"
-pkg openrails/billing, const HostEventCustomerPaymentAuthorityRevoked HostEventType = "customer.payment_authority_revoked"
 pkg openrails/billing, const HostEventDelinquencyCleared HostEventType = "delinquency.cleared"
 pkg openrails/billing, const HostEventDelinquencyEntered HostEventType = "delinquency.entered"
 pkg openrails/billing, const HostEventDelinquencyGrace HostEventType = "delinquency.grace"
 pkg openrails/billing, const HostEventIDPrefix untyped string = "hev_"
+pkg openrails/billing, const HostEventMandateRevoked HostEventType = "mandate.revoked"
 pkg openrails/billing, const HostEventOrderCanceled HostEventType = "order.canceled"
 pkg openrails/billing, const HostEventOrderCompleted HostEventType = "order.completed"
 pkg openrails/billing, const HostEventOrderExpired HostEventType = "order.expired"
@@ -1120,6 +1120,26 @@ pkg openrails/billing, type AdmitParams struct, Resource string `json:"resource,
 pkg openrails/billing, type AdmitParams struct, Roles []uuid.UUID `json:"roles,omitempty"`
 pkg openrails/billing, type AdmitParams struct, Source string `json:"source,omitempty"`
 pkg openrails/billing, type AdmitParams struct, TrustLevel string `json:"trust_level,omitempty"`
+pkg openrails/billing, type Agreement struct
+pkg openrails/billing, type Agreement struct, AcceptedAt time.Time `json:"accepted_at"`
+pkg openrails/billing, type Agreement struct, Card *CardDetails `json:"card"`
+pkg openrails/billing, type Agreement struct, Currency string `json:"currency"`
+pkg openrails/billing, type Agreement struct, EndedAt *time.Time `json:"ended_at"`
+pkg openrails/billing, type Agreement struct, ID MandateID `json:"id"`
+pkg openrails/billing, type Agreement struct, Kind MandateKind `json:"kind"`
+pkg openrails/billing, type Agreement struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id"`
+pkg openrails/billing, type Agreement struct, Status MandateStatus `json:"status"`
+pkg openrails/billing, type Agreement struct, Subscription *AgreementSubscription `json:"subscription"`
+pkg openrails/billing, type AgreementRevocation struct
+pkg openrails/billing, type AgreementRevocation struct, Agreement Agreement `json:"agreement"`
+pkg openrails/billing, type AgreementRevocation struct, Subscription *Subscription `json:"subscription"`
+pkg openrails/billing, type AgreementRevocation struct, UsageOrder *Order `json:"usage_order"`
+pkg openrails/billing, type AgreementSubscription struct
+pkg openrails/billing, type AgreementSubscription struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type AgreementSubscription struct, BillingIntervalHours *int `json:"billing_interval_hours"`
+pkg openrails/billing, type AgreementSubscription struct, ID SubscriptionID `json:"id"`
+pkg openrails/billing, type AgreementSubscription struct, NextChargeAt *time.Time `json:"next_charge_at"`
+pkg openrails/billing, type AgreementSubscription struct, Product string `json:"product"`
 pkg openrails/billing, type AlertSeverity string
 pkg openrails/billing, type AlertWebhook struct
 pkg openrails/billing, type AlertWebhook struct, CreatedAt time.Time `json:"created_at"`
@@ -1792,11 +1812,11 @@ pkg openrails/billing, type HostEvent struct, Balance *BalanceHostEvent `json:"b
 pkg openrails/billing, type HostEvent struct, CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
 pkg openrails/billing, type HostEvent struct, Delinquency *DelinquencyHostEvent `json:"delinquency"`
 pkg openrails/billing, type HostEvent struct, ID HostEventID `json:"id"`
+pkg openrails/billing, type HostEvent struct, Mandate *MandateHostEvent `json:"mandate"`
 pkg openrails/billing, type HostEvent struct, MerchantID MerchantID `json:"merchant_id"`
 pkg openrails/billing, type HostEvent struct, OccurredAt time.Time `json:"occurred_at"`
 pkg openrails/billing, type HostEvent struct, Order *OrderHostEvent `json:"order"`
 pkg openrails/billing, type HostEvent struct, Payment *PaymentSettledEvent `json:"payment"`
-pkg openrails/billing, type HostEvent struct, PaymentAuthority *PaymentAuthorityHostEvent `json:"payment_authority"`
 pkg openrails/billing, type HostEvent struct, ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
 pkg openrails/billing, type HostEvent struct, Type HostEventType `json:"type"`
 pkg openrails/billing, type HostEventID [16]byte
@@ -1849,6 +1869,13 @@ pkg openrails/billing, type Mandate struct, StoringAttemptID *PaymentAttemptID `
 pkg openrails/billing, type Mandate struct, SubscriptionID *SubscriptionID `json:"subscription_id"`
 pkg openrails/billing, type Mandate struct, TransactionLinkID *string `json:"transaction_link_id"`
 pkg openrails/billing, type MandateEndReason string
+pkg openrails/billing, type MandateHostEvent struct
+pkg openrails/billing, type MandateHostEvent struct, Currency string `json:"currency"`
+pkg openrails/billing, type MandateHostEvent struct, CustomerID CustomerID `json:"customer_id"`
+pkg openrails/billing, type MandateHostEvent struct, Kind MandateKind `json:"kind"`
+pkg openrails/billing, type MandateHostEvent struct, MandateID MandateID `json:"mandate_id"`
+pkg openrails/billing, type MandateHostEvent struct, RevokedAt time.Time `json:"revoked_at"`
+pkg openrails/billing, type MandateHostEvent struct, SubscriptionID *SubscriptionID `json:"subscription_id"`
 pkg openrails/billing, type MandateID [16]byte
 pkg openrails/billing, type MandateKind string
 pkg openrails/billing, type MandateStatus string
@@ -1880,6 +1907,7 @@ pkg openrails/billing, type MerchantName struct
 pkg openrails/billing, type MerchantName struct, ID MerchantID `json:"id"`
 pkg openrails/billing, type MerchantName struct, Name string `json:"name"`
 pkg openrails/billing, type MerchantProfile struct
+pkg openrails/billing, type MerchantProfile struct, BillingURL string `json:"billing_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, FromEmail string `json:"from_email,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, LogoURL string `json:"logo_url,omitempty"`
 pkg openrails/billing, type MerchantProfile struct, SignupURL string `json:"signup_url,omitempty"`
@@ -2392,14 +2420,6 @@ pkg openrails/billing, type PaymentAttemptListParams struct, Source []string
 pkg openrails/billing, type PaymentAttemptListParams struct, SubscriptionID SubscriptionID
 pkg openrails/billing, type PaymentAttemptListParams struct, Until time.Time
 pkg openrails/billing, type PaymentAttemptListParams struct, embedded PageRequest
-pkg openrails/billing, type PaymentAuthorityHostEvent struct
-pkg openrails/billing, type PaymentAuthorityHostEvent struct, CustomerID CustomerID `json:"customer_id"`
-pkg openrails/billing, type PaymentAuthorityHostEvent struct, RevokedMandates []MandateID `json:"revoked_mandates"`
-pkg openrails/billing, type PaymentAuthorityRevocation struct
-pkg openrails/billing, type PaymentAuthorityRevocation struct, CustomerID CustomerID `json:"customer_id"`
-pkg openrails/billing, type PaymentAuthorityRevocation struct, MerchantID MerchantID `json:"merchant_id"`
-pkg openrails/billing, type PaymentAuthorityRevocation struct, RevokedAt time.Time `json:"revoked_at"`
-pkg openrails/billing, type PaymentAuthorityRevocation struct, RevokedMandates []MandateID `json:"revoked_mandates"`
 pkg openrails/billing, type PaymentChannel string
 pkg openrails/billing, type PaymentConfig struct
 pkg openrails/billing, type PaymentConfig struct, PSPs []PSPPaymentConfig `json:"psps"`
