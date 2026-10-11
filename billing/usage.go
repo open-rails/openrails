@@ -135,13 +135,24 @@ const (
 	UsageByInvoker   UsageGroupBy = "invoker"
 )
 
+// DefaultUsagePageLimit and MaxUsagePageLimit bound a usage report's page of
+// groups.
+const (
+	DefaultUsagePageLimit = 100
+	MaxUsagePageLimit     = 1000
+)
+
 // GetUsageParams selects a usage report: one currency over [From, To), grouped
-// by GroupBy (event_type when empty).
+// by GroupBy (event_type when empty), a page of at most Limit groups
+// (DefaultUsagePageLimit when zero) after Cursor. A zero From or To is the
+// cursor's, or without a cursor the month before now. A cursor reads only the
+// report it came from: the same currency, window and grouping.
 type GetUsageParams struct {
 	Currency string       `form:"currency"`
 	From     time.Time    `form:"from"`
 	To       time.Time    `form:"to"`
 	GroupBy  UsageGroupBy `form:"group_by"`
+	PageRequest
 }
 
 // UsageRow is one group of a usage report. Dimensions are the summed event
@@ -153,7 +164,9 @@ type UsageRow struct {
 	Dimensions map[string]int64 `json:"dimensions"`
 }
 
-// Usage is a customer's usage over a window.
+// Usage is one page of a customer's usage over a window: its groups by total
+// amount, largest first, then by key. NextCursor reads the next page; nil on
+// the last.
 type Usage struct {
 	CustomerID CustomerID   `json:"customer_id"`
 	Currency   string       `json:"currency"`
@@ -161,4 +174,5 @@ type Usage struct {
 	To         time.Time    `json:"to"`
 	GroupBy    UsageGroupBy `json:"group_by"`
 	Rows       []UsageRow   `json:"rows"`
+	NextCursor *string      `json:"next_cursor"`
 }

@@ -20,16 +20,29 @@ import (
 // ErrInvalidCursor is a cursor this list did not issue (400 invalid_cursor).
 var ErrInvalidCursor = apperr.New(http.StatusBadRequest, billing.CodeInvalidCursor, "the cursor is not one this list issued").WithParam("cursor")
 
-// ErrInvalidLimit is a limit outside 1..billing.MaxPageLimit (400 invalid_query).
+// ErrInvalidLimit is a limit outside its list's Size (400 invalid_query).
 var ErrInvalidLimit = apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, "limit is invalid").WithParam("limit")
 
-// Limit is the page size a request asks for: billing.DefaultPageLimit when it
-// names none, ErrInvalidLimit outside 1..billing.MaxPageLimit.
-func Limit(page billing.PageRequest) (int, error) {
+// Size is a list's page sizes: Default when a request names no limit, at
+// most Max.
+type Size struct{ Default, Max int }
+
+// Standard is the Size of every list that states none of its own.
+var Standard = Size{Default: billing.DefaultPageLimit, Max: billing.MaxPageLimit}
+
+// Limit is Standard.Limit.
+func Limit(page billing.PageRequest) (int, error) { return Standard.Limit(page) }
+
+// Fetch is Standard.Fetch.
+func Fetch(limit int) int32 { return Standard.Fetch(limit) }
+
+// Limit is the page size a request asks for: s.Default when it names none,
+// ErrInvalidLimit outside 1..s.Max.
+func (s Size) Limit(page billing.PageRequest) (int, error) {
 	switch {
 	case page.Limit == 0:
-		return billing.DefaultPageLimit, nil
-	case page.Limit < 1 || page.Limit > billing.MaxPageLimit:
+		return s.Default, nil
+	case page.Limit < 1 || page.Limit > s.Max:
 		return 0, ErrInvalidLimit
 	}
 	return page.Limit, nil
@@ -37,12 +50,12 @@ func Limit(page billing.PageRequest) (int, error) {
 
 // Fetch is the row count a keyset query asks for: one more than the page, so
 // Cut can tell whether another page follows without a count query. A limit
-// outside 1..billing.MaxPageLimit (Limit refuses it) asks for a full page.
-func Fetch(limit int) int32 {
-	if limit < 1 || limit > billing.MaxPageLimit {
-		limit = billing.MaxPageLimit
+// outside 1..s.Max (Limit refuses it) asks for a full page.
+func (s Size) Fetch(limit int) int32 {
+	if limit < 1 || limit > s.Max {
+		limit = s.Max
 	}
-	return int32(limit) + 1 // #nosec G115 -- bounded to 1..MaxPageLimit above
+	return int32(limit) + 1 // #nosec G115 -- bounded to 1..s.Max above
 }
 
 // Encode makes an opaque cursor from a keyset position: the ordering key of

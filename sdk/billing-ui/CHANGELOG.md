@@ -1,5 +1,13 @@
 # Changelog
 
+## Usage report
+
+- `getUsage({ currency, groupBy, from, to, limit, cursor })` reads a page of
+  the customer's usage (`GET /me/usage`): `Usage`, its `rows` by total
+  amount, largest first, and `next_cursor` (null on the last page). A page
+  holds at most 1,000 groups (default 100); a cursor reads only the report it
+  came from.
+
 ## Public reads name their merchant; token source
 
 - Breaking: `listProducts({ merchant, keys })`, `useProducts({ merchant, keys

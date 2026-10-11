@@ -29,6 +29,7 @@ import (
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/http/wireform"
 	"github.com/open-rails/openrails/internal/modules/checkout"
+	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
@@ -286,11 +287,14 @@ func (r *Request) DecodeJSON(data any) error {
 // (billing.DefaultPageLimit when absent) and the opaque cursor a previous
 // page returned. A limit that is not an integer in 1..billing.MaxPageLimit is
 // answered 400 invalid_query and Page returns false.
-func (r *Request) Page() (billing.PageRequest, bool) {
-	page := billing.PageRequest{Cursor: r.Query("cursor"), Limit: billing.DefaultPageLimit}
+func (r *Request) Page() (billing.PageRequest, bool) { return r.PageOf(pagination.Standard) }
+
+// PageOf is Page for a list of its own size.
+func (r *Request) PageOf(size pagination.Size) (billing.PageRequest, bool) {
+	page := billing.PageRequest{Cursor: r.Query("cursor"), Limit: size.Default}
 	if raw := r.Query("limit"); raw != "" {
 		n, err := strconv.Atoi(raw)
-		if err != nil || n < 1 || n > billing.MaxPageLimit {
+		if err != nil || n < 1 || n > size.Max {
 			r.APIError(api.Coded(billing.CodeInvalidQuery, "limit is invalid").WithParam("limit"))
 			return billing.PageRequest{}, false
 		}

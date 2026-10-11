@@ -22,60 +22,45 @@ WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
 ORDER BY occurred_at DESC
 LIMIT 1;
 
--- name: AggregateUsageTotals :many
--- Per-event_type rollup over [from, to) in one currency.
-SELECT event_type,
-       COALESCE(SUM(amount), 0)::bigint AS total_amount,
-       COUNT(*)::bigint AS event_count
-FROM billing.usage_events
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = sqlc.arg(currency)
-  AND occurred_at >= sqlc.arg(from_at)::timestamptz
-  AND occurred_at < sqlc.arg(to_at)::timestamptz
-GROUP BY event_type;
+-- name: UsageReport :many
+-- One page of a customer's usage over [from, to) in one currency, grouped by
+-- event_type, resource ('' when absent) or invoker: total amount descending,
+-- then the key in byte order, after the group (after_amount, after_key).
+SELECT g.key, g.event_count, g.total_amount
+FROM (
+    SELECT COALESCE(CASE sqlc.arg(group_by)::text
+               WHEN 'event_type' THEN ue.event_type
+               WHEN 'resource' THEN ue.resource
+               WHEN 'invoker' THEN ue.invoker_id
+           END, '')::text AS key,
+           COUNT(*)::bigint AS event_count,
+           COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
+    FROM billing.usage_events ue
+    WHERE ue.merchant_id = sqlc.arg(merchant_id) AND ue.customer_id = sqlc.arg(customer_id)
+      AND ue.currency = sqlc.arg(currency)
+      AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
+      AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
+    GROUP BY 1
+) g
+WHERE sqlc.narg(after_amount)::bigint IS NULL
+   OR g.total_amount < sqlc.narg(after_amount)::bigint
+   OR (g.total_amount = sqlc.narg(after_amount)::bigint AND g.key COLLATE "C" > sqlc.narg(after_key)::text)
+ORDER BY g.total_amount DESC, g.key COLLATE "C"
+LIMIT sqlc.arg(row_limit)::int;
 
--- name: AggregateUsageDimensions :many
--- Summed per-dimension counts per event_type over [from, to).
+-- name: UsageReportDimensions :many
+-- The summed dimensions of a report page's event types over [from, to).
 SELECT ue.event_type,
        d.key::text AS key,
        COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
 FROM billing.usage_events ue
 CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
-WHERE ue.merchant_id = $1 AND ue.customer_id = $2
+WHERE ue.merchant_id = sqlc.arg(merchant_id) AND ue.customer_id = sqlc.arg(customer_id)
   AND ue.currency = sqlc.arg(currency)
+  AND ue.event_type = ANY (sqlc.arg(event_types)::text[])
   AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
   AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
 GROUP BY ue.event_type, d.key;
-
--- name: ServiceUsageRollup :many
--- Per-dimension-value spend grouped by a fixed selector. group_by is validated
--- against the allowlist in Go; unknown selectors group everything under ''.
-SELECT COALESCE(CASE sqlc.arg(group_by)::text
-           WHEN 'resource' THEN ue.resource
-           WHEN 'invoker' THEN ue.invoker_id
-       END, '')::text AS key,
-       ue.currency,
-       COUNT(*)::bigint AS event_count,
-       COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
-FROM billing.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.customer_id = $2
-  AND ue.currency = sqlc.arg(currency)
-  AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
-  AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
-GROUP BY 1, 2
-ORDER BY total_amount DESC;
-
--- name: ResourceRevenueDaily :many
--- Per-day revenue for a resource across the merchant's customers. ue.amount is
--- already in the currency's ledger scale: no conversion.
-SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
-       ue.currency,
-       COALESCE(SUM(ue.amount), 0)::bigint AS amount
-FROM billing.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = sqlc.arg(currency)
-  AND ue.occurred_at >= sqlc.arg(from_at)::timestamptz
-  AND ue.occurred_at < sqlc.arg(to_at)::timestamptz
-GROUP BY 1, 2
-ORDER BY 1;
 
 -- name: SumUsageAmountSince :one
 -- accrual_rate_cap: the customer's rated usage over a lookback window, for the

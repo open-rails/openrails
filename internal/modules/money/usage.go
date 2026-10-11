@@ -369,81 +369,10 @@ func (s *MoneyService) FindUsageEvent(ctx context.Context, payer identity.Custom
 	return ev, nil
 }
 
-// UsageRollupRow is a per-event_type aggregate of usage over a window: total
-// host-priced amount, event count, and summed per-dimension counts. Powers
-// usage reporting (GET /v1/me/usage) and invoice line items.
-type UsageRollupRow struct {
-	EventType   string           `json:"event_type"`
-	Currency    string           `json:"currency"`
-	TotalAmount int64            `json:"total_amount"`
-	EventCount  int64            `json:"event_count"`
-	Dimensions  map[string]int64 `json:"dimensions"`
-}
-
-// AggregateUsage rolls up an payer's usage_events over [from, to) grouped by
-// event_type, with summed dimensions. Scoped to the request merchant. This is
-// the rollup layer — it is NEVER called on the per-request admission hot path.
-func (s *MoneyService) AggregateUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) ([]UsageRollupRow, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return nil, fmt.Errorf("payer required")
-	}
-	cur := normalizeCurrency(currency)
-	if err := moneyutil.ValidateCurrency(cur); err != nil {
-		return nil, err
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tenantID := tid.UUID()
-	payerID := payer.UUID()
-
-	rows := map[string]*UsageRollupRow{}
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		q := s.db.Gen(ctx)
-		totals, err := q.AggregateUsageTotals(ctx, gen.AggregateUsageTotalsParams{
-			MerchantID: tenantID, CustomerID: payerID,
-			Currency: cur,
-			FromAt:   from.UTC(), ToAt: to.UTC(),
-		})
-		if err != nil {
-			return err
-		}
-		for _, t := range totals {
-			rows[t.EventType] = &UsageRollupRow{
-				EventType:   t.EventType,
-				Currency:    cur,
-				TotalAmount: t.TotalAmount,
-				EventCount:  t.EventCount,
-				Dimensions:  map[string]int64{},
-			}
-		}
-
-		dims, err := q.AggregateUsageDimensions(ctx, gen.AggregateUsageDimensionsParams{
-			MerchantID: tenantID, CustomerID: payerID,
-			Currency: cur,
-			FromAt:   from.UTC(), ToAt: to.UTC(),
-		})
-		if err != nil {
-			return err
-		}
-		for _, d := range dims {
-			if r, ok := rows[d.EventType]; ok {
-				r.Dimensions[d.Key] = d.Total
-			}
-		}
+// nilIfEmpty returns nil for "", else a pointer to s (nullable text columns).
+func nilIfEmpty(s string) *string {
+	if s == "" {
 		return nil
-	})
-	if err != nil {
-		return nil, err
 	}
-
-	out := make([]UsageRollupRow, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, *r)
-	}
-	return out, nil
+	return &s
 }

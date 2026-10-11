@@ -16,6 +16,7 @@ export {
   type ProductListOptions,
   type SendSolanaTransaction,
   type SubscriptionChangeInput,
+  type UsageOptions,
 } from "./client"
 export {
   redeemAssertion,
@@ -68,6 +69,8 @@ export type {
   SubscriptionStatus,
   SubscriptionChange,
   SubscriptionChangePreview,
+  Usage,
+  UsageRow,
 } from "./types"
 export {
   amountToDecimal,

@@ -25,6 +25,7 @@ import {
   subscriptionSchema,
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
+  usageSchema,
   type Account,
   type CustomerConfig,
   type CustomerLink,
@@ -44,6 +45,7 @@ import {
   type Subscription,
   type SubscriptionChange,
   type SubscriptionChangePreview,
+  type Usage,
 } from "./types"
 
 export interface BillingClientOptions {
@@ -103,6 +105,19 @@ export interface CursorOptions {
   limit?: number
   cursor?: string | null
   signal?: AbortSignal
+}
+
+/**
+ * A page of the customer's usage report in `currency`, grouped by `groupBy`
+ * (event type by default). `from` and `to` are RFC 3339 or a date; left out,
+ * the month before now, or with `cursor` the window of the page it came from.
+ * `limit` is at most 1,000 groups (default 100).
+ */
+export interface UsageOptions extends CursorOptions {
+  currency: string
+  groupBy?: "event_type" | "resource" | "invoker"
+  from?: string
+  to?: string
 }
 
 /**
@@ -689,6 +704,24 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      */
     getAccount(signal?: AbortSignal): Promise<Account> {
       return json(accountSchema, "/me", { signal })
+    },
+
+    /**
+     * A page of the customer's usage: its groups by total amount, largest
+     * first. Pass the answer's `next_cursor` as `cursor` for the next page.
+     */
+    getUsage(opts: UsageOptions): Promise<Usage> {
+      return json(usageSchema, "/me/usage", {
+        query: {
+          currency: opts.currency,
+          group_by: opts.groupBy,
+          from: opts.from,
+          to: opts.to,
+          limit: opts.limit,
+          cursor: opts.cursor ?? undefined,
+        },
+        signal: opts.signal,
+      })
     },
 
     /**

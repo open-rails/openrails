@@ -12,112 +12,6 @@ import (
 	"github.com/google/uuid"
 )
 
-const aggregateUsageDimensions = `-- name: AggregateUsageDimensions :many
-SELECT ue.event_type,
-       d.key::text AS key,
-       COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
-FROM billing.usage_events ue
-CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
-WHERE ue.merchant_id = $1 AND ue.customer_id = $2
-  AND ue.currency = $3
-  AND ue.occurred_at >= $4::timestamptz
-  AND ue.occurred_at < $5::timestamptz
-GROUP BY ue.event_type, d.key
-`
-
-type AggregateUsageDimensionsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	FromAt     time.Time
-	ToAt       time.Time
-}
-
-type AggregateUsageDimensionsRow struct {
-	EventType string
-	Key       string
-	Total     int64
-}
-
-// Summed per-dimension counts per event_type over [from, to).
-func (q *Queries) AggregateUsageDimensions(ctx context.Context, arg AggregateUsageDimensionsParams) ([]AggregateUsageDimensionsRow, error) {
-	rows, err := q.db.Query(ctx, aggregateUsageDimensions,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.FromAt,
-		arg.ToAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AggregateUsageDimensionsRow
-	for rows.Next() {
-		var i AggregateUsageDimensionsRow
-		if err := rows.Scan(&i.EventType, &i.Key, &i.Total); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const aggregateUsageTotals = `-- name: AggregateUsageTotals :many
-SELECT event_type,
-       COALESCE(SUM(amount), 0)::bigint AS total_amount,
-       COUNT(*)::bigint AS event_count
-FROM billing.usage_events
-WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
-  AND occurred_at >= $4::timestamptz
-  AND occurred_at < $5::timestamptz
-GROUP BY event_type
-`
-
-type AggregateUsageTotalsParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	FromAt     time.Time
-	ToAt       time.Time
-}
-
-type AggregateUsageTotalsRow struct {
-	EventType   string
-	TotalAmount int64
-	EventCount  int64
-}
-
-// Per-event_type rollup over [from, to) in one currency.
-func (q *Queries) AggregateUsageTotals(ctx context.Context, arg AggregateUsageTotalsParams) ([]AggregateUsageTotalsRow, error) {
-	rows, err := q.db.Query(ctx, aggregateUsageTotals,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.Currency,
-		arg.FromAt,
-		arg.ToAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AggregateUsageTotalsRow
-	for rows.Next() {
-		var i AggregateUsageTotalsRow
-		if err := rows.Scan(&i.EventType, &i.TotalAmount, &i.EventCount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const getUsageEventByCoords = `-- name: GetUsageEventByCoords :one
 SELECT id, merchant_id, customer_id, invoker_id, currency, resource, event_type, dimensions, amount, source, source_id, ledger_transfer_id, pricing_authority, metadata, occurred_at, created_at, outcome, forgiven_amount FROM billing.usage_events
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $6
@@ -235,127 +129,6 @@ func (q *Queries) InsertUsageEvent(ctx context.Context, arg InsertUsageEventPara
 	return err
 }
 
-const resourceRevenueDaily = `-- name: ResourceRevenueDaily :many
-SELECT to_char(date_trunc('day', ue.occurred_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD')::text AS date,
-       ue.currency,
-       COALESCE(SUM(ue.amount), 0)::bigint AS amount
-FROM billing.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.resource = $2 AND ue.currency = $3
-  AND ue.occurred_at >= $4::timestamptz
-  AND ue.occurred_at < $5::timestamptz
-GROUP BY 1, 2
-ORDER BY 1
-`
-
-type ResourceRevenueDailyParams struct {
-	MerchantID uuid.UUID
-	Resource   *string
-	Currency   string
-	FromAt     time.Time
-	ToAt       time.Time
-}
-
-type ResourceRevenueDailyRow struct {
-	Date     string
-	Currency string
-	Amount   int64
-}
-
-// Per-day revenue for a resource across the merchant's customers. ue.amount is
-// already in the currency's ledger scale: no conversion.
-func (q *Queries) ResourceRevenueDaily(ctx context.Context, arg ResourceRevenueDailyParams) ([]ResourceRevenueDailyRow, error) {
-	rows, err := q.db.Query(ctx, resourceRevenueDaily,
-		arg.MerchantID,
-		arg.Resource,
-		arg.Currency,
-		arg.FromAt,
-		arg.ToAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ResourceRevenueDailyRow
-	for rows.Next() {
-		var i ResourceRevenueDailyRow
-		if err := rows.Scan(&i.Date, &i.Currency, &i.Amount); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const serviceUsageRollup = `-- name: ServiceUsageRollup :many
-SELECT COALESCE(CASE $3::text
-           WHEN 'resource' THEN ue.resource
-           WHEN 'invoker' THEN ue.invoker_id
-       END, '')::text AS key,
-       ue.currency,
-       COUNT(*)::bigint AS event_count,
-       COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
-FROM billing.usage_events ue
-WHERE ue.merchant_id = $1 AND ue.customer_id = $2
-  AND ue.currency = $4
-  AND ue.occurred_at >= $5::timestamptz
-  AND ue.occurred_at < $6::timestamptz
-GROUP BY 1, 2
-ORDER BY total_amount DESC
-`
-
-type ServiceUsageRollupParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	GroupBy    string
-	Currency   string
-	FromAt     time.Time
-	ToAt       time.Time
-}
-
-type ServiceUsageRollupRow struct {
-	Key         string
-	Currency    string
-	EventCount  int64
-	TotalAmount int64
-}
-
-// Per-dimension-value spend grouped by a fixed selector. group_by is validated
-// against the allowlist in Go; unknown selectors group everything under ”.
-func (q *Queries) ServiceUsageRollup(ctx context.Context, arg ServiceUsageRollupParams) ([]ServiceUsageRollupRow, error) {
-	rows, err := q.db.Query(ctx, serviceUsageRollup,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.GroupBy,
-		arg.Currency,
-		arg.FromAt,
-		arg.ToAt,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ServiceUsageRollupRow
-	for rows.Next() {
-		var i ServiceUsageRollupRow
-		if err := rows.Scan(
-			&i.Key,
-			&i.Currency,
-			&i.EventCount,
-			&i.TotalAmount,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const sumUsageAmountSince = `-- name: SumUsageAmountSince :one
 SELECT COALESCE(SUM(amount), 0)::bigint AS total_amount
 FROM billing.usage_events
@@ -383,4 +156,136 @@ func (q *Queries) SumUsageAmountSince(ctx context.Context, arg SumUsageAmountSin
 	var total_amount int64
 	err := row.Scan(&total_amount)
 	return total_amount, err
+}
+
+const usageReport = `-- name: UsageReport :many
+SELECT g.key, g.event_count, g.total_amount
+FROM (
+    SELECT COALESCE(CASE $1::text
+               WHEN 'event_type' THEN ue.event_type
+               WHEN 'resource' THEN ue.resource
+               WHEN 'invoker' THEN ue.invoker_id
+           END, '')::text AS key,
+           COUNT(*)::bigint AS event_count,
+           COALESCE(SUM(ue.amount), 0)::bigint AS total_amount
+    FROM billing.usage_events ue
+    WHERE ue.merchant_id = $2 AND ue.customer_id = $3
+      AND ue.currency = $4
+      AND ue.occurred_at >= $5::timestamptz
+      AND ue.occurred_at < $6::timestamptz
+    GROUP BY 1
+) g
+WHERE $7::bigint IS NULL
+   OR g.total_amount < $7::bigint
+   OR (g.total_amount = $7::bigint AND g.key COLLATE "C" > $8::text)
+ORDER BY g.total_amount DESC, g.key COLLATE "C"
+LIMIT $9::int
+`
+
+type UsageReportParams struct {
+	GroupBy     string
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Currency    string
+	FromAt      time.Time
+	ToAt        time.Time
+	AfterAmount *int64
+	AfterKey    *string
+	RowLimit    int32
+}
+
+type UsageReportRow struct {
+	Key         string
+	EventCount  int64
+	TotalAmount int64
+}
+
+// One page of a customer's usage over [from, to) in one currency, grouped by
+// event_type, resource (” when absent) or invoker: total amount descending,
+// then the key in byte order, after the group (after_amount, after_key).
+func (q *Queries) UsageReport(ctx context.Context, arg UsageReportParams) ([]UsageReportRow, error) {
+	rows, err := q.db.Query(ctx, usageReport,
+		arg.GroupBy,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.FromAt,
+		arg.ToAt,
+		arg.AfterAmount,
+		arg.AfterKey,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UsageReportRow
+	for rows.Next() {
+		var i UsageReportRow
+		if err := rows.Scan(&i.Key, &i.EventCount, &i.TotalAmount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const usageReportDimensions = `-- name: UsageReportDimensions :many
+SELECT ue.event_type,
+       d.key::text AS key,
+       COALESCE(SUM((d.value)::bigint), 0)::bigint AS total
+FROM billing.usage_events ue
+CROSS JOIN LATERAL jsonb_each_text(ue.dimensions) AS d
+WHERE ue.merchant_id = $1 AND ue.customer_id = $2
+  AND ue.currency = $3
+  AND ue.event_type = ANY ($4::text[])
+  AND ue.occurred_at >= $5::timestamptz
+  AND ue.occurred_at < $6::timestamptz
+GROUP BY ue.event_type, d.key
+`
+
+type UsageReportDimensionsParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	EventTypes []string
+	FromAt     time.Time
+	ToAt       time.Time
+}
+
+type UsageReportDimensionsRow struct {
+	EventType string
+	Key       string
+	Total     int64
+}
+
+// The summed dimensions of a report page's event types over [from, to).
+func (q *Queries) UsageReportDimensions(ctx context.Context, arg UsageReportDimensionsParams) ([]UsageReportDimensionsRow, error) {
+	rows, err := q.db.Query(ctx, usageReportDimensions,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.EventTypes,
+		arg.FromAt,
+		arg.ToAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []UsageReportDimensionsRow
+	for rows.Next() {
+		var i UsageReportDimensionsRow
+		if err := rows.Scan(&i.EventType, &i.Key, &i.Total); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

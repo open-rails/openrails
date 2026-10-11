@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 
 import errorFixture from "../../../../testdata/wire/error_envelope.json"
 import subscriptionFixture from "../../../../testdata/wire/subscription.json"
+import usageFixture from "../../../../testdata/wire/usage.json"
 import {
   apiError,
   fakeBilling,
@@ -19,7 +20,12 @@ import {
 } from "./client"
 import { BillingError, isServerError } from "./errors"
 import { tokenSource } from "./token-source"
-import { priceSchema, productSchema, subscriptionSchema } from "./types"
+import {
+  priceSchema,
+  productSchema,
+  subscriptionSchema,
+  usageSchema,
+} from "./types"
 
 describe("wire fixtures", () => {
   it("preserves catalog revisions and accepts prices from older servers", () => {
@@ -45,6 +51,21 @@ describe("wire fixtures", () => {
         waiting_for_new_card: false,
         last_failure_reason: "insufficient_funds",
       },
+    })
+  })
+
+  it("decodes the canonical OpenRails usage report", () => {
+    expect(usageSchema.parse(usageFixture)).toMatchObject({
+      group_by: "event_type",
+      rows: [
+        {
+          key: "gpu",
+          event_count: 3,
+          amount: "9223372036854775807",
+          dimensions: { seconds: 90 },
+        },
+      ],
+      next_cursor: "next-page",
     })
   })
 
@@ -125,6 +146,33 @@ describe("createBillingClient", () => {
     expect(server.fetch.mock.calls[1][0]).toBe(
       "/billing/v1/me/payments?limit=5&cursor=c1&rail=nmi"
     )
+  })
+
+  it("pages the usage report by cursor", async () => {
+    const page = (next_cursor: string | null) =>
+      json(200, { ...usageFixture, next_cursor })
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(page("c2"))
+      .mockResolvedValueOnce(page(null))
+    const client = createBillingClient({ fetch })
+    const first = await client.getUsage({
+      currency: "USD",
+      groupBy: "resource",
+      limit: 2,
+    })
+    expect(first.next_cursor).toBe("c2")
+    const last = await client.getUsage({
+      currency: "USD",
+      groupBy: "resource",
+      limit: 2,
+      cursor: first.next_cursor,
+    })
+    expect(last.next_cursor).toBeNull()
+    expect(fetch.mock.calls.map(([url]) => url)).toEqual([
+      "/billing/v1/me/usage?currency=USD&group_by=resource&limit=2",
+      "/billing/v1/me/usage?currency=USD&group_by=resource&limit=2&cursor=c2",
+    ])
   })
 
   it("rejects a drifting payload as invalid_response", async () => {

@@ -60,6 +60,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
         idempotencyKey: "k",
       }),
     () => client.confirmOrder("ord_1"),
+    () => client.getUsage({ currency: "USD" }),
   ]
   for (const call of calls) await call().catch(() => undefined)
 

@@ -10,8 +10,8 @@ var admissionErrors = []string{"admission_not_found", billing.CodeServiceCredent
 
 func withAdmission(list ...string) []string { return codes(append(list, admissionErrors...)...) }
 
-// usageQuery is a usage report's query.
-var usageQuery = params(text("currency"), text("from"), text("group_by"), text("to"))
+// usageQuery is a usage report's query: a page of its groups.
+var usageQuery = params(text("currency"), text("from"), text("group_by"), pageParams, text("to"))
 
 // meteringRoutes is spend as it happens: admissions and their holds, usage
 // events (failed usage included) and the customer's own report, the charges
@@ -30,7 +30,7 @@ var meteringRoutes = []Route{
 	{Method: POST, Path: "/v1/app/usage-events", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "RecordUsage", IdempotencyKey: true,
 		Request: billing.RecordUsageBatchParams{}, Responses: []Reply{{200, billing.RecordUsageBatchResult{}}}, Errors: codes("invalid_param"), Handler: h(handlers.RecordUsage)},
 	{Method: GET, Path: "/v1/me/usage", Group: Customer, Auth: AuthCustomer,
-		Query: usageQuery, Responses: []Reply{{200, billing.Usage{}}}, Errors: codes("currency_unsupported"), Handler: h(handlers.GetMyUsage)},
+		Query: usageQuery, Responses: []Reply{{200, billing.Usage{}}}, Errors: codes("currency_unsupported", "invalid_cursor"), Handler: h(handlers.GetMyUsage)},
 	{Method: POST, Path: "/v1/app/running-charges", Group: App, Auth: AuthApplication, Permission: needUsage, Name: "StartRunningCharge", IdempotencyKey: true,
 		Request: billing.StartRunningChargeParams{}, Responses: []Reply{{201, billing.RunningCharge{}}, {200, billing.RunningCharge{}}},
 		Errors: codes("currency_unsupported", "idempotency_key_reused", "insufficient_credits", "invalid_param"), Handler: h(handlers.StartRunningCharge)},

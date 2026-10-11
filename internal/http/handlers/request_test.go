@@ -14,11 +14,11 @@ import (
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/google/uuid"
-	"github.com/jonboulle/clockwork"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/config"
@@ -156,28 +156,17 @@ func TestPaymentMethodHealth(t *testing.T) {
 	}
 }
 
-func TestUsageWindow(t *testing.T) {
-	now := time.Date(2040, 5, 15, 12, 30, 0, 0, time.UTC)
-	clock := clockwork.NewFakeClockAt(now)
-	rt := &app.Runtime{Clock: clock}
-	r, _ := newTestRequest(http.MethodGet, "/usage", nil, rt)
-	from, to, ok := usageWindow(r)
-	require.True(t, ok)
-	require.Equal(t, []time.Time{now.AddDate(0, -1, 0), now}, []time.Time{from, to}, "defaults come from the runtime clock")
-	clock.Advance(24 * time.Hour)
-	_, to, _ = usageWindow(r)
-	require.Equal(t, now.Add(24*time.Hour), to)
-
-	r, _ = newTestRequest(http.MethodGet, "/usage?from=2030-01-01&to=2030-02-01", nil, rt)
-	from, to, ok = usageWindow(r)
-	require.True(t, ok)
-	require.Equal(t, []any{2030, time.January, time.February}, []any{from.Year(), from.Month(), to.Month()})
-
-	for _, q := range []string{"from=junk", "to=junk", "from=2030-02-01&to=2030-01-01", "from=2030-01-01&to=2030-01-01"} {
-		r, rec := newTestRequest(http.MethodGet, "/usage?"+q, nil, rt)
-		_, _, ok := usageWindow(r)
-		require.False(t, ok, q)
-		require.Equal(t, http.StatusBadRequest, rec.Code, q)
+// A usage report's query is refused before any read: a from or to that is not
+// a time, or a limit outside 1..billing.MaxUsagePageLimit.
+func TestUsageQueryRefusals(t *testing.T) {
+	for query, param := range map[string]string{"from=junk": "from", "to=2030-13-01": "to", "limit=0": "limit", "limit=1001": "limit"} {
+		r, rec := newTestRequest(http.MethodGet, "/v1/me/usage?currency=USD&"+query, nil, &app.Runtime{})
+		getUsage(r, billing.CustomerID(uuid.New()))
+		var body api.ErrorResponse
+		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body), rec.Body.String())
+		require.Equal(t, http.StatusBadRequest, rec.Code, query)
+		require.Equal(t, billing.CodeInvalidQuery, body.Error.Code, query)
+		require.Equal(t, param, *body.Error.Param, query)
 	}
 }
 

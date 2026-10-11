@@ -536,6 +536,38 @@ export const accountSchema = z.object({
 })
 export type Account = z.infer<typeof accountSchema>
 
+/**
+ * One group of a usage report: its events and their total `amount`.
+ * `dimensions` are the summed event dimensions when grouped by event type.
+ */
+export const usageRowSchema = z.object({
+  key: z.string(),
+  event_count: z.number(),
+  amount,
+  dimensions: z.record(z.string(), z.number()).nullish(),
+})
+export type UsageRow = z.infer<typeof usageRowSchema>
+
+/**
+ * One page of the customer's usage in `currency` over [`from`, `to`): its
+ * groups by total amount, largest first, then by key. `next_cursor` reads the
+ * next page; null on the last.
+ */
+export const usageSchema = z.object({
+  customer_id: z.string(),
+  currency: z.string(),
+  from: time,
+  to: time,
+  /** `event_type | resource | invoker`; kept open for new values. */
+  group_by: z.string(),
+  rows: z.array(usageRowSchema),
+  next_cursor: z
+    .string()
+    .nullish()
+    .transform((v) => v ?? null),
+})
+export type Usage = z.infer<typeof usageSchema>
+
 /** Currency code (upper case) to its native-unit scale. */
 export type CurrencyScales = Readonly<Record<string, number>>
 

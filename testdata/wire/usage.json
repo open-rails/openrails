@@ -1,0 +1,18 @@
+{
+  "customer_id": "22222222-2222-2222-2222-222222222222",
+  "currency": "USD",
+  "from": "2026-08-16T00:00:00.123456789Z",
+  "to": "2026-09-16T00:00:00.123456789Z",
+  "group_by": "event_type",
+  "rows": [
+    {
+      "key": "gpu",
+      "event_count": 3,
+      "amount": "9223372036854775807",
+      "dimensions": {
+        "seconds": 90
+      }
+    }
+  ],
+  "next_cursor": "next-page"
+}
