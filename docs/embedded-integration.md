@@ -148,7 +148,10 @@ if err != nil { return err }
 ```
 
 Only Postgres (including the migrations `New` applies first) and a refused
-`MerchantDeclaration.Catalog` can fail `New`; it starts no workers. Vault login, PSP posture checks and Redis reconnect in the background
+`MerchantDeclaration.Catalog` can fail `New`; it starts no workers. A catalog
+naming a declared PSP whose account waits on Vault (a Transit signer before the
+first login) is applied in the background once Vault answers; `Ready` fails,
+naming it, until then. Vault login, PSP posture checks and Redis reconnect in the background
 (capped full-jitter backoff, forever); until then only their features answer
 503. `Ready` is the readiness check (Postgres, the merchant directory, the
 declared catalog, River). Register `Probes` with the host's

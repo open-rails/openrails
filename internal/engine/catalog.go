@@ -74,11 +74,12 @@ func (e *Engine) reportCatalog(slug string, err error) {
 // ctx. An object an edit changed is skipped, not refused: New succeeds, the
 // finding names it and the next start retries it. A provider reference not
 // confirmed in time leaves the application to the background, and Ready fails
-// until it commits.
-func (e *Engine) applyDeclaredCatalog(ctx context.Context, mid billing.MerchantID, slug string, params catalog.Application) error {
+// until it commits; so does one to a declared PSP (psps are their keys) whose
+// account waits on Vault.
+func (e *Engine) applyDeclaredCatalog(ctx context.Context, mid billing.MerchantID, slug string, psps []string, params catalog.Application) error {
 	name := fmt.Sprintf("openrails: apply Config.Merchants[%q].Catalog", slug)
 	for attempt := 0; ; attempt++ {
-		receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Now().Add(declaredCatalogProviderWait))
+		receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Now().Add(declaredCatalogProviderWait), psps)
 		switch {
 		case err == nil:
 			logCatalogConflicts(slug, receipt)
@@ -87,7 +88,7 @@ func (e *Engine) applyDeclaredCatalog(ctx context.Context, mid billing.MerchantI
 			return fmt.Errorf("%s: %w", name, ctx.Err())
 		case errors.Is(err, service.ErrCatalogProviderUnconfirmed):
 			e.reportCatalog(slug, err)
-			e.finishDeclaredCatalog(mid, slug, params)
+			e.finishDeclaredCatalog(mid, slug, psps, params)
 			return nil
 		case !transientDatabaseError(err):
 			return fmt.Errorf("%s: %w", name, err)
@@ -102,12 +103,12 @@ func (e *Engine) applyDeclaredCatalog(ctx context.Context, mid billing.MerchantI
 // finishDeclaredCatalog retries the application until it commits, with no
 // provider deadline. A provider that now refuses a reference keeps Ready
 // failing with that reason until the reference is fixed.
-func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, slug string, params catalog.Application) {
+func (e *Engine) finishDeclaredCatalog(mid billing.MerchantID, slug string, psps []string, params catalog.Application) {
 	rt := e.App.Runtime
 	rt.Go("declared catalog", func(ctx context.Context) {
 		last := ""
 		err := retry.Forever(ctx, func(ctx context.Context) error {
-			receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Time{})
+			receipt, err := e.svc.ApplyDeclaredCatalog(merchant.WithID(ctx, mid), params, time.Time{}, psps)
 			if err == nil {
 				logCatalogConflicts(slug, receipt)
 			}

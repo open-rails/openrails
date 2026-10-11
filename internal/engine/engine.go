@@ -14,7 +14,9 @@ import (
 	"context"
 
 	"fmt"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 
@@ -164,7 +166,8 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		if doc == nil {
 			continue
 		}
-		if err := e.applyDeclaredCatalog(ctx, ids[i], declarations[i].Slug, *doc); err != nil {
+		psps := slices.Sorted(maps.Keys(declarations[i].PSPs))
+		if err := e.applyDeclaredCatalog(ctx, ids[i], declarations[i].Slug, psps, *doc); err != nil {
 			return fail(err)
 		}
 	}

@@ -57,8 +57,9 @@ type Engine struct {
 // wait for the database; nothing else does. It provisions each merchant
 // Config.Merchants declares and applies its Catalog before returning, failing
 // with the reason if one is refused; only provider references it cannot
-// confirm within seconds finish in the background, and Ready fails until they
-// do. Vault login, PSP posture checks and Redis recover
+// confirm within seconds, and those to a declared PSP whose account waits on
+// Vault (a Transit signer before the first login), finish in the background,
+// and Ready fails until they do. Vault login, PSP posture checks and Redis recover
 // in the background and fail only the features that need them (see Probes).
 func New(ctx context.Context, cfg Config, deps Deps) (*Engine, error) {
 	e, err := engine.New(ctx, cfg, deps)

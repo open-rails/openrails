@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,7 +26,7 @@ import (
 // before local mutation. An object whose named field an edit set differently
 // is skipped and reported unless params.Force.
 func (s *Service) ApplyCatalog(ctx context.Context, document catalogwire.Application, params billing.ApplyCatalogParams) (*billing.CatalogApplicationReceipt, error) {
-	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference)
+	return s.applyCatalog(ctx, document, params.Force, s.verifyCatalogProviderReference, nil)
 }
 
 // ErrCatalogProviderUnconfirmed: a provider reference could not be confirmed
@@ -36,8 +37,11 @@ var ErrCatalogProviderUnconfirmed = errors.New("catalog provider reference uncon
 // ApplyDeclaredCatalog applies a declared merchant's catalog on start. It never
 // forces: conflicting objects are skipped, reported and retried on the next
 // start. Provider reference reads end at deadline (zero: none); one that
-// fails without a provider refusal is ErrCatalogProviderUnconfirmed.
-func (s *Service) ApplyDeclaredCatalog(ctx context.Context, document catalogwire.Application, deadline time.Time) (*billing.CatalogApplicationReceipt, error) {
+// fails without a provider refusal is ErrCatalogProviderUnconfirmed. So is a
+// reference to one of declaredPSPs (the PSP keys the merchant's declaration
+// names) that has no account yet, its signer awaiting Vault. A PSP declared
+// nowhere is refused.
+func (s *Service) ApplyDeclaredCatalog(ctx context.Context, document catalogwire.Application, deadline time.Time, declaredPSPs []string) (*billing.CatalogApplicationReceipt, error) {
 	verify := func(ctx context.Context, provider, rail, account, product string, req billing.CreatePriceParams, link map[string]string) (map[string]string, error) {
 		if !deadline.IsZero() {
 			var cancel context.CancelFunc
@@ -51,10 +55,17 @@ func (s *Service) ApplyDeclaredCatalog(ctx context.Context, document catalogwire
 		}
 		return out, err
 	}
-	return s.applyCatalog(ctx, document, false, verify)
+	declared := map[string]bool{}
+	for _, key := range declaredPSPs {
+		declared[strings.ToLower(strings.TrimSpace(key))] = true
+	}
+	return s.applyCatalog(ctx, document, false, verify, declared)
 }
 
-func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, verify catalogReferenceVerifier) (*billing.CatalogApplicationReceipt, error) {
+// applyCatalog applies params. A reference to a PSP in declaredPSPs with no
+// account yet is ErrCatalogProviderUnconfirmed, unless the document is
+// refused for another reason.
+func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Application, force bool, verify catalogReferenceVerifier, declaredPSPs map[string]bool) (*billing.CatalogApplicationReceipt, error) {
 	if err := params.Validate(); err != nil {
 		return nil, apperr.Invalidf("%s", err)
 	}
@@ -75,7 +86,7 @@ func (s *Service) applyCatalog(ctx context.Context, params catalogwire.Applicati
 		return nil, err
 	}
 	for attempt := 1; ; attempt++ {
-		prepared, err := s.prepareCatalogApplication(ctx, params, digest, verify)
+		prepared, err := s.prepareCatalogApplication(ctx, params, digest, verify, declaredPSPs)
 		if err != nil {
 			return nil, err
 		}
