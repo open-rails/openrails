@@ -35,6 +35,19 @@ type BillingConfig struct {
 	Merchants map[string]MerchantConfig `yaml:"merchants" koanf:"merchants"`
 }
 
+// Declarations is the manifest as the engine reads it: each merchant's
+// declaration, without the keys only the server reads (remote_application).
+func (m *BillingConfig) Declarations() *merchantbootstrap.BillingConfig {
+	if m == nil {
+		return nil
+	}
+	out := &merchantbootstrap.BillingConfig{Version: m.Version, Merchants: make(map[string]config.MerchantDeclaration, len(m.Merchants))}
+	for slug, merchant := range m.Merchants {
+		out.Merchants[slug] = merchant.MerchantDeclaration
+	}
+	return out
+}
+
 // LoadMerchantConfigManifest reads and validates a merchant config manifest.
 func LoadMerchantConfigManifest(path string) (*BillingConfig, error) {
 	return LoadMerchantConfigManifestFiles(path)

@@ -72,13 +72,17 @@ func runApplyCatalog(cmd *cobra.Command, opts catalogOptions) error {
 	}
 
 	cfg, _ := cmd.Context().Value(config.ConfigContextKey).(*config.Config)
+	manifest, err := cliMerchantManifest(cmd.Context(), opts.merchantManifest)
+	if err != nil {
+		return err
+	}
 	push := hosttools.CatalogApplyOptions{
-		Config:               cfg,
-		File:                 opts.file,
-		Out:                  cmd.OutOrStdout(),
-		Merchant:             opts.merchant,
-		MerchantManifestPath: opts.merchantManifest,
-		Force:                opts.forceConflicts,
+		Config:           cfg,
+		File:             opts.file,
+		Out:              cmd.OutOrStdout(),
+		Merchant:         opts.merchant,
+		MerchantManifest: manifest,
+		Force:            opts.forceConflicts,
 	}
 	receipt, err := hosttools.ApplyMerchantCatalog(cmd.Context(), push)
 	if err != nil {

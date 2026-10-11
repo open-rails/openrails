@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/service"
 )
 
@@ -21,8 +22,10 @@ type CatalogApplyOptions struct {
 	Config  *config.Config
 	PGXPool *pgxpool.Pool
 	App     *app.App
-	// MerchantManifestPath optionally supplies the host-owned credential snapshot.
-	// Managed DB/Vault deployments always use their configured backend instead.
+	// MerchantManifest is the manifest the host boots from; nil reads
+	// MerchantManifestPath (or the conventional path). Managed Vault
+	// deployments always use their configured backend instead.
+	MerchantManifest     *merchantbootstrap.BillingConfig
 	MerchantManifestPath string
 	Merchant             string
 	File                 string

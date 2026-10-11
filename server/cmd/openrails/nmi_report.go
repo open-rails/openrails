@@ -25,9 +25,13 @@ func newNMICmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			manifest, err := cliMerchantManifest(c.Context(), manifestPath)
+			if err != nil {
+				return err
+			}
 			return hosttools.NMIDeclineReport(c.Context(), hosttools.NMIDeclineReportOptions{
 				Config: cfg, MerchantID: mid, PSP: psp, Since: since, Until: until, Format: format,
-				MerchantManifestPath: manifestPath, Out: os.Stdout,
+				MerchantManifest: manifest, Out: os.Stdout,
 			})
 		},
 	}
