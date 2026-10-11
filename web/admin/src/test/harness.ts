@@ -346,7 +346,6 @@ export const cursorPages =
 const CACHE_KEYS = (): Record<string, QueryKey> => ({
   customers: queryKeys.customers(),
   customer: queryKeys.customer("cus_1"),
-  "customer.rates": queryKeys.customerUsageRates("cus_1"),
   subscriptions: queryKeys.subscriptions(),
   subscription: queryKeys.subscription("sub_1"),
   payments: queryKeys.payments(),

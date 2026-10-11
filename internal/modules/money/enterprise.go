@@ -9,18 +9,15 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/pagination"
 )
 
 // Enterprise arrears seams (#798): host-driven sweep, past-due marking,
-// pending-charge visibility and host-owned usage meters / rate cards
-// (including negotiated per-payer overrides).
+// pending-charge visibility and host-owned usage meters / rate cards.
 
 // SweepUsage rates a payer's reported usage over [from, to) through the
 // catalog rate cards into pending owed items — the same watermarked sweep
@@ -140,12 +137,9 @@ func (s *MoneyService) EnsureUsageMeter(ctx context.Context, meter catalogrules.
 	})
 }
 
-// UsageRateCardInput declares a usage rate card. Payer nil/zero = the
-// merchant-default card (ProductID required); Payer set = a negotiated
-// per-payer price/allowance override (#798) that inherits the default's
-// product, filter, and meter contract.
+// UsageRateCardInput declares a meter's usage rate card under the product
+// whose invoices carry it.
 type UsageRateCardInput struct {
-	Payer     *identity.CustomerID
 	ProductID *uuid.UUID
 	MeterKey  string
 	Filter    map[string][]string
@@ -153,8 +147,7 @@ type UsageRateCardInput struct {
 	Allowance *catalog.Allowance
 }
 
-// SetUsageRateCard upserts an in_arrears usage rate card. Operator surface —
-// negotiated pricing is never self-serve.
+// SetUsageRateCard upserts a meter's in_arrears usage rate card.
 func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInput) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -163,15 +156,8 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	if meterKey == "" {
 		return invalidUsageRateCard(fmt.Errorf("meter_key required"))
 	}
-	payerScoped := in.Payer != nil && !in.Payer.IsZero()
-	if !payerScoped && (in.ProductID == nil || *in.ProductID == uuid.Nil) {
-		return invalidUsageRateCard(fmt.Errorf("product_id required for a merchant-default rate card"))
-	}
-	if payerScoped && in.ProductID != nil {
-		return invalidUsageRateCard(fmt.Errorf("product_id is inherited by a payer rate card"))
-	}
-	if payerScoped && len(in.Filter) > 0 {
-		return invalidUsageRateCard(fmt.Errorf("filter is inherited by a payer rate card"))
+	if in.ProductID == nil || *in.ProductID == uuid.Nil {
+		return invalidUsageRateCard(fmt.Errorf("product_id required for a rate card"))
 	}
 	if err := catalogrules.ValidateUsagePrice("usage rate card", &in.Price); err != nil {
 		return invalidUsageRateCard(err)
@@ -214,41 +200,11 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 		if err := catalogrules.ValidateDimensions("usage rate card", meter.GroupBy, in.Filter, &in.Price); err != nil {
 			return invalidUsageRateCard(err)
 		}
-		if err := ensureAllowanceSource(
-			ctx,
-			tx,
-			tid.UUID(),
-			meterKey,
-			in.Payer,
-			in.Price.Currency,
-			in.Allowance,
-		); err != nil {
+		if err := ensureAllowanceSource(ctx, tx, tid.UUID(), meterKey, in.Price.Currency, in.Allowance); err != nil {
 			return err
 		}
 		if err := validateRateCardAsAllowanceSource(ctx, queries, tid.UUID(), meter, in.Price); err != nil {
 			return err
-		}
-		if payerScoped {
-			if err := ensureCustomer(ctx, queries, tid.UUID(), in.Payer.UUID()); err != nil {
-				return err
-			}
-			defaultCurrency, err := loadDefaultRateCardCurrency(ctx, tx, tid.UUID(), meterKey)
-			if err != nil {
-				return err
-			}
-			if in.Price.Currency != defaultCurrency {
-				return ErrRateCardCurrencyMismatch
-			}
-			if err := queries.UpsertPayerUsageRateCard(ctx, gen.UpsertPayerUsageRateCardParams{
-				MerchantID: tid.UUID(),
-				CustomerID: in.Payer.UUID(),
-				MeterKey:   meterKey,
-				Allowance:  allowanceJSON,
-				Price:      priceJSON,
-			}); err != nil {
-				return fmt.Errorf("upsert payer usage rate card: %w", err)
-			}
-			return nil
 		}
 		if err := ensureActiveProduct(ctx, tx, tid.UUID(), *in.ProductID); err != nil {
 			return err
@@ -258,20 +214,6 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 			tid.UUID().String()+":"+in.ProductID.String(),
 		); err != nil {
 			return fmt.Errorf("lock rate card product: %w", err)
-		}
-		hasCurrencyConflict, err := queries.UsageRateCardCurrencyConflict(
-			ctx,
-			gen.UsageRateCardCurrencyConflictParams{
-				MerchantID: tid.UUID(),
-				MeterKey:   meterKey,
-				Currency:   in.Price.Currency,
-			},
-		)
-		if err != nil {
-			return fmt.Errorf("check payer rate card currencies: %w", err)
-		}
-		if hasCurrencyConflict {
-			return ErrRateCardCurrencyMismatch
 		}
 		filterJSON, err := json.Marshal(in.Filter)
 		if err != nil {
@@ -291,8 +233,8 @@ func (s *MoneyService) SetUsageRateCard(ctx context.Context, in UsageRateCardInp
 	})
 }
 
-// DeleteDefaultUsageRateCard removes a meter's merchant-default card after all
-// negotiated payer overrides have been removed.
+// DeleteDefaultUsageRateCard removes a meter's rate card unless another
+// meter's allowance accrues from it.
 func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey string) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("money service not initialized")
@@ -310,9 +252,9 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 			return err
 		}
 		queries := gen.New(tx)
-		state, err := queries.GetDefaultUsageRateCardDeleteState(
+		exists, err := queries.DefaultUsageRateCardExists(
 			ctx,
-			gen.GetDefaultUsageRateCardDeleteStateParams{
+			gen.DefaultUsageRateCardExistsParams{
 				MerchantID: tid.UUID(),
 				MeterKey:   meterKey,
 			},
@@ -320,11 +262,8 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 		if err != nil {
 			return fmt.Errorf("load default usage rate card: %w", err)
 		}
-		if !state.DefaultExists {
+		if !exists {
 			return ErrDefaultRateCardNotFound
-		}
-		if state.OverrideCount > 0 {
-			return ErrRateCardHasOverrides
 		}
 		dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
 			ctx,
@@ -346,111 +285,5 @@ func (s *MoneyService) DeleteDefaultUsageRateCard(ctx context.Context, meterKey 
 			return fmt.Errorf("delete default usage rate card: %w", err)
 		}
 		return nil
-	})
-}
-
-// ListRateOverrides returns one keyset page of customers' rate overrides,
-// by customer then meter: of one customer and one meter when given.
-func (s *MoneyService) ListRateOverrides(ctx context.Context, payer *identity.CustomerID, meterKey string, page billing.PageRequest) (billing.ListPage[billing.RateOverride], error) {
-	var out billing.ListPage[billing.RateOverride]
-	if s == nil || s.db == nil {
-		return out, fmt.Errorf("money service not initialized")
-	}
-	limit, err := pagination.Limit(page)
-	if err != nil {
-		return out, err
-	}
-	var position struct {
-		Customer uuid.UUID `json:"c"`
-		Meter    string    `json:"m"`
-	}
-	params := gen.ListRateOverridesParams{FetchLimit: pagination.Fetch(limit)}
-	if present, err := pagination.Decode(page.Cursor, &position); err != nil {
-		return out, err
-	} else if present {
-		if position.Customer == uuid.Nil {
-			return out, pagination.ErrInvalidCursor
-		}
-		params.AfterCustomer, params.AfterKey = &position.Customer, &position.Meter
-	}
-	if payer != nil {
-		id := payer.UUID()
-		params.CustomerID = &id
-	}
-	if meterKey = catalogrules.NormalizeKey(meterKey); meterKey != "" {
-		params.MeterKey = &meterKey
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return out, err
-	}
-	params.MerchantID = tid.UUID()
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err := s.db.Gen(ctx).ListRateOverrides(ctx, params)
-		if err != nil {
-			return err
-		}
-		items := make([]billing.RateOverride, 0, len(rows))
-		for _, row := range rows {
-			item, err := rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.Revision, row.CreatedAt, row.UpdatedAt)
-			if err != nil {
-				return err
-			}
-			items = append(items, item)
-		}
-		out = pagination.Cut(items, limit, func(o billing.RateOverride) any {
-			return struct {
-				Customer uuid.UUID `json:"c"`
-				Meter    string    `json:"m"`
-			}{o.CustomerID.UUID(), o.MeterKey}
-		})
-		return nil
-	})
-	return out, err
-}
-
-// GetPayerRateCard reads a customer's rate override for one meter.
-func (s *MoneyService) GetPayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) (*billing.RateOverride, error) {
-	if s == nil || s.db == nil {
-		return nil, fmt.Errorf("money service not initialized")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var out billing.RateOverride
-	err = s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row, err := s.db.Gen(ctx).GetPayerRateCard(ctx, gen.GetPayerRateCardParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), MeterKey: meterKey})
-		if err != nil {
-			return err
-		}
-		out, err = rateOverride(row.CustomerID, row.MeterKey, row.Price, row.Allowance, row.Revision, row.CreatedAt, row.UpdatedAt)
-		return err
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
-// DeletePayerRateCard removes a payer's negotiated override for a meter,
-// restoring the merchant default.
-func (s *MoneyService) DeletePayerRateCard(ctx context.Context, payer identity.CustomerID, meterKey string) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("money service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	meterKey = catalogrules.NormalizeKey(meterKey)
-	if meterKey == "" {
-		return fmt.Errorf("meter_key required")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return err
-	}
-	return s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		return s.db.Gen(ctx).DeletePayerRateCard(ctx, gen.DeletePayerRateCardParams{MerchantID: tid.UUID(), CustomerID: payer.UUID(), MeterKey: meterKey})
 	})
 }

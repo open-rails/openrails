@@ -102,21 +102,6 @@ func (s *Service) catalogAfterCommit(ctx context.Context, work func(context.Cont
 	work(ctx, s)
 }
 
-// CatalogRevision is a read-only merchant revision lookup. A paginated caller
-// must pin/check this value across its reads and restart if it changes.
-func (s *Service) CatalogRevision(ctx context.Context) (int64, error) {
-	ctx, release, err := s.pin(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer release()
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return 0, err
-	}
-	return s.catalogDatabase().Gen(ctx).GetCatalogRevision(ctx, mid.UUID())
-}
-
 // ErrCatalogBenefitOverlap refuses a catalog change that lets two recurring
 // products grant one entitlement outside a shared tier group.
 func errCatalogBenefitOverlap(o gen.ListRecurringBenefitOverlapsRow) error {

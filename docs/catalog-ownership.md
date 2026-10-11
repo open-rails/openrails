@@ -5,8 +5,8 @@ A merchant's catalog changes in two ways, and both may be used at once:
 - **Documents**, the `apply` manager: `MerchantDeclaration.Catalog` on every start,
   `Client.ApplyCatalog`, `POST /v1/admin/catalog/applications` and
   `openrails apply-catalog`.
-- **Edits**, the `edit` manager: the console, the product, price, meter and
-  rate-override routes, and the `Client` edit methods (`UpdateProduct`,
+- **Edits**, the `edit` manager: the console, the product, price and meter
+  routes, and the `Client` edit methods (`UpdateProduct`,
   `CreatePrice`, `UpdatePrice`, `SetMeter`, …).
 
 OpenRails records which manager last set each field of each catalog object, as
@@ -68,13 +68,14 @@ created stays, and the file lets go of its fields.
 
 ## Revisions and concurrent edits
 
-Every product, price key, meter and rate override has a `revision` that starts at
-1 and advances on each change, from an edit or a document. The catalog-wide
-revision (`GetCatalogRevision`) still advances on every catalog write.
+Every product, price key and meter has a `revision` that starts at 1 and
+advances on each change, from an edit or a document. The catalog-wide revision
+still advances on every catalog write; a document's receipt reports it
+(`base_revision`, `applied_revision`).
 
 An edit may send the revision it read as `expected_revision` (`UpdateProduct`,
 `UpdatePrice`, `CreatePrice` of a new version, `SetMeter` (its rate card
-included), `SetRateOverride`; 0 expects no meter or override yet). If the object changed
+included); 0 expects no meter yet). If the object changed
 since, the edit is refused with `409 revision_mismatch` and
 `metadata.revision`, the current one. Without it an edit is unconditional. The
 console always sends it. Documents never carry revisions: field ownership

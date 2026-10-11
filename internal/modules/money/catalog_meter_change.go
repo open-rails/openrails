@@ -2,7 +2,6 @@ package money
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -15,7 +14,7 @@ import (
 
 // CheckCatalogMeterChange holds the ordinary meter/activity locks through the
 // caller's transaction. Nil replacement means removal. Publishing must not
-// reinterpret recorded events or orphan negotiated pricing/allowance sources.
+// reinterpret recorded events or orphan an allowance source.
 func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string, replacement *catalogrules.Meter) error {
 	queries := gen.New(tx)
 	if err := queries.LockUsageMeterKey(ctx, merchantID.String()+":"+key); err != nil {
@@ -47,13 +46,6 @@ func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUI
 	if replacement != nil {
 		return nil
 	}
-	overrides, err := queries.CountUsageMeterOverrides(ctx, gen.CountUsageMeterOverridesParams{MerchantID: merchantID, MeterKey: key})
-	if err != nil {
-		return err
-	}
-	if overrides > 0 {
-		return fmt.Errorf("meter %q has customer pricing overrides: %w", key, ErrMeterInUse)
-	}
 	dependencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(ctx, gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{MerchantID: merchantID, MeterKey: key})
 	if err != nil {
 		return err
@@ -64,7 +56,8 @@ func CheckCatalogMeterChange(ctx context.Context, tx pgx.Tx, merchantID uuid.UUI
 	return nil
 }
 
-// CheckCatalogRateCardRemoval retains the default-card deletion protections.
+// CheckCatalogRateCardRemoval refuses to remove a rate card another meter's
+// allowance accrues from.
 func CheckCatalogRateCardRemoval(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, key string) error {
 	_, err := loadUsageMeterForRateCard(ctx, tx, merchantID, key)
 	if errors.Is(err, ErrUsageMeterNotFound) {
@@ -73,15 +66,7 @@ func CheckCatalogRateCardRemoval(ctx context.Context, tx pgx.Tx, merchantID uuid
 	if err != nil {
 		return err
 	}
-	queries := gen.New(tx)
-	state, err := queries.GetDefaultUsageRateCardDeleteState(ctx, gen.GetDefaultUsageRateCardDeleteStateParams{MerchantID: merchantID, MeterKey: key})
-	if err != nil {
-		return err
-	}
-	if state.OverrideCount > 0 {
-		return ErrRateCardHasOverrides
-	}
-	dependencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(ctx, gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{MerchantID: merchantID, MeterKey: key})
+	dependencies, err := gen.New(tx).GetUsageRateCardAllowanceDependencyCurrencies(ctx, gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{MerchantID: merchantID, MeterKey: key})
 	if err != nil {
 		return err
 	}
@@ -91,9 +76,8 @@ func CheckCatalogRateCardRemoval(ctx context.Context, tx pgx.Tx, merchantID uuid
 	return nil
 }
 
-// CheckCatalogRateCardContracts validates the resulting default and retained
-// negotiated prices against the resulting meter, never the old default. The
-// meter/price locks serialize override writers through the caller's transaction.
+// CheckCatalogRateCardContracts validates the resulting rate card against the
+// resulting meter, never the old card.
 func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uuid.UUID, meter catalogrules.Meter, filter map[string][]string, price catalog.RatePrice) error {
 	if !catalogrules.BillingSupported(meter.Aggregation) {
 		return invalidUsageRateCard(fmt.Errorf("meter %q does not support billing", meter.Key))
@@ -108,31 +92,5 @@ func CheckCatalogRateCardContracts(ctx context.Context, tx pgx.Tx, merchantID uu
 	if err != nil {
 		return err
 	}
-	queries := gen.New(tx)
-	if err := validateRateCardAsAllowanceSource(ctx, queries, merchantID, meter, price); err != nil {
-		return err
-	}
-	rows, err := queries.ListUsageRateCardPricesForUpdate(ctx, gen.ListUsageRateCardPricesForUpdateParams{MerchantID: merchantID, MeterKey: meter.Key})
-	if err != nil {
-		return err
-	}
-	for _, row := range rows {
-		if row.CustomerID == nil {
-			continue
-		}
-		var negotiated catalog.RatePrice
-		if err := json.Unmarshal(row.Price, &negotiated); err != nil {
-			return err
-		}
-		if negotiated.Currency != price.Currency {
-			return ErrRateCardCurrencyMismatch
-		}
-		if err := catalogrules.ValidateDimensions("negotiated usage rate card", meter.GroupBy, filter, &negotiated); err != nil {
-			return meterRateCardConflict(err)
-		}
-		if err := validateRateCardAsAllowanceSource(ctx, queries, merchantID, meter, negotiated); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateRateCardAsAllowanceSource(ctx, gen.New(tx), merchantID, meter, price)
 }

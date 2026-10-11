@@ -6,14 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -21,18 +19,15 @@ import (
 )
 
 var (
-	ErrUsageMeterNotFound       = errors.New("usage meter not found")
-	ErrMeterInUse               = errors.New("usage meter is in use")
-	ErrDefaultRateCardNotFound  = errors.New("default usage rate card not found")
-	ErrDefaultRateCardRequired  = errors.New("default usage rate card required")
-	ErrRateCardHasOverrides     = errors.New("usage rate card has payer overrides")
-	ErrRateCardCurrencyMismatch = errors.New("usage rate card currency must match default")
-	ErrRateCardProductNotFound  = errors.New("usage rate card product not found")
-	ErrAllowanceMeterNotFound   = errors.New("usage rate card allowance meter not found")
-	ErrAllowanceSourceInvalid   = errors.New("usage rate card allowance source is invalid")
-	ErrAllowanceSourceInUse     = errors.New("usage rate card is an allowance source")
-	ErrMeterRateCardConflict    = errors.New("usage meter change conflicts with its rate cards")
-	ErrUsageRateCardInvalid     = errors.New("usage rate card is invalid")
+	ErrUsageMeterNotFound      = errors.New("usage meter not found")
+	ErrMeterInUse              = errors.New("usage meter is in use")
+	ErrDefaultRateCardNotFound = errors.New("default usage rate card not found")
+	ErrRateCardProductNotFound = errors.New("usage rate card product not found")
+	ErrAllowanceMeterNotFound  = errors.New("usage rate card allowance meter not found")
+	ErrAllowanceSourceInvalid  = errors.New("usage rate card allowance source is invalid")
+	ErrAllowanceSourceInUse    = errors.New("usage rate card is an allowance source")
+	ErrMeterRateCardConflict   = errors.New("usage meter change conflicts with its rate cards")
+	ErrUsageRateCardInvalid    = errors.New("usage rate card is invalid")
 )
 
 // meterKeyPosition is the keyset position of a list ordered by one key.
@@ -126,18 +121,6 @@ func (s *MoneyService) GetUsageMeter(ctx context.Context, meterKey string) (*bil
 	return &meter, nil
 }
 
-// rateOverride reads one customer rate card row.
-func rateOverride(customer *uuid.UUID, meterKey *string, price, allowance []byte, revision int64, createdAt, updatedAt time.Time) (billing.RateOverride, error) {
-	if customer == nil || meterKey == nil {
-		return billing.RateOverride{}, fmt.Errorf("rate override has no customer or meter")
-	}
-	out := billing.RateOverride{CustomerID: billing.CustomerID(*customer), MeterKey: *meterKey, Revision: revision, CreatedAt: createdAt, UpdatedAt: updatedAt}
-	if err := decodeRateCard(price, allowance, &out.Price, &out.Allowance); err != nil {
-		return out, fmt.Errorf("decode rate override for customer %s meter %q: %w", *customer, *meterKey, err)
-	}
-	return out, nil
-}
-
 type usageMeterRecord struct {
 	key                string
 	eventType          string
@@ -149,7 +132,6 @@ type usageMeterRecord struct {
 	revision           int64
 	createdAt          time.Time
 	updatedAt          time.Time
-	overrideCount      int64
 	hasActivity        bool
 	lastEventAt        *time.Time
 	cardID             *uuid.UUID
@@ -167,7 +149,7 @@ func usageMeterFromListRow(row gen.ListUsageMetersWithCatalogRow) (billing.Meter
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
 		groupBy: row.GroupBy, revision: row.Revision, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
-		overrideCount: row.OverrideCount, hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
+		hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
 		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
 		filter: row.Filter, price: row.Price, allowance: row.Allowance,
 		cardCreatedAt: row.CardCreatedAt, cardUpdatedAt: row.CardUpdatedAt,
@@ -179,7 +161,7 @@ func usageMeterFromGetRow(row gen.GetUsageMeterWithCatalogRow) (billing.Meter, e
 		key: row.Key, eventType: row.EventType, effectiveEventType: row.EffectiveEventType,
 		valueProperty: row.ValueProperty, aggregation: row.Aggregation, unit: row.Unit,
 		groupBy: row.GroupBy, revision: row.Revision, createdAt: row.CreatedAt, updatedAt: row.UpdatedAt,
-		overrideCount: row.OverrideCount, hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
+		hasActivity: row.HasActivity, lastEventAt: row.LastEventAt,
 		cardID: row.CardID, productID: row.ProductID, productKey: row.ProductKey,
 		filter: row.Filter, price: row.Price, allowance: row.Allowance,
 		cardCreatedAt: row.CardCreatedAt, cardUpdatedAt: row.CardUpdatedAt,
@@ -192,7 +174,7 @@ func usageMeterFromRecord(row usageMeterRecord) (billing.Meter, error) {
 	meter := billing.Meter{
 		Key: row.key, EventType: row.effectiveEventType, ValueProperty: row.valueProperty,
 		Aggregation: catalog.Aggregation(row.aggregation), Unit: row.unit,
-		OverrideCount: row.overrideCount, HasActivity: row.hasActivity, LastEventAt: row.lastEventAt,
+		HasActivity: row.hasActivity, LastEventAt: row.lastEventAt,
 		Revision: row.revision, CreatedAt: row.createdAt, UpdatedAt: row.updatedAt,
 	}
 	if err := json.Unmarshal(row.groupBy, &meter.GroupBy); err != nil {
@@ -330,7 +312,6 @@ func ensureAllowanceSource(
 	tx pgx.Tx,
 	merchantID uuid.UUID,
 	targetMeterKey string,
-	payer *identity.CustomerID,
 	currency string,
 	allowance *catalog.Allowance,
 ) error {
@@ -347,49 +328,21 @@ func ensureAllowanceSource(
 	if err != nil {
 		return fmt.Errorf("load allowance source meter: %w", err)
 	}
-
-	rows, err := gen.New(tx).ListUsageRateCardPricesForUpdate(
+	priceJSON, err := gen.New(tx).GetDefaultUsageRateCardPriceForUpdate(
 		ctx,
-		gen.ListUsageRateCardPricesForUpdateParams{
-			MerchantID: merchantID,
-			MeterKey:   allowance.AccrueFrom,
-		},
+		gen.GetDefaultUsageRateCardPriceForUpdateParams{MerchantID: merchantID, MeterKey: allowance.AccrueFrom},
 	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return allowanceSourceInvalid(fmt.Errorf("source meter %q has no rate card", allowance.AccrueFrom))
+	}
 	if err != nil {
-		return fmt.Errorf("load allowance source rate cards: %w", err)
+		return fmt.Errorf("load allowance source rate card: %w", err)
 	}
-
-	var defaultPrice *catalog.RatePrice
-	var payerPrice *catalog.RatePrice
-	prices := make([]catalog.RatePrice, 0, len(rows))
-	for _, row := range rows {
-		var price catalog.RatePrice
-		if err := json.Unmarshal(row.Price, &price); err != nil {
-			return fmt.Errorf("decode allowance source rate card: %w", err)
-		}
-		prices = append(prices, price)
-		if row.CustomerID == nil {
-			defaultPrice = &prices[len(prices)-1]
-		}
-		if payer != nil && !payer.IsZero() && row.CustomerID != nil && *row.CustomerID == payer.UUID() {
-			payerPrice = &prices[len(prices)-1]
-		}
+	var price catalog.RatePrice
+	if err := json.Unmarshal(priceJSON, &price); err != nil {
+		return fmt.Errorf("decode allowance source rate card: %w", err)
 	}
-	if defaultPrice == nil {
-		return allowanceSourceInvalid(fmt.Errorf("source meter %q has no default rate card", allowance.AccrueFrom))
-	}
-	if payer != nil && !payer.IsZero() {
-		if payerPrice != nil {
-			return validateAllowanceSourcePrice(sourceMeter, *payerPrice, currency)
-		}
-		return validateAllowanceSourcePrice(sourceMeter, *defaultPrice, currency)
-	}
-	for _, price := range prices {
-		if err := validateAllowanceSourcePrice(sourceMeter, price, currency); err != nil {
-			return err
-		}
-	}
-	return nil
+	return validateAllowanceSourcePrice(sourceMeter, price, currency)
 }
 
 func validateUsageMeterRateCardContracts(
@@ -415,26 +368,13 @@ func validateUsageMeterRateCardContracts(
 	if err := json.Unmarshal(state.Filter, &filter); err != nil {
 		return fmt.Errorf("decode usage meter rate card filter: %w", err)
 	}
-	prices, err := queries.ListUsageRateCardPricesForUpdate(
-		ctx,
-		gen.ListUsageRateCardPricesForUpdateParams{
-			MerchantID: merchantID,
-			MeterKey:   replacement.Key,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("load usage meter rate card prices: %w", err)
+	var price catalog.RatePrice
+	if err := json.Unmarshal(state.Price, &price); err != nil {
+		return fmt.Errorf("decode usage meter rate card price: %w", err)
 	}
-	for _, row := range prices {
-		var price catalog.RatePrice
-		if err := json.Unmarshal(row.Price, &price); err != nil {
-			return fmt.Errorf("decode usage meter rate card price: %w", err)
-		}
-		if err := catalogrules.ValidateDimensions("usage rate card", replacement.GroupBy, filter, &price); err != nil {
-			return meterRateCardConflict(err)
-		}
+	if err := catalogrules.ValidateDimensions("usage rate card", replacement.GroupBy, filter, &price); err != nil {
+		return meterRateCardConflict(err)
 	}
-
 	dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
 		ctx,
 		gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{
@@ -445,14 +385,8 @@ func validateUsageMeterRateCardContracts(
 	if err != nil {
 		return fmt.Errorf("load allowance dependencies: %w", err)
 	}
-	for _, row := range prices {
-		var price catalog.RatePrice
-		if err := json.Unmarshal(row.Price, &price); err != nil {
-			return fmt.Errorf("decode allowance source rate card price: %w", err)
-		}
-		if err := validateAllowanceSourceDependencies(replacement, price, dependencyCurrencies); err != nil {
-			return meterRateCardConflict(err)
-		}
+	if err := validateAllowanceSourceDependencies(replacement, price, dependencyCurrencies); err != nil {
+		return meterRateCardConflict(err)
 	}
 	return nil
 }
@@ -550,29 +484,6 @@ func allowanceSourceInvalid(err error) error {
 
 func meterRateCardConflict(err error) error {
 	return fmt.Errorf("%w: %v", ErrMeterRateCardConflict, err)
-}
-
-func loadDefaultRateCardCurrency(
-	ctx context.Context,
-	tx pgx.Tx,
-	merchantID uuid.UUID,
-	meterKey string,
-) (string, error) {
-	priceJSON, err := gen.New(tx).GetDefaultUsageRateCardPriceForUpdate(
-		ctx,
-		gen.GetDefaultUsageRateCardPriceForUpdateParams{MerchantID: merchantID, MeterKey: meterKey},
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", ErrDefaultRateCardRequired
-	}
-	if err != nil {
-		return "", fmt.Errorf("load default usage rate card: %w", err)
-	}
-	var price catalog.RatePrice
-	if err := json.Unmarshal(priceJSON, &price); err != nil {
-		return "", fmt.Errorf("decode default usage rate card price: %w", err)
-	}
-	return strings.ToUpper(strings.TrimSpace(price.Currency)), nil
 }
 
 func ensureActiveProduct(

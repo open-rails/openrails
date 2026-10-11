@@ -185,9 +185,10 @@ func TestOlderBuildBootsOnANewerSchema(t *testing.T) {
 	require.NoError(t, client.Close(t.Context()))
 }
 
-// The migration that removes merchant API hosts applies over a merchant
-// holding a host and an open claim: both go, and the merchant still serves.
-func TestAPIHostMigrationDropsHosts(t *testing.T) {
+// beforeMigration is a schema migrated up to, not including, the migration
+// whose file name ends in suffix.
+func beforeMigration(t *testing.T, suffix string) *fixture {
+	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
 	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
 	pool := openPool(t, dsn)
@@ -199,7 +200,7 @@ func TestAPIHostMigrationDropsHosts(t *testing.T) {
 	require.NoError(t, err)
 	before := fstest.MapFS{}
 	for _, name := range files {
-		if strings.HasSuffix(name, "_drop_merchant_api_hosts.up.sql") {
+		if strings.HasSuffix(name, suffix) {
 			break
 		}
 		body, err := fs.ReadFile(postgresmigrations.FS, name)
@@ -212,27 +213,45 @@ func TestAPIHostMigrationDropsHosts(t *testing.T) {
 	application, err := app.BootstrapWithOptions(t.Context(), &cfg, &app.BootstrapOptions{PGXPool: pool, Migrations: before})
 	require.NoError(t, err)
 	require.NoError(t, application.Close(t.Context()))
+	return f
+}
 
+// relationExists reports whether the fixture's schema holds a table or index.
+func (f *fixture) relationExists(t *testing.T, name string) bool {
+	t.Helper()
+	var found *string
+	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT to_regclass($1)::text", pgx.Identifier{f.schema, name}.Sanitize()).Scan(&found))
+	return found != nil
+}
+
+// columnExists reports whether a table of the fixture's schema has a column.
+func (f *fixture) columnExists(t *testing.T, table, column string) bool {
+	t.Helper()
+	var found bool
+	require.NoError(t, f.pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = $2 AND column_name = $3)`, f.schema, table, column).Scan(&found))
+	return found
+}
+
+// The migration that removes merchant API hosts applies over a merchant
+// holding a host and an open claim: both go, and the merchant still serves.
+func TestAPIHostMigrationDropsHosts(t *testing.T) {
+	f := beforeMigration(t, "_drop_merchant_api_hosts.up.sql")
 	table := func(name string) string { return pgx.Identifier{f.schema, name}.Sanitize() }
 	slug, host := "hosted-"+uuid.NewString()[:8], "api-"+uuid.NewString()[:8]+".e2e.test"
 	var merchantID uuid.UUID
-	require.NoError(t, pool.QueryRow(t.Context(), `INSERT INTO `+table("merchants")+` (slug, status, api_host) VALUES ($1, 'active', $2) RETURNING id`, slug, host).Scan(&merchantID))
-	_, err = pool.Exec(t.Context(), `INSERT INTO `+table("merchant_api_host_claims")+` (merchant_id, api_host, token) VALUES ($1, $2, 'open-claim')`, merchantID, "next-"+host)
+	require.NoError(t, f.pool.QueryRow(t.Context(), `INSERT INTO `+table("merchants")+` (slug, status, api_host) VALUES ($1, 'active', $2) RETURNING id`, slug, host).Scan(&merchantID))
+	_, err := f.pool.Exec(t.Context(), `INSERT INTO `+table("merchant_api_host_claims")+` (merchant_id, api_host, token) VALUES ($1, $2, 'open-claim')`, merchantID, "next-"+host)
 	require.NoError(t, err)
 
 	client := f.runtime(t, slug)
-	var column bool
-	require.NoError(t, pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM information_schema.columns
-		WHERE table_schema = $1 AND table_name = 'merchants' AND column_name = 'api_host')`, f.schema).Scan(&column))
-	require.False(t, column, "merchants.api_host is dropped")
+	require.False(t, f.columnExists(t, "merchants", "api_host"), "merchants.api_host is dropped")
 	for _, relation := range []string{"merchant_api_host_claims", "merchants_api_host_key"} {
-		var found *string
-		require.NoError(t, pool.QueryRow(t.Context(), "SELECT to_regclass($1)::text", table(relation)).Scan(&found))
-		require.Nil(t, found, relation)
+		require.False(t, f.relationExists(t, relation), relation)
 	}
 
 	var kept uuid.UUID
-	require.NoError(t, pool.QueryRow(t.Context(), `SELECT id FROM `+table("merchants")+` WHERE slug = $1 AND deleted_at IS NULL`, slug).Scan(&kept))
+	require.NoError(t, f.pool.QueryRow(t.Context(), `SELECT id FROM `+table("merchants")+` WHERE slug = $1 AND deleted_at IS NULL`, slug).Scan(&kept))
 	require.Equal(t, merchantID, kept, "the merchant is the one that held the host")
 	state, err := client.GetMerchantConfiguration(t.Context())
 	require.NoError(t, err)
@@ -243,4 +262,42 @@ func TestAPIHostMigrationDropsHosts(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, page.Items, 1)
 	require.Equal(t, product.ID, page.Items[0].ID)
+}
+
+// The migration that removes rate overrides applies over a meter whose rate
+// card one customer had an override of: the override goes with its columns,
+// and the card prices the meter.
+func TestRateOverrideMigrationDeletesOverrides(t *testing.T) {
+	f := beforeMigration(t, "_drop_rate_overrides.up.sql")
+	table := func(name string) string { return pgx.Identifier{f.schema, name}.Sanitize() }
+	slug := "metered-" + uuid.NewString()[:8]
+	var merchantID, productID, customerID uuid.UUID
+	require.NoError(t, f.pool.QueryRow(t.Context(), `INSERT INTO `+table("merchants")+` (slug, status) VALUES ($1, 'active') RETURNING id`, slug).Scan(&merchantID))
+	require.NoError(t, f.pool.QueryRow(t.Context(), `INSERT INTO `+table("products")+` (merchant_id, key, display_name, tier_rank, archived) VALUES ($1, 'api', 'API', 0, false) RETURNING id`, merchantID).Scan(&productID))
+	require.NoError(t, f.pool.QueryRow(t.Context(), `INSERT INTO `+table("customers")+` (merchant_id) VALUES ($1) RETURNING id`, merchantID).Scan(&customerID))
+	_, err := f.pool.Exec(t.Context(), `INSERT INTO `+table("catalog_meters")+` (merchant_id, key, aggregation, group_by) VALUES ($1, 'requests', 'count', '{}')`, merchantID)
+	require.NoError(t, err)
+	price := func(amount string) string {
+		return `{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"` + amount + `"}}`
+	}
+	_, err = f.pool.Exec(t.Context(), `INSERT INTO `+table("catalog_rate_cards")+` (merchant_id, product_id, ordinal, meter_key, payment_term, filter, price) VALUES ($1, $2, 1, 'requests', 'in_arrears', '{}', $3)`, merchantID, productID, price("1000"))
+	require.NoError(t, err)
+	_, err = f.pool.Exec(t.Context(), `INSERT INTO `+table("catalog_rate_cards")+` (merchant_id, customer_id, ordinal, meter_key, payment_term, filter, price) VALUES ($1, $2, 1, 'requests', 'in_arrears', '{}', $3)`, merchantID, customerID, price("400"))
+	require.NoError(t, err)
+
+	client := f.runtime(t, slug)
+	for _, column := range []string{"customer_id", "revision"} {
+		require.False(t, f.columnExists(t, "catalog_rate_cards", column), column)
+	}
+	for _, index := range []string{"catalog_rate_cards_customer_id_meter_key_key", "catalog_rate_cards_meter_key_customer_id_idx"} {
+		require.False(t, f.relationExists(t, index), index)
+	}
+	var cards int
+	require.NoError(t, f.pool.QueryRow(t.Context(), `SELECT count(*) FROM `+table("catalog_rate_cards")+` WHERE merchant_id = $1`, merchantID).Scan(&cards))
+	require.Equal(t, 1, cards, "the override is deleted; the product's card stays")
+	meter, err := client.GetMeter(t.Context(), "requests")
+	require.NoError(t, err)
+	require.NotNil(t, meter.RateCard)
+	require.Equal(t, billing.ProductID(productID), meter.RateCard.ProductID)
+	require.EqualValues(t, 1000, meter.RateCard.Price.PerUnit.UnitAmount)
 }

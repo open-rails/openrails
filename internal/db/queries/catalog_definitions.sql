@@ -18,14 +18,13 @@ SELECT rc.id, rc.created_at, COALESCE(p.key, '')::text AS product_key, rc.ordina
        rc.allowance, rc.price
 FROM billing.catalog_rate_cards rc
 LEFT JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
-WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.customer_id IS NULL;
+WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid;
 
 -- name: ListCatalogProductRateCards :many
 SELECT rc.product_id::uuid AS product_id, rc.ordinal, rc.meter_key, rc.payment_term, rc.filter, rc.allowance, rc.price
 FROM billing.catalog_rate_cards rc
 JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
 WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid
-  AND rc.customer_id IS NULL
 ORDER BY rc.product_id, rc.ordinal;
 
 -- name: SyncCatalogMeter :exec
@@ -57,7 +56,7 @@ WHERE sqlc.arg(overwrite)::boolean;
 
 -- name: DeleteDefaultCatalogRateCard :exec
 DELETE FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND customer_id IS NULL;
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: DeleteCatalogMeter :exec
 DELETE FROM billing.catalog_meters

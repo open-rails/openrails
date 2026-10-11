@@ -199,9 +199,9 @@ func TestCatalogPatchSemantics(t *testing.T) {
 	}
 }
 
-// Meters, their rate card and customer overrides: one RateOverride shape
-// whether listed by meter or by customer; deletes answer 204.
-func TestMetersAndRateOverrides(t *testing.T) {
+// Meters and their rate card: a restated meter keeps its card, null removes
+// it, and removing an absent card is no change.
+func TestMetersAndTheirRateCards(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	for _, tp := range []topology{embedded, remote} {
@@ -229,25 +229,7 @@ func TestMetersAndRateOverrides(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, meter.RateCard, "a meter restated without rate_card keeps its rate card")
 
-		customer, err := billing.ParseCustomerID(w.newCustomer().id)
-		require.NoError(t, err)
-		override, err := c.SetRateOverride(t.Context(), customer, key, billing.SetRateOverrideParams{Price: perUnit(4_000)})
-		require.NoError(t, err)
-		require.Equal(t, customer, override.CustomerID)
-		require.EqualValues(t, 4_000, override.Price.PerUnit.UnitAmount)
-		byMeter, err := c.ListRateOverrides(t.Context(), billing.RateOverrideListParams{MeterKey: key})
-		require.NoError(t, err)
-		require.Equal(t, []billing.RateOverride{*override}, byMeter.Items)
-		byCustomer, err := c.ListRateOverrides(t.Context(), billing.RateOverrideListParams{CustomerID: customer})
-		require.NoError(t, err)
-		require.Equal(t, []billing.RateOverride{*override}, byCustomer.Items)
-		both, err := c.ListRateOverrides(t.Context(), billing.RateOverrideListParams{CustomerID: customer, MeterKey: key + "-other"})
-		require.NoError(t, err)
-		require.Empty(t, both.Items, "the filters combine")
 		removeCard := billing.SetMeterParams{Aggregation: catalog.AggregationCount, RateCard: catalog.Null[billing.MeterRateCardParams]()}
-		_, err = c.SetMeter(t.Context(), key, removeCard)
-		requireCode(t, err, http.StatusConflict, "rate_card_has_overrides")
-		require.NoError(t, c.DeleteRateOverride(t.Context(), customer, key))
 		meter, err = c.SetMeter(t.Context(), key, removeCard)
 		require.NoError(t, err)
 		require.Nil(t, meter.RateCard)

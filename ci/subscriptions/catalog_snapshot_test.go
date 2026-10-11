@@ -45,7 +45,7 @@ func TestCatalogSnapshotPreservesPurchasedArchivedIdentities(t *testing.T) {
 	_, err = c.ArchiveProduct(t.Context(), billing.ArchiveProductParams{ProductID: first.ProductID, PurchaseAction: billing.PurchaseActionReview,
 		PurchaseWindowStartsAt: w.clock.Now().Add(time.Hour), IdempotencyKey: "snapshot-archive", Reason: "Catalog retirement"})
 	require.NoError(t, err)
-	// Default and customer-specific rate cards belong to the catalog snapshot.
+	// Rate cards belong to the catalog snapshot.
 	rates, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
 meters:
   requests:
@@ -67,8 +67,6 @@ products:
 	require.NoError(t, err)
 	_, err = c.ApplyCatalog(t.Context(), rates, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
-	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.catalog_rate_cards(merchant_id,customer_id,ordinal,meter_key,payment_term,filter,price) VALUES($1,$2,1,'requests','in_arrears','null','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"500"}}')`), mid.UUID(), uuid.MustParse(buyer.id))
-	require.NoError(t, err)
 	// A retained binding references an already provisioned account; no secret is copied.
 	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,configuration) VALUES($1,$2,$3,'{"provider":"nmi"}')`), mid.UUID(), first.ID.UUID(), w.psp["nmi"].UUID())
 	require.NoError(t, err)
@@ -87,8 +85,9 @@ products:
 	require.NoError(t, json.Unmarshal(raw, &document))
 	require.Len(t, document.Tables["prices"], 3)
 	require.Len(t, document.Tables["product_archive_operations"], 1)
+	require.Len(t, document.Tables["catalog_rate_cards"], 1)
 	require.Len(t, document.Dependencies.PSPs, 1)
-	require.Equal(t, []string{buyer.id}, document.Dependencies.Customers)
+	require.Nil(t, document.Dependencies.Customers, "a rate card names no customer")
 
 	schema := "catalog_snapshot_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: schema, RiverSchema: schema}}))
@@ -135,11 +134,6 @@ products:
 	refusal(err, "dependency_mismatch")
 	empty()
 	_, err = w.pool.Exec(t.Context(), "UPDATE "+dst+`.psps SET account_id=(SELECT account_id FROM `+src+`.psps WHERE id=$1) WHERE id=$1`, w.psp["nmi"].UUID())
-	require.NoError(t, err)
-	_, err = restore(artifact.Bytes())
-	refusal(err, "dependency_mismatch")
-	empty()
-	_, err = w.pool.Exec(t.Context(), "INSERT INTO "+dst+`.customers(merchant_id,id) VALUES($1,$2)`, mid.UUID(), uuid.MustParse(buyer.id))
 	require.NoError(t, err)
 	// A sealed artifact with a broken later-table FK proves all earlier inserts roll back.
 	originalProduct := document.Tables["product_archive_operations"][0]["product_id"]
@@ -205,9 +199,8 @@ products:
 	var title string
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT display_name FROM "+dst+".products WHERE id=$1", first.ProductID.UUID()).Scan(&title))
 	require.Equal(t, "Later edit", title)
-	// Normal host configuration recreates natural PSP IDs; customer provisioning
-	// uses the public Client with the original host UUID. No raw PSP inserts are
-	// required for this ordinary destination path.
+	// Normal host configuration recreates natural PSP IDs. No raw PSP inserts
+	// are required for this ordinary destination path.
 	provisionedSchema := "catalog_provisioned_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]
 	require.NoError(t, engine.Migrate(t.Context(), w.pool, openrails.Config{Database: openrails.DatabaseConfig{Schema: provisionedSchema, RiverSchema: provisionedSchema}}))
 	provisionedName := pgx.Identifier{provisionedSchema}.Sanitize()
@@ -224,13 +217,9 @@ products:
 	}, openrails.Deps{FXTransport: testFX.Transport(), Postgres: w.pool, StripeTransport: w.stripe, NMITransport: w.nmi, Clock: w.clock})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = bill.Close(context.Background()) })
-	client, err := bill.MerchantBySlug("catalog-provisioned")
-	require.NoError(t, err)
 	var provisionedPSP uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT id FROM "+provisionedName+".psps WHERE merchant_id=$1 AND rail='nmi'", mid.UUID()).Scan(&provisionedPSP))
 	require.Equal(t, w.psp["nmi"].UUID(), provisionedPSP)
-	_, err = client.UpdateCustomer(t.Context(), buyer.cid(), billing.UpdateCustomerParams{})
-	require.NoError(t, err)
 	require.NoError(t, bill.Close(t.Context()))
 	_, err = merchantarchive.RestoreCatalog(t.Context(), provisioned, mid, bytes.NewReader(artifact.Bytes()))
 	require.NoError(t, err, "publicly provisioned prerequisites must satisfy restore")

@@ -226,7 +226,7 @@ func run(ctx context.Context) error {
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
 
 	if os.Getenv("EXAMPLE_CHECK_ONLY") != "" {
-		_, err := bill.GetCatalogRevision(ctx) // reaches the server as the app's merchant
+		_, err := bill.ListMeters(ctx, billing.PageRequest{Limit: 1}) // reaches the server as the app's merchant
 		return err
 	}
 	addr := cmp.Or(os.Getenv("ADDR"), ":8080")

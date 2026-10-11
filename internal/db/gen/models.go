@@ -157,7 +157,7 @@ type BillingCatalogMeter struct {
 type BillingCatalogRateCard struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
-	ProductID   *uuid.UUID
+	ProductID   uuid.UUID
 	Ordinal     int32
 	MeterKey    *string
 	PaymentTerm string
@@ -166,10 +166,6 @@ type BillingCatalogRateCard struct {
 	Price       []byte
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	// Negotiated per-payer override: when set, this card replaces the merchant-default card for the same meter_key when rating that payer.
-	CustomerID *uuid.UUID
-	// Advances on every change to the card: a rate override's revision.
-	Revision int64
 }
 
 // Local catalog snapshot restore receipts; one completed atomic restore per merchant. Identical artifact retries are no-ops even after later catalog edits. Excluded from exported snapshots. Retention: permanent, never pruned.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
 
@@ -164,5 +165,50 @@ func TestUsageOrdersBillEachChargeOnce(t *testing.T) {
 		balance, err := client.GetBalance(ctx, c.cid(), "USD")
 		require.NoError(t, err)
 		require.Zero(t, balance.OwedAmount)
+	}
+}
+
+// A meter's rate card prices every customer's usage: two customers metered on
+// one card are each billed their own quantity at the card's price.
+func TestEveryCustomerIsRatedByTheMeterRateCard(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.settleRefreshes()
+	w.jobs.PeriodicJobs().Clear()
+	ctx, client := t.Context(), w.client[remote]
+	const unit = int64(2_000_000)
+	key := "calls-" + uuid.NewString()[:6]
+	product, err := client.CreateProduct(ctx, billing.CreateProductParams{Key: "api-" + uuid.NewString()[:8], DisplayName: "API"})
+	require.NoError(t, err)
+	_, err = client.SetMeter(ctx, key, billing.SetMeterParams{Aggregation: catalog.AggregationCount, RateCard: catalog.Value(billing.MeterRateCardParams{
+		ProductID: product.ID, Price: catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: unit}}})})
+	require.NoError(t, err)
+
+	interval := 30 * 24 * time.Hour
+	current, err := money.CurrentBillingPeriodStart(w.clock.Now(), time.Time{}, money.BillingBoundaryFixedInterval)
+	require.NoError(t, err)
+	start := current.Add(interval)
+	end := start.Add(interval)
+	w.advance(start.Add(time.Hour).Sub(w.clock.Now()))
+
+	calls := map[*customer]int64{w.newCustomer(): 3, w.newCustomer(): 5}
+	for c, n := range calls {
+		_, err := client.UpdateCustomer(ctx, c.cid(), billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 50_000_000}}})
+		require.NoError(t, err)
+		for range n {
+			_, err := recordUsage(ctx, client, billing.RecordUsageParams{CustomerID: c.cid(), Invoker: c.id, Currency: "USD", EventType: key, Source: "test", SourceID: uuid.NewString()})
+			require.NoError(t, err)
+		}
+	}
+	w.advance(end.Add(time.Hour).Sub(w.clock.Now()))
+	job, err := w.jobs.Insert(ctx, openrails.UsageSweepArgs{FinalizePreviousMonth: true}, &river.InsertOpts{Queue: openrails.QueueBilling})
+	require.NoError(t, err)
+	w.waitJob(job.Job.ID)
+
+	for c, n := range calls {
+		page, err := client.ListOrders(ctx, billing.OrderListParams{Origin: billing.OrderOriginUsage, CustomerID: c.cid()})
+		require.NoError(t, err)
+		require.Len(t, page.Items, 1)
+		require.Equal(t, n*unit, page.Items[0].Total, "%d calls at the card's price", n)
 	}
 }

@@ -27,34 +27,8 @@ SET event_type = NULLIF(sqlc.arg(event_type)::text, ''),
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND key = sqlc.arg(meter_key);
 
--- name: UpsertPayerUsageRateCard :exec
-INSERT INTO billing.catalog_rate_cards
-    (merchant_id, product_id, customer_id, ordinal, meter_key, payment_term, filter, allowance, price)
-VALUES (
-    sqlc.arg(merchant_id), NULL, sqlc.arg(customer_id)::uuid, 1,
-    sqlc.arg(meter_key)::text, 'in_arrears', '{}'::jsonb,
-    sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb
-)
-ON CONFLICT (merchant_id, customer_id, meter_key)
-    WHERE meter_key IS NOT NULL AND customer_id IS NOT NULL
-DO UPDATE SET product_id = NULL,
-    filter = '{}'::jsonb,
-    allowance = EXCLUDED.allowance,
-    price = EXCLUDED.price,
-    updated_at = now();
-
 -- name: LockUsageRateCardProduct :exec
 SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 1));
-
--- name: UsageRateCardCurrencyConflict :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.catalog_rate_cards
-    WHERE merchant_id = sqlc.arg(merchant_id)
-      AND meter_key = sqlc.arg(meter_key)::text
-      AND customer_id IS NOT NULL
-      AND upper(COALESCE(price ->> 'currency', '')) <> sqlc.arg(currency)
-);
 
 -- name: UpsertDefaultUsageRateCard :exec
 INSERT INTO billing.catalog_rate_cards
@@ -66,19 +40,17 @@ VALUES (
         (SELECT ordinal FROM billing.catalog_rate_cards
          WHERE merchant_id = sqlc.arg(merchant_id)
            AND product_id = sqlc.arg(product_id)::uuid
-           AND meter_key = sqlc.arg(meter_key)::text
-           AND customer_id IS NULL),
+           AND meter_key = sqlc.arg(meter_key)::text),
         (SELECT MAX(ordinal) + 1 FROM billing.catalog_rate_cards
          WHERE merchant_id = sqlc.arg(merchant_id)
-           AND product_id = sqlc.arg(product_id)::uuid
-           AND customer_id IS NULL),
+           AND product_id = sqlc.arg(product_id)::uuid),
         1
     ),
     sqlc.arg(meter_key)::text, 'in_arrears', sqlc.arg(filter)::jsonb,
     sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb
 )
 ON CONFLICT (merchant_id, meter_key)
-    WHERE meter_key IS NOT NULL AND customer_id IS NULL
+    WHERE meter_key IS NOT NULL
 DO UPDATE SET product_id = EXCLUDED.product_id,
     ordinal = EXCLUDED.ordinal,
     filter = EXCLUDED.filter,
@@ -88,14 +60,6 @@ DO UPDATE SET product_id = EXCLUDED.product_id,
 
 -- name: GetDefaultUsageRateCardStateForUpdate :one
 SELECT filter, allowance, price
-FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND meter_key = sqlc.arg(meter_key)::text
-  AND customer_id IS NULL
-FOR UPDATE;
-
--- name: ListUsageRateCardPricesForUpdate :many
-SELECT customer_id, price
 FROM billing.catalog_rate_cards
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text
@@ -111,19 +75,19 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND allowance ->> 'accrue_from' = sqlc.arg(meter_key)::text;
 
 -- The meter row is already locked by the caller, which serializes every rate-card
--- mutation for this meter; PostgreSQL does not permit FOR UPDATE on aggregates.
--- name: GetDefaultUsageRateCardDeleteState :one
-SELECT count(*) FILTER (WHERE customer_id IS NULL) > 0 AS default_exists,
-       count(*) FILTER (WHERE customer_id IS NOT NULL) AS override_count
-FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND meter_key = sqlc.arg(meter_key)::text;
+-- mutation for this meter.
+-- name: DefaultUsageRateCardExists :one
+SELECT EXISTS (
+    SELECT 1
+    FROM billing.catalog_rate_cards
+    WHERE merchant_id = sqlc.arg(merchant_id)
+      AND meter_key = sqlc.arg(meter_key)::text
+);
 
 -- name: DeleteDefaultUsageRateCard :exec
 DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = sqlc.arg(merchant_id)
-  AND meter_key = sqlc.arg(meter_key)::text
-  AND customer_id IS NULL;
+  AND meter_key = sqlc.arg(meter_key)::text;
 
 -- name: ListUsageMetersWithCatalog :many
 WITH activity AS (
@@ -136,11 +100,6 @@ WITH activity AS (
                AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = sqlc.arg(merchant_id)
-), override_counts AS (
-    SELECT meter_key, count(*) AS override_count
-    FROM billing.catalog_rate_cards
-    WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id IS NOT NULL
-    GROUP BY meter_key
 )
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
@@ -152,7 +111,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       COALESCE(override_counts.override_count, 0) AS override_count,
        (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
        activity.last_event_at,
        card.id AS card_id,
@@ -166,12 +124,9 @@ SELECT meter.key,
 FROM billing.catalog_meters meter
 LEFT JOIN activity
   ON activity.meter_key = meter.key
-LEFT JOIN override_counts
-  ON override_counts.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
- AND card.customer_id IS NULL
 LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
@@ -191,11 +146,6 @@ WITH activity AS (
                AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = sqlc.arg(merchant_id)
-), override_counts AS (
-    SELECT meter_key, count(*) AS override_count
-    FROM billing.catalog_rate_cards
-    WHERE merchant_id = sqlc.arg(merchant_id) AND customer_id IS NOT NULL
-    GROUP BY meter_key
 )
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
@@ -207,7 +157,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       COALESCE(override_counts.override_count, 0) AS override_count,
        (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
        activity.last_event_at,
        card.id AS card_id,
@@ -221,12 +170,9 @@ SELECT meter.key,
 FROM billing.catalog_meters meter
 LEFT JOIN activity
   ON activity.meter_key = meter.key
-LEFT JOIN override_counts
-  ON override_counts.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
- AND card.customer_id IS NULL
 LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
@@ -240,13 +186,6 @@ SELECT EXISTS (
     WHERE merchant_id = sqlc.arg(merchant_id)
       AND key = sqlc.arg(meter_key)
 );
-
--- name: CountUsageMeterOverrides :one
-SELECT count(*)
-FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND meter_key = sqlc.arg(meter_key)::text
-  AND customer_id IS NOT NULL;
 
 -- name: LockUsageEventsForMeterCorrection :exec
 LOCK TABLE billing.usage_events IN SHARE ROW EXCLUSIVE MODE;
@@ -276,7 +215,6 @@ SELECT price
 FROM billing.catalog_rate_cards
 WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text
-  AND customer_id IS NULL
 FOR UPDATE;
 
 -- name: GetActiveMeteringProductForShare :one

@@ -42,12 +42,7 @@ products:
 		require.NoError(t, err)
 		return receipt
 	}
-	revision := func() int64 {
-		t.Helper()
-		r, err := w.client[embedded].GetCatalogRevision(t.Context())
-		require.NoError(t, err)
-		return r.Revision
-	}
+	revision := w.catalogRevision
 	derived := func(r *billing.CatalogApplicationReceipt) {
 		t.Helper()
 		require.Regexp(t, `^sha256:[0-9a-f]{64}$`, r.ApplicationID)

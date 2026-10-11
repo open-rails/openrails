@@ -116,9 +116,6 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"metering", billingservice.ErrMeterRateCardConflict, want{409, "meter_rate_card_conflict", ""}},
 		{"metering", billingservice.ErrAllowanceSourceInvalid, want{409, "allowance_source_invalid", ""}},
 		{"metering", billingservice.ErrAllowanceSourceInUse, want{409, "allowance_source_in_use", ""}},
-		{"metering", billingservice.ErrDefaultRateCardRequired, want{409, "default_rate_card_required", ""}},
-		{"metering", billingservice.ErrRateCardHasOverrides, want{409, "rate_card_has_overrides", ""}},
-		{"metering", billingservice.ErrRateCardCurrencyMismatch, want{409, "rate_card_currency_mismatch", ""}},
 		{"metering", apperr.New(409, billing.CodeRevisionMismatch, "meter moved"), want{409, "revision_mismatch", ""}},
 		{"catalog", apperr.New(409, billing.CodeRevisionMismatch, "product moved"), want{409, "revision_mismatch", ""}},
 	}

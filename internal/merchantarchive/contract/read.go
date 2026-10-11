@@ -132,6 +132,14 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "order_lines" && len(r.Values) == len(p.Columns)-1 {
 			r.Values = append(r.Values, nil)
 		}
+		// Rate cards before migration 66 carried a customer, set on a rate
+		// override, which that migration deletes, and later a revision.
+		if p.Name == "catalog_rate_cards" && len(r.Values) > len(p.Columns) {
+			if r.Values[len(p.Columns)] != nil {
+				return nil
+			}
+			r.Values = r.Values[:len(p.Columns)]
+		}
 		if !legacy {
 			return emit(p, r.Values)
 		}

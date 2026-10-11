@@ -47,11 +47,10 @@ func (q *Queries) AdvanceMeteredRatingWatermark(ctx context.Context, arg Advance
 	return err
 }
 
-const listPayerArrearsRateCards = `-- name: ListPayerArrearsRateCards :many
+const listArrearsRateCards = `-- name: ListArrearsRateCards :many
 
 SELECT rc.id,
        rc.meter_key::text AS meter_key,
-       (rc.customer_id IS NOT NULL)::boolean AS payer_scoped,
        COALESCE(NULLIF(cm.event_type, ''), cm.key)::text AS event_type,
        COALESCE(NULLIF(cm.value_property, ''), cm.key)::text AS value_property,
        COALESCE(NULLIF(cm.aggregation, ''), 'sum')::text AS aggregation,
@@ -63,22 +62,19 @@ FROM billing.catalog_rate_cards rc
 JOIN billing.catalog_meters cm ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
 WHERE rc.merchant_id = $1::uuid
   AND rc.meter_key IS NOT NULL
-  AND (rc.customer_id IS NULL OR rc.customer_id = $2::uuid)
-  AND lower(COALESCE(rc.price ->> 'currency', $3::text)) = lower($3::text)
+  AND lower(COALESCE(rc.price ->> 'currency', $2::text)) = lower($2::text)
   AND rc.payment_term = 'in_arrears'
 ORDER BY rc.ordinal
 `
 
-type ListPayerArrearsRateCardsParams struct {
+type ListArrearsRateCardsParams struct {
 	MerchantID uuid.UUID
-	CustomerID uuid.UUID
 	Currency   string
 }
 
-type ListPayerArrearsRateCardsRow struct {
+type ListArrearsRateCardsRow struct {
 	ID            uuid.UUID
 	MeterKey      string
-	PayerScoped   bool
 	EventType     string
 	ValueProperty string
 	Aggregation   string
@@ -88,22 +84,21 @@ type ListPayerArrearsRateCardsRow struct {
 	Price         []byte
 }
 
-// Metered rating: the rate cards that apply to a customer, usage aggregation
+// Metered rating: the merchant's usage rate cards, usage aggregation
 // for a rated window, and the per-period accrual watermark.
-// A customer-scoped card (customer_id set) later replaces the default for its meter.
-func (q *Queries) ListPayerArrearsRateCards(ctx context.Context, arg ListPayerArrearsRateCardsParams) ([]ListPayerArrearsRateCardsRow, error) {
-	rows, err := q.db.Query(ctx, listPayerArrearsRateCards, arg.MerchantID, arg.CustomerID, arg.Currency)
+// One card per meter, the same for every customer.
+func (q *Queries) ListArrearsRateCards(ctx context.Context, arg ListArrearsRateCardsParams) ([]ListArrearsRateCardsRow, error) {
+	rows, err := q.db.Query(ctx, listArrearsRateCards, arg.MerchantID, arg.Currency)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ListPayerArrearsRateCardsRow
+	var items []ListArrearsRateCardsRow
 	for rows.Next() {
-		var i ListPayerArrearsRateCardsRow
+		var i ListArrearsRateCardsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MeterKey,
-			&i.PayerScoped,
 			&i.EventType,
 			&i.ValueProperty,
 			&i.Aggregation,

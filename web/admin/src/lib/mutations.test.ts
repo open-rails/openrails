@@ -35,7 +35,7 @@ type Case = [
   body?: unknown,
 ]
 
-const customerTree = ["customer", "customer.rates"]
+const customerTree = ["customer"]
 const catalogTree = ["catalog", "drift", "meter", "meters"]
 const subTree = ["subscription", "subscriptions"]
 const meterTree = ["meter", "meters"]
@@ -272,28 +272,6 @@ const cases: Case[] = [
     "PUT /admin/catalog/meters/tokens",
     meterTree,
     { ...meter, rate_card: null, expected_revision: 3 },
-  ],
-  [
-    "stores a negotiated rate",
-    (c, g) =>
-      g(M.putCustomerUsageRateOverride(c), {
-        customerId: "cus_1",
-        meterKey: "tokens",
-        override: { price: ratePrice },
-      }),
-    "PUT /admin/catalog/rate-overrides/cus_1/tokens",
-    [...meterTree, ...customerTree, "dashboard"],
-    { price: ratePrice },
-  ],
-  [
-    "removes a negotiated rate",
-    (c, g) =>
-      g(M.deleteCustomerUsageRateOverride(c), {
-        customerId: "cus_1",
-        meterKey: "tokens",
-      }),
-    "DELETE /admin/catalog/rate-overrides/cus_1/tokens",
-    [...meterTree, ...customerTree, "dashboard"],
   ],
   [
     "edits the configuration at the revision it read, keeping the PSP list",

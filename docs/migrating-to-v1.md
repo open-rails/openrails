@@ -199,9 +199,9 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 |---|---|
 | `client.Products.Create`, `Ensure`, `Retrieve`, `RetrieveByKey`, `Update`, `List` | `client.CreateProduct(` (`Ensure`: a catalog application, `client.ApplyCatalog(`), `client.GetProduct(`, `client.UpdateProduct(`, `client.ListProducts(` (by key: `Keys`) |
 | `client.Prices.Create`, `Retrieve`, `RetrieveByKey`, `Update`, `List`, `SetKey` | `client.CreatePrice(`, `client.GetPrice(`, `client.UpdatePrice(` (a merge patch: `archived`, `psp_links`), `client.ListPrices(` (by key: `ProductKey`, `Key`), `client.ListPriceHistory(` |
-| `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`, `client.GetCatalogRevision(` |
+| `client.Catalog.Apply`, `Revision` | `client.ApplyCatalog(`; its receipt reports the catalog revision (`applied_revision`), and each product, price and meter its own `revision` |
 | `ProductCreateParams`, `PriceCreateParams`, … | `billing.CreateProductParams`, `billing.CreatePriceParams`, `billing.UpdateProductParams`, `billing.UpdatePriceParams` |
-| `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(` (its `RateCard`; null removes it), `client.GetMeter(`, `client.ListMeters(`, and `client.ListRateOverrides(`, `client.SetRateOverride(`, `client.DeleteRateOverride(` for a customer's negotiated price |
+| `EnsureUsageMeter`, `GetUsageMeter`, `ListUsageMeters`, `SetDefaultUsageRateCard`, `DeleteDefaultUsageRateCard` | `client.SetMeter(` (its `RateCard`; null removes it), `client.GetMeter(`, `client.ListMeters(`; the meter's rate card prices every customer (no per-customer price) |
 | `ListOffersForEntitlements` | `client.ListProducts(` with `Entitlements` and `ForSale`; each product carries its current prices |
 | Creator-owned catalogs: `EnsureOwnCatalog`, `EnsureCatalogForOwner`, `GetCatalogForOwner`, `WithOwnCatalog()`, `ForCatalogOwner`, `EnsureCatalog`, `GetCatalog`, `ListCatalogs`; `billing.Catalog`, `billing.CatalogID`, `billing.EnsureCatalogParams`, `billing.CatalogListParams` | Removed: a merchant has one catalog |
 | `CatalogID` on `billing.Product`, `CreateProductParams`, `CreatePriceProduct`, `ProductListParams`, `PriceListParams` and `CatalogApplicationReceipt`; `catalog.Application.CatalogID` | Removed with the catalogs |
@@ -371,7 +371,8 @@ fields (`400 unknown_field`), and every error code is in
 | `GET /v1/config` carried the merchant's `payment` and `merchant` | It is the deployment's part alone (`capabilities`, `currencies`, `rails`, `captcha`, `network`). `GET /v1/me/config` answers `{payment, merchant}` to a credential bound to the merchant: a customer's token, or a checkout URL's secret on the checkout host |
 | `GET` and `POST /v1/orders/{id}/solana-pay` needed a Host or header naming the merchant on a server of many | The order names its merchant; a public route no longer answers `merchant_not_found` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
-| `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `GET /v1/admin/catalog/rate-overrides`; `PATCH` the product or price |
+| `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | Removed: the meter's rate card prices every customer; `PATCH` the product or price |
+| `/v1/merchant/catalog/revision`, `/v1/admin/catalog/revision` | Removed: an apply's receipt reports the catalog revision; each object carries its own |
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/admin/billing-import` |
 | `/scim/v2/*`; a client-credentials token with scope `scim` | `/v1/app/scim/v2/*`, in the programmatic routes: an application credential, or the merchant's provisioning token |

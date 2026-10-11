@@ -3,6 +3,8 @@ package merchantarchive
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
+	"slices"
 	"strings"
 	"testing"
 
@@ -17,7 +19,7 @@ func snapshotWireFixture(t *testing.T) CatalogSnapshot {
 	t.Helper()
 	document := CatalogSnapshot{
 		Kind: "catalog_snapshot", SchemaVersion: 1, MerchantID: snapshotTestMerchant,
-		Dependencies: CatalogDependencies{PSPs: []CatalogPSPIdentity{}, Customers: []string{}},
+		Dependencies: CatalogDependencies{PSPs: []CatalogPSPIdentity{}},
 		Tables:       map[string][]map[string]json.RawMessage{},
 	}
 	for _, table := range []string{"products", "product_entitlements", "prices", "price_key_movements", "price_psp_bindings", "catalog_meters", "catalog_rate_cards", "catalog_applications", "product_archive_operations"} {
@@ -253,4 +255,38 @@ func TestCatalogSnapshotWireRejectsMissingIdentityAndUnknownColumns(t *testing.T
 			require.Error(t, err)
 		})
 	}
+}
+
+// A snapshot from before migration 66 lists its overrides' customers and
+// carries each rate card's revision. It verifies against its own digest; the
+// product's card restores without a revision and the override is skipped.
+func TestCatalogSnapshotHistoricalRateOverrides(t *testing.T) {
+	document := snapshotWireFixture(t)
+	customer := "10000000-0000-0000-0000-000000000009"
+	document.Dependencies.Customers = &[]string{customer}
+	card := snapshotWireRow(t, "catalog_rate_cards", map[string]string{
+		"merchant_id": snapshotTestMerchant, "id": "10000000-0000-0000-0000-000000000007",
+		"product_id": "10000000-0000-0000-0000-000000000002", "ordinal": "1", "meter_key": "requests",
+		"payment_term": "in_arrears", "filter": "{}", "price": `{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"1000"}}`,
+		"created_at": "2026-10-07 12:00:00+00", "updated_at": "2026-10-07 12:00:00+00",
+	})
+	historical := maps.Clone(card)
+	historical["revision"] = json.RawMessage(`"2"`)
+	override := maps.Clone(historical)
+	delete(override, "product_id")
+	override["id"] = json.RawMessage(`"10000000-0000-0000-0000-000000000008"`)
+	override["customer_id"], _ = json.Marshal(customer)
+	document.Tables["products"] = []map[string]json.RawMessage{snapshotWireProduct(t)}
+	document.Tables["catalog_rate_cards"] = []map[string]json.RawMessage{historical, override}
+
+	signed, count, err := readCatalogSnapshot(bytes.NewReader(snapshotWireUncheckedYAML(t, document)))
+	require.NoError(t, err)
+	require.EqualValues(t, 2, count, "the product and its card")
+	require.Len(t, signed.Tables["catalog_rate_cards"], 2, "the signed document is unchanged")
+	upgraded, err := upgradeCatalogSnapshot(signed)
+	require.NoError(t, err)
+	cards := upgraded.Tables["catalog_rate_cards"]
+	require.Len(t, cards, 1)
+	require.Equal(t, slices.Sorted(maps.Keys(card)), slices.Sorted(maps.Keys(cards[0])))
+	require.JSONEq(t, string(card["id"]), string(cards[0]["id"]))
 }

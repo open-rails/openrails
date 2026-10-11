@@ -18,7 +18,7 @@ import (
 
 // ExportCatalog writes all persisted catalog rows, including archived revisions
 // and original IDs. It never exports credentials, customer records, payments or
-// provider jobs. Referenced PSP/customer identities are restore prerequisites.
+// provider jobs. Referenced PSP identities are restore prerequisites.
 func ExportCatalog(ctx context.Context, database *db.DB, id billing.MerchantID, out io.Writer) error {
 	if database == nil || id.IsZero() {
 		return &Error{Code: "merchant_mismatch"}
@@ -99,38 +99,29 @@ func ExportCatalog(ctx context.Context, database *db.DB, id billing.MerchantID, 
 	return WriteCatalogSnapshot(out, document)
 }
 
-func catalogDependencyIDs(document CatalogSnapshot) ([]string, []string, error) {
-	psps, customers := map[string]bool{}, map[string]bool{}
-	for table, field := range map[string]string{"price_psp_bindings": "psp_id", "catalog_rate_cards": "customer_id"} {
-		for _, row := range document.Tables[table] {
-			raw, ok := row[field]
-			if !ok {
-				continue
-			}
-			var id string
-			if err := json.Unmarshal(raw, &id); err != nil {
-				return nil, nil, fmt.Errorf("invalid %s dependency", table)
-			}
-			if table == "price_psp_bindings" {
-				psps[id] = true
-			} else {
-				customers[id] = true
-			}
+func catalogDependencyIDs(document CatalogSnapshot) ([]string, error) {
+	psps := map[string]bool{}
+	for _, row := range document.Tables["price_psp_bindings"] {
+		raw, ok := row["psp_id"]
+		if !ok {
+			continue
 		}
-	}
-	keys := func(m map[string]bool) []string {
-		out := make([]string, 0, len(m))
-		for k := range m {
-			out = append(out, k)
+		var id string
+		if err := json.Unmarshal(raw, &id); err != nil {
+			return nil, fmt.Errorf("invalid price_psp_bindings dependency")
 		}
-		sort.Strings(out)
-		return out
+		psps[id] = true
 	}
-	return keys(psps), keys(customers), nil
+	out := make([]string, 0, len(psps))
+	for id := range psps {
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out, nil
 }
 func catalogDependencies(ctx context.Context, tx pgx.Tx, id billing.MerchantID, document CatalogSnapshot) (CatalogDependencies, error) {
-	out := CatalogDependencies{PSPs: []CatalogPSPIdentity{}, Customers: []string{}}
-	psps, customers, err := catalogDependencyIDs(document)
+	out := CatalogDependencies{PSPs: []CatalogPSPIdentity{}}
+	psps, err := catalogDependencyIDs(document)
 	if err != nil {
 		return out, err
 	}
@@ -142,15 +133,14 @@ func catalogDependencies(ctx context.Context, tx pgx.Tx, id billing.MerchantID, 
 		}
 		out.PSPs = append(out.PSPs, value)
 	}
-	out.Customers = customers
 	return out, nil
 }
 func verifyCatalogDependencies(ctx context.Context, tx pgx.Tx, id billing.MerchantID, document CatalogSnapshot) error {
-	psps, customers, err := catalogDependencyIDs(document)
+	psps, err := catalogDependencyIDs(document)
 	if err != nil {
 		return err
 	}
-	if len(psps) != len(document.Dependencies.PSPs) || len(customers) != len(document.Dependencies.Customers) {
+	if len(psps) != len(document.Dependencies.PSPs) {
 		return &Error{Code: "invalid_artifact", Err: fmt.Errorf("catalog prerequisite inventory mismatch")}
 	}
 	expected := map[string]CatalogPSPIdentity{}
@@ -169,22 +159,6 @@ func verifyCatalogDependencies(ctx context.Context, tx pgx.Tx, id billing.Mercha
 		err := tx.QueryRow(ctx, `SELECT rail,environment,account_id FROM billing.psps WHERE merchant_id=$1 AND id=$2 FOR SHARE`, id.UUID(), psp).Scan(&got.Rail, &got.Environment, &got.AccountID)
 		if err != nil || want != got {
 			return &Error{Code: "dependency_mismatch", Table: "psps", Err: err}
-		}
-	}
-	seen := map[string]bool{}
-	for _, customer := range document.Dependencies.Customers {
-		if seen[customer] {
-			return &Error{Code: "invalid_artifact", Err: fmt.Errorf("duplicate customer prerequisite")}
-		}
-		seen[customer] = true
-	}
-	for _, customer := range customers {
-		if !seen[customer] {
-			return &Error{Code: "invalid_artifact", Err: fmt.Errorf("missing customer prerequisite")}
-		}
-		var found string
-		if err := tx.QueryRow(ctx, `SELECT id::text FROM billing.customers WHERE merchant_id=$1 AND id=$2 FOR SHARE`, id.UUID(), customer).Scan(&found); err != nil {
-			return &Error{Code: "dependency_mismatch", Table: "customers", Err: err}
 		}
 	}
 	return nil

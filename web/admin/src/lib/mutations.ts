@@ -29,7 +29,6 @@ import {
   createProduct,
   createWebhook,
   createPSP,
-  deleteCustomerUsageRateOverride,
   deleteWebhook,
   getCustomer,
   getProductByKey,
@@ -38,7 +37,6 @@ import {
   listPayments,
   listSubscriptions,
   putUsageMeterRateCard,
-  putCustomerUsageRateOverride,
   updatePSP,
   putUsageMeter,
   previewPriceMigration,
@@ -56,7 +54,6 @@ import {
   updateProduct,
   updateWebhook,
   type DefaultUsageRateCardRequest,
-  type CustomerUsageRateOverrideRequest,
   type PaymentFilters,
   type ProductGrant,
   type ProductRequest,
@@ -556,63 +553,6 @@ export const adminMutations = {
           queryClient.invalidateQueries({ queryKey: metersKey }),
           queryClient.invalidateQueries({
             queryKey: keys.usageMeter(meter.key),
-          }),
-        ]),
-    })
-  },
-  putCustomerUsageRateOverride: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    const metersKey = keys.usageMeters()
-    return mutationOptions({
-      mutationKey: [...metersKey, "customer-override", "put"],
-      mutationFn: ({
-        customerId,
-        meterKey,
-        override,
-      }: {
-        customerId: string
-        meterKey: string
-        override: CustomerUsageRateOverrideRequest
-      }) => putCustomerUsageRateOverride(customerId, meterKey, override),
-      onError: reloadIfMoved(queryClient, metersKey, keys.customers()),
-      onSuccess: (_result, { customerId, meterKey }) =>
-        Promise.all([
-          queryClient.invalidateQueries({
-            queryKey: keys.customer(customerId),
-          }),
-          queryClient.invalidateQueries({ queryKey: metersKey }),
-          queryClient.invalidateQueries({
-            queryKey: keys.usageMeter(meterKey),
-          }),
-          queryClient.invalidateQueries({
-            queryKey: keys.dashboard(),
-          }),
-        ]),
-    })
-  },
-  deleteCustomerUsageRateOverride: (queryClient: QueryClient) => {
-    const keys = merchantQueryKeys()
-    const metersKey = keys.usageMeters()
-    return mutationOptions({
-      mutationKey: [...metersKey, "customer-override", "delete"],
-      mutationFn: ({
-        customerId,
-        meterKey,
-      }: {
-        customerId: string
-        meterKey: string
-      }) => deleteCustomerUsageRateOverride(customerId, meterKey),
-      onSuccess: (_result, { customerId, meterKey }) =>
-        Promise.all([
-          queryClient.invalidateQueries({
-            queryKey: keys.customer(customerId),
-          }),
-          queryClient.invalidateQueries({ queryKey: metersKey }),
-          queryClient.invalidateQueries({
-            queryKey: keys.usageMeter(meterKey),
-          }),
-          queryClient.invalidateQueries({
-            queryKey: keys.dashboard(),
           }),
         ]),
     })

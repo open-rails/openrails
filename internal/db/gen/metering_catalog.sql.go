@@ -12,31 +12,33 @@ import (
 	"github.com/google/uuid"
 )
 
-const countUsageMeterOverrides = `-- name: CountUsageMeterOverrides :one
-SELECT count(*)
-FROM billing.catalog_rate_cards
-WHERE merchant_id = $1
-  AND meter_key = $2::text
-  AND customer_id IS NOT NULL
+const defaultUsageRateCardExists = `-- name: DefaultUsageRateCardExists :one
+SELECT EXISTS (
+    SELECT 1
+    FROM billing.catalog_rate_cards
+    WHERE merchant_id = $1
+      AND meter_key = $2::text
+)
 `
 
-type CountUsageMeterOverridesParams struct {
+type DefaultUsageRateCardExistsParams struct {
 	MerchantID uuid.UUID
 	MeterKey   string
 }
 
-func (q *Queries) CountUsageMeterOverrides(ctx context.Context, arg CountUsageMeterOverridesParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countUsageMeterOverrides, arg.MerchantID, arg.MeterKey)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+// The meter row is already locked by the caller, which serializes every rate-card
+// mutation for this meter.
+func (q *Queries) DefaultUsageRateCardExists(ctx context.Context, arg DefaultUsageRateCardExistsParams) (bool, error) {
+	row := q.db.QueryRow(ctx, defaultUsageRateCardExists, arg.MerchantID, arg.MeterKey)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const deleteDefaultUsageRateCard = `-- name: DeleteDefaultUsageRateCard :exec
 DELETE FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
-  AND customer_id IS NULL
 `
 
 type DeleteDefaultUsageRateCardParams struct {
@@ -70,39 +72,11 @@ func (q *Queries) GetActiveMeteringProductForShare(ctx context.Context, arg GetA
 	return id, err
 }
 
-const getDefaultUsageRateCardDeleteState = `-- name: GetDefaultUsageRateCardDeleteState :one
-SELECT count(*) FILTER (WHERE customer_id IS NULL) > 0 AS default_exists,
-       count(*) FILTER (WHERE customer_id IS NOT NULL) AS override_count
-FROM billing.catalog_rate_cards
-WHERE merchant_id = $1
-  AND meter_key = $2::text
-`
-
-type GetDefaultUsageRateCardDeleteStateParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-}
-
-type GetDefaultUsageRateCardDeleteStateRow struct {
-	DefaultExists bool
-	OverrideCount int64
-}
-
-// The meter row is already locked by the caller, which serializes every rate-card
-// mutation for this meter; PostgreSQL does not permit FOR UPDATE on aggregates.
-func (q *Queries) GetDefaultUsageRateCardDeleteState(ctx context.Context, arg GetDefaultUsageRateCardDeleteStateParams) (GetDefaultUsageRateCardDeleteStateRow, error) {
-	row := q.db.QueryRow(ctx, getDefaultUsageRateCardDeleteState, arg.MerchantID, arg.MeterKey)
-	var i GetDefaultUsageRateCardDeleteStateRow
-	err := row.Scan(&i.DefaultExists, &i.OverrideCount)
-	return i, err
-}
-
 const getDefaultUsageRateCardPriceForUpdate = `-- name: GetDefaultUsageRateCardPriceForUpdate :one
 SELECT price
 FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
-  AND customer_id IS NULL
 FOR UPDATE
 `
 
@@ -123,7 +97,6 @@ SELECT filter, allowance, price
 FROM billing.catalog_rate_cards
 WHERE merchant_id = $1
   AND meter_key = $2::text
-  AND customer_id IS NULL
 FOR UPDATE
 `
 
@@ -197,11 +170,6 @@ WITH activity AS (
                AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = $1
-), override_counts AS (
-    SELECT meter_key, count(*) AS override_count
-    FROM billing.catalog_rate_cards
-    WHERE merchant_id = $1 AND customer_id IS NOT NULL
-    GROUP BY meter_key
 )
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
@@ -213,7 +181,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       COALESCE(override_counts.override_count, 0) AS override_count,
        (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
        activity.last_event_at,
        card.id AS card_id,
@@ -227,12 +194,9 @@ SELECT meter.key,
 FROM billing.catalog_meters meter
 LEFT JOIN activity
   ON activity.meter_key = meter.key
-LEFT JOIN override_counts
-  ON override_counts.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
- AND card.customer_id IS NULL
 LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
@@ -256,7 +220,6 @@ type GetUsageMeterWithCatalogRow struct {
 	Revision           int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	OverrideCount      int64
 	HasActivity        bool
 	LastEventAt        *time.Time
 	CardID             *uuid.UUID
@@ -283,7 +246,6 @@ func (q *Queries) GetUsageMeterWithCatalog(ctx context.Context, arg GetUsageMete
 		&i.Revision,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.OverrideCount,
 		&i.HasActivity,
 		&i.LastEventAt,
 		&i.CardID,
@@ -368,11 +330,6 @@ WITH activity AS (
                AND ue.event_type = COALESCE(NULLIF(m.event_type, ''), m.key)) AS last_event_at
     FROM billing.catalog_meters m
     WHERE m.merchant_id = $1
-), override_counts AS (
-    SELECT meter_key, count(*) AS override_count
-    FROM billing.catalog_rate_cards
-    WHERE merchant_id = $1 AND customer_id IS NOT NULL
-    GROUP BY meter_key
 )
 SELECT meter.key,
        COALESCE(meter.event_type, '') AS event_type,
@@ -384,7 +341,6 @@ SELECT meter.key,
        meter.revision,
        meter.created_at,
        meter.updated_at,
-       COALESCE(override_counts.override_count, 0) AS override_count,
        (activity.last_event_at IS NOT NULL)::boolean AS has_activity,
        activity.last_event_at,
        card.id AS card_id,
@@ -398,12 +354,9 @@ SELECT meter.key,
 FROM billing.catalog_meters meter
 LEFT JOIN activity
   ON activity.meter_key = meter.key
-LEFT JOIN override_counts
-  ON override_counts.meter_key = meter.key
 LEFT JOIN billing.catalog_rate_cards card
   ON card.merchant_id = meter.merchant_id
  AND card.meter_key = meter.key
- AND card.customer_id IS NULL
 LEFT JOIN billing.products product
   ON product.merchant_id = card.merchant_id
  AND product.id = card.product_id
@@ -430,7 +383,6 @@ type ListUsageMetersWithCatalogRow struct {
 	Revision           int64
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
-	OverrideCount      int64
 	HasActivity        bool
 	LastEventAt        *time.Time
 	CardID             *uuid.UUID
@@ -463,7 +415,6 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 			&i.Revision,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.OverrideCount,
 			&i.HasActivity,
 			&i.LastEventAt,
 			&i.CardID,
@@ -475,44 +426,6 @@ func (q *Queries) ListUsageMetersWithCatalog(ctx context.Context, arg ListUsageM
 			&i.CardCreatedAt,
 			&i.CardUpdatedAt,
 		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUsageRateCardPricesForUpdate = `-- name: ListUsageRateCardPricesForUpdate :many
-SELECT customer_id, price
-FROM billing.catalog_rate_cards
-WHERE merchant_id = $1
-  AND meter_key = $2::text
-FOR UPDATE
-`
-
-type ListUsageRateCardPricesForUpdateParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-}
-
-type ListUsageRateCardPricesForUpdateRow struct {
-	CustomerID *uuid.UUID
-	Price      []byte
-}
-
-func (q *Queries) ListUsageRateCardPricesForUpdate(ctx context.Context, arg ListUsageRateCardPricesForUpdateParams) ([]ListUsageRateCardPricesForUpdateRow, error) {
-	rows, err := q.db.Query(ctx, listUsageRateCardPricesForUpdate, arg.MerchantID, arg.MeterKey)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUsageRateCardPricesForUpdateRow
-	for rows.Next() {
-		var i ListUsageRateCardPricesForUpdateRow
-		if err := rows.Scan(&i.CustomerID, &i.Price); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -597,19 +510,17 @@ VALUES (
         (SELECT ordinal FROM billing.catalog_rate_cards
          WHERE merchant_id = $1
            AND product_id = $2::uuid
-           AND meter_key = $3::text
-           AND customer_id IS NULL),
+           AND meter_key = $3::text),
         (SELECT MAX(ordinal) + 1 FROM billing.catalog_rate_cards
          WHERE merchant_id = $1
-           AND product_id = $2::uuid
-           AND customer_id IS NULL),
+           AND product_id = $2::uuid),
         1
     ),
     $3::text, 'in_arrears', $4::jsonb,
     $5::jsonb, $6::jsonb
 )
 ON CONFLICT (merchant_id, meter_key)
-    WHERE meter_key IS NOT NULL AND customer_id IS NULL
+    WHERE meter_key IS NOT NULL
 DO UPDATE SET product_id = EXCLUDED.product_id,
     ordinal = EXCLUDED.ordinal,
     filter = EXCLUDED.filter,
@@ -633,42 +544,6 @@ func (q *Queries) UpsertDefaultUsageRateCard(ctx context.Context, arg UpsertDefa
 		arg.ProductID,
 		arg.MeterKey,
 		arg.Filter,
-		arg.Allowance,
-		arg.Price,
-	)
-	return err
-}
-
-const upsertPayerUsageRateCard = `-- name: UpsertPayerUsageRateCard :exec
-INSERT INTO billing.catalog_rate_cards
-    (merchant_id, product_id, customer_id, ordinal, meter_key, payment_term, filter, allowance, price)
-VALUES (
-    $1, NULL, $2::uuid, 1,
-    $3::text, 'in_arrears', '{}'::jsonb,
-    $4::jsonb, $5::jsonb
-)
-ON CONFLICT (merchant_id, customer_id, meter_key)
-    WHERE meter_key IS NOT NULL AND customer_id IS NOT NULL
-DO UPDATE SET product_id = NULL,
-    filter = '{}'::jsonb,
-    allowance = EXCLUDED.allowance,
-    price = EXCLUDED.price,
-    updated_at = now()
-`
-
-type UpsertPayerUsageRateCardParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	MeterKey   string
-	Allowance  []byte
-	Price      []byte
-}
-
-func (q *Queries) UpsertPayerUsageRateCard(ctx context.Context, arg UpsertPayerUsageRateCardParams) error {
-	_, err := q.db.Exec(ctx, upsertPayerUsageRateCard,
-		arg.MerchantID,
-		arg.CustomerID,
-		arg.MeterKey,
 		arg.Allowance,
 		arg.Price,
 	)
@@ -712,30 +587,6 @@ type UsageMeterExistsParams struct {
 
 func (q *Queries) UsageMeterExists(ctx context.Context, arg UsageMeterExistsParams) (bool, error) {
 	row := q.db.QueryRow(ctx, usageMeterExists, arg.MerchantID, arg.MeterKey)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
-const usageRateCardCurrencyConflict = `-- name: UsageRateCardCurrencyConflict :one
-SELECT EXISTS (
-    SELECT 1
-    FROM billing.catalog_rate_cards
-    WHERE merchant_id = $1
-      AND meter_key = $2::text
-      AND customer_id IS NOT NULL
-      AND upper(COALESCE(price ->> 'currency', '')) <> $3
-)
-`
-
-type UsageRateCardCurrencyConflictParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-	Currency   string
-}
-
-func (q *Queries) UsageRateCardCurrencyConflict(ctx context.Context, arg UsageRateCardCurrencyConflictParams) (bool, error) {
-	row := q.db.QueryRow(ctx, usageRateCardCurrencyConflict, arg.MerchantID, arg.MeterKey, arg.Currency)
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err

@@ -53,7 +53,6 @@ var openRoutes = []string{
 // those that move money or remove access. A change is reviewed.
 var sensitiveRoutes = []string{
 	"DELETE /v1/admin/alert-webhooks/{id}",
-	"DELETE /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
 	"DELETE /v1/admin/provisioning-tokens/{id}",
 	"GET /v1/admin/billing-archive",
 	"PATCH /v1/admin/alert-webhooks/{id}",
@@ -89,7 +88,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/subscriptions/{id}/change",
 	"POST /v1/admin/subscriptions/{id}/resume",
 	"PUT /v1/admin/catalog/meters/{key}",
-	"PUT /v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}",
 	"PUT /v1/admin/subscriptions/{id}/payment-method",
 }
 

@@ -115,16 +115,15 @@ func TestEntitlementReplacementsMoveKeysAcrossProducts(t *testing.T) {
 			require.NoError(t, err)
 			both, err := c.CreateProduct(t.Context(), billing.CreateProductParams{Key: "both-" + n, DisplayName: "Both", Entitlements: []string{a, b}})
 			require.NoError(t, err)
-			before, err := c.GetCatalogRevision(t.Context())
-			require.NoError(t, err)
+			before := w.catalogRevision()
 
 			replace := func(pairs ...catalog.EntitlementReplacement) (*billing.CatalogApplicationReceipt, error) {
 				return c.ApplyCatalog(t.Context(), &catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion, EntitlementReplacements: pairs}, billing.ApplyCatalogParams{})
 			}
 			receipt, err := replace(catalog.EntitlementReplacement{From: a, To: b}, catalog.EntitlementReplacement{From: gone})
 			require.NoError(t, err)
-			require.Equal(t, before.Revision, receipt.BaseRevision)
-			require.Equal(t, before.Revision+1, receipt.AppliedRevision, "one catalog edit")
+			require.Equal(t, before, receipt.BaseRevision)
+			require.Equal(t, before+1, receipt.AppliedRevision, "one catalog edit")
 			require.Equal(t, 3, receipt.ProductsChanged)
 			require.Equal(t, []billing.EntitlementChange{
 				{ProductID: both.ID, ProductKey: both.Key, Added: []string{}, Removed: []string{a}},

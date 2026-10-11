@@ -26,7 +26,6 @@ import type {
   PriceKeyMovement,
   Product,
   PublicConfig,
-  RateOverride,
   RatePrice,
   Renewal,
   RefundPaymentParams,
@@ -98,41 +97,6 @@ export const listCustomerPaymentMethods = (
     `/admin/customers/${customerId}/payment-methods`,
     { query: { ...page }, signal }
   )
-
-export interface CustomerUsageRateOverrideRequest {
-  price: RatePrice
-  allowance?: Allowance
-  // The override's revision this edit read; 0 when it read none.
-  expected_revision?: number
-}
-
-export const listCustomerUsageRateOverrides = (
-  customerId: string,
-  cursor?: string,
-  signal?: AbortSignal
-) =>
-  api<ListPage<RateOverride>>("/admin/catalog/rate-overrides", {
-    query: { customer_id: customerId, limit: PAGE_MAX, cursor },
-    signal,
-  })
-
-const rateOverridePath = (customerId: string, meterKey: string) =>
-  `/admin/catalog/rate-overrides/${customerId}/${encodeURIComponent(meterKey)}`
-
-export const putCustomerUsageRateOverride = (
-  customerId: string,
-  meterKey: string,
-  body: CustomerUsageRateOverrideRequest
-) =>
-  api<RateOverride>(rateOverridePath(customerId, meterKey), {
-    method: "PUT",
-    body,
-  })
-
-export const deleteCustomerUsageRateOverride = (
-  customerId: string,
-  meterKey: string
-) => api<void>(rateOverridePath(customerId, meterKey), { method: "DELETE" })
 
 export interface ProductGrant {
   productId: string
@@ -444,17 +408,6 @@ export const listUsageMeters = (
 
 export const getUsageMeter = (key: string, signal?: AbortSignal) =>
   api<Meter>(`/admin/catalog/meters/${encodeURIComponent(key)}`, {
-    signal,
-  })
-
-export const listUsageMeterOverrides = (
-  key: string,
-  limit = PAGE_MAX,
-  cursor?: string,
-  signal?: AbortSignal
-) =>
-  api<ListPage<RateOverride>>("/admin/catalog/rate-overrides", {
-    query: { meter_key: key, limit, cursor },
     signal,
   })
 

@@ -212,7 +212,7 @@ ci/subscriptions	TestListOffersIsOneRequest	9.2
 ci/subscriptions	TestListReadsAreBatched	11.8
 ci/subscriptions	TestMerchantDunningPolicy	19.6
 ci/subscriptions	TestMerchantHandsOverACheckoutSession	9.7
-ci/subscriptions	TestMetersAndRateOverrides	10.9
+ci/subscriptions	TestMetersAndTheirRateCards	10.9
 ci/subscriptions	TestMonthlyInvoicesCoverActivePayersOnly	7.4
 ci/subscriptions	TestNMIAccountUpdaterContactCustomer	13.2
 ci/subscriptions	TestNMIAccountUpdaterRecoversBothOwners	21.5

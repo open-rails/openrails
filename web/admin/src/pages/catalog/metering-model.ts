@@ -2,11 +2,9 @@ import type {
   Allowance,
   Meter,
   MeterRateCard,
-  RateOverride,
   RatePrice,
 } from "@/lib/api/generated/wire"
 import type {
-  CustomerUsageRateOverrideRequest,
   DefaultUsageRateCardRequest,
   UsageMeterRequest,
 } from "@/lib/api/endpoints"
@@ -83,21 +81,6 @@ export class RateCardFormError extends Error {
 
 export type MeterCollectionState =
   "loading" | "permission" | "error" | "empty" | "ready"
-
-export function customerUsageRateRows(
-  meters: Meter[],
-  overrides: RateOverride[]
-): Array<{ meter: Meter; override?: RateOverride }> {
-  const overridesByMeter = new Map(
-    overrides.map((override) => [override.meter_key, override])
-  )
-  return meters
-    .filter(
-      (meter) => meter.billing_supported && Boolean(meter.rate_card)
-    )
-    .map((meter) => ({ meter, override: overridesByMeter.get(meter.key) }))
-    .sort((left, right) => left.meter.key.localeCompare(right.meter.key))
-}
 
 export function meterCollectionState(params: {
   pending: boolean
@@ -209,17 +192,6 @@ export function rateCardFormValues(
   }
 }
 
-export function negotiatedRateFormValues(
-  defaultCard: MeterRateCard,
-  override?: RateOverride
-): RateCardFormValues {
-  return rateCardFormValues({
-    ...defaultCard,
-    price: override?.price ?? defaultCard.price,
-    allowance: override ? override.allowance : defaultCard.allowance,
-  })
-}
-
 export function buildRateCardRequest(
   values: RateCardFormValues
 ): DefaultUsageRateCardRequest {
@@ -239,15 +211,6 @@ export function buildRateCardRequest(
     filter: filterRowsToMap(values.filters),
     price,
     ...(allowance ? { allowance } : {}),
-  }
-}
-
-export function negotiatedRateRequest(
-  rateCard: DefaultUsageRateCardRequest
-): CustomerUsageRateOverrideRequest {
-  return {
-    price: rateCard.price,
-    ...(rateCard.allowance ? { allowance: rateCard.allowance } : {}),
   }
 }
 

@@ -29,7 +29,7 @@ func (q *Queries) DeleteCatalogMeter(ctx context.Context, arg DeleteCatalogMeter
 
 const deleteDefaultCatalogRateCard = `-- name: DeleteDefaultCatalogRateCard :exec
 DELETE FROM billing.catalog_rate_cards
-WHERE merchant_id = $1::uuid AND id = $2::uuid AND customer_id IS NULL
+WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
 type DeleteDefaultCatalogRateCardParams struct {
@@ -109,7 +109,6 @@ SELECT rc.product_id::uuid AS product_id, rc.ordinal, rc.meter_key, rc.payment_t
 FROM billing.catalog_rate_cards rc
 JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
 WHERE rc.merchant_id = $1::uuid
-  AND rc.customer_id IS NULL
 ORDER BY rc.product_id, rc.ordinal
 `
 
@@ -157,7 +156,7 @@ SELECT rc.id, rc.created_at, COALESCE(p.key, '')::text AS product_key, rc.ordina
        rc.allowance, rc.price
 FROM billing.catalog_rate_cards rc
 LEFT JOIN billing.products p ON p.merchant_id = rc.merchant_id AND p.id = rc.product_id
-WHERE rc.merchant_id = $1::uuid AND rc.customer_id IS NULL
+WHERE rc.merchant_id = $1::uuid
 `
 
 type ListDefaultCatalogRateCardsRow struct {

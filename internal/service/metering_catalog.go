@@ -10,18 +10,15 @@ import (
 )
 
 var (
-	ErrUsageMeterNotFound       = money.ErrUsageMeterNotFound
-	ErrMeterInUse               = money.ErrMeterInUse
-	ErrDefaultRateCardNotFound  = money.ErrDefaultRateCardNotFound
-	ErrDefaultRateCardRequired  = money.ErrDefaultRateCardRequired
-	ErrRateCardHasOverrides     = money.ErrRateCardHasOverrides
-	ErrRateCardCurrencyMismatch = money.ErrRateCardCurrencyMismatch
-	ErrRateCardProductNotFound  = money.ErrRateCardProductNotFound
-	ErrAllowanceMeterNotFound   = money.ErrAllowanceMeterNotFound
-	ErrAllowanceSourceInvalid   = money.ErrAllowanceSourceInvalid
-	ErrAllowanceSourceInUse     = money.ErrAllowanceSourceInUse
-	ErrMeterRateCardConflict    = money.ErrMeterRateCardConflict
-	ErrUsageRateCardInvalid     = money.ErrUsageRateCardInvalid
+	ErrUsageMeterNotFound      = money.ErrUsageMeterNotFound
+	ErrMeterInUse              = money.ErrMeterInUse
+	ErrDefaultRateCardNotFound = money.ErrDefaultRateCardNotFound
+	ErrRateCardProductNotFound = money.ErrRateCardProductNotFound
+	ErrAllowanceMeterNotFound  = money.ErrAllowanceMeterNotFound
+	ErrAllowanceSourceInvalid  = money.ErrAllowanceSourceInvalid
+	ErrAllowanceSourceInUse    = money.ErrAllowanceSourceInUse
+	ErrMeterRateCardConflict   = money.ErrMeterRateCardConflict
+	ErrUsageRateCardInvalid    = money.ErrUsageRateCardInvalid
 )
 
 // ListUsageMeters returns one page of the merchant's meters, by key.

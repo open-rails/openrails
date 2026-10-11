@@ -1,11 +1,10 @@
--- Metered rating: the rate cards that apply to a customer, usage aggregation
+-- Metered rating: the merchant's usage rate cards, usage aggregation
 -- for a rated window, and the per-period accrual watermark.
 
--- A customer-scoped card (customer_id set) later replaces the default for its meter.
--- name: ListPayerArrearsRateCards :many
+-- One card per meter, the same for every customer.
+-- name: ListArrearsRateCards :many
 SELECT rc.id,
        rc.meter_key::text AS meter_key,
-       (rc.customer_id IS NOT NULL)::boolean AS payer_scoped,
        COALESCE(NULLIF(cm.event_type, ''), cm.key)::text AS event_type,
        COALESCE(NULLIF(cm.value_property, ''), cm.key)::text AS value_property,
        COALESCE(NULLIF(cm.aggregation, ''), 'sum')::text AS aggregation,
@@ -17,7 +16,6 @@ FROM billing.catalog_rate_cards rc
 JOIN billing.catalog_meters cm ON cm.merchant_id = rc.merchant_id AND cm.key = rc.meter_key
 WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid
   AND rc.meter_key IS NOT NULL
-  AND (rc.customer_id IS NULL OR rc.customer_id = sqlc.arg(customer_id)::uuid)
   AND lower(COALESCE(rc.price ->> 'currency', sqlc.arg(currency)::text)) = lower(sqlc.arg(currency)::text)
   AND rc.payment_term = 'in_arrears'
 ORDER BY rc.ordinal;

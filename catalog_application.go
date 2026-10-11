@@ -36,16 +36,6 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 	return &out, nil
 }
 
-// GetCatalogRevision reads the catalog revision, which every catalog write
-// advances.
-func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error) {
-	var out billing.CatalogRevision
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/catalog/revision", nil, &out, requestOptions...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // AskCatalog answers a question about the catalog with a model that reads it
 // and may draft price changes for a person to review; it changes nothing. The
 // deployment must enable it.

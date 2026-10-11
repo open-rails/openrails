@@ -323,9 +323,6 @@ var errorCodes = []ErrorCode{
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
 	{"allowance_source_invalid", 409, invalid, "The allowance source cannot back this rate card."},
 	{"allowance_source_in_use", 409, invalid, "The allowance source is in use."},
-	{"default_rate_card_required", 409, invalid, "The meter needs a default rate card."},
-	{"rate_card_has_overrides", 409, invalid, "The rate card still has customer overrides."},
-	{"rate_card_currency_mismatch", 409, invalid, "The rate card's currency does not match."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Findings.

@@ -81,8 +81,7 @@ func TestHumanAmountCatalogUsesExactCurrencyNativeUnits(t *testing.T) {
 
 func TestHumanAmountInvalidInputCannotMutateCatalog(t *testing.T) {
 	w := newWorld(t)
-	before, err := w.client[remote].GetCatalogRevision(t.Context())
-	require.NoError(t, err)
+	before := w.catalogRevision()
 	for _, amount := range []string{
 		"9.99", "1 UNKNOWN", "1 USDD", "-1 USD", "1e3 USD", "1/2 USD", "NaN USD", "Inf USD",
 		"0.0000001 USD", "0.0000000001 SOL", "0.0000001 USDC", "0.00001 JPY",
@@ -102,7 +101,5 @@ func TestHumanAmountInvalidInputCannotMutateCatalog(t *testing.T) {
 		status, _ := applyHumanAmountYAML(t, w, document)
 		require.Equal(t, http.StatusBadRequest, status, extra)
 	}
-	after, err := w.client[embedded].GetCatalogRevision(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, before.Revision, after.Revision)
+	require.Equal(t, before, w.catalogRevision())
 }

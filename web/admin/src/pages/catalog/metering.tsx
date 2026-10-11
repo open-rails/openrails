@@ -161,9 +161,6 @@ export function CatalogMeteringPage() {
                   <TableHead className="text-muted-foreground">
                     Product
                   </TableHead>
-                  <TableHead className="text-right text-muted-foreground">
-                    Overrides
-                  </TableHead>
                   <TableHead className="text-muted-foreground">
                     Activity
                   </TableHead>
@@ -225,9 +222,6 @@ function MeterRow({ meter }: { meter: Meter }) {
         {summarizeRateCard(meter.rate_card)}
       </TableCell>
       <TableCell>{meter.rate_card?.product_key ?? "—"}</TableCell>
-      <TableCell className="text-right tabular-nums">
-        {meter.override_count.toLocaleString()}
-      </TableCell>
       <TableCell>
         <span className="inline-flex items-center gap-1.5 text-sm">
           <span
@@ -253,15 +247,11 @@ export function MeterDetailPage() {
   const { key = "" } = useParams()
   const meterKey = key
   const navigate = useNavigate()
-  const overridePages = useCursorPages()
   const meterQuery = useQuery(adminQueries.usageMeter(meterKey))
   const writesAllowed = useCatalogWrites()
   const metersQuery = useQuery(adminQueries.allUsageMeters())
   const productsQuery = useQuery(
     adminQueries.allProducts({ errorAction: "Load products for metering" })
-  )
-  const overridesQuery = useQuery(
-    adminQueries.usageMeterOverrides(meterKey, PAGE_SIZE, overridePages.cursor)
   )
 
   if (meterQuery.isPending) return <MeterDetailSkeleton />
@@ -396,125 +386,6 @@ export function MeterDetailPage() {
       </section>
 
       <DefaultRateSection meter={meter} writesAllowed={writesAllowed} />
-
-      <section className="grid gap-3">
-        <div>
-          <h2 className="text-base font-semibold">Negotiated overrides</h2>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Customer-specific prices replacing this default rate.
-          </p>
-        </div>
-        {overridesQuery.isPending ? (
-          <div className="grid gap-2">
-            <Skeleton className="h-9 w-full" />
-            <Skeleton className="h-9 w-full" />
-          </div>
-        ) : overridesQuery.error ? (
-          <PageMessage
-            title={
-              overridesQuery.error instanceof ApiError &&
-              overridesQuery.error.status === 403
-                ? "Override access is restricted"
-                : "Overrides could not be loaded"
-            }
-            description={
-              overridesQuery.error instanceof ApiError &&
-              overridesQuery.error.status === 403
-                ? "Your role does not have permission to read negotiated rates."
-                : "Try loading this list again."
-            }
-            action={
-              overridesQuery.error instanceof ApiError &&
-              overridesQuery.error.status === 403 ? undefined : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void overridesQuery.refetch()}
-                >
-                  Try again
-                </Button>
-              )
-            }
-            compact
-          />
-        ) : (overridesQuery.data?.data.length ?? 0) === 0 ? (
-          <p className="border-y py-6 text-sm text-muted-foreground">
-            No customers have a negotiated rate for this meter.
-          </p>
-        ) : (
-          <>
-            <div className="max-w-full overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead className="text-muted-foreground">
-                      Customer
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      Rate
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      Allowance
-                    </TableHead>
-                    <TableHead className="text-muted-foreground">
-                      Updated
-                    </TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {overridesQuery.data?.data.map((override) => (
-                    <LinkedTableRow
-                      key={override.customer_id}
-                      to={`/customers/${override.customer_id}`}
-                    >
-                      <TableCell>
-                        <Link
-                          className="font-medium underline-offset-3 hover:underline"
-                          to={`/customers/${override.customer_id}`}
-                        >
-                          {override.customer_email || override.customer_id}
-                        </Link>
-                        {override.customer_email && (
-                          <p className="text-xs text-muted-foreground">
-                            {override.customer_id}
-                          </p>
-                        )}
-                      </TableCell>
-                      <TableCell className="tabular-nums">
-                        {summarizeRateCard({
-                          price: override.price,
-                        } as NonNullable<Meter["rate_card"]>)}
-                      </TableCell>
-                      <TableCell>
-                        {override.allowance?.included !== undefined
-                          ? `${override.allowance.included.toLocaleString()} included`
-                          : override.allowance?.accrue_from
-                            ? `From ${override.allowance.accrue_from}`
-                            : "—"}
-                      </TableCell>
-                      <TableCell className="text-muted-foreground tabular-nums">
-                        {formatDate(override.updated_at)}
-                      </TableCell>
-                      <TableCell>
-                        <HugeiconsIcon
-                          icon={ArrowRight01Icon}
-                          className="ml-auto size-4 text-muted-foreground"
-                        />
-                      </TableCell>
-                    </LinkedTableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <CursorPaginationFooter
-              pages={overridePages}
-              nextCursor={overridesQuery.data?.next_cursor}
-              loading={overridesQuery.isPending}
-            />
-          </>
-        )}
-      </section>
     </div>
   )
 }
@@ -532,7 +403,6 @@ function DefaultRateSection({
     adminMutations.deleteDefaultUsageRateCard(queryClient)
   )
   const card = meter.rate_card
-  const blocked = meter.override_count > 0
   const handleDelete = async () => {
     try {
       await remove.mutateAsync(meter)
@@ -548,23 +418,14 @@ function DefaultRateSection({
         <div>
           <h2 className="text-base font-semibold">Default rate</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            Used for every customer without a negotiated override.
+            Used for every customer.
           </p>
         </div>
         {card && writesAllowed && (
           <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
             <AlertDialogTrigger
               render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={blocked}
-                  title={
-                    blocked
-                      ? "Remove every negotiated override first."
-                      : undefined
-                  }
-                >
+                <Button variant="outline" size="sm">
                   <HugeiconsIcon icon={Delete02Icon} className="size-4" />
                   Remove default
                 </Button>
@@ -609,10 +470,6 @@ function DefaultRateSection({
             value={card.price.model.replace("_", " ")}
           />
           <ContractFact
-            label="Overrides"
-            value={meter.override_count.toLocaleString()}
-          />
-          <ContractFact
             label="Filter"
             value={
               Object.keys(card.filter ?? {}).length
@@ -634,13 +491,6 @@ function DefaultRateSection({
           />
           <ContractFact label="Updated" value={formatDate(card.updated_at)} />
         </dl>
-      )}
-      {blocked && card && writesAllowed && (
-        <p className="text-xs text-muted-foreground">
-          Remove all {meter.override_count.toLocaleString()} negotiated override
-          {meter.override_count === 1 ? "" : "s"} below before deleting the
-          default rate.
-        </p>
       )}
     </section>
   )
@@ -673,17 +523,13 @@ function PageMessage({
   title,
   description,
   action,
-  compact = false,
 }: {
   title: string
   description: string
   action?: React.ReactNode
-  compact?: boolean
 }) {
   return (
-    <div
-      className={`flex flex-col items-start border-y ${compact ? "gap-2 py-5" : "gap-3 py-10"}`}
-    >
+    <div className="flex flex-col items-start gap-3 border-y py-10">
       <div>
         <h2 className="text-sm font-medium">{title}</h2>
         <p className="mt-1 text-sm text-muted-foreground">{description}</p>

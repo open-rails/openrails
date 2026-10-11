@@ -24,7 +24,6 @@ import (
 type catalogRateCardRow struct {
 	ID          uuid.UUID
 	MeterKey    string
-	PayerScoped bool
 	EventType   string
 	ValueKey    string
 	Aggregation string
@@ -49,7 +48,7 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 	if err != nil {
 		return err
 	}
-	rateCards, err := s.loadCatalogRateCards(ctx, tid.UUID(), payer, cur)
+	rateCards, err := s.loadCatalogRateCards(ctx, tid.UUID(), cur)
 	if err != nil {
 		return err
 	}
@@ -101,21 +100,21 @@ func (s *MoneyService) sweepCatalogRateCardUsage(ctx context.Context, payer iden
 	return nil
 }
 
-// loadCatalogRateCards loads the arrears usage rate cards that apply to one
-// payer, joined to their meters. A payer-scoped card (negotiated pricing,
-// customer_id set) replaces the merchant default for the same meter_key.
-// event_type and value_property default to the meter key; aggregation to sum.
-func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, payer identity.CustomerID, currency string) ([]catalogRateCardRow, error) {
+// loadCatalogRateCards loads the merchant's arrears usage rate cards in one
+// currency, joined to their meters: one per meter, the same for every
+// customer. event_type and value_property default to the meter key;
+// aggregation to sum.
+func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid.UUID, currency string) ([]catalogRateCardRow, error) {
 	var out []catalogRateCardRow
 	err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, qerr := s.db.Gen(ctx).ListPayerArrearsRateCards(ctx, gen.ListPayerArrearsRateCardsParams{
-			MerchantID: merchantID, CustomerID: payer.UUID(), Currency: currency,
+		rows, qerr := s.db.Gen(ctx).ListArrearsRateCards(ctx, gen.ListArrearsRateCardsParams{
+			MerchantID: merchantID, Currency: currency,
 		})
 		if qerr != nil {
 			return qerr
 		}
 		for _, r := range rows {
-			row := catalogRateCardRow{ID: r.ID, MeterKey: r.MeterKey, PayerScoped: r.PayerScoped, EventType: r.EventType, ValueKey: r.ValueProperty, Aggregation: r.Aggregation}
+			row := catalogRateCardRow{ID: r.ID, MeterKey: r.MeterKey, EventType: r.EventType, ValueKey: r.ValueProperty, Aggregation: r.Aggregation}
 			if err := json.Unmarshal(r.GroupBy, &row.GroupBy); err != nil {
 				return fmt.Errorf("decode rate card %s group_by: %w", row.ID, err)
 			}
@@ -139,39 +138,6 @@ func (s *MoneyService) loadCatalogRateCards(ctx context.Context, merchantID uuid
 	})
 	if err != nil {
 		return nil, err
-	}
-	return resolvePayerRateCardOverrides(out)
-}
-
-// resolvePayerRateCardOverrides collapses the loaded set to one card per
-// meter_key: a payer-scoped card contributes only price and allowance; the
-// meter, product-owned filter and dimensional contract remain the default's.
-func resolvePayerRateCardOverrides(cards []catalogRateCardRow) ([]catalogRateCardRow, error) {
-	overrides := map[string]catalogRateCardRow{}
-	for _, rc := range cards {
-		if rc.PayerScoped {
-			overrides[rc.MeterKey] = rc
-		}
-	}
-	out := make([]catalogRateCardRow, 0, len(cards))
-	defaults := make(map[string]struct{}, len(cards))
-	for _, rc := range cards {
-		if rc.PayerScoped {
-			continue
-		}
-		defaults[rc.MeterKey] = struct{}{}
-		if override, ok := overrides[rc.MeterKey]; ok {
-			rc.ID = override.ID
-			rc.PayerScoped = true
-			rc.Price = override.Price
-			rc.Allowance = override.Allowance
-		}
-		out = append(out, rc)
-	}
-	for meterKey := range overrides {
-		if _, ok := defaults[meterKey]; !ok {
-			return nil, fmt.Errorf("meter %q: %w", meterKey, ErrDefaultRateCardRequired)
-		}
 	}
 	return out, nil
 }

@@ -109,7 +109,7 @@ portable. `unindexed-filter` also checks the explicit merchant predicate path.
 ## AUDIT_ALLOWLIST.txt
 
 **PERMANENT — operator-declared catalog/config.** `products`, `prices`, `psps`,
-`custodians`, `catalog_meters`, default `catalog_rate_cards`, and the staff a
+`custodians`, `catalog_meters`, `catalog_rate_cards`, and the staff a
 merchant invited (`federated_grants`). Row
 counts follow the merchant's own configuration, not customer activity, so
 listing them whole does not scale with records on file.

@@ -126,8 +126,7 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 	w := newWorld(t)
 	product, err := w.client[remote].CreateProduct(t.Context(), billing.CreateProductParams{Key: "duration-validation", DisplayName: "Validation"})
 	require.NoError(t, err)
-	revision, err := w.client[remote].GetCatalogRevision(t.Context())
-	require.NoError(t, err)
+	revision := w.catalogRevision()
 	for _, value := range []bool{true, false} {
 		status, body := w.staffJSON(http.MethodPost, "/v1/admin/catalog/prices", map[string]any{
 			"product_id": product.ID.String(), "key": "invalid", "currency": "USD", "unit_amount": "1000000", "auto_renew": value,
@@ -147,9 +146,7 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 		})
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	}
-	after, err := w.client[remote].GetCatalogRevision(t.Context())
-	require.NoError(t, err)
-	require.Equal(t, revision.Revision, after.Revision, "invalid duration declarations cannot mutate the catalog")
+	require.Equal(t, revision, w.catalogRevision(), "invalid duration declarations cannot mutate the catalog")
 }
 
 // An order line states its price's renewal and access terms, in process and

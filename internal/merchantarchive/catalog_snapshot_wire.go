@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"slices"
 
 	"github.com/goccy/go-yaml"
 	"github.com/google/uuid"
@@ -32,8 +33,10 @@ type CatalogSnapshot struct {
 	SHA256          string                                  `json:"sha256,omitempty"`
 }
 type CatalogDependencies struct {
-	PSPs      []CatalogPSPIdentity `json:"psps"`
-	Customers []string             `json:"customers"`
+	PSPs []CatalogPSPIdentity `json:"psps"`
+	// Customers is a historical snapshot's: its rate overrides' customers,
+	// kept for its digest. Their rows are skipped on restore.
+	Customers *[]string `json:"customers,omitempty"`
 }
 type CatalogPSPIdentity struct {
 	ID          string `json:"id"`
@@ -172,6 +175,7 @@ func catalogDigest(document CatalogSnapshot) (string, error) {
 // each product's keys become rows valid from before key history, as
 // migration 15 converts them. The digest is the original document's.
 func upgradeCatalogSnapshot(document CatalogSnapshot) (CatalogSnapshot, error) {
+	document = withoutRateOverrides(document)
 	if _, current := document.Tables["catalog_field_owners"]; !current {
 		// A snapshot from before field ownership: no field had an owner.
 		tables := maps.Clone(document.Tables)
@@ -224,6 +228,32 @@ func upgradeCatalogSnapshot(document CatalogSnapshot) (CatalogSnapshot, error) {
 	tables["product_entitlements"] = keys
 	document.Tables = tables
 	return document, nil
+}
+
+// withoutRateOverrides converts a snapshot from before migration 66: a rate
+// card naming a customer was an override, which that migration deletes, and
+// a card's revision went with them.
+func withoutRateOverrides(document CatalogSnapshot) CatalogSnapshot {
+	cards := document.Tables["catalog_rate_cards"]
+	if !slices.ContainsFunc(cards, func(row map[string]json.RawMessage) bool {
+		_, customer := row["customer_id"]
+		_, revision := row["revision"]
+		return customer || revision
+	}) {
+		return document
+	}
+	kept := make([]map[string]json.RawMessage, 0, len(cards))
+	for _, row := range cards {
+		if _, override := row["customer_id"]; override {
+			continue
+		}
+		row = maps.Clone(row)
+		delete(row, "revision")
+		kept = append(kept, row)
+	}
+	document.Tables = maps.Clone(document.Tables)
+	document.Tables["catalog_rate_cards"] = kept
+	return document
 }
 
 func validateCatalogSnapshot(document CatalogSnapshot) (int64, error) {

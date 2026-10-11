@@ -112,7 +112,7 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		{string(billing.MerchantBillingRead), http.MethodGet, "/v1/admin/findings", "", http.StatusOK},
 		{string(billing.MerchantBillingManage), http.MethodPatch, "/v1/admin/customers/" + customer, `{}`, http.StatusOK},
 		{string(billing.MerchantConfigManage), http.MethodPost, "/v1/admin/psps/refresh", "", http.StatusAccepted},
-		{string(billing.MerchantCatalogManage), http.MethodGet, "/v1/admin/catalog/revision", "", http.StatusOK},
+		{string(billing.MerchantCatalogManage), http.MethodGet, "/v1/admin/catalog/meters", "", http.StatusOK},
 		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/admin/psps", "", http.StatusOK},
 		{string(billing.MerchantMetricsRead), http.MethodGet, "/v1/admin/metrics/schema", "", http.StatusOK},
 		{string(billing.MerchantEntitlementsRead), http.MethodPost, "/v1/app/entitlements/check", `{"customer_id":"` + customer + `","entitlements":["content:any"]}`, http.StatusOK},

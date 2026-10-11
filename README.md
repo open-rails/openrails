@@ -1138,7 +1138,7 @@ later client edits. The startup example above applies `catalog.yaml` through
 share the catalog as above. The standalone server mounts them with
 `route_groups.catalog`.
 
-Every product, price key, meter and rate override carries a `revision` that
+Every product, price key and meter carries a `revision` that
 advances on each change. An edit may send the revision it read as
 `expected_revision`; if the object changed since, it is refused with
 `409 revision_mismatch` and `metadata.revision`. The console always sends it.

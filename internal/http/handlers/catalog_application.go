@@ -53,17 +53,3 @@ func ApplyCatalog(r *httprequest.Request) {
 	}
 	r.JSON(http.StatusOK, receipt)
 }
-
-// GetCatalogRevision reads the catalog revision.
-func GetCatalogRevision(r *httprequest.Request) {
-	svc, ok := newAdminBillingService(r)
-	if !ok {
-		return
-	}
-	revision, err := svc.CatalogRevision(r.Request.Context())
-	if err != nil {
-		writeCatalogError(r, err)
-		return
-	}
-	r.JSON(http.StatusOK, billing.CatalogRevision{Revision: revision})
-}

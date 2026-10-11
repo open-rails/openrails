@@ -64,32 +64,6 @@ func TestPendingOwedItemGuards(t *testing.T) {
 		"owed item timestamp required")
 }
 
-func TestPayerRateCardOverrideKeepsDefaultMeterContract(t *testing.T) {
-	perUnit := func(amount int64) catalog.RatePrice {
-		return catalog.RatePrice{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: amount}}
-	}
-	def := catalogRateCardRow{
-		ID: uuid.New(), MeterKey: "requests", EventType: "request.completed", ValueKey: "$.units",
-		Aggregation: string(catalog.AggregationSum), GroupBy: map[string]string{"region": "$.region"},
-		Filter: map[string][]string{"region": {"eu"}}, Allowance: &catalog.Allowance{Included: 5}, Price: perUnit(10_000),
-	}
-	other := catalogRateCardRow{ID: uuid.New(), MeterKey: "storage", Price: perUnit(1)}
-	override := catalogRateCardRow{
-		ID: uuid.New(), MeterKey: "requests", PayerScoped: true, EventType: "poisoned.event",
-		GroupBy: map[string]string{"poisoned": "$.poisoned"}, Filter: map[string][]string{"poisoned": {"x"}},
-		Allowance: &catalog.Allowance{Included: 20}, Price: perUnit(4_000),
-	}
-
-	resolved, err := resolvePayerRateCardOverrides([]catalogRateCardRow{override, def, other})
-	require.NoError(t, err)
-	want := def
-	want.ID, want.PayerScoped, want.Price, want.Allowance = override.ID, true, override.Price, override.Allowance
-	require.Equal(t, []catalogRateCardRow{want, other}, resolved)
-
-	_, err = resolvePayerRateCardOverrides([]catalogRateCardRow{override, other})
-	require.ErrorIs(t, err, ErrDefaultRateCardRequired)
-}
-
 func TestRateCardFilterRules(t *testing.T) {
 	rules, err := rateCardFilterRules(catalogRateCardRow{
 		ID:      uuid.New(),

@@ -5,17 +5,13 @@ import { QueryClient } from "@tanstack/react-query"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setSelectedMerchant } from "@/lib/api/client"
-import {
-  putCustomerUsageRateOverride,
-  putUsageMeter,
-} from "@/lib/api/endpoints"
+import { putUsageMeter } from "@/lib/api/endpoints"
 import { adminMutations } from "@/lib/mutations"
 import { merchantQueryKeys, queryKeys } from "@/lib/queries"
 
 vi.mock("@/lib/api/endpoints", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/endpoints")>()),
   putUsageMeter: vi.fn(),
-  putCustomerUsageRateOverride: vi.fn(),
 }))
 
 const memoryStorage = (): Storage => {
@@ -125,53 +121,5 @@ describe("invalidation after a mid-flight merchant switch", () => {
     expect(putUsageMeter).toHaveBeenCalledWith("api-tokens", meter)
     expect(cache.initiatingMerchant()).toEqual([true, true])
     expect(cache.otherMerchant()).toEqual([false, false])
-  })
-
-  it("refreshes the customer and dashboard of merchant A, not merchant B", async () => {
-    const queryClient = new QueryClient()
-    const cache = seedBothMerchants(queryClient, (keys) => [
-      [...keys.customer("customer-1")],
-      [...keys.customerUsageRates("customer-1")],
-      [...keys.usageMeters()],
-      [...keys.usageMeter("api-tokens")],
-      [...keys.dashboard()],
-    ])
-
-    selectMerchant(MERCHANT_A)
-    const request =
-      deferred<Awaited<ReturnType<typeof putCustomerUsageRateOverride>>>()
-    vi.mocked(putCustomerUsageRateOverride).mockReturnValueOnce(
-      request.promise
-    )
-    const override = {
-      price: {
-        model: "per_unit" as const,
-        currency: "USD",
-        per_unit: { unit_amount: "500000", divide_by: 1 },
-      },
-    }
-    const running = queryClient
-      .getMutationCache()
-      .build(
-        queryClient,
-        adminMutations.putCustomerUsageRateOverride(queryClient)
-      )
-      .execute({
-        customerId: "customer-1",
-        meterKey: "api-tokens",
-        override,
-      })
-
-    selectMerchant(MERCHANT_B)
-    request.resolve({} as never)
-    await running
-
-    expect(putCustomerUsageRateOverride).toHaveBeenCalledWith(
-      "customer-1",
-      "api-tokens",
-      override
-    )
-    expect(cache.initiatingMerchant()).toEqual([true, true, true, true, true])
-    expect(cache.otherMerchant()).toEqual([false, false, false, false, false])
   })
 })

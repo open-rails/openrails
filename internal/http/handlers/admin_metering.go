@@ -138,12 +138,6 @@ func writeMeteringError(r *httprequest.Request, err error) {
 		status, code = http.StatusConflict, "allowance_source_invalid"
 	case errors.Is(err, billingservice.ErrAllowanceSourceInUse):
 		status, code = http.StatusConflict, "allowance_source_in_use"
-	case errors.Is(err, billingservice.ErrDefaultRateCardRequired):
-		status, code = http.StatusConflict, "default_rate_card_required"
-	case errors.Is(err, billingservice.ErrRateCardHasOverrides):
-		status, code = http.StatusConflict, "rate_card_has_overrides"
-	case errors.Is(err, billingservice.ErrRateCardCurrencyMismatch):
-		status, code = http.StatusConflict, "rate_card_currency_mismatch"
 	default:
 		writeRefusal(r, err, "metering operation failed")
 		return

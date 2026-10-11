@@ -57,7 +57,6 @@ import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
 import { DefaultCardBadges } from "./default-card-badges"
-import { CustomerUsageRatesSection } from "./usage-rates"
 import { CustomerCreditSupportSection } from "./credits"
 import { CursorPager } from "@/components/cursor-pager"
 import { useCursorPages } from "@/lib/cursor-pages"
@@ -145,7 +144,6 @@ export function CustomerDetailPage() {
         customerId={customerId}
         currencies={customer.balances.map((balance) => balance.currency)}
       />
-      <CustomerUsageRatesSection customerId={customerId} />
       <CustomerInvoiceProfileSection customerId={customerId} />
 
       <div className="grid gap-4 lg:grid-cols-3 lg:items-start">

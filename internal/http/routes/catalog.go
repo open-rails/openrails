@@ -4,7 +4,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/handlers"
-	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
 // page is a list route's paging parameters.
@@ -15,8 +14,8 @@ var (
 	productErrors = []string{"catalog_benefit_overlap", "product_not_found", "product_tier_group_conflict", "product_tier_group_in_use", "resource_conflict", "revision_mismatch"}
 	priceErrors   = []string{"catalog_benefit_overlap", "price_key_cadence_conflict", "price_key_not_found", "price_not_found", "product_not_found", "resource_conflict", "revision_mismatch", "trial_unsupported_on_rail"}
 	meterErrors   = []string{
-		"allowance_meter_not_found", "allowance_source_in_use", "allowance_source_invalid", "default_rate_card_not_found", "default_rate_card_required",
-		"meter_in_use", "meter_rate_card_conflict", "rate_card_currency_mismatch", "rate_card_has_overrides", "rate_card_product_not_found",
+		"allowance_meter_not_found", "allowance_source_in_use", "allowance_source_invalid", "default_rate_card_not_found",
+		"meter_in_use", "meter_rate_card_conflict", "rate_card_product_not_found",
 		"revision_mismatch", "usage_meter_invalid", "usage_meter_not_found", "usage_rate_card_invalid",
 	}
 )
@@ -33,8 +32,6 @@ var catalogRoutes = []Route{
 	{Method: GET, Path: "/v1/app/catalog/products", Group: App, Auth: AuthApplication, Permission: needOffers, Name: "ListOffers",
 		Query: params(page, repeated("entitlement"), repeated("keys")), Responses: []Reply{{200, billing.ListPage[billing.Product]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.AppListOffers)},
 
-	{Method: GET, Path: "/v1/admin/catalog/revision", Group: CatalogAdmin, Auth: AuthMerchant, Name: "GetCatalogRevision", Level: LevelRead,
-		Responses: []Reply{{200, billing.CatalogRevision{}}}, Handler: h(handlers.GetCatalogRevision)},
 	{Method: POST, Path: "/v1/admin/catalog/applications", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ApplyCatalog", Level: LevelUpdate, Sensitive: true,
 		Request: catalog.Application{}, Query: queryOf(handlers.CatalogApplicationQuery{}), Responses: []Reply{{200, billing.CatalogApplicationReceipt{}}}, Errors: codes(append([]string{"catalog_revision_conflict", "price_not_sellable"}, productErrors...)...), Handler: h(handlers.ApplyCatalog)},
 
@@ -44,12 +41,6 @@ var catalogRoutes = []Route{
 		Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(meterErrors...), Handler: h(handlers.GetMeter)},
 	{Method: PUT, Path: "/v1/admin/catalog/meters/{key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetMeter", Level: LevelUpdate, Sensitive: true,
 		Request: billing.SetMeterParams{}, Responses: []Reply{{200, billing.Meter{}}}, Errors: codes(meterErrors...), Handler: h(handlers.SetMeter)},
-	{Method: GET, Path: "/v1/admin/catalog/rate-overrides", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListRateOverrides", Level: LevelRead,
-		Query: params(page, text("customer_id"), text("meter_key")), Responses: []Reply{{200, billing.ListPage[billing.RateOverride]{}}}, Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListRateOverrides)},
-	{Method: PUT, Path: "/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "SetRateOverride", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationGrant,
-		Request: billing.SetRateOverrideParams{}, Responses: []Reply{{200, billing.RateOverride{}}}, Errors: codes(meterErrors...), Handler: h(handlers.SetRateOverride)},
-	{Method: DELETE, Path: "/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "DeleteRateOverride", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
-		Responses: []Reply{{204, nil}}, Errors: codes(meterErrors...), Handler: h(handlers.DeleteRateOverride)},
 
 	{Method: POST, Path: "/v1/admin/catalog/product-archives", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ArchiveProduct", Level: LevelUpdate, Sensitive: true, IdempotencyKey: true,
 		Request: billing.ArchiveProductParams{}, Responses: []Reply{{200, billing.ProductArchive{}}}, Errors: codes(append([]string{"idempotency_key_required", "idempotency_key_reused", "invalid_param", "provider_cancel_held", "rebill_terms_committed", "service_unavailable"}, productErrors...)...), Handler: h(handlers.CreateProductArchive)},

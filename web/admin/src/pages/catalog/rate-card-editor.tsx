@@ -46,21 +46,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import type {
-  Allowance,
-  Meter,
-  Product,
-  RateOverride,
-} from "@/lib/api/generated/wire"
+import type { Meter, Product } from "@/lib/api/generated/wire"
 import type { DefaultUsageRateCardRequest } from "@/lib/api/endpoints"
 import { DIALOG_WIDE } from "@/lib/dialog-width"
-import { formatCap } from "@/lib/duration"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import {
   buildRateCardRequest,
-  negotiatedRateFormValues,
-  negotiatedRateRequest,
   RateCardFormError,
   rateCardFormValues,
   summarizeRateCard,
@@ -81,8 +73,6 @@ export function RateCardEditor({
   productsPending = false,
   productsError = false,
   productsForbidden = false,
-  customerId,
-  override,
 }: {
   meter: Meter
   writesAllowed?: boolean
@@ -91,8 +81,6 @@ export function RateCardEditor({
   productsPending?: boolean
   productsError?: boolean
   productsForbidden?: boolean
-  customerId?: string
-  override?: RateOverride
 }) {
   const [open, setOpen] = React.useState(false)
   const [submitError, setSubmitError] = React.useState<FormIssue | null>(null)
@@ -102,25 +90,16 @@ export function RateCardEditor({
   const saveDefault = useMutation(
     adminMutations.putDefaultUsageRateCard(queryClient)
   )
-  const saveOverride = useMutation(
-    adminMutations.putCustomerUsageRateOverride(queryClient)
-  )
   const activeProducts = products.filter((product) => !product.archived)
-  const isNegotiated = Boolean(customerId)
-  const defaultCard = meter.rate_card
-  const existing = isNegotiated ? override : defaultCard
-  const initialValues =
-    isNegotiated && defaultCard
-      ? negotiatedRateFormValues(defaultCard, override)
-      : rateCardFormValues(defaultCard)
-  const savePending = saveDefault.isPending || saveOverride.isPending
+  const existing = meter.rate_card
+  const savePending = saveDefault.isPending
   const form = useForm({
-    defaultValues: initialValues,
+    defaultValues: rateCardFormValues(existing),
     onSubmit: async ({ value }) => {
       setSubmitError(null)
       try {
         const rateCard = buildRateCardRequest(value)
-        if (existing && !isNegotiated) {
+        if (existing) {
           setPendingRequest(rateCard)
           return
         }
@@ -143,38 +122,17 @@ export function RateCardEditor({
 
   const persist = async (rateCard: DefaultUsageRateCardRequest) => {
     try {
-      if (isNegotiated && customerId) {
-        await saveOverride.mutateAsync({
-          customerId,
-          meterKey: meter.key,
-          override: {
-            ...negotiatedRateRequest(rateCard),
-            expected_revision: override?.revision ?? 0,
-          },
-        })
-        toast.success(
-          existing ? "Negotiated rate updated" : "Negotiated rate added"
-        )
-      } else {
-        await saveDefault.mutateAsync({ meter, rateCard })
-        toast.success(existing ? "Default rate replaced" : "Default rate added")
-      }
+      await saveDefault.mutateAsync({ meter, rateCard })
+      toast.success(existing ? "Default rate replaced" : "Default rate added")
       setPendingRequest(null)
       setOpen(false)
     } catch (error) {
       setPendingRequest(null)
-      toastApiError(
-        error,
-        isNegotiated ? "Save negotiated rate" : "Save default rate"
-      )
+      toastApiError(error, "Save default rate")
     }
   }
 
-  if (
-    (isNegotiated && !defaultCard) ||
-    (!isNegotiated && !writesAllowed) ||
-    !meter.billing_supported
-  ) {
+  if (!writesAllowed || !meter.billing_supported) {
     return null
   }
 
@@ -193,26 +151,12 @@ export function RateCardEditor({
       >
         <DialogTrigger
           render={
-            <Button
-              variant={isNegotiated || existing ? "outline" : "default"}
-              size="sm"
-              aria-label={
-                isNegotiated
-                  ? `${existing ? "Edit" : "Add"} negotiated rate for ${meter.key}`
-                  : undefined
-              }
-            >
+            <Button variant={existing ? "outline" : "default"} size="sm">
               <HugeiconsIcon
                 icon={existing ? Edit02Icon : Money03Icon}
                 className="size-4"
               />
-              {isNegotiated
-                ? existing
-                  ? "Edit"
-                  : "Add negotiated rate"
-                : existing
-                  ? "Edit default rate"
-                  : "Add default rate"}
+              {existing ? "Edit default rate" : "Add default rate"}
             </Button>
           }
         />
@@ -230,48 +174,17 @@ export function RateCardEditor({
           >
             <DialogHeader>
               <DialogTitle>
-                {isNegotiated
-                  ? `${existing ? "Edit" : "Add"} negotiated rate`
-                  : existing
-                    ? "Edit default rate"
-                    : "Add default rate"}
+                {existing ? "Edit default rate" : "Add default rate"}
               </DialogTitle>
               <DialogDescription>
-                {isNegotiated
-                  ? `Set the price used for this customer on ${meter.key}. Money is entered in major currency units.`
-                  : "Set the in-arrears price used when a customer has no negotiated override. Money is entered in major currency units."}
+                Set the in-arrears price every customer is rated by. Money is
+                entered in major currency units.
               </DialogDescription>
             </DialogHeader>
 
             <section className="grid gap-4">
-              <h3 className="text-sm font-medium">
-                {isNegotiated ? "Inherited contract" : "Product and model"}
-              </h3>
-              {isNegotiated && defaultCard ? (
-                <div className="grid gap-4 sm:grid-cols-3">
-                  <InheritedFact
-                    label="Product"
-                    value={defaultCard.product_key}
-                  />
-                  <InheritedFact
-                    label="Currency"
-                    value={defaultCard.price.currency ?? ""}
-                  />
-                  <InheritedFact
-                    label="Event filter"
-                    value={summarizeFilter(defaultCard.filter ?? {})}
-                  />
-                  <InheritedFact
-                    label="Default rate"
-                    value={summarizeRateCard(defaultCard)}
-                  />
-                  <InheritedFact
-                    label="Default allowance"
-                    value={summarizeAllowance(defaultCard.allowance ?? undefined)}
-                  />
-                  <PricingModelField form={form} />
-                </div>
-              ) : productsPending ? (
+              <h3 className="text-sm font-medium">Product and model</h3>
+              {productsPending ? (
                 <div className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">
                   Loading products…
                 </div>
@@ -363,7 +276,7 @@ export function RateCardEditor({
               )}
             </form.Subscribe>
 
-            {!isNegotiated && <FilterFields form={form} meter={meter} />}
+            <FilterFields form={form} meter={meter} />
             <AllowanceFields form={form} meters={meters} meterKey={meter.key} />
 
             <form.Subscribe selector={(state) => state.values}>
@@ -387,19 +300,16 @@ export function RateCardEditor({
                 type="submit"
                 disabled={
                   savePending ||
-                  (!isNegotiated &&
-                    (productsPending ||
-                      productsError ||
-                      activeProducts.length === 0))
+                  productsPending ||
+                  productsError ||
+                  activeProducts.length === 0
                 }
               >
                 {savePending
                   ? "Saving…"
-                  : isNegotiated
-                    ? "Save negotiated rate"
-                    : existing
-                      ? "Review replacement"
-                      : "Save default rate"}
+                  : existing
+                    ? "Review replacement"
+                    : "Save default rate"}
               </Button>
             </DialogFooter>
           </form>
@@ -480,31 +390,6 @@ function PricingModelField({ form }: { form: MeteringForm }) {
       )}
     </form.Field>
   )
-}
-
-function InheritedFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="min-w-0">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-sm font-medium break-words">{value}</p>
-    </div>
-  )
-}
-
-function summarizeFilter(filter: Record<string, string[]>): string {
-  const entries = Object.entries(filter)
-  if (entries.length === 0) return "All matching events"
-  return entries
-    .map(([dimension, values]) => `${dimension}: ${values.join(", ")}`)
-    .join(" · ")
-}
-
-function summarizeAllowance(allowance?: Allowance): string {
-  if (!allowance) return "None"
-  if (allowance.included !== undefined) {
-    return `${allowance.included.toLocaleString()} included`
-  }
-  return `From ${allowance.accrue_from}${allowance.cap ? `, capped at ${formatCap(allowance.cap)}` : ""}`
 }
 
 function PerUnitFields({

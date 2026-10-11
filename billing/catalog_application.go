@@ -86,9 +86,3 @@ type EntitlementChange struct {
 	// access the edit changed.
 	Holders int64 `json:"holders"`
 }
-
-// CatalogRevision is the merchant's catalog revision, which every catalog
-// write advances.
-type CatalogRevision struct {
-	Revision int64 `json:"revision"`
-}

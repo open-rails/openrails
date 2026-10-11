@@ -73,7 +73,7 @@ func TestHandleForAMerchantProvisionedAtRunTime(t *testing.T) {
 	ctx := t.Context()
 	// A handle made before its merchant exists: making one reads nothing.
 	early := handle(t, srv, billing.MerchantID(uuid.New()))
-	_, err := early.GetCatalogRevision(ctx)
+	_, err := early.ListMeters(ctx, billing.PageRequest{})
 	require.ErrorIs(t, err, billing.ErrMerchantUnresolved)
 
 	mid := provision(t, srv, uniqueName("runtime"))

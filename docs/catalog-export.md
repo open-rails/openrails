@@ -24,7 +24,7 @@ Every row and stored column from these nine catalog tables is included:
 | `price_key_movements` | Complete retained price-key movement history |
 | `price_psp_bindings` | Original provider-account IDs and remote product/price references |
 | `catalog_meters` | Current meter definitions and revisions |
-| `catalog_rate_cards` | All current default and customer-specific rate cards, with IDs and revisions |
+| `catalog_rate_cards` | All current rate cards, with IDs |
 | `catalog_field_owners` | Which manager, a document or an edit, set each field ([catalog ownership](catalog-ownership.md)) |
 | `catalog_applications` | Original application receipts, canonical hashes and revision coordinates |
 | `product_archive_operations` | Original product-archive request and replay receipts |
@@ -53,10 +53,10 @@ one transaction; corruption, foreign-key failures or unmet prerequisites leave
 no partial catalog. Concurrent imports of the same artifact commit once.
 
 Provider accounts referenced by bindings must already exist with their original
-UUID, rail, environment and account ID. Customers referenced by negotiated rate
-cards must also exist with their original merchant-scoped UUID. The snapshot
-lists these prerequisites without copying credentials or customer records; it
-never remaps a reference merely because a destination account has the same name.
+UUID, rail, environment and account ID. The snapshot lists these prerequisites
+without copying credentials; it never remaps a reference merely because a
+destination account has the same name. A snapshot taken before rate overrides
+were removed restores without them.
 
 For ordinary OpenRails accounts, the PSP UUID is derived from rail, environment
 and provider account ID. Applying the same merchant PSP configuration in the
@@ -103,7 +103,7 @@ This export includes unarchived products and their unarchived prices, all meters
 and default rate cards attached to those products. It preserves entitlements,
 tiers, recurring and trial terms, prepaid credit grants and expiry, deposit
 ranges, and configured provider references. It omits database IDs, revision
-history, archived offers and customer-specific rate-card overrides.
+history and archived offers.
 
 This document follows ordinary partial-application rules. Omitted products and
 prices remain unchanged; the export does not set `prune: true`. Adding that flag
