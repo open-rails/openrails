@@ -636,8 +636,8 @@ AuthKit joins the same fleet when its `Database.RiverSchema` is
 
 #### Add a storefront
 
-[`@openrails/billing-ui`](sdk/billing-ui) is a React package with a styled
-checkout and an account page. Its components call your mounted `/billing/v1`
+[`@openrails/billing-ui`](sdk/billing-ui) is a React package with an order
+checkout, a cart and an account page. Its components call your mounted `/billing/v1`
 routes directly, so you write no billing endpoints of your own. Install the
 version that matches your OpenRails:
 
@@ -722,7 +722,16 @@ Buying the bundle grants both `course:101` and `course:102`, so both courses sho
 videos but not the paid courses. `AccountBilling` lets members cancel, resume or
 change the card for a failed renewal.
 
-A server that decides what its customer buys creates the order with `Client.CreateOrder` and hands its id to the browser, which pays it with `<OrderCheckout orderId={id} />`. See [billing-ui's README](sdk/billing-ui/README.md).
+Every purchase is an order. `BuyButton` and `<Cart>` create the customer's
+order and pay it in `<OrderCheckout>`, on your own page under your own auth: a
+saved card, a new card from the PSP's own fields (charged and saved in one
+request), a hosted Stripe page, or a Solana Pay request. A payment the bank
+challenges answers `next_action`; the checkout runs it (Stripe.js 3-D Secure)
+and confirms the order. A server that decides what its customer buys creates
+the order with `Client.CreateOrder` and hands its id to the browser, which pays
+it with `<OrderCheckout orderId={id} />`. A plan change the bank challenges is
+completed with `authenticateChange`. See [billing-ui's
+README](sdk/billing-ui/README.md).
 
 #### Routes
 
