@@ -115,6 +115,29 @@ func TestUsageEstimateCannotOverflowIntoAFreeAdmission(t *testing.T) {
 	require.Zero(t, p.balance(customer).HeldAmount)
 }
 
+// Adjacent int64 quantities above float64's exact range are different terms,
+// even when both estimates round to the same hold amount.
+func TestUsageEstimateReplayPreservesExactQuantities(t *testing.T) {
+	p := newPricing(t, newFixture(t), "estimate-identity")
+	p.meter("tokens", "large", catalog.AggregationSum, "tokens", nil, perUnit(1, 1<<53), nil)
+	customer := billing.CustomerID(uuid.New())
+	p.grant(customer, 1_000_000)
+	estimate := billing.UsageEstimate{EventType: "large", Dimensions: map[string]int64{"tokens": 1 << 53},
+		Metadata: map[string]any{"scale": 1e21}}
+	first := p.admitUsage(customer, "exact", estimate)
+	require.True(t, first.Allowed(), "%+v", first)
+	require.EqualValues(t, 1, first.Admission.EstimatedAmount)
+	replay := p.admitUsage(customer, "exact", estimate)
+	require.True(t, replay.Allowed(), "%+v", replay)
+	require.True(t, replay.Admission.Replayed, "jsonb's numeric spelling must preserve an exact replay")
+	estimate.Dimensions["tokens"]++
+	changed := p.admitUsage(customer, "exact", estimate)
+	require.False(t, changed.Allowed(), "a different int64 quantity must not replay the first estimate")
+	require.NotNil(t, changed.Error)
+	require.Equal(t, billing.CodeIdempotencyKeyReused, changed.Error.Code)
+	require.EqualValues(t, 1, p.balance(customer).HeldAmount)
+}
+
 // The owner's case: hold $0.02, the work costs $0.01, and $0.01 moves. The
 // hold is gone and the usage is recorded with its charges.
 func TestCaptureSettlesAtTheCatalogPrice(t *testing.T) {

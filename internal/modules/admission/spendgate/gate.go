@@ -15,6 +15,7 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -253,7 +254,7 @@ func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decisio
 	case row.Currency != in.Currency:
 		field = "currency"
 	// A usage estimate is the term: its price is what admitting it answered.
-	case estimated && !sameJSON(row.EstimateUsage, in.EstimateUsage):
+	case estimated && !sameUsageEstimate(row.EstimateUsage, in.EstimateUsage):
 		field = "usage"
 	case !estimated && row.EstimatedAmount != in.Cost:
 		field = "estimated_amount"
@@ -286,13 +287,13 @@ func (g *Gate) replay(row gen.BillingAdmissionOperation, in AdmitInput) (Decisio
 	return Decision{Allowed: true, Replayed: true, EstimatedAmount: row.EstimatedAmount, ExpiresAt: row.ExpiresAt, State: state, AvailableAmount: row.AvailableAmount}, nil
 }
 
-// sameJSON compares two JSON documents by value: stored jsonb comes back with
-// its keys reordered.
-func sameJSON(a, b []byte) bool {
+// sameUsageEstimate compares stored jsonb by value while keeping dimensions
+// as int64: decoding them into any would round quantities above 2^53.
+func sameUsageEstimate(a, b []byte) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return len(a) == len(b)
 	}
-	var x, y any
+	var x, y billing.UsageEstimate
 	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
 		return false
 	}
