@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -70,7 +69,6 @@ func (s *CheckoutAttemptService) acceptedOperationSessionResponse(ctx context.Co
 		return nil, true, fmt.Errorf("unrecognized sale operation status %q", operation.Status)
 	}
 	response := s.sessionToResponse(&projection)
-	response.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(operation.ID), Status: operation.Status}
 	response.NextAction = nil
 	if operation.Status == intents.StatusFailedTerminal {
 		response.Failure = operationFailure(operation)

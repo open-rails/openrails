@@ -89,7 +89,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 		return
 	}
 	status := http.StatusOK
-	if result.Operation.Unresolved() {
+	if result.Status == "processing" {
 		status = http.StatusAccepted
 	}
 	r.JSON(status, result)
@@ -97,12 +97,7 @@ func RetryMySubscriptionNow(r *httprequest.Request) {
 func customerPaymentError(r *httprequest.Request, err error) {
 	var refusal *billingservice.CustomerPaymentRefusal
 	if errors.As(err, &refusal) {
-		apiError := paymentRefusalError(refusal.Code)
-		if apiError.Metadata == nil {
-			apiError.Metadata = map[string]any{}
-		}
-		apiError.Metadata["operation_id"] = refusal.OperationID.String()
-		r.APIError(apiError)
+		r.APIError(paymentRefusalError(refusal.Code))
 		return
 	}
 	switch {

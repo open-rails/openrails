@@ -10,8 +10,12 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
+	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
@@ -98,10 +102,78 @@ func (c *changeTarget) deferred() bool {
 // instant in the answer is UTC.
 func (s *CheckoutService) ChangeSubscription(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {
 	resp, err := s.changeSubscription(ctx, req, user)
-	if resp != nil {
-		resp.DelayedStart, resp.NextChargeDate = utcPtr(resp.DelayedStart), utcPtr(resp.NextChargeDate)
+	if err != nil {
+		return nil, err
 	}
-	return resp, err
+	return s.answerChange(ctx, req.SubscriptionID, req.Payer, resp)
+}
+
+// ConfirmSubscriptionChange reads the provider for the subscription's
+// unresolved change after its customer completed the change's next_action,
+// and answers the change as it now stands.
+func (s *CheckoutService) ConfirmSubscriptionChange(ctx context.Context, subscriptionID uuid.UUID, user *UserIdentity, payer billingauth.Payer) (*TierChangeResponse, error) {
+	if s.SubscriptionService == nil {
+		return nil, errors.New("subscription change services unavailable")
+	}
+	sub, err := s.SubscriptionService.GetByID(ctx, subscriptionID)
+	if err != nil || user == nil || !sameCustomer(sub.CustomerID.String(), user.ID) {
+		return nil, ErrTierChangeNoSubscription
+	}
+	live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, sub.ID)
+	if db.IsNotFound(err) {
+		return nil, ErrNoChangeToConfirm
+	}
+	if err != nil {
+		return nil, err
+	}
+	if subject, err := decodeTierChangeSubject(live); err != nil || !sameCustomer(subject.UserID, user.ID) {
+		return nil, ErrTierChangeNoSubscription
+	}
+	var current gen.BillingProviderIntent
+	if live.IntentType == TypeInitialMembership && live.Rail == string(models.RailStripe) {
+		current, err = s.confirmStripeAuthentication(ctx, live.ID, payer)
+	} else if verifier, ok := s.Intents.(interface {
+		VerifyByID(context.Context, uuid.UUID) (gen.BillingProviderIntent, error)
+	}); ok {
+		current, err = verifier.VerifyByID(ctx, live.ID)
+	} else {
+		return nil, errors.New("payment verifier unavailable")
+	}
+	if err != nil {
+		return nil, err
+	}
+	resp, err := tierChangeResponse(current)
+	if err != nil {
+		return nil, err
+	}
+	return s.answerChange(ctx, sub.ID, &payer, resp)
+}
+
+// answerChange completes a change's answer: a change awaiting the issuer's
+// authentication carries the challenge as next_action for its customer, and
+// every instant is UTC.
+func (s *CheckoutService) answerChange(ctx context.Context, subscriptionID uuid.UUID, payer *billingauth.Payer, resp *TierChangeResponse) (*TierChangeResponse, error) {
+	if resp == nil {
+		return nil, nil
+	}
+	resp.DelayedStart, resp.NextChargeDate = utcPtr(resp.DelayedStart), utcPtr(resp.NextChargeDate)
+	if resp.Status != "requires_action" || resp.NextAction != nil || payer == nil || s.SubscriptionService == nil {
+		return resp, nil
+	}
+	live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, subscriptionID)
+	if db.IsNotFound(err) {
+		return resp, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !authenticationRequired(live) {
+		return resp, nil
+	}
+	if resp.NextAction, err = s.authenticateAction(ctx, live, *payer, s.StripeEngines); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (s *CheckoutService) changeSubscription(ctx context.Context, req *SubscriptionChangeRequest, user *UserIdentity) (*TierChangeResponse, error) {

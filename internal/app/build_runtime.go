@@ -479,6 +479,9 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 				runtime.CheckoutService.NMISaleService.StripeEngines = engines
 			}
 		}
+		if engines, ok := runtime.CollectionResolver.(intents.StripeEngineServiceResolver); ok {
+			runtime.CheckoutService.StripeEngines = engines
+		}
 		if runtime.CheckoutService.CustodianSaleService != nil {
 			runtime.CheckoutService.CustodianSaleService.Intents = intentRunner
 		}

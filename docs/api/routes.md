@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (181), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (180), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -53,13 +53,12 @@ A customer acting on its own account.
 | GET | `/v1/me/subscriptions/{id}` | customer | — | — | 200 `Subscription` |  |
 | POST | `/v1/me/subscriptions/{id}/retry-now` | customer | — | `RetrySubscriptionNowParams` | 200 `SubscriptionRetryNowResult`<br>202 `SubscriptionRetryNowResult` |  |
 | POST | `/v1/me/subscriptions/{id}/change` | customer | — | `CustomerChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | `Idempotency-Key` |
+| POST | `/v1/me/subscriptions/{id}/confirm` | customer | — | — | 200 `SubscriptionChange`<br>202 `SubscriptionChange` |  |
 | POST | `/v1/me/subscriptions/{id}/change/preview` | customer | — | `PreviewSubscriptionChangeParams` | 200 `SubscriptionChangePreview` |  |
 | GET | `/v1/me/entitlements` | customer | — | — | 200 `ListPage<CustomerEntitlement>` |  |
 | GET | `/v1/me` | customer | — | — | 200 `CustomerAccount` |  |
 | GET | `/v1/me/balance/transactions` | customer | — | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/me/usage` | customer | — | — | 200 `Usage` |  |
-| GET | `/v1/me/payment-operations/{id}/authentication` | customer | — | — | 200 `StripeEngineAuthentication` |  |
-| POST | `/v1/me/payment-operations/{id}/authentication/confirm` | customer | — | — | 200 `PaymentOperation` |  |
 | GET | `/v1/me/payments` | customer | — | — | 200 `ListPage<Payment>` |  |
 | PUT | `/v1/me/default-payment-methods/{currency}` | customer | — | `SetDefaultPaymentMethodParams` | 200 `DefaultPaymentMethod` |  |
 | GET | `/v1/me/payment-methods` | customer | — | — | 200 `ListPage<PaymentMethod>` |  |

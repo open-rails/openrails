@@ -420,8 +420,7 @@ fields (`400 unknown_field`), and every error code is in
 - **Notifications.** Unread is `{unread_count}`; marking read answers the
   notification.
 - **Ids.** `psp_`, `chk_`, `cgr_`, `txn_`, `ent_`, `pa_`, `rep_`, `rpb_`, `awh_`,
-  `ntf_`, `fnd_`, `hev_`, `par_`, `pop_` (payment operations, as in
-  `SubscriptionChange.operation_id`). An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
+  `ntf_`, `fnd_`, `hev_`, `par_`. An import names a PSP by `psp_…` id or by key. A Stripe Checkout session opened before the upgrade
   carries `checkout_session_id` in its metadata: let open ones expire first.
 
 ### New limits

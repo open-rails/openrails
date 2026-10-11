@@ -220,10 +220,10 @@ func tierChangeRefused(in gen.BillingProviderIntent, rail string, providerStatus
 // enrollment.
 func (s *CheckoutService) refuseTierChangeInFlight(ctx context.Context, sub *models.Subscription) error {
 	database := s.SubscriptionService.Database()
-	live, err := intents.NewStore(database).LiveTierChange(ctx, sub.ID)
+	_, err := intents.NewStore(database).LiveTierChange(ctx, sub.ID)
 	switch {
 	case err == nil:
-		return &TierChangeInFlightError{OperationID: live.ID}
+		return &TierChangeInFlightError{}
 	case !db.IsNotFound(err):
 		return err
 	}
@@ -234,10 +234,10 @@ func (s *CheckoutService) refuseTierChangeInFlight(ctx context.Context, sub *mod
 	if err != nil {
 		return err
 	}
-	owner, err := database.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: mid.UUID(), CustomerID: sub.CustomerID, ProductID: sub.ProductID})
+	_, err = database.Gen(ctx).GetConflictingInitialEnrollmentOperation(ctx, gen.GetConflictingInitialEnrollmentOperationParams{MerchantID: mid.UUID(), CustomerID: sub.CustomerID, ProductID: sub.ProductID})
 	switch {
 	case err == nil:
-		return &TierChangeInFlightError{OperationID: owner.ID}
+		return &TierChangeInFlightError{}
 	case db.IsNotFound(err):
 		return nil
 	default:
@@ -259,11 +259,10 @@ func sameCustomer(a, b string) bool {
 // conflict proves an operation owned the subscription, so the answer is a
 // conflict even if it settled since.
 func (s *CheckoutService) tierChangeInFlight(ctx context.Context, subscriptionID uuid.UUID) error {
-	live, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, subscriptionID)
-	if err != nil {
+	if _, err := intents.NewStore(s.SubscriptionService.Database()).LiveTierChange(ctx, subscriptionID); err != nil {
 		return ErrTierChangePending
 	}
-	return &TierChangeInFlightError{OperationID: live.ID}
+	return &TierChangeInFlightError{}
 }
 
 func derefUUID(id *uuid.UUID) uuid.UUID {

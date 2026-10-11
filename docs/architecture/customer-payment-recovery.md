@@ -60,11 +60,12 @@ HTTP commands:
   subscription the PSP schedules.
 
 An order answers as every order does (200, or a coded 402 on a decline).
-`retry-now`'s completed result is 200; unresolved execution is 202 with the operation's
-identity and state. A definitive card refusal uses the existing coded 402 error
-envelope (processor failures retain the standard processor error mapping).
-Error metadata includes the operation ID. Replaying the same key returns that
-original refusal even if a later attempt has recovered the account.
+`retry-now`'s completed result is 200 (`status: succeeded`); unresolved
+execution is 202 (`status: processing`), read back with the same key. A
+definitive card refusal uses the existing coded 402 error envelope (processor
+failures retain the standard processor error mapping). Replaying the same key
+returns that original refusal even if a later attempt has recovered the
+account.
 `payment_in_progress` and `payment_idempotency_conflict` are 409 refusals.
 A caller should retain its key through network uncertainty and read the existing
 resource before starting a different action.

@@ -860,7 +860,6 @@ pkg openrails/billing, func ParsePSPID(string) (PSPID, error)
 pkg openrails/billing, func ParsePaymentAttemptID(string) (PaymentAttemptID, error)
 pkg openrails/billing, func ParsePaymentID(string) (PaymentID, error)
 pkg openrails/billing, func ParsePaymentMethodID(string) (PaymentMethodID, error)
-pkg openrails/billing, func ParsePaymentOperationID(string) (PaymentOperationID, error)
 pkg openrails/billing, func ParsePriceID(string) (PriceID, error)
 pkg openrails/billing, func ParsePriceMigrationID(string) (PriceMigrationID, error)
 pkg openrails/billing, func ParseProductAccessID(string) (ProductAccessID, error)
@@ -903,7 +902,6 @@ pkg openrails/billing, method (*PSPID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentAttemptID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PaymentMethodID) UnmarshalText([]byte) error
-pkg openrails/billing, method (*PaymentOperationID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PriceID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*PriceMigrationID) UnmarshalText([]byte) error
 pkg openrails/billing, method (*ProductAccessID) UnmarshalText([]byte) error
@@ -1010,11 +1008,6 @@ pkg openrails/billing, method (PaymentMethodID) IsZero() bool
 pkg openrails/billing, method (PaymentMethodID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PaymentMethodID) String() string
 pkg openrails/billing, method (PaymentMethodID) UUID() uuid.UUID
-pkg openrails/billing, method (PaymentOperation) Unresolved() bool
-pkg openrails/billing, method (PaymentOperationID) IsZero() bool
-pkg openrails/billing, method (PaymentOperationID) MarshalText() ([]byte, error)
-pkg openrails/billing, method (PaymentOperationID) String() string
-pkg openrails/billing, method (PaymentOperationID) UUID() uuid.UUID
 pkg openrails/billing, method (PriceID) IsZero() bool
 pkg openrails/billing, method (PriceID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (PriceID) String() string
@@ -2488,14 +2481,9 @@ pkg openrails/billing, type PaymentMethodSubscription struct
 pkg openrails/billing, type PaymentMethodSubscription struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type PaymentMethodSubscription struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type PaymentMethodSubscription struct, ID SubscriptionID `json:"id"`
-pkg openrails/billing, type PaymentOperation struct
-pkg openrails/billing, type PaymentOperation struct, ID PaymentOperationID `json:"id"`
-pkg openrails/billing, type PaymentOperation struct, Status string `json:"status"`
-pkg openrails/billing, type PaymentOperationID [16]byte
 pkg openrails/billing, type PaymentRecovery struct
 pkg openrails/billing, type PaymentRecovery struct, BlockedReason string `json:"blocked_reason,omitempty"`
 pkg openrails/billing, type PaymentRecovery struct, LastFailureReason string `json:"last_failure_reason,omitempty"`
-pkg openrails/billing, type PaymentRecovery struct, Operation *PaymentOperation `json:"operation,omitempty"`
 pkg openrails/billing, type PaymentRecovery struct, OrderID *OrderID `json:"order_id,omitempty"`
 pkg openrails/billing, type PaymentRecovery struct, Retryable bool `json:"retryable"`
 pkg openrails/billing, type PaymentSettledEvent struct
@@ -3050,7 +3038,6 @@ pkg openrails/billing, type SubscriptionChange struct, Message string `json:"mes
 pkg openrails/billing, type SubscriptionChange struct, NextAction *NextAction `json:"next_action,omitempty"`
 pkg openrails/billing, type SubscriptionChange struct, NextChargeAmount int64 `json:"next_charge_amount,string"`
 pkg openrails/billing, type SubscriptionChange struct, NextChargeDate *time.Time `json:"next_charge_date,omitempty"`
-pkg openrails/billing, type SubscriptionChange struct, OperationID PaymentOperationID `json:"operation_id,omitzero"`
 pkg openrails/billing, type SubscriptionChange struct, PriceID PriceID `json:"price_id"`
 pkg openrails/billing, type SubscriptionChange struct, Quantity *int `json:"quantity"`
 pkg openrails/billing, type SubscriptionChange struct, Rail string `json:"rail"`
@@ -3085,8 +3072,8 @@ pkg openrails/billing, type SubscriptionListParams struct, Rail string
 pkg openrails/billing, type SubscriptionListParams struct, Status SubscriptionStatus
 pkg openrails/billing, type SubscriptionListParams struct, embedded PageRequest
 pkg openrails/billing, type SubscriptionRetryNowResult struct
-pkg openrails/billing, type SubscriptionRetryNowResult struct, Operation PaymentOperation `json:"operation"`
 pkg openrails/billing, type SubscriptionRetryNowResult struct, Replayed bool `json:"replayed"`
+pkg openrails/billing, type SubscriptionRetryNowResult struct, Status string `json:"status"`
 pkg openrails/billing, type SubscriptionRetryNowResult struct, Subscription Subscription `json:"subscription"`
 pkg openrails/billing, type SubscriptionStatus string
 pkg openrails/billing, type SyncStatus string

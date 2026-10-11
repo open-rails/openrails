@@ -44,7 +44,7 @@ export {
   type EmbeddedCheckoutProps,
 } from "./embedded-checkout"
 export { Cart, type CartProps } from "./cart"
-export { authenticatePayment } from "./authenticate"
+export { authenticateChange } from "./authenticate"
 export {
   canAuthenticatePayment,
   canSavePaymentMethod,

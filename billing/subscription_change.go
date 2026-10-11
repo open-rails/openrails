@@ -17,9 +17,11 @@ type ChangeSubscriptionParams struct {
 }
 
 // SubscriptionChange is the result of a subscription change. Status is
-// succeeded, processing, requires_action or blocked; NextAction names the
-// customer's step when it is requires_action. Effective is now (charged now)
-// or period_end (applied by the next renewal, nothing charged now).
+// succeeded, processing, requires_action or blocked. A processing answer
+// (HTTP 202) is read back with the same Idempotency-Key; on requires_action
+// the customer completes NextAction and confirms the change (POST
+// /v1/me/subscriptions/{id}/confirm). Effective is now (charged now) or
+// period_end (applied by the next renewal, nothing charged now).
 type SubscriptionChange struct {
 	Status         string          `json:"status"`
 	Effective      string          `json:"effective,omitempty"`
@@ -28,7 +30,8 @@ type SubscriptionChange struct {
 	Rail           string          `json:"rail"`
 	SubscriptionID *SubscriptionID `json:"subscription_id,omitempty"`
 	// NextAction is the customer's step when Status is requires_action: a
-	// redirect to a provider page, or Solana transactions to sign.
+	// redirect to a provider page, the card issuer's authentication of the
+	// charge (authenticate), or Solana transactions to sign.
 	NextAction *NextAction `json:"next_action,omitempty"`
 	// TransactionID is the provider's charge for a change that settled now.
 	TransactionID *string    `json:"transaction_id"`
@@ -42,12 +45,6 @@ type SubscriptionChange struct {
 	AmountDueNow     int64      `json:"amount_due_now,string"`
 	NextChargeAmount int64      `json:"next_charge_amount,string"`
 	NextChargeDate   *time.Time `json:"next_charge_date,omitempty"`
-	// OperationID names the durable operation behind a change charged now or a
-	// Stripe provider change. A processing answer (HTTP 202) carries it while
-	// the outcome is unresolved, and a requires_action answer names the payment
-	// the customer must authenticate (GET /v1/me/payment-operations/{id}/
-	// authentication); the same Idempotency-Key replays the stored result.
-	OperationID PaymentOperationID `json:"operation_id,omitzero"`
 }
 
 // SubscriptionChangePreview is what a change would charge now and at the next
@@ -68,7 +65,7 @@ type SubscriptionChangePreview struct {
 // Subscription-change refusals carry these StatusError.Code values.
 const (
 	// CodeSubscriptionChangeInFlight: another unresolved change owns the
-	// subscription; metadata.operation_id names it.
+	// subscription: read it back with its Idempotency-Key, or confirm it.
 	CodeSubscriptionChangeInFlight = "subscription_change_in_flight"
 	// CodeSubscriptionChangeRefused: the provider definitively refused the
 	// change.

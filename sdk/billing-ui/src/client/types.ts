@@ -121,32 +121,29 @@ export const cardSummarySchema = z.object({
 })
 export type CardSummary = z.infer<typeof cardSummarySchema>
 
-export const paymentOperationSchema = z.object({
-  id: z.string(),
-  status: z.string(),
-})
-export type PaymentOperation = z.infer<typeof paymentOperationSchema>
-
 export const paymentRecoverySchema = z.object({
   last_failure_reason: z.string().nullish(),
   retryable: z.boolean(),
   blocked_reason: z.string().nullish(),
-  operation: paymentOperationSchema.nullish(),
   /** An engine-owned subscription's unpaid renewal: the order to pay. */
   order_id: z.string().nullish(),
 })
 export type PaymentRecovery = z.infer<typeof paymentRecoverySchema>
 
 /**
- * A step the customer takes before an action completes. With
- * `solana_sign_transactions` the wallet signs and sends `transactions` in
- * order; the action is then repeated with the last signature.
+ * What the customer completes before an action or payment can finish:
+ * `authenticate` runs the PSP's own script with `payload` (Stripe.js
+ * `handleNextAction` with `client_secret`), then the payable is confirmed;
+ * `redirect_to_url` leaves for `url`; with `solana_sign_transactions` the
+ * wallet signs and sends `transactions` in order and the action is repeated
+ * with the last signature.
  */
 export const nextActionSchema = z.object({
-  /** `redirect_to_url | payment_authentication | solana_sign_transactions` */
   type: z.string(),
-  redirect_to_url: z.object({ url: z.string().nullish() }).nullish(),
+  url: z.string().nullish(),
+  psp_id: z.string().nullish(),
   transactions: z.array(z.string()).nullish(),
+  payload: z.record(z.string(), z.string()).nullish(),
 })
 export type NextAction = z.infer<typeof nextActionSchema>
 
@@ -286,20 +283,6 @@ export const paymentFailureSchema = z.object({
 export type PaymentFailure = z.infer<typeof paymentFailureSchema>
 
 /**
- * What the customer completes before a payment can finish: `authenticate`
- * runs the PSP's own script with `payload` (Stripe.js `handleNextAction`
- * with `client_secret`); `redirect_to_url` leaves for `url`.
- */
-export const orderNextActionSchema = z.object({
-  type: z.string(),
-  url: z.string().nullish(),
-  psp_id: z.string().nullish(),
-  transactions: z.array(z.string()).nullish(),
-  payload: z.record(z.string(), z.string()).nullish(),
-})
-export type OrderNextAction = z.infer<typeof orderNextActionSchema>
-
-/**
  * One line of an order. A purchased line names its price and product; a
  * usage order's line names its accrual source (`metered:<meter>`) instead.
  */
@@ -338,7 +321,7 @@ export const orderSchema = z.object({
   lines: z.array(orderLineSchema),
   payment: z.object({
     status: z.string(),
-    next_action: orderNextActionSchema.nullish(),
+    next_action: nextActionSchema.nullish(),
     last_payment_error: paymentFailureSchema.nullish(),
     payment_method_id: z.string().nullish(),
     payment_id: z.string().nullish(),
@@ -595,7 +578,7 @@ export const subscriptionChangeSchema = z.object({
   quantity: z.number().nullish(),
   /** The subscription now carrying the plan (an upgrade may open a successor). */
   subscription_id: z.string().nullish(),
-  /** `payment_authentication` uses `operation_id`. */
+  /** On `requires_action`: complete it, then `confirmSubscriptionChange`. */
   next_action: nextActionSchema.nullish(),
   /** When a change at period end takes effect. */
   delayed_start: time.nullish(),
@@ -604,8 +587,6 @@ export const subscriptionChangeSchema = z.object({
   next_charge_amount: amount.nullish(),
   next_charge_date: time.nullish(),
   message: z.string().nullish(),
-  /** The durable operation: unresolved while `processing`, the payment to authenticate on `requires_action`. */
-  operation_id: z.string().nullish(),
 })
 export type SubscriptionChange = z.infer<typeof subscriptionChangeSchema>
 
@@ -716,11 +697,6 @@ export const customerLinkSchema = z.object({
   revoked_by: z.string().nullish(),
 })
 export type CustomerLink = z.infer<typeof customerLinkSchema>
-
-export const paymentAuthenticationSchema = z.object({
-  client_secret: z.string().nullish(),
-})
-export type PaymentAuthentication = z.infer<typeof paymentAuthenticationSchema>
 
 /**
  * What a card setup hands the server: tokenized data only, never a PAN.

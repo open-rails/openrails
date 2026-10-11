@@ -489,7 +489,6 @@ func engineChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, er
 		Effective: "now", PriceID: billing.PriceID(p.Terms.PriceID), Quantity: subscriptions.CloneQuantity(p.Terms.Quantity),
 		Rail: in.Rail, SubscriptionID: &subID,
 		Currency: p.Terms.Currency, AmountDueNow: p.Terms.Amount, NextChargeAmount: p.Terms.RecurringAmount, NextChargeDate: &end,
-		OperationID: billing.PaymentOperationID(in.ID),
 	}
 	switch in.Status {
 	case intents.StatusSucceeded:
@@ -514,9 +513,9 @@ func engineChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse, er
 		return nil, tierChangeRefused(in, "", 0, "")
 	default:
 		if authenticationRequired(in) {
+			// The customer's answer carries the issuer challenge as next_action.
 			resp.Status = "requires_action"
-			resp.NextAction = &billing.NextAction{Type: "payment_authentication"}
-			resp.Message = "The card issuer requires authentication; authenticate operation " + in.ID.String() + " to complete the change"
+			resp.Message = "The card issuer requires authentication: complete next_action, then confirm the change"
 			return resp, nil
 		}
 		return tierChangeProcessing(resp)

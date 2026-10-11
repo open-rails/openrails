@@ -173,8 +173,7 @@ subscription to another price of its tier group, to other seats, or both:
 `{price_id?, quantity?}`. It answers a `SubscriptionChange`: `status`
 (`succeeded`, `processing`, `requires_action`, `blocked`), `effective` (`now`,
 `period_end`), `price_id`, `quantity`, `amount_due_now`, `next_charge_amount`,
-`next_charge_date`, and a `next_action` or `operation_id` when the customer
-must act. `…/change/preview` answers the same numbers and changes nothing.
+`next_charge_date`, and a `next_action` when the customer must act. `…/change/preview` answers the same numbers and changes nothing.
 
 - **Seats** exist only on a price sold per seat: its catalog `quantity: {min,
   max}`. Its unit amount is one seat's, and `quantity` stays within the bounds.
@@ -194,8 +193,9 @@ must act. `…/change/preview` answers the same numbers and changes nothing.
   price's cycle; a tier change keeps the seats unless the request names
   others. A declined charge changes nothing (`402` with the decline reason); a
   card challenge answers `requires_action` with `next_action.type:
-  "payment_authentication"` and `operation_id` (authenticate at
-  `/v1/me/payment-operations/{id}/authentication`, then repeat the request).
+  "authenticate"` (its `payload.client_secret` for Stripe.js); after the
+  customer authenticates, `POST /v1/me/subscriptions/{id}/confirm` reads the
+  provider and answers the change.
 - **Fewer seats and a downgrade** are effective at period end: nothing is
   charged or refunded, and the next renewal bills them; the subscription shows
   them as its `scheduled_change`. A change to another tier while one is

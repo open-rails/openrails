@@ -4,7 +4,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/http/middleware"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
 // cursorPage is the query of a cursor-paged list.
@@ -33,15 +32,10 @@ var paymentsRoutes = []Route{
 		Responses: []Reply{{200, billing.ListPage[billing.Renewal]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListRenewals)},
 	{Method: GET, Path: "/v1/admin/renewals/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetRenewal", Level: LevelRead,
 		Responses: []Reply{{200, billing.Renewal{}}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.GetRenewal)},
-	{Method: GET, Path: "/v1/me/payment-operations/{id}/authentication", Group: Customer, Auth: AuthCustomer,
-		Responses: []Reply{{200, checkout.StripeEngineAuthentication{}}}, Errors: paymentOperationErrors, Handler: h(handlers.GetStripePaymentAuthentication)},
-	{Method: POST, Path: "/v1/me/payment-operations/{id}/authentication/confirm", Group: Customer, Auth: AuthCustomer,
-		Responses: []Reply{{200, billing.PaymentOperation{}}}, Errors: paymentOperationErrors, Handler: h(handlers.ConfirmStripePaymentAuthentication)},
 	{Method: GET, Path: "/v1/me/payments", Group: Customer, Auth: AuthCustomer,
 		Query: paymentListQuery(), Responses: []Reply{{200, billing.ListPage[billing.Payment]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListMyPayments)},
 }
 
-var paymentOperationErrors = codes("card_attempts_blocked", "card_declined", "card_not_saved", "custodian_capture_unavailable", "customer_session_required", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_not_found", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable")
 
 // paymentListQuery is the query of a payment list.
 func paymentListQuery(extra ...Param) []Param {

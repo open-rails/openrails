@@ -13,7 +13,6 @@ import (
 	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
-	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	logtest "github.com/sirupsen/logrus/hooks/test"
 	"github.com/stretchr/testify/assert"
@@ -278,11 +277,12 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 }
 
 func TestTierChangeOutcomeEnvelope(t *testing.T) {
-	op := uuid.New()
 	got := render(t, func(r *httprequest.Request) {
-		writeChangeTierError(r, &checkout.TierChangeInFlightError{OperationID: op})
+		writeChangeTierError(r, &checkout.TierChangeInFlightError{})
 	})
-	require.Equal(t, []any{409, billing.CodeSubscriptionChangeInFlight, op.String()}, []any{got.Status, got.Code, got.Metadata["operation_id"]})
+	require.Equal(t, []any{409, billing.CodeSubscriptionChangeInFlight}, []any{got.Status, got.Code})
+	got = render(t, func(r *httprequest.Request) { writeChangeTierError(r, checkout.ErrNoChangeToConfirm) })
+	require.Equal(t, []any{409, billing.CodeResourceConflict}, []any{got.Status, got.Code})
 
 	got = render(t, func(r *httprequest.Request) {
 		writeChangeTierError(r, &checkout.TierChangeDeclinedError{Rail: "stripe", FailureCode: "insufficient_funds", Message: "raw provider text"})
@@ -306,11 +306,11 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 
 	for status, want := range map[string]int{"processing": http.StatusAccepted, "succeeded": http.StatusOK} {
 		r, rec := newTestRequest(http.MethodPost, "/", nil, &app.Runtime{})
-		writeTierChangeResponse(r, &checkout.TierChangeResponse{Status: status, OperationID: billing.PaymentOperationID{1}})
+		writeTierChangeResponse(r, &checkout.TierChangeResponse{Status: status})
 		require.Equal(t, want, rec.Code)
 		var body checkout.TierChangeResponse
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-		require.Equal(t, billing.PaymentOperationID{1}, body.OperationID, "a lost first response can be read back")
+		require.Equal(t, status, body.Status)
 	}
 }
 

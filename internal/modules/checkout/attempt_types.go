@@ -117,7 +117,6 @@ type CheckoutAttemptMembershipQuote struct {
 }
 
 type CheckoutAttemptResponse struct {
-	Operation       *billing.PaymentOperation       `json:"operation,omitempty"`
 	Failure         *billing.PaymentFailure         `json:"failure,omitempty"`
 	MembershipQuote *CheckoutAttemptMembershipQuote `json:"membership_quote,omitempty"`
 	Capture         *CustodianCaptureAction         `json:"capture,omitempty"`

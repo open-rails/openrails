@@ -605,13 +605,7 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 	if err != nil {
 		return nil, err
 	}
-	auth, err := checkout.StripePaymentAuthentication(ctx, operation.ID, principal, resolver)
-	if err != nil || auth.ClientSecret == "" {
-		return nil, err
-	}
-	psp := billing.PSPID(uuidOrNil(operation.PspID))
-	return &billing.NextAction{Type: "authenticate", PSPID: &psp, Transactions: []string{},
-		Payload: map[string]string{"client_secret": auth.ClientSecret, "payment_intent_id": auth.PaymentIntentID}}, nil
+	return checkout.authenticateAction(ctx, operation, principal, resolver)
 }
 
 // ConfirmOrder reads the provider for the order's live attempt after the
@@ -639,7 +633,7 @@ func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders
 		return OrderCharge{}, err
 	}
 	if operation.Rail == string(models.RailStripe) {
-		if _, err := checkout.ConfirmStripePaymentAuthentication(ctx, operation.ID, principal); err != nil {
+		if _, err := checkout.confirmStripeAuthentication(ctx, operation.ID, principal); err != nil {
 			return OrderCharge{}, err
 		}
 	} else if verifier, ok := checkout.Intents.(interface {

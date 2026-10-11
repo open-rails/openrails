@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -25,11 +26,28 @@ func (c *customer) change(sub billing.SubscriptionID, params billing.ChangeSubsc
 func (c *customer) changeAt(base string, sub billing.SubscriptionID, params billing.ChangeSubscriptionParams) (*billing.SubscriptionChange, error) {
 	var out billing.SubscriptionChange
 	err := c.changeCall(base, "/subscriptions/"+sub.String()+"/change", params.IdempotencyKey, params, &out)
-	if err == nil && out.Status == "processing" && params.IdempotencyKey != "" && !out.OperationID.IsZero() && c.w.awaitExecutor(`i.id = $1`, out.OperationID.UUID()) {
+	if err == nil && out.Status == "processing" && params.IdempotencyKey != "" && c.w.awaitExecutor(`i.subscription_id = $1 AND i.intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership')`, sub.UUID()) {
 		out = billing.SubscriptionChange{}
 		err = c.changeCall(base, "/subscriptions/"+sub.String()+"/change", params.IdempotencyKey, params, &out)
 	}
 	return &out, err
+}
+
+// changeOperation is the provider operation behind sub's latest change.
+func (w *world) changeOperation(sub billing.SubscriptionID) uuid.UUID {
+	w.t.Helper()
+	var id uuid.UUID
+	require.NoError(w.t, w.pool.QueryRow(w.t.Context(), w.q(`SELECT id FROM billing.provider_intents WHERE subscription_id = $1
+		AND intent_type IN ('nmi_upgrade', 'stripe_tier_change', 'initial_membership') ORDER BY created_at DESC, id DESC LIMIT 1`), sub.UUID()).Scan(&id))
+	return id
+}
+
+// confirmChange confirms sub's change after the customer completed its
+// next_action.
+func (c *customer) confirmChange(sub billing.SubscriptionID) (*billing.SubscriptionChange, error) {
+	c.w.t.Helper()
+	var out billing.SubscriptionChange
+	return &out, c.changeCall(c.w.server.URL, "/subscriptions/"+sub.String()+"/confirm", "", billing.ChangeSubscriptionParams{}, &out)
 }
 
 // previewChange is the customer's preview of a change.

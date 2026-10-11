@@ -69,7 +69,11 @@ func (s *Service) RetrySubscriptionNow(ctx context.Context, payer identity.Custo
 		if err != nil {
 			return err
 		}
-		out = &billing.SubscriptionRetryNowResult{Subscription: sub.View(), Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(result.ID), Status: result.Status}, Replayed: replayed}
+		status := "processing"
+		if result.Status == intents.StatusSucceeded {
+			status = "succeeded"
+		}
+		out = &billing.SubscriptionRetryNowResult{Subscription: sub.View(), Status: status, Replayed: replayed}
 		return nil
 	})
 	return out, err
@@ -96,9 +100,8 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 	if err != nil {
 		return nil, err
 	}
-	row, err := s.rt.DB.Gen(ctx).GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: mid.UUID(), SubscriptionID: id})
+	_, err = s.rt.DB.Gen(ctx).GetUnresolvedManualRebill(ctx, gen.GetUnresolvedManualRebillParams{MerchantID: mid.UUID(), SubscriptionID: id})
 	if err == nil {
-		out.Operation = &billing.PaymentOperation{ID: billing.PaymentOperationID(row.ID), Status: row.Status}
 		out.BlockedReason = "payment_in_progress"
 		return out, nil
 	}
@@ -187,8 +190,7 @@ func (s *Service) SubscriptionRecovery(ctx context.Context, payer identity.Custo
 // through the standard card-error envelope. It is never inferred from current
 // subscription/invoice state, so an old key keeps its original refusal.
 type CustomerPaymentRefusal struct {
-	OperationID uuid.UUID
-	Code        string
+	Code string
 }
 
 func (r *CustomerPaymentRefusal) Error() string { return "customer payment was refused" }
@@ -231,5 +233,5 @@ func customerPaymentRefusal(row gen.BillingProviderIntent) error {
 	if evidence.FailureCode == "" {
 		return errors.New("payment refusal has no code")
 	}
-	return &CustomerPaymentRefusal{OperationID: row.ID, Code: evidence.FailureCode}
+	return &CustomerPaymentRefusal{Code: evidence.FailureCode}
 }

@@ -208,7 +208,7 @@ describe("subscription change", () => {
     expect(sent.headers.get("Idempotency-Key")).toBe("key-1")
   })
 
-  it("returns an unresolved change and names the one in flight", async () => {
+  it("returns an unresolved change, its challenge and the one in flight", async () => {
     const { client, fetch } = served(
       json(202, {
         object: "subscription_change",
@@ -217,24 +217,27 @@ describe("subscription change", () => {
         payment: { rail: "stripe" },
         amount_due_now: "0",
         next_charge_amount: "0",
-        operation_id: "op_1",
       }),
       json(200, {
         object: "subscription_change",
         status: "requires_action",
         price_id: "price_2",
         payment: { rail: "stripe" },
-        next_action: { type: "payment_authentication" },
+        next_action: {
+          type: "authenticate",
+          url: null,
+          psp_id: "psp_1",
+          transactions: [],
+          payload: { client_secret: "pi_1_secret", payment_intent_id: "pi_1" },
+        },
         amount_due_now: "5000000",
         next_charge_amount: "19990000",
-        operation_id: "op_1",
       }),
       json(409, {
         error: {
           type: "invalid_request_error",
           code: "subscription_change_in_flight",
-          message: "tier change op_1 is unresolved",
-          metadata: { operation_id: "op_1" },
+          message: "another change of this subscription is unresolved",
         },
       }),
       new Response(null, { status: 503 })
@@ -242,17 +245,17 @@ describe("subscription change", () => {
     const input = { priceId: "price_2", idempotencyKey: "key-1" }
     expect(await client.changeSubscription("sub_1", input)).toMatchObject({
       status: "processing",
-      operation_id: "op_1",
     })
     expect(await client.changeSubscription("sub_1", input)).toMatchObject({
       status: "requires_action",
-      next_action: { type: "payment_authentication" },
-      operation_id: "op_1",
+      next_action: {
+        type: "authenticate",
+        payload: { client_secret: "pi_1_secret" },
+      },
     })
     await expect(client.changeSubscription("sub_1", input)).rejects.toMatchObject({
       status: 409,
       code: "subscription_change_in_flight",
-      metadata: { operation_id: "op_1" },
     })
     // A write is never retried: the caller replays its key.
     await expect(client.changeSubscription("sub_1", input)).rejects.toMatchObject({

@@ -119,7 +119,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_method_stale` | 402 | `card_error` | The saved payment method can no longer be charged; collect the card again. |
 | `payment_method_update_failed` | 502 | `api_error` | The provider could not update the payment method. |
 | `payment_method_update_unsupported` | 400 | `invalid_request_error` | This payment method cannot be updated through OpenRails. |
-| `payment_not_found` | 404 | `invalid_request_error` | The payment or payment operation does not exist. |
+| `payment_not_found` | 404 | `invalid_request_error` | The payment does not exist. |
 | `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |
 | `payment_not_retryable` | 409 | `invalid_request_error` | The resource is not payable now. |
 | `payment_option_unavailable` | 422 | `invalid_request_error` | No PSP that can take the order's lines accepts this payment. |
@@ -182,7 +182,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `subscription_change_cycle_unknown` | 422 | `invalid_request_error` | The target price has no positive billing cycle. |
 | `subscription_change_idempotency_conflict` | 409 | `invalid_request_error` | The Idempotency-Key already names a different change. |
 | `subscription_change_idempotency_key_required` | 400 | `invalid_request_error` | A subscription change needs an Idempotency-Key. |
-| `subscription_change_in_flight` | 409 | `invalid_request_error` | Another unresolved change owns the subscription; metadata.operation_id names it. |
+| `subscription_change_in_flight` | 409 | `invalid_request_error` | Another unresolved change owns the subscription: read it back with its Idempotency-Key, or confirm it. |
 | `subscription_change_period_unknown` | 422 | `invalid_request_error` | The subscription has no valid current period. |
 | `subscription_change_provider_conflict` | 409 | `invalid_request_error` | The provider's copy of the subscription is missing or differs; reconcile it first. |
 | `subscription_change_refused` | 409 | `invalid_request_error` | The change was refused and not executed. |

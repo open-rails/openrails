@@ -1,5 +1,16 @@
 # Changelog
 
+## Payment operations removed
+
+- Breaking: `getPaymentAuthentication`, `confirmPaymentAuthentication`,
+  `authenticatePayment`, `PaymentOperation` and `PaymentAuthentication` are
+  removed, with `operation_id` on `SubscriptionChange` and `operation` on
+  `PaymentRecovery`. A change the issuer challenges answers an `authenticate`
+  `next_action`; `authenticateChange(client, id, change, psp)` completes it
+  and confirms the change (`confirmSubscriptionChange`).
+- `NextAction` is one shape for orders, changes and subscriptions (`type`,
+  `url`, `psp_id`, `transactions`, `payload`); `OrderNextAction` is gone.
+
 ## Running charges
 
 - `Balance` gains `accrued_amount`, `accrual_rate_per_hour`, `as_of` and

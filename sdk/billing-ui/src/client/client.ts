@@ -13,7 +13,6 @@ import {
   customerLinkSchema,
   networkLinkChallengeSchema,
   publicConfigSchema,
-  paymentAuthenticationSchema,
   listPageSchema,
   orderSchema,
   cartSchema,
@@ -28,7 +27,6 @@ import {
   type CustomerLink,
   type NetworkLinkChallenge,
   type PublicConfig,
-  type PaymentAuthentication,
   type CurrencyScales,
   type ListPage,
   type NewCard,
@@ -425,13 +423,29 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
+     * Reads the provider for a change awaiting the customer, after they
+     * completed its `next_action` (the issuer's authentication), and answers
+     * the change as it now stands.
+     */
+    confirmSubscriptionChange(
+      subscriptionId: string
+    ): Promise<SubscriptionChange> {
+      return json(
+        subscriptionChangeSchema,
+        `/me/subscriptions/${id(subscriptionId)}/confirm`,
+        { method: "POST", body: {} }
+      )
+    },
+
+    /**
      * Moves the subscription to another price of its tier group, to other
      * seats of a per-seat price, or both. An upgrade and more seats charge
      * the saved card now; a downgrade and fewer seats apply at period end.
      * Reuse `idempotencyKey` until the change resolves (`processing`, a
      * `subscription_change_in_flight` refusal or a lost response) so the
      * stored result replays instead of charging twice. A Solana wallet next
-     * action is completed with `signWalletAction`, then repeated with `signature`.
+     * action is completed with `signWalletAction`, then repeated with
+     * `signature`; an `authenticate` one with `authenticateChange`.
      */
     changeSubscription(
       subscriptionId: string,
@@ -599,23 +613,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(
         paymentMethodSchema,
         `/me/payment-methods/${id(paymentMethodId)}/confirm`,
-        { method: "POST", body: {} }
-      )
-    },
-
-    /** The provider challenge a pending payment operation is waiting on. */
-    getPaymentAuthentication(
-      operationId: string
-    ): Promise<PaymentAuthentication> {
-      return json(
-        paymentAuthenticationSchema,
-        `/me/payment-operations/${id(operationId)}/authentication`
-      )
-    },
-
-    async confirmPaymentAuthentication(operationId: string): Promise<void> {
-      await send(
-        `/me/payment-operations/${id(operationId)}/authentication/confirm`,
         { method: "POST", body: {} }
       )
     },

@@ -773,7 +773,7 @@ func stripeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResponse
 		PriceID: billing.PriceID(p.PriceID),
 		Rail:    string(models.RailStripe), SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.AmountDueNow, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
-		OperationID: billing.PaymentOperationID(in.ID), Effective: effectiveOf(p.Action),
+		Effective: effectiveOf(p.Action),
 	}
 	switch in.Status {
 	case intents.StatusSucceeded:

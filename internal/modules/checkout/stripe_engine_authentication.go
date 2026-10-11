@@ -13,11 +13,11 @@ import (
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
-type StripeEngineAuthentication struct {
-	Operation               billing.PaymentOperation `json:"operation"`
-	PaymentIntentID         string                   `json:"payment_intent_id,omitempty"`
-	ClientSecret            string                   `json:"client_secret,omitempty"`
-	ProviderPaymentMethodID string                   `json:"provider_payment_method_id,omitempty"`
+// stripeAuthentication is the issuer challenge a Stripe engine payment waits
+// on: its PaymentIntent and the client secret Stripe.js completes it with.
+type stripeAuthentication struct {
+	PaymentIntentID string
+	ClientSecret    string
 }
 
 func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uuid.UUID, principal billingauth.Payer) (gen.BillingProviderIntent, error) {
@@ -34,78 +34,83 @@ func (s *CheckoutService) ownedStripeEngineOperation(ctx context.Context, id uui
 	}
 	in, err := intents.NewStore(s.SubscriptionService.Database()).Get(ctx, id)
 	if err != nil {
-		return empty, apperr.New(404, "payment_not_found", "payment operation not found")
+		return empty, apperr.New(404, "payment_not_found", "payment not found")
 	}
 	params, err := intents.StripeEngineParams(in)
 	if err != nil || in.MerchantID != mid.UUID() || params.CustomerID.String() != principal.SubjectID {
-		return empty, apperr.New(404, "payment_not_found", "payment operation not found")
+		return empty, apperr.New(404, "payment_not_found", "payment not found")
 	}
 	return in, nil
 }
 
-// StripePaymentAuthentication exposes an original PI only to its interactive
-// payer. Credential scopes and the immutable operation, not request body fields,
-// select the account and card. The HTTP adapter must send Cache-Control:no-store.
-func (s *CheckoutService) StripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (StripeEngineAuthentication, error) {
+// stripeAuthentication reads an unresolved payment's client secret, for its
+// interactive payer only; zero when it waits on nothing. Credential scopes and
+// the immutable operation, not request fields, select the account and card.
+// The secret is read from Stripe on every answer and never stored.
+func (s *CheckoutService) stripeAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (stripeAuthentication, error) {
 	in, err := s.ownedStripeEngineOperation(ctx, id, principal)
 	if err != nil {
-		return StripeEngineAuthentication{}, err
+		return stripeAuthentication{}, err
 	}
-	out := StripeEngineAuthentication{Operation: billing.PaymentOperation{ID: billing.PaymentOperationID(in.ID), Status: in.Status}}
 	if in.Status == intents.StatusSucceeded || in.Status == intents.StatusFailedTerminal {
-		return out, nil
+		return stripeAuthentication{}, nil
 	}
 	if resolver == nil {
-		return out, errors.New("Stripe payment resolver unavailable")
+		return stripeAuthentication{}, errors.New("Stripe payment resolver unavailable")
 	}
 	service, found, err := resolver.ResolveStripeEngineService(ctx, in.MerchantID, in.PspID)
 	if err != nil {
-		return out, err
+		return stripeAuthentication{}, err
 	}
 	if !found || service == nil {
-		return out, errors.New("Stripe payment account unavailable")
+		return stripeAuthentication{}, errors.New("Stripe payment account unavailable")
 	}
 	params, err := intents.StripeEngineParams(in)
 	if err != nil {
-		return out, err
+		return stripeAuthentication{}, err
 	}
 	reference := intents.EvidenceString(in, "stripe_payment_intent_id")
 	if reference == "" {
 		if candidate, found, err := intents.LoadCollectionCandidate(in); err != nil {
-			return out, err
+			return stripeAuthentication{}, err
 		} else if found {
 			reference = candidate.TransactionID
 		}
 	}
 	if reference == "" {
-		return out, apperr.Conflictf("payment identity is still being recovered")
+		return stripeAuthentication{}, apperr.Conflictf("payment identity is still being recovered")
 	}
 	secret, err := service.EngineAuthenticationSecret(ctx, params, reference, params.CustomerID)
 	if err != nil {
-		return out, apperr.Conflictf("payment does not require customer authentication")
+		return stripeAuthentication{}, apperr.Conflictf("payment does not require customer authentication")
 	}
-	out.PaymentIntentID = reference
-	out.ClientSecret = secret
-	out.ProviderPaymentMethodID = params.Instrument.RailMethodRef
-	return out, nil
+	return stripeAuthentication{PaymentIntentID: reference, ClientSecret: secret}, nil
 }
 
-// ConfirmStripePaymentAuthentication ignores browser outcome assertions and
-// drives the existing verifier against the original provider payment identity.
-func (s *CheckoutService) ConfirmStripePaymentAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer) (billing.PaymentOperation, error) {
+// authenticateAction is the next action of a Stripe engine payment awaiting
+// its payer's authentication; nil when none is outstanding.
+func (s *CheckoutService) authenticateAction(ctx context.Context, in gen.BillingProviderIntent, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (*billing.NextAction, error) {
+	auth, err := s.stripeAuthentication(ctx, in.ID, principal, resolver)
+	if err != nil || auth.ClientSecret == "" {
+		return nil, err
+	}
+	psp := billing.PSPID(uuidOrNil(in.PspID))
+	return &billing.NextAction{Type: "authenticate", PSPID: &psp, Transactions: []string{},
+		Payload: map[string]string{"client_secret": auth.ClientSecret, "payment_intent_id": auth.PaymentIntentID}}, nil
+}
+
+// confirmStripeAuthentication ignores browser outcome assertions and drives
+// the verifier against the original provider payment identity.
+func (s *CheckoutService) confirmStripeAuthentication(ctx context.Context, id uuid.UUID, principal billingauth.Payer) (gen.BillingProviderIntent, error) {
 	in, err := s.ownedStripeEngineOperation(ctx, id, principal)
 	if err != nil {
-		return billing.PaymentOperation{}, err
+		return gen.BillingProviderIntent{}, err
 	}
 	verifier, ok := s.Intents.(interface {
 		VerifyByID(context.Context, uuid.UUID) (gen.BillingProviderIntent, error)
 	})
 	if !ok {
-		return billing.PaymentOperation{}, errors.New("payment verifier unavailable")
+		return gen.BillingProviderIntent{}, errors.New("payment verifier unavailable")
 	}
-	current, err := verifier.VerifyByID(ctx, in.ID)
-	if err != nil {
-		return billing.PaymentOperation{}, err
-	}
-	return billing.PaymentOperation{ID: billing.PaymentOperationID(current.ID), Status: current.Status}, nil
+	return verifier.VerifyByID(ctx, in.ID)
 }

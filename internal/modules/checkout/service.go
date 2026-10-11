@@ -86,6 +86,9 @@ type CheckoutService struct {
 	// ResolveNMIClientOverride replaces the store-armed NMI client resolution
 	// entirely (test seam; nil = the scoped resolution).
 	ResolveNMIClientOverride func(context.Context, string) (*nmi.NMIClient, error)
+	// StripeEngines reads a Stripe engine payment's issuer challenge for the
+	// customer's next action.
+	StripeEngines intents.StripeEngineServiceResolver
 }
 
 func (s *CheckoutService) SetSubscriptionLifecycleService(l *subscriptions.SubscriptionLifecycleService) {

@@ -172,9 +172,6 @@ func logAdminTierChange(
 		fields["effective"] = resp.Effective
 		fields["rail"] = resp.Rail
 		fields["status"] = resp.Status
-		if !resp.OperationID.IsZero() {
-			fields["operation_id"] = resp.OperationID.String()
-		}
 	}
 	if err != nil {
 		log.WithError(err).WithFields(fields).Warn("admin subscription change failed")

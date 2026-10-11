@@ -148,7 +148,8 @@ Rail-specific gotchas the UI must handle:
   `action: upgrade | downgrade`. Upgrades are immediate with proration; downgrades come
   back `succeeded` with `delayed_start` (takes effect at period end). `requires_action`
   carries a `next_action`: a `redirect_to_url` (CCBill), wallet transactions to sign
-  (Solana), or a card challenge (`payment_authentication` with `operation_id`).
+  (Solana), or a card challenge (`authenticate`: run it with Stripe.js, then
+  `POST /v1/me/subscriptions/{id}/confirm`).
 - An order for a second subscription in the same tier group is refused
   `already_owned` with the hint `change` — send those users to `change`.
 

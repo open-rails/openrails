@@ -650,7 +650,6 @@ func nmiUpgradeTierChangeResponse(in gen.BillingProviderIntent) (*TierChangeResp
 		Effective: effectiveOf(action), PriceID: billing.PriceID(p.PriceID),
 		Rail: in.Rail, SubscriptionID: &subID,
 		Currency: p.Currency, AmountDueNow: p.ProrationAmount, NextChargeAmount: p.RecurringAmount, NextChargeDate: &end,
-		OperationID: billing.PaymentOperationID(in.ID),
 	}
 	if p.Downgrade() {
 		resp.DelayedStart = &end

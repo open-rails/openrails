@@ -42,7 +42,7 @@ another kind's prefix is `400 invalid_param`.
 | `pmig_` | price migration | | |
 | `uev_` | usage event | `hev_` | host event |
 | `ntf_` | notification | `fnd_` | finding |
-| `awh_` | alert webhook | `pop_` | payment operation |
+| `awh_` | alert webhook | | |
 | `par_` | product archive | | |
 
 Customer and merchant ids are plain UUIDs. A price or product *key* is a

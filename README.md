@@ -747,6 +747,7 @@ Mounting gives your users these routes under `/billing`:
 | `POST /billing/v1/me/subscriptions/{id}/resume` | undo a cancellation before the period ends |
 | `POST /billing/v1/me/subscriptions/{id}/change` | change plan or seats |
 | `POST /billing/v1/me/subscriptions/{id}/change/preview` | what that change would cost |
+| `POST /billing/v1/me/subscriptions/{id}/confirm` | finish a change after the bank's 3-D Secure step |
 | `PUT /billing/v1/me/subscriptions/{id}/payment-method` | pay a subscription with another saved card, or with their default again |
 | `POST /billing/v1/me/subscriptions/{id}/retry-now` | retry a failed renewal the PSP schedules (an engine-owned renewal is an order, paid with `/orders/{id}/pay`) |
 | `GET /billing/v1/me/payment-methods` | their saved cards, newest first |
@@ -755,8 +756,6 @@ Mounting gives your users these routes under `/billing`:
 | `PATCH /billing/v1/me/payment-methods/{id}` | change a card's expiry, billing details or reuse |
 | `POST /billing/v1/me/payment-methods/{id}/confirm` | finish saving a card after the bank's 3-D Secure step |
 | `PUT /billing/v1/me/default-payment-methods/{currency}` | choose the card that pays one currency: its usage orders and every subscription without its own card |
-| `GET /billing/v1/me/payment-operations/{id}/authentication` | a payment's 3-D Secure challenge |
-| `POST /billing/v1/me/payment-operations/{id}/authentication/confirm` | finish it |
 | `POST /billing/v1/me/stripe/billing-portal-sessions` | open Stripe's billing portal (when a Stripe PSP is declared) |
 | `GET /billing/v1/me/payments` | payment and refund history |
 | `GET /billing/v1/me` | balance per currency, the card that pays each currency, and unread notices |

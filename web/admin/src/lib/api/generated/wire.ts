@@ -1631,16 +1631,10 @@ export type PaymentMethodSubscription = {
   created_at: string
 }
 
-export type PaymentOperation = {
-  id: string
-  status: string
-}
-
 export type PaymentRecovery = {
   last_failure_reason?: string
   retryable: boolean
   blocked_reason?: string
-  operation?: PaymentOperation
   order_id?: string
 }
 
@@ -2213,13 +2207,6 @@ export type StopRunningChargeParams = {
   stopped_at?: string
 }
 
-export type StripeEngineAuthentication = {
-  operation: PaymentOperation
-  payment_intent_id?: string
-  client_secret?: string
-  provider_payment_method_id?: string
-}
-
 export type StripePortalSession = {
   url: string
 }
@@ -2287,7 +2274,6 @@ export type SubscriptionChange = {
   amount_due_now: string
   next_charge_amount: string
   next_charge_date?: string
-  operation_id?: string
 }
 
 export type SubscriptionChangePreview = {
@@ -2314,7 +2300,7 @@ export type SubscriptionDunning = {
 
 export type SubscriptionRetryNowResult = {
   subscription: Subscription
-  operation: PaymentOperation
+  status: string
   replayed: boolean
 }
 

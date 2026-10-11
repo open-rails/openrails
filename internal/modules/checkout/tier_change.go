@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
@@ -24,11 +25,15 @@ type SubscriptionChangeRequest struct {
 	// member and Reason why, kept with the change and any charge.
 	Staff           bool
 	Invoker, Reason string
+	// Payer is the customer's verified session, which alone may read the
+	// issuer challenge of a change awaiting authentication.
+	Payer *billingauth.Payer
 }
 
 var (
 	ErrTierChangeNoSubscription = errors.New("no active subscription found")
 	ErrTierChangePending        = errors.New("tier change already pending")
+	ErrNoChangeToConfirm        = errors.New("no change of this subscription awaits confirmation")
 	ErrTierChangeSameProduct    = errors.New("already on this plan")
 	ErrTierChangeDifferentGroup = errors.New("cannot change to a different tier group")
 	// ErrTierChangeCrossCurrency: proration subtracts the old plan's unused
@@ -124,10 +129,10 @@ func tierChangeIdempotencyConflict() error {
 
 // TierChangeInFlightError: an unresolved tier change already owns the
 // subscription; a request under another idempotency key is refused with it.
-type TierChangeInFlightError struct{ OperationID uuid.UUID }
+type TierChangeInFlightError struct{}
 
 func (e *TierChangeInFlightError) Error() string {
-	return "tier change " + e.OperationID.String() + " is unresolved; retry with its Idempotency-Key"
+	return "another change of this subscription is unresolved; read it back with its Idempotency-Key, or confirm it"
 }
 func (e *TierChangeInFlightError) Unwrap() error { return ErrTierChangePending }
 

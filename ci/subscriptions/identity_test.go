@@ -179,7 +179,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	// checkout session.
 	a, sub := w.engineMember("stripe", embedded, from)
 	w.stripe.SetDecline(visa.Last4, "auth")
-	pending, err := a.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: "idor-" + uuid.NewString()})
+	upgradeKey := "idor-" + uuid.NewString()
+	pending, err := a.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: upgradeKey})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", pending.Status)
 	aCard := a.saveCard("nmi", visa)
@@ -209,28 +210,26 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	before := w.railLedger("stripe")
 	nmiBefore := w.railLedger("nmi")
 
-	op := pending.OperationID.String()
 	probes := map[string]struct {
 		path string
 		body any
 	}{
-		"POST /v1/me/subscriptions/{id}/cancel":                      {"/subscriptions/" + sub.String() + "/cancel", map[string]any{"reason": "not mine"}},
-		"POST /v1/me/subscriptions/{id}/resume":                      {"/subscriptions/" + sub.String() + "/resume", map[string]any{}},
-		"PUT /v1/me/subscriptions/{id}/payment-method":               {"/subscriptions/" + sub.String() + "/payment-method", map[string]any{"payment_method_id": bCard}},
-		"GET /v1/me/subscriptions/{id}":                              {"/subscriptions/" + sub.String(), nil},
-		"POST /v1/me/subscriptions/{id}/retry-now":                   {"/subscriptions/" + sub.String() + "/retry-now", map[string]any{}},
-		"POST /v1/me/subscriptions/{id}/change":                      {"/subscriptions/" + sub.String() + "/change", map[string]any{"price_id": to.ID}},
-		"POST /v1/me/subscriptions/{id}/change/preview":              {"/subscriptions/" + sub.String() + "/change/preview", map[string]any{"price_id": to.ID}},
-		"GET /v1/me/payment-operations/{id}/authentication":          {"/payment-operations/" + op + "/authentication", nil},
-		"POST /v1/me/payment-operations/{id}/authentication/confirm": {"/payment-operations/" + op + "/authentication/confirm", map[string]any{}},
-		"PATCH /v1/me/payment-methods/{id}":                          {"/payment-methods/" + aCard, map[string]any{"exp_month": 12, "exp_year": 2039, "reusable": false}},
-		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
-		"PUT /v1/me/default-payment-methods/{currency}":              {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},
-		"POST /v1/me/payment-methods/{id}/confirm":                   {"/payment-methods/" + aCard + "/confirm", nil},
-		"GET /v1/me/orders/{id}":                                     {"/orders/" + aOrder, nil},
-		"POST /v1/me/orders/{id}/pay":                                {"/orders/" + aOrder + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "3000000"}},
-		"POST /v1/me/orders/{id}/confirm":                            {"/orders/" + aOrder + "/confirm", nil},
-		"POST /v1/me/orders/{id}/cancel":                             {"/orders/" + aOrder + "/cancel", nil},
+		"POST /v1/me/subscriptions/{id}/cancel":         {"/subscriptions/" + sub.String() + "/cancel", map[string]any{"reason": "not mine"}},
+		"POST /v1/me/subscriptions/{id}/resume":         {"/subscriptions/" + sub.String() + "/resume", map[string]any{}},
+		"PUT /v1/me/subscriptions/{id}/payment-method":  {"/subscriptions/" + sub.String() + "/payment-method", map[string]any{"payment_method_id": bCard}},
+		"GET /v1/me/subscriptions/{id}":                 {"/subscriptions/" + sub.String(), nil},
+		"POST /v1/me/subscriptions/{id}/retry-now":      {"/subscriptions/" + sub.String() + "/retry-now", map[string]any{}},
+		"POST /v1/me/subscriptions/{id}/change":         {"/subscriptions/" + sub.String() + "/change", map[string]any{"price_id": to.ID}},
+		"POST /v1/me/subscriptions/{id}/change/preview": {"/subscriptions/" + sub.String() + "/change/preview", map[string]any{"price_id": to.ID}},
+		"POST /v1/me/subscriptions/{id}/confirm":        {"/subscriptions/" + sub.String() + "/confirm", nil},
+		"PATCH /v1/me/payment-methods/{id}":             {"/payment-methods/" + aCard, map[string]any{"exp_month": 12, "exp_year": 2039, "reusable": false}},
+		"DELETE /v1/me/payment-methods/{id}":            {"/payment-methods/" + aCard, nil},
+		"PUT /v1/me/default-payment-methods/{currency}": {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},
+		"POST /v1/me/payment-methods/{id}/confirm":      {"/payment-methods/" + aCard + "/confirm", nil},
+		"GET /v1/me/orders/{id}":                        {"/orders/" + aOrder, nil},
+		"POST /v1/me/orders/{id}/pay":                   {"/orders/" + aOrder + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "3000000"}},
+		"POST /v1/me/orders/{id}/confirm":               {"/orders/" + aOrder + "/confirm", nil},
+		"POST /v1/me/orders/{id}/cancel":                {"/orders/" + aOrder + "/cancel", nil},
 	}
 	probed := 0
 	for _, route := range routes.Catalog() {
@@ -313,7 +312,9 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	}
 	status, refused := w.callAt(w.server.URL, a.token, http.MethodPost, "/notifications/read", "", map[string]any{"all": true, "notification_ids": []string{notification}})
 	require.Equal(t, http.StatusBadRequest, status, "all names no ids: %v", refused)
-	require.NotEmpty(t, unwrap(a.must(http.MethodGet, "/payment-operations/"+op+"/authentication", "", nil))["client_secret"], "A's upgrade still waits for A")
+	waiting, err := a.change(sub, billing.ChangeSubscriptionParams{PriceID: priceRef(to.ID), IdempotencyKey: upgradeKey})
+	require.NoError(t, err)
+	require.NotEmpty(t, waiting.NextAction.Payload["client_secret"], "A's upgrade still waits for A")
 	require.Equal(t, "open", a.must(http.MethodGet, "/orders/"+aOrder, "", nil)["status"], "A's order is still A's to pay")
 }
 

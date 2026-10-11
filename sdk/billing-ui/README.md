@@ -173,10 +173,11 @@ const change = await billing.changeSubscription(sub.id, {
   charge now; fewer seats and a downgrade apply at the next renewal.
 - `changeSubscription` is a money write. Mint one `idempotencyKey` per attempt and
   reuse it until the change resolves (`status: "processing"`, a
-  `subscription_change_in_flight` refusal naming `metadata.operation_id`, a 5xx or a
-  lost response), so OpenRails replays the stored result instead of charging
-  twice. `requires_action` carries `operation_id` for `authenticatePayment`;
-  replay the same key afterwards.
+  `subscription_change_in_flight` refusal, a 5xx or a lost response), so
+  OpenRails replays the stored result instead of charging twice. A change the
+  card issuer challenges answers `requires_action` with an `authenticate`
+  `next_action`: `authenticateChange(client, id, change, psp)` runs it in the
+  page and confirms the change (`confirmSubscriptionChange`).
 - A rail that needs the customer's own step answers `requires_action` with a
   `next_action`. Solana's is `solana_sign_transactions`:
   `signWalletAction(change.next_action, send)` signs and sends its
@@ -208,8 +209,6 @@ provider:
   page (needs `BillingProvider`); `canSavePaymentMethod(psp)` filters PSPs
   that support it. After an off-page verification the provider returns to
   `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
-- `authenticatePayment(client, operationId, psp)` completes a pending
-  payment's 3-D Secure challenge when `canAuthenticatePayment(psp)`.
 - `defaultCountry` (SavePaymentMethod, AccountBilling)
   preselects the billing country, else the browser locale's region.
 

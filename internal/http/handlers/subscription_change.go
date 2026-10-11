@@ -100,6 +100,9 @@ func ChangeSubscription(r *httprequest.Request) {
 		return
 	}
 	req.IdempotencyKey = strings.TrimSpace(r.Header("Idempotency-Key"))
+	payer := checkoutVerifiedPrincipal(r)
+	req.Payer = &payer
+	r.SetHeader("Cache-Control", "no-store") // next_action may carry a client secret
 	resp, err := r.State.CheckoutService.ChangeSubscription(r.Request.Context(), req, user)
 	if err != nil {
 		writeChangeTierError(r, err)
@@ -108,9 +111,35 @@ func ChangeSubscription(r *httprequest.Request) {
 	writeTierChangeResponse(r, resp)
 }
 
+// ConfirmSubscriptionChange reads the provider for the customer's change
+// awaiting them, after they completed its next_action, and answers the change.
+func ConfirmSubscriptionChange(r *httprequest.Request) {
+	user := r.GetUser()
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		r.ErrorCode(billing.CodeAuthenticationRequired, "authentication required")
+		return
+	}
+	id, err := billing.ParseSubscriptionID(r.Param("id"))
+	if err != nil || id.IsZero() {
+		r.ErrorCode(billing.CodeInvalidParam, "invalid subscription ID")
+		return
+	}
+	if r.State.CheckoutService == nil {
+		r.ErrorCode(billing.CodeInternalError, "checkout service unavailable")
+		return
+	}
+	r.SetHeader("Cache-Control", "no-store")
+	resp, err := r.State.CheckoutService.ConfirmSubscriptionChange(r.Request.Context(), id.UUID(), user, checkoutVerifiedPrincipal(r))
+	if err != nil {
+		writeChangeTierError(r, err)
+		return
+	}
+	writeTierChangeResponse(r, resp)
+}
+
 // writeTierChangeResponse answers a durable change: 202 while the provider
-// outcome is unresolved (the body names the operation; the same
-// Idempotency-Key replays the result), 200 otherwise.
+// outcome is unresolved (the same Idempotency-Key replays the result), 200
+// otherwise.
 func writeTierChangeResponse(r *httprequest.Request, resp *checkout.TierChangeResponse) {
 	if resp.Status == "processing" {
 		r.JSON(http.StatusAccepted, resp)
@@ -151,8 +180,7 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 	}
 	var inFlight *checkout.TierChangeInFlightError
 	if errors.As(err, &inFlight) {
-		r.APIError(api.NewAPIError(http.StatusConflict, api.ErrorTypeInvalidRequest, billing.CodeSubscriptionChangeInFlight, inFlight.Error()).
-			WithMetadata(map[string]any{"operation_id": inFlight.OperationID.String()}))
+		r.ErrorCode(billing.CodeSubscriptionChangeInFlight, inFlight.Error())
 		return
 	}
 	var tierErr *checkout.TierChangeError
@@ -179,7 +207,7 @@ func writeChangeTierError(r *httprequest.Request, err error) {
 	switch {
 	case errors.Is(err, checkout.ErrTierChangeNoSubscription):
 		r.ErrorCode(billing.CodeResourceNotFound, "no active subscription found")
-	case errors.Is(err, checkout.ErrTierChangePending), errors.Is(err, checkout.ErrCheckoutProcessing):
+	case errors.Is(err, checkout.ErrTierChangePending), errors.Is(err, checkout.ErrCheckoutProcessing), errors.Is(err, checkout.ErrNoChangeToConfirm):
 		r.ErrorCode(billing.CodeResourceConflict, err.Error())
 	case errors.Is(err, checkout.ErrTierChangeSameProduct):
 		r.ErrorCode(billing.CodeResourceConflict, "already on this plan")

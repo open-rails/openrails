@@ -36,8 +36,7 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.getConfig(),
     () => client.createNetworkLinkChallenge(),
     () => client.createNetworkLink({ challengeId: "lnc_1", idToken: "t" }),
-    () => client.getPaymentAuthentication("op_1"),
-    () => client.confirmPaymentAuthentication("op_1"),
+    () => client.confirmSubscriptionChange("sub_1"),
     () => client.removePaymentMethod("pm_1"),
     () =>
       client.setDefaultPaymentMethod({
