@@ -316,9 +316,10 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 
 | Page | Route | What it does |
 |------|-------|--------------|
-| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant) + the Ask panel |
-| Customers | `/customers` | Search → customer profile: subscriptions, payments, entitlements, payment methods; grant/revoke entitlement + product access |
-| Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view; cancel (typed confirmation), resume, NMI payment-method change |
+| Dashboard | `/` | Per-merchant metrics widget grid (drag/resize, saved per merchant) + the Ask panel. A range picker (presets, or a custom start and end date) sets every widget's range and stays in the URL (`?range=7d`, `?from=2026-09-01&to=2026-09-30`); a widget with `fixed_range` keeps its own, as the default "today" row does (each tile against yesterday) |
+| Reports | `/reports` | The daily subscription report (started, canceled, net change per UTC day) and the monthly renewal report (renewal payments, cancellations, churn per UTC month) over the dashboard's range, each with a CSV download |
+| Customers | `/customers` | Search → customer profile: subscriptions, payments, entitlements, payment methods; grant/revoke entitlement + product access (1, 7, 30 or 365 days after any access the customer has, until a date, or never) |
+| Subscriptions | `/subscriptions` | Status filters incl. the past_due dunning view, and two views: Renewing soon (active, period ending within 7 days, soonest first) and Recently canceled (the last 30 days, latest first), as `?view=renewing_soon` / `?view=recently_canceled`; cancel (typed confirmation), resume, NMI payment-method change |
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
 | Catalog | `/catalog` | Products/prices, price detail + change wizard, archive/restore, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
 | Ops | `/ops` | Findings queue (approve/ignore), the merchant inbox (ledger repairs and worker stalls arrive there as critical notifications) |
@@ -334,6 +335,19 @@ the UI shows a pointed empty-state instead of a broken button:
 | Ask panel — free-form metrics Q&A (aggregate query results flow to the LLM provider, hence its own consent) | Metrics | key AND `llm.ask_enabled` / `LLM_ASK_ENABLED` |
 | Catalog copilot Q&A (read-only catalog/subscriber aggregates) | Catalog | key AND `llm.catalog_copilot_enabled` / `LLM_CATALOG_COPILOT_ENABLED` |
 | Copilot drafting (drafts price changes into the wizard; a human always confirms — the model never mutates) | Catalog, with catalog updates | copilot AND `llm.catalog_drafting_enabled` / `LLM_CATALOG_DRAFTING_ENABLED` |
+
+Lists page by cursor: the pager announces the rows shown and offers rows
+per page, first, previous and next. A plain confirmation is the console's
+one confirm dialog; destructive acts ask for a typed word. After a deploy, a
+page whose code is gone offers a reload.
+
+The dashboard a merchant starts with, until it saves its own: today's new
+subscriptions, renewals, cancellations, failed purchases and net change, each
+against yesterday; active subscribers, net new subscribers, MRR, net revenue,
+churn rate, failed renewals and subscriptions in dunning; new vs canceled by
+day; cancellations by type; net revenue by rail and by stream; payment health
+by PSP; new subscriptions by subscriber type; and, with usage, credits sold vs
+usage revenue and the top customers by usage revenue.
 
 `llm.provider` is `anthropic` (default) or `openai`; `llm.base_url` points
 `openai` at any OpenAI-compatible backend (Groq, Ollama, vLLM). Everything else

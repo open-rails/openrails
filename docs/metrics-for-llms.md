@@ -26,8 +26,9 @@ token-lean tables. No SDK.
 **Schema first.** The `/schema` JSON is designed to ride in a system prompt: every measure
 carries description + formula + allowed dims; dimensions carry enum values; `query_shape`
 states the body grammar; `examples` pairs intents with correct query JSON (imitate them);
-`derived` lists client-side formulas (e.g. arpu = mrr / active subscriptions); `caveats`
-states what the data is NOT; `limits` states the caps. Use only names from it.
+`caveats` states what the data is NOT; `limits` states the caps. Use only names from it.
+A measure's `class` is how it aggregates: `additive`, `distinct`, `ratio`, `difference`
+(one measure minus another, e.g. `net_new_subscriptions`) or `snapshot`.
 
 ## Query shape
 
@@ -40,7 +41,9 @@ Valid body keys (anything else is a 400): `measures` (required), `by`, `grain`, 
 (required), `filters`, `order`, `limit`, `compare`.
 
 - `range`: `{"from","to"}` as `YYYY-MM-DD` (inclusive UTC days) or RFC3339 `[from,to)`,
-  **or** `{"last":"7d"}` (`Nd|Nw|Nm|Ny`, trailing window ending today; exclusive with from/to).
+  **or** `{"last":"7d"}` (`Nd|Nw|Nm|Ny`, trailing window ending today on the
+  deployment's clock; exclusive with from/to). `{"last":"1d"}` with `compare` is today
+  against yesterday.
 - `by`: group-by dimensions; include `"time"` for a time series (`grain` then required:
   `day|week|month|quarter|year`).
 - `filters`: `{dimension: [values...]}` — OR within a dimension, AND across.

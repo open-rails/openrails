@@ -233,7 +233,7 @@ reference: [api/routes.md](api/routes.md).
 | Record money received outside OpenRails for an order | `POST /v1/admin/payments` | Orders → detail |
 | List / inspect payments | `GET /v1/admin/payments[/{id}]` | Payments |
 | Refund (with explicit `revoke_access` choice) | `POST /v1/admin/payments/{id}/refunds` | Payments → detail (disabled on rails without API refunds) |
-| List / inspect subscriptions | `GET /v1/admin/subscriptions[/{id}]` | Subscriptions (incl. past_due dunning view) |
+| List / inspect subscriptions | `GET /v1/admin/subscriptions[/{id}]`; `sort` is `created_at` (newest first, the default), `current_period_ends_at` (soonest first) or `canceled_at` (latest first) | Subscriptions (incl. past_due dunning view, Renewing soon, Recently canceled) |
 | Cancel / resume a subscription | `POST /v1/admin/subscriptions/{id}/cancel` / `/resume` | Subscriptions |
 | Change a subscription's payment method | `PUT /v1/admin/subscriptions/{id}/payment-method` | Subscriptions (NMI) |
 | Grant / revoke credit | `POST /v1/admin/credit-grants`, `POST /v1/admin/credit-grants/{id}/revoke` | Customers → profile |
