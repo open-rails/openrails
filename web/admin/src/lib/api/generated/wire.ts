@@ -67,6 +67,7 @@ export type AdmitParams = {
   resource?: string
   currency?: string
   estimated_amount?: string
+  usage?: UsageEstimate
   accrual_rate_delta_per_hour?: string
   source?: string
   expires_at?: string
@@ -285,18 +286,36 @@ export type CaptchaConfig = {
   token_header: string
 }
 
+export type CaptureAdmissionBatchParams = {
+  items?: CaptureAdmissionParams[]
+}
+
 export type CaptureAdmissionParams = {
-  amount?: string
+  request_id?: string
   usage?: CaptureUsage
+  amount?: string
+}
+
+export type CaptureBatchResult = {
+  items: CaptureResult[]
 }
 
 export type CaptureReceipt = {
   request_id: string
   customer_id: string
   currency: string
+  estimated_amount: string
   amount: string
+  charges: UsageCharge[]
+  usage_event_id: string | null
   balance_transaction_id: string | null
   replayed: boolean
+}
+
+export type CaptureResult = {
+  status: number
+  receipt: CaptureReceipt | null
+  error: ErrorDetails | null
 }
 
 export type CaptureUsage = {
@@ -2174,6 +2193,12 @@ export type UsageCharge = {
   cell: string | null
   quantity: number
   amount: string
+}
+
+export type UsageEstimate = {
+  event_type?: string
+  dimensions?: Record<string, number>
+  metadata?: Record<string, unknown>
 }
 
 export type UsageEvent = {

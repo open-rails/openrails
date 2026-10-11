@@ -202,7 +202,7 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | GET | `/v1/app/catalog/products` | application | `merchant:catalog:read`<br>`root:catalog:read` | — | 200 `ListPage<Product>` |  |
 | POST | `/v1/app/entitlements/check` | application | `merchant:entitlements:read`<br>`root:entitlements:read` | `CheckEntitlementsParams` | 200 `EntitlementCheck` |  |
 | POST | `/v1/app/admissions` | application | `merchant:usage:manage`<br>`root:usage:manage` | `AdmitBatchParams` | 200 `AdmitBatchResult` | `Idempotency-Key` |
-| POST | `/v1/app/admissions/{request_id}/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionParams` | 200 `CaptureReceipt` | `Idempotency-Key` |
+| POST | `/v1/app/admissions/capture` | application | `merchant:usage:manage`<br>`root:usage:manage` | `CaptureAdmissionBatchParams` | 200 `CaptureBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/admissions/release` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/admissions/extend` | application | `merchant:usage:manage`<br>`root:usage:manage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/usage-events` | application | `merchant:usage:manage`<br>`root:usage:manage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |

@@ -5381,20 +5381,12 @@
         ]
       }
     },
-    "/v1/app/admissions/{request_id}/capture": {
+    "/v1/app/admissions/capture": {
       "post": {
         "tags": [
           "app"
         ],
         "parameters": [
-          {
-            "name": "request_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "Idempotency-Key",
             "in": "header",
@@ -5407,7 +5399,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CaptureAdmissionParams"
+                "$ref": "#/components/schemas/CaptureAdmissionBatchParams"
               }
             }
           }
@@ -5418,7 +5410,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CaptureReceipt"
+                  "$ref": "#/components/schemas/CaptureBatchResult"
                 }
               }
             }
@@ -5438,11 +5430,7 @@
           "root": "root:usage:manage"
         },
         "x-openrails-errors": [
-          "admission_not_found",
-          "idempotency_key_reused",
-          "insufficient_credits",
-          "invalid_param",
-          "service_credential_customer_scope_denied"
+          "invalid_param"
         ],
         "x-openrails-error-sets": [
           "tier:application",
@@ -10748,6 +10736,9 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "usage": {
+            "$ref": "#/components/schemas/UsageEstimate"
+          },
           "accrual_rate_delta_per_hour": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -11978,17 +11969,45 @@
           "token_header"
         ]
       },
+      "CaptureAdmissionBatchParams": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureAdmissionParams"
+            }
+          }
+        }
+      },
       "CaptureAdmissionParams": {
         "type": "object",
         "properties": {
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
+          "request_id": {
+            "type": "string"
           },
           "usage": {
             "$ref": "#/components/schemas/CaptureUsage"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
           }
         }
+      },
+      "CaptureBatchResult": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CaptureResult"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
       },
       "CaptureReceipt": {
         "type": "object",
@@ -12002,9 +12021,29 @@
           "currency": {
             "type": "string"
           },
+          "estimated_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "charges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageCharge"
+            }
+          },
+          "usage_event_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "balance_transaction_id": {
             "oneOf": [
@@ -12024,9 +12063,45 @@
           "request_id",
           "customer_id",
           "currency",
+          "estimated_amount",
           "amount",
+          "charges",
+          "usage_event_id",
           "balance_transaction_id",
           "replayed"
+        ]
+      },
+      "CaptureResult": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "integer"
+          },
+          "receipt": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/CaptureReceipt"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/ErrorDetails"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "status",
+          "receipt",
+          "error"
         ]
       },
       "CaptureUsage": {
@@ -20733,6 +20808,24 @@
           "quantity",
           "amount"
         ]
+      },
+      "UsageEstimate": {
+        "type": "object",
+        "properties": {
+          "event_type": {
+            "type": "string"
+          },
+          "dimensions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {}
+          }
+        }
       },
       "UsageEvent": {
         "type": "object",
