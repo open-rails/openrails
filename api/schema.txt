@@ -71,6 +71,7 @@ migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
+migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -261,6 +262,7 @@ table billing.catalog_meters
   constraint catalog_meters_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_meters_pkey PRIMARY KEY (merchant_id, key)
   constraint catalog_meters_revision_check CHECK ((revision >= 1))
+  index CREATE INDEX catalog_meters_event_type_idx ON billing.catalog_meters USING btree (merchant_id, COALESCE(NULLIF(event_type, ''::text), key))
   index CREATE UNIQUE INDEX catalog_meters_pkey ON billing.catalog_meters USING btree (merchant_id, key)
   trigger CREATE TRIGGER catalog_authored_meter BEFORE INSERT OR DELETE OR UPDATE ON billing.catalog_meters FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
   trigger CREATE TRIGGER catalog_meter_revision BEFORE INSERT OR UPDATE ON billing.catalog_meters FOR EACH ROW EXECUTE FUNCTION billing.assign_object_revision()
@@ -271,7 +273,7 @@ table billing.catalog_rate_cards
   column product_id uuid NOT NULL
   column ordinal integer NOT NULL
   column meter_key text
-  column payment_term text NOT NULL
+  column payment_term text
   column filter jsonb NOT NULL
   column allowance jsonb
   column price jsonb NOT NULL
@@ -281,6 +283,7 @@ table billing.catalog_rate_cards
   constraint catalog_rate_cards_meter_key_fkey FOREIGN KEY (merchant_id, meter_key) REFERENCES billing.catalog_meters(merchant_id, key) ON DELETE RESTRICT
   constraint catalog_rate_cards_ordinal_positive_check CHECK ((ordinal >= 1))
   constraint catalog_rate_cards_payment_term_check CHECK ((payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text])))
+  constraint catalog_rate_cards_payment_term_metered_check CHECK (((meter_key IS NULL) = (payment_term IS NOT NULL)))
   constraint catalog_rate_cards_pkey PRIMARY KEY (merchant_id, id)
   constraint catalog_rate_cards_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE CASCADE
   index CREATE UNIQUE INDEX catalog_rate_cards_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE (meter_key IS NOT NULL)
@@ -947,22 +950,24 @@ table billing.merchants
   trigger CREATE TRIGGER guard_merchant_restore BEFORE UPDATE ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_restore()
   trigger CREATE TRIGGER immutable_merchant_group_binding BEFORE UPDATE OF permission_group_id ON billing.merchants FOR EACH ROW EXECUTE FUNCTION billing.guard_merchant_group_binding()
 
-table billing.metered_rating_watermarks
+table billing.meter_period_quantities
   column merchant_id uuid NOT NULL
   column customer_id uuid NOT NULL
   column currency text NOT NULL
-  column source text NOT NULL
+  column meter_key text NOT NULL
+  column cell text NOT NULL
   column period_starts_at timestamp with time zone NOT NULL
-  column rated_through_at timestamp with time zone NOT NULL
-  column accrued_amount bigint NOT NULL
+  column quantity bigint NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint metered_rating_watermarks_accrued_nonneg_check CHECK ((accrued_amount >= 0))
-  constraint metered_rating_watermarks_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
-  constraint metered_rating_watermarks_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint metered_rating_watermarks_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint metered_rating_watermarks_pkey PRIMARY KEY (merchant_id, customer_id, currency, source, period_starts_at)
-  index CREATE UNIQUE INDEX metered_rating_watermarks_pkey ON billing.metered_rating_watermarks USING btree (merchant_id, customer_id, currency, source, period_starts_at)
+  constraint meter_period_quantities_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint meter_period_quantities_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
+  constraint meter_period_quantities_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint meter_period_quantities_meter_key_check CHECK ((meter_key <> ''::text))
+  constraint meter_period_quantities_pkey PRIMARY KEY (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
+  constraint meter_period_quantities_quantity_check CHECK ((quantity >= 0))
+  index CREATE INDEX meter_period_quantities_period_starts_at_idx ON billing.meter_period_quantities USING btree (merchant_id, period_starts_at)
+  index CREATE UNIQUE INDEX meter_period_quantities_pkey ON billing.meter_period_quantities USING btree (merchant_id, customer_id, currency, meter_key, cell, period_starts_at)
 
 table billing.money_settings
   column merchant_id uuid NOT NULL
@@ -2348,7 +2353,9 @@ table billing.usage_events PARTITION BY RANGE (occurred_at)
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column outcome text NOT NULL
   column forgiven_amount bigint NOT NULL
+  column charges jsonb NOT NULL
   constraint usage_events_amount_check CHECK ((amount >= 0))
+  constraint usage_events_charges_check CHECK ((jsonb_typeof(charges) = 'array'::text))
   constraint usage_events_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint usage_events_customer_id_currency_ledger_transfer_id_fkey FOREIGN KEY (merchant_id, customer_id, currency, ledger_transfer_id) REFERENCES billing.ledger_transfers(merchant_id, customer_id, currency, id)
   constraint usage_events_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
@@ -2953,7 +2960,7 @@ function billing.guard_billing_restore_receipt()
                     'maintenance_runs',
                     'mandates',
                     'merchant_destructive_policy',
-                    'metered_rating_watermarks',
+                    'meter_period_quantities',
                     'money_settings',
                     'nmi_bulk_checkpoints',
                     'nmi_history_months',
