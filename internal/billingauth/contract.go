@@ -13,8 +13,8 @@ import (
 
 // Authenticator is the host's auth (helpers/auth): it says who a request is.
 // OpenRails builds every gate from the Verified it returns, asking its Can
-// for a permission in a Scope and its CheckRecentSignIn for a person's recent
-// sign-in, and answers every refusal itself.
+// for a permission in a Scope. Sensitive customer-network operations also
+// ask CheckRecentSignIn; admin operations do not. It answers every refusal itself.
 type Authenticator = auth.Authenticator
 
 // Verified is one request's verified credential (helpers/auth).
