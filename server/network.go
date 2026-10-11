@@ -27,7 +27,9 @@ func (s *Server) CustomerLinks(ctx context.Context, account billing.NetworkAccou
 // billing.ErrNetworkLinkInUse while the customer's subscriptions at that
 // merchant still charge its cards, and billing.ErrNotFound for a link the
 // account does not hold. The merchant's clients lose the account's consent;
-// the customer, its orders and subscriptions stay.
+// the customer, its orders and subscriptions stay. A link already ended
+// answers as it stands, and an unlink that failed part way is finished by
+// unlinking again.
 func (s *Server) UnlinkCustomer(ctx context.Context, account billing.NetworkAccountID, link billing.CustomerLinkID) (*billing.CustomerLink, error) {
 	if s.network == nil {
 		return nil, errNetworkOff

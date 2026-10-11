@@ -111,7 +111,8 @@ answers a page of at most one.
   to another card first. The merchant's clients lose the account's consent and
   refresh tokens ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)), so a
   merchant that signs its customers in with openrails.dev asks again. The
-  customer, its orders and subscriptions stay.
+  customer, its orders and subscriptions stay. Unlinking an ended link answers
+  it, and finishes revoking consents an earlier unlink left behind.
 - Withdrawing the merchant's consent in the account's settings unlinks too,
   and is refused the same way.
 - Deleting the account is refused while a linked customer's subscriptions

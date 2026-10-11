@@ -24,6 +24,8 @@ import (
 
 	jwt "github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
 	"github.com/open-rails/authkit"
 	"github.com/open-rails/authkit/authtest"
@@ -609,8 +611,11 @@ func TestUnlinkingCustomers(t *testing.T) {
 	event := w.linkedEvent(w.shopKey, billing.HostEventCustomerNetworkUnlinked, sub)
 	require.NotNil(t, event, "customer.network_unlinked")
 	require.Equal(t, billing.CustomerLinkRevokedByCustomer, *event.RevokedBy)
-	_, err = w.srv.UnlinkCustomer(ctx, account, link.ID)
-	require.ErrorIs(t, err, billing.ErrNotFound, "an ended link")
+	again, err := w.srv.UnlinkCustomer(ctx, account, link.ID)
+	require.NoError(t, err, "an ended link answers as it stands")
+	require.Equal(t, billing.CustomerLinkRevoked, again.Status)
+	_, err = w.srv.UnlinkCustomer(ctx, account, billing.CustomerLinkID(uuid.New()))
+	require.ErrorIs(t, err, billing.ErrNotFound, "a link the account never held")
 
 	gone := func(id string) func() bool {
 		return func() bool {
@@ -648,6 +653,124 @@ func TestUnlinkingCustomers(t *testing.T) {
 	links, err := w.srv.CustomerLinks(ctx, billing.NetworkAccountID(uuid.MustParse(lee.ID)))
 	require.NoError(t, err)
 	require.Empty(t, links)
+}
+
+// unlinkedEvents counts the merchant's customer.network_unlinked events for
+// customer.
+func (w *world) unlinkedEvents(key iam.APIKeyCreated, customer string) (n int) {
+	w.t.Helper()
+	for _, e := range w.events(key, billing.HostEventCustomerNetworkUnlinked) {
+		if e.CustomerNetwork != nil && e.CustomerNetwork.CustomerID.String() == customer {
+			n++
+		}
+	}
+	return n
+}
+
+// Unlinks racing to end one link, as the consent event an unlink raises can:
+// the link ends once, by the customer, the merchant hears once, and every
+// unlink answers the link as it stands. A row lock holds both unlinks at the
+// link's update until both have read it active.
+func TestUnlinksAnswerTheLinkAsItStands(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	sub := uuid.NewString()
+	link := w.connect(w.customer(w.shopLogin, sub, nil), w.shopClient, w.account(true))
+	// The hold and the probe have connections of their own: the server's
+	// pool keeps every one it has for the unlinks.
+	graph, _ := operator.Of(w.srv)
+	dial := func() *pgx.Conn {
+		cfg, err := pgxpool.ParseConfig(os.Getenv("OPENRAILS_E2E_DSN"))
+		require.NoError(t, err)
+		conn, err := pgx.ConnectConfig(ctx, cfg.ConnConfig)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = conn.Close(context.WithoutCancel(ctx)) })
+		return conn
+	}
+	holding, probe := dial(), dial()
+	hold, err := holding.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = hold.Rollback(context.WithoutCancel(ctx)) }()
+	var holder int
+	require.NoError(t, hold.QueryRow(ctx, "SELECT pg_backend_pid()").Scan(&holder))
+	table := pgx.Identifier{graph.Config.Database.Schema, "customer_links"}.Sanitize()
+	_, err = hold.Exec(ctx, "SELECT 1 FROM "+table+" WHERE merchant_id = $1 AND id = $2 FOR UPDATE", w.shop.UUID(), link.ID.UUID())
+	require.NoError(t, err)
+
+	type answer struct {
+		link *billing.CustomerLink
+		err  error
+	}
+	answers := make(chan answer, 2)
+	for range 2 {
+		go func() {
+			l, err := w.srv.UnlinkCustomer(ctx, link.AccountID, link.ID)
+			answers <- answer{l, err}
+		}()
+	}
+	require.Eventually(t, func() bool {
+		var waiting int
+		err := probe.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity a WHERE $1 = ANY(pg_blocking_pids(a.pid))
+			OR EXISTS (SELECT 1 FROM pg_stat_activity b WHERE b.pid = ANY(pg_blocking_pids(a.pid)) AND $1 = ANY(pg_blocking_pids(b.pid)))`, holder).Scan(&waiting)
+		return err == nil && waiting == 2
+	}, 30*time.Second, 20*time.Millisecond, "both unlinks wait at the link")
+	require.NoError(t, hold.Commit(ctx))
+	for range 2 {
+		a := <-answers
+		require.NoError(t, a.err)
+		require.Equal(t, billing.CustomerLinkRevoked, a.link.Status)
+		require.Equal(t, billing.CustomerLinkRevokedByCustomer, *a.link.RevokedBy)
+	}
+	require.Equal(t, 1, w.unlinkedEvents(w.shopKey, sub), "the merchant hears once")
+}
+
+// An unlink that ended the link but left a consent behind is finished by
+// unlinking again. Here withdrawing one of the merchant's clients' consents
+// ends the link while another client still holds the account's consent; the
+// account's unlink then revokes that one too. A link made since keeps its
+// consents.
+func TestUnlinkingAgainFinishesTheUnlink(t *testing.T) {
+	w := newWorld(t)
+	ctx := t.Context()
+	sub := uuid.NewString()
+	token := w.customer(w.shopLogin, sub, nil)
+	ann := w.account(true)
+	link := w.connect(token, w.shopClient, ann)
+	app := w.client(w.shop)
+	w.signIn(ann, app, "n-"+uuid.NewString(), "", "openid", "email")
+	held := func(clientID string) bool {
+		consents, err := w.srv.AuthKit().OAuthConsents(ctx, ann.ID)
+		require.NoError(t, err)
+		for _, c := range consents {
+			if c.ClientID == clientID {
+				return true
+			}
+		}
+		return false
+	}
+	require.True(t, held(app.ClientID))
+
+	require.NoError(t, w.srv.AuthKit().RevokeConsent(ctx, ann.ID, w.shopClient.ClientID))
+	require.Eventually(t, func() bool { c, _ := w.adminCustomer(w.shopKey, sub); return c.Network == nil }, 30*time.Second, 100*time.Millisecond,
+		"oauth_consent.revoked ends the link")
+	require.True(t, held(app.ClientID), "the merchant's other client still holds the account's consent")
+
+	unlinked, err := w.srv.UnlinkCustomer(ctx, link.AccountID, link.ID)
+	require.NoError(t, err)
+	require.Equal(t, billing.CustomerLinkRevoked, unlinked.Status)
+	require.Equal(t, billing.CustomerLinkRevokedByCustomer, *unlinked.RevokedBy)
+	require.False(t, held(app.ClientID), "unlinking again revoked it")
+	require.Equal(t, 1, w.unlinkedEvents(w.shopKey, sub))
+
+	relinked := w.connect(token, w.shopClient, ann)
+	require.NotEqual(t, link.ID, relinked.ID)
+	_, err = w.srv.UnlinkCustomer(ctx, link.AccountID, link.ID)
+	require.NoError(t, err)
+	require.True(t, held(w.shopClient.ClientID), "the new link keeps its consent")
+	links, err := w.srv.CustomerLinks(ctx, link.AccountID)
+	require.NoError(t, err)
+	require.Len(t, links, 1)
+	require.Equal(t, relinked.ID, links[0].ID)
 }
 
 // A revoked link is kept 24 months, then the cleanup deletes it.

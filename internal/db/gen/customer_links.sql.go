@@ -155,18 +155,51 @@ func (q *Queries) GetActiveCustomerLinkByCustomer(ctx context.Context, arg GetAc
 	return i, err
 }
 
-const getActiveCustomerLinkOfAccount = `-- name: GetActiveCustomerLinkOfAccount :one
+const getCustomerLink = `-- name: GetCustomerLink :one
 SELECT merchant_id, id, customer_id, account_id, method, credential, order_id, auth_time, amr, terms_version, status, linked_at, revoked_at, revoked_by FROM billing.customer_links
-WHERE account_id = $1::uuid AND id = $2::uuid AND status = 'active'
+WHERE merchant_id = $1::uuid AND id = $2::uuid
 `
 
-type GetActiveCustomerLinkOfAccountParams struct {
+type GetCustomerLinkParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetCustomerLink(ctx context.Context, arg GetCustomerLinkParams) (BillingCustomerLink, error) {
+	row := q.db.QueryRow(ctx, getCustomerLink, arg.MerchantID, arg.ID)
+	var i BillingCustomerLink
+	err := row.Scan(
+		&i.MerchantID,
+		&i.ID,
+		&i.CustomerID,
+		&i.AccountID,
+		&i.Method,
+		&i.Credential,
+		&i.OrderID,
+		&i.AuthTime,
+		&i.Amr,
+		&i.TermsVersion,
+		&i.Status,
+		&i.LinkedAt,
+		&i.RevokedAt,
+		&i.RevokedBy,
+	)
+	return i, err
+}
+
+const getCustomerLinkOfAccount = `-- name: GetCustomerLinkOfAccount :one
+SELECT merchant_id, id, customer_id, account_id, method, credential, order_id, auth_time, amr, terms_version, status, linked_at, revoked_at, revoked_by FROM billing.customer_links
+WHERE account_id = $1::uuid AND id = $2::uuid
+`
+
+type GetCustomerLinkOfAccountParams struct {
 	AccountID uuid.UUID
 	ID        uuid.UUID
 }
 
-func (q *Queries) GetActiveCustomerLinkOfAccount(ctx context.Context, arg GetActiveCustomerLinkOfAccountParams) (BillingCustomerLink, error) {
-	row := q.db.QueryRow(ctx, getActiveCustomerLinkOfAccount, arg.AccountID, arg.ID)
+// One of the account's links, active or ended.
+func (q *Queries) GetCustomerLinkOfAccount(ctx context.Context, arg GetCustomerLinkOfAccountParams) (BillingCustomerLink, error) {
+	row := q.db.QueryRow(ctx, getCustomerLinkOfAccount, arg.AccountID, arg.ID)
 	var i BillingCustomerLink
 	err := row.Scan(
 		&i.MerchantID,

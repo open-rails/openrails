@@ -54,6 +54,7 @@ sql:
       - "internal/migrate/postgres/0055_order_checkout.up.sql"
       - "internal/migrate/postgres/0056_customer_links.up.sql"
       - "internal/migrate/postgres/0057_renewal_orders.up.sql"
+      - "internal/migrate/postgres/0058_customer_link_account_index.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

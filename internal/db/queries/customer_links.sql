@@ -39,9 +39,14 @@ WHERE account_id = sqlc.arg(account_id)::uuid AND status = 'active'
 ORDER BY merchant_id
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: GetActiveCustomerLinkOfAccount :one
+-- name: GetCustomerLinkOfAccount :one
+-- One of the account's links, active or ended.
 SELECT * FROM billing.customer_links
-WHERE account_id = sqlc.arg(account_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'active';
+WHERE account_id = sqlc.arg(account_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: GetCustomerLink :one
+SELECT * FROM billing.customer_links
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
 -- name: ListActiveCustomerLinksOfMerchant :many
 -- A batch of the merchant's links, for revoking them all when it leaves.

@@ -58,6 +58,7 @@ migration 0054_carts.up.sql sha256:e3b0fe2260a225edcb603597d6991b0316190841feb17
 migration 0055_order_checkout.up.sql sha256:6692e2a3b11ba128515e04bdae192a33b2698ad6dc16fb0082bb2335ad96f615
 migration 0056_customer_links.up.sql sha256:a7d2c1371f1c6fd77a3067991a7c16bb32e8d926f1b0c61ef809bf31edb8d65d
 migration 0057_renewal_orders.up.sql sha256:e2ef66ff62458528d59f388aebace2f36cb863f8711059910a1de5fe947b0c59
+migration 0058_customer_link_account_index.up.sql sha256:3cb9305805d37f9800c383e86b1375994036a8d4047af3832ece9e8c66922821
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -634,6 +635,7 @@ table billing.customer_links
   constraint customer_links_status_check CHECK ((status = ANY (ARRAY['active'::text, 'revoked'::text])))
   constraint customer_links_terms_version_check CHECK (((terms_version = btrim(terms_version)) AND (terms_version <> ''::text)))
   index CREATE UNIQUE INDEX customer_links_account_active_key ON billing.customer_links USING btree (account_id, merchant_id) WHERE (status = 'active'::text)
+  index CREATE INDEX customer_links_account_idx ON billing.customer_links USING btree (account_id, id)
   index CREATE UNIQUE INDEX customer_links_customer_active_key ON billing.customer_links USING btree (merchant_id, customer_id) WHERE (status = 'active'::text)
   index CREATE UNIQUE INDEX customer_links_pkey ON billing.customer_links USING btree (merchant_id, id)
   index CREATE INDEX customer_links_revoked_at_idx ON billing.customer_links USING btree (merchant_id, revoked_at) WHERE (status = 'revoked'::text)

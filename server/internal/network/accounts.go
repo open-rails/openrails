@@ -2,6 +2,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -51,27 +52,47 @@ func (s *Service) eachLink(ctx context.Context, account uuid.UUID, fn func(gen.B
 }
 
 // Unlink ends the account's link: refused while the customer's
-// subscriptions at the merchant still charge its cards. The merchant's
-// clients lose the account's consent first, so a merchant that signs its
-// customers in with openrails.dev must ask again; the customer, its orders
-// and subscriptions stay.
+// subscriptions at the merchant still charge its cards. The link ends first,
+// so the consent events that follow find nothing to end; then the merchant's
+// clients lose the account's consent, so a merchant that signs its customers
+// in with openrails.dev must ask again. Unlinking a link the account already
+// ended finishes that, unless the account is linked there again. The
+// customer, its orders and subscriptions stay.
 func (s *Service) Unlink(ctx context.Context, account billing.NetworkAccountID, id billing.CustomerLinkID) (billing.CustomerLink, error) {
-	row, err := s.db.GenDirectory().GetActiveCustomerLinkOfAccount(ctx, gen.GetActiveCustomerLinkOfAccountParams{AccountID: account.UUID(), ID: id.UUID()})
+	directory := s.db.GenDirectory()
+	row, err := directory.GetCustomerLinkOfAccount(ctx, gen.GetCustomerLinkOfAccountParams{AccountID: account.UUID(), ID: id.UUID()})
 	switch {
 	case db.IsNotFound(err):
 		return billing.CustomerLink{}, errLinkNotFound
 	case err != nil:
 		return billing.CustomerLink{}, err
 	}
-	if inUse, err := s.inUse(ctx, row); err != nil {
-		return billing.CustomerLink{}, err
-	} else if inUse {
-		return billing.CustomerLink{}, errLinkInUse
+	link := linkOf(row)
+	if link.Status == billing.CustomerLinkActive {
+		if inUse, err := s.inUse(ctx, row); err != nil {
+			return billing.CustomerLink{}, err
+		} else if inUse {
+			return billing.CustomerLink{}, errLinkInUse
+		}
+		if link, err = s.revoke(ctx, row, billing.CustomerLinkRevokedByCustomer); err != nil {
+			return billing.CustomerLink{}, err
+		}
 	}
-	if err := s.revokeConsents(ctx, account.String(), billing.MerchantID(row.MerchantID)); err != nil {
+	if link.RevokedBy == nil || *link.RevokedBy != billing.CustomerLinkRevokedByCustomer {
+		return link, nil
+	}
+	// A link made since owns the merchant's consents.
+	_, err = directory.GetActiveCustomerLinkByAccount(ctx, gen.GetActiveCustomerLinkByAccountParams{AccountID: account.UUID(), MerchantID: row.MerchantID})
+	switch {
+	case err == nil:
+		return link, nil
+	case !db.IsNotFound(err):
 		return billing.CustomerLink{}, err
 	}
-	return s.revoke(ctx, row, billing.CustomerLinkRevokedByCustomer)
+	if err := s.revokeConsents(ctx, account.String(), link.MerchantID); err != nil {
+		return billing.CustomerLink{}, err
+	}
+	return link, nil
 }
 
 // inUse reports whether the link's customer has a subscription at its
@@ -91,7 +112,7 @@ func (s *Service) revokeConsents(ctx context.Context, account string, mid billin
 		if c.GroupID != mid.String() {
 			continue
 		}
-		if err := s.ak.RevokeConsent(ctx, account, c.ClientID); err != nil {
+		if err := s.ak.RevokeConsent(ctx, account, c.ClientID); err != nil && !errors.Is(err, iam.ErrOAuthConsentNotFound) {
 			return fmt.Errorf("network: revoke consent: %w", err)
 		}
 	}
@@ -101,13 +122,18 @@ func (s *Service) revokeConsents(ctx context.Context, account string, mid billin
 // revoke ends a link and tells the merchant. A link already ended answers
 // as it stands.
 func (s *Service) revoke(ctx context.Context, row gen.BillingCustomerLink, by billing.CustomerLinkRevokedBy) (billing.CustomerLink, error) {
-	out := linkOf(row)
+	var out billing.CustomerLink
 	now := s.now().UTC()
 	err := s.db.MerchantTx(merchant.WithID(ctx, billing.MerchantID(row.MerchantID)), func(ctx context.Context, tx pgx.Tx) error {
 		q := gen.New(tx)
 		revoked, err := q.RevokeCustomerLink(ctx, gen.RevokeCustomerLinkParams{MerchantID: row.MerchantID, ID: row.ID, RevokedAt: now, RevokedBy: string(by)})
 		if db.IsNotFound(err) {
-			return nil
+			current, err := q.GetCustomerLink(ctx, gen.GetCustomerLinkParams{MerchantID: row.MerchantID, ID: row.ID})
+			if db.IsNotFound(err) {
+				return errLinkNotFound
+			}
+			out = linkOf(current)
+			return err
 		}
 		if err != nil {
 			return err
