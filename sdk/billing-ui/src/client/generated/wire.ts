@@ -82,79 +82,6 @@ export type Cart = {
   expires_at: string | null
 }
 
-export type CheckoutSession = {
-  id: string
-  status: string
-  merchant: CheckoutSessionMerchant
-  plan: CheckoutSessionPlan
-  line_items: CheckoutSessionLineItem[]
-  tax: string | null
-  due_today: string | null
-  options: CheckoutSessionOption[]
-  saved_methods: CheckoutSessionSavedMethod[]
-  next_action: NextAction | null
-  operation: PaymentOperation | null
-  payment_id: string | null
-  subscription_id: string | null
-  failure_message: string | null
-  failure: PaymentFailure | null
-  success_url: string | null
-  embed_origin: string | null
-  expires_at: string
-}
-
-export type CheckoutSessionLineItem = {
-  label: string
-  sublabel: string | null
-  amount: string
-}
-
-export type CheckoutSessionLink = {
-  id: string
-  url: string | null
-  expires_at: string
-}
-
-export type CheckoutSessionMerchant = {
-  display_name: string
-}
-
-export type CheckoutSessionOption = {
-  id: string
-  psp_id: string
-  rail: string
-  mode: string
-  driver: string
-  public_config: Record<string, string> | null
-}
-
-export type CheckoutSessionPayResult = {
-  status: string
-  next_action: NextAction | null
-  operation: PaymentOperation | null
-  payment_id: string | null
-  subscription_id: string | null
-  failure_message: string | null
-  failure: PaymentFailure | null
-}
-
-export type CheckoutSessionPlan = {
-  auto_renew: boolean
-  display_name: string
-  unit_amount: string
-  currency: string
-  unit_decimals: number
-  billing_interval_hours: number | null
-  access_duration_hours: number | null
-}
-
-export type CheckoutSessionSavedMethod = {
-  id: string
-  option_id: string
-  rail: string
-  card: CardDetails | null
-}
-
 export type CreateMyOrderParams = {
   lines?: OrderLineParams[]
   cart?: boolean
@@ -276,15 +203,6 @@ export type Mandate = {
 export type MarkNotificationsReadParams = {
   notification_ids?: string[]
   all?: boolean
-}
-
-export type MintCheckoutSessionParams = {
-  price_id?: string
-  price_key?: string
-  product_key?: string
-  amount?: string
-  auto_renew?: boolean
-  success_url?: string
 }
 
 export type NetworkLinkChallenge = {
@@ -499,15 +417,6 @@ export type PSPPaymentConfig = {
   config?: Record<string, string>
   status?: string
   retry_after?: number
-}
-
-export type PayCheckoutSessionParams = {
-  option_id?: string
-  payment_method_id?: string
-  payment_token?: string
-  card?: CardEntry
-  billing_details?: BillingDetails
-  token_symbol?: string
 }
 
 export type PayOrderParams = {

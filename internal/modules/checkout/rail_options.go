@@ -1,139 +1,14 @@
 package checkout
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
-	"github.com/open-rails/openrails/internal/writeposture"
 )
-
-// CheckoutOption is a locally ready payment-provider choice for a price.
-// Selector is the exact value checkout accepts, PSPID is the provider's stable
-// internal identity, and Rail is the canonical gateway.
-type CheckoutOption struct {
-	Selector string
-	PSPID    uuid.UUID
-	Rail     string
-	Mode     string
-	// Token is the settlement token the price binds on this PSP (Solana), or "".
-	Token string
-}
-
-// ListCheckoutOptions returns payment providers that this runtime can use
-// for new checkout against exactly one price ID or key, in routing order.
-// It performs no remote provider probes and no writes; readiness means the
-// active local account, required credentials, price link, checkout mode, and
-// runtime services are all present.
-func (s *CheckoutAttemptService) ListCheckoutOptions(ctx context.Context, priceID, productKey, priceKey string) ([]CheckoutOption, error) {
-	if err := validateCheckoutPriceSelector(priceID, productKey, priceKey); err != nil {
-		return nil, err
-	}
-	if s == nil || s.priceService == nil || s.productService == nil {
-		return nil, fmt.Errorf("checkout rail options unavailable")
-	}
-	checkoutService, ok := s.checkoutService.(*CheckoutService)
-	if !ok || checkoutService == nil || checkoutService.Rails == nil {
-		return nil, fmt.Errorf("checkout rail options unavailable")
-	}
-	merchantID, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("resolve checkout merchant: %w", err)
-	}
-	if s.config == nil || (writeposture.View{Config: s.config, DB: s.db}).Posture(ctx, merchantID.UUID()).ReadOnly() {
-		return []CheckoutOption{}, nil
-	}
-
-	price, err := resolveCheckoutPrice(ctx, s.priceService, priceID, productKey, priceKey)
-	if err != nil {
-		return nil, fmt.Errorf("resolve checkout price: %w", err)
-	}
-	if price.MerchantID != merchantID.UUID() {
-		return nil, fmt.Errorf("resolve checkout price: price not found")
-	}
-	if !price.IsPurchasable() {
-		return []CheckoutOption{}, nil
-	}
-	product, err := s.productService.GetByID(ctx, price.ProductID)
-	if err != nil {
-		return nil, fmt.Errorf("resolve checkout product: %w", err)
-	}
-	if product.MerchantID != merchantID.UUID() {
-		return nil, fmt.Errorf("resolve checkout product: product not found")
-	}
-	if !product.IsPurchasable() {
-		return []CheckoutOption{}, nil
-	}
-	return s.listCheckoutOptionsForPrice(ctx, price, product)
-}
-
-// listCheckoutOptionsForPrice is a projection of the routing decision: the
-// options a frontend may offer are exactly the candidates routing found
-// eligible, in the order routing would pick them.
-func (s *CheckoutAttemptService) listCheckoutOptionsForPrice(ctx context.Context, price *models.Price, product *models.Product) ([]CheckoutOption, error) {
-	mode := checkoutModeForRail(price, "")
-	decision, err := s.Route(ctx, RoutingInput{Price: price, Product: product, Mode: mode})
-	if err != nil && !errors.Is(err, ErrNoRoutableProcessor) {
-		return nil, err
-	}
-	eligible := decision.Eligible()
-	if len(eligible) == 0 {
-		// Nothing eligible AND something failed to resolve: report the failure
-		// rather than an empty list that reads like "this merchant is unarmed".
-		for _, candidate := range decision.Candidates {
-			if candidate.Skip == models.CheckoutRoutingSkipResolveFailed {
-				return nil, fmt.Errorf("resolve checkout rail %s: resolution failed", candidate.Selector)
-			}
-		}
-		return []CheckoutOption{}, nil
-	}
-	options := make([]CheckoutOption, 0, len(eligible))
-	for _, candidate := range decision.Candidates {
-		if candidate.Skip != "" {
-			continue
-		}
-		options = append(options, CheckoutOption{
-			Selector: candidate.Selector,
-			PSPID:    candidate.PSPID,
-			Rail:     candidate.Rail,
-			Mode:     string(mode),
-			Token:    boundSettlementToken(price, candidate),
-		})
-	}
-	return options, nil
-}
-
-// boundSettlementToken is the token a Solana sale must settle in: a price
-// denominated in a token is paid in that token; otherwise its link fixes it,
-// the published plan's mint for a subscription or a declared token.
-func boundSettlementToken(price *models.Price, candidate RoutingCandidate) string {
-	if candidate.Rail != string(models.RailSolana) {
-		return ""
-	}
-	if units, ok := moneyutil.LookupCurrency(price.Currency); ok && units.Kind == "crypto" {
-		return units.Code
-	}
-	var link map[string]string
-	if candidate.PSPID != uuid.Nil {
-		link = price.ForPSP(candidate.PSPID).PSPLinkForRail(models.RailSolana)
-	}
-	if link == nil {
-		link = price.PSPLinkForRail(models.RailSolana)
-	}
-	for _, key := range []string{"mint_symbol", "token"} {
-		if token := strings.ToUpper(strings.TrimSpace(link[key])); token != "" {
-			return token
-		}
-	}
-	return ""
-}
 
 func checkoutModeForRail(price *models.Price, rail string) models.CheckoutAttemptMode {
 	_ = rail

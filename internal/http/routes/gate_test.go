@@ -37,17 +37,15 @@ import (
 )
 
 // openTiers are the tiers no Auth runs on: their credential is the request
-// itself (a capability id or a provider signature) or there is none.
-var openTiers = []Tier{AuthPublic, AuthSessionID, AuthProvider, AuthCheckoutSession}
+// itself (a provider signature) or there is none.
+var openTiers = []Tier{AuthPublic, AuthProvider}
 
 // openRoutes is every route no Auth gates. A route that joins it is a
 // reviewed change.
 var openRoutes = []string{
 	"GET /health/live", "GET /health/ready", "GET /v1/config",
 	"GET /v1/catalog/products",
-	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
 	"GET /v1/orders/{id}/solana-pay", "POST /v1/orders/{id}/solana-pay",
-	"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay",
 	"POST /v1/webhooks/{rail}/{account_id}",
 }
 
@@ -71,7 +69,6 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/catalog/prices",
 	"POST /v1/admin/catalog/product-archives",
 	"POST /v1/admin/catalog/products",
-	"POST /v1/admin/checkout-sessions",
 	"POST /v1/admin/credit-grants",
 	"POST /v1/admin/credit-grants/{id}/revoke",
 	"POST /v1/admin/findings/{id}/resolve",
@@ -100,7 +97,7 @@ var sensitiveRoutes = []string{
 // that tier checks: a staff route its group's permission, a customer route
 // none, and no customer path names a customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
-	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthCustomer, AuthMerchant, AuthSignedIn, AuthApplication, AuthProvider, AuthProvisioning, AuthNetwork}
+	tiers := []Tier{AuthPublic, AuthCustomer, AuthMerchant, AuthSignedIn, AuthApplication, AuthProvider, AuthProvisioning, AuthNetwork}
 	var open, sensitive []string
 	names := map[string]string{}
 	for _, r := range Catalog() {
@@ -495,14 +492,6 @@ func TestStaffGate(t *testing.T) {
 	require.Equal(t, http.StatusNoContent, got.status, got.code)
 	require.Equal(t, billingauth.Staff{Identity: person, Route: refund, Merchant: merchantA}, got.staff)
 
-	// A checkout session is an ordinary staff write: whoever creates it, its
-	// customer pays it, and a saved card needs that customer's own proof.
-	for _, who := range []billingauth.Identity{person, service, personalKey} {
-		got = runRoute(t, rt, &recordingAuth{who: who}, "POST /v1/admin/checkout-sessions", nil)
-		require.Equal(t, http.StatusNoContent, got.status, who.Credential.Kind)
-		require.Equal(t, "POST /v1/admin/checkout-sessions", got.staff.Route)
-	}
-
 	stepUp := &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute, Metadata: map[string]any{"step_up_methods": []any{"password"}}}
 	revoked := errors.Join(auth.ErrUnauthenticated, auth.ErrRevoked)
 	// A provider's sender-proof refusal is a 401 like any other; its
@@ -654,44 +643,6 @@ func mountErrorFor(t *testing.T, mount func()) (msg string) {
 	}()
 	mount()
 	return ""
-}
-
-// The checkout viewer shows saved cards only to the session's own customer:
-// a presented credential the Authenticator admits as a person in person
-// binds that customer; a refused or absent one, or an application, leaves
-// the capability alone.
-func TestCheckoutViewer(t *testing.T) {
-	route, _ := Lookup(GET, "/v1/checkout-sessions/{id}")
-	run := func(a billingauth.Authenticator, authorization string) (bool, customerscope.Scope) {
-		env := newEnv(gatedRuntime(t), Options{Auth: a})
-		env.admit = admitAll
-		var scope customerscope.Scope
-		var bound, reached bool
-		h := env.checkoutViewer(route)(func(r *httprequest.Request) {
-			reached = true
-			scope, bound = r.CustomerScope()
-		})
-		req := httptest.NewRequest(GET, "/v1/checkout-sessions/ocs_x", nil)
-		req = req.WithContext(merchant.WithID(req.Context(), merchantA))
-		if authorization != "" {
-			req.Header.Set("Authorization", authorization)
-		}
-		h(httprequest.NewHTTP(httptest.NewRecorder(), req, nil))
-		require.True(t, reached, "the capability is never refused here")
-		return bound, scope
-	}
-	fake := &authtest.Fake{}
-	bound, scope := run(fake, "Bearer "+fake.Person(userB))
-	require.True(t, bound)
-	require.Equal(t, userB, scope.Customer().String())
-	for name, authorization := range map[string]string{"anonymous": "", "refused": "Bearer forged", "a service": "Bearer " + fake.Machine("svc_1")} {
-		bound, _ = run(fake, authorization)
-		require.False(t, bound, name)
-	}
-	bound, _ = run(nil, "Bearer "+fake.Person(userB))
-	require.False(t, bound, "a mount without Auth shows no saved cards")
-	bound, _ = run(panicking{}, "Bearer any")
-	require.False(t, bound, "a panicking provider shows no saved cards")
 }
 
 // Only the route gate makes a customer scope or binds a verdict.

@@ -10,15 +10,13 @@ billing (subscriptions, saved cards, payment history).
 | `@openrails/billing-ui`           | `BillingProvider`, styled checkout and account components, i18n                    |
 | `@openrails/billing-ui/locales/*` | `en de es ja ko zh` message bundles                                                |
 
-The checkout owns the browser payment flow, behind `<BuyButton>` and
-`<Offers>`. OpenRails holds the checkout session: the signed-in customer mints
-one for a price, and its `ocs_` id alone reads and pays it. Card data is tokenized in NMI-hosted Collect.js iframes and
-never enters the host application, unless the PSP takes cards on OpenRails
-itself (`card_entry: server`, driver `card`).
+The checkout owns the browser payment flow, behind `<BuyButton>`, `<Offers>`
+and `<OrderCheckout>`: the signed-in customer's order, read and paid with
+their own credential. Card data is tokenized in the PSP's own fields
+(Collect.js, Stripe Elements) and never enters the host application.
 
-See [Payment form contract](docs/payment-form-contract.md) for the exact-money
-session document, billing fields, browser-autofill behavior, and the checkout
-request schema.
+See [Payment form contract](docs/payment-form-contract.md) for exact money,
+billing fields, browser-autofill behavior and the payment request.
 
 The package lives in the OpenRails repository and shares its version: each
 OpenRails release `vX.Y.Z` publishes `@openrails/billing-ui@X.Y.Z` to npm, with
@@ -48,13 +46,13 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 key (a course, its bundle and the membership that also unlocks it; the Go
 `Client.ListOffers` finds the products granting an entitlement): a
 `BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
-"$10.00 every 30 days"). The purchase is theirs from start to payment, so the
-app never handles a checkout session: today a button opens one in a checkout
-dialog; when orders take a new card it will create an order instead,
-and apps won't change. Signing in is the host's: with `signedIn={false}`, or
-when OpenRails answers 401, they call `onSignInRequired` instead. `onPaid`
-follows a successful payment only; it is a hint, so confirm access from your
-own API (your gate) before granting anything.
+"$10.00 every 30 days"). The purchase is theirs from start to payment: a
+button creates the customer's order and pays it in a dialog
+(`<OrderCheckout>`); a second click before it is paid opens the same order.
+Signing in is the host's: with `signedIn={false}`, or when OpenRails answers
+401, they call `onSignInRequired` instead. `onPaid` receives the completed
+order; it is a hint, so confirm access from your own API (your gate) before
+granting anything.
 
 ```tsx
 <BuyButton
@@ -73,9 +71,8 @@ own API (your gate) before granting anything.
 />
 ```
 
-`successUrl` returns the buyer from a redirect step (Stripe's hosted page); it
-must be on one of your app's return origins. `autoRenew={false}` buys a
-recurring price's first term only.
+`returnUrl` returns the buyer from a redirect step (Stripe's hosted page); it
+must be on one of your app's return origins.
 
 For prepaid credits, a fixed pack is another product/price. A
 `customer_amount` price takes the buyer's `amount`: collect it on your product
@@ -98,44 +95,22 @@ payment. Fixed prices reject `amount`; their pack benefit can be greater than
 the purchase price for a bulk discount. Customer-selected deposits currently
 use NMI or Stripe.
 
-A rail's own step is the pay result's `next_action`: `redirect_to_url` (an
-https page, opened in the top window) or `solana_pay` (a `solana:` link shown
-as a QR code). A card challenge is its `operation`, authenticated in the page.
+A rail's own step is the order's `payment.next_action`: `redirect_to_url` (an
+https page, opened in the top window), `solana_pay` (a `solana:` link shown
+as a QR code) or `authenticate` (the bank's challenge, run in the page).
 
-### A shared payment page
+### An order your server creates
 
-Several sites selling for one merchant can share one payment page
-(`Config.Checkout.PageURL`). A server mints the session with the Go
-`Client.CreateCheckoutSession` and hands the browser its `url`, which the site
-frames:
-
-```tsx
-<CheckoutFrame url={session.url} theme="dark" onComplete={() => refetchAccess()} />
-```
-
-Stripe Elements needs the buyer's own client, so the shared page offers token
-rails only.
-
-The payment host serves `<CheckoutPage>` from one HTML entry at `PageURL`,
-behind its adapter's `CheckoutFramePolicy` (only the sites in
-`Config.Checkout.EmbedOrigins` may frame it). No customer signs in there, so
-its `BillingProvider` has no client:
+A server that decides what its customer buys creates the order with the Go
+`Client.CreateOrder` (`POST /v1/app/orders`) and hands its id to the
+customer's browser, which pays it signed in:
 
 ```tsx
-import { BillingProvider, CheckoutPage } from "@openrails/billing-ui"
-
-createRoot(root).render(
-  <BillingProvider>
-    <CheckoutPage appearance={{ variables: brand }} />
-  </BillingProvider>
-)
+<OrderCheckout orderId={orderId} returnUrl={returnUrl} onSettled={(order) => refetchAccess(order)} />
 ```
 
-The page reads the session id from its URL fragment and talks to its frame
-with `postMessage`, origin-checked both ways: page to app `ready`,
-`resize {height}`, `complete {status}` and `redirect {url}` (a nested frame
-cannot navigate the top window, so the app does); app to page
-`init {theme}`. The page messages only the app origin recorded on its session.
+`onSettled` follows a complete order, or one processing on an asynchronous
+rail. A subscription line names its subscription once paid.
 
 ## Account billing
 
@@ -218,19 +193,15 @@ browser flow from each PSP's `flow` and public `config`
 (Collect.js, native card inputs, Stripe Elements, redirect, wallet). Hosts never branch on a
 provider:
 
-- A session's `options` are exactly the armed PSPs whose rail can make this
-  sale (Solana when it is configured, never CCBill),
-  each with its `driver` and `public_config`; `saved_methods` are the buyer's
-  cards on them, newest first (paying sends the chosen card's id explicitly).
-  Card rails (`collect_js`, `card`, `stripe_elements`) render one panel: saved cards,
-  an inline new card and one Pay/Subscribe button, which is the customer's
-  confirmation of the displayed terms. No provider chooser with one rail.
-- Inside a `BillingProvider` with a client, a new card is always saved to the
-  account first and the session is paid with `payment_method_id` on the
-  customer surface; `requires_action` results
-  carrying an `operation` run 3-D Secure in the page. A `failed` result stays
-  on the panel with `failure.message` next to its `field`, so the buyer can
-  pick another card; the host gives each new attempt a new idempotency key.
+- An order's `payment_options` are exactly the armed PSPs whose rail can make
+  this sale (Solana for one-time lines when it is configured, never CCBill),
+  each with what it `accepts`. `OrderCheckout` renders one panel: the
+  customer's saved cards on them, newest first, an inline new card and one Pay
+  button. No provider chooser with one rail.
+- A new card is charged and saved in one pay; an `authenticate` next action
+  runs 3-D Secure in the page, then `confirm`. A decline stays on the panel
+  with its message, so the buyer can pick another card under a new
+  idempotency key.
 - Only PSPs with `checkout !== false` (`checkoutPsps`) take new cards; others
   stay listed so existing cards and subscriptions keep working.
 - `<SavePaymentMethod psp={psp} onSaved={(id) => ...} />` saves a card in the
@@ -239,7 +210,7 @@ provider:
   `returnURL(setupId)`; confirm with `client.confirmCardSetup(id)`.
 - `authenticatePayment(client, operationId, psp)` completes a pending
   payment's 3-D Secure challenge when `canAuthenticatePayment(psp)`.
-- `defaultCountry` (CheckoutPage, SavePaymentMethod, AccountBilling)
+- `defaultCountry` (SavePaymentMethod, AccountBilling)
   preselects the billing country, else the browser locale's region.
 
 - Panels: `SubscriptionsPanel` (cancel, resume, change card),

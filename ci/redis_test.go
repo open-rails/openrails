@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
@@ -62,7 +64,7 @@ func degraded(t *testing.T, client *openrails.Client) bool {
 
 // pay is a checkout payment from addr: the rate-limited checkout bucket.
 func pay(h http.Handler, addr string) int {
-	req := httptest.NewRequest(http.MethodPost, "/v1/checkout-sessions/ocs_"+strings.ReplaceAll(uuid.NewString(), "-", "")+"/pay", strings.NewReader(`{}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/me/orders/"+billing.OrderID(uuid.New()).String()+"/pay", strings.NewReader(`{}`))
 	req.RemoteAddr = addr
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()

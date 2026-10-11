@@ -22,10 +22,10 @@ import (
 	"github.com/open-rails/openrails/openrailstest"
 )
 
-// Staff may hand a customer a checkout session, as the merchant's server
-// may; only the customer pays it, and a saved card only with the customer's
-// own proof. The machine checkout-attempt routes are gone.
-func TestStaffCheckoutSessionIsTheCustomersToPay(t *testing.T) {
+// A merchant order is its customer's to pay: only the customer, signed in,
+// pays it, and a saved card only its own. Staff create no orders, and the
+// machine checkout-attempt routes are gone.
+func TestMerchantOrderIsTheCustomersToPay(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
 	w.start()
@@ -44,45 +44,33 @@ func TestStaffCheckoutSessionIsTheCustomersToPay(t *testing.T) {
 		status, out := w.merchantCall(staff, route.method, route.path)
 		require.Equal(t, http.StatusNotFound, status, "%s %s is not mounted: %s", route.method, route.path, out)
 	}
+	status, out := w.merchantJSON(staff, http.MethodPost, "/v1/app/orders", map[string]any{"customer_id": a.id, "lines": []any{map[string]any{"price_id": price.ID}}})
+	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "a staff member creates no order: %v", out)
 
-	// The checkout-sessions route is a staff write: a reader is refused.
-	mint := map[string]any{"customer": map[string]any{"id": a.id}, "price_id": price.ID}
-	status, out := w.merchantJSON(w.auth.token(t, "reader"), http.MethodPost, "/v1/admin/checkout-sessions", mint)
-	require.Equal(t, http.StatusForbidden, status, "%v", out)
-	status, out = w.merchantJSON(staff, http.MethodPost, "/v1/admin/checkout-sessions", mint)
-	require.Equal(t, http.StatusCreated, status, "%v", out)
-	staffSession := hostedSession{w: w, id: out["id"].(string)}
-	status, out = staffSession.pay(map[string]any{"option_id": staffSession.option("nmi"), "payment_method_id": aCard})
-	require.Equal(t, http.StatusForbidden, status, "the staff member's link alone charges no saved card: %v", out)
-	require.Equal(t, "customer_proof_required", hostedErrorCode(out))
-	w.settle()
-	require.Len(t, w.railLedger("nmi"), charges, "the refused link charged nothing")
-
-	// The host's backend mints one too; only A, signed in, pays it with A's card.
-	session := w.handOver(a, price.ID)
-	option := session.option("nmi")
+	// The host's backend creates one; only A, signed in, pays it with A's card.
+	sold, err := a.sell(remote, order{price: price.ID})
+	require.NoError(t, err)
+	path := "/orders/" + sold.order.ID.String() + "/pay"
+	pay := func(token, method string) (int, map[string]any) {
+		return w.callAt(w.server.URL, token, http.MethodPost, path, "try-"+uuid.NewString(), map[string]any{"payment": map[string]any{"payment_method_id": method}, "expected_total": micros(sold.order.Total)})
+	}
 	for name, try := range map[string]func() (int, map[string]any){
-		"B's credential, A's card": func() (int, map[string]any) {
-			return session.payAs(b, map[string]any{"option_id": option, "payment_method_id": aCard})
-		},
-		"B's credential, B's card": func() (int, map[string]any) {
-			return session.payAs(b, map[string]any{"option_id": option, "payment_method_id": bCard})
-		},
-		"no credential, A's card": func() (int, map[string]any) {
-			return session.pay(map[string]any{"option_id": option, "payment_method_id": aCard})
-		},
-		"A's API key, A's card": func() (int, map[string]any) {
-			return session.w.page(http.MethodPost, "/v1/checkout-sessions/"+session.id+"/pay", w.auth.apiKeyToken(t, a.id), map[string]any{"option_id": option, "payment_method_id": aCard})
-		},
+		"B's credential, A's card": func() (int, map[string]any) { return pay(b.token, aCard) },
+		"B's credential, B's card": func() (int, map[string]any) { return pay(b.token, bCard) },
+		"no credential, A's card":  func() (int, map[string]any) { return pay("", aCard) },
+		"A's API key, A's card":    func() (int, map[string]any) { return pay(w.auth.apiKeyToken(t, a.id), aCard) },
 	} {
 		status, out := try()
-		require.Contains(t, []int{http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity}, status, "%s: %v", name, out)
+		require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound, http.StatusUnprocessableEntity}, status, "%s: %v", name, out)
 	}
 	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges, "no refused proof charged anything")
 	require.False(t, a.entitled("content:members"))
 
-	a.payWithSaved(session, "nmi", aCard)
+	paid, err := sold.buy(a, order{method: aCard})
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", paid.Status, "%+v", paid.Order)
+	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges+1)
 	require.True(t, a.entitled("content:members"))
 	require.False(t, b.entitled("content:members"))
@@ -213,7 +201,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	notes, _ := a.must(http.MethodGet, "/notifications?limit=10", "", nil)["data"].([]any)
 	require.NotEmpty(t, notes)
 	notification := notes[0].(map[string]any)["id"].(string)
-	session := w.handOver(a, from.ID)
 	pass := w.lifetime("idor:order", 3_000_000)
 	aOrder := a.must(http.MethodPost, "/orders", "order-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": pass.ID.String()}}})["id"].(string)
 
@@ -240,8 +227,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
 		"PUT /v1/me/default-payment-methods/{currency}":              {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},
 		"POST /v1/me/payment-methods/{id}/confirm":                   {"/payment-methods/" + aCard + "/confirm", nil},
-		"GET /v1/me/checkout-sessions/{id}":                          {"/checkout-sessions/" + session.id, nil},
-		"POST /v1/me/checkout-sessions/{id}/pay":                     {"/checkout-sessions/" + session.id + "/pay", map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard}},
 		"GET /v1/me/orders/{id}":                                     {"/orders/" + aOrder, nil},
 		"POST /v1/me/orders/{id}/pay":                                {"/orders/" + aOrder + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "3000000"}},
 		"POST /v1/me/orders/{id}/confirm":                            {"/orders/" + aOrder + "/confirm", nil},
@@ -297,13 +282,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		probed++
 	}
 	require.Len(t, bodyProbes, probed, "every body fixture names a mounted route")
-
-	read := session.read()
-	require.Empty(t, read["saved_methods"], "a guest sees no saved cards")
-	status, out := w.page(http.MethodGet, "/v1/checkout-sessions/"+session.id, b.token, nil)
-	require.Equal(t, http.StatusNotFound, status, "to B, A's session does not exist: %v", out)
-	status, out = session.payAs(b, map[string]any{"option_id": session.option("nmi"), "payment_method_id": bCard})
-	require.Equal(t, http.StatusNotFound, status, "B paying A's session: %v", out)
 
 	// Nothing of A's changed.
 	w.settle()

@@ -112,7 +112,7 @@ func TestNewRoutes(t *testing.T) {
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/config")
-	require.Contains(t, keys, "OPTIONS /billing/v1/checkout-sessions/{id}/pay")
+	require.Contains(t, keys, "OPTIONS /billing/v1/config")
 	require.Contains(t, keys, "GET /billing/v1/admin/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/admin/payments")
 	require.NotContains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "writes need AdminUpdate")

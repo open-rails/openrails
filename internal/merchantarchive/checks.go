@@ -36,7 +36,6 @@ var excludedTables = map[string]string{
 	"customer_links":              "openrails.dev's data, not the merchant's: revoked when the merchant leaves",
 	"provisioning_tokens":         "credentials; the destination mints its own",
 	"merchant_destructive_policy": "deployment safety policy",
-	"checkout_sessions":           "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout attempt; a buyer mints a new one at the destination",
 	"carts":                       "a customer's basket, not billing history: priced live, it holds no money and the customer fills it again at the destination",
 	"notifications":               "inbox and notification delivery", "provider_mutation_logs": "operator evidence; raw bodies excluded",
 	"reconciliation_findings":       "operator observations",
@@ -80,7 +79,6 @@ var excludedColumns = map[string]string{
 	"payment_attempts":              "id merchant_id customer_id psp_id rail kind owner card_entry source observed_via category reason action response_code response_text transaction_id avs_result cvv_result card_brand card_last4 token_type amount currency attempted_at checkout_id checkout_target subscription_id payment_method_id payment_id provider_intent_id step created_at cycle_id card_bin issuer_code issuer_text enriched_at mandate_id sent_initial_transaction_id order_id",
 	"rebill_cycles":                 "id merchant_id subscription_id customer_id psp_id rail owner due_at amount currency created_at missed_at miss_reason quantity",
 	"idempotency_keys":              "merchant_id operation idempotency_key status token claims result error lease_expires_at expires_at created_at updated_at",
-	"checkout_sessions":             "merchant_id id_hash customer_id price_id offer success_url origin attempt attempt_id expires_at purge_at created_at",
 	"carts":                         "merchant_id customer_id lines last_changed_at created_at",
 	"dashboard_configs":             "merchant_id layout updated_at updated_by",
 	"customer_contacts":             "merchant_id customer_id email display_name user_name active provisioned_at directory_updated_at created_at updated_at",
@@ -298,12 +296,18 @@ var referenceChecks = []rowCheck{
     AND (g.spec_snapshot->'deposit'->>'paid_amount')::bigint=payments.amount AND payments.amount>0
     AND g.starts_at=(payments.credit_grant_snapshot->>'starts_at')::timestamptz
     AND g.ends_at=(payments.credit_grant_snapshot->>'expires_at')::timestamptz)`},
+	// An order's lot keeps its line's promise instead: the frozen benefit per
+	// unit, and the line's amount as what was paid for it.
 	{"grants", `kind='credit' AND event='grant' AND spec_snapshot->'deposit'->'paid_amount' IS NOT NULL AND NOT EXISTS (
   SELECT 1 FROM billing.payments p WHERE p.merchant_id=$1 AND p.id=grants.payment_id
-    AND p.status='succeeded' AND p.credit_grant_snapshot IS NOT NULL
-    AND p.customer_id=grants.customer_id AND p.currency=grants.currency
-    AND (p.credit_grant_snapshot->>'amount')::bigint=grants.amount
-    AND p.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)`},
+    AND p.status='succeeded' AND p.customer_id=grants.customer_id AND p.currency=grants.currency
+    AND ((p.credit_grant_snapshot IS NOT NULL
+        AND (p.credit_grant_snapshot->>'amount')::bigint=grants.amount
+        AND p.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)
+      OR EXISTS (SELECT 1 FROM billing.order_lines l WHERE l.merchant_id=$1 AND l.order_id=p.order_id
+        AND l.product_id=grants.product_id AND l.credit_grant IS NOT NULL
+        AND (l.credit_grant->>'amount')::bigint*COALESCE(l.quantity,1)=grants.amount
+        AND l.amount=(grants.spec_snapshot->'deposit'->>'paid_amount')::bigint)))`},
 
 	{"provider_intents", `intent_type='nmi_vault_delete' AND status='succeeded' AND EXISTS(SELECT 1 FROM billing.payment_methods m WHERE m.merchant_id=$1 AND
           (m.id::text=(CASE WHEN provider_intents.intent_type='initial_membership' THEN provider_intents.payload->'terms'->>'payment_method_id' ELSE provider_intents.payload->>'payment_method_id' END) OR

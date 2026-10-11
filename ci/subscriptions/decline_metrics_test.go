@@ -108,10 +108,10 @@ func TestDeclineMetrics(t *testing.T) {
 	w.advance(time.Hour)
 
 	newCard := map[string][]string{"kind": {"verify", "initial"}, "card_entry": {"new"}}
-	require.Equal(t, 3.0, w.metricTotal(since, "attempts", newCard), "two verifications and the charge")
+	require.Equal(t, 2.0, w.metricTotal(since, "attempts", newCard), "the declined charge and the paid one")
 	require.Equal(t, 1.0, w.metricTotal(since, "failed_attempts", newCard))
-	require.InDelta(t, 1.0/3, w.metricTotal(since, "attempt_failure_rate", newCard), 1e-9, "the new-card decline rate per attempt")
-	require.Equal(t, 6.0, w.metricTotal(since, "attempts", nil), "and the renewal's three")
+	require.InDelta(t, 1.0/2, w.metricTotal(since, "attempt_failure_rate", newCard), 1e-9, "the new-card decline rate per attempt")
+	require.Equal(t, 5.0, w.metricTotal(since, "attempts", nil), "and the renewal's three")
 	byReason := map[string]float64{}
 	for _, r := range w.metricRows(since, []string{"failed_attempts"}, []string{"reason"}, nil) {
 		byReason[r["reason"].(string)] = decimal(t, r["failed_attempts"])
@@ -122,7 +122,7 @@ func TestDeclineMetrics(t *testing.T) {
 	require.Equal(t, 0.0, w.metricTotal(since, "failed_checkouts", nil))
 	require.Equal(t, 0.0, w.metricTotal(since, "checkout_failure_rate", nil), "the buyer got through")
 	require.Equal(t, 1.0, w.metricTotal(since, "checkout_recovery_rate", nil))
-	require.Equal(t, 3.0, w.metricTotal(since, "attempts_per_checkout", nil))
+	require.Equal(t, 2.0, w.metricTotal(since, "attempts_per_checkout", nil))
 
 	require.Equal(t, 1.0, w.metricTotal(since, "rebills_due", nil))
 	require.Equal(t, 0.0, w.metricTotal(since, "rebills_open", nil))

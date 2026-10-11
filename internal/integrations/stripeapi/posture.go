@@ -87,14 +87,7 @@ func PostureCheck(transport http.RoundTripper, secretKey, connected, declared st
 // create/rotate) and records the verdict for the transport gate.
 // The verdict is bound to the declared account (acct_...) it was checked for.
 func (f *Factory) VerifyPosture(ctx context.Context, secretKey, declared string) providerposture.Status {
-	key := PostureKey(secretKey, APIBase, "")
-	if f != nil && f.base != nil {
-		if liveSecretKey(secretKey) {
-			return providerposture.Status{Key: key, Verdict: providerposture.Live, Err: errors.New("stripe live key with an injected transport")}
-		}
-		return providerposture.Status{Key: key, Verdict: providerposture.Simulated}
-	}
-	return providerposture.Process().Verify(ctx, key, f.PostureCheckFor(secretKey, declared))
+	return providerposture.Process().Verify(ctx, PostureKey(secretKey, APIBase, ""), f.PostureCheckFor(secretKey, declared))
 }
 
 // PostureCheckFor returns the startup check for a declared account's key.

@@ -77,6 +77,16 @@ UPDATE billing.mandates SET
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status = 'active' AND initial_transaction_id IS NULL;
 
+-- name: LinkMandateStoringAttempt :exec
+-- Agreements a charge stored before its attempt was recorded take that attempt.
+UPDATE billing.mandates SET
+    storing_attempt_id = (SELECT a.id FROM billing.payment_attempts a
+        WHERE a.merchant_id = sqlc.arg(merchant_id)::uuid AND a.psp_id = mandates.psp_id
+          AND a.transaction_id = mandates.initial_transaction_id),
+    updated_at = now()
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND payment_method_id = sqlc.arg(payment_method_id)::uuid AND psp_id = sqlc.arg(psp_id)::uuid
+  AND initial_transaction_id = sqlc.arg(initial_transaction_id)::text AND storing_attempt_id IS NULL;
+
 -- name: EndMandate :execrows
 UPDATE billing.mandates SET
     status = CASE WHEN sqlc.arg(reason)::text = 'customer_revoked' THEN 'revoked' ELSE 'ended' END,

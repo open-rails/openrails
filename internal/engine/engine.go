@@ -192,9 +192,6 @@ func validate(cfg *config.Config, deps config.Deps) error {
 	if err := validRiverSchema(config.RiverSchemaName(cfg)); err != nil {
 		return err
 	}
-	if err := config.ValidateCheckout(cfg.Checkout); err != nil {
-		return fmt.Errorf("openrails: Config.Checkout: %w", err)
-	}
 	if cfg.TestMode == config.CredentialPostureLive {
 		for name, set := range map[string]bool{
 			"StripeTransport": deps.StripeTransport != nil, "NMITransport": deps.NMITransport != nil, "FXTransport": deps.FXTransport != nil,

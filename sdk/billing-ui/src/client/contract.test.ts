@@ -2,7 +2,6 @@
 // (src/client/generated/routes.ts), beneath the client's /billing mount.
 import { expect, it, vi } from "vitest"
 
-import { checkoutOf } from "./checkout"
 import { createBillingClient } from "./client"
 import { OPENRAILS_ROUTES } from "./generated/routes"
 
@@ -49,10 +48,17 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.listOrders({ origin: "usage" }),
     () => client.getOrder("ord_1"),
     () =>
-      checkoutOf(client).createCheckoutSession({
-        productKey: "premium",
-        priceKey: "monthly",
+      client.createOrder({
+        lines: [{ price_id: "price_1" }],
+        idempotencyKey: "k",
       }),
+    () =>
+      client.payOrder("ord_1", {
+        payment: { payment_method_id: "pm_1" },
+        expectedTotal: "1",
+        idempotencyKey: "k",
+      }),
+    () => client.confirmOrder("ord_1"),
   ]
   for (const call of calls) await call().catch(() => undefined)
 

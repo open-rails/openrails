@@ -59,10 +59,8 @@ func Open(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 }
 
 // New builds both runtimes and seeds the catalog. The server runs River
-// workers because customer cancel/resume are queued jobs. pageURL is the
-// hosted checkout page, served on another origin and framed by baseURL; ""
-// is the single-site case.
-func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, workers bool) (_ *Runtime, err error) {
+// workers because customer cancel/resume are queued jobs.
+func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers bool) (_ *Runtime, err error) {
 	chain := solanafake.New()
 	gateway := nmimock.New(nmimock.Options{})
 	defer func() {
@@ -105,7 +103,6 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 				}.PSPConfig(),
 			},
 		},
-		Checkout: checkoutConfig(baseURL, pageURL),
 		// Every browser of the suite is one address, 127.0.0.1, which one
 		// checkout limit would soon refuse.
 		RateLimitsDisabled: true,
@@ -135,15 +132,6 @@ func New(ctx context.Context, baseURL, pageURL, dsn string, pool *pgxpool.Pool, 
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}
 	return &Runtime{Auth: auth, Client: client, Catalog: catalog, Solana: chain, NMI: gateway, BaseURL: baseURL}, nil
-}
-
-// checkoutConfig serves the payment page at pageURL, framed by the app at
-// baseURL.
-func checkoutConfig(baseURL, pageURL string) openrails.CheckoutConfig {
-	if pageURL == "" {
-		return openrails.CheckoutConfig{}
-	}
-	return openrails.CheckoutConfig{PageURL: pageURL, EmbedOrigins: []string{baseURL}}
 }
 
 // billingRoutes is the billing surface the storefront and account pages call.
@@ -178,11 +166,6 @@ func (r *Runtime) Mount(mux *http.ServeMux) error {
 	routes := billingRoutes
 	routes.Auth = r.Auth.Authenticator() // says who a request is; OpenRails decides what to admit
 	return openrailshttp.Mount(mux, r.Client, routes)
-}
-
-// PaymentPage wraps the handler serving the hosted checkout page.
-func (r *Runtime) PaymentPage(page http.Handler) http.Handler {
-	return openrailshttp.CheckoutFramePolicy(r.Client)(page)
 }
 
 func (r *Runtime) Close() {

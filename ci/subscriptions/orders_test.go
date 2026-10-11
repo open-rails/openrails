@@ -66,6 +66,9 @@ func (c *customer) orderAt(base, method, path, key string, body any) orderCall {
 	require.NoError(c.w.t, err)
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
+	if c.ip != "" {
+		req.Header.Set("X-Forwarded-For", c.ip)
+	}
 	if key != "" {
 		req.Header.Set("Idempotency-Key", key)
 	}

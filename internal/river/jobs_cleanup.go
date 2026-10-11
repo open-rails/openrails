@@ -14,7 +14,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/retention"
@@ -132,7 +131,6 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 // CleanupResult holds the count of deleted records per table
 type CleanupResult struct {
 	CheckoutAttemptsExpired int64
-	CheckoutSessions        int64
 	Carts                   int64
 	NotificationsSeen       int64
 	NotificationsAll        int64
@@ -222,20 +220,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		result.PartitionsDropped = n
 	}
 
-	// Checkout sessions past their reconciliation window: one indexed, bounded
-	// delete across merchants, so it needs no due-work walk.
-	for range cleanupIndexedMaxBatches {
-		n, err := checkoutsession.DeleteExpired(ctx, w.DB, now, cleanupDeleteBatch)
-		if err != nil {
-			logger.WithError(err).Error("Cleanup: delete checkout sessions failed")
-			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete checkout sessions: %w", err))
-			break
-		}
-		result.CheckoutSessions += n
-		if n < cleanupDeleteBatch {
-			break
-		}
-	}
 	// Carts unchanged for their retention: the same indexed, bounded delete.
 	for range cleanupIndexedMaxBatches {
 		n, err := orders.DeleteExpiredCarts(ctx, w.DB, now, cleanupDeleteBatch)
@@ -330,7 +314,6 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"more_work_queued":          nextCursor != nil,
 		"duration_ms":               clock.Now().Sub(started).Milliseconds(),
 		"checkout_attempts_expired": result.CheckoutAttemptsExpired,
-		"checkout_sessions":         result.CheckoutSessions,
 		"carts":                     result.Carts,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,

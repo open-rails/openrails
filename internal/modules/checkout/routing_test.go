@@ -271,8 +271,6 @@ func TestRouteCandidateSkipClasses(t *testing.T) {
 	failing := routingServiceWith(armedAll(), pspCatalog{err: errors.New("catalog down")})
 	_, skip := failing.evaluateCandidate(merchantCtx(), failing.checkoutService, RoutingInput{Price: price, Mode: models.CheckoutAttemptModeSubscription}, "stripe")
 	require.Equal(t, models.CheckoutRoutingSkipResolveFailed, skip)
-	_, err := failing.listCheckoutOptionsForPrice(merchantCtx(), price, &models.Product{})
-	require.ErrorContains(t, err, "resolution failed", "an outage is not an empty option list")
 }
 
 func TestRoutingRuleMatches(t *testing.T) {
@@ -294,33 +292,6 @@ func TestRoutingRuleMatches(t *testing.T) {
 		require.Equal(t, tc.want, routingRuleMatches(tc.match, in), tc.name)
 	}
 	require.False(t, routingRuleMatches(models.CheckoutRoutingMatch{Product: "pro"}, RoutingInput{}), "absent product never matches a product rule")
-}
-
-// The option list is a projection of routing: exactly the eligible
-// candidates, each executable through mode resolution and payment validation.
-func TestListCheckoutOptions(t *testing.T) {
-	svc := routingService(armedAll())
-	price := recurringPrice()
-	options, err := svc.listCheckoutOptionsForPrice(merchantCtx(), price, &models.Product{})
-	require.NoError(t, err)
-	require.Equal(t, []CheckoutOption{
-		{Selector: "stripe", PSPID: merchants.PspID("stripe", "live", "acct_stripe"), Rail: "stripe", Mode: "subscription"},
-		{Selector: "nmi", PSPID: merchants.PspID("nmi", "live", "acct_nmi"), Rail: "nmi", Mode: "subscription"},
-	}, options)
-	for _, o := range options {
-		mode, err := svc.resolveMode(o.Mode, o.Selector, price)
-		require.NoError(t, err)
-		require.Equal(t, models.CheckoutAttemptModeSubscription, mode)
-		payment := &CheckoutAttemptPaymentRequest{Rail: o.Selector}
-		if o.Rail == "nmi" {
-			payment.PaymentToken = "token_test"
-		}
-		require.NoError(t, svc.validatePayment(merchantCtx(), o.Selector, payment, &UserIdentity{ID: uuid.NewString()}))
-	}
-
-	empty, err := routingService(railresolve.FixedSet{}).listCheckoutOptionsForPrice(merchantCtx(), price, &models.Product{})
-	require.NoError(t, err)
-	require.Empty(t, empty)
 }
 
 // One readiness verdict backs both the option list and routing.

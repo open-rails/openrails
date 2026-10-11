@@ -153,11 +153,13 @@ func TestCatalogDurationInvalidAPIContract(t *testing.T) {
 	require.Equal(t, revision.Revision, after.Revision, "invalid duration declarations cannot mutate the catalog")
 }
 
-func TestCheckoutOrderRenewalAPIContract(t *testing.T) {
+// An order line states its price's renewal and access terms, in process and
+// through NewRemote alike.
+func TestOrderLineRenewalAPIContract(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.start()
 	product, err := w.client[remote].CreateProduct(t.Context(), billing.CreateProductParams{
-		Key: "renewal-choice", DisplayName: "Order renewal", Entitlements: []string{"content:renewal-choice"},
+		Key: "renewal-terms", DisplayName: "Order renewal", Entitlements: []string{"content:renewal-terms"},
 	})
 	require.NoError(t, err)
 	price, err := w.client[remote].CreatePrice(t.Context(), billing.CreatePriceParams{
@@ -165,25 +167,10 @@ func TestCheckoutOrderRenewalAPIContract(t *testing.T) {
 		BillingIntervalHours: new(720), AccessDurationHours: new(72),
 	})
 	require.NoError(t, err)
-	customer := w.newCustomer()
-	for _, choice := range []*bool{nil, new(true), new(false)} {
-		wantRenew := choice == nil || *choice
-		for _, tp := range []topology{embedded, remote} {
-			link, err := w.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
-				Customer: customer.identity(), PriceID: price.ID, AutoRenew: choice,
-			})
-			require.NoError(t, err)
-			session := hostedSession{w: w, id: link.ID}
-			plan := session.read()["plan"].(map[string]any)
-			require.Equal(t, wantRenew, plan["auto_renew"])
-			require.EqualValues(t, 720, plan["billing_interval_hours"])
-			require.EqualValues(t, 72, plan["access_duration_hours"])
-		}
-		body := map[string]any{"price_id": price.ID.String()}
-		if choice != nil {
-			body["auto_renew"] = *choice
-		}
-		session := customer.session(body)
-		require.Equal(t, wantRenew, session.read()["plan"].(map[string]any)["auto_renew"])
+	for _, tp := range []topology{embedded, remote} {
+		sold, err := w.newCustomer().sell(tp, order{price: price.ID})
+		require.NoError(t, err)
+		line := sold.order.Lines[0]
+		require.Equal(t, []any{720, 72}, []any{*line.BillingIntervalHours, *line.AccessDurationHours}, tp)
 	}
 }

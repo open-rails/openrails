@@ -30,7 +30,7 @@ func TestCopiedDatabaseIsReadonlyUntilArmed(t *testing.T) {
 	w.settle()
 	require.Len(t, e.providerLedger(), 1, "a copy charges no renewal")
 	require.Equal(t, end, e.periodEnd())
-	paid, err := buyer.checkout(embedded, order{price: pid(e.price), rail: "nmi", method: card, successURL: "https://e2e.test/return"})
+	paid, err := buyer.checkout(embedded, order{price: pid(e.price), rail: "nmi", method: card})
 	require.True(t, err != nil || paid.Status != "succeeded", "a copy sells nothing")
 	require.Len(t, e.providerLedger(), 1, "nothing is charged")
 

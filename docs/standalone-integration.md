@@ -280,7 +280,7 @@ only, never on another merchant's data.
 ### Frontend integration
 
 Your users' browsers call OpenRails' self-service surface (`/v1/me/*`:
-entitlements, subscriptions, payment methods, checkout sessions, orders) **directly**, using
+entitlements, subscriptions, payment methods, orders) **directly**, using
 a short-lived access token with scope `openrails:self` that your
 identity provider mints for OpenRails — your session tokens never leave your
 trust domain. The token contract and checkout flows are in

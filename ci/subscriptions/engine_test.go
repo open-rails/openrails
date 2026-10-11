@@ -670,7 +670,7 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			price := w.membership("content:members", 9_990_000)
 			c := w.newCustomer()
 			declined := c.saveCard(rail, card{Brand: "visa", Last4: "0002", Decline: map[string]string{"stripe": "insufficient_funds", "nmi": "202"}[rail]})
-			paid, err := c.checkout(embedded, order{price: price.ID, rail: rail, method: declined, successURL: "https://e2e.test/return"})
+			paid, err := c.checkout(embedded, order{price: price.ID, rail: rail, method: declined})
 			t.Logf("pay: %+v %v", paid, err)
 			w.settle()
 			w.until(func() bool { return w.latestAttemptStatus(c.id) == "failed" }, "the declined enrollment resolves as failed")
@@ -678,35 +678,41 @@ func TestEngineInitialDeclineResolves(t *testing.T) {
 			require.NoError(t, err)
 			require.Empty(t, subs.Items)
 			require.False(t, c.entitled("content:members"))
+			// The declined order stays open: the customer pays it with another card.
 			fresh := c.saveCard(rail, visa)
-			c.subscribeAgain(embedded, rail, price.ID.String(), "content:members", fresh)
+			again, err := paid.sale.buy(c, order{rail: rail, method: fresh})
+			require.NoError(t, err)
+			require.Equal(t, "succeeded", again.Status, "%+v", again.Order)
+			w.settle()
 			require.True(t, c.entitled("content:members"))
 		})
 	}
 }
 
 // An initial payment awaiting issuer authentication that the buyer abandons
-// must not hold the product hostage: once the checkout lapses the engine
-// closes the payment, and the buyer can enroll again.
+// must not hold the product hostage: once the attempt lapses the engine
+// closes the payment, and the buyer pays the order with another card.
 func TestEngineAbandonedAuthenticationReleases(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	price := w.membership("content:members", 9_990_000)
 	c := w.newCustomer()
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
-	paid, err := c.checkout(embedded, order{price: price.ID, rail: "stripe", method: challenged, successURL: "https://e2e.test/return"})
+	paid, err := c.checkout(embedded, order{price: price.ID, rail: "stripe", method: challenged})
 	require.NoError(t, err)
-	require.Equal(t, "requires_action", paid.Status, "the issuer challenges the buyer: %+v", paid.CheckoutSessionPayResult)
-	require.NotNil(t, paid.Operation, "the page authenticates the payment")
-	attempt := paid.session.attemptID()
+	require.Equal(t, "requires_action", paid.Status, "the issuer challenges the buyer: %+v", paid.Order)
+	require.Equal(t, "authenticate", paid.NextAction.Type, "the customer authenticates the payment")
+	attempt := paid.sale.attemptID()
 	w.settle()
 	w.advance(2 * day)
 	w.refreshProviders()
 	w.wake()
 	w.until(func() bool { return w.attemptStatus(attempt) == "failed" }, "the abandoned challenge fails the enrollment")
 	require.Len(t, w.stripe.Mutations("/v1/payment_intents/"), 1, "the challenged payment itself is closed, once")
-	fresh := c.saveCard("stripe", visa)
-	c.subscribeAgain(embedded, "stripe", price.ID.String(), "content:members", fresh)
+	again, err := paid.sale.buy(c, order{rail: "stripe", method: c.saveCard("stripe", visa)})
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", again.Status, "%+v", again.Order)
+	w.settle()
 	require.True(t, c.entitled("content:members"))
 	require.Len(t, w.stripe.ledger(""), 1, "only the second card was charged")
 }
@@ -766,10 +772,16 @@ func TestEngineNMIDuplicateRefusal(t *testing.T) {
 		c := w.newCustomer()
 		method := c.saveCard("nmi", visa)
 		w.nmi.RefuseDuplicates(1)
-		paid, err := c.checkout(embedded, order{price: price.ID, rail: "nmi", method: method, successURL: "https://e2e.test/return"})
+		s, err := c.sell(embedded, order{price: price.ID})
+		require.NoError(t, err)
+		paid, err := s.buy(c, order{rail: "nmi", method: method})
 		t.Logf("pay: %+v %v", paid, err)
 		w.until(func() bool { return w.latestAttemptStatus(c.id) == "failed" }, "the refused enrollment resolves")
-		c.subscribeAgain(embedded, "nmi", price.ID.String(), "content:members", method)
+		// The order stays open: paying it again enrolls.
+		paid, err = s.buy(c, order{rail: "nmi", method: method, key: "retry-" + uuid.NewString()})
+		require.NoError(t, err)
+		require.Equal(t, "succeeded", paid.Status, "%+v", paid)
+		w.settle()
 		require.Len(t, w.nmi.ledger(""), 1)
 		require.True(t, c.entitled("content:members"))
 	})
@@ -1017,20 +1029,17 @@ func TestOneTimeAbandonedAuthenticationReleases(t *testing.T) {
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 4_990_000, Currency: "USD"})
 	require.NoError(t, err)
 	c := w.newCustomer()
-	buy := func(method string) *sessionPaid {
-		paid, err := c.checkout(embedded, order{price: price.ID, rail: "stripe", method: method, successURL: "https://e2e.test/return"})
-		require.NoError(t, err)
-		return paid
-	}
 	challenged := c.saveCard("stripe", card{Brand: "visa", Last4: "3155", Decline: "auth"})
-	first := buy(challenged)
-	require.Equal(t, "requires_action", first.Status, "%+v", first.CheckoutSessionPayResult)
+	first, err := c.checkout(embedded, order{price: price.ID, rail: "stripe", method: challenged})
+	require.NoError(t, err)
+	require.Equal(t, "requires_action", first.Status, "%+v", first.Order)
 	w.advance(2 * time.Hour)
 	w.until(func() bool {
-		status, doc := w.page(http.MethodGet, "/v1/checkout-sessions/"+first.session.id, "", nil)
-		return status == http.StatusOK && doc["status"] != "requires_action" && doc["status"] != "processing"
-	}, "the abandoned challenge ends the purchase")
-	again := buy(c.saveCard("stripe", visa))
+		status := first.sale.read(c).Status
+		return status != "requires_action" && status != "processing"
+	}, "the abandoned challenge ends the attempt")
+	again, err := first.sale.buy(c, order{rail: "stripe", method: c.saveCard("stripe", visa)})
+	require.NoError(t, err)
 	w.settle()
 	require.True(t, c.entitled("content:post"), "status %s", again.Status)
 	require.Len(t, w.stripe.ledger(""), 1)

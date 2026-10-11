@@ -96,6 +96,7 @@ func payNMIInvoice(ctx context.Context, r *world, c *customer, invoice billing.O
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", key)
+	req.Header.Set("X-Forwarded-For", c.ip)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return invoiceAnswer{err: err}
@@ -370,12 +371,13 @@ func TestNMIInvoiceReplicaCrashAfterProviderCommit(t *testing.T) {
 		require.Eventually(t, func() bool {
 			reply := payNMIInvoice(t.Context(), r, c, invoice, method, "crashed")
 			require.NoError(t, reply.err)
-			if reply.status == http.StatusConflict && strings.Contains(string(reply.body), billing.CodeIdempotencyKeyInUse) {
+			if reply.status == http.StatusConflict && strings.Contains(string(reply.body), billing.CodeIdempotencyKeyInUse) ||
+				reply.status == http.StatusTooManyRequests { // Paying is limited per address.
 				return false
 			}
 			require.Equal(t, http.StatusOK, reply.status, string(reply.body))
 			return true
-		}, time.Minute, 500*time.Millisecond)
+		}, 2*time.Minute, 3*time.Second)
 	}
 	requireInvoicePaidOnce(f, invoice, 1, 1, nmiInvoiceAmount, 0)
 }

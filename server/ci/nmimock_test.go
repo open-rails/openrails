@@ -3,8 +3,10 @@
 package ci_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/google/uuid"
@@ -52,7 +54,16 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: as.Client.Authenticator(), Prefix: "/billing"}))
 	do := func(method, path string, body any, want int) map[string]any {
 		t.Helper()
-		w := call(t, mux, customer, method, "/billing/v1/me"+path, "", body)
+		var payload bytes.Buffer
+		if body != nil {
+			require.NoError(t, json.NewEncoder(&payload).Encode(body))
+		}
+		r := httptest.NewRequest(method, "/billing/v1/me"+path, &payload)
+		r.Header.Set("Authorization", "Bearer "+customer)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Idempotency-Key", uuid.NewString())
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
 		require.Equal(t, want, w.Code, "%s %s: %s", method, path, w.Body.String())
 		var out map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
@@ -62,16 +73,8 @@ func TestHostNMIFakeSavedCardSale(t *testing.T) {
 	card := nmimock.Card{Brand: "visa", Last4: "4242"}
 	method := do(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "token": gateway.Tokenize(card),
 		"billing_details": map[string]any{"name": "Host Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}, http.StatusCreated)["id"]
-	session := do(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID}, http.StatusCreated)["id"].(string)
-	var option any
-	for _, raw := range do(http.MethodGet, "/checkout-sessions/"+session, nil, http.StatusOK)["options"].([]any) {
-		if o := raw.(map[string]any); o["rail"] == "nmi" {
-			option = o["id"]
-		}
-	}
-	require.NotNil(t, option, "the session offers the NMI PSP")
-	paid := do(http.MethodPost, "/checkout-sessions/"+session+"/pay", map[string]any{"option_id": option, "payment_method_id": method}, http.StatusOK)
-	require.Equal(t, "succeeded", paid["status"], "%v", paid)
+	paid := do(http.MethodPost, "/orders", map[string]any{"lines": []any{map[string]any{"price_id": price.ID}}, "expected_total": "4990000", "payment": map[string]any{"payment_method_id": method}}, http.StatusCreated)
+	require.Equal(t, "complete", paid["status"], "%v", paid)
 
 	sale := gateway.LastSale()
 	require.NotNil(t, sale)

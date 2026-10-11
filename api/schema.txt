@@ -62,6 +62,7 @@ migration 0058_customer_link_account_index.up.sql sha256:3cb9305805d37f9800c383e
 migration 0059_payment_authority_events.up.sql sha256:08cc0d1a8136eb105ec16ffd5f1b40ea768005126809c414ce69fa044c87935e
 migration 0060_checkout_ui_mode.up.sql sha256:131f7e20e0a12d75b7fcacec2a06211b9f1b7ed0664fbad59f8e3fd087f8e393
 migration 0061_usage_orders.up.sql sha256:25aebf6b45129dec964eb9f0c148f653da7c17d0177d17929b5a21792a53414f
+migration 0062_drop_checkout_sessions.up.sql sha256:382f3a65cea76992fbe02cf0d0e17361465201a650b688a03eb8fab9c3644641
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -336,35 +337,6 @@ table billing.checkout_attempts
   index CREATE UNIQUE INDEX checkout_attempts_psp_id_transaction_id_key ON billing.checkout_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL))
   index CREATE INDEX checkout_attempts_subscription_id_idx ON billing.checkout_attempts USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   index CREATE UNIQUE INDEX checkout_attempts_transaction_id_key ON billing.checkout_attempts USING btree (transaction_id) WHERE ((rail = 'solana'::text) AND (transaction_id IS NOT NULL) AND (deleted_at IS NULL))
-
-table billing.checkout_sessions
-  column merchant_id uuid NOT NULL
-  column id_hash bytea NOT NULL
-  column customer_id uuid NOT NULL
-  column price_id uuid NOT NULL
-  column offer jsonb NOT NULL
-  column success_url text
-  column origin text
-  column attempt integer NOT NULL DEFAULT 0
-  column attempt_id uuid
-  column expires_at timestamp with time zone NOT NULL
-  column purge_at timestamp with time zone NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint checkout_sessions_attempt_check CHECK ((attempt >= 0))
-  constraint checkout_sessions_attempt_id_fkey FOREIGN KEY (merchant_id, attempt_id) REFERENCES billing.checkout_attempts(merchant_id, id) ON DELETE CASCADE
-  constraint checkout_sessions_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
-  constraint checkout_sessions_id_hash_check CHECK ((octet_length(id_hash) = 32))
-  constraint checkout_sessions_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint checkout_sessions_origin_check CHECK ((origin <> ''::text))
-  constraint checkout_sessions_pkey PRIMARY KEY (merchant_id, id_hash)
-  constraint checkout_sessions_price_id_fkey FOREIGN KEY (merchant_id, price_id) REFERENCES billing.prices(merchant_id, id) ON DELETE CASCADE
-  constraint checkout_sessions_purge_check CHECK ((purge_at >= expires_at))
-  constraint checkout_sessions_success_url_check CHECK ((success_url <> ''::text))
-  index CREATE INDEX checkout_sessions_attempt_id_idx ON billing.checkout_sessions USING btree (merchant_id, attempt_id) WHERE (attempt_id IS NOT NULL)
-  index CREATE INDEX checkout_sessions_customer_id_idx ON billing.checkout_sessions USING btree (merchant_id, customer_id)
-  index CREATE INDEX checkout_sessions_id_hash_idx ON billing.checkout_sessions USING btree (id_hash)
-  index CREATE UNIQUE INDEX checkout_sessions_pkey ON billing.checkout_sessions USING btree (merchant_id, id_hash)
-  index CREATE INDEX checkout_sessions_purge_at_idx ON billing.checkout_sessions USING btree (purge_at)
 
 table billing.cost_observations
   column merchant_id uuid NOT NULL
@@ -3103,7 +3075,6 @@ function billing.guard_billing_restore_receipt()
                     'catalog_rate_cards',
                     'catalog_restore_receipts',
                     'checkout_attempts',
-                    'checkout_sessions',
                     'cost_observations',
                     'cost_qualifications',
                     'cost_refusals',

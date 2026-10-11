@@ -198,22 +198,6 @@ type BillingCheckoutAttempt struct {
 	OrderID *uuid.UUID
 }
 
-// One checkout session per row. id_hash is SHA-256 of the ocs_ id, which is the bearer credential and is never stored. offer is the offer as minted (plan, amount due, payment options with their PSP bindings). attempt numbers the current payment attempt and attempt_id is the checkout attempt it created; attempt advances only after that attempt failed terminally. Paying stops at expires_at; the row stays readable until purge_at so a late provider return can still be reconciled, then retention deletes it. Retention: rows are deleted at purge_at, 24 hours after the session expired.
-type BillingCheckoutSession struct {
-	MerchantID uuid.UUID
-	IDHash     []byte
-	CustomerID uuid.UUID
-	PriceID    uuid.UUID
-	Offer      []byte
-	SuccessUrl *string
-	Origin     *string
-	Attempt    int32
-	AttemptID  *uuid.UUID
-	ExpiresAt  time.Time
-	PurgeAt    time.Time
-	CreatedAt  time.Time
-}
-
 // Append-only provider-neutral billing reads. Exact bounded raw bodies and OpenRails-canonical normalized records remain evidence; no row is a ledger movement. Retention: rows are deleted 90 days after their operation was settled or released, by the cleanup job only.
 type BillingCostObservation struct {
 	MerchantID              uuid.UUID

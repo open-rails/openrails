@@ -55,8 +55,6 @@ jobs:
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm check
       - run: pnpm exec playwright install --with-deps chromium
-      - name: Cross-origin checkout
-        run: pnpm test:browser
       - name: Generated contract matches this commit
         run: pnpm contract:check
       - name: E2E against this commit's OpenRails

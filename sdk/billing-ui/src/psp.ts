@@ -2,9 +2,6 @@
 // browser flow a PSP needs is decided here, never by the host.
 import { z } from "zod"
 
-import type { PaymentMethod } from "./client/types"
-import type { PaymentOption, SavedPaymentMethod } from "./types"
-
 export const pspConfigSchema = z.object({
   psp_id: z.string().min(1),
   /** The PSP's key. */
@@ -30,16 +27,6 @@ export const pspConfigSchema = z.object({
 })
 export type PspConfig = z.infer<typeof pspConfigSchema>
 
-const cardDrivers = new Set<PaymentOption["driver"]>([
-  "collect_js",
-  "card",
-  "stripe_elements",
-])
-
-/** Whether a rail takes a card in the page (saved or new). */
-export const isCardRail = (rail: PaymentOption): boolean =>
-  cardDrivers.has(rail.driver)
-
 /** PSPs that take new purchases and new cards. */
 export const checkoutPsps = (psps: readonly PspConfig[]): PspConfig[] =>
   psps.filter((psp) => psp.checkout !== false)
@@ -58,30 +45,6 @@ export function cardRetryAfter(psps: readonly PspConfig[]): number | null {
     )
     .map((psp) => psp.retry_after ?? 30)
   return waits.length > 0 ? Math.min(...waits) : null
-}
-
-/** Saved cards the checkout can charge in place, for the given rails, newest first. */
-export function savedMethodsFor(
-  methods: readonly PaymentMethod[],
-  rails: readonly PaymentOption[]
-): SavedPaymentMethod[] {
-  const recent = [...methods].sort((a, b) =>
-    (b.created_at ?? "").localeCompare(a.created_at ?? "")
-  )
-  return recent.flatMap((method) => {
-    const rail = rails.find(
-      (item) => (item.psp_id ?? item.id) === method.psp_id && isCardRail(item)
-    )
-    if (!rail || method.health?.active === false) return []
-    return [
-      {
-        id: method.id,
-        option_id: rail.id,
-        rail: rail.rail,
-        card: method.card ?? null,
-      },
-    ]
-  })
 }
 
 export type CardSetupDriver = "collect_js" | "card" | "stripe_elements"
@@ -112,21 +75,3 @@ export const canSavePaymentMethod = (psp: PspConfig): boolean =>
 /** Whether a pending payment on this PSP can be authenticated in the page. */
 export const canAuthenticatePayment = (psp: PspConfig): boolean =>
   cardSetupDriver(psp) === "stripe_elements"
-
-/** The PSP config behind a checkout rail, for card setup and authentication. */
-export function railPsp(rail: PaymentOption): PspConfig {
-  return {
-    psp_id: rail.psp_id ?? rail.id,
-    key: rail.psp_key ?? rail.rail,
-    rail: rail.rail,
-    custodian: "psp",
-    display_name: "",
-    flow:
-      rail.driver === "stripe_elements"
-        ? "elements"
-        : rail.driver === "card"
-          ? "card"
-          : "tokenize",
-    config: rail.public_config ?? null,
-  }
-}

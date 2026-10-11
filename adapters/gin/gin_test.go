@@ -90,7 +90,7 @@ func TestInventoryMountsNatively(t *testing.T) {
 		{http.MethodHead, "/api/pay/v1/config", http.StatusOK},
 		{http.MethodPost, "/api/pay/v1/admin/product-access", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXYZ/balance", http.StatusMethodNotAllowed},
-		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
+		{http.MethodOptions, "/api/pay/v1/config", http.StatusNoContent},
 		{http.MethodGet, "/api/payment/v1/config", http.StatusTeapot},
 	} {
 		w := serve(engine, tc.method, tc.path, nil)
@@ -144,17 +144,6 @@ func TestSubtreeRouteMountsAtTheRoot(t *testing.T) {
 	require.Error(t, nilBundle.Mount(engine))
 	require.Error(t, (&Bundle{}).Mount(nil))
 	require.ErrorContains(t, Mount(engine, nil, openrails.Routes{}), "client")
-}
-
-// A client that serves no payment page lets only itself frame one.
-func TestCheckoutFramePolicy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	engine := gin.New()
-	engine.GET("/checkout", CheckoutFramePolicy(nil), func(c *gin.Context) { c.String(http.StatusOK, "page") })
-	w := httptest.NewRecorder()
-	engine.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/checkout", nil))
-	require.Equal(t, "frame-ancestors 'self'", w.Header().Get("Content-Security-Policy"))
-	require.Equal(t, "page", w.Body.String())
 }
 
 var testMerchant = billing.MerchantID(uuid.MustParse("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"))

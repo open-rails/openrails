@@ -7,88 +7,60 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/require"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/stretchr/testify/require"
 )
 
-// A chosen deposit is frozen before handing checkout to another app. Paying
-// and replaying use the existing card-sale path and mint one lot per purchase.
-func TestHostedCreditDepositSnapshot(t *testing.T) {
-	app, pay := hostedHosts(t, nil)
-	client := app.client[embedded]
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "api-credit", DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
-	require.NoError(t, err)
-	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "deposit", Currency: "USD", CustomerAmount: &catalog.CustomerAmount{MinAmount: 1_000_000, MaxAmount: 500_000_000}})
-	require.NoError(t, err)
-	buyer := app.newCustomer()
-	method := buyer.saveCard("nmi", visa)
-
-	for _, tp := range []topology{embedded, remote} {
-		for _, amount := range []*int64{nil, new(int64(0)), new(int64(999_999)), new(int64(500_010_000)), new(int64(100_000_001))} {
-			_, err := app.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: buyer.identity(), PriceID: price.ID, Amount: amount})
-			require.ErrorIs(t, err, billing.ErrInvalid, tp)
-		}
-	}
-	require.Empty(t, pay.nmi.Sales(), "invalid selections cannot reach a provider")
-	for i, amount := range []int64{100_000_000, 75_000_000} {
-		link, err := app.client[[]topology{embedded, remote}[i]].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: buyer.identity(), PriceID: price.ID, Amount: &amount})
-		require.NoError(t, err)
-		session := hostedSession{w: pay, id: link.ID}
-		require.Equal(t, []string{"100000000", "75000000"}[i], session.read()["due_today"])
-		body := map[string]any{"option_id": session.option("nmi"), "payment_method_id": method}
-		changed := map[string]any{"option_id": session.option("nmi"), "payment_method_id": method, "amount": "1000000"}
-		status, _ := session.payAs(buyer, changed)
-		require.Equal(t, http.StatusBadRequest, status, "the payment form cannot change the minted amount")
-		status, paid := session.payAs(buyer, body)
-		require.Equal(t, http.StatusOK, status, "%v", paid)
-		require.Equal(t, "succeeded", paid["status"])
-		status, replay := session.payAs(buyer, body)
-		require.Equal(t, http.StatusOK, status, "%v", replay)
-		require.Equal(t, paid["payment_id"], replay["payment_id"])
-		pay.settle()
-		require.Equal(t, []string{"100.00", "75.00"}[i], pay.nmi.LastSale().Amount)
-	}
-	require.Len(t, pay.nmi.Sales(), 2, "separate deposits are repeat-buyable and retries do not charge twice")
-	grants, err := client.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: buyer.cid()})
-	require.NoError(t, err)
-	require.Len(t, grants.Items, 2)
-	for _, grant := range grants.Items {
-		require.NotNil(t, grant.ExpiresAt)
-		require.WithinDuration(t, app.clock.Now().Add(365*24*time.Hour), *grant.ExpiresAt, time.Second)
-	}
-	current, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
-	require.NoError(t, err)
-	require.Zero(t, current.UnitAmount, "each deposit must leave the shared offer unchanged")
-	require.Zero(t, current.Version, "deposits are not catalog price versions")
-}
-
-// The selected amount is the session's, fixed at mint: a retried pay replays
-// the deposit and cannot silently become a different-sized one.
-func TestCreditDepositAttemptIdempotency(t *testing.T) {
+// Each deposit is its own merchant order, its chosen amount frozen when the
+// order is created: a pay naming another total is refused, a replayed pay
+// charges once, and every deposit mints its own lot.
+func TestCreditDepositOrders(t *testing.T) {
 	w := newWorld(t)
 	client := w.client[embedded]
-	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "deposit-replay", DisplayName: "API deposit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "api-credit", DisplayName: "API credit", CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}})
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "deposit", Currency: "USD", CustomerAmount: &catalog.CustomerAmount{MinAmount: 1_000_000, MaxAmount: 500_000_000}})
 	require.NoError(t, err)
 	buyer := w.newCustomer()
 	method := buyer.saveCard("nmi", visa)
-	deposit := order{price: price.ID, amount: new(int64(100_000_000)), rail: "nmi", method: method}
-	session, err := buyer.sell(embedded, deposit)
-	require.NoError(t, err)
-	require.Equal(t, "100000000", session.read()["due_today"])
-	result, err := session.buy(buyer, deposit)
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", result.Status)
-	replay, err := session.buy(buyer, deposit)
-	require.NoError(t, err)
-	require.Equal(t, result.PaymentID, replay.PaymentID)
-	for _, amount := range []any{"200000000", nil} {
-		status, out := session.payAs(buyer, map[string]any{"option_id": session.option("nmi"), "payment_method_id": method, "amount": amount})
-		require.Equal(t, http.StatusBadRequest, status, "the page cannot name another amount: %v", out)
+
+	for _, tp := range []topology{embedded, remote} {
+		for _, amount := range []*int64{nil, new(int64(0)), new(int64(999_999)), new(int64(500_010_000))} {
+			_, err := buyer.sell(tp, order{price: price.ID, amount: amount})
+			require.Error(t, err, tp)
+		}
 	}
-	w.settle()
-	require.Len(t, w.nmi.Sales(), 1, "only the original deposit was charged")
-	require.Equal(t, "100.00", w.nmi.LastSale().Amount)
+	require.Empty(t, w.nmi.Sales(), "invalid selections cannot reach a provider")
+	for i, amount := range []int64{100_000_000, 75_000_000} {
+		session, err := buyer.sell([]topology{embedded, remote}[i], order{price: price.ID, amount: &amount})
+		require.NoError(t, err)
+		require.Equal(t, amount, session.order.Total)
+		status, out := buyer.call(http.MethodPost, "/orders/"+session.order.ID.String()+"/pay", "other-"+uuid.NewString(),
+			map[string]any{"payment": map[string]any{"payment_method_id": method}, "expected_total": "1000000"})
+		require.Equal(t, http.StatusConflict, status, "a pay cannot change the frozen amount: %v", out)
+		require.Equal(t, billing.CodeOrderTotalChanged, errorCode(out))
+		paid, err := session.buy(buyer, order{method: method})
+		require.NoError(t, err)
+		require.Equal(t, "succeeded", paid.Status, "%+v", paid.Order)
+		replay, err := session.buy(buyer, order{method: method})
+		require.NoError(t, err)
+		require.Equal(t, paid.PaymentID, replay.PaymentID)
+		w.settle()
+		require.Equal(t, []string{"100.00", "75.00"}[i], w.nmi.LastSale().Amount)
+	}
+	require.Len(t, w.nmi.Sales(), 2, "separate deposits are repeat-buyable and retries do not charge twice")
+	grants, err := client.ListCreditGrants(t.Context(), billing.CreditGrantListParams{CustomerID: buyer.cid()})
+	require.NoError(t, err)
+	require.Len(t, grants.Items, 2)
+	for _, grant := range grants.Items {
+		require.NotNil(t, grant.ExpiresAt)
+		require.WithinDuration(t, w.clock.Now().Add(365*24*time.Hour), *grant.ExpiresAt, time.Second)
+	}
+	current, err := client.GetPrice(t.Context(), price.ID, billing.GetPriceParams{})
+	require.NoError(t, err)
+	require.Zero(t, current.UnitAmount, "each deposit must leave the shared offer unchanged")
+	require.Zero(t, current.Version, "deposits are not catalog price versions")
 }

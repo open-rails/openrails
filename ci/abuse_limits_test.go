@@ -13,6 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/open-rails/openrails/billing"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/helpers/auth"
@@ -83,7 +85,7 @@ func (in *abuseInstances) call(on http.Handler, method, path, addr string) *http
 
 // pay is a checkout payment on instance i: the checkout bucket, 10 a minute.
 func (in *abuseInstances) pay(i int, addr string) *httptest.ResponseRecorder {
-	return in.call(in.public[i%len(in.public)], http.MethodPost, "/v1/checkout-sessions/ocs_"+strings.ReplaceAll(uuid.NewString(), "-", "")+"/pay", addr)
+	return in.call(in.public[i%len(in.public)], http.MethodPost, "/v1/me/orders/"+billing.OrderID(uuid.New()).String()+"/pay", addr)
 }
 
 // remove is a destructive admin operation on instance i: five a minute.

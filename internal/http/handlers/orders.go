@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -36,7 +37,16 @@ func orderActor(r *httprequest.Request, present bool) *billingservice.OrderActor
 		r.ErrorCode(billing.CodeAuthenticationRequired, "")
 		return nil
 	}
-	return &billingservice.OrderActor{Customer: scope.Customer(), Principal: checkoutVerifiedPrincipal(r), ClientIP: r.ClientIP()}
+	ip := r.ClientIP()
+	if present && ip != "" {
+		addr, err := netip.ParseAddr(ip)
+		if err != nil || addr.Zone() != "" || addr.IsUnspecified() {
+			r.APIError(api.Coded(billing.CodeInvalidParam, "the forwarded client address is not an IP address"))
+			return nil
+		}
+		ip = addr.Unmap().String()
+	}
+	return &billingservice.OrderActor{Customer: scope.Customer(), Principal: checkoutVerifiedPrincipal(r), ClientIP: ip}
 }
 
 // orderKey is the request's Idempotency-Key, "" after answering a refusal.

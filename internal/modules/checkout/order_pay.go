@@ -94,8 +94,17 @@ func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*mod
 	if len(prices) == 0 || len(prices) != len(products) {
 		return []OrderOption{}, nil
 	}
-	var out []OrderOption
+	// Routing reads each price's PSP links, which a quote's rows lack.
+	linked := make([]*models.Price, len(prices))
 	for i, price := range prices {
+		copied := *price
+		linked[i] = &copied
+	}
+	if err := s.db.LoadPricePSPBindings(ctx, linked, nil); err != nil {
+		return nil, err
+	}
+	var out []OrderOption
+	for i, price := range linked {
 		decision, err := s.Route(ctx, RoutingInput{Price: price, Product: products[i], Mode: checkoutModeForRail(price, "")})
 		if err != nil && !errors.Is(err, ErrNoRoutableProcessor) {
 			return nil, err
@@ -751,8 +760,20 @@ func (h *NMISaleIntentHandler) completeOrder(ctx context.Context, d *db.DB, in g
 		if _, err := h.Sale.Orders.Paid(ctx, d, p.OrderID, paid); err != nil {
 			return err
 		}
-		if err := recordSaleAttempt(ctx, d, in, p, customer, method, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &p.PaymentID}, now); err != nil {
+		// The payment names the subscription an order of one bought; so does
+		// its attempt.
+		payment, err := d.Gen(ctx).GetPaymentByID(ctx, gen.GetPaymentByIDParams{MerchantID: in.MerchantID, ID: p.PaymentID})
+		if err != nil {
 			return err
+		}
+		if err := recordSaleAttempt(ctx, d, in, p, customer, method, attempts.Attempt{Approved: true, TransactionID: receipt.TransactionID(), PaymentID: &p.PaymentID, SubscriptionID: payment.SubscriptionID}, now); err != nil {
+			return err
+		}
+		// The agreements the charge stored on its card name its attempt.
+		if method != nil {
+			if err := d.Gen(ctx).LinkMandateStoringAttempt(ctx, gen.LinkMandateStoringAttemptParams{MerchantID: in.MerchantID, PaymentMethodID: *method, PspID: *in.PspID, InitialTransactionID: storing}); err != nil {
+				return err
+			}
 		}
 		evidence["transaction_id"], evidence["payment_id"] = receipt.TransactionID(), p.PaymentID.String()
 		return nil
@@ -838,7 +859,9 @@ func orderFailure(rail string, evidence map[string]any) *billing.PaymentFailure 
 		if code == "" || code == "0" {
 			code = evidenceText(evidence, "response_code")
 		}
-		reason = decline.Classify(rail, code).Reason
+		// The gateway's AVS and CVV letters name the field to correct.
+		reason = decline.ClassifyEvidence(decline.Evidence{Rail: rail, Code: code,
+			AVS: evidenceText(evidence, "avs_response"), CVV: evidenceText(evidence, "cvv_response")}).Reason
 		if decline.ProviderFault(reason) {
 			reason = billing.DeclineProcessingError
 		}

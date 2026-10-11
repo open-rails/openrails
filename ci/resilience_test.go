@@ -139,7 +139,7 @@ func sign(t *testing.T, rt *openrails.Client) ([]byte, error) {
 
 // solanaSession sells a new one-time price, or a recurring one on the
 // merchant's plan published on chain, while the Solana rail is armed.
-func solanaSession(t *testing.T, client *openrails.Client, chain *solanafake.Node, signer solanago.PublicKey) *checkoutSession {
+func solanaSession(t *testing.T, client *openrails.Client, chain *solanafake.Node, signer solanago.PublicKey) *purchase {
 	t.Helper()
 	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "sol-" + uuid.NewString()[:8], DisplayName: "Solana", Entitlements: []string{"content:sol"}})
 	require.NoError(t, err)
@@ -153,18 +153,16 @@ func solanaSession(t *testing.T, client *openrails.Client, chain *solanafake.Nod
 	}
 	price, err := client.CreatePrice(t.Context(), params)
 	require.NoError(t, err)
-	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"}, ProductKey: product.Key, PriceKey: price.Key, SuccessURL: "https://e2e.test/success",
-	})
+	session, err := sell(t, client, sale{customer: cid(uuid.NewString()), price: price.ID})
 	require.NoError(t, err)
 	return session
 }
 
 // solanaPayStatus pays session's Solana option on client's payment page and
 // returns the HTTP status of the refusal (0 on success).
-func solanaPayStatus(t *testing.T, client *openrails.Client, session *checkoutSession) int {
+func solanaPayStatus(t *testing.T, client *openrails.Client, session *purchase) int {
 	t.Helper()
-	_, err := session.on(client).pay("solana", nil)
+	_, err := session.on(client).pay("pay-"+uuid.NewString(), map[string]any{"token_symbol": "DUSD"})
 	var status *billing.StatusError
 	if err == nil {
 		return 0
@@ -184,14 +182,12 @@ func stripeCheckout(t *testing.T, client *openrails.Client) {
 	require.NoError(t, err)
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "reader@example.test"}, ProductKey: product.Key, PriceKey: price.Key, SuccessURL: "https://e2e.test/success",
-	})
+	session, err := sell(t, client, sale{customer: cid(uuid.NewString()), price: price.ID})
 	require.NoError(t, err)
-	paid, err := session.pay("stripe", nil)
+	paid, err := session.pay("pay-1", redirect("https://e2e.test/success"))
 	require.NoError(t, err)
-	require.NotNil(t, paid.NextAction, "%+v", paid)
-	require.Equal(t, "redirect_to_url", paid.NextAction.Type)
+	require.NotNil(t, paid.Payment.NextAction, "%+v", paid)
+	require.Equal(t, "redirect_to_url", paid.Payment.NextAction.Type)
 }
 
 // First boot with Vault, Redis and the NMI posture probe all unavailable: the

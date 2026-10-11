@@ -81,9 +81,9 @@ func TestRenewalIsAnOrder(t *testing.T) {
 		require.Len(t, mine.body["data"], 2, "the customer reads their renewals")
 		events, err := w.client[tp].ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventOrderCompleted})
 		require.NoError(t, err)
-		renewed := 0
+		renewals, renewed := e.renewalOrders(), 0
 		for _, ev := range events.Items {
-			if ev.Order != nil && ev.Order.CustomerID.String() == e.c.id {
+			if ev.Order != nil && slices.ContainsFunc(renewals, func(o billing.Order) bool { return o.ID == ev.Order.OrderID }) {
 				renewed++
 			}
 		}

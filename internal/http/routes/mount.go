@@ -205,7 +205,7 @@ func (e *Env) gates(route Route) []router.Middleware {
 	}
 	var mw []router.Middleware
 	switch route.Auth {
-	case AuthPublic, AuthSessionID, AuthProvider:
+	case AuthPublic, AuthProvider:
 		mw = conn
 	case AuthProvisioning:
 		if e.SCIMMerchant.IsZero() {
@@ -216,8 +216,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		if route.AppWrite() {
 			mw = append(mw, e.appRequestReplay(route))
 		}
-	case AuthCheckoutSession:
-		mw = append([]router.Middleware{middleware.CheckoutSessionMerchant(e.Runtime), e.checkoutViewer(route)}, conn...)
 	case AuthCustomer:
 		mw = e.customerGates(route)
 		if e.checkout {
@@ -238,12 +236,6 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(mw, conn...)
 	default:
 		panic(MountError{Route: route.Key(), Reason: "declares no auth tier"})
-	}
-	switch route.Throttle {
-	case ThrottleSessionRead:
-		mw = append(mw, middleware.CheckoutSessionRateLimit(e.Runtime, "checkout-session-read", middleware.CheckoutSessionReadsPerMinute))
-	case ThrottleSessionPay:
-		mw = append(mw, middleware.CheckoutSessionRateLimit(e.Runtime, "checkout-session-pay", middleware.CheckoutSessionPaysPerMinute))
 	}
 	if checked := checkedParams(route.Query); len(checked) > 0 {
 		mw = append(mw, strictQueryMW(checked))
@@ -416,12 +408,11 @@ func RegisterCheckoutRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	env.mount(rr, "", func(r Route) bool { return r.Checkout != "" })
 }
 
-// checkoutLimit bounds the reads and the pays under one checkout URL, as a
-// checkout session's are.
+// checkoutLimit bounds the reads and the pays under one checkout URL.
 func (e *Env) checkoutLimit(route Route) router.Middleware {
-	bucket, perMinute := "checkout-url-read", middleware.CheckoutSessionReadsPerMinute
+	bucket, perMinute := "checkout-url-read", middleware.CheckoutURLReadsPerMinute
 	if route.Method != GET {
-		bucket, perMinute = "checkout-url-pay", middleware.CheckoutSessionPaysPerMinute
+		bucket, perMinute = "checkout-url-pay", middleware.CheckoutURLPaysPerMinute
 	}
 	return middleware.CheckoutURLRateLimit(e.Runtime, bucket, perMinute, func(r *httprequest.Request) string {
 		c, _ := hostedcheckout.FromContext(r.Request.Context())

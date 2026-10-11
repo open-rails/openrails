@@ -53,7 +53,6 @@ func TestClientRequestShapes(t *testing.T) {
 		"/v1/admin/entitlements":     `{"data":[{"customer_id":"` + customer + `","entitlement":"pro"}],"next_cursor":null}`,
 		"/v1/app/entitlements/check": `{"entitlements":{"pro":true,"team":false}}`,
 	})
-	who := billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.MustParse(customer))}
 	expires := time.Now().Add(time.Hour)
 	typedCustomer := billing.CustomerID(uuid.MustParse(customer))
 	cases := []struct {
@@ -64,17 +63,6 @@ func TestClientRequestShapes(t *testing.T) {
 		query  string
 		check  func(t *testing.T, body map[string]any)
 	}{
-		{"checkout session", func() error {
-			_, err := client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: who, ProductKey: "pro", PriceKey: "pro-monthly"})
-			return err
-		}, http.MethodPost, "/v1/admin/checkout-sessions", "", func(t *testing.T, b map[string]any) {
-			require.Equal(t, "pro-monthly", b["price_key"])
-			require.Equal(t, who.ID.String(), b["customer"].(map[string]any)["id"])
-		}},
-		{"checkout options for a price", func() error {
-			_, err := client.ListCheckoutOptions(t.Context(), billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "pro-monthly"})
-			return err
-		}, http.MethodGet, "/v1/admin/checkout-options", "price_key=pro-monthly&product_key=pro", nil},
 		{"settings carry named policies and tier bindings", func() error {
 			revision := int64(1)
 			_, err := client.UpdateMerchantConfiguration(t.Context(), billing.UpdateMerchantConfigurationParams{ExpectedRevision: &revision, Settings: &billing.MerchantSettings{
@@ -282,22 +270,6 @@ func TestClientRefusesInvalidIdentifiersBeforeIO(t *testing.T) {
 		},
 		"price":        func() error { _, err := c.GetPrice(ctx, billing.PriceID{}, billing.GetPriceParams{}); return err },
 		"update price": func() error { _, err := c.UpdatePrice(ctx, billing.PriceID{}, billing.UpdatePriceParams{}); return err },
-		"checkout options": func() error {
-			_, err := c.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{PriceID: billing.PriceID(uuid.New()), PriceKey: "k"})
-			return err
-		},
-		"checkout options without a price": func() error {
-			_, err := c.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{})
-			return err
-		},
-		"checkout customer": func() error {
-			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{PriceKey: "k"})
-			return err
-		},
-		"checkout price": func() error {
-			_, err := c.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}})
-			return err
-		},
 		"access list customer": func() error {
 			_, err := c.ListProductAccess(ctx, billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{{}}})
 			return err

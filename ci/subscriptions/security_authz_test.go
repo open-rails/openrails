@@ -215,18 +215,18 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	require.Empty(t, list.Items)
 
 	// Merchant B cannot sell merchant A's price, or charge merchant A's saved card.
-	_, err = r.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: e.c.identity(), PriceID: pid(e.price), SuccessURL: "https://e2e.test/return"})
+	_, err = e.c.sellWith(ctx, r.client, order{price: pid(e.price)})
 	require.Error(t, err)
 	own := r.client
 	product, err := own.CreateProduct(ctx, billing.CreateProductParams{Key: "rival-" + uuid.NewString()[:8], DisplayName: "Rival", Entitlements: []string{"content:rival"}})
 	require.NoError(t, err)
 	rivalPrice, err := own.CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	link, err := own.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: e.c.identity(), PriceID: rivalPrice.ID, SuccessURL: "https://e2e.test/return"})
-	require.NoError(t, err)
 	// The same subject signed in at merchant B names merchant A's card.
 	there := &customer{w: w, id: e.c.id, token: r.auth.token(t, e.c.id)}
-	_, err = hostedSession{w: w, id: link.ID}.buyAt(r.server.URL, there, order{rail: "nmi", method: e.method})
+	rival, err := there.sellWith(ctx, own, order{price: rivalPrice.ID})
+	require.NoError(t, err)
+	_, err = rival.buyAt(r.server.URL, there, order{rail: "nmi", method: e.method})
 	require.Error(t, err, "a foreign merchant's saved card is not chargeable")
 	require.NotContains(t, err.Error(), "River", "refused by ownership, not by the headless harness")
 	require.Len(t, e.providerLedger(), 1, "nothing charged the member's card")

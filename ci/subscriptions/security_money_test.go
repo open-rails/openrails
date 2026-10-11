@@ -35,7 +35,7 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			// The engine refuses a price that does not grant an asserted
-			// entitlement; no session asserts one, but the check stands.
+			// entitlement; no order asserts one, but the check stands.
 			_, err := w.engineCheckout(c, checkout.CheckoutAttemptCreateRequest{
 				PriceID: cheap.ID.String(), Entitlement: "content:vip", OfferKind: billing.OfferRecurring,
 				Payment: checkout.CheckoutAttemptPaymentRequest{Rail: rail, PaymentMethodID: method},
@@ -55,12 +55,18 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			_, err = c.sell(embedded, order{price: archived.ID})
 			require.Error(t, err, "an archived price is not purchasable")
 
-			// The caller cannot name a currency or a quantity.
-			status, body := w.hostJSON(http.MethodPost, "/v1/admin/checkout-sessions", map[string]any{
-				"customer": map[string]any{"id": c.id}, "price_id": member.ID, "currency": "JPY", "quantity": 0,
+			// The caller cannot name a currency or a line's amount.
+			status, body := w.hostJSON(http.MethodPost, "/v1/app/orders", map[string]any{
+				"customer_id": c.id, "lines": []any{map[string]any{"price_id": member.ID}}, "currency": "JPY",
 			})
 			require.Equal(t, http.StatusBadRequest, status, "%v", body)
 			code, _ := errorOf(body)
+			require.Equal(t, billing.CodeUnknownField, code)
+			status, body = w.hostJSON(http.MethodPost, "/v1/app/orders", map[string]any{
+				"customer_id": c.id, "lines": []any{map[string]any{"price_id": member.ID, "unit_amount": "1"}},
+			})
+			require.Equal(t, http.StatusBadRequest, status, "%v", body)
+			code, _ = errorOf(body)
 			require.Equal(t, billing.CodeUnknownField, code)
 
 			c.mustCheckout(embedded, order{price: member.ID, rail: rail, method: method})
@@ -91,19 +97,14 @@ func TestSecurityConcurrentPermanentPurchaseChargesOnce(t *testing.T) {
 			require.NoError(t, err)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			// Each purchase is its own session, minted and paid on one process.
+			// Each purchase is its own order, created and paid on one process.
 			buy := func(mint *openrails.Client, server string) error {
-				link, err := mint.CreateCheckoutSession(context.WithoutCancel(t.Context()), billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price.ID})
-				if err != nil {
-					return err
-				}
 				ctx := context.WithoutCancel(t.Context())
-				session := hostedSession{w: w, id: link.ID}
-				option, err := session.optionOf(ctx, server, rail)
+				session, err := c.sellWith(ctx, mint, order{price: price.ID})
 				if err != nil {
 					return err
 				}
-				return succeeded(session.payAt(ctx, server, option, c, order{method: method}))
+				return succeeded(session.payAt(ctx, server, c, order{method: method}))
 			}
 			g := w.chargeGate(rail)
 			var first, racers sync.WaitGroup

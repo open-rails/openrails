@@ -5,7 +5,6 @@ package subscriptions_test
 import (
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"testing"
 
@@ -20,9 +19,9 @@ import (
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
-// Checkout offers a rail iff its PSP is armed and the rail can make that kind
-// of new sale (#1078). Each option carries the browser driver and public
-// values billing-ui renders; hosts pass options through.
+// An order offers a PSP iff it is armed and its rail can make that kind of
+// new sale: a card PSP takes saved and new cards, Stripe also its hosted page
+// and Solana a wallet for one-time lines.
 
 // applyCatalog applies one product with the given prices map YAML (keys at
 // two spaces) through the merchant catalog application, as a host does at
@@ -46,13 +45,15 @@ products:
 	return key, err
 }
 
-func (w *world) options(selection billing.CheckoutOptionListParams) map[string]billing.CheckoutOption {
+// options are an order's payment options for price, by rail, as the
+// merchant's preview reads them.
+func (w *world) options(price billing.PriceID) map[string]billing.OrderPaymentOption {
 	w.t.Helper()
-	options, err := w.client[remote].ListCheckoutOptions(w.t.Context(), selection)
+	preview, err := w.client[remote].PreviewOrder(w.t.Context(), billing.PreviewOrderParams{CustomerID: w.newCustomer().cid(), Lines: []billing.OrderLineParams{{PriceID: price}}})
 	require.NoError(w.t, err)
-	out := map[string]billing.CheckoutOption{}
-	for _, option := range options.Items {
-		out[string(option.Rail)] = option
+	out := map[string]billing.OrderPaymentOption{}
+	for _, option := range preview.PaymentOptions {
+		out[option.Rail] = option
 	}
 	return out
 }
@@ -83,11 +84,6 @@ func withSolana(t *testing.T, w *world) (*solanafake.Node, solanago.PrivateKey) 
 func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 	w := prepareWorld(t, 12)
 	fake, merchant := withSolana(t, w)
-	declared := w.declare
-	w.declare = func(psps map[string]openrails.PSPConfig) {
-		declared(psps)
-		delete(psps["stripe"].Settings, "publishable_key")
-	}
 	w.start()
 
 	plan, err := fake.Plan(merchant.PublicKey(), 4242, solanafake.DevnetDUSDMint, 23_000_000, monthHours)
@@ -111,39 +107,27 @@ func TestCheckoutOffersSolanaWhenConfigured(t *testing.T) {
 `, plan))
 	require.NoError(t, err)
 
-	monthly := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-monthly"})
-	solana, ok := monthly["solana"]
-	require.True(t, ok, "Solana recurring is offered: %+v", monthly)
-	require.Equal(t, "subscription", solana.Mode)
-	require.Equal(t, "solana_pay", solana.Driver)
-	require.Equal(t, map[string]string{"token_symbol": "DUSD", "token_name": "Dev USD", "network": "devnet"}, solana.PublicConfig)
-	require.Equal(t, "collect_js", monthly["nmi"].Driver, "NMI enrolls in the page: %+v", monthly["nmi"])
-	require.Equal(t, "e2e-tokenization", monthly["nmi"].PublicConfig["tokenization_key"])
-	require.Contains(t, monthly, "stripe", "Stripe stays routable")
-	require.Empty(t, monthly["stripe"].Driver, "no publishable key: the browser cannot enroll a Stripe subscription")
+	monthly := w.options(pid(priceID(t, w, key, key+"-monthly")))
+	require.NotContains(t, monthly, "solana", "Solana sells one-time lines only: %+v", monthly)
+	require.Equal(t, []string{"saved_card", "new_card"}, monthly["nmi"].Accepts)
+	require.Equal(t, []string{"saved_card", "new_card"}, monthly["stripe"].Accepts, "a recurring line is no Stripe hosted sale")
 	require.NotContains(t, monthly, "ccbill", "CCBill never enrolls a new subscription")
 
-	once := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-once"})
-	require.Equal(t, "one_off", once["solana"].Mode)
-	require.Equal(t, "solana_pay", once["solana"].Driver)
-	require.Equal(t, "DUSD", once["solana"].PublicConfig["token_symbol"], "first accepted stablecoin")
-	require.Equal(t, "redirect", once["stripe"].Driver, "one-time Stripe uses hosted Checkout")
-	require.Equal(t, "collect_js", once["nmi"].Driver)
+	once := w.options(pid(priceID(t, w, key, key+"-once")))
+	require.Equal(t, []string{"solana_pay"}, once["solana"].Accepts)
+	require.Equal(t, []string{"saved_card", "new_card", "redirect"}, once["stripe"].Accepts, "one-time Stripe also sells on hosted Checkout")
+	require.Equal(t, []string{"saved_card", "new_card"}, once["nmi"].Accepts)
 	require.NotContains(t, once, "ccbill")
 
-	// The advertised Solana option is sellable: a subscription session opens
-	// a Solana Pay request for the published plan.
+	// The offered Solana option is sellable: the order answers a Solana Pay
+	// transaction request.
 	buyer := w.newCustomer()
-	paid, err := buyer.checkout(embedded, order{price: pid(priceID(t, w, key, key+"-monthly")), rail: "solana", successURL: "https://e2e.test/return"})
+	paid, err := buyer.checkout(embedded, order{price: pid(priceID(t, w, key, key+"-once")), rail: "solana"})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", paid.Status)
-	require.NotNil(t, paid.NextAction, "%+v", paid.CheckoutSessionPayResult)
+	require.NotNil(t, paid.NextAction, "%+v", paid.Order)
 	require.Equal(t, "solana_pay", paid.NextAction.Type)
-	attempt := paid.session.attemptID()
-	var mode string
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT mode FROM billing.checkout_attempts WHERE id = $1`), attempt.UUID()).Scan(&mode))
-	require.Equal(t, "subscription", mode)
-	require.True(t, strings.HasPrefix(*paid.NextAction.URL, "solana:https://e2e.test/billing/v1/checkout-attempts/"+attempt.String()+"/solana-pay"), "%+v", paid.NextAction)
+	require.True(t, strings.HasPrefix(*paid.NextAction.URL, "solana:https://e2e.test/billing/v1/orders/"+paid.Order.ID.String()+"/solana-pay"), "%+v", paid.NextAction)
 }
 
 func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
@@ -163,7 +147,7 @@ func TestCheckoutOmitsSolanaWhenNotConfigured(t *testing.T) {
 `)
 	require.NoError(t, err)
 	for _, price := range []string{key + "-monthly", key + "-once"} {
-		options := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: price})
+		options := w.options(pid(priceID(t, w, key, price)))
 		require.NotContains(t, options, "solana", price)
 		require.Contains(t, options, "nmi", price)
 		require.Contains(t, options, "stripe", price)
@@ -185,19 +169,19 @@ func TestCCBillNeverSellsNewSubscriptions(t *testing.T) {
         recurring_billing_option_id: "%s"
 `, ccbillFormName, ccbillFlexID, ccbillRBO))
 	require.NoError(t, err, "armed engine rails sell the price on local terms")
-	options := w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-monthly"})
+	options := w.options(pid(priceID(t, w, key, key+"-monthly")))
 	require.NotContains(t, options, "ccbill")
 	require.Contains(t, options, "nmi")
 
+	// The order takes no payment on CCBill: no option names it.
 	buyer := w.newCustomer()
-	session, err := buyer.sell(embedded, order{price: pid(priceID(t, w, key, key+"-monthly")), successURL: "https://e2e.test/return"})
+	session, err := buyer.sell(embedded, order{price: pid(priceID(t, w, key, key+"-monthly"))})
 	require.NoError(t, err)
-	for _, raw := range session.read()["options"].([]any) {
-		require.NotEqual(t, "ccbill", raw.(map[string]any)["rail"], "a CCBill PSP is never offered a new subscription")
+	for _, option := range session.order.PaymentOptions {
+		require.NotEqual(t, "ccbill", option.Rail, "a CCBill PSP is never offered a new subscription")
 	}
-	status, out := session.pay(map[string]any{"option_id": "option_ccbill"})
-	require.Equal(t, http.StatusUnprocessableEntity, status, "%v", out)
-	require.Equal(t, "checkout_request_invalid", hostedErrorCode(out))
+	_, err = session.buy(buyer, order{rail: "ccbill"})
+	require.Error(t, err, "CCBill sells nothing new")
 	var attempts int
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.checkout_attempts WHERE customer_id = $1`), buyer.id).Scan(&attempts))
 	require.Zero(t, attempts, "no attempt is made on CCBill")

@@ -2,9 +2,9 @@
 
 # Routes
 
-Every route of the HTTP API (186), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (177), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
-**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
+**Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
 **Permission** is, for a staff or programmatic route, the `Routes.Permissions` field the host's Auth checks; the route is mounted only when it is given.
 
@@ -26,10 +26,6 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/checkout-sessions/{id}` | checkout_session | — | — | 200 `CheckoutSession` |  |
-| POST | `/v1/checkout-sessions/{id}/pay` | checkout_session | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
-| GET | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | — | 200 `SolanaPayGetResponse` | when `solana` |
-| POST | `/v1/checkout-attempts/{id}/solana-pay` | session_id | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/orders/{id}/solana-pay` | public | — | — | 200 `SolanaPayGetResponse` | when `solana` |
 | POST | `/v1/orders/{id}/solana-pay` | public | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
 | GET | `/v1/catalog/products` | public | — | — | 200 `ListPage<Product>` |  |
@@ -40,9 +36,6 @@ A customer acting on its own account.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/me/checkout-sessions` | customer | — | `MintCheckoutSessionParams` | 201 `CheckoutSessionLink` |  |
-| GET | `/v1/me/checkout-sessions/{id}` | customer | — | — | 200 `CheckoutSession` |  |
-| POST | `/v1/me/checkout-sessions/{id}/pay` | customer | — | `PayCheckoutSessionParams` | 200 `CheckoutSessionPayResult` |  |
 | POST | `/v1/me/orders/preview` | customer | — | `PreviewMyOrderParams` | 200 `OrderPreview` |  |
 | POST | `/v1/me/orders` | customer | — | `CreateMyOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
 | GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |
@@ -86,8 +79,6 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/admin/checkout-sessions` | merchant | `AdminUpdate` | `CreateCheckoutSessionParams` | 201 `CheckoutSessionLink` | sensitive |
-| GET | `/v1/admin/checkout-options` | merchant | `AdminRead` | — | 200 `ListPage<CheckoutOption>` |  |
 | GET | `/v1/admin/orders` | merchant | `AdminRead` | — | 200 `ListPage<Order>` |  |
 | GET | `/v1/admin/orders/{id}` | merchant | `AdminRead` | — | 200 `Order` |  |
 | POST | `/v1/admin/orders/{id}/void` | merchant | `AdminUpdate` | — | 200 `Order` | sensitive; limit `destructive` |

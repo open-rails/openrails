@@ -144,8 +144,9 @@ describe("Offers", () => {
     ).toBeInTheDocument()
   })
 
-  it("checks out a price and calls onPaid once it succeeds", async () => {
+  it("orders a price and calls onPaid once the order is complete", async () => {
     const server = fakeBilling({ products: catalog() })
+    server.orderStatus = "complete"
     const onPaid = vi.fn()
     mount(
       <Offers
@@ -161,17 +162,16 @@ describe("Offers", () => {
 
     await waitFor(() =>
       expect(onPaid).toHaveBeenCalledWith(
-        expect.objectContaining({ status: "succeeded" })
+        expect.objectContaining({ status: "complete" })
       )
     )
-    expect(server.calls).toContain("POST /me/checkout-sessions")
-    expect(server.calls).toContain("GET /me/checkout-sessions/ocs_rent")
-    const mint = server.fetch.mock.calls.find(
+    expect(server.calls).toContain("POST /me/orders")
+    expect(server.calls).toContain("GET /me/orders/ord_price_rent")
+    const create = server.fetch.mock.calls.find(
       ([, init]) => init?.method === "POST"
     )!
-    expect(JSON.parse(String(mint[1]!.body))).toMatchObject({
-      product_key: "course-101",
-      price_key: "rent",
+    expect(JSON.parse(String(create[1]!.body))).toEqual({
+      lines: [{ price_id: "price_rent" }],
     })
   })
 
@@ -190,15 +190,12 @@ describe("Offers", () => {
     fireEvent.click(await screen.findByRole("button", { name: "$4.99" }))
 
     expect(onSignInRequired).toHaveBeenCalledOnce()
-    expect(server.calls).not.toContain("POST /me/checkout-sessions")
+    expect(server.calls).not.toContain("POST /me/orders")
   })
 
   it("asks the host to sign the visitor in on a 401", async () => {
     const server = fakeBilling({ products: catalog() })
-    server.fail["POST /me/checkout-sessions"] = apiError(
-      401,
-      "authentication_required"
-    )
+    server.fail["POST /me/orders"] = apiError(401, "authentication_required")
     const onSignInRequired = vi.fn()
     mount(
       <Offers
@@ -216,7 +213,7 @@ describe("Offers", () => {
 
   it("shows any other refusal", async () => {
     const server = fakeBilling({ products: catalog() })
-    server.fail["POST /me/checkout-sessions"] = apiError(
+    server.fail["POST /me/orders"] = apiError(
       404,
       "price_not_found",
       "That price is no longer on sale."

@@ -11,7 +11,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -48,7 +47,7 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 			require.Equal(t, tc.token, price.Currency)
 			require.Equal(t, tc.native, price.UnitAmount)
 			chain.prices = map[string]string{tc.token: price.ID.String()}
-			chain.rail = w.options(billing.CheckoutOptionListParams{ProductKey: productKey, PriceKey: productKey + "-native"})["solana"]
+			chain.rail = w.options(price.ID)["solana"]
 			buyer := w.newCustomer()
 			transfer := chain.checkoutIn(buyer, tc.token)
 			require.Equal(t, uint64(tc.native), transfer.amount, "same-token price is already in atomic chain units")

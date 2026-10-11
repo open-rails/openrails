@@ -28,7 +28,7 @@ Before the code:
 | Programmatic routes (`/v1/app`) admitting any application | Each mounts only with its permission and admits an application holding it: `Permissions.Entitlements` (`root:entitlements:read`), `Offers` (`root:catalog:read`), `Usage` (`root:usage:manage`), `Costs` (`root:costs:manage`), `Events` (`root:events:read`) ([auth](auth.md#permissions)) |
 | `server.MerchantRead`, `server.MerchantWrite`, `server.MerchantAdmin`, `server.MerchantMetrics` | `server.MerchantBillingRead`, `server.MerchantBillingManage`, `server.MerchantCatalogManage` and `server.MerchantConfigManage` (the one admin permission split), `server.MerchantMetricsRead`; a program on `/v1/app` holds `server.MerchantEntitlementsRead`, `server.MerchantCatalogRead`, `server.MerchantUsageManage`, `server.MerchantCostsManage` or `server.MerchantEventsRead` |
 | `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | Removed: OpenRails names no staff permissions. Give your own in `Routes.Permissions` (`AdminRead`, `AdminUpdate`, `Catalog`, `MerchantConfig`, `Metrics`); AuthKit checks a `root:` permission on root with no configuration |
-| `Config.HTTP` (`HTTPConfig` with `Checkout`, the customer routes, `Merchant`, the cookie origin); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `RouteGroups`, `Permissions`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New`. The shared payment page is `Config.Checkout` |
+| `Config.HTTP` (`HTTPConfig` with `Checkout`, the customer routes, `Merchant`, the cookie origin); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `RouteGroups`, `Permissions`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New` |
 | `Routes.Guards`, the `openrails.RouteSet` constants (level, resource and route groups); `Routes.Storefront`, `Routes.Customers` and the customer scopes (`CustomerSelfService`, …); `Routes.Merchant`, `Routes.MerchantConfig` | `Routes.RouteGroups` turns each group on and `Routes.Permissions{AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics}` names what its callers hold; OpenRails decides each admin route's level (read or update) |
 | `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
 | `VaultConfig.Enabled`; `vault.enabled` (env `VAULT_ENABLED`) on the standalone server | Removed: a non-nil `Config.Vault` (or `Deps.Vault`) connects to Vault; on the standalone server a `vault:` section or any `VAULT_*` setting declares it, and `vault.enabled` refuses boot |
@@ -193,15 +193,13 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 
 | Before | After |
 |---|---|
-| `CreateHostedCheckoutSession` | `client.CreateCheckoutSession(` with `billing.CreateCheckoutSessionParams` (`Customer`, `PriceID` or `ProductKey` + `PriceKey`, `AutoRenew`, `SuccessURL`), answering `billing.CheckoutSessionLink` |
-| `CreateCheckoutSession(…{PaymentOptions, Confirm, IdempotencyKey})`, `GetCheckoutSession`, `ConfirmCheckoutSession` | Removed: the customer pays a checkout session (`POST /v1/checkout-sessions/{id}/pay`) they minted themselves or `client.CreateCheckoutSession(` minted for them |
+| `CreateHostedCheckoutSession`, `CreateCheckoutSession(…)`, `GetCheckoutSession`, `ConfirmCheckoutSession` | `client.CreateOrder(` with `billing.CreateOrderParams` (`CustomerID`, `Lines`, `IdempotencyKey`): an unpaid order the customer pays signed in (`POST /v1/me/orders/{id}/pay`) |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
-| `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey` | `client.ListCheckoutOptions(` with `billing.CheckoutOptionListParams` |
+| `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey` | `client.PreviewOrder(`: the preview's `PaymentOptions` |
 | `GetCheckoutConfig(ctx)` | Removed: the public `GET /v1/config` carries the PSPs as its `payment` |
-| `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.CheckoutAttemptID`, `chk_` ids, `billing.CheckoutAttempt` |
+| `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.OrderID`, `ord_` ids, `billing.Order` |
 | `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
-| `CheckoutPaymentOptions.Card` | Removed: a Client never carries a card |
-| `CheckoutPaymentOptions.Rail` (a PSP key or a rail kind) and its flat `NameOnCard`, `Address1`, `Zip`, … | `billing.CheckoutPaymentOptions` with `PSP` (the PSP key; a rail kind is refused) and `BillingDetails` (`billing.BillingDetails`) |
+| `CheckoutPaymentOptions` (`Card`, `Rail`, flat `NameOnCard`, `Address1`, `Zip`, …) | Removed: a Client never pays; the customer's order payment names a saved card, a token with `billing.BillingDetails`, a Solana token or a return URL |
 | `CreatePaymentMethodSession`, `CreateSolanaCancelSession`, `CreateSolanaTierChangeSession` | Removed |
 
 ### Subscriptions
@@ -282,7 +280,7 @@ fields (`400 unknown_field`), and every error code is in
 
 - Customer treasury: every `/v1/customers/{customer_id}/…` route.
 - Browser checkout: `POST /v1/checkout`, `/v1/checkout/{id}`, `/v1/me/checkout`.
-  A browser buys through a checkout session (below).
+  A browser buys through an order.
 - `GET /v1/me/status`, `/v1/me/tier`, `/v1/me/products`: read
   `/v1/me/entitlements` and `/v1/me/subscriptions`.
 - PSP cutover and engine takeover routes.
@@ -321,8 +319,7 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
 | The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential or Host of another merchant is `409 merchant_binding_mismatch`; a missing permission `403 permission_required` |
 | `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; rails in `GET /v1/config` |
-| `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions` | `POST /v1/admin/checkout-sessions`, `POST /v1/me/checkout-sessions` |
-| `/v1/merchant/checkout-sessions…` (engine checkout) | Removed: a checkout session's `POST /v1/checkout-sessions/{id}/pay` |
+| `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions`, `/v1/merchant/checkout-sessions…` (engine checkout) | `POST /v1/app/orders` (an unpaid order for a customer), `POST /v1/me/orders` and `POST /v1/me/orders/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/credit-grants?customer_id=`, `/v1/admin/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
@@ -450,8 +447,8 @@ calendar ([data retention](operations.md#data-retention)):
 
 | Before | After |
 |---|---|
-| `createHttpSource`, `CheckoutSourceError` | `client.checkoutSource(id)` is the source of `<Checkout>`, `<CheckoutModal>` and `<CheckoutPage>` |
-| `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The session's `options`; `PaymentOption` |
+| `createHttpSource`, `CheckoutSourceError`, `<Checkout>`, `<CheckoutModal>` | `<OrderCheckout orderId>` pays an order; `<BuyButton>` creates and pays one |
+| `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The order's `payment_options` |
 | `getSolanaConfig()` | `getConfig()`; the network is `payment.solana.network` |
 | `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
@@ -479,7 +476,7 @@ up there.
 | `rail_intents`, `rail_mutation_logs` | `billing.provider_intents`, `billing.provider_mutation_logs` |
 | `rail_customer_accounts`, `rail_refresh_watermarks` | `billing.psp_customers`, `billing.psp_refresh_watermarks` |
 | `provider_billing_qualifications`, `provider_billing_observations` | `billing.cost_qualifications`, `billing.cost_observations` |
-| `checkout_sessions` (engine), `hosted_checkout_sessions` | `billing.checkout_attempts`, `billing.checkout_sessions` |
+| `checkout_sessions` (engine), `hosted_checkout_sessions` | `billing.checkout_attempts`, `billing.orders` |
 | `psps.evidence` (jsonb), `psps.replaced_at` | Columns on `billing.psps`: `settings`, `signer`, `credential_refs`, `revision`, `archived_at`; `key` is NOT NULL |
 | `subscriptions.user_email`; `cancelled_at`; status `cancelled` | The directory (`Deps.UserInfo`) or `customer_contacts.email`; `canceled_at`; `canceled` |
 | `customers.email`, `customers.username`, `customers.blocked` | `billing.customer_contacts` (`email`, `user_name`, `display_name`, `active`), the copy SCIM and token claims keep when OpenRails is not embedded beside the directory; none with `Deps.UserInfo` |

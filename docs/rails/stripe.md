@@ -168,21 +168,15 @@ alert-only — it reports drift and never mutates your Stripe objects.
 
 ### Checkout
 
-With a declared `publishable_key`, a checkout session's Stripe option has driver
-`stripe_elements`: the page makes a `pm_` with Stripe Elements, saves it with
-`POST /v1/me/payment-methods` (one SetupIntent OpenRails confirms, 3-D Secure
-answered in the page and confirmed), pays the session with that
-`payment_method_id`, and runs 3-D Secure in the page through `operation`. This is
-how Stripe subscriptions are sold.
+With a declared `publishable_key` the page takes a card in Stripe Elements: the
+`pm_` it makes pays an order as `payment: {token, psp_id}`, one PaymentIntent
+that charges and saves it, with 3-D Secure answered in the page through the
+order's `authenticate` next action and `confirm`. This is how Stripe
+subscriptions are sold. `POST /v1/me/payment-methods` saves a card without
+buying (one SetupIntent).
 
-Without one, a one-off price pays through a Stripe-hosted Checkout session: paying
-answers `next_action: {type: "redirect_to_url", url}`, and the buyer returns to
-the session's `success_url`. Completion arrives via `checkout.session.completed`
-(and the async-payment variants) on the webhook; the Stripe session carries the
-`checkout_attempt_id` metadata key.
-
-An order of one-time lines can be paid the same way: its Stripe option accepts
-`redirect`, and `payment: {return_url, psp_id?}` opens a payment-mode Checkout
+An order of one-time lines can also be paid on a Stripe-hosted Checkout
+session: its Stripe option accepts `redirect`, and `payment: {return_url, psp_id?}` opens a payment-mode Checkout
 Session for the order's total. The order answers `requires_action` with
 `next_action: {type: "redirect_to_url", url}`; the session's completion (its
 webhook, or `POST /v1/me/orders/{id}/confirm` reading it) completes the order,

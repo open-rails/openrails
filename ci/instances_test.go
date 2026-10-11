@@ -177,14 +177,11 @@ products:
 		price, err := instances[0].client.ListPrices(t.Context(), billing.PriceListParams{ProductKey: key, Key: key + "-once"})
 		require.NoError(t, err)
 		require.Len(t, price.Items, 1)
-		session, err := sell(t, instances[0].client, billing.CreateCheckoutSessionParams{
-			Customer: billing.CheckoutCustomerIdentity{ID: cid(buyer), VerifiedEmail: "buyer@example.test"},
-			PriceID:  price.Items[0].ID, SuccessURL: "https://e2e.test/success",
-		})
+		session, err := sell(t, instances[0].client, sale{customer: cid(buyer), price: price.Items[0].ID})
 		require.NoError(t, err)
-		paying, err := session.on(instances[1].client).pay("stripe", nil)
+		paying, err := session.on(instances[1].client).pay("pay-1", redirect("https://e2e.test/success"))
 		require.NoError(t, err)
-		require.Equal(t, "requires_action", paying.Status)
+		require.Equal(t, billing.OrderPaymentRequiresAction, paying.Payment.Status)
 		sessions := stripe.CheckoutSessions()
 		require.Len(t, sessions, 1)
 		_, err = stripe.CompleteCheckoutSession(t.Context(), sessions[0]["id"].(string))
@@ -226,7 +223,7 @@ products:
 		// Redis outlives the test: a fresh client address.
 		addr := fmt.Sprintf("198.18.%d.%d:4711", rand.IntN(256), 1+rand.IntN(254))
 		pay := func(in *instance) *httptest.ResponseRecorder {
-			req := httptest.NewRequest(http.MethodPost, "/v1/checkout-sessions/ocs_"+strings.ReplaceAll(uuid.NewString(), "-", "")+"/pay", strings.NewReader(`{}`))
+			req := httptest.NewRequest(http.MethodPost, "/v1/me/orders/"+billing.OrderID(uuid.New()).String()+"/pay", strings.NewReader(`{}`))
 			req.RemoteAddr = addr
 			req.Header.Set("Content-Type", "application/json")
 			rec := httptest.NewRecorder()

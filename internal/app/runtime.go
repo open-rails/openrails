@@ -37,7 +37,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -248,8 +247,6 @@ type Runtime struct {
 
 	CheckoutService        *checkout.CheckoutService
 	CheckoutAttemptService *checkout.CheckoutAttemptService
-	// CheckoutSessions stores checkout sessions (#1124).
-	CheckoutSessions *checkoutsession.Store
 	// Orders are purchases (#1168).
 	Orders *orders.Service
 	// Idempotency claims request keys (#1099).

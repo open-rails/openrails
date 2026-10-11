@@ -49,8 +49,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
   request authenticates and authorizes again. One key names one purchase:
   generate it when the buyer decides to buy, store it with the order, and send
   the same key on every retry of that request (timeouts, network errors,
-  restarts). A new key, or a new checkout session per click, is a new
-  purchase: a subscription or permanent product is refused as a duplicate, but
+  restarts). A new key is a new purchase: a subscription or permanent product is refused as a duplicate, but
   a timed pass is sold again (it starts when the previous one ends) and a
   credit pack grants its credits again.
 - **Discovery.** `GET /v1/config` (public, cacheable) is the deployment's
@@ -74,7 +73,7 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 | Routes | Credential |
 |---|---|
 | Public: `/v1/config`, `/v1/catalog/products` | none |
-| Checkout sessions: `/v1/checkout-sessions/{id}` | the session id (`ocs_…`) in the path |
+| Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
 | Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: the host's credential its permission admits. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
 | Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
@@ -104,8 +103,8 @@ sends no CORS headers.
 
 ## Checkout
 
-A browser buys through a checkout session: the customer mints it with their own
-credential, or the merchant with its own. See [checkout](commerce.md).
+A browser buys through an order its customer pays with their own credential;
+the merchant's backend may create one for them. See [checkout](commerce.md).
 
 ## Public configuration
 
@@ -133,8 +132,8 @@ an `ETag`). It holds what a browser needs before anything else:
   resend the request with the token in `token_header`. Null when the
   deployment challenges nobody.
 
-`GET /v1/admin/checkout-options` lists, for a `price_id` or a `product_key`
-and `price_key`, the options that can sell that price.
+An order's `payment_options`, and a preview's, list the PSPs that can take its
+lines.
 
 ## Subscriptions
 

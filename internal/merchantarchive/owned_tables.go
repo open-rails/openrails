@@ -15,7 +15,6 @@ var ownedTables = []string{
 	"catalog_rate_cards",
 	"catalog_restore_receipts",
 	"checkout_attempts",
-	"checkout_sessions",
 	"cost_observations",
 	"cost_qualifications",
 	"cost_refusals",

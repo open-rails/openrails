@@ -34,12 +34,6 @@ export type OpenRailsErrorCode =
   | "checkout_embed_origins_required"
   | "checkout_expired"
   | "checkout_not_found"
-  | "checkout_offer_unavailable"
-  | "checkout_payment_in_progress"
-  | "checkout_request_invalid"
-  | "checkout_session_expired"
-  | "checkout_session_not_found"
-  | "checkout_session_unavailable"
   | "credential_expired"
   | "credential_revoked"
   | "credit_grant_held"
@@ -52,7 +46,6 @@ export type OpenRailsErrorCode =
   | "customer_email_required"
   | "customer_not_found"
   | "customer_payment_unsupported"
-  | "customer_proof_required"
   | "customer_session_required"
   | "dashboard_invalid"
   | "database_busy"
@@ -245,12 +238,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   checkout_embed_origins_required: { status: 400, type: "invalid_request_error", meaning: "An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins." },
   checkout_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout URL expired; the merchant creates a new order." },
   checkout_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout URL is unknown or no longer valid." },
-  checkout_offer_unavailable: { status: 422, type: "invalid_request_error", meaning: "The purchase is not available." },
-  checkout_payment_in_progress: { status: 409, type: "invalid_request_error", meaning: "A payment on this checkout session is already being processed." },
-  checkout_request_invalid: { status: 422, type: "invalid_request_error", meaning: "The checkout request is invalid." },
-  checkout_session_expired: { status: 410, type: "invalid_request_error", meaning: "The checkout session expired." },
-  checkout_session_not_found: { status: 404, type: "invalid_request_error", meaning: "The checkout session does not exist." },
-  checkout_session_unavailable: { status: 403, type: "authorization_error", meaning: "The checkout session is not available to this caller." },
   credential_expired: { status: 401, type: "authentication_error", meaning: "The credential has expired." },
   credential_revoked: { status: 401, type: "authentication_error", meaning: "The credential or its session was revoked." },
   credit_grant_held: { status: 409, type: "invalid_request_error", meaning: "Active holds need the grant's remaining credit." },
@@ -263,7 +250,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   customer_email_required: { status: 400, type: "invalid_request_error", meaning: "The rail needs the customer's verified email and username." },
   customer_not_found: { status: 404, type: "invalid_request_error", meaning: "The customer does not exist." },
   customer_payment_unsupported: { status: 400, type: "invalid_request_error", meaning: "Customer-present payment is unsupported for this rail or method." },
-  customer_proof_required: { status: 403, type: "authorization_error", meaning: "A saved card is charged only on a checkout session its customer pays, signed in; mint one instead." },
   customer_session_required: { status: 403, type: "authorization_error", meaning: "The operation needs the customer's interactive session." },
   dashboard_invalid: { status: 400, type: "invalid_request_error", meaning: "The dashboard is invalid; metadata.errors lists why." },
   database_busy: { status: 503, type: "api_error", meaning: "No database connection is available; retry shortly." },

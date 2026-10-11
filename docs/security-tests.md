@@ -62,8 +62,7 @@ unless noted.
   not that the account id belongs to it. NMI events are HMAC-signed with the
   claimer's own secret, so a squatter cannot receive or forge the owner's
   events; the owner's operator can still reassign the id.
-- Checkout sessions keep 403 for another customer's session: ids are random
-  UUIDs, so the distinction reveals nothing enumerable.
+- Another customer's order is 404: an order id is never a credential.
 - Webhook routes must load an account's secret before verifying its HMAC. The
   `webhook` rate-limit bucket bounds that work, and every refusal answers
   alike.

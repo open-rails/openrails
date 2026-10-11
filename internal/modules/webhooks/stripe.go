@@ -1148,6 +1148,7 @@ func (s *StripeWebhookService) handleStripeDisputeWon(ctx context.Context, dispu
 			CustomerID:        original.CustomerID,
 			PriceID:           original.PriceID,
 			SubscriptionID:    original.SubscriptionID,
+			OrderID:           original.OrderID,
 			RefundedPaymentID: &original.ID,
 			Rail:              original.Rail,
 			TransactionID:     recoveryID,

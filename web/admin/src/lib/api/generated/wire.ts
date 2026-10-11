@@ -409,24 +409,6 @@ export type CheckEntitlementsParams = {
   at?: string
 }
 
-export type CheckoutCustomerIdentity = {
-  id?: string
-  verified_email?: string
-  username?: string
-  client_ip?: string
-}
-
-export type CheckoutOption = {
-  psp: string
-  psp_id: string
-  rail: "ccbill" | "nmi" | "solana" | "stripe"
-  mode: string
-  driver?: string
-  public_config?: Record<string, string>
-  status?: string
-  retry_after?: number
-}
-
 export type CheckoutRoutingMatch = {
   currency?: string
   product?: string
@@ -438,79 +420,6 @@ export type CheckoutRoutingMatch = {
 export type CheckoutRoutingRule = {
   match?: CheckoutRoutingMatch
   prefer: string[]
-}
-
-export type CheckoutSession = {
-  id: string
-  status: string
-  merchant: CheckoutSessionMerchant
-  plan: CheckoutSessionPlan
-  line_items: CheckoutSessionLineItem[]
-  tax: string | null
-  due_today: string | null
-  options: CheckoutSessionOption[]
-  saved_methods: CheckoutSessionSavedMethod[]
-  next_action: NextAction | null
-  operation: PaymentOperation | null
-  payment_id: string | null
-  subscription_id: string | null
-  failure_message: string | null
-  failure: PaymentFailure | null
-  success_url: string | null
-  embed_origin: string | null
-  expires_at: string
-}
-
-export type CheckoutSessionLineItem = {
-  label: string
-  sublabel: string | null
-  amount: string
-}
-
-export type CheckoutSessionLink = {
-  id: string
-  url: string | null
-  expires_at: string
-}
-
-export type CheckoutSessionMerchant = {
-  display_name: string
-}
-
-export type CheckoutSessionOption = {
-  id: string
-  psp_id: string
-  rail: string
-  mode: string
-  driver: string
-  public_config: Record<string, string> | null
-}
-
-export type CheckoutSessionPayResult = {
-  status: string
-  next_action: NextAction | null
-  operation: PaymentOperation | null
-  payment_id: string | null
-  subscription_id: string | null
-  failure_message: string | null
-  failure: PaymentFailure | null
-}
-
-export type CheckoutSessionPlan = {
-  auto_renew: boolean
-  display_name: string
-  unit_amount: string
-  currency: string
-  unit_decimals: number
-  billing_interval_hours: number | null
-  access_duration_hours: number | null
-}
-
-export type CheckoutSessionSavedMethod = {
-  id: string
-  option_id: string
-  rail: string
-  card: CardDetails | null
 }
 
 export type CloseProviderOperationParams = {
@@ -526,16 +435,6 @@ export type CreateAlertWebhookParams = {
   url?: string
   format?: "discord" | "generic" | "slack"
   enabled?: boolean | null
-}
-
-export type CreateCheckoutSessionParams = {
-  customer?: CheckoutCustomerIdentity
-  price_id?: string
-  price_key?: string
-  product_key?: string
-  amount?: string
-  auto_renew?: boolean
-  success_url?: string
 }
 
 export type CreateCreditGrantBatchParams = {
@@ -1269,15 +1168,6 @@ export type MetricsSchema = {
   query_shape: string
 }
 
-export type MintCheckoutSessionParams = {
-  price_id?: string
-  price_key?: string
-  product_key?: string
-  amount?: string
-  auto_renew?: boolean
-  success_url?: string
-}
-
 export type NetworkLink = {
   link: CustomerLink
   merchant: PublicMerchant
@@ -1595,15 +1485,6 @@ export type PackagePrice = {
   amount?: string
   package_size?: number
   free_units?: number
-}
-
-export type PayCheckoutSessionParams = {
-  option_id?: string
-  payment_method_id?: string
-  payment_token?: string
-  card?: CardEntry
-  billing_details?: BillingDetails
-  token_symbol?: string
 }
 
 export type PayOrderParams = {

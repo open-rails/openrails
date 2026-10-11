@@ -310,6 +310,12 @@ func (s *Service) fulfil(ctx context.Context, d *db.DB, order *Order, line gen.B
 		if err := q.SetOrderLineProduced(ctx, gen.SetOrderLineProducedParams{MerchantID: order.MerchantID, ID: line.ID, SubscriptionID: &sub.ID}); err != nil {
 			return err
 		}
+		if len(order.Lines) == 1 && charge.PaymentID != uuid.Nil {
+			if err := q.SetPaymentSubscription(ctx, gen.SetPaymentSubscriptionParams{MerchantID: order.MerchantID, ID: charge.PaymentID, SubscriptionID: sub.ID,
+				PeriodStart: terms.PeriodStart.UTC().Format(time.RFC3339)}); err != nil {
+				return err
+			}
+		}
 	case len(line.CreditGrant) > 0 && string(line.CreditGrant) != "null":
 		credit, err := creditOf(line)
 		if err != nil {

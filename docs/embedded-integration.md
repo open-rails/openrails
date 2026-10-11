@@ -90,7 +90,6 @@ explicit:
 | `Database` | default `billing` | `Schema`: the Postgres schema of OpenRails' tables. `RiverSchema` (default `Schema` + `_river`): where OpenRails' River jobs live; `Start` runs them there, on its own client or the host's fleet (section 4). `New` creates or upgrades both. |
 | `Merchant` | no | The merchant this engine serves (section 5). |
 | `Catalog` | no | Optional startup batch, equivalent to calling `ApplyCatalog` once (section 5). Requires `Merchant`. |
-| `Checkout` | no | The shared payment page (`PageURL`, `EmbedOrigins`) when several sites sell through one (section 6). |
 | `Vault` | no | The Vault connection (or `Deps.Vault`). Its `KVMount` makes Vault the home of the merchant's configuration; without one, `Merchant` is. |
 | `PublicBillingBaseURL` | for callbacks and links | External billing mount, excluding `/v1`. |
 | `SMTP` | no | The built-in email sender: any SMTP server (`Host`, `Port`: 465 implicit TLS, else STARTTLS, 0 is 587; `Username`, `Password`; the deployment's `From`). SendGrid is `smtp.sendgrid.net` with username `apikey` and an API key as the password. Billing mail is sent from the merchant's profile `from_email` when it has one. Without it or `Deps.Email`, OpenRails sends no email. |
@@ -306,7 +305,7 @@ OpenRails asks it once per request and builds every gate from its answer, a
 
 | Call | OpenRails asks it |
 |---|---|
-| `Authenticate(r)` | on every customer, staff and programmatic route and the access read, once; on a checkout session only when a credential is presented, never to refuse |
+| `Authenticate(r)` | on every customer, staff and programmatic route and the access read, once |
 | `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
 | `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff route, with your permission for the route's group (`Routes.Permissions`) in `Routes.Scope`, checked live; without it the request holds nothing |
 | `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | then, when a person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An application has no sign-in to renew; a person whose credential has none (a personal API key) is refused 403 `step_up_unavailable` |
@@ -393,9 +392,9 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `Routes` | Exposed surface |
 |---|---|
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
-| (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup), products, prices, reading and paying [checkout sessions](api/commerce.md#checkout-sessions) by id, Solana Pay, the captcha, the customer routes (`/v1/me/*` for `Config.Merchant`) and signature-checked provider callbacks. A shared payment page is `Config.Checkout` (`PageURL`, `EmbedOrigins`) |
-| `Auth` | Your auth (above); required. A checkout session shows saved cards only to its own customer, admitted by it |
-| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations, checkout sessions; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
+| (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup), products, prices, Solana Pay, the customer routes (`/v1/me/*` for `Config.Merchant`, orders included) and signature-checked provider callbacks |
+| `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
+| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `Permissions.AdminRead`, updates `Permissions.AdminUpdate` |
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `Permissions.Catalog`. With `Config.Catalog`, the file skips what an edit changed |
 | `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs, settings, billing import and export, the dashboard layout; needs `Permissions.MerchantConfig` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
@@ -442,7 +441,6 @@ The shared concrete `*openrails.Client`, grouped by job:
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements` (programmatic), `ListEntitlements`, `ListProductAccess`, `CreateProductAccess`, `RevokeProductAccess` |
 | Catalog (API hosts) | `ListOffers` (programmatic: what a customer may buy, by entitlement or product key), `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride` |
-| Checkout | `CreateCheckoutSession`, `ListCheckoutOptions` |
 | Subscriptions | `GetSubscription`, `ListSubscriptions`, `CancelSubscription`, `ResumeSubscription`, `ChangeSubscription`, `PreviewSubscriptionChange`, `SetSubscriptionPaymentMethod`, `CreatePriceMigration`, `PreviewPriceMigration`, `ListPriceMigrations`, `GetPriceMigration`, `CancelPriceMigration` |
 | Orders | `CreateOrder`, `PreviewOrder`, `CancelOrder` (merchant orders: unpaid orders a customer pays on your site); `ListOrders`, `GetOrder` (staff read); `VoidOrder`, `MarkOrderUncollectible`, `RetryOrderCollection` (usage orders). Only the customer pays with a card they enter |
 | Payments | `GetPayment`, `ListPayments`, `CreatePayment` (money received outside OpenRails), `RefundPayment`, `ListPaymentAttempts`, `GetPaymentAttempt`, `ListRenewals`, `GetRenewal`, `ListPaymentMethods` |
@@ -477,8 +475,8 @@ constructor; the credential and transport options (`WithAPIKey`,
 `NewRemote` and `New` refuses them. Both modes default to a two-second call deadline;
 `openrails.WithTimeout(0)` explicitly delegates the deadline to the caller.
 
-Checkout sessions and attempts and checkout options use the shared client
-too. See [checkout](api/commerce.md).
+Orders and their previews use the shared client too. See
+[checkout](api/commerce.md).
 
 A host that must commit its own provider obligation atomically with the OpenRails
 authorization, release or settlement uses the embedded Client's `Tx` operations
@@ -578,10 +576,10 @@ team UI. Worker health is the host's `Client.Probes` (`openrails_job_progress`).
 
 ### Merchant checkout authority
 
-A customer usually starts a purchase with their own credential: their browser
-mints a checkout session at `/v1/me/checkout-sessions`. `Client.CreateCheckoutSession`
-mints one with the merchant's credential instead, in process or remote with a
-merchant API key your `AdminUpdate` admits, for a host whose own purchase
-rules decide what a customer may buy. Either way the customer pays it on the
-payment page, and paying with a saved card needs the customer's own proof
-(`403 customer_proof_required` otherwise): staff never buy for someone else.
+A customer usually buys with their own credential: their browser creates and
+pays an order at `/v1/me/orders`. `Client.CreateOrder` creates an unpaid order
+for them with the merchant's credential instead, in process or remote with an
+application key holding `Permissions.Orders`, for a host whose own purchase
+rules decide what a customer may buy. Either way only the customer pays it,
+signed in (billing-ui's `<OrderCheckout orderId>`): staff never buy for
+someone else.

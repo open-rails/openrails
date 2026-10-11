@@ -95,7 +95,6 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/credit-grants/{id}/revoke":                          write,
 		"GET /v1/admin/credit-grants":                                       read,
 		"GET /v1/admin/credit-grants/{id}":                                  read,
-		"POST /v1/admin/checkout-sessions":                                  write,
 		"GET /v1/admin/provider-operations/{operation_id}":                  read,
 		"GET /v1/admin/provider-operations":                                 read,
 		"POST /v1/admin/provider-operations/{operation_id}/close":           write,
@@ -240,14 +239,13 @@ func TestUserRoutes(t *testing.T) {
 		return routeKeys(table)
 	}
 	none := inventory(routesurface.ProviderRoutes{})
-	require.Subset(t, none, []string{"GET /v1/catalog/products",
-		"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay"})
+	require.Subset(t, none, []string{"GET /v1/catalog/products"})
 	for _, key := range none {
 		require.NotContains(t, key, "solana")
 		require.NotRegexp(t, `/v1/checkout(/|$)`, key, "no engine checkout door for browsers")
 	}
 	oneOff := inventory(routesurface.ProviderRoutes{Solana: true})
-	require.Subset(t, oneOff, []string{"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay"})
+	require.Subset(t, oneOff, []string{"POST /v1/orders/{id}/solana-pay"})
 	for _, key := range inventory(routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}) {
 		require.NotContains(t, key, "/solana/recurring")
 	}

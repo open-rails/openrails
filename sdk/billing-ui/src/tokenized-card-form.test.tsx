@@ -76,6 +76,35 @@ describe("TokenizedCardForm", () => {
     expect(screen.getByRole("button", { name: "Save card" })).toBeDisabled()
     expect(save).toHaveBeenCalledTimes(1)
   })
+  it("takes another card once the host refused the first", async () => {
+    const pay = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true)
+    render(
+      <TokenizedCardForm
+        tokenizationKey="preview_fixture"
+        tokenizationURL="https://gateway.example/Collect.js"
+        submitLabel="Pay"
+        onTokenized={pay}
+      />
+    )
+    fireEvent.change(screen.getByLabelText("Name on card"), {
+      target: { value: "Pat Reader" },
+    })
+    fireEvent.change(screen.getByLabelText("Country"), {
+      target: { value: "US" },
+    })
+    fireEvent.change(screen.getByLabelText(/ZIP/), {
+      target: { value: "94107" },
+    })
+    fireEvent.click(screen.getByRole("button", { name: "Pay" }))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pay" })).toBeEnabled()
+    )
+    fireEvent.click(screen.getByRole("button", { name: "Pay" }))
+    await waitFor(() => expect(pay).toHaveBeenCalledTimes(2))
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Pay" })).toBeDisabled()
+    )
+  })
 })
 
 it.each(["key", "url", "consent"])(

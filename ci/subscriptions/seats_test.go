@@ -82,7 +82,7 @@ func TestSeats(t *testing.T) {
 		business := w.seatPrice(group, 2, 2000, catalog.Quantity{Min: 1, Max: 10})
 		c, sub := w.engineMember(rail, embedded, team)
 		current := w.subscription(embedded, sub)
-		require.Equal(t, seats(1), current.Quantity, "a session buys one seat")
+		require.Equal(t, seats(1), current.Quantity, "an order buys the price's minimum seats")
 		end := *current.CurrentPeriodEndsAt
 
 		// More seats: the added seats for the rest of the period, now.

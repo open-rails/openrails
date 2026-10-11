@@ -4,21 +4,24 @@ import { describe, expect, it, vi } from "vitest"
 
 import { BuyButton } from "./buy-button"
 import { createBillingClient } from "./client/client"
-import type { CheckoutModalProps } from "./modal"
+import type { Order } from "./client/types"
+import type { OrderModalProps } from "./modal"
 import { BillingProvider } from "./react/provider"
 import {
   apiError,
   fakeBilling,
+  json,
+  order,
   price,
   product,
   type FakeBilling,
 } from "./test/billing-server"
 
-// The checkout itself is Checkout's (checkout.test.tsx); here it records what
-// BuyButton hands it.
-const modals = vi.hoisted(() => [] as CheckoutModalProps[])
+// Paying is OrderCheckout's (order-checkout.test.tsx); here the modal records
+// what BuyButton hands it.
+const modals = vi.hoisted(() => [] as OrderModalProps[])
 vi.mock("./modal", () => ({
-  CheckoutModal: (props: CheckoutModalProps) => {
+  OrderModal: (props: OrderModalProps) => {
     modals.push(props)
     return <div role="dialog" />
   },
@@ -75,7 +78,7 @@ describe("BuyButton", () => {
     expect(server.calls).toContain("GET /catalog/products")
   })
 
-  it("asks the host to sign in, without a request, when it says the visitor is signed out", async () => {
+  it("asks the host to sign in, without an order, when it says the visitor is signed out", async () => {
     const server = fakeBilling({ products: [] })
     const onSignInRequired = vi.fn()
     const { tree, rerender } = mount(server)
@@ -93,15 +96,12 @@ describe("BuyButton", () => {
     )
     fireEvent.click(screen.getByRole("button", { name: "Rent" }))
     expect(onSignInRequired).toHaveBeenCalledOnce()
-    expect(server.calls).toEqual([])
+    expect(server.calls).not.toContain("POST /me/orders")
   })
 
   it("asks the host to sign in on a 401", async () => {
-    const server = fakeBilling({ products: [] })
-    server.fail["POST /me/checkout-sessions"] = apiError(
-      401,
-      "authentication_required"
-    )
+    const server = fakeBilling({ products: [course()] })
+    server.fail["POST /me/orders"] = apiError(401, "authentication_required")
     const onSignInRequired = vi.fn()
     const { tree, rerender } = mount(server)
     rerender(
@@ -115,14 +115,14 @@ describe("BuyButton", () => {
         />
       )
     )
-    fireEvent.click(screen.getByRole("button", { name: "Rent" }))
+    fireEvent.click(await enabled("Rent"))
     await waitFor(() => expect(onSignInRequired).toHaveBeenCalledOnce())
     expect(screen.queryByRole("dialog")).toBeNull()
   })
 
-  it("checks out on the customer's surface and calls onPaid only on success", async () => {
+  it("creates the customer's order and calls onPaid once it is complete", async () => {
     modals.length = 0
-    const server = fakeBilling({ products: [] })
+    const server = fakeBilling({ products: [course()] })
     const onPaid = vi.fn()
     const { tree, rerender } = mount(server)
     rerender(
@@ -131,33 +131,46 @@ describe("BuyButton", () => {
           product="course-101"
           price="rent"
           label="Rent"
+          returnUrl="https://app.test/back"
           onPaid={onPaid}
           onSignInRequired={vi.fn()}
         />
       )
     )
-    fireEvent.click(screen.getByRole("button", { name: "Rent" }))
+    fireEvent.click(await enabled("Rent"))
     await screen.findByRole("dialog")
-    const mint = server.fetch.mock.calls.find(
+    const create = server.fetch.mock.calls.find(
       ([, init]) => init?.method === "POST"
     )!
-    expect(JSON.parse(String(mint[1]!.body))).toMatchObject({
-      product_key: "course-101",
-      price_key: "rent",
+    expect(String(create[0])).toContain("/me/orders")
+    expect(JSON.parse(String(create[1]!.body))).toEqual({
+      lines: [{ price_id: "price_rent" }],
     })
+    const modal = modals.at(-1)!
+    expect(modal.orderId).toBe("ord_price_rent")
+    expect(modal.returnUrl).toBe("https://app.test/back")
 
-    // The source reads the session as the signed-in customer.
-    await modals.at(-1)!.source.getSession()
-    expect(server.calls).toContain("GET /me/checkout-sessions/ocs_rent")
-
-    modals.at(-1)!.onComplete!({ status: "requires_action" })
+    const paid = (status: string) => order({ status }) as unknown as Order
+    modal.onSettled!(paid("processing"))
     expect(onPaid).not.toHaveBeenCalled()
-    modals.at(-1)!.onComplete!({ status: "succeeded" })
-    expect(onPaid).toHaveBeenCalledExactlyOnceWith({ status: "succeeded" })
+    modal.onSettled!(paid("complete"))
+    expect(onPaid).toHaveBeenCalledOnce()
   })
 
   it("buys a customer-chosen deposit for exactly its amount", async () => {
-    const server = fakeBilling({ products: [] })
+    const deposit = product({
+      id: "prod_credit",
+      key: "api-credits",
+      prices: [
+        price(null, null, {
+          id: "price_deposit",
+          key: "deposit",
+          product_id: "prod_credit",
+          unit_amount: "0",
+        }),
+      ],
+    })
+    const server = fakeBilling({ products: [deposit] })
     const { tree, rerender } = mount(server)
     rerender(
       tree(
@@ -171,38 +184,75 @@ describe("BuyButton", () => {
         />
       )
     )
-    fireEvent.click(screen.getByRole("button", { name: "Add credits" }))
+    fireEvent.click(await enabled("Add credits"))
     await screen.findByRole("dialog")
-    const mint = server.fetch.mock.calls.find(
+    const create = server.fetch.mock.calls.find(
       ([, init]) => init?.method === "POST"
     )!
-    expect(JSON.parse(String(mint[1]!.body))).toEqual({
-      product_key: "api-credits",
-      price_key: "deposit",
-      amount: "100000000",
+    expect(JSON.parse(String(create[1]!.body))).toEqual({
+      lines: [{ price_id: "price_deposit", amount: "100000000" }],
     })
   })
 
-  it("keeps one checkout source while the tree re-renders", async () => {
+  it("resumes the unpaid order that already holds the purchase", async () => {
     modals.length = 0
-    const server = fakeBilling({ products: [] })
+    const server = fakeBilling({ products: [course()] })
+    server.fail["POST /me/orders"] = json(409, {
+      error: {
+        type: "invalid_request_error",
+        code: "already_owned",
+        message: "Another purchase of this awaits its payment.",
+        metadata: { owned_by: "ord_open", hint: "resume" },
+      },
+    })
     const { tree, rerender } = mount(server)
-    const button = (onPaid: () => void) =>
+    rerender(
+      tree(
+        <BuyButton
+          product="course-101"
+          price="purchase"
+          label="Buy"
+          onPaid={vi.fn()}
+          onSignInRequired={vi.fn()}
+        />
+      )
+    )
+    fireEvent.click(await enabled("Buy"))
+    await screen.findByRole("dialog")
+    expect(modals.at(-1)!.orderId).toBe("ord_open")
+  })
+
+  it("answers a second click with the same order", async () => {
+    const server = fakeBilling({ products: [course()] })
+    const { tree, rerender } = mount(server)
+    rerender(
       tree(
         <BuyButton
           product="course-101"
           price="rent"
           label="Rent"
-          onPaid={onPaid}
+          onPaid={vi.fn()}
           onSignInRequired={vi.fn()}
         />
       )
-    rerender(button(vi.fn()))
-    fireEvent.click(screen.getByRole("button", { name: "Rent" }))
+    )
+    fireEvent.click(await enabled("Rent"))
     await screen.findByRole("dialog")
-    rerender(button(vi.fn()))
-    rerender(button(vi.fn()))
-    expect(modals.length).toBeGreaterThan(1)
-    expect(new Set(modals.map((m) => m.source)).size).toBe(1)
+    modals.at(-1)!.onOpenChange(false)
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    fireEvent.click(await enabled("Rent"))
+    await screen.findByRole("dialog")
+    const keys = server.fetch.mock.calls
+      .filter(([, init]) => init?.method === "POST")
+      .map(([, init]) => new Headers(init!.headers).get("Idempotency-Key"))
+    expect(keys).toHaveLength(2)
+    expect(keys[0]).toBe(keys[1])
   })
 })
+
+// The button, once its price is read from the catalog.
+async function enabled(name: string) {
+  const button = await screen.findByRole("button", { name })
+  await waitFor(() => expect(button).toBeEnabled())
+  return button
+}

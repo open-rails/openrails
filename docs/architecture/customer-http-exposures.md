@@ -30,13 +30,8 @@ embedded API (`/billing` serves `/billing/v1/*`) and the admin console beside it
 (`/billing/admin`); a standalone server's routes, with their issuer-anchored
 AuthKit and console URLs, sit at the root.
 
-A checkout session's id alone pays it with a new card; a saved card needs its
-customer's proof. The session's customer reads and pays it at
-`/v1/me/checkout-sessions/{id}` and `/v1/me/checkout-sessions/{id}/pay` (beside
-`/v1/me/checkout-sessions`, which mints one), and the `Auth` is that proof. The
-session must be the request's merchant's and the identity's subject its
-customer; any other session is `checkout_session_not_found`, and only the
-customer acting in person pays (`customer_action_required`). billing-ui's
-`client.checkoutSource(id, { customerBase: prefix })` reads and pays there;
-without `customerBase` it uses the session id alone at
-`/v1/checkout-sessions/{id}`.
+An order is read and paid only by its own customer at `/v1/me/orders/{id}`
+and `/v1/me/orders/{id}/pay`, and the `Auth` is the proof: an order of another
+customer, or of another merchant than the request's, is `resource_not_found`,
+and only the customer acting in person pays (`customer_action_required`). The
+order id is not a credential.

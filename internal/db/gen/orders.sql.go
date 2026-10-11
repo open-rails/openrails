@@ -1561,6 +1561,31 @@ func (q *Queries) SetOrderPending(ctx context.Context, arg SetOrderPendingParams
 	return result.RowsAffected(), nil
 }
 
+const setPaymentSubscription = `-- name: SetPaymentSubscription :exec
+UPDATE billing.payments SET subscription_id = $1::uuid,
+    metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('period_start', $2::text)
+WHERE merchant_id = $3::uuid AND id = $4::uuid AND subscription_id IS NULL AND deleted_at IS NULL
+`
+
+type SetPaymentSubscriptionParams struct {
+	SubscriptionID uuid.UUID
+	PeriodStart    string
+	MerchantID     uuid.UUID
+	ID             uuid.UUID
+}
+
+// An order whose one line is a subscription: its payment is that
+// subscription's first, so refunds and disputes of it reach the subscription.
+func (q *Queries) SetPaymentSubscription(ctx context.Context, arg SetPaymentSubscriptionParams) error {
+	_, err := q.db.Exec(ctx, setPaymentSubscription,
+		arg.SubscriptionID,
+		arg.PeriodStart,
+		arg.MerchantID,
+		arg.ID,
+	)
+	return err
+}
+
 const startOrderAttempt = `-- name: StartOrderAttempt :execrows
 UPDATE billing.orders
 SET payment_status = 'requires_payment_method', attempt_id = $1::uuid, payment_method_id = $2::uuid,

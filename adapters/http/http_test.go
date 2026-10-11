@@ -87,7 +87,7 @@ func TestInventoryMountsNativelyUnderAPrefix(t *testing.T) {
 			{http.MethodHead, "/api/pay/v1/config", http.StatusOK},
 			{http.MethodPost, "/api/pay/v1/admin/product-access", http.StatusUnauthorized},
 			{http.MethodPost, "/api/pay/v1/admin/customers/entitlementsXbatch", http.StatusTeapot},
-			{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
+			{http.MethodOptions, "/api/pay/v1/config", http.StatusNoContent},
 			{http.MethodGet, "/api/pay/v1/unrelated", http.StatusTeapot},
 			{http.MethodGet, "/api/payment/v1/config", http.StatusTeapot},
 			{http.MethodGet, "/v1/config", http.StatusTeapot},

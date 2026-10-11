@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -17,84 +18,83 @@ import (
 	openrailshttp "github.com/open-rails/openrails/adapters/http"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
-	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 )
 
-// A purchase is made as production makes it: the merchant hands its customer
-// a checkout session through its Client, and the payment page reads and pays
-// it by its id alone.
+// A purchase is made as production makes it: the merchant creates an unpaid
+// order for its customer through its Client, and the customer pays it on
+// /v1/me, signed in.
 
-type checkoutSession struct {
-	t    *testing.T
-	page http.Handler
-	id   string
+// sale is what the merchant sells: one price to one customer.
+type sale struct {
+	customer billing.CustomerID
+	price    billing.PriceID
+	amount   *int64
 }
 
-// sell mints a checkout session through client and opens its payment page.
-func sell(t *testing.T, client *openrails.Client, mint billing.CreateCheckoutSessionParams) (*checkoutSession, error) {
+type purchase struct {
+	t     *testing.T
+	page  http.Handler
+	token string
+	order billing.Order
+}
+
+// sell creates s's order through client and opens it as its customer on
+// client's mount.
+func sell(t *testing.T, client *openrails.Client, s sale) (*purchase, error) {
 	t.Helper()
-	link, err := client.CreateCheckoutSession(t.Context(), mint)
+	order, err := client.CreateOrder(t.Context(), billing.CreateOrderParams{CustomerID: s.customer,
+		Lines: []billing.OrderLineParams{{PriceID: s.price, Amount: s.amount}}, IdempotencyKey: uuid.NewString()})
 	if err != nil {
 		return nil, err
 	}
-	return (&checkoutSession{t: t, id: link.ID}).on(client), nil
+	return (&purchase{t: t, order: *order}).on(client), nil
 }
 
-// on is the session on client's payment page: any process of its merchant
-// serves it.
-func (s *checkoutSession) on(client *openrails.Client) *checkoutSession {
-	s.t.Helper()
+// on is the purchase on client's mount: any process of its merchant serves
+// its customer.
+func (p *purchase) on(client *openrails.Client) *purchase {
+	p.t.Helper()
+	auth := &authtest.Fake{}
 	mux := http.NewServeMux()
-	require.NoError(s.t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
-	return &checkoutSession{t: s.t, page: mux, id: s.id}
+	require.NoError(p.t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: auth}))
+	return &purchase{t: p.t, page: mux, token: auth.Person(p.order.CustomerID.String()), order: p.order}
 }
 
-func (s *checkoutSession) call(method, path string, body any) (int, []byte) {
-	s.t.Helper()
+func (p *purchase) call(method, path, key string, body any) (int, []byte) {
+	p.t.Helper()
 	var raw []byte
 	if body != nil {
 		var err error
 		raw, err = json.Marshal(body)
-		require.NoError(s.t, err)
+		require.NoError(p.t, err)
 	}
-	req := httptest.NewRequest(method, "/v1/checkout-sessions/"+s.id+path, bytes.NewReader(raw))
+	req := httptest.NewRequest(method, "/v1/me/orders/"+p.order.ID.String()+path, bytes.NewReader(raw))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+p.token)
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
 	rec := httptest.NewRecorder()
-	s.page.ServeHTTP(rec, req)
+	p.page.ServeHTTP(rec, req)
 	return rec.Code, rec.Body.Bytes()
 }
 
-// read is the session as the payment page shows it.
-func (s *checkoutSession) read() checkoutsession.CheckoutSession {
-	s.t.Helper()
-	status, raw := s.call(http.MethodGet, "", nil)
-	require.Equal(s.t, http.StatusOK, status, "%s", raw)
-	var out checkoutsession.CheckoutSession
-	require.NoError(s.t, json.Unmarshal(raw, &out))
+// read is the order as its customer reads it.
+func (p *purchase) read() billing.Order {
+	p.t.Helper()
+	status, raw := p.call(http.MethodGet, "", "", nil)
+	require.Equal(p.t, http.StatusOK, status, "%s", raw)
+	var out billing.Order
+	require.NoError(p.t, json.Unmarshal(raw, &out))
 	return out
 }
 
-// option is the session's option on rail.
-func (s *checkoutSession) option(rail string) string {
-	s.t.Helper()
-	for _, option := range s.read().Options {
-		if option.Rail == rail {
-			return option.ID
-		}
-	}
-	s.t.Fatalf("no %s option", rail)
-	return ""
-}
-
-// pay sends the page's pay body: the option on rail and fields beside it. A
-// refusal is the error the remote Client reads.
-func (s *checkoutSession) pay(rail string, fields map[string]any) (*checkoutsession.CheckoutSessionPayResult, error) {
-	s.t.Helper()
-	body := map[string]any{"option_id": s.option(rail)}
-	for k, v := range fields {
-		body[k] = v
-	}
-	status, raw := s.call(http.MethodPost, "/pay", body)
+// pay pays the order under key with payment: a redirect PSP's hosted page
+// (return_url), a Solana wallet (token_symbol) or a card. A refusal, a
+// declined payment's 402 included, is the error the remote Client reads.
+func (p *purchase) pay(key string, payment map[string]any) (*billing.Order, error) {
+	p.t.Helper()
+	status, raw := p.call(http.MethodPost, "/pay", key, map[string]any{"payment": payment, "expected_total": strconv.FormatInt(p.order.Total, 10)})
 	if status != http.StatusOK {
 		var envelope struct {
 			Error *billing.ErrorDetails `json:"error"`
@@ -105,15 +105,26 @@ func (s *checkoutSession) pay(rail string, fields map[string]any) (*checkoutsess
 		}
 		return nil, out
 	}
-	var out checkoutsession.CheckoutSessionPayResult
-	require.NoError(s.t, json.Unmarshal(raw, &out))
+	var out billing.Order
+	require.NoError(p.t, json.Unmarshal(raw, &out))
 	return &out, nil
 }
 
-// attempt is the checkout attempt the session's payment created.
-func (s *checkoutSession) attempt(f *fixture) billing.CheckoutAttemptID {
-	s.t.Helper()
+// redirect is a payment on a redirect PSP's hosted page, returning to url.
+func redirect(url string) map[string]any { return map[string]any{"return_url": url} }
+
+// attempt is the checkout attempt the order's payment created.
+func (p *purchase) attempt(f *fixture) billing.CheckoutAttemptID {
+	p.t.Helper()
 	var id uuid.UUID
-	require.NoError(s.t, f.pool.QueryRow(s.t.Context(), "SELECT attempt_id FROM "+pgx.Identifier{f.schema, "checkout_sessions"}.Sanitize()+" WHERE id_hash = sha256($1)", []byte(s.id)).Scan(&id))
+	require.NoError(p.t, f.pool.QueryRow(p.t.Context(), "SELECT attempt_id FROM "+pgx.Identifier{f.schema, "orders"}.Sanitize()+" WHERE id = $1", p.order.ID.UUID()).Scan(&id))
 	return billing.CheckoutAttemptID(id)
+}
+
+// requireCode is a refusal with code.
+func requireCode(t *testing.T, err error, code string) {
+	t.Helper()
+	var status *billing.StatusError
+	require.ErrorAs(t, err, &status)
+	require.Equal(t, code, status.Code, "%v", err)
 }

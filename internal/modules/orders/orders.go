@@ -133,6 +133,7 @@ func (o *Order) AwaitsCustomer() bool {
 }
 
 // HasRecurring reports a line that renews.
+// recurringLines counts the order's subscriptions.
 func (o *Order) HasRecurring() bool {
 	for _, l := range o.Lines {
 		if l.BillingIntervalHours != nil {

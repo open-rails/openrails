@@ -32,7 +32,7 @@ keyed by package directory; a test missing from it counts as the median. Redis i
 tests of several instances sharing limits and the card-attack captcha tests.
 
 - `ci/` covers migration replay, the schema snapshot (`TestSchemaSnapshot`),
-  catalog and merchant isolation, checkout sessions and attempts, signed
+  catalog and merchant isolation, orders and their attempts, signed
   webhook replay, credits, usage and admissions, usage orders, merchant
   configuration, retention and partitioning, and exact integer money.
 - `ci/subscriptions` covers engine-owned and provider-owned subscriptions on

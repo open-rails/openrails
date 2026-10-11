@@ -134,16 +134,3 @@ type ConsoleMount struct {
 	// served verbatim in config.json. OpenRails never reads it.
 	Extensions map[string]any
 }
-
-// CheckoutConfig is Config.Checkout: the shared payment page. The zero value
-// is the single-site case: the app renders billing-ui's <Checkout> itself
-// against the session routes, with no payment page and no frame.
-type CheckoutConfig struct {
-	// PageURL is where the shared payment page (billing-ui's <CheckoutPage>)
-	// is served; a minted session's URL is PageURL#<id>. Every app selling
-	// through the page sets it.
-	PageURL string
-	// EmbedOrigins are the sites (scheme://host[:port]) allowed to frame the
-	// page this host serves. Only the payment host sets it.
-	EmbedOrigins []string
-}

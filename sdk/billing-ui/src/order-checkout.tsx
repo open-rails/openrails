@@ -172,7 +172,7 @@ export function OrderCheckout({
     )
     .map((method) => ({
       id: method.id,
-      option_id: method.psp_id ?? "",
+      psp_id: method.psp_id ?? "",
       rail: method.rail ?? "",
       card: method.card ?? undefined,
     }))
@@ -452,13 +452,14 @@ export function OrderCheckout({
                   submitLabel={payLabel}
                   disabled={busy || !open}
                   appearance={appearance}
-                  onTokenized={async (card: TokenizedCardData) => {
-                    await pay(async () => ({
+                  // A refused payment leaves the form open for another card.
+                  onTokenized={(card: TokenizedCardData) =>
+                    pay(async () => ({
                       token: card.payment_token,
                       psp_id: psp.psp_id,
                       billing_details: billingDetailsOf(card),
                     }))
-                  }}
+                  }
                 />
               ) : (
                 <form

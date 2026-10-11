@@ -20,7 +20,6 @@ client brings its own host authority.
 | Route tier | What OpenRails asks | Who it admits |
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
-| checkout session | the session id; `Authenticate` only when a credential is presented, never to refuse | the session's own customer, a person in person, sees and pays with its saved cards |
 | customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
 | merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's group permission (`Routes.Permissions`) in the merchant's scope, then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |

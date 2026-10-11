@@ -24,13 +24,10 @@ import {
   cardRetryAfter,
   cardSetupDriver,
   checkoutPsps,
-  railPsp,
-  savedMethodsFor,
   type PspConfig,
 } from "./psp"
 import { BillingProvider } from "./react/provider"
 import { SavePaymentMethod } from "./save-payment-method"
-import type { PaymentOption } from "./types"
 
 const nmi: PspConfig = {
   psp_id: "psp_nmi",
@@ -62,36 +59,6 @@ const ccbill: PspConfig = {
 }
 
 describe("PSP flows", () => {
-  it("matches saved cards to a session's options by PSP", () => {
-    const options: PaymentOption[] = [
-      {
-        id: "option_a",
-        psp_id: "psp_nmi",
-        rail: "nmi",
-        mode: "subscription",
-        driver: "collect_js",
-      },
-      {
-        id: "option_b",
-        psp_id: "psp_solana",
-        rail: "solana",
-        mode: "subscription",
-        driver: "solana_pay",
-      },
-    ]
-    expect(
-      savedMethodsFor(
-        [
-          { id: "pm_1", psp_id: "psp_nmi", card: { last4: "1111" } },
-          { id: "pm_2", psp_id: "psp_solana" },
-          { id: "pm_3", psp_id: "psp_nmi", health: { active: false } },
-        ],
-        options
-      ).map((m) => [m.id, m.option_id, m.card?.last4])
-    ).toEqual([["pm_1", "option_a", "1111"]])
-    expect(railPsp(options[0]).psp_id).toBe("psp_nmi")
-  })
-
   it("picks the in-page card setup from the PSP configuration", () => {
     expect(cardSetupDriver(nmi)).toBe("collect_js")
     expect(cardSetupDriver({ ...nmi, flow: "card", config: null })).toBe("card")
@@ -116,40 +83,8 @@ describe("PSP flows", () => {
     expect(cardRetryAfter([nmi, { ...ccbill, status: down.status }])).toBeNull()
   })
 
-  it("offers Stripe Elements as an in-page card rail and hides non-checkout PSPs", () => {
+  it("hides non-checkout PSPs", () => {
     const elements = { ...stripe, flow: "elements" }
-    const rails: PaymentOption[] = [
-      {
-        id: "option_stripe",
-        psp_id: "psp_stripe",
-        rail: "stripe",
-        mode: "one_off",
-        driver: "stripe_elements",
-        public_config: { publishable_key: "pk_test_1" },
-      },
-    ]
-    expect(railPsp(rails[0])).toEqual(
-      expect.objectContaining({ psp_id: "psp_stripe", flow: "elements" })
-    )
-    expect(
-      savedMethodsFor(
-        [
-          {
-            id: "pm_old",
-            psp_id: "psp_stripe",
-            card: { brand: "visa", last4: "4242" },
-            created_at: "2026-01-01T00:00:00Z",
-          },
-          {
-            id: "pm_new",
-            psp_id: "psp_stripe",
-            card: { brand: "visa", last4: "1881" },
-            created_at: "2026-02-01T00:00:00Z",
-          },
-        ],
-        rails
-      ).map((m) => m.id)
-    ).toEqual(["pm_new", "pm_old"])
     expect(
       checkoutPsps([nmi, { ...elements, checkout: false }]).map((p) => p.key)
     ).toEqual(["nmi"])

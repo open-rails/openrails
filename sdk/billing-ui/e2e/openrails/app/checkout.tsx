@@ -1,47 +1,37 @@
-// The checkout behind BuyButton, driven directly: the signed-in customer
-// mints a session and frames the shared payment page, or renders Checkout
-// itself (#mode=inline, the single-site case). Checkout and the checkout
-// calls are internal, so this test page imports them from src.
+// The purchase behind BuyButton, driven directly from the packaged entry:
+// the signed-in customer creates an order for one price and pays it in
+// OrderCheckout.
 import { createRoot } from "react-dom/client"
 
 import "../../../dist/styles.css"
-import { Checkout } from "../../../src/checkout"
-import { CheckoutFrame } from "../../../src/checkout-frame"
-import { checkoutOf } from "../../../src/client/checkout"
-import { createBillingClient } from "../../../src/client/client"
-import type { CheckoutFrameTheme } from "../../../src/frame"
-import { BillingProvider } from "../../../src/react/provider"
+import {
+  BillingProvider,
+  OrderCheckout,
+  createBillingClient,
+} from "../../../dist/index.js"
 
 const params = new URLSearchParams(location.hash.slice(1))
 const token = params.get("token")
-const inline = params.get("mode") === "inline"
-const theme = (params.get("theme") ?? "light") as CheckoutFrameTheme
+const theme = params.get("theme") === "dark" ? "dark" : "light"
 const completed: string[] = []
 Object.assign(window, { checkoutCompleted: completed })
 
 const client = createBillingClient({ getToken: () => token })
 
 async function main() {
-  const session = await checkoutOf(client).createCheckoutSession({
-    priceId: params.get("price") ?? "",
+  const { order } = await client.createOrder({
+    lines: [{ price_id: params.get("price") ?? "" }],
+    idempotencyKey: crypto.randomUUID(),
   })
-  Object.assign(window, { checkoutSession: session })
+  Object.assign(window, { checkoutOrder: order })
   createRoot(document.getElementById("root")!).render(
-    <BillingProvider appearance={{ theme: "light" }} locale="en-US">
-      <main style={{ maxWidth: 960, margin: "0 auto", padding: "32px 16px" }}>
-        {inline || !session.url ? (
-          <Checkout
-            source={checkoutOf(client).checkoutSource(session.id)}
-            onComplete={(result) => completed.push(result.status)}
-          />
-        ) : (
-          <CheckoutFrame
-            url={session.url}
-            theme={theme}
-            minHeight={120}
-            onComplete={(status) => completed.push(status)}
-          />
-        )}
+    <BillingProvider client={client} appearance={{ theme }} locale="en-US">
+      <main style={{ maxWidth: 520, margin: "0 auto", padding: "32px 16px" }}>
+        <OrderCheckout
+          orderId={order.id}
+          appearance={{ theme }}
+          onSettled={(paid) => completed.push(paid.status)}
+        />
       </main>
     </BillingProvider>
   )

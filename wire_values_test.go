@@ -14,7 +14,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 )
 
 func requireFixture(t *testing.T, name string, value any) []byte {
@@ -40,28 +39,6 @@ func TestCurrencyRegistry(t *testing.T) {
 	require.Equal(t, 4, jpy.NativeShift(), "zero-decimal rails still scale into native units")
 	_, ok = billing.LookupCurrency("XYZ")
 	require.False(t, ok, "a scale is never guessed")
-}
-
-func TestCheckoutSessionPlanStampsRegistryScale(t *testing.T) {
-	hours := 720
-	plan, err := checkoutsession.NewPlan("Premium", math.MaxInt64, "jpy", &hours, &hours)
-	require.NoError(t, err)
-	require.Equal(t, checkoutsession.CheckoutSessionPlan{AutoRenew: true, DisplayName: "Premium", UnitAmount: math.MaxInt64, Currency: "JPY", UnitDecimals: 4, BillingIntervalHours: &hours, AccessDurationHours: &hours}, plan)
-	raw, err := json.Marshal(plan)
-	require.NoError(t, err)
-	require.Contains(t, string(raw), `"unit_amount":"9223372036854775807"`)
-	_, err = checkoutsession.NewPlan("Premium", 1, "XYZ", nil, nil)
-	require.ErrorIs(t, err, billing.ErrInvalid, "a scale is never guessed")
-	// OpenRails advertises the browser driver per option (#1078); an option
-	// no browser can drive carries none.
-	psp := billing.PSPID(uuid.MustParse("0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e"))
-	option := billing.CheckoutOption{PSP: "solana", PSPID: psp, Rail: "solana", Mode: "subscription", Driver: "solana_pay", PublicConfig: map[string]string{"token_symbol": "DUSD"}}
-	raw, err = json.Marshal(option)
-	require.NoError(t, err)
-	require.JSONEq(t, `{"psp":"solana","psp_id":"psp_0198f3a4-6f1e-7c2b-9d4e-1f2a3b4c5d6e","rail":"solana","mode":"subscription","driver":"solana_pay","public_config":{"token_symbol":"DUSD"}}`, string(raw))
-	raw, err = json.Marshal(billing.CheckoutOption{PSP: "stripe", PSPID: psp, Rail: "stripe", Mode: "subscription"})
-	require.NoError(t, err)
-	require.NotContains(t, string(raw), "driver")
 }
 
 func TestUsageOrderMoneyWireIsLossless(t *testing.T) {

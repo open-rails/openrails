@@ -6,8 +6,6 @@ package middleware
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"math"
 	"net/http"
@@ -214,7 +212,7 @@ func EvaluateRateLimit(w http.ResponseWriter, r *http.Request, subjects []RateLi
 			"limited_subject": combined.subject.Key,
 			"client_ip":       clientIP,
 			"user_id":         userID,
-			"path":            LogPath(r),
+			"path":            r.URL.Path,
 			"method":          r.Method,
 			"bucket":          bucket,
 		}).Warn("Rate limit exceeded")
@@ -496,11 +494,17 @@ func ClassifyBucket(path, method string) string {
 	}
 }
 
-// isCheckoutPath is a buyer paying: minting a checkout session, paying one
-// (by its id, or as its customer), or a wallet's Solana Pay request.
+// isCheckoutPath is a buyer paying: creating an order, paying or confirming
+// one, or a wallet's Solana Pay request for one.
 func isCheckoutPath(path string) bool {
-	return path == "/v1/me/checkout-sessions" || strings.HasPrefix(path, "/v1/me/checkout-sessions/") ||
-		strings.HasPrefix(path, "/v1/checkout-sessions/") || strings.HasPrefix(path, "/v1/checkout-attempts/")
+	if path == "/v1/me/orders" {
+		return true
+	}
+	rest, mine := strings.CutPrefix(path, "/v1/me/orders/")
+	if mine {
+		return strings.HasSuffix(rest, "/pay") || strings.HasSuffix(rest, "/confirm")
+	}
+	return strings.HasPrefix(path, "/v1/orders/") && strings.HasSuffix(path, "/solana-pay")
 }
 
 // cardAttackMode reports whether the request's merchant is under a card-testing
@@ -524,31 +528,13 @@ func effectiveLimit(limit *config.RateLimit) int {
 	return limit.RequestsPerMinute
 }
 
-// Checkout session limits per session id per minute: the id is the
-// credential, so it is limited whatever address presents it. Polling reads
-// every three seconds; a pay is a buyer's click.
+// Limits per hosted checkout URL per minute: its secret is the credential, so
+// it is limited whatever address presents it. Polling reads every three
+// seconds; a pay is a buyer's click.
 const (
-	CheckoutSessionReadsPerMinute = 120
-	CheckoutSessionPaysPerMinute  = 10
+	CheckoutURLReadsPerMinute = 120
+	CheckoutURLPaysPerMinute  = 10
 )
-
-// CheckoutSessionRateLimit limits requests naming one checkout session
-// (the :id path parameter), beside the per-address limits of RateLimitHTTP.
-func CheckoutSessionRateLimit(rt *app.Runtime, bucket string, perMinute int) router.Middleware {
-	return func(next router.Handler) router.Handler {
-		return func(r *request.Request) {
-			id := r.Param("id")
-			if rt == nil || rt.Config == nil || rt.Config.RateLimits == nil || !strings.HasPrefix(id, "ocs_") || len(id) > 128 {
-				next(r)
-				return
-			}
-			sum := sha256.Sum256([]byte(id))
-			if limitSubject(r, rt, "ocs:"+hex.EncodeToString(sum[:16]), bucket, perMinute) {
-				next(r)
-			}
-		}
-	}
-}
 
 // CheckoutURLRateLimit limits the requests under one hosted checkout URL,
 // keyed by its order (key; "" passes), whatever address presents it.
@@ -576,19 +562,4 @@ func limitSubject(r *request.Request, rt *app.Runtime, subject, bucket string, p
 	r.SetHeader("Retry-After", strconv.Itoa(retryAfter))
 	r.AbortCode(billing.CodeRateLimitExceeded, "Rate limit exceeded")
 	return false
-}
-
-// LogPath is r's path for logs. A checkout session id is a bearer
-// credential and is never logged.
-func LogPath(r *http.Request) string {
-	path := r.URL.Path
-	i := strings.Index(path, "/ocs_")
-	if i < 0 {
-		return path
-	}
-	rest := path[i+1:]
-	if j := strings.IndexByte(rest, '/'); j >= 0 {
-		return path[:i] + "/ocs_redacted" + rest[j:]
-	}
-	return path[:i] + "/ocs_redacted"
 }

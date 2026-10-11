@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -845,11 +846,15 @@ func (w *world) merchantCall(token, method, path string) (int, string) {
 }
 
 // customer is one native customer acting through the mounted /v1/me routes.
+// ip is the address its orders come from, as the site's proxy forwards it.
 type customer struct {
 	w     *world
 	id    string
 	token string
+	ip    string
 }
+
+var customerAddress atomic.Int64
 
 // newCustomer is a user of the host, already a customer: settings create
 // one OpenRails has not seen.
@@ -857,7 +862,9 @@ func (w *world) newCustomer() *customer {
 	id := uuid.NewString()
 	_, err := w.client[embedded].UpdateCustomer(w.t.Context(), billing.CustomerID(uuid.MustParse(id)), billing.UpdateCustomerParams{})
 	require.NoError(w.t, err)
-	return &customer{w: w, id: id, token: w.auth.token(w.t, id)}
+	n := customerAddress.Add(1)
+	ip := fmt.Sprintf("100.%d.%d.%d", 64+(n>>16)&63, (n>>8)&255, n&255)
+	return &customer{w: w, id: id, token: w.auth.token(w.t, id), ip: ip}
 }
 
 func (c *customer) call(method, path, key string, body any) (int, map[string]any) {
@@ -924,8 +931,8 @@ func (c *customer) saveCard(rail string, card card) string {
 	return ""
 }
 
-// subscribe enrolls an engine-owned membership: the merchant hands the
-// customer a checkout session through tp's Client, and the customer pays it
+// subscribe enrolls an engine-owned membership: the merchant creates an
+// order for the customer through tp's Client, and the customer pays it
 // signed in with a saved card.
 func (c *customer) subscribe(tp topology, rail, priceID, entitlement, method string) billing.SubscriptionID {
 	c.w.t.Helper()
@@ -945,14 +952,9 @@ func (c *customer) subscribeAgain(tp topology, rail, priceID, entitlement, metho
 
 func (c *customer) enrollOnce(tp topology, rail, priceID, _, method string) billing.SubscriptionID {
 	c.w.t.Helper()
-	paid := c.mustCheckout(tp, order{price: pid(priceID), rail: rail, method: method, successURL: "https://e2e.test/return"})
-	require.NotNil(c.w.t, paid.SubscriptionID, "the payment names the membership: %+v", paid.CheckoutSessionPayResult)
+	paid := c.mustCheckout(tp, order{price: pid(priceID), rail: rail, method: method})
+	require.NotNil(c.w.t, paid.SubscriptionID, "the payment names the membership: %+v", paid.Order)
 	return *paid.SubscriptionID
-}
-
-// identity is the customer as a host hands it to checkout.
-func (c *customer) identity() billing.CheckoutCustomerIdentity {
-	return billing.CheckoutCustomerIdentity{ID: cid(c.id)}
 }
 
 // cid and pid read test ids as their typed form.

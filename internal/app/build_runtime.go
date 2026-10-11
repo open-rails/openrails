@@ -36,7 +36,6 @@ import (
 	"github.com/open-rails/openrails/internal/modules/alerting"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 	"github.com/open-rails/openrails/internal/modules/copilot"
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
@@ -361,7 +360,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 
 		CheckoutService:        serviceInstances.CheckoutService,
 		CheckoutAttemptService: serviceInstances.CheckoutAttemptService,
-		CheckoutSessions:       checkoutsession.NewStore(database),
 		Orders:                 orders.New(database, serviceInstances.SubscriptionLifecycleService, clock),
 		Idempotency:            serviceInstances.Idempotency,
 		CardAbuseGuard:         cardAbuseGuard,

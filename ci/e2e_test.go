@@ -231,36 +231,30 @@ func TestCheckoutReplayAndEntitlementAccess(t *testing.T) {
 	require.NoError(t, err)
 
 	customer := uuid.NewString()
-	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
-		Customer:   billing.CheckoutCustomerIdentity{ID: cid(customer), VerifiedEmail: "reader@example.test"},
-		ProductKey: product.Key,
-		PriceKey:   price.Key,
-		SuccessURL: "https://e2e.test/success",
-	})
+	session, err := sell(t, client, sale{customer: cid(customer), price: price.ID})
 	require.NoError(t, err)
-	minted := session.read()
-	require.EqualValues(t, 1_000_000, minted.Plan.UnitAmount)
-	first, err := session.pay("stripe", nil)
+	require.EqualValues(t, 1_000_000, session.read().Total)
+	first, err := session.pay("pay-1", redirect("https://e2e.test/success"))
 	require.NoError(t, err)
-	require.Equal(t, "requires_action", first.Status)
-	require.NotNil(t, first.NextAction, "Stripe's hosted page is the next step: %+v", first)
-	require.Equal(t, "redirect_to_url", first.NextAction.Type)
-	require.Equal(t, "https://checkout.stripe.test/e2e", *first.NextAction.URL)
+	require.Equal(t, billing.OrderPaymentRequiresAction, first.Payment.Status)
+	require.NotNil(t, first.Payment.NextAction, "Stripe's hosted page is the next step: %+v", first)
+	require.Equal(t, "redirect_to_url", first.Payment.NextAction.Type)
+	require.Equal(t, "https://checkout.stripe.test/e2e", *first.Payment.NextAction.URL)
 	attempt := session.attempt(f)
 
-	replay, err := session.pay("stripe", nil)
+	replay, err := session.pay("pay-1", redirect("https://e2e.test/success"))
 	require.NoError(t, err)
 	require.Equal(t, first, replay)
 	require.Equal(t, attempt, session.attempt(f), "a repeated pay resumes the same attempt")
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "the provider sees one request across an identical replay")
 
-	_, err = session.pay("stripe", map[string]any{"success_url": "https://e2e.test/changed"})
-	require.ErrorIs(t, err, billing.ErrInvalid, "the page cannot change what the session was minted with")
+	_, err = session.pay("pay-1", redirect("https://e2e.test/changed"))
+	requireCode(t, err, billing.CodeIdempotencyKeyReused)
 	require.EqualValues(t, 1, provider.checkoutCalls.Load(), "a changed pay must not contact Stripe")
 
 	read := session.read()
-	require.Equal(t, "requires_action", read.Status)
-	require.Equal(t, first.NextAction, read.NextAction)
+	require.Equal(t, billing.OrderPaymentRequiresAction, read.Payment.Status)
+	require.Equal(t, first.Payment.NextAction, read.Payment.NextAction)
 
 	before, err := heldKeys(t.Context(), client, billing.CustomerID(uuid.MustParse(customer)), time.Time{}, "content:premium")
 	require.NoError(t, err)

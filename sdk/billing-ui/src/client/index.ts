@@ -38,7 +38,6 @@ export type {
   PaymentFailure,
   PublicConfig,
   PublicMerchant,
-  CheckoutSessionLink,
   ListPage,
   NetworkLinkChallenge,
   NewCard,

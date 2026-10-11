@@ -23,8 +23,6 @@ type (
 
 	// CredentialPosture is Config.TestMode: Sandbox or Live.
 	CredentialPosture = config.CredentialPosture
-	// CheckoutConfig is Config.Checkout: the shared payment page.
-	CheckoutConfig = config.CheckoutConfig
 	// Routes is the HTTP surface the adapters mount on the root router.
 	Routes = config.Routes
 	// RouteGroups is Routes.RouteGroups: the route groups turned on.

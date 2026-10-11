@@ -55,19 +55,18 @@ access, err := client.ListProductAccess(ctx, billing.ProductAccessListParams{
 if err != nil { return err }
 _ = access.Items
 
-session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
-    Customer:   billing.CheckoutCustomerIdentity{ID: customerID},
-    PriceID:    price.ID,
-    SuccessURL: successURL,
+order, err := client.CreateOrder(ctx, billing.CreateOrderParams{
+    CustomerID:     customerID,
+    Lines:          []billing.OrderLineParams{{PriceID: price.ID}},
+    IdempotencyKey: key,
 })
 ```
 
-Usually the customer's browser mints the session itself with the customer's
-own credential (`POST /v1/me/checkout-sessions`); `CreateCheckoutSession` mints
-it with the merchant's credential. Either way the customer pays it on the
-payment page, and a saved card needs the customer's own proof. The server
-derives one-off or recurring checkout from the selected price. Browser return
-URLs provide navigation; verified provider events establish payment and access.
+Usually the customer's browser creates and pays the order itself with the
+customer's own credential (`POST /v1/me/orders`); `CreateOrder` creates an
+unpaid one with the merchant's credential. Either way only the customer pays
+it, signed in. Verified provider events and the order's own status establish
+payment and access; a browser's return is navigation only.
 
 ## What a host declares
 

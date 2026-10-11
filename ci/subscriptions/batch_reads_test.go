@@ -141,7 +141,7 @@ func (c *customer) buy(priceID, entitlement, method string) {
 // purchase pays a session for the price with a saved Stripe card.
 func (c *customer) purchase(priceID, method string) {
 	c.w.t.Helper()
-	c.mustCheckout(embedded, order{price: pid(priceID), rail: "stripe", method: method, successURL: "https://e2e.test/return"})
+	c.mustCheckout(embedded, order{price: pid(priceID), rail: "stripe", method: method})
 }
 
 func uuidShort() string { return uuid.NewString()[:8] }
@@ -190,7 +190,7 @@ func TestCheckoutCoverageIsOneQuery(t *testing.T) {
 	}
 	method := c.saveCard("stripe", visa)
 	got := w.count(func() { c.purchase(price.ID.String(), method) })
-	require.Equal(t, 1, got["ProductAccessCoverage"], "one coverage query for the product: %v", got)
+	require.Equal(t, 1, got["GetAccessTimelineTailEnd"], "one coverage query for the product: %v", got)
 	// The rental stacks after the customer's latest window of the product.
 	start := now.Add(10 * 24 * time.Hour)
 	access, err := client.ListProductAccess(t.Context(), billing.ProductAccessListParams{CustomerIDs: []billing.CustomerID{c.customerID()}})

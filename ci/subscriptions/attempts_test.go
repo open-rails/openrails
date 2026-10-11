@@ -48,7 +48,7 @@ func str(s *string) string {
 }
 
 // A buyer mistypes the security code, then fixes it: every answer is one
-// attempt, all in one checkout that ends approved.
+// attempt, all on the one order that ends paid.
 func TestNewCardAttemptsFatFinger(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -63,16 +63,14 @@ func TestNewCardAttemptsFatFinger(t *testing.T) {
 	w.settle()
 
 	rows := w.attempts(h.c.id)
-	require.Len(t, rows, 3)
+	require.Len(t, rows, 2)
 	require.Equal(t, w.nmiRequests(), len(rows), "one attempt per NMI answer")
-	refused, verified, charged := rows[0], rows[1], rows[2]
-	require.Equal(t, []string{"verify", "card_data", "incorrect_cvc", "N"}, []string{refused.Kind, refused.Category, str(refused.Reason), str(refused.CVV)})
-	require.NotEmpty(t, str(refused.TransactionID), "NMI's id for the refused verification")
-	require.Equal(t, []string{"verify", "approved"}, []string{verified.Kind, verified.Category})
-	require.Equal(t, []string{"initial", "approved", "engine"}, []string{charged.Kind, charged.Category, charged.Owner})
+	refused, charged := rows[0], rows[1]
+	require.Equal(t, []string{"initial", "card_data", "incorrect_cvc", "N"}, []string{refused.Kind, refused.Category, str(refused.Reason), str(refused.CVV)})
+	require.NotEmpty(t, str(refused.TransactionID), "NMI's id for the refused sale")
+	require.Equal(t, []string{"initial", "approved"}, []string{charged.Kind, charged.Category})
 	for _, a := range rows {
 		require.Equal(t, "new", a.CardEntry)
-		require.Equal(t, strings.TrimPrefix(price.ID.String(), "price_"), str(a.Target))
 		require.Equal(t, *rows[0].Checkout, *a.Checkout, "one checkout")
 	}
 	paid := completed(w.payments(embedded, h.c.id))
@@ -96,9 +94,9 @@ func TestNewCardAttemptsSaleDeclined(t *testing.T) {
 	w.settle()
 
 	rows := w.attempts(h.c.id)
-	require.Len(t, rows, 4)
+	require.Len(t, rows, 2)
 	require.Equal(t, w.nmiRequests(), len(rows))
-	declined := rows[1]
+	declined := rows[0]
 	require.Equal(t, []string{"initial", "issuer_soft", "insufficient_funds", "new"}, []string{declined.Kind, declined.Category, str(declined.Reason), declined.CardEntry})
 	require.NotEmpty(t, str(declined.TransactionID))
 	require.Nil(t, declined.Payment, "a decline moved no money")
@@ -136,7 +134,7 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	require.Equal(t, "succeeded", paid.Status)
 	w.settle()
 	rows = w.attempts(buyer.id)
-	require.Len(t, rows, 2)
-	require.Equal(t, []string{"initial", "approved", "none", "new"}, []string{rows[1].Kind, rows[1].Category, rows[1].Owner, rows[1].CardEntry})
-	require.Equal(t, w.nmiRequests(), 4, "two verifications, one refused, and a sale")
+	require.Len(t, rows, 1, "a new card's sale saves it: no verification first")
+	require.Equal(t, []string{"initial", "approved", "none", "new"}, []string{rows[0].Kind, rows[0].Category, rows[0].Owner, rows[0].CardEntry})
+	require.Equal(t, w.nmiRequests(), 3, "two verifications, one refused, and a sale")
 }

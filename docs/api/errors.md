@@ -29,7 +29,7 @@ request ID takes precedence, with `X-Request-ID` as a fallback.
 
 A checkout the provider refused returns HTTP 402 and `errors.Is(err,
 billing.ErrPaymentRefused)`; nothing was charged and the customer may try again
-with another instrument in a new checkout session. The code says what happened,
+with another instrument on the same order. The code says what happened,
 `metadata` says why:
 
 | Code | Type | Status | Meaning | Metadata |

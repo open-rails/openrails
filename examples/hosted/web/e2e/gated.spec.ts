@@ -1,5 +1,5 @@
 // A visitor without access lands on the buy page, signs in with auth-ui, pays
-// with billing-ui's CheckoutModal (Collect.js is a stand-in; nmimock is the
+// with billing-ui's OrderCheckout (Collect.js is a stand-in; nmimock is the
 // gateway) and is sent back to the content, which the server now serves.
 import { expect, test, type Locator, type Page } from "@playwright/test"
 
@@ -48,7 +48,7 @@ async function signIn(page: Page, buy: Locator, user: string) {
   await expect(page.getByRole("dialog")).toBeHidden()
 }
 
-// Pays in CheckoutModal with a new card.
+// Pays the order in BuyButton's dialog with a new card.
 async function pay(page: Page, buy: Locator, confirm: RegExp) {
   await buy.click()
   const checkout = page.getByRole("dialog")
@@ -131,7 +131,7 @@ test("the membership unlocks members-only videos and every course", async ({ pag
   await expect(page.getByTestId("offer")).toHaveCount(1)
   await expect(button(page, "$99.00 every 365 days")).toBeVisible()
   await signIn(page, button(page, "$10.00 every 30 days"), carol)
-  await pay(page, button(page, "$10.00 every 30 days"), /^Subscribe for/)
+  await pay(page, button(page, "$10.00 every 30 days"), /^Pay \$10\.00/)
   await expect(page).toHaveURL("/courses/live-qa")
   await expectVideo(page)
 

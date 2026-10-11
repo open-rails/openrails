@@ -1,112 +1,40 @@
 # Checkout
 
-A browser buys only through a **checkout session** (`ocs_`), and the payment
-page reads and pays it by its id. The customer usually mints their own with
-their own credential (`POST /v1/me/checkout-sessions`, billing-ui); the merchant
-may mint one for them with the merchant's credential (`CreateCheckoutSession`).
-Either way only the customer pays it, and a saved card needs the customer's own
-proof. A **checkout attempt** (`chk_`) is one charge of one price on one PSP;
-each pay on a session creates one.
+A browser buys through an **order**: priced lines read and paid by their own
+customer on `/v1/me/orders` ([frontend integration](../frontend-integration.md#orders)).
+The merchant's backend may create an unpaid order for a customer (`CreateOrder`);
+only that customer pays it. A **checkout attempt** (`chk_`) is one charge of an
+order on one PSP; each pay creates one.
 
 ## Merchant client
 
-These operations run through the same admin routes in the embedded and
-remote clients, each behind the host's permission for it (`Routes.Permissions`):
-
 | Client method | HTTP operation | Permission |
 | --- | --- | --- |
-| CreateCheckoutSession | POST /v1/admin/checkout-sessions | `AdminUpdate` |
-| ListCheckoutOptions | GET /v1/admin/checkout-options?price_id=…\|product_key=…&price_key=… | `AdminRead` |
+| PreviewOrder | POST /v1/app/orders/preview | `Orders` |
+| CreateOrder | POST /v1/app/orders | `Orders` |
+| GetOrder, ListOrders | GET /v1/admin/orders[/{id}] | `AdminRead` |
+| CancelOrder | POST /v1/app/orders/{id}/cancel | `Orders` |
 
-`Customer.ID` is the merchant-owned customer id. Verified email and username are
-host assertions made with the merchant's credential.
+`PreviewOrder` prices lines for one customer and lists the `payment_options`
+that can take them, in routing order; options report local readiness and never
+probe a gateway. `CreateOrder` freezes the lines into an `open` order; the
+customer pays it with `POST /v1/me/orders/{id}/pay`, signed in, or with
+billing-ui's `<OrderCheckout orderId>`.
 
-`CreateCheckoutSession` hands a price to a customer's browser: the answer is the
-session id and, when `Config.Checkout.PageURL` is set, the payment page URL.
-Whoever mints it, the customer pays it: a saved method (`payment_method_id`) is
-refused with `403 customer_proof_required` unless the customer presents their
-own credential on the pay.
-
-`ListCheckoutOptions` lists the options that can sell one price, in
-routing order; options report local readiness and never probe a gateway.
-
-A pay answers `status` `succeeded`, `failed` (with `failure`), `processing`
-(read it again) or `requires_action` with a `next_action`:
+A pay answers the order. `payment.status` is `succeeded`,
+`requires_payment_method` (a decline: `402` with `last_payment_error`),
+`processing` (read it again) or `requires_action` with a `next_action`:
 
 | `next_action.type` | The buyer |
 | --- | --- |
-| `redirect_to_url` | opens `url` (a Stripe or CCBill page) in the top window; it returns to `success_url` |
-| `solana_pay` | scans or opens `url`, a `solana:` Solana Pay link |
+| `redirect_to_url` | opens `url` (Stripe's hosted page) in the top window; it returns to `return_url` |
+| `solana_pay` | scans or opens `url`, a `solana:` Solana Pay link served by `/v1/orders/{id}/solana-pay` |
+| `authenticate` | completes the bank's challenge in the PSP's script, then `POST /v1/me/orders/{id}/confirm` |
 
-A card that needs 3-D Secure carries `operation` instead. A declined card leaves
-no subscription and no saved card. A provider refusal is a coded 402/502 (see
-[errors](errors.md#payment-refusals)); the attempt is recorded as failed and a
-new one may be made with another instrument.
+A declined card leaves no subscription and no saved card. A provider refusal
+is a coded 402/502 (see [errors](errors.md#payment-refusals)); the attempt is
+recorded as failed and the customer pays again with another instrument.
 
 Amounts use native currency units (micros for fiat) as decimal strings in JSON
 and `int64` in Go. `created_at`/`expires_at` are RFC3339 instants
 ([errors and wire rules](errors.md)).
-
-## Checkout sessions
-
-A signed-in customer mints a session for one price; the session id then reads
-and pays it with a new card and no other credential. Saved cards are the
-customer's own: a session shows them, and pays with one, only to its customer
-admitted by the mount's `Auth`. Anyone else presenting a credential reads the
-session as missing (`404 checkout_session_not_found`). OpenRails owns the session (id, expiry,
-attempts) in `billing.checkout_sessions`; apps sharing a merchant and
-database share it, so one of them can serve the payment page for all.
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/v1/me/checkout-sessions` | customer session | Mint: `{price_id \| product_key + price_key, auto_renew?, success_url?}` → `201 {id, url, expires_at}` |
-| GET | `/v1/checkout-sessions/{id}` | the id (saved cards: and its customer) | The session document |
-| POST | `/v1/checkout-sessions/{id}/pay` | the id (a saved card: and its customer) | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
-| GET | `/v1/me/checkout-sessions/{id}` | its customer, on a customer surface | The session document with the customer's saved cards |
-| POST | `/v1/me/checkout-sessions/{id}/pay` | its customer in person, on a customer surface | Pay, as above; a saved card needs no other proof |
-| GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind an attempt's `solana_pay` link |
-| GET, POST | `/v1/orders/{id}/solana-pay` | none | The Solana Pay transaction request behind an order's `solana_pay` next action: the label, then the transaction for the wallet's account |
-| POST | `/v1/admin/checkout-sessions` | the merchant's credential, `AdminUpdate` | Mint for a customer (`Client.CreateCheckoutSession`) |
-
-- On the customer surface the host's `Auth` names the customer, so the
-  customer pays there: `/v1/me/checkout-sessions/{id}` and
-  `/v1/me/checkout-sessions/{id}/pay`, and the `Auth` is the proof a saved
-  card needs. A session of another merchant than the request's, or of another
-  customer, is `404 checkout_session_not_found`.
-- The id is `ocs_` + 256 random bits, stored as its SHA-256 and never logged.
-  Hand it only to that customer's browser; put it in a URL fragment, not a
-  query. It is payable for 30 minutes and readable for 24 hours more, so a
-  late provider return still learns its outcome.
-- Config: the routes are always mounted. `Config.Checkout.PageURL` is the shared payment
-  page (the mint answers `url = PageURL#id`); `EmbedOrigins` are the sites
-  allowed to frame the page this host serves. Both empty is the single-site
-  case: the app renders `<Checkout source={client.checkoutSource(id)}>` itself.
-- Each option names its `psp_id`, `rail` and `driver`. A PSP whose
-  `card_entry` is `server` (driver `card`) takes the card in the pay body's
-  `card` field. Stripe (driver `stripe_elements`) pays a card saved in the page
-  (`payment_method_id`), with 3-D Secure in the page through `operation`. A
-  redirect (Stripe or CCBill hosted pages, one-off only) or a Solana Pay link
-  arrives as `next_action`.
-- Paying runs the engine's checkout with one idempotency key per attempt, so a
-  double click or a retry charges once. The attempt advances only after a
-  terminal failure; a session has 10 attempts. A decline answers
-  `200 {status: "failed", failure}`; a purchase the buyer cannot make (already a
-  member) answers `status: "blocked"`.
-- `success_url` must be on one of the minting app's `ReturnOrigins`. The
-  payment host accepts its `EmbedOrigins` as return origins too.
-- The session records the minting app's origin from that app's configuration
-  (the `success_url` origin, else `ReturnOrigins[0]`, else the origin of
-  `PublicBillingBaseURL`) and the document carries it as `embed_origin` only
-  when the serving host lists it in `EmbedOrigins` or it is `PageURL`'s own.
-- The host serving the page wraps it with the adapter's `CheckoutFramePolicy`
-  (`Content-Security-Policy: frame-ancestors 'self' <EmbedOrigins>`).
-- Limits: per address as any checkout route, and per session id 120 reads and
-  10 pays a minute.
-
-Money is exact: `plan.unit_amount`, `line_items[].amount`, `tax` and
-`due_today` are int64 decimal strings of `plan.currency`'s native unit, and
-`plan.unit_decimals` is that currency's registered scale
-(`billing.LookupCurrency`, the same table as `GET /v1/config`'s `currencies`). The
-canonical fixture is `testdata/wire/checkout_session.json`; billing-ui
-decodes the same file and rejects a numeric amount or a missing
-`unit_decimals` as an unavailable session.

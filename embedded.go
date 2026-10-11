@@ -12,7 +12,6 @@ import (
 	"github.com/riverqueue/river"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/engine"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
@@ -227,17 +226,6 @@ func (c *Client) Routes(selection Routes) ([]Route, error) {
 		out[i] = Route{Method: r.Method, Path: r.Path, Handler: r.Handler}
 	}
 	return out, nil
-}
-
-// CheckoutFrameAncestors is the Content-Security-Policy an embedded host sends
-// with the payment page it serves: only the host itself and
-// Config.Checkout.EmbedOrigins may frame it. The adapters'
-// CheckoutFramePolicy sets it.
-func (c *Client) CheckoutFrameAncestors() string {
-	if c == nil || c.engine == nil {
-		return "frame-ancestors 'self'"
-	}
-	return config.CheckoutFrameAncestors(c.engine.App.Config)
 }
 
 // RiverJobs is OpenRails' contribution to the host's River fleet (workers,

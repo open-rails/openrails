@@ -91,22 +91,22 @@ func jsonResponse(body string) *http.Response {
 	}
 }
 
-func (f *stripeCheckoutFake) metadata(t *testing.T) (providerSessionID, checkoutAttemptID, userID, priceID string) {
+func (f *stripeCheckoutFake) metadata(t *testing.T) (providerSessionID, checkoutAttemptID, userID, orderID string) {
 	t.Helper()
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	require.NotNil(t, f.checkout)
-	return "cs_e2e_webhook", f.checkout.Get("metadata[checkout_attempt_id]"), f.checkout.Get("metadata[user_id]"), f.checkout.Get("metadata[internal_price_id]")
+	return "cs_e2e_webhook", f.checkout.Get("metadata[checkout_attempt_id]"), f.checkout.Get("metadata[user_id]"), f.checkout.Get("metadata[order_id]")
 }
 
-func stripeWebhookBody(t *testing.T, eventID, eventType, providerSessionID, checkoutAttemptID, userID, priceID string, created int64) []byte {
+func stripeWebhookBody(t *testing.T, eventID, eventType, providerSessionID, checkoutAttemptID, userID, orderID string, created int64) []byte {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"id": eventID, "type": eventType, "created": created,
 		"data": map[string]any{"object": map[string]any{
 			"id": providerSessionID, "mode": "payment", "status": "complete", "payment_status": "paid",
 			"payment_intent": "pi_e2e_webhook", "amount_total": 100, "currency": "usd",
-			"metadata": map[string]string{"checkout_attempt_id": checkoutAttemptID, "user_id": userID, "internal_price_id": priceID},
+			"metadata": map[string]string{"checkout_attempt_id": checkoutAttemptID, "user_id": userID, "order_id": orderID},
 		}},
 	})
 	require.NoError(t, err)
@@ -163,23 +163,19 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 	})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
-		Customer:   billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "webhook@example.test"},
-		PriceID:    price.ID,
-		SuccessURL: "https://example.test/success",
-	})
+	session, err := sell(t, client, sale{customer: cid(userID), price: price.ID})
 	require.NoError(t, err)
-	_, err = session.pay("stripe", nil)
+	_, err = session.pay("pay-1", redirect("https://example.test/success"))
 	require.NoError(t, err)
-	providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID := fake.metadata(t)
+	providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID := fake.metadata(t)
 	require.Equal(t, userID, metadataUserID)
-	require.Equal(t, strings.TrimPrefix(price.ID.String(), "price_"), metadataPriceID)
+	require.Equal(t, session.order.ID.String(), metadataOrderID)
 	require.Equal(t, strings.TrimPrefix(session.attempt(f).String(), "chk_"), strings.TrimPrefix(checkoutAttemptID, "chk_"))
 
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
 	now := time.Now()
-	completed := stripeWebhookBody(t, "evt_e2e_completed", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataPriceID, now.Unix())
+	completed := stripeWebhookBody(t, "evt_e2e_completed", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataOrderID, now.Unix())
 	status, body := postSignedStripeWebhook(t, mux, account, secret, completed, now)
 	require.Equal(t, http.StatusOK, status, body)
 	// Exact redelivery exercises the event deduplication key, separately from
@@ -189,17 +185,17 @@ func TestStripeWebhookReplayAndReorderingConverges(t *testing.T) {
 
 	// A second delivery with a different event id exercises purchase
 	// idempotency independently from the webhook-event deduplication key.
-	replay := stripeWebhookBody(t, "evt_e2e_replay", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataPriceID, now.Add(time.Second).Unix())
+	replay := stripeWebhookBody(t, "evt_e2e_replay", "checkout.session.completed", providerSessionID, checkoutAttemptID, userID, metadataOrderID, now.Add(time.Second).Unix())
 	status, body = postSignedStripeWebhook(t, mux, account, secret, replay, now.Add(time.Second))
 	require.Equal(t, http.StatusOK, status, body)
 
 	// Stripe may deliver an older expiration after completion. It must not
 	// replace the succeeded terminal state.
-	expired := stripeWebhookBody(t, "evt_e2e_expired", "checkout.session.expired", providerSessionID, checkoutAttemptID, userID, metadataPriceID, now.Add(-time.Minute).Unix())
+	expired := stripeWebhookBody(t, "evt_e2e_expired", "checkout.session.expired", providerSessionID, checkoutAttemptID, userID, metadataOrderID, now.Add(-time.Minute).Unix())
 	status, body = postSignedStripeWebhook(t, mux, account, secret, expired, now.Add(2*time.Second))
 	require.Equal(t, http.StatusOK, status, body)
 
-	require.Equal(t, "succeeded", session.read().Status)
+	require.Equal(t, billing.OrderComplete, session.read().Status)
 	access, err := heldKeys(t.Context(), client, billing.CustomerID(uuid.MustParse(userID)), time.Time{}, "content:webhook")
 	require.NoError(t, err)
 	require.True(t, access["content:webhook"])

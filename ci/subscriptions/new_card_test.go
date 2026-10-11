@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"fmt"
-	"net/http"
 	"sync"
 	"testing"
 
@@ -14,9 +13,9 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// A hosted checkout: the customer's one "Subscribe" click on the payment page
-// sends a fresh Collect.js token, and OpenRails saves the card, quotes the
-// price and enrolls it in one pay.
+// A new-card purchase: the customer's one "Subscribe" click sends a fresh
+// Collect.js token, and OpenRails charges and saves the card and enrolls the
+// price in one pay.
 type hostedPay struct {
 	w     *world
 	c     *customer
@@ -24,35 +23,47 @@ type hostedPay struct {
 	price string
 }
 
-// hostedPaySessions are the sessions hostedPay minted, by customer and key.
-var hostedPaySessions sync.Map
+// hostedPayOrders are the orders hostedPay created: by customer and key, and
+// each customer's open one, which a new key pays again (a decline leaves it
+// open).
+var hostedPayOrders sync.Map
 
-// session is the session key names: the first pay with a key mints it through
-// tp's Client, later pays with it pay the same session again.
-func (h hostedPay) session(key string) hostedSession {
+// session is the order key pays: the order an earlier pay with key paid, the
+// customer's open one, or a new one the merchant creates through tp's Client.
+func (h hostedPay) session(key string) sale {
 	h.w.t.Helper()
-	if s, ok := hostedPaySessions.Load(h.c.id + "/" + key); ok {
-		return s.(hostedSession)
+	if s, ok := hostedPayOrders.Load(h.c.id + "/" + key); ok {
+		return s.(sale)
+	}
+	open := h.c.id + "/open/" + h.price
+	if s, ok := hostedPayOrders.Load(open); ok {
+		hostedPayOrders.Store(h.c.id+"/"+key, s)
+		return s.(sale)
 	}
 	s, err := h.c.sell(h.tp, order{price: pid(h.price)})
 	require.NoError(h.w.t, err)
-	hostedPaySessions.Store(h.c.id+"/"+key, s)
+	hostedPayOrders.Store(h.c.id+"/"+key, s)
+	hostedPayOrders.Store(open, s)
 	return s
 }
 
-// pay is the customer paying key's session with a card the page tokenized.
-func (h hostedPay) pay(key, token string) (*sessionPaid, error) {
+// pay is the customer paying key's order with a card the page tokenized.
+func (h hostedPay) pay(key, token string) (*paidOrder, error) {
 	h.w.t.Helper()
-	return h.session(key).buy(h.c, order{rail: "nmi", token: token})
+	paid, err := h.session(key).buy(h.c, order{rail: "nmi", token: token, key: key})
+	if err == nil && paid.Status == "succeeded" {
+		hostedPayOrders.Delete(h.c.id + "/open/" + h.price)
+	}
+	return paid, err
 }
 
 // declinedPay is a pay the issuer declined: nothing charged, the page shows
 // why and takes another card.
-func declinedPay(t *testing.T, paid *sessionPaid, err error) billing.PaymentFailure {
+func declinedPay(t *testing.T, paid *paidOrder, err error) billing.PaymentFailure {
 	t.Helper()
 	require.NoError(t, err)
-	require.Equal(t, "failed", paid.Status, "%+v", paid.CheckoutSessionPayResult)
-	require.NotNil(t, paid.Failure, "a decline explains itself: %+v", paid.CheckoutSessionPayResult)
+	require.Equal(t, "failed", paid.Status, "%+v", paid.Order)
+	require.NotNil(t, paid.Failure, "a decline explains itself: %+v", paid.Order)
 	return *paid.Failure
 }
 
@@ -102,14 +113,13 @@ func TestHostedNewCardSubscription(t *testing.T) {
 
 			// A retried or double-submitted pay replays the accepted enrollment.
 			paid := h.session("pay-1")
-			option := paid.optionAt(w.server.URL, "nmi")
 			outcomes := make(chan error, 2)
 			var wg sync.WaitGroup
 			for range 2 {
 				wg.Go(func() {
-					again, err := paid.payAt(t.Context(), w.server.URL, option, h.c, order{token: token})
+					again, err := paid.payAt(t.Context(), w.server.URL, h.c, order{rail: "nmi", token: token, key: "pay-1"})
 					if err == nil && (again.Status != "succeeded" || *again.SubscriptionID != *session.SubscriptionID) {
-						err = fmt.Errorf("replayed as %+v", again.CheckoutSessionPayResult)
+						err = fmt.Errorf("replayed as %+v", again.Order)
 					}
 					outcomes <- err
 				})
@@ -164,24 +174,25 @@ func TestHostedSavedCardSubscription(t *testing.T) {
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
 			price := w.membership("content:members", 9_990_000)
-			c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method, successURL: "https://e2e.test/return"})
+			c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method})
 			require.True(t, c.entitled("content:members"))
 		})
 	}
 }
 
-// A purchase the merchant prepares for its customer is handed over as a
-// checkout session: the customer pays it on the page with a new card.
-func TestMerchantHandsOverACheckoutSession(t *testing.T) {
+// A purchase the merchant prepares for its customer through NewRemote charges
+// nothing until the customer pays it with a new card.
+func TestMerchantHandsOverAnOrder(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)
-	session := w.handOver(c, price.ID)
-	require.Empty(t, w.nmi.ledger(""), "a handed-over session charges nothing")
-	status, done := session.payCard(visa)
-	require.Equal(t, http.StatusOK, status, "%v", done)
-	require.Equal(t, "succeeded", done["status"], "%v", done)
+	session, err := c.sell(remote, order{price: price.ID})
+	require.NoError(t, err)
+	require.Empty(t, w.nmi.ledger(""), "a merchant order charges nothing")
+	done, err := session.buy(c, order{rail: "nmi", token: w.nmi.Tokenize(visa)})
+	require.NoError(t, err)
+	require.Equal(t, "succeeded", done.Status, "%+v", done.Order)
 	w.settle()
 	require.True(t, c.entitled("content:members"))
 	require.Len(t, w.nmi.ledger(""), 1)

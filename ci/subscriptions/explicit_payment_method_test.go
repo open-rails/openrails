@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -15,21 +16,21 @@ import (
 )
 
 // A charge names its payment method. A customer with a saved card whose pay
-// names neither a saved method nor a new card token is refused and nothing is
-// charged.
+// names no payment is refused and nothing is charged.
 func TestChargeRequiresExplicitPaymentMethod(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
 	c := w.newCustomer()
 	c.saveCard("nmi", visa)
-	sale := w.permanent("content:post")
+	post := w.permanent("content:post")
 	member := w.membership("content:members", 9_990_000)
-	for _, price := range []billing.PriceID{sale.ID, member.ID} {
-		_, err := c.checkout(embedded, order{price: price, rail: "nmi"})
-		var status *billing.StatusError
-		require.ErrorAs(t, err, &status)
-		require.Equal(t, http.StatusUnprocessableEntity, status.Status)
-		require.Equal(t, "checkout_request_invalid", status.Code, "a card pay names its card: %v", err)
+	for _, price := range []billing.PriceID{post.ID, member.ID} {
+		sold, err := c.sell(embedded, order{price: price})
+		require.NoError(t, err)
+		paid := c.order(http.MethodPost, "/orders/"+sold.order.ID.String()+"/pay", "pay-"+uuid.NewString(),
+			map[string]any{"payment": map[string]any{}, "expected_total": micros(sold.order.Total)})
+		require.Equal(t, http.StatusBadRequest, paid.status, "a pay names its card: %v", paid.body)
+		require.Equal(t, billing.CodeInvalidParam, orderError(paid))
 	}
 	require.Empty(t, w.nmi.ledger(""), "no card is charged")
 	require.Zero(t, len(w.nmi.Attempts()))

@@ -38,8 +38,8 @@ import (
 
 // A visitor without a key that unlocks a video, signed out included, gets
 // 402 with the products on sale that unlock it and its buy page. Buying
-// through the routes billing-ui calls (a checkout session for the catalog
-// price) gets the signed video URL: a course for its buyers, every video for
+// through the routes billing-ui calls (an order of the catalog price) gets
+// the signed video URL: a course for its buyers, every video for
 // members.
 func TestGatedContent(t *testing.T) {
 	app := startApp(t)
@@ -325,34 +325,43 @@ func (a *app) signUp(t *testing.T, name string) string {
 
 const password = "correct horse battery staple"
 
-// buy pays for product's price as the buy page's Buy does: the signed-in
-// customer mints a checkout session for the catalog price, and CheckoutModal
-// reads and pays it by its id with a new card (checkoutSource without a
-// customer base sends no token).
+// buy pays for product's price as the buy page's BuyButton does: the
+// signed-in customer orders the catalog price and pays it with a new card in
+// the same call.
 func (a *app) buy(t *testing.T, token, product, price string) {
 	t.Helper()
-	var session struct {
-		ID string `json:"id"`
+	var catalog struct {
+		Data []struct {
+			Key    string `json:"key"`
+			Prices []struct {
+				ID         string `json:"id"`
+				Key        string `json:"key"`
+				UnitAmount string `json:"unit_amount"`
+			} `json:"prices"`
+		} `json:"data"`
 	}
-	a.call(t, token, http.MethodPost, "/billing/v1/me/checkout-sessions", map[string]string{"product_key": product, "price_key": price}, &session)
-	var page struct {
-		Options []struct {
-			ID     string `json:"id"`
-			Driver string `json:"driver"`
-		} `json:"options"`
+	a.call(t, "", http.MethodGet, "/billing/v1/catalog/products?keys="+product, nil, &catalog)
+	var line map[string]string
+	var total string
+	for _, p := range catalog.Data {
+		for _, offer := range p.Prices {
+			if p.Key == product && offer.Key == price {
+				line, total = map[string]string{"price_id": offer.ID}, offer.UnitAmount
+			}
+		}
 	}
-	a.call(t, "", http.MethodGet, "/billing/v1/checkout-sessions/"+session.ID, nil, &page)
-	require.Len(t, page.Options, 1)
-	require.Equal(t, "collect_js", page.Options[0].Driver)
-	var paid struct {
+	require.NotNil(t, line, "%s.%s is on sale", product, price)
+	var order struct {
 		Status string `json:"status"`
 	}
-	a.call(t, "", http.MethodPost, "/billing/v1/checkout-sessions/"+session.ID+"/pay", map[string]any{
-		"option_id":       page.Options[0].ID,
-		"payment_token":   a.nmi.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
-		"billing_details": map[string]any{"name": "Card Holder", "address": map[string]string{"country": "US", "postal_code": "10001"}},
-	}, &paid)
-	require.Equal(t, "succeeded", paid.Status)
+	a.call(t, token, http.MethodPost, "/billing/v1/me/orders", map[string]any{
+		"lines": []any{line}, "expected_total": total,
+		"payment": map[string]any{
+			"token":           a.nmi.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
+			"billing_details": map[string]any{"name": "Card Holder", "address": map[string]string{"country": "US", "postal_code": "10001"}},
+		},
+	}, &order)
+	require.Equal(t, "complete", order.Status)
 }
 
 // requireBuy: path answers 402 naming the products that unlock it and the
@@ -428,6 +437,9 @@ func (a *app) call(t *testing.T, token, method, path string, body, out any) {
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", a.URL)
+	if method == http.MethodPost {
+		req.Header.Set("Idempotency-Key", rand.Text())
+	}
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}

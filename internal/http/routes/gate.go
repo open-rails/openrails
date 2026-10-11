@@ -653,58 +653,6 @@ func bindCustomer(r *httprequest.Request, c billingauth.Identity, id billing.Cus
 	return true
 }
 
-// checkoutViewer asks who presents a checkout session, when a credential is
-// presented, without letting it refuse: the capability alone pays with a new
-// card, and only the session's own customer, a person in person, sees and
-// pays with its saved cards.
-func (e *Env) checkoutViewer(route Route) router.Middleware {
-	a := e.Viewers
-	if IsNilAuth(a) {
-		return func(next router.Handler) router.Handler { return next }
-	}
-	return func(next router.Handler) router.Handler {
-		return func(r *httprequest.Request) {
-			if !presentsCredential(r.Request) {
-				next(r)
-				return
-			}
-			v, err := authenticate(a, r.Request)
-			if err != nil {
-				next(r)
-				return
-			}
-			c, err := identityOf(v)
-			id, perr := billing.ParseCustomerID(c.Subject)
-			mid, _ := merchant.FromContext(r.Request.Context())
-			named, bound := billingauth.NamedMerchant(v)
-			if err != nil || perr != nil || mid.IsZero() || bound && named.MerchantID != mid ||
-				!billingauth.Interactive(c) || id.IsZero() || id.String() != c.Subject || c.Invoker.Issuer == "" {
-				next(r)
-				return
-			}
-			if here, err := e.boundTo(r.Request.Context(), v, mid, e.servesMany()); err != nil || !here {
-				next(r)
-				return
-			}
-			issuer, ok := e.subjectIssuer(v, c)
-			if !ok || e.admit(r.Request.Context(), mid, id, issuer) != nil {
-				next(r)
-				return
-			}
-			bindVerified(r, v)
-			if bindCustomer(r, c, id, billingauth.Target{MerchantID: mid}) {
-				next(r)
-			}
-		}
-	}
-}
-
-// presentsCredential reports a request carrying an explicit credential or a
-// cookie the mount admitted (ExplicitCredentials strips the rest).
-func presentsCredential(r *http.Request) bool {
-	return r != nil && (strings.TrimSpace(r.Header.Get("Authorization")) != "" || r.Header.Get("Cookie") != "")
-}
-
 // staffGates gates a merchant-tier route: the request's merchant, a person
 // or an application holding the route's permission in its scope and, for a
 // person on an operation that moves money or removes access, a recent

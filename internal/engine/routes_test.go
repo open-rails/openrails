@@ -103,10 +103,10 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 		code         int
 	}{
 		{http.MethodGet, "/api/pay/v1/me", http.StatusUnauthorized},
-		{http.MethodPost, "/api/pay/v1/me/checkout-sessions", http.StatusUnauthorized},
+		{http.MethodPost, "/api/pay/v1/me/orders", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/admin/psps", http.StatusUnauthorized},
 		{http.MethodOptions, "/api/pay/v1/me", http.StatusNoContent},
-		{http.MethodOptions, "/api/pay/v1/checkout-sessions/ocs_x/pay", http.StatusNoContent},
+		{http.MethodOptions, "/api/pay/v1/config", http.StatusNoContent},
 	} {
 		rec := serve(mux, tc.method, tc.path, "{}", "Authorization", "Bearer invalid")
 		require.Equal(t, tc.code, rec.Code, tc.method+" "+tc.path+" "+rec.Body.String())
@@ -231,8 +231,8 @@ func TestHTTPRateLimitIsSharedAcrossMountsAndRoutes(t *testing.T) {
 		mux  http.Handler
 		path string
 	}{
-		{first, "/first/v1/me/checkout-sessions"},
-		{second, "/second/v1/me/checkout-sessions"},
+		{first, "/first/v1/me/orders"},
+		{second, "/second/v1/me/orders"},
 	} {
 		req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader("{}"))
 		req.RemoteAddr = "203.0.113.94:1234"
@@ -260,7 +260,7 @@ func TestCustomerRoutesAlwaysMounted(t *testing.T) {
 	for _, path := range []string{"/payments", "/orders", "/subscriptions", "/payment-methods"} {
 		require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodGet, "/api/pay/v1/me"+path, "").Code, path)
 	}
-	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodPost, "/api/pay/v1/me/checkout-sessions", "").Code)
+	require.Equal(t, http.StatusUnauthorized, serve(mux, http.MethodPost, "/api/pay/v1/me/orders", "").Code)
 	require.Equal(t, http.StatusNotFound, serve(mux, http.MethodGet, "/api/pay/v1/admin/payments", "").Code)
 	rec := serve(mux, http.MethodGet, "/api/pay/v1/config", "")
 	require.Equal(t, http.StatusOK, rec.Code)

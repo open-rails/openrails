@@ -180,10 +180,11 @@ products:
 	var restored bytes.Buffer
 	require.NoError(t, merchantarchive.ExportCatalog(t.Context(), destination, mid, &restored))
 	require.Equal(t, artifact.String(), restored.String())
-	// The real source payment still joins the restored archived price/product,
-	// and target-side foreign keys accept that exact original price identity.
+	// The real source payment's order line still joins the restored archived
+	// price/product, and target-side foreign keys accept that exact original
+	// price identity.
 	var preserved bool
-	require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM `+src+`.payments pay JOIN `+dst+`.prices price ON price.merchant_id=pay.merchant_id AND price.id=pay.price_id JOIN `+dst+`.products product ON product.merchant_id=price.merchant_id AND product.id=price.product_id WHERE pay.id=$1 AND price.archived AND product.archived)`, paid.PaymentID.UUID()).Scan(&preserved))
+	require.NoError(t, w.pool.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM `+src+`.payments pay JOIN `+src+`.order_lines line ON line.merchant_id=pay.merchant_id AND line.order_id=pay.order_id JOIN `+dst+`.prices price ON price.merchant_id=line.merchant_id AND price.id=line.price_id JOIN `+dst+`.products product ON product.merchant_id=price.merchant_id AND product.id=price.product_id WHERE pay.id=$1 AND price.archived AND product.archived)`, paid.PaymentID.UUID()).Scan(&preserved))
 	require.True(t, preserved)
 	_, err = w.pool.Exec(t.Context(), "CREATE TABLE "+dst+`.purchase_reference_probe(merchant_id uuid,price_id uuid,FOREIGN KEY(merchant_id,price_id) REFERENCES `+dst+`.prices(merchant_id,id))`)
 	require.NoError(t, err)

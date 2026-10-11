@@ -42,9 +42,6 @@ export default async function globalSetup() {
         `127.0.0.1:${port}`,
         "-base-url",
         baseURL,
-        // Another origin on the same server: the payment page is framed.
-        "-page-url",
-        `http://127.0.0.1:${port}/pay.html`,
         "-static",
         path.join(root, "e2e/openrails/fixtures"),
         "-lifetime",
@@ -64,15 +61,13 @@ export default async function globalSetup() {
   }
 }
 
-// Bundles the account, checkout, offers and payment pages against a fresh package build (dist/).
+// Bundles the account, checkout and offers pages against a fresh package build (dist/).
 async function buildHostApp() {
   execFileSync("pnpm", ["build"], { cwd: root, stdio: "inherit" })
   await build({
     configFile: false,
     logLevel: "warn",
     plugins: [react()],
-    // The checkout test page imports billing-ui's internals from src.
-    resolve: { alias: { "#orck": path.join(root, "src") } },
     root: path.join(root, "e2e/openrails/app"),
     build: {
       outDir: path.join(root, "e2e/openrails/fixtures/app"),
@@ -83,7 +78,6 @@ async function buildHostApp() {
           account: path.join(root, "e2e/openrails/app/main.tsx"),
           checkout: path.join(root, "e2e/openrails/app/checkout.tsx"),
           offers: path.join(root, "e2e/openrails/app/offers.tsx"),
-          pay: path.join(root, "e2e/openrails/app/pay.tsx"),
         },
         output: { entryFileNames: "[name].js" },
       },

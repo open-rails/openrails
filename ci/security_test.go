@@ -47,13 +47,11 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
 	userID := uuid.NewString()
-	session, err := sell(t, client, billing.CreateCheckoutSessionParams{
-		Customer: billing.CheckoutCustomerIdentity{ID: cid(userID), VerifiedEmail: "refund@example.test"}, PriceID: price.ID, SuccessURL: "https://example.test/success",
-	})
+	session, err := sell(t, client, sale{customer: cid(userID), price: price.ID})
 	require.NoError(t, err)
-	_, err = session.pay("stripe", nil)
+	_, err = session.pay("pay-1", redirect("https://example.test/success"))
 	require.NoError(t, err)
-	providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID := fake.metadata(t)
+	providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID := fake.metadata(t)
 
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, client, openrails.Routes{Auth: authtest.Deny{}}))
@@ -70,7 +68,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	}
 
 	now := time.Now()
-	deliver(stripeWebhookBody(t, "evt_security_paid", "checkout.session.completed", providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID, now.Unix()))
+	deliver(stripeWebhookBody(t, "evt_security_paid", "checkout.session.completed", providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID, now.Unix()))
 	require.True(t, entitled())
 
 	refund, err := json.Marshal(map[string]any{
@@ -89,7 +87,7 @@ func TestSecurityRefundedPurchaseIsNotRegranted(t *testing.T) {
 	require.False(t, entitled(), "a full provider refund ends the purchase")
 
 	for i, kind := range []string{"checkout.session.completed", "checkout.session.async_payment_succeeded"} {
-		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutAttemptID, metadataUserID, metadataPriceID, now.Add(time.Duration(i+2)*time.Second).Unix()))
+		deliver(stripeWebhookBody(t, "evt_security_replay_"+strings.Repeat("x", i+1), kind, providerSessionID, checkoutAttemptID, metadataUserID, metadataOrderID, now.Add(time.Duration(i+2)*time.Second).Unix()))
 		require.False(t, entitled(), "%s after the refund must not grant again", kind)
 	}
 	access, err := heldProducts(t.Context(), client, billing.CustomerID(uuid.MustParse(userID)), product.ID)

@@ -89,7 +89,7 @@ merchants:
 		t.Helper()
 		raw, err := json.Marshal(body)
 		require.NoError(t, err)
-		q := rsRequest{method: method, path: "/v1/me" + path, authorization: "Bearer " + token}
+		q := rsRequest{method: method, path: "/v1/me" + path, authorization: "Bearer " + token, idempotencyKey: uuid.NewString()}
 		if body != nil {
 			q.body = string(raw)
 		}
@@ -103,15 +103,8 @@ merchants:
 	require.NoError(t, err)
 	card := me(http.MethodPost, "/payment-methods", map[string]any{"psp_id": psps.Items[0].ID, "token": gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 		"billing_details": map[string]any{"name": "New Comer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})["id"]
-	session := me(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID})["id"].(string)
-	var option any
-	for _, raw := range me(http.MethodGet, "/checkout-sessions/"+session, nil)["options"].([]any) {
-		if o := raw.(map[string]any); o["rail"] == "nmi" {
-			option = o["id"]
-		}
-	}
-	paid := me(http.MethodPost, "/checkout-sessions/"+session+"/pay", map[string]any{"option_id": option, "payment_method_id": card})
-	require.Equal(t, "succeeded", paid["status"], "%v", paid)
+	paid := me(http.MethodPost, "/orders", map[string]any{"lines": []any{map[string]any{"price_id": price.ID}}, "expected_total": "9990000", "payment": map[string]any{"payment_method_id": card}})
+	require.Equal(t, "complete", paid["status"], "%v", paid)
 
 	sweep := riverjobs.NotificationEmailSweepWorker{DB: graph.Runtime.DB, Notifications: graph.Runtime.NotificationService}
 	require.NoError(t, sweep.Work(ctx, &river.Job[riverjobs.NotificationEmailSweepArgs]{}))

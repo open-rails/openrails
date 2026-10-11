@@ -263,6 +263,68 @@ describe("OrderCheckout", () => {
     expect(screen.queryByText(/1881/)).not.toBeInTheDocument()
   })
 
+  it("subscribes on an order the merchant's server created, with a saved card", async () => {
+    const membership = (status = "open") => {
+      const base = order(
+        status === "complete"
+          ? { status: "succeeded", payment_method_id: "pm_kept", payment_id: "pay_1" }
+          : {},
+        status
+      )
+      return {
+        ...base,
+        lines: [
+          {
+            ...base.lines[0],
+            description: "Pro",
+            quantity: null,
+            billing_interval_hours: 720,
+            access_duration_hours: 720,
+            subscription_id: status === "complete" ? "sub_1" : null,
+          },
+        ],
+      }
+    }
+    const paid: Record<string, unknown>[] = []
+    const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+      if (input.endsWith("/config")) return Response.json(config)
+      if (input.includes("/me/payment-methods"))
+        return Response.json({
+          data: [
+            {
+              id: "pm_kept",
+              customer_id: "c1",
+              rail: "stripe",
+              psp_id: "psp_stripe",
+              status: "active",
+              card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2035 },
+              reusable: true,
+            },
+          ],
+          next_cursor: null,
+        })
+      if (input.endsWith("/me/orders/ord_1")) return Response.json(membership())
+      if (input.endsWith("/me/orders/ord_1/pay")) {
+        paid.push(JSON.parse(String(init?.body)))
+        return Response.json(membership("complete"))
+      }
+      return Response.json({}, { status: 404 })
+    })
+    const onSettled = vi.fn()
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <OrderCheckout orderId="ord_1" onSettled={onSettled} />
+      </BillingProvider>
+    )
+    fireEvent.click(await screen.findByRole("radio", { name: /4242/ }))
+    fireEvent.click(await screen.findByRole("button", { name: "Pay $15.00" }))
+    await waitFor(() => expect(onSettled).toHaveBeenCalled())
+    expect(paid).toEqual([
+      expect.objectContaining({ payment: { payment_method_id: "pm_kept" }, expected_total: "15000000" }),
+    ])
+    expect(onSettled.mock.calls[0][0].lines[0].subscription_id).toBe("sub_1")
+  })
+
   it("pays what a usage order still owes with a saved card", async () => {
     const usage = (status = "open") => ({
       ...order({ status: status === "complete" ? "succeeded" : "requires_payment_method" }, status),

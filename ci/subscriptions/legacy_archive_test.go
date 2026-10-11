@@ -21,8 +21,10 @@ type legacyArchiveEdit func(table string, values []*string) []*string
 // legacyArchive rewrites a current archive as version 1 wrote it: per-key
 // entitlement windows (one per key of each product-access window, projecting
 // an entitlement grant) in place of product access, key snapshots on payments
-// and subscriptions, and grants without free-grant attribution. edit adjusts
-// each version 1 row; skip drops whole tables.
+// and subscriptions, and grants without free-grant attribution. Its book
+// predates orders: an order's payment names its line's price, and the order,
+// its attempts, claims and sale are dropped. edit adjusts each version 1 row;
+// skip drops whole tables.
 func legacyArchive(t *testing.T, current []byte, edit legacyArchiveEdit, skip ...string) []byte {
 	t.Helper()
 	currentProfiles := map[string]contract.Profile{}
@@ -56,9 +58,37 @@ func legacyArchive(t *testing.T, current []byte, edit legacyArchiveEdit, skip ..
 		require.NoError(t, err)
 		return new(string(raw))
 	}
+	// An order's price: its first line's.
+	orderPrice := map[string]*string{}
+	table := ""
+	_, err := archivewire.Read(bytes.NewReader(current), func(archivewire.Header) error { return nil }, func(record archivewire.Record) error {
+		if record.Kind == "table" {
+			table = record.Table
+		} else if table == "order_lines" {
+			order := *field(currentProfiles[table], record.Values, "order_id")
+			if _, seen := orderPrice[order]; !seen {
+				orderPrice[order] = field(currentProfiles[table], record.Values, "price_id")
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	orderRow := func(table string, values []*string) bool {
+		from := currentProfiles[table]
+		switch table {
+		case "orders", "order_lines":
+			return true
+		case "ownership_claims", "checkout_attempts":
+			return field(from, values, "order_id") != nil
+		case "provider_intents":
+			var payload map[string]any
+			raw := field(from, values, "payload")
+			return raw != nil && json.Unmarshal([]byte(*raw), &payload) == nil && payload["order_id"] != nil
+		}
+		return false
+	}
 	var out bytes.Buffer
 	var writer *archivewire.Writer
-	table := ""
 	write := func(values []*string) error {
 		name := table
 		if name == "product_access" {
@@ -71,7 +101,7 @@ func legacyArchive(t *testing.T, current []byte, edit legacyArchiveEdit, skip ..
 		}
 		return writer.Row(values)
 	}
-	_, err := archivewire.Read(bytes.NewReader(current), func(h archivewire.Header) error {
+	_, err = archivewire.Read(bytes.NewReader(current), func(h archivewire.Header) error {
 		var err error
 		writer, err = archivewire.NewVersionWriter(&out, 1, h.MerchantID, h.CatalogRevision)
 		return err
@@ -101,7 +131,7 @@ func legacyArchive(t *testing.T, current []byte, edit legacyArchiveEdit, skip ..
 				accessGrants[*field(from, values, "id")] = true
 			}
 		}
-		if skipped[table] {
+		if skipped[table] || orderRow(table, values) {
 			return nil
 		}
 		if table == "product_access" {
@@ -150,7 +180,12 @@ func legacyArchive(t *testing.T, current []byte, edit legacyArchiveEdit, skip ..
 		}
 		switch table {
 		case "payments":
-			if price := field(from, values, "price_id"); price != nil {
+			price := field(from, values, "price_id")
+			if order := field(from, values, "order_id"); order != nil {
+				price = orderPrice[*order]
+				set("price_id", price)
+			}
+			if price != nil {
 				product := priceProducts[*price]
 				set("entitlements_snapshot", snapshot(&product))
 			}

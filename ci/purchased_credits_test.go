@@ -58,7 +58,7 @@ func (f *creditCheckoutFake) paid(t *testing.T, n int, event string) []byte {
 		"data": map[string]any{"object": map[string]any{
 			"id": fmt.Sprintf("cs_credit_%d", n), "mode": "payment", "status": "complete", "payment_status": "paid",
 			"payment_intent": fmt.Sprintf("pi_credit_%d", n), "amount_total": 100, "currency": "usd",
-			"metadata": map[string]string{"checkout_attempt_id": form.Get("metadata[checkout_attempt_id]"), "user_id": form.Get("metadata[user_id]"), "internal_price_id": form.Get("metadata[internal_price_id]")},
+			"metadata": map[string]string{"checkout_attempt_id": form.Get("metadata[checkout_attempt_id]"), "user_id": form.Get("metadata[user_id]"), "order_id": form.Get("metadata[order_id]")},
 		}},
 	})
 	require.NoError(t, err)
@@ -87,9 +87,9 @@ func TestPurchasedCreditsFreezeBenefitsAndRemainRepeatable(t *testing.T) {
 	customer := billing.CustomerID(uuid.New())
 	buy := func() {
 		t.Helper()
-		session, err := sell(t, client, billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: customer, VerifiedEmail: "api@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/success"})
+		session, err := sell(t, client, sale{customer: customer, price: price.ID})
 		require.NoError(t, err)
-		_, err = session.pay("stripe", nil)
+		_, err = session.pay("pay-1", redirect("https://e2e.test/success"))
 		require.NoError(t, err)
 	}
 	buy()

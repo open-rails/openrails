@@ -735,15 +735,3 @@ interface NewCardFields {
  */
 export type NewCard = NewCardFields &
   ({ token: string; card?: never } | { card: CardEntry; token?: never })
-
-/**
- * A minted checkout session. `id` reads and pays it with no other credential;
- * hand it to this customer's browser only. `url` is the shared payment page
- * (`<CheckoutFrame url>`), null when BuyButton renders the checkout itself.
- */
-export const checkoutSessionLinkSchema = z.object({
-  id: z.string().startsWith("ocs_"),
-  url: z.string().url().nullish(),
-  expires_at: time,
-})
-export type CheckoutSessionLink = z.infer<typeof checkoutSessionLinkSchema>

@@ -75,19 +75,25 @@ func TestPSPArmedOnOneReplicaServesOnAnother(t *testing.T) {
 	require.NoError(t, err)
 	price, err := w.client[embedded].CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: "armed-usd", UnitAmount: 1_000_000, Currency: "USD"})
 	require.NoError(t, err)
-	checkout := func() error {
-		_, err := other.client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
-			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "armed@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/return",
-		})
-		return err
+	sells := func() bool {
+		preview, err := other.client.PreviewOrder(ctx, billing.PreviewOrderParams{CustomerID: cid(uuid.NewString()), Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+		if err != nil {
+			return false
+		}
+		for _, option := range preview.PaymentOptions {
+			if option.PSPID == nmi {
+				return true
+			}
+		}
+		return false
 	}
-	require.ErrorIs(t, checkout(), billing.ErrInvalid, "nothing sells through a disarmed PSP")
+	require.False(t, sells(), "nothing sells through a disarmed PSP")
 
 	psp, err := w.client[embedded].GetPSP(ctx, nmi)
 	require.NoError(t, err)
 	_, err = w.client[embedded].UpdatePSP(ctx, nmi, billing.UpdatePSPParams{ExpectedRevision: &psp.Revision, Credentials: map[string]string{"security_key": "e2e-nmi-key"}})
 	require.NoError(t, err)
-	require.Eventually(t, func() bool { return checkout() == nil }, 10*time.Second, 50*time.Millisecond, "the other replica sells through the armed PSP")
+	require.Eventually(t, sells, 10*time.Second, 50*time.Millisecond, "the other replica sells through the armed PSP")
 	require.False(t, engine.Graph(other.rt).Runtime.PSPPostureDisarmed(nmi.UUID()))
 }
 

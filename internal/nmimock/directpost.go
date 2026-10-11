@@ -131,8 +131,14 @@ func (m *Mock) tokenSale(form url.Values) string {
 	if c.Decline != "" && c.Decline != "vault" {
 		s.Declined = c.Decline
 		m.sales = append(m.sales, s)
-		return answer("response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
-			"orderid", order, "type", "sale", "response_code", c.Decline)
+		fields := []string{"response", "2", "responsetext", "DECLINE", "authcode", "", "transactionid", s.TransactionID, "avsresponse", c.AVS, "cvvresponse", c.CVV,
+			"orderid", order, "type", "sale", "response_code", c.Decline}
+		if form.Get("customer_vault") == "add_customer" && c.VaultsDeclined {
+			v := &Vault{ID: m.next("vault"), BillingID: m.next("bill"), Card: c}
+			m.vaults[v.ID] = v
+			fields = append(fields, "customer_vault_id", v.ID)
+		}
+		return answer(fields...)
 	}
 	if m.duplicate > 0 {
 		m.duplicate--

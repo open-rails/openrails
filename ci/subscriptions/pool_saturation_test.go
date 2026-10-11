@@ -16,8 +16,8 @@ import (
 
 // A request holds one pool connection and never waits for a second, so
 // checkout traffic well past the pool's size completes instead of
-// deadlocking: each request reads the checkout options (custodians and PSPs),
-// then creates and pays its session.
+// deadlocking: each request previews the order (custodians and PSPs), then
+// creates and pays it.
 func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 	t.Parallel()
 	const poolSize, requests = 6, 20
@@ -44,23 +44,17 @@ func TestCheckoutBeyondPoolSizeCompletes(t *testing.T) {
 			defer wg.Done()
 			<-start
 			for range 2 {
-				if _, err := client.ListCheckoutOptions(ctx, billing.CheckoutOptionListParams{PriceID: price.ID}); err != nil {
+				if _, err := client.PreviewOrder(ctx, billing.PreviewOrderParams{CustomerID: c.cid(), Lines: []billing.OrderLineParams{{PriceID: price.ID}}}); err != nil {
 					errs[i] = err
 					return
 				}
 			}
-			link, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price.ID})
+			session, err := c.sellWith(ctx, client, order{price: price.ID})
 			if err != nil {
 				errs[i] = err
 				return
 			}
-			session := hostedSession{w: w, id: link.ID}
-			option, err := session.optionOf(ctx, w.server.URL, "nmi")
-			if err != nil {
-				errs[i] = err
-				return
-			}
-			errs[i] = succeeded(session.payAt(ctx, w.server.URL, option, c, order{token: w.nmi.Tokenize(visa)}))
+			errs[i] = succeeded(session.payAt(ctx, w.server.URL, c, order{rail: "nmi", token: w.nmi.Tokenize(visa)}))
 		}()
 	}
 	close(start)

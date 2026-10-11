@@ -75,11 +75,6 @@ type Tier string
 const (
 	// AuthPublic: no credential.
 	AuthPublic Tier = "public"
-	// AuthCheckoutSession: the opaque ocs_ capability, resolved to its stored
-	// merchant; a presented customer credential only narrows what it shows.
-	AuthCheckoutSession Tier = "checkout_session"
-	// AuthSessionID: the id in the path is the credential.
-	AuthSessionID Tier = "session_id"
 	// AuthCustomer: a person acting for itself, as the customer.
 	AuthCustomer Tier = "customer"
 	// AuthMerchant: a person or an application holding the route's group
@@ -142,16 +137,6 @@ type Level string
 const (
 	LevelRead   Level = "read"
 	LevelUpdate Level = "update"
-)
-
-// Throttle is a route's own limiter, beside the deployment's rate limits.
-type Throttle string
-
-const (
-	// ThrottleSessionRead and ThrottleSessionPay bound a checkout session per
-	// session id.
-	ThrottleSessionRead Throttle = "checkout_session_read"
-	ThrottleSessionPay  Throttle = "checkout_session_pay"
 )
 
 // CheckoutAccess is how the hosted checkout host serves a route under a
@@ -301,8 +286,6 @@ type Route struct {
 	Sensitive bool
 	// Limit meters the operation per human administrator, after authorization.
 	Limit middleware.AdminOperation
-	// Throttle is the route's own limiter.
-	Throttle Throttle
 	// When is the configuration the route needs to be mounted.
 	When Feature
 	// NoConn: the route pins no merchant database connection.
@@ -369,7 +352,7 @@ func Lookup(method, path string) (Route, bool) {
 var allRoutes, index = func() ([]Route, map[string]Route) {
 	var all []Route
 	for _, resource := range [][]Route{
-		metaRoutes, configRoutes, checkoutRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
+		metaRoutes, configRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
 		merchantRoutes, opsRoutes, provisioningRoutes, customerNetworkRoutes, networkRoutes(),
 	} {
@@ -446,7 +429,7 @@ func TierErrors(tier Tier) []string {
 	staff := []string{billing.CodeHostPrincipalInvalid}
 	var own []string
 	switch tier {
-	case AuthPublic, AuthSessionID:
+	case AuthPublic:
 		own = []string{billing.CodeMerchantNotFound} // the Host names no merchant
 	case AuthCustomer:
 		// network_account_linked: an account linked to another customer of

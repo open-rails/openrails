@@ -217,9 +217,9 @@ func TestBillingArchiveWaitsForALiveClaim(t *testing.T) {
 	require.NotEqual(t, "idempotency_keys", table, "a lapsed claim does not block the export")
 }
 
-// The archive accepts a refused membership's failed payments row under its
-// payment id (an older decline record); any other payment under a refused
-// enrollment is refused.
+// The archive accepts a refused sale's failed payments row under its payment
+// id (an older decline record); any other payment under a refused sale is
+// refused.
 func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -228,6 +228,13 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	paid, err := h.pay("pay-nsf", w.nmi.Tokenize(card{Brand: "visa", Last4: "0002", Decline: "202"}))
 	declinedPay(t, paid, err)
 	w.settle()
+	// The host has its events: the export waits only on what is undelivered.
+	events, err := w.client[embedded].ListHostEvents(t.Context(), billing.HostEventListParams{})
+	require.NoError(t, err)
+	for _, event := range events.Items {
+		_, err := w.client[embedded].AcknowledgeHostEvents(t.Context(), []billing.HostEventID{event.ID})
+		require.NoError(t, err)
+	}
 	refusedTable := func() string {
 		status, body := w.staff(http.MethodGet, "/v1/admin/billing-archive")
 		if status == http.StatusOK {
@@ -246,18 +253,18 @@ func TestBillingArchiveKeepsPreCutDeclineRecords(t *testing.T) {
 	require.NotEqual(t, "provider_intents", refusedTable())
 
 	// An older decline record: a failed payments row.
-	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.payments (merchant_id, id, customer_id, price_id, psp_id, channel, rail, transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
-		SELECT merchant_id, (payload->'terms'->>'payment_id')::uuid, (payload->'terms'->>'customer_id')::uuid, (payload->'terms'->>'price_id')::uuid,
-		       psp_id, 'rail', rail, rail || '_sub_declined:' || id, (payload->'terms'->>'amount')::bigint, (payload->'terms'->>'recurring_amount')::bigint,
-		       payload->'terms'->>'currency', 'failed', 'none', created_at
-		FROM billing.provider_intents WHERE intent_type = 'initial_membership' AND status = 'failed_terminal'`))
+	record, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.payments (merchant_id, id, customer_id, order_id, psp_id, channel, rail, transaction_id, amount, list_amount, currency, status, money_movement, purchased_at)
+		SELECT merchant_id, (payload->>'payment_id')::uuid, (payload->>'user_id')::uuid, (payload->>'order_id')::uuid,
+		       psp_id, 'rail', rail, rail || '_sub_declined:' || id, (payload->>'amount')::bigint, (payload->>'list_amount')::bigint,
+		       payload->>'currency', 'failed', 'none', created_at
+		FROM billing.provider_intents WHERE intent_type = 'nmi_sale' AND status = 'failed_terminal'`))
 	require.NoError(t, err)
 	require.EqualValues(t, 1, record.RowsAffected())
 	require.NotEqual(t, "provider_intents", refusedTable(), "a pre-#1111 decline record is not a payment")
 
 	_, err = w.pool.Exec(t.Context(), w.q(`UPDATE billing.payments SET status = 'succeeded' WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
-	require.Equal(t, "provider_intents", refusedTable(), "a completed payment under a refused enrollment")
+	require.Equal(t, "provider_intents", refusedTable(), "a completed payment under a refused sale")
 	_, err = w.pool.Exec(t.Context(), w.q(`DELETE FROM billing.payments WHERE transaction_id LIKE '%_sub_declined:%'`))
 	require.NoError(t, err)
 }

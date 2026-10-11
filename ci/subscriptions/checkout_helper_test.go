@@ -4,63 +4,89 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
+	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
-	"github.com/open-rails/openrails/internal/modules/checkoutsession"
 )
 
-// Every purchase is made as production makes it: the merchant hands its
-// customer a checkout session through its Client, and the payment page pays
-// it by its id, the customer signed in to pay with a saved card.
+// Every purchase is made as production makes it: the merchant creates an
+// unpaid order for its customer through its Client, and the customer pays it
+// on /v1/me, signed in.
 
-// order is one purchase: what the session sells and how the page pays it.
+// order is one purchase: what the merchant sells and how the customer pays.
 type order struct {
-	price      billing.PriceID
-	amount     *int64
-	autoRenew  *bool
-	successURL string
-	// rail is the option the page pays on. method is a saved card, paid with
-	// the customer's own proof; token a card the page tokenized. With neither
-	// the option pays by redirect or Solana Pay.
+	price  billing.PriceID
+	amount *int64
+	// rail is the PSP the customer pays on. method is a saved card; token a
+	// card the PSP's fields tokenized. With neither the customer pays on the
+	// PSP's hosted page (returnURL) or, on Solana, from a wallet.
 	rail, method, token string
+	returnURL           string
 	// ip is the buyer's address as the site's proxy forwards it; empty is a
 	// fresh one.
 	ip string
+	// key is the pay's Idempotency-Key. Empty is one per order and payment,
+	// so paying the same way again is a replay, as a page's double submit.
+	key string
 }
 
-// sessionPaid is the page's answer to a pay and the session it paid.
-type sessionPaid struct {
-	checkoutsession.CheckoutSessionPayResult
-	session hostedSession
+// sale is an order the merchant created for its customer.
+type sale struct {
+	w     *world
+	order billing.Order
 }
 
-// sell is the merchant minting o's session for c through tp's Client.
-func (c *customer) sell(tp topology, o order) (hostedSession, error) {
+// paidOrder is a pay's answer read as the payment's status: succeeded,
+// processing, requires_action, or failed (declined, Failure says why).
+type paidOrder struct {
+	Order          billing.Order
+	Status         string
+	NextAction     *billing.NextAction
+	PaymentID      *billing.PaymentID
+	SubscriptionID *billing.SubscriptionID
+	Failure        *billing.PaymentFailure
+	sale           sale
+}
+
+func (p *paidOrder) String() string {
+	return fmt.Sprintf("%s: order %s %s, failure %+v", p.Status, p.Order.ID, p.Order.Status, p.Failure)
+}
+
+// sell is the merchant creating o's order for c through tp's Client.
+func (c *customer) sell(tp topology, o order) (sale, error) {
 	c.w.t.Helper()
-	link, err := c.w.client[tp].CreateCheckoutSession(c.w.t.Context(), billing.CreateCheckoutSessionParams{
-		Customer: c.identity(), PriceID: o.price, Amount: o.amount, AutoRenew: o.autoRenew, SuccessURL: o.successURL,
-	})
-	if err != nil {
-		return hostedSession{}, err
-	}
-	return hostedSession{w: c.w, id: link.ID}, nil
+	return c.sellWith(c.w.t.Context(), c.w.client[tp], o)
 }
 
-// checkout is c buying o on a session minted through tp's Client.
-func (c *customer) checkout(tp topology, o order) (*sessionPaid, error) {
+// sellWith is sell through client. It touches no testing.T, so racing
+// goroutines call it.
+func (c *customer) sellWith(ctx context.Context, client *openrails.Client, o order) (sale, error) {
+	created, err := client.CreateOrder(ctx, billing.CreateOrderParams{CustomerID: c.customerID(),
+		Lines: []billing.OrderLineParams{{PriceID: o.price, Amount: o.amount}}, IdempotencyKey: uuid.NewString()})
+	if err != nil {
+		return sale{}, err
+	}
+	return sale{w: c.w, order: *created}, nil
+}
+
+// checkout is c buying o on an order created through tp's Client.
+func (c *customer) checkout(tp topology, o order) (*paidOrder, error) {
 	c.w.t.Helper()
 	s, err := c.sell(tp, o)
 	if err != nil {
@@ -70,34 +96,46 @@ func (c *customer) checkout(tp topology, o order) (*sessionPaid, error) {
 }
 
 // mustCheckout is a checkout that succeeds.
-func (c *customer) mustCheckout(tp topology, o order) *sessionPaid {
+func (c *customer) mustCheckout(tp topology, o order) *paidOrder {
 	c.w.t.Helper()
 	paid, err := c.checkout(tp, o)
 	require.NoError(c.w.t, err)
-	require.Equal(c.w.t, "succeeded", paid.Status, "%+v", paid.CheckoutSessionPayResult)
+	require.Equal(c.w.t, "succeeded", paid.Status, "%+v", paid.Order)
 	c.w.settle()
 	return paid
 }
 
-// buy is c paying s as o says, on the page of the process that minted it.
-func (s hostedSession) buy(c *customer, o order) (*sessionPaid, error) {
+// buy is c paying s as o says, on the process that created it.
+func (s sale) buy(c *customer, o order) (*paidOrder, error) {
 	s.w.t.Helper()
 	return s.buyAt(s.w.server.URL, c, o)
 }
 
-// buyAt is c paying s on the page server serves: any process of the merchant.
-// A processing answer whose payment River's executor is still running is the
-// session's outcome once it finishes, as the page reads it.
-func (s hostedSession) buyAt(server string, c *customer, o order) (*sessionPaid, error) {
+// buyAt is c paying s on the process server serves: any process of the
+// merchant. A processing answer whose charge River's executor is still
+// running is the order's outcome once it finishes.
+func (s sale) buyAt(server string, c *customer, o order) (*paidOrder, error) {
 	s.w.t.Helper()
-	paid, err := s.payAt(s.w.t.Context(), server, s.optionAt(server, o.rail), c, o)
+	paid, err := s.payAt(s.w.t.Context(), server, c, o)
 	if err == nil && paid.Status == "processing" && s.awaitPayment() {
-		status, raw := s.w.pageAt(server, http.MethodGet, "/v1/checkout-sessions/"+s.id, "", "", nil)
-		require.Equal(s.w.t, http.StatusOK, status, "%s", raw)
-		paid = &sessionPaid{session: s}
-		require.NoError(s.w.t, json.Unmarshal(raw, &paid.CheckoutSessionPayResult))
+		paid = s.readAt(server, c)
 	}
 	return paid, err
+}
+
+// read is the order as its customer reads it.
+func (s sale) read(c *customer) *paidOrder {
+	s.w.t.Helper()
+	return s.readAt(s.w.server.URL, c)
+}
+
+func (s sale) readAt(server string, c *customer) *paidOrder {
+	s.w.t.Helper()
+	status, raw := s.w.pageAt(server, http.MethodGet, "/v1/me/orders/"+s.order.ID.String(), c.token, "", nil)
+	require.Equal(s.w.t, http.StatusOK, status, "%s", raw)
+	var o billing.Order
+	require.NoError(s.w.t, json.Unmarshal(raw, &o))
+	return s.answer(o)
 }
 
 // executorTimeout bounds how long a helper waits for River's executor to
@@ -124,33 +162,49 @@ func (w *world) awaitExecutor(cond string, args ...any) bool {
 	return true
 }
 
-// awaitPayment is awaitExecutor for the payment of s's current attempt.
-func (s hostedSession) awaitPayment() bool {
+// awaitPayment is awaitExecutor for the order's charge.
+func (s sale) awaitPayment() bool {
 	s.w.t.Helper()
-	return s.w.awaitExecutor(`i.payload->>'checkout_attempt_id' = (SELECT s.attempt_id::text FROM billing.checkout_sessions s WHERE s.id_hash = sha256($1::bytea))`, []byte(s.id))
+	return s.w.awaitExecutor(`i.payload->>'order_id' = $1`, s.order.ID.UUID().String())
 }
 
-// payAt is c paying option of s on server's page as o says. It touches no
-// testing.T, so racing goroutines call it.
-func (s hostedSession) payAt(ctx context.Context, server, option string, c *customer, o order) (*sessionPaid, error) {
-	body := map[string]any{"option_id": option}
-	token := ""
+// payment is o's payment as the customer's page sends it.
+func (s sale) payment(o order) map[string]any {
 	switch {
 	case o.method != "":
-		body["payment_method_id"], token = o.method, c.token
+		return map[string]any{"payment_method_id": o.method}
 	case o.token != "":
-		body["payment_token"] = o.token
-		body["billing_details"] = map[string]any{"name": "Page Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}
+		return map[string]any{"token": o.token, "psp_id": s.w.psp[o.rail], "billing_details": map[string]any{
+			"name": "Page Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
+	case o.rail == "solana":
+		return map[string]any{"token_symbol": "DUSD"}
 	}
-	raw, err := json.Marshal(body)
+	out := map[string]any{"return_url": cmp.Or(o.returnURL, "https://e2e.test/return")}
+	if psp, ok := s.w.psp[o.rail]; ok {
+		out["psp_id"] = psp
+	}
+	return out
+}
+
+// payAt is c paying s on server as o says. It touches no testing.T, so
+// racing goroutines call it. A declined payment (402) is a failed answer.
+func (s sale) payAt(ctx context.Context, server string, c *customer, o order) (*paidOrder, error) {
+	payment := s.payment(o)
+	key := o.key
+	if key == "" {
+		raw, _ := json.Marshal(payment)
+		key = uuid.NewSHA1(uuid.NameSpaceOID, append([]byte(s.order.ID.String()), raw...)).String()
+	}
+	raw, err := json.Marshal(map[string]any{"payment": payment, "expected_total": strconv.FormatInt(s.order.Total, 10)})
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+mountPrefix+"/v1/checkout-sessions/"+s.id+"/pay", bytes.NewReader(raw))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+mountPrefix+"/v1/me/orders/"+s.order.ID.String()+"/pay", bytes.NewReader(raw))
 	if err != nil {
 		return nil, err
 	}
-	pageHeaders(req, token, o.ip)
+	pageHeaders(req, c.token, o.ip)
+	req.Header.Set("Idempotency-Key", key)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
@@ -160,25 +214,45 @@ func (s hostedSession) payAt(ctx context.Context, server, option string, c *cust
 		return nil, err
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, statusError(res.StatusCode, raw)
+		err := statusError(res.StatusCode, raw)
+		if status, ok := err.(*billing.StatusError); ok && res.StatusCode == http.StatusPaymentRequired && status.Order != nil {
+			return s.answer(*status.Order), nil
+		}
+		return nil, err
 	}
-	out := &sessionPaid{session: s}
-	if err := json.Unmarshal(raw, &out.CheckoutSessionPayResult); err != nil {
+	var out billing.Order
+	if err := json.Unmarshal(raw, &out); err != nil {
 		return nil, fmt.Errorf("%w: %s", err, raw)
 	}
-	return out, nil
+	return s.answer(out), nil
+}
+
+func (s sale) answer(o billing.Order) *paidOrder {
+	out := &paidOrder{Order: o, Status: string(o.Payment.Status), NextAction: o.Payment.NextAction, PaymentID: o.Payment.PaymentID, Failure: o.Payment.LastPaymentError, sale: s}
+	out.sale.order = o
+	if o.Payment.Status == billing.OrderPaymentRequiresPaymentMethod && o.Payment.LastPaymentError != nil {
+		out.Status = "failed"
+	}
+	for _, line := range o.Lines {
+		if line.SubscriptionID != nil {
+			out.SubscriptionID = line.SubscriptionID
+		}
+	}
+	return out
 }
 
 // succeeded is a pay that charged: any other answer is an error.
-func succeeded(paid *sessionPaid, err error) error {
+func succeeded(paid *paidOrder, err error) error {
 	if err == nil && paid.Status != "succeeded" {
-		err = fmt.Errorf("checkout %s: %+v", paid.Status, paid.CheckoutSessionPayResult)
+		err = fmt.Errorf("order payment %v", paid)
 	}
 	return err
 }
 
-// pageHeaders are a payment page request's: from ip (a fresh address when
-// empty) through the site's proxy, with token when the customer is signed in.
+var hostedAddress atomic.Int64
+
+// pageHeaders are a page's request: from ip (a fresh address when empty)
+// through the site's proxy, with token when the customer is signed in.
 func pageHeaders(req *http.Request, token, ip string) {
 	req.Header.Set("Content-Type", "application/json")
 	if ip == "" {
@@ -190,47 +264,8 @@ func pageHeaders(req *http.Request, token, ip string) {
 	}
 }
 
-// optionAt is the session's option on rail, as server's page reads it.
-func (s hostedSession) optionAt(server, rail string) string {
-	s.w.t.Helper()
-	option, err := s.optionOf(s.w.t.Context(), server, rail)
-	require.NoError(s.w.t, err)
-	return option
-}
-
-// optionOf is optionAt for racing goroutines.
-func (s hostedSession) optionOf(ctx context.Context, server, rail string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/checkout-sessions/"+s.id, nil)
-	if err != nil {
-		return "", err
-	}
-	pageHeaders(req, "", "")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer res.Body.Close()
-	raw, err := io.ReadAll(res.Body)
-	if err != nil {
-		return "", err
-	}
-	if res.StatusCode != http.StatusOK {
-		return "", statusError(res.StatusCode, raw)
-	}
-	var doc checkoutsession.CheckoutSession
-	if err := json.Unmarshal(raw, &doc); err != nil {
-		return "", err
-	}
-	for _, option := range doc.Options {
-		if option.Rail == rail {
-			return option.ID, nil
-		}
-	}
-	return "", fmt.Errorf("no %s option: %s", rail, raw)
-}
-
-// pageAt calls a payment page route on server from ip, with token when the
-// customer is signed in there.
+// pageAt calls a route on server from ip, with token when the customer is
+// signed in there.
 func (w *world) pageAt(server, method, path, token, ip string, body any) (int, []byte) {
 	w.t.Helper()
 	var data io.Reader
@@ -262,11 +297,11 @@ func statusError(status int, raw []byte) error {
 	return out
 }
 
-// attemptID is the checkout attempt the session's current payment created.
-func (s hostedSession) attemptID() billing.CheckoutAttemptID {
+// attemptID is the checkout attempt the order's latest payment created.
+func (s sale) attemptID() billing.CheckoutAttemptID {
 	s.w.t.Helper()
 	var id uuid.UUID
-	require.NoError(s.w.t, s.w.pool.QueryRow(s.w.t.Context(), s.w.q(`SELECT attempt_id FROM billing.checkout_sessions WHERE id_hash = sha256($1::bytea)`), []byte(s.id)).Scan(&id))
+	require.NoError(s.w.t, s.w.pool.QueryRow(s.w.t.Context(), s.w.q(`SELECT attempt_id FROM billing.orders WHERE id = $1`), s.order.ID.UUID()).Scan(&id))
 	return billing.CheckoutAttemptID(id)
 }
 
@@ -287,7 +322,7 @@ func (w *world) latestAttemptStatus(customerID string) string {
 	return status
 }
 
-// The engine's own checkout entry, for inputs no checkout session sends: a
+// The engine's own checkout entry, for inputs no order sends: a
 // wallet-connected Solana subscribe, a one-off Solana transaction request, a
 // signature relayed from the buyer's wallet, an asserted entitlement. No
 // production route reaches them; these scenarios keep them covered.
@@ -304,7 +339,7 @@ func (w *world) engineCheckout(c *customer, in checkout.CheckoutAttemptCreateReq
 	if in.IdempotencyKey == "" {
 		in.IdempotencyKey = "engine-" + uuid.NewString()
 	}
-	// The payer accepts the price's terms in this request, as a session's pay does.
+	// The payer accepts the price's terms in this request, as an order's pay does.
 	in.Acceptance = &billingauth.Payer{CredentialClass: billingauth.CredentialClassUserSession, MerchantID: engine.Graph(w.rt).Runtime.ConfiguredMerchant(), SubjectID: c.id, Issuer: "openrails:merchant-checkout"}
 	var out *checkout.CheckoutAttemptResponse
 	err := w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) (err error) {

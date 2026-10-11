@@ -24,6 +24,9 @@ type Card struct {
 	NetworkToken bool
 	// Exp is the MMYY a card stored by number was given; empty reads as 1235.
 	Exp string
+	// VaultsDeclined: a declined sale that asked to save this card vaults it
+	// anyway and answers its customer_vault_id.
+	VaultsDeclined bool
 }
 
 // Vault is a Customer Vault record: its priority-1 billing entry, then Extra.

@@ -3,7 +3,7 @@
 OpenRails is embedded into your Golang-webserver, or run as a stand-alone self-hosted application, and it owns your consumer's full billing state:
 
 - The operator (you) creates a catalog of products + prices, and what they grant when owned (access to digital content usually).
-- Create a checkout session for each purchase
+- Create an order for each purchase
 - Tokenize the user's card (browser -> vault, so that your webserver never sees sensitive card details)
 - Charge the vaulted-card initially
 - Charge again on rebill date
@@ -249,7 +249,7 @@ you turn it on, embedded or standalone:
 
 | Route group | Turned on by | Caller must hold | Who may call it |
 |---|---|---|---|
-| public (`/v1/catalog/products`, `/v1/config`, checkout sessions) | always on | nothing | anyone |
+| public (`/v1/catalog/products`, `/v1/config`, an order's Solana Pay request) | always on | nothing | anyone |
 | customer (`/v1/me`) | always on | a sign-in | a signed-in customer, for their own billing |
 | webhooks (`/v1/webhooks`) | always on | a valid signature | payment processors |
 | admin: customer support (`/v1/admin`) | `RouteGroups.Admin` | `Permissions.AdminRead`; changes also `AdminUpdate` | staff, or your backend |
@@ -646,10 +646,7 @@ course's entitlement gets a link to watch it instead of a buy button:
 
 ```tsx
 import { useEffect, useState } from "react"
-import { createBillingClient } from "@openrails/billing-ui/client"
-import { BillingProvider } from "@openrails/billing-ui/react"
-import { AccountBilling, BillingUiProvider, CheckoutModal } from "@openrails/billing-ui"
-import "@openrails/billing-ui/styles.css"
+import { AccountBilling, BillingProvider, BuyButton, createBillingClient } from "@openrails/billing-ui"
 import { auth } from "./auth" // your auth-ui client: authFetch attaches the AuthKit token
 
 const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFetch })
@@ -662,8 +659,7 @@ const courses = [
 export function Store() {
   const held = useEntitlements()
   return (
-    <BillingUiProvider appearance={{ theme: "auto" }}>
-      <BillingProvider client={billing}>
+    <BillingProvider client={billing} appearance={{ theme: "auto" }}>
         {courses.map((course) => (
           <section key={course.product}>
             <h2>{course.title}</h2>
@@ -671,28 +667,27 @@ export function Store() {
               <a href={`/videos/${course.video}`}>Watch</a>
             ) : (
               <>
-                <BuyButton productKey={course.product} priceKey="purchase" label="Buy for $4.99" />
-                <BuyButton productKey={course.product} priceKey="rent" label="Rent for 3 days, $1.99" />
+                <BuyButton product={course.product} price="purchase" label="Buy for $4.99" {...handlers} />
+                <BuyButton product={course.product} price="rent" label="Rent for 3 days, $1.99" {...handlers} />
               </>
             )}
           </section>
         ))}
-        <BuyButton productKey="course-bundle" priceKey="purchase" label="Both courses for $8.99" />
+        <BuyButton product="course-bundle" price="purchase" label="Both courses for $8.99" {...handlers} />
 
         <h2>Channel membership</h2>
         {held.has("channel:membership") ? (
           <a href="/videos/members-qa">Members-only Q&A</a>
         ) : (
           <>
-            <BuyButton productKey="channel-membership" priceKey="monthly" label="$10 every 30 days" />
-            <BuyButton productKey="channel-membership" priceKey="yearly" label="$99 every 365 days" />
+            <BuyButton product="channel-membership" price="monthly" label="$10 every 30 days" {...handlers} />
+            <BuyButton product="channel-membership" price="yearly" label="$99 every 365 days" {...handlers} />
           </>
         )}
 
         {/* Memberships (cancel, resume, change card), saved cards and payment history. */}
         <AccountBilling plansHref="/store" collectionCurrency="USD" />
-      </BillingProvider>
-    </BillingUiProvider>
+    </BillingProvider>
   )
 }
 
@@ -708,27 +703,11 @@ function useEntitlements() {
   return held
 }
 
-function BuyButton({ productKey, priceKey, label }: { productKey: string; priceKey: string; label: string }) {
-  const [sessionId, setSessionId] = useState<string>()
-  async function buy() {
-    // POST /billing/v1/me/checkout-sessions: OpenRails prices the offer from the catalog.
-    const session = await billing.createCheckoutSession({ productKey, priceKey })
-    setSessionId(session.id)
-  }
-  return (
-    <>
-      <button onClick={buy}>{label}</button>
-      {sessionId && (
-        <CheckoutModal
-          open
-          onOpenChange={(open) => !open && setSessionId(undefined)}
-          // Card entry happens in the processor's iframe.
-          source={billing.checkoutSource(sessionId)}
-          onComplete={() => location.reload()}
-        />
-      )}
-    </>
-  )
+// BuyButton creates the customer's order and pays it in a dialog; your gate
+// confirms access once it is paid.
+const handlers = {
+  onPaid: () => location.reload(),
+  onSignInRequired: () => auth.signIn(),
 }
 ```
 
@@ -737,7 +716,7 @@ Buying the bundle grants both `course:101` and `course:102`, so both courses sho
 videos but not the paid courses. `AccountBilling` lets members cancel, resume or
 change the card for a failed renewal.
 
-Several sites selling for one merchant can share one payment page instead: set `Config.Checkout.PageURL` (where the page is served) and `EmbedOrigins` (the sites allowed to frame it). The payment host serves billing-ui's `<CheckoutPage>`; each site creates its session as above and shows `<CheckoutFrame url={session.url} />`. See [billing-ui's README](sdk/billing-ui/README.md).
+A server that decides what its customer buys creates the order with `Client.CreateOrder` and hands its id to the browser, which pays it with `<OrderCheckout orderId={id} />`. See [billing-ui's README](sdk/billing-ui/README.md).
 
 #### Routes
 
@@ -748,9 +727,6 @@ Mounting gives your users these routes under `/billing`:
 | Route | What it does |
 |---|---|
 | `GET /billing/v1/catalog/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
-| `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
-| `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
-| `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
 | `GET`, `POST /billing/v1/orders/{id}/solana-pay` | the Solana Pay request a wallet signs for an order (when a Solana PSP is declared) |
 | `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, the rails a PSP can be declared on, the payment methods a buyer can use with their browser config, and the captcha to solve when asked (always mounted) |
 
@@ -758,7 +734,6 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
 | `POST /billing/v1/me/orders/preview`, `POST /billing/v1/me/orders` | price lines; buy them (with a `payment`, in one call) |
 | `GET /billing/v1/me/orders`, `GET /billing/v1/me/orders/{id}` | their orders, subscription renewals and usage billed in arrears included (`?origin=`, `?status=`, `?subscription_id=`, `?overdue=true`) |
 | `POST /billing/v1/me/orders/{id}/pay`, `/confirm`, `/cancel` | pay an open order (a renewal or usage order with a saved card), finish the bank's challenge, cancel a purchase |
@@ -875,29 +850,6 @@ existing terms; explicit `null` clears that duration. Changed terms create a new
 immutable price revision. Cancellation stops future payments and preserves
 access already purchased; refunds and explicit revocations may withdraw it.
 Dunning access follows the separate grace policy and does not extend paid time.
-
-**Renewal belongs to the order.** A checkout request can select a recurring price
-and set `auto_renew: false` in the same command. This buys the initial term and
-prevents the next charge; it does not change the catalog price. Omit the flag
-(or send `true`) to renew until explicit cancellation. For example, a signed-in
-customer can send:
-
-```http
-POST /billing/v1/me/checkout-sessions
-Content-Type: application/json
-
-{
-  "product_key": "channel-membership",
-  "price_key": "monthly",
-  "auto_renew": false
-}
-```
-
-The returned session retains that choice through payment and retries. This
-option requires an engine-managed NMI or Stripe checkout without a trial.
-Provider-native flows that cannot enforce it atomically refuse before payment.
-Hosts that require manual cancellation simply omit the flag and need no renewal
-toggle in their checkout UI.
 
 Product keys are merchant-wide; price keys belong to their product. For example,
 `channel-membership.monthly` selects the 30-day membership offer.
@@ -1259,24 +1211,22 @@ expiry starts when payment succeeds. Omitted expiry means 365 days. Later catalo
 changes affect new checkouts, preserving existing lots.
 
 The deposit is also a product: it names what is bought, its currency, limits, and
-expiry policy. The amount is selected for each checkout without creating a new
-price revision. For a $100 deposit, the customer's browser mints its own session
-with `"amount": "100000000"` on `POST /billing/v1/me/checkout-sessions`. With
-the merchant's credential, the Go client mints it instead:
+expiry policy. The amount is chosen for each order without creating a new
+price revision. For a $100 deposit, the customer's browser orders the line with
+`"amount": "100000000"` on `POST /billing/v1/me/orders`. With the merchant's
+credential, the Go client creates the order instead:
 
 ```go
 amount := int64(100_000_000) // $100 in USD micros
-session, err := client.CreateCheckoutSession(ctx, billing.CreateCheckoutSessionParams{
-    Customer: billing.CheckoutCustomerIdentity{ID: customerID},
-    ProductKey: "api-deposit",
-    PriceKey: "deposit",
-    Amount: &amount,
-    SuccessURL: "https://example.com/billing/success",
+order, err := client.CreateOrder(ctx, billing.CreateOrderParams{
+    CustomerID:     customerID,
+    Lines:          []billing.OrderLineParams{{PriceID: depositPriceID, Amount: &amount}},
+    IdempotencyKey: key,
 })
 ```
 
-Hand the session to that customer's browser; paying with a saved card needs the
-customer's own proof. Its amount cannot be changed after minting. Fixed-price packs reject an amount override. Customer-selected deposits
+Only that customer pays it, signed in. Its amount is frozen when the order is
+created. Fixed-price packs reject an amount override. Customer-selected deposits
 currently support Stripe and NMI checkout; recurring credit benefits are not yet
 supported. These are monetary API balances, consumed by priced usage, rather than
 a separate request-count or token-count wallet. A voluntary refund requires the
@@ -1310,8 +1260,8 @@ Operator side (you, the merchant):
 - Call one API for admissions, credits, entitlement checks, subscriptions and orders: the Go `Client` (in-process or over HTTP), or plain HTTP from any stack.
 
 Customer side (your users):
-- The customer starts a purchase with their own credential: their browser creates a checkout session (`POST /v1/me/checkout-sessions`, billing-ui) and pays it.
-- Apps with purchase rules of their own can create the session with the merchant's credential instead: `Client.CreateCheckoutSession`, in process or remote with a merchant API key your `AdminUpdate` admits, then hand it to the buyer's browser. Paying with a saved card always needs the customer's own proof.
+- The customer buys with their own credential: their browser creates an order (`POST /v1/me/orders`, billing-ui) and pays it.
+- Apps with purchase rules of their own can create the order with the merchant's credential instead: `Client.CreateOrder`, in process or remote with an application key holding `Permissions.Orders`; only the customer pays it, signed in.
 - Your frontend calls `/v1/me/*` self-service routes with a short-lived token.
 - Processor webhooks land on OpenRails; it updates entitlements in your database and your app reads them.
 
@@ -1326,11 +1276,10 @@ idempotency; a host wrapper supplies verified identity and its content policy.
 
 | Operation | Reference contract |
 | --- | --- |
-| `CreateCheckoutSession` | Either `PriceID` or the pair `ProductKey` + `PriceKey` |
+| `CreateOrder`, `PreviewOrder` | Each line's `PriceID` |
 | `ListEntitlements` | Keys derived from the products customers hold: up to 100 customers and 100 keys, or one prefix, in one page; without customers, one key's holders |
 | `ListProductAccess` | Customer and product IDs; archived purchase access remains readable |
 | `CreatePrice` | Exactly one existing `ProductID`, `ProductKey`, or inline `ProductData` |
-| `ListCheckoutOptions` | `CheckoutOptionListParams`: `PriceID` or `ProductKey` + `PriceKey` names the price whose options it lists |
 | `PreviewPSPRouting` | Exactly one `price_id` or `price_key` |
 | Catalog reads | `GetProduct` / `GetPrice` (ID), or `ListProducts` by `Keys` and `ListPrices` by `ProductKey` + `Key` |
 | Tier changes, accepted attempts, payments, subscriptions and imports | Immutable IDs |
@@ -1342,7 +1291,7 @@ More in [products and prices through the Client](docs/catalog-client.md).
 
 ### Features
 
-- **Checkout sessions** — one session model across every rail: tokenized card entry
+- **Orders** — one purchase model across every rail: tokenized card entry
   (NMI Collect.js, Stripe Elements), a provider-hosted redirect, and Solana Pay.
 - **Catalog as source of truth** — declare your products, prices, rate cards, and tiers
   once; OpenRails pushes them to providers (find-or-create) and watches for drift.
@@ -1665,7 +1614,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 
 - [Embedded integration (Go library)](docs/embedded-integration.md) — run the engine in-process: boot, migrations, declaring your merchant, mounting the billing routes on your server, calling the in-process client.
 - [Standalone integration (service)](docs/standalone-integration.md) — deploy OpenRails as its own service: production config, first-run provisioning, API keys, the Go SDK and plain-HTTP integration.
-- [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, checkout sessions, payment methods, tokens, and error handling.
+- [Frontend integration](docs/frontend-integration.md) — the browser side: self-service routes, orders, payment methods, tokens, and error handling.
 - [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI, on npm.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
 - [Customer contacts](docs/customer-contacts.md) — where customers' emails and names come from: your AuthKit in process, or your directory's SCIM 2.0 pushes.

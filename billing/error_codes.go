@@ -227,20 +227,13 @@ var errorCodes = []ErrorCode{
 	{"refund_failed", 502, fault, "The provider refused the refund."},
 
 	// Checkout.
-	{"checkout_session_not_found", 404, invalid, "The checkout session does not exist."},
-	{"checkout_session_expired", 410, invalid, "The checkout session expired."},
-	{"checkout_session_unavailable", 403, authz, "The checkout session is not available to this caller."},
 	{"checkout_not_found", 404, invalid, "The checkout URL is unknown or no longer valid."},
 	{"checkout_expired", 410, invalid, "The checkout URL expired; the merchant creates a new order."},
 	{"hosted_checkout_unavailable", 400, invalid, "This deployment serves no hosted checkout, or the order cannot take one."},
 	{"checkout_attempts_exhausted", 409, invalid, "The checkout took its most card attempts; the merchant creates a new order."},
 	{"checkout_embed_origins_required", 400, invalid, "An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins."},
-	{"customer_proof_required", 403, authz, "A saved card is charged only on a checkout session its customer pays, signed in; mint one instead."},
 	{"checkout_attempt_closed", 409, invalid, "The checkout attempt already completed or was canceled."},
 	{"checkout_attempt_expired", 410, invalid, "The checkout attempt expired before it was paid."},
-	{"checkout_payment_in_progress", 409, invalid, "A payment on this checkout session is already being processed."},
-	{"checkout_request_invalid", 422, invalid, "The checkout request is invalid."},
-	{"checkout_offer_unavailable", 422, invalid, "The purchase is not available."},
 
 	// Orders.
 	{CodeAlreadyOwned, 409, invalid, "The customer already holds what a line buys; metadata.owned_by names the holder and metadata.hint says change or resume."},

@@ -55,9 +55,9 @@ model/tool limits still apply. These are HTTP abuse limits on both standalone
 and embedded routes; trusted in-process Client operations follow the normal
 library boundary and do not consume HTTP counters.
 
-> The `checkout` bucket covers POSTs to and under `/v1/me/checkout-sessions`
-> and under `/v1/checkout-sessions/` and `/v1/checkout-attempts/`. Read-only GETs are not
-> limited. A checkout session is also limited per session id, whatever address
+> The `checkout` bucket covers `POST /v1/me/orders`, an order's `/pay` and
+> `/confirm`, and `POST /v1/orders/{id}/solana-pay`. Read-only GETs are not
+> limited. A hosted checkout URL is also limited per order, whatever address
 > presents it: 120 reads and 10 pays a minute.
 
 > **Webhooks are per-IP, and all webhooks from a rail share one source-IP bucket** (fixed rail
@@ -114,7 +114,7 @@ payments check it before any provider call and answer `429` `card_attempts_block
 with `Retry-After`:
 
 - per customer and per client address (an IPv6 client is its /64; the address
-  of the browser paying a checkout session): 6 declines in 15
+  of the browser paying an order): 6 declines in 15
   minutes block for the window; 10 in 24 hours block for the day;
 - per merchant: 100 declines in the last 24 hours from at least 25 customers
   and 25 addresses is attack mode, where any subject with a decline in the

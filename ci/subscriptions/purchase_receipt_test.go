@@ -92,14 +92,16 @@ func TestCreditDepositReceiptArrivesBySMTP(t *testing.T) {
 	const to = "buyer@host.test"
 	directory.Put(userinfo.User{ID: c.id, Email: to, Username: "buyer"})
 
-	session := c.session(map[string]any{"price_id": price.ID, "amount": "12990000", "success_url": "https://e2e.test/done"})
-	status, out := session.payAs(c, map[string]any{"option_id": session.option("stripe")})
-	require.Equal(t, http.StatusOK, status, "%v", out)
-	require.Equal(t, "requires_action", out["status"], "%v", out)
+	created := c.order(http.MethodPost, "/orders", "deposit-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": price.ID.String(), "amount": "12990000"}}})
+	require.Equal(t, http.StatusCreated, created.status, "%v", created.body)
+	out := c.order(http.MethodPost, "/orders/"+created.body["id"].(string)+"/pay", "pay-"+uuid.NewString(),
+		map[string]any{"payment": map[string]any{"return_url": "https://e2e.test/done", "psp_id": w.psp["stripe"]}, "expected_total": "12990000"})
+	require.Equal(t, http.StatusOK, out.status, "%v", out.body)
+	require.Equal(t, "requires_action", paymentOf(out)["status"], "%v", out.body)
 	require.Empty(t, srv.Messages(), "nothing is paid yet")
 	checkout := w.stripe.CheckoutSessions()
 	require.Len(t, checkout, 1)
-	require.Equal(t, checkout[0]["url"], out["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
+	require.Equal(t, checkout[0]["url"], paymentOf(out)["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
 
 	paid, err := w.stripe.CompleteCheckoutSession(ctx, checkout[0]["id"].(string))
 	require.NoError(t, err)

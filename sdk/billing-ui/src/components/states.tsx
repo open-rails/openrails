@@ -1,7 +1,7 @@
 // Terminal and transitional views. Each is quiet: one fact, one instruction,
 // no dead controls.
 import { Skeleton } from "#orck/components/ui/skeleton"
-import { Eyebrow } from "#orck/components/summary"
+import { Eyebrow } from "#orck/components/eyebrow"
 
 export function LoadingSkeleton() {
   return (

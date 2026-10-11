@@ -233,12 +233,8 @@ func (m *model) operation(r routes.Route) *obj {
 	responses.set("default", newObj("$ref", "#/components/responses/Error"))
 	op.set("responses", responses)
 	switch r.Auth {
-	case routes.AuthPublic, routes.AuthSessionID, routes.AuthProvider:
+	case routes.AuthPublic, routes.AuthProvider:
 		op.set("security", []any{})
-	case routes.AuthCheckoutSession:
-		// The capability alone pays with a new card; the session's own
-		// customer, authenticated, also sees and pays with saved cards.
-		op.set("security", []any{newObj(), newObj("bearer", []string{})})
 	default:
 		op.set("security", []any{newObj("bearer", []string{})})
 	}
@@ -257,9 +253,6 @@ func (m *model) operation(r routes.Route) *obj {
 	}
 	if r.Limit != "" {
 		op.set("x-openrails-operation-limit", string(r.Limit))
-	}
-	if r.Throttle != "" {
-		op.set("x-openrails-throttle", string(r.Throttle))
 	}
 	op.set("x-openrails-errors", r.Errors)
 	op.set("x-openrails-error-sets", r.ErrorSets())

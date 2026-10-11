@@ -39,12 +39,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `checkout_embed_origins_required` | 400 | `invalid_request_error` | An embedded checkout needs the origins that may frame it: the merchant's settings checkout.embed_origins. |
 | `checkout_expired` | 410 | `invalid_request_error` | The checkout URL expired; the merchant creates a new order. |
 | `checkout_not_found` | 404 | `invalid_request_error` | The checkout URL is unknown or no longer valid. |
-| `checkout_offer_unavailable` | 422 | `invalid_request_error` | The purchase is not available. |
-| `checkout_payment_in_progress` | 409 | `invalid_request_error` | A payment on this checkout session is already being processed. |
-| `checkout_request_invalid` | 422 | `invalid_request_error` | The checkout request is invalid. |
-| `checkout_session_expired` | 410 | `invalid_request_error` | The checkout session expired. |
-| `checkout_session_not_found` | 404 | `invalid_request_error` | The checkout session does not exist. |
-| `checkout_session_unavailable` | 403 | `authorization_error` | The checkout session is not available to this caller. |
 | `credential_expired` | 401 | `authentication_error` | The credential has expired. |
 | `credential_revoked` | 401 | `authentication_error` | The credential or its session was revoked. |
 | `credit_grant_held` | 409 | `invalid_request_error` | Active holds need the grant's remaining credit. |
@@ -57,7 +51,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `customer_email_required` | 400 | `invalid_request_error` | The rail needs the customer's verified email and username. |
 | `customer_not_found` | 404 | `invalid_request_error` | The customer does not exist. |
 | `customer_payment_unsupported` | 400 | `invalid_request_error` | Customer-present payment is unsupported for this rail or method. |
-| `customer_proof_required` | 403 | `authorization_error` | A saved card is charged only on a checkout session its customer pays, signed in; mint one instead. |
 | `customer_session_required` | 403 | `authorization_error` | The operation needs the customer's interactive session. |
 | `dashboard_invalid` | 400 | `invalid_request_error` | The dashboard is invalid; metadata.errors lists why. |
 | `database_busy` | 503 | `api_error` | No database connection is available; retry shortly. |

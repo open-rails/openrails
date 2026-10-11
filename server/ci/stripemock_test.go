@@ -3,6 +3,7 @@
 package ci_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -57,26 +58,29 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	stripe.SendWebhooksTo(srv.URL+"/billing/v1/webhooks/stripe/acct_test", "whsec_test")
 	do := func(method, path string, body any, want int) map[string]any {
 		t.Helper()
-		w := call(t, mux, customer, method, "/billing/v1/me"+path, "", body)
+		var payload bytes.Buffer
+		if body != nil {
+			require.NoError(t, json.NewEncoder(&payload).Encode(body))
+		}
+		r := httptest.NewRequest(method, "/billing/v1/me"+path, &payload)
+		r.Header.Set("Authorization", "Bearer "+customer)
+		r.Header.Set("Content-Type", "application/json")
+		r.Header.Set("Idempotency-Key", uuid.NewString())
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
 		require.Equal(t, want, w.Code, "%s %s: %s", method, path, w.Body.String())
 		var out map[string]any
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &out))
 		return out
 	}
 
-	session := do(http.MethodPost, "/checkout-sessions", map[string]any{"price_id": price.ID, "amount": "12990000", "success_url": "https://e2e.test/done"}, http.StatusCreated)["id"].(string)
-	var option any
-	for _, raw := range do(http.MethodGet, "/checkout-sessions/"+session, nil, http.StatusOK)["options"].([]any) {
-		if o := raw.(map[string]any); o["rail"] == "stripe" {
-			option = o["id"]
-		}
-	}
-	require.NotNil(t, option, "the session offers the Stripe PSP")
-	paying := do(http.MethodPost, "/checkout-sessions/"+session+"/pay", map[string]any{"option_id": option}, http.StatusOK)
-	require.Equal(t, "requires_action", paying["status"], "%v", paying)
+	paying := do(http.MethodPost, "/orders", map[string]any{"lines": []any{map[string]any{"price_id": price.ID, "amount": "12990000"}}, "expected_total": "12990000",
+		"payment": map[string]any{"return_url": "https://e2e.test/done"}}, http.StatusCreated)
+	payment := paying["payment"].(map[string]any)
+	require.Equal(t, "requires_action", payment["status"], "%v", paying)
 	checkout := stripe.LastCheckoutSession()
 	require.NotNil(t, checkout)
-	require.Equal(t, checkout.URL, paying["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
+	require.Equal(t, checkout.URL, payment["next_action"].(map[string]any)["url"], "the customer goes to Stripe's page")
 	require.EqualValues(t, 1299, checkout.AmountTotal)
 
 	event, err := stripe.CompleteCheckoutSession(ctx, checkout.ID)
@@ -91,6 +95,6 @@ func TestHostStripeFakeCreditDeposit(t *testing.T) {
 	require.NoError(t, err)
 	require.EqualValues(t, 12_990_000, balance.BalanceAmount)
 	require.Len(t, stripe.Ledger(""), 1)
-	require.Equal(t, "succeeded", do(http.MethodGet, "/checkout-sessions/"+session, nil, http.StatusOK)["status"])
+	require.Equal(t, "complete", do(http.MethodGet, "/orders/"+paying["id"].(string), nil, http.StatusOK)["status"])
 	require.Empty(t, stripe.Unexpected())
 }

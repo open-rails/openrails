@@ -16,17 +16,13 @@ beside a `currency`. No field name carries a currency.
   (what providers settle in); `billing.Currencies()` is the same table in Go.
 - **Every monetary value is a string**: prices, payments and refunds, balances,
   holds and captures, credit grants and transactions, usage, orders, limits
-  and spend windows, rate cards, tier-change amounts, and the checkout session
-  document. A JavaScript consumer uses `BigInt` or an exact decimal library;
+  and spend windows, rate cards and tier-change amounts. A JavaScript consumer uses `BigInt` or an exact decimal library;
   converting to `Number` loses values above 2^53. A numeric amount in a request
   is refused.
 - **Currency codes** are upper-case ISO 4217 spelling on every response,
   whatever case a request sent.
 - Counts are numbers. Durations are integer seconds (`window_seconds`,
   `retry_after_seconds`); day buckets are `YYYY-MM-DD`.
-
-The checkout session document also carries `plan.unit_decimals`, the scale of
-its currency, so a payment page formats amounts without a second request.
 
 ## Ids
 
@@ -40,8 +36,7 @@ another kind's prefix is `400 invalid_param`.
 | `sub_` | subscription | `pay_` | payment |
 | `pm_` | payment method | `ord_` | order |
 | `psp_` | PSP | `chk_` | checkout attempt |
-| `ocs_` | checkout session | `att_` | payment attempt |
-| `cyc_` | rebill cycle | | |
+| `att_` | payment attempt | `cyc_` | rebill cycle |
 | `cgr_` | credit grant | `txn_` | balance transaction |
 | `ent_` | entitlement | `pa_` | product access |
 | `pmig_` | price migration | | |

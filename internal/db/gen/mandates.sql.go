@@ -433,6 +433,34 @@ func (q *Queries) InsertMandate(ctx context.Context, arg InsertMandateParams) (B
 	return i, err
 }
 
+const linkMandateStoringAttempt = `-- name: LinkMandateStoringAttempt :exec
+UPDATE billing.mandates SET
+    storing_attempt_id = (SELECT a.id FROM billing.payment_attempts a
+        WHERE a.merchant_id = $1::uuid AND a.psp_id = mandates.psp_id
+          AND a.transaction_id = mandates.initial_transaction_id),
+    updated_at = now()
+WHERE merchant_id = $1::uuid AND payment_method_id = $2::uuid AND psp_id = $3::uuid
+  AND initial_transaction_id = $4::text AND storing_attempt_id IS NULL
+`
+
+type LinkMandateStoringAttemptParams struct {
+	MerchantID           uuid.UUID
+	PaymentMethodID      uuid.UUID
+	PspID                uuid.UUID
+	InitialTransactionID string
+}
+
+// Agreements a charge stored before its attempt was recorded take that attempt.
+func (q *Queries) LinkMandateStoringAttempt(ctx context.Context, arg LinkMandateStoringAttemptParams) error {
+	_, err := q.db.Exec(ctx, linkMandateStoringAttempt,
+		arg.MerchantID,
+		arg.PaymentMethodID,
+		arg.PspID,
+		arg.InitialTransactionID,
+	)
+	return err
+}
+
 const listLiveMandatesOfPaymentMethods = `-- name: ListLiveMandatesOfPaymentMethods :many
 SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
 WHERE merchant_id = $1::uuid AND customer_id = $2::uuid

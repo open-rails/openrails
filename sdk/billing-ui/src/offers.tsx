@@ -1,4 +1,4 @@
-// Offers sells products by key: each one on sale, one BuyButton per price.
+// Offers sells products by key: each one on sale, one buy button per price.
 // The host decides what to sell (its server names the products, say from its
 // gate's 402) and what happens once it's paid.
 import * as React from "react"
@@ -7,8 +7,8 @@ import { cn } from "cn"
 import { RESET } from "#orck/account/format"
 import { EmptyState, ErrorState, ListSkeleton } from "#orck/account/section"
 import type { CheckoutAppearance } from "#orck/appearance"
-import { BuyButton } from "#orck/buy-button"
-import type { Product } from "#orck/client/types"
+import { Purchase } from "#orck/buy-button"
+import type { Order, Product } from "#orck/client/types"
 import {
   Card,
   CardContent,
@@ -21,7 +21,6 @@ import { offerLabel } from "#orck/lib/offer-label"
 import { useCurrencyScales } from "#orck/react/config"
 import { useProducts, type ProductsState } from "#orck/react/hooks"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
-import type { PayResult } from "#orck/types"
 
 export interface OffersProps {
   /**
@@ -37,10 +36,10 @@ export interface OffersProps {
    */
   products?: Product[]
   /**
-   * The checkout succeeded. A hint: the host's own gate decides access, so
-   * send the buyer back to the content it guards.
+   * The order is paid. A hint: the host's own gate decides access, so send
+   * the buyer back to the content it guards.
    */
-  onPaid: (result: PayResult) => void
+  onPaid: (order: Order) => void
   /**
    * Buying needs a signed-in customer: called instead of the checkout when
    * `signedIn` is false or OpenRails answers 401.
@@ -111,10 +110,9 @@ function OfferList({
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           {prices.map((price) => (
-            <BuyButton
+            <Purchase
               key={price.id}
-              product={product.key}
-              price={price.key}
+              priceId={price.id}
               label={offerLabel(price, scales, m, locale)}
               onPaid={onPaid}
               onSignInRequired={onSignInRequired}

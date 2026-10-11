@@ -13,7 +13,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, access *int, autoRenew *bool) (*engineCase, hostedSession) {
+func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, access *int) *engineCase {
 	t.Helper()
 	product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{
 		Key: "duration-" + uuid.NewString(), DisplayName: "Independent access",
@@ -28,20 +28,18 @@ func enrollAccessDuration(t *testing.T, w *world, rail string, tp topology, acce
 	e := &engineCase{w: w, rail: rail, tp: tp, price: price.ID.String(), amount: 999, ent: "content:duration", started: w.clock.Now()}
 	e.c = w.newCustomer()
 	e.method = e.c.saveCard(rail, visa)
-	// The merchant hands the order over through tp's Client; its customer
-	// pays it signed in with the saved card.
-	session, err := e.c.sell(tp, order{price: price.ID, autoRenew: autoRenew, successURL: "https://e2e.test/return"})
+	// The merchant creates the order through tp's Client; its customer pays
+	// it signed in with the saved card.
+	paid, err := e.c.checkout(tp, order{price: price.ID, rail: rail, method: e.method})
 	require.NoError(t, err)
-	paid, err := session.buy(e.c, order{rail: rail, method: e.method})
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", paid.Status, "%+v", paid.CheckoutSessionPayResult)
+	require.Equal(t, "succeeded", paid.Status, "%+v", paid.Order)
 	require.NotNil(t, paid.SubscriptionID)
 	e.sub = *paid.SubscriptionID
 	w.settle()
 	require.Len(t, e.providerLedger(), 1, "one initial payment")
 	require.True(t, e.c.entitled(e.ent))
 	require.True(t, e.started.Add(720*time.Hour).Equal(e.periodEnd()), "billing uses its interval independently of access")
-	return e, session
+	return e
 }
 
 func requireDurationSelfAccess(t *testing.T, e *engineCase, want bool) {
@@ -61,7 +59,7 @@ func requireDurationSelfAccess(t *testing.T, e *engineCase, want bool) {
 func TestDurationAccessExpiresBeforeNextBill(t *testing.T) {
 	forEach(t, func(t *testing.T, rail string, tp topology) {
 		w := newWorld(t)
-		e, _ := enrollAccessDuration(t, w, rail, tp, new(72), nil)
+		e := enrollAccessDuration(t, w, rail, tp, new(72))
 		w.advance(73 * time.Hour)
 		w.runRenewals()
 		w.converge()
@@ -95,7 +93,7 @@ func TestDurationAccessSurvivesCancellation(t *testing.T) {
 		t.Run(access.name, func(t *testing.T) {
 			forEach(t, func(t *testing.T, rail string, tp topology) {
 				w := newWorld(t)
-				e, _ := enrollAccessDuration(t, w, rail, tp, access.hours, nil)
+				e := enrollAccessDuration(t, w, rail, tp, access.hours)
 				_, err := w.client[tp].CancelSubscription(t.Context(), e.sub, billing.CancelSubscriptionParams{Reason: "keep purchased access"})
 				require.NoError(t, err)
 				w.advance(721 * time.Hour)
@@ -120,53 +118,4 @@ func TestDurationAccessSurvivesCancellation(t *testing.T) {
 			})
 		})
 	}
-}
-
-func TestDurationOrderCanDisableRenewalAtCreation(t *testing.T) {
-	forEach(t, func(t *testing.T, rail string, tp topology) {
-		w := newWorld(t)
-		e, session := enrollAccessDuration(t, w, rail, tp, new(72), new(false))
-		sub := w.subscription(tp, e.sub)
-		require.Equal(t, billing.SubscriptionCanceled, sub.Status, "one command records the paid order without a later renewal")
-		require.NotNil(t, sub.CanceledAt)
-		require.Nil(t, nextRetry(sub))
-		replayed, err := session.buy(e.c, order{rail: rail, method: e.method})
-		require.NoError(t, err)
-		require.Equal(t, e.sub, *replayed.SubscriptionID)
-		require.Len(t, e.providerLedger(), 1, "same order replay cannot charge twice")
-		status, out := session.payAs(e.c, map[string]any{"option_id": session.option(rail), "payment_method_id": e.method, "auto_renew": true})
-		require.Equal(t, http.StatusBadRequest, status, "the page cannot change the accepted renewal preference: %v", out)
-		require.Len(t, e.providerLedger(), 1)
-		w.advance(73 * time.Hour)
-		w.converge()
-		require.False(t, e.c.entitled(e.ent))
-		w.advance(720 * time.Hour)
-		w.runRenewals()
-		w.runRenewals()
-		require.Len(t, e.providerLedger(), 1, "auto_renew:false never queues another payment")
-		require.Equal(t, 1, e.providerAttempts())
-	})
-}
-
-func TestDurationOrderWithoutRenewalRefusesUnsupportedTrialBeforeCharge(t *testing.T) {
-	forEach(t, func(t *testing.T, rail string, tp topology) {
-		w := newWorld(t)
-		product, err := w.client[tp].CreateProduct(t.Context(), billing.CreateProductParams{Key: "trial-order", DisplayName: "Trial order", Entitlements: []string{"content:trial-order"}})
-		require.NoError(t, err)
-		price, err := w.client[tp].CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: "monthly", UnitAmount: 9_990_000, Currency: "USD", BillingIntervalHours: new(720), AccessDurationHours: new(24), TrialUnitAmount: new(int64(0)), TrialDurationHours: new(24)})
-		require.NoError(t, err)
-		e := &engineCase{w: w, rail: rail, tp: tp}
-		e.c = w.newCustomer()
-		e.method = e.c.saveCard(rail, visa)
-		paid, err := e.c.checkout(tp, order{price: price.ID, autoRenew: new(false), rail: rail, method: e.method, successURL: "https://e2e.test/return"})
-		if err == nil {
-			require.NotEqual(t, "succeeded", paid.Status, "%+v", paid.CheckoutSessionPayResult)
-		}
-		t.Logf("trial order without renewal: %v %+v", err, paid)
-		require.Empty(t, e.providerLedger(), "an unsupported trial cannot turn into a paid recurring purchase")
-		require.Zero(t, e.providerAttempts())
-		w.advance(721 * time.Hour)
-		w.runRenewals()
-		require.Empty(t, e.providerLedger(), "there is no later trial conversion charge")
-	})
 }

@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"maps"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/railresolve"
-	billingservice "github.com/open-rails/openrails/internal/service"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -95,65 +93,6 @@ func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilit
 	return doc
 }
 
-// ListCheckoutOptions serves GET /v1/admin/checkout-options: the ways
-// checkout can sell one price, each with the browser driver that renders it.
-func ListCheckoutOptions(r *httprequest.Request) {
-	rawID, key := strings.TrimSpace(r.Query("price_id")), r.Query("price_key")
-	productKey := r.Query("product_key")
-	hasKey := strings.TrimSpace(key) != ""
-	switch {
-	case hasKey != (strings.TrimSpace(productKey) != ""):
-		r.ErrorCode(billing.CodeInvalidParam, "product_key and price_key must be supplied together")
-		return
-	case rawID != "" && hasKey:
-		r.ErrorCode(billing.CodeInvalidParam, "price_id and price_key are exclusive")
-		return
-	case rawID == "" && !hasKey:
-		r.ErrorCode(billing.CodeInvalidParam, "price_id or product_key and price_key is required")
-		return
-	}
-	var priceID billing.PriceID
-	if rawID != "" {
-		parsed, err := billing.ParsePriceID(rawID)
-		if err != nil || parsed.IsZero() {
-			r.ErrorCode(billing.CodeInvalidParam, "invalid price_id")
-			return
-		}
-		priceID = parsed
-	}
-	payment, ok := merchantPaymentConfig(r)
-	if !ok {
-		return
-	}
-	svc, err := billingservice.New(r.State)
-	if err != nil {
-		r.InternalError("billing service unavailable", err)
-		return
-	}
-	options, err := svc.ListCheckoutOptions(r.Request.Context(), priceID, productKey, key)
-	if err != nil {
-		writeCheckoutAttemptError(r, err)
-		return
-	}
-	advertiseCheckoutOptions(options, payment)
-	r.JSON(http.StatusOK, billing.ListPage[billing.CheckoutOption]{Items: options})
-}
-
-// merchantPaymentConfig is the payment setup of the merchant the request
-// acts on; it answers the error when there is none.
-func merchantPaymentConfig(r *httprequest.Request) (billing.PaymentConfig, bool) {
-	mid, ok := merchant.FromContext(r.Request.Context())
-	if !ok || mid.IsZero() {
-		r.ErrorCode(billing.CodeResourceNotFound, "no merchant for this host")
-		return billing.PaymentConfig{}, false
-	}
-	if r.State == nil || r.State.Merchants == nil {
-		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration unavailable")
-		return billing.PaymentConfig{}, false
-	}
-	return loadPaymentConfig(r, mid)
-}
-
 // loadPaymentConfig projects the merchant's armed PSPs and Solana acceptance
 // onto the browser-safe payment setup.
 func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.PaymentConfig, bool) {
@@ -214,90 +153,6 @@ func pspArmed(rails railresolve.Source) func(context.Context, merchants.PSPScope
 		}
 		return true, nil
 	}
-}
-
-// advertiseCheckoutOptions attaches to each option the browser driver and
-// public values that render it, from the same armed-PSP projection
-// /v1/config serves (#1078).
-func advertiseCheckoutOptions(options []billing.CheckoutOption, cfg billing.PaymentConfig) {
-	byID := make(map[billing.PSPID]merchants.PublicPSPConfig, len(cfg.PSPs))
-	for _, psp := range cfg.PSPs {
-		byID[psp.PSPID] = psp
-	}
-	for i := range options {
-		option := &options[i]
-		bound := option.PublicConfig["token_symbol"]
-		option.PublicConfig = nil
-		psp, ok := byID[option.PSPID]
-		if !ok {
-			continue
-		}
-		if psp.Status != "" {
-			option.Status, option.RetryAfter = psp.Status, psp.RetryAfter
-			continue
-		}
-		public := maps.Clone(psp.Config)
-		if psp.Flow == merchants.FlowWallet {
-			token, ok := solanaOptionToken(cfg.Solana, bound)
-			if !ok {
-				continue
-			}
-			if public == nil {
-				public = map[string]string{}
-			}
-			public["token_symbol"] = token.Symbol
-			if token.Name != "" && token.Name != token.Symbol {
-				public["token_name"] = token.Name
-			}
-			public["network"] = solanaClusterName(cfg.Solana.Network)
-		}
-		if option.Driver = merchants.CheckoutDriver(psp, option.Mode); option.Driver != "" {
-			option.PublicConfig = public
-		}
-	}
-}
-
-// solanaOptionToken is the token a Solana option settles in: the one the price
-// binds, else the merchant's preferred accepted token, else its first accepted
-// stablecoin. A bound token the merchant does not list keeps its symbol.
-func solanaOptionToken(cfg *billing.SolanaPaymentConfig, bound string) (billing.SolanaPaymentToken, bool) {
-	if cfg == nil {
-		return billing.SolanaPaymentToken{}, false
-	}
-	find := func(symbol string) (billing.SolanaPaymentToken, bool) {
-		for _, token := range cfg.Tokens {
-			if strings.EqualFold(token.Symbol, symbol) {
-				return token, true
-			}
-		}
-		return billing.SolanaPaymentToken{}, false
-	}
-	if bound = strings.ToUpper(strings.TrimSpace(bound)); bound != "" {
-		if token, ok := find(bound); ok {
-			return token, true
-		}
-		return billing.SolanaPaymentToken{Symbol: bound}, true
-	}
-	if token, ok := find(cfg.PreferredToken); ok {
-		return token, true
-	}
-	for _, token := range cfg.Tokens {
-		if token.RecurringEligible {
-			return token, true
-		}
-	}
-	if len(cfg.Tokens) > 0 {
-		return cfg.Tokens[0], true
-	}
-	return billing.SolanaPaymentToken{}, false
-}
-
-// solanaClusterName is the Solana cluster name browsers expect.
-func solanaClusterName(network string) string {
-	if network == "mainnet" {
-		return "mainnet-beta"
-	}
-	return network
 }
 
 func degraded(cfg billing.PaymentConfig) bool {

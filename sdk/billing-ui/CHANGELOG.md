@@ -1,5 +1,23 @@
 # Changelog
 
+## Orders replace checkout sessions
+
+- Breaking: `<BuyButton>` and `<Offers>` create the customer's order and pay
+  it in `<OrderCheckout>`; `onPaid` receives the completed `Order`.
+  `returnUrl` replaces `successUrl`, and `autoRenew` is gone.
+- Breaking: `<CheckoutPage>`, `<CheckoutFrame>` and the shared payment page
+  are removed with checkout sessions; so are `CheckoutLayout`,
+  `CheckoutFrameTheme`, `CheckoutSession`, `CheckoutSessionStatus`,
+  `CheckoutPlan`, `CheckoutLineItem`, `CheckoutPhase`, `PaymentOption`,
+  `PayRequest`, `PayResult`, their schemas, `amountSchema`,
+  `unitDecimalsSchema`, `isCardRail`, `savedMethodsFor` and the client's
+  `CheckoutSessionLink`. `NextAction` and `PaymentFailure` are the order's,
+  from `@openrails/billing-ui/client`.
+- A page that paid a server-minted session pays the server's order instead:
+  the Go `Client.CreateOrder` creates it, and `<OrderCheckout orderId>` pays
+  it, a subscription line included.
+- `SavedPaymentMethod` names its `psp_id` (was `option_id`).
+
 ## Usage orders
 
 - Breaking: `listInvoices`, `getInvoice` and `Invoice` are removed. Usage

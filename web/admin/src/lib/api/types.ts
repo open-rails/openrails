@@ -113,8 +113,8 @@ export type UsageAggregation =
 export type UsagePriceModel = "per_unit" | "tiered" | "package"
 
 
-// PSPRoutingSkip mirrors the or#288 skip vocabulary
-// (internal/db/models/checkout_session.go). null = the PSP is eligible.
+// PSPRoutingSkip mirrors the routing skip vocabulary
+// (internal/db/models/checkout_attempt.go). null = the PSP is eligible.
 export type PSPRoutingSkip =
   | "unknown_selector"
   | "ambiguous_selector"

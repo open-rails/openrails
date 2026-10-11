@@ -30,7 +30,11 @@ export interface TokenizedCardData {
 export interface TokenizedCardFormProps {
   tokenizationKey: string
   tokenizationURL: string
-  onTokenized: (card: TokenizedCardData) => Promise<void>
+  /**
+   * The host's use of the card. Resolving `false` says it was definitely
+   * refused (a decline): the form takes another card.
+   */
+  onTokenized: (card: TokenizedCardData) => Promise<void | boolean>
   submitLabel?: string
   disabled?: boolean
   /** Billing country to preselect; default: the browser locale's region. */
@@ -114,11 +118,12 @@ export function TokenizedCardForm({
         return
       sent = true
       setSubmitted(true)
-      await onTokenized({
+      const accepted = await onTokenized({
         payment_token: token.token,
         ...parsed.data,
         ...collectCardDisplay(token.card),
       })
+      if (accepted === false && mounted.current) setSubmitted(false)
     } catch (cause) {
       if (mounted.current)
         setError(

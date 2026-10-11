@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 
@@ -86,7 +87,15 @@ func moneyStringValue(v any) bool {
 	n, err := strconv.ParseInt(s, 10, 64)
 	return err == nil && strconv.FormatInt(n, 10) == s
 }
-func booleanValue(v any) bool      { _, ok := v.(bool); return ok }
+func booleanValue(v any) bool { _, ok := v.(bool); return ok }
+func numberValue(v any) bool {
+	n, ok := v.(json.Number)
+	if !ok {
+		return false
+	}
+	f, err := n.Float64()
+	return err == nil && !math.IsInf(f, 0) && !math.IsNaN(f)
+}
 func nullable(r jsonRule) jsonRule { return func(v any) bool { return v == nil || r(v) } }
 func object(fields map[string]jsonRule) jsonRule {
 	return func(v any) bool {
@@ -264,6 +273,10 @@ var jsonRules = map[string]jsonRule{
 		"credit_grant":      creditGrantJSON,
 		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
+		// An order's sale: its order, and a new card the charge saves.
+		"order_id": uuidValue, "recurring": booleanValue, "new_card": booleanValue, "token": textValue, "fingerprint": textValue,
+		"billing": object(map[string]jsonRule{"first_name": textValue, "last_name": textValue, "address1": textValue, "address2": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue, "phone": textValue, "email": textValue}),
+		"card":    object(map[string]jsonRule{"brand": textValue, "last4": textValue, "exp_month": integerValue, "exp_year": integerValue}),
 	}),
 	"provider_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
 		"stripe_payment_intent_id": textValue, "authentication_required": booleanValue, "decline_code": textValue,
@@ -304,6 +317,8 @@ var jsonRules = map[string]jsonRule{
 	"catalog_rate_cards.allowance":      nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
 	"catalog_rate_cards.price":          rateJSON,
 	"orders.tax":                        nullable(emptyObject), "orders.billing_contacts": nullable(contactsJSON),
+	// An order line's credit benefit per unit, frozen when the order was made.
+	"order_lines.credit_grant":      nullable(object(map[string]jsonRule{"amount": moneyStringValue, "currency": textValue, "expires_after_days": integerValue})),
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),
@@ -318,9 +333,15 @@ var jsonRules = map[string]jsonRule{
 		d := json.NewDecoder(strings.NewReader(raw))
 		d.UseNumber()
 		return d.Decode(&decoded) == nil && d.Decode(new(any)) == io.EOF && initialMembershipTermsJSON(decoded)
-	}, "accepted_purchase": acceptedPurchaseJSON, "customer_selected": booleanValue, "purchase_submitted": booleanValue, "provider_closed": booleanValue, "requested_entitlement": textValue, "requested_offer_kind": func(v any) bool { return v == "permanent" || v == "finite" || v == "recurring" }, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": sha256Value, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue})),
-	"checkout_attempts.routing_reason":   nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
-	"host_outbox.data":                   object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue}),
+	}, "accepted_purchase": acceptedPurchaseJSON, "customer_selected": booleanValue, "purchase_submitted": booleanValue, "provider_closed": booleanValue, "requested_entitlement": textValue, "requested_offer_kind": func(v any) bool { return v == "permanent" || v == "finite" || v == "recurring" }, "kind": textValue, "customer_ref": textValue, "consent": textValue, "payment_method_id": uuidValue, "capture": captureJSON, "_openrails_request_fingerprint": sha256Value, "subscription_id": textValue, "message": textValue, "failure_reason": textValue, "failure_code": textValue,
+		// An order's attempt: its charge's operation, a hosted page or a Solana Pay quote.
+		"operation_id": uuidValue, "flow": textValue, "return_url": textValue, "checkout_session_id": textValue, "checkout_url": textValue,
+		"token_symbol": textValue, "token_mint": textValue, "token_decimals": textValue, "recipient": textValue, "token_amount": moneyStringValue,
+		"token_price_usd": numberValue, "fx_rate": numberValue, "fx_currency": textValue, "quoted_at": textValue, "quote_expires_at": textValue})),
+	"checkout_attempts.routing_reason": nullable(object(map[string]jsonRule{"policy": textValue, "rule": integerValue, "selected": textValue, "rail": textValue, "fallbacks": array(textValue), "skipped": array(object(map[string]jsonRule{"selector": textValue, "reason": textValue}))})),
+	"host_outbox.data": object(map[string]jsonRule{"customer_id": textValue, "currency": textValue, "state": textValue, "overdue_started_at": textValue, "overdue_amount": integerValue, "overdue_orders": integerValue, "entered_at": textValue, "evaluated_at": textValue,
+		// An order's transition: its statuses, number, payment and decline reason.
+		"status": textValue, "payment_status": textValue, "number": textValue, "payment_id": uuidValue, "reason": textValue}),
 	"provider_intents.payload":           nullable(object(map[string]jsonRule{"original_payment_id": textValue, "reservation_id": textValue, "amount_cents": integerValue, "currency": textValue, "reason": textValue, "revoke_access": booleanValue, "provider_target": textValue, "provider_transaction_id": textValue})),
 	"provider_intents.result_evidence":   nullable(object(map[string]jsonRule{"transaction_id": textValue, "response_code": integerValue, "retokenize": booleanValue, "verified_absent": booleanValue, "object_id": textValue, "already_inactive": booleanValue, "archived": booleanValue, "verified_inactive": booleanValue, "plan_pda": textValue, "already_sunset": booleanValue, "sunset": booleanValue, "signature": textValue, "verified_sunset": booleanValue})),
 	"admission_operations.terms":         object(map[string]jsonRule{"invoker": textValue, "invoker_type": textValue, "trust_level": textValue, "roles": array(textValue), "resource": textValue, "source": textValue, "accrual_rate_delta_per_hour": integerValue}),

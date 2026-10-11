@@ -370,11 +370,15 @@ func (c *customer) do(t *testing.T, method, target, contentType string, body []b
 	u, err := url.Parse(target)
 	require.NoError(t, err)
 	origin := u.Scheme + "://" + u.Host
+	key := rand.Text() // one request, however often a DPoP nonce resends it
 	for attempt := 0; ; attempt++ {
 		req, err := http.NewRequest(method, target, bytes.NewReader(body))
 		require.NoError(t, err)
 		if contentType != "" {
 			req.Header.Set("Content-Type", contentType)
+		}
+		if method == http.MethodPost {
+			req.Header.Set("Idempotency-Key", key)
 		}
 		if token != "" {
 			c.key.Authorize(t, req, token, c.nonces[origin])
@@ -399,35 +403,51 @@ func (c *customer) do(t *testing.T, method, target, contentType string, body []b
 }
 
 // buy pays for product's price as billing-ui's BuyButton does: the customer
-// creates a checkout session at the server with their DPoP-bound token, and
-// CheckoutModal reads and pays it by its id with a new card.
+// orders the catalog price at the server with their DPoP-bound token and pays
+// it with a new card in the same call.
 func (a *stack) buy(t *testing.T, c *customer, product, price string) {
 	t.Helper()
-	payload, _ := json.Marshal(map[string]string{"product_key": product, "price_key": price})
-	res := c.do(t, http.MethodPost, a.ServerURL+"/v1/me/checkout-sessions", "application/json", payload, c.token)
-	require.Less(t, res.status, 300, "checkout session: %d %s", res.status, res.body)
-	var session struct {
-		ID string `json:"id"`
-	}
-	require.NoError(t, json.Unmarshal(res.body, &session))
-	var page struct {
-		Options []struct {
-			ID     string `json:"id"`
-			Driver string `json:"driver"`
-		} `json:"options"`
-	}
-	a.call(t, "", http.MethodGet, a.ServerURL+"/v1/checkout-sessions/"+session.ID, nil, &page)
-	require.Len(t, page.Options, 1)
-	require.Equal(t, "collect_js", page.Options[0].Driver)
-	var paid struct {
+	line, total := a.priceOf(t, product, price)
+	payload, _ := json.Marshal(map[string]any{
+		"lines": []any{line}, "expected_total": total,
+		"payment": map[string]any{
+			"token":           "e2e-" + randomHex(8) + "-4242", // Collect.js's, as the platform's nmimock accepts
+			"billing_details": map[string]any{"name": "Card Holder", "address": map[string]string{"country": "US", "postal_code": "10001"}},
+		},
+	})
+	res := c.do(t, http.MethodPost, a.ServerURL+"/v1/me/orders", "application/json", payload, c.token)
+	require.Equal(t, http.StatusCreated, res.status, "order: %s", res.body)
+	var order struct {
 		Status string `json:"status"`
 	}
-	a.call(t, "", http.MethodPost, a.ServerURL+"/v1/checkout-sessions/"+session.ID+"/pay", map[string]any{
-		"option_id":       page.Options[0].ID,
-		"payment_token":   "e2e-" + randomHex(8) + "-4242", // Collect.js's, as the platform's nmimock accepts
-		"billing_details": map[string]any{"name": "Card Holder", "address": map[string]string{"country": "US", "postal_code": "10001"}},
-	}, &paid)
-	require.Equal(t, "succeeded", paid.Status)
+	require.NoError(t, json.Unmarshal(res.body, &order))
+	require.Equal(t, "complete", order.Status)
+}
+
+// priceOf is product's price as an order line, and its amount, read from the
+// public catalog.
+func (a *stack) priceOf(t *testing.T, product, price string) (map[string]string, string) {
+	t.Helper()
+	var catalog struct {
+		Data []struct {
+			Key    string `json:"key"`
+			Prices []struct {
+				ID         string `json:"id"`
+				Key        string `json:"key"`
+				UnitAmount string `json:"unit_amount"`
+			} `json:"prices"`
+		} `json:"data"`
+	}
+	a.call(t, "", http.MethodGet, a.ServerURL+"/v1/catalog/products?keys="+url.QueryEscape(product), nil, &catalog)
+	for _, p := range catalog.Data {
+		for _, offer := range p.Prices {
+			if p.Key == product && offer.Key == price {
+				return map[string]string{"price_id": offer.ID}, offer.UnitAmount
+			}
+		}
+	}
+	t.Fatalf("%s.%s is not on sale", product, price)
+	return nil, ""
 }
 
 // mail is a message in Mailpit.

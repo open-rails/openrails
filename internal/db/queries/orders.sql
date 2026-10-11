@@ -125,6 +125,13 @@ SET subscription_id = COALESCE(sqlc.narg(subscription_id)::uuid, subscription_id
     product_access_id = COALESCE(sqlc.narg(product_access_id)::uuid, product_access_id)
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
+-- An order whose one line is a subscription: its payment is that
+-- subscription's first, so refunds and disputes of it reach the subscription.
+-- name: SetPaymentSubscription :exec
+UPDATE billing.payments SET subscription_id = sqlc.arg(subscription_id)::uuid,
+    metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object('period_start', sqlc.arg(period_start)::text)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND subscription_id IS NULL AND deleted_at IS NULL;
+
 -- An attempt starts on an open order: one that takes payment, or awaits the
 -- customer's action on an attempt that has since ended.
 -- name: StartOrderAttempt :execrows

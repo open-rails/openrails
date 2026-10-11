@@ -40,7 +40,7 @@ type solanaPay struct {
 	// prices sell the one-time pass in each token: DUSD, the merchant's
 	// first stablecoin, for its USD price, and PYUSD for a PYUSD price.
 	prices map[string]string
-	rail   billing.CheckoutOption
+	rail   billing.OrderPaymentOption
 	// stopWorkers ends the poller loop of each running runtime, by world.
 	stopWorkers map[*world]func()
 }
@@ -85,7 +85,7 @@ func newSolanaPay(t *testing.T) *solanaPay {
 	require.NoError(t, err)
 	p.price = priceID(t, w, key, key+"-once")
 	p.prices = map[string]string{"DUSD": p.price, "PYUSD": priceID(t, w, key, key+"-pyusd")}
-	p.rail = w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-once"})["solana"]
+	p.rail = w.options(pid(priceID(t, w, key, key+"-once")))["solana"]
 	require.NotEmpty(t, p.rail.PSPID, "solana is offered")
 	return p
 }

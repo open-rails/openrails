@@ -72,8 +72,8 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 			}
 			// Feature limits neither consume the checkout budget nor become
 			// a blanket limit on the merchant's non-model endpoints.
-			call{path: "/v1/me/checkout-sessions", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
-			call{path: "/v1/me/checkout-sessions", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
+			call{path: "/v1/me/orders", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
+			call{path: "/v1/me/orders", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
 			for range 3 {
 				call{path: "/v1/admin/metrics/query", ip: "203.0.113.95", want: http.StatusOK}.do(t, h)
 			}

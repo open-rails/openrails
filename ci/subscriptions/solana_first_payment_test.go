@@ -34,7 +34,6 @@ type solanaShop struct {
 	fake     *solanafake.Node
 	merchant solanago.PrivateKey
 	mint     solanago.PublicKey
-	option   billing.CheckoutOption
 	price    string
 	key      string
 }
@@ -63,7 +62,7 @@ func openSolanaShop(t *testing.T, before ...func(*world)) *solanaShop {
 	require.NoError(t, err)
 	mint := solanago.MustPublicKeyFromBase58(solanafake.DevnetDUSDMint)
 	fake.Fund(merchant.PublicKey(), mint, 0)
-	return &solanaShop{w: w, fake: fake, merchant: merchant, mint: mint, option: w.options(billing.CheckoutOptionListParams{ProductKey: key, PriceKey: key + "-monthly"})["solana"], price: priceID(t, w, key, key+"-monthly"), key: key}
+	return &solanaShop{w: w, fake: fake, merchant: merchant, mint: mint, price: priceID(t, w, key, key+"-monthly"), key: key}
 }
 
 type solanaBuyer struct {
@@ -99,7 +98,7 @@ func (s *solanaShop) checkout(t *testing.T, b *solanaBuyer, wallet solanago.Publ
 	t.Helper()
 	got, err := s.w.engineCheckout(b.customer, checkout.CheckoutAttemptCreateRequest{
 		PriceID: s.price, SuccessURL: "https://e2e.test/return", CancelURL: "https://e2e.test/return?canceled=1",
-		Payment: checkout.CheckoutAttemptPaymentRequest{Rail: s.option.PSP, TokenSymbol: "DUSD", Wallet: wallet.String()},
+		Payment: checkout.CheckoutAttemptPaymentRequest{Rail: "solana", TokenSymbol: "DUSD", Wallet: wallet.String()},
 	})
 	require.NoError(t, err)
 	require.Equal(t, "requires_action", got.Status, "%+v", got)

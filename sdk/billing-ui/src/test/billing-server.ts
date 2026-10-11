@@ -2,7 +2,6 @@
 // fixtures. Real-server coverage lives in the Playwright e2e suite.
 import { vi, type Mock } from "vitest"
 
-import { fixtureSession } from "../fixtures"
 import currenciesFixture from "../../../../testdata/wire/currencies.json"
 import subscriptionFixture from "../../../../testdata/wire/subscription.json"
 
@@ -88,6 +87,48 @@ export function payment(overrides: Partial<Row> = {}): Row {
   } as Row
 }
 
+/** An open order of one line, as OpenRails answers it. */
+export function order(overrides: Partial<Row> = {}): Row {
+  return {
+    id: "ord_1",
+    customer_id: "22222222-2222-2222-2222-222222222222",
+    origin: "customer",
+    status: "open",
+    number: null,
+    currency: "USD",
+    total: "19990000",
+    lines: [
+      {
+        id: "oli_1",
+        price_id: "price_plus",
+        product_id: "prod_plus",
+        description: "Plus",
+        quantity: null,
+        unit_amount: "19990000",
+        amount: "19990000",
+        billing_interval_hours: 720,
+        access_duration_hours: 720,
+        subscription_id: null,
+        product_access_id: null,
+      },
+    ],
+    payment: {
+      status: "requires_payment_method",
+      next_action: null,
+      last_payment_error: null,
+      payment_method_id: null,
+      payment_id: null,
+    },
+    payment_options: [],
+    expires_at: "2036-10-01T00:00:00Z",
+    completed_at: null,
+    canceled_at: null,
+    expired_at: null,
+    created_at: "2036-09-01T00:00:00Z",
+    ...overrides,
+  } as Row
+}
+
 /** A wire price with separate billing and access durations. */
 export function price(
   hours: number | null,
@@ -163,6 +204,8 @@ export interface FakeBilling {
   psps: Record<string, unknown>[]
   /** The registry in `GET /config`. */
   currencies: Record<string, unknown>[]
+  /** The status `GET /me/orders/{id}` answers; "complete" pays it. */
+  orderStatus: string
   /** Next response override per "METHOD /path". */
   fail: Record<string, Response>
   calls: string[]
@@ -189,6 +232,7 @@ export function fakeBilling(
     products: seed.products ?? [product()],
     psps: seed.psps ?? [],
     currencies: seed.currencies ?? currenciesFixture,
+    orderStatus: "open",
     fail: {},
     calls: [],
     fetch: vi.fn<typeof fetch>(),
@@ -360,14 +404,27 @@ export function fakeBilling(
         const data = state.products.filter((p) => keys.includes(String(p.key)))
         return json(200, { data, next_cursor: null })
       }
-      if (key === "POST /me/checkout-sessions")
-        return json(201, {
-          id: `ocs_${body.price_id ?? body.price_key}`,
-          url: null,
-          expires_at: "2036-09-01T00:30:00Z",
-        })
-      if ((m = key.match(/^GET \/me\/checkout-sessions\/([^/]+)$/)))
-        return json(200, fixtureSession({ id: m[1], status: "succeeded" }))
+      if (key === "POST /me/orders") {
+        const line = (body?.lines as Row[] | undefined)?.[0]
+        return json(201, order({ id: `ord_${line?.price_id ?? "cart"}` }))
+      }
+      if ((m = key.match(/^GET \/me\/orders\/([^/]+)$/))) {
+        const paid = state.orderStatus === "complete"
+        return json(
+          200,
+          order({
+            id: decodeURIComponent(m[1]),
+            status: state.orderStatus,
+            ...(paid
+              ? {
+                  number: "000001",
+                  payment: { ...(order().payment as Row), status: "succeeded" },
+                  completed_at: "2036-09-01T00:00:00Z",
+                }
+              : {}),
+          })
+        )
+      }
       if (key === "GET /me/payments")
         return json(200, cursorPage(state.payments, limit, cursor))
       return apiError(404, "resource_not_found", `no route ${key}`)

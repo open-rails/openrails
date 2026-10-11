@@ -28,16 +28,15 @@ import (
 // hostingMethods run, mount and derive: an engine's lifecycle, the HTTP
 // surface it hands its host, and clients made from a client.
 var hostingMethods = map[string]string{
-	"Start":                  "starts the workers",
-	"Close":                  "stops the engine",
-	"Ready":                  "the readiness probe (/health/ready when remote)",
-	"Probes":                 "the optional dependencies, for the host's supervisor",
-	"Routes":                 "the HTTP surface the host mounts",
-	"SCIMHandler":            "the SCIM service provider an in-process directory pushes to",
-	"CheckoutFrameAncestors": "the frame policy of the payment page the host serves",
-	"RiverJobs":              "the jobs a host-owned River fleet runs",
-	"With":                   "a client with other options over the same transport",
-	"MerchantID":             "the client's default merchant",
+	"Start":       "starts the workers",
+	"Close":       "stops the engine",
+	"Ready":       "the readiness probe (/health/ready when remote)",
+	"Probes":      "the optional dependencies, for the host's supervisor",
+	"Routes":      "the HTTP surface the host mounts",
+	"SCIMHandler": "the SCIM service provider an in-process directory pushes to",
+	"RiverJobs":   "the jobs a host-owned River fleet runs",
+	"With":        "a client with other options over the same transport",
+	"MerchantID":  "the client's default merchant",
 }
 
 // embeddedMethods are operations only an in-process engine offers. Each one
@@ -58,9 +57,7 @@ var embeddedMethods = map[string]string{
 // every field set (they take one of several).
 var routeArguments = map[string][]any{
 	"ApplyCatalog":          {&catalog.Application{SchemaVersion: catalog.ApplicationSchemaVersion}, billing.ApplyCatalogParams{}},
-	"CreateCheckoutSession": {billing.CreateCheckoutSessionParams{Customer: billing.CheckoutCustomerIdentity{ID: billing.CustomerID(uuid.New())}, ProductKey: "pro", PriceKey: "monthly"}},
 	"CreatePrice":           {billing.CreatePriceParams{ProductKey: "pro", Currency: "USD", UnitAmount: 1}},
-	"ListCheckoutOptions":   {billing.CheckoutOptionListParams{ProductKey: "pro", PriceKey: "monthly"}},
 	"SetMeter":              {"tokens", billing.SetMeterParams{Aggregation: catalog.AggregationSum, RateCard: catalog.Null[billing.MeterRateCardParams]()}},
 	"RefundPayment":         {billing.PaymentID(uuid.New()), billing.RefundPaymentParams{Full: true, Reason: "requested", IdempotencyKey: "k"}},
 	"ArchiveProduct":        {billing.ArchiveProductParams{ProductKey: "pro", IdempotencyKey: "k"}},

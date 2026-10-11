@@ -17,12 +17,10 @@
       "func (c *Client) CaptureAdmission(ctx context.Context, requestID string, params billing.CaptureAdmissionParams, requestOptions ...RequestOption) (*billing.CaptureReceipt, error)",
       "func (c *Client) ChangeSubscription(ctx context.Context, id billing.SubscriptionID, params billing.ChangeSubscriptionParams, requestOptions ...RequestOption) (*billing.SubscriptionChange, error)",
       "func (c *Client) CheckEntitlements(ctx context.Context, params billing.CheckEntitlementsParams, requestOptions ...RequestOption) (*billing.EntitlementCheck, error)",
-      "func (c *Client) CheckoutFrameAncestors() string",
       "func (c *Client) Close(ctx context.Context) error",
       "func (c *Client) CloseProviderOperation(ctx context.Context, req billing.CloseProviderOperationParams, requestOptions ...RequestOption) (*billing.ProviderOperation, error)",
       "func (c *Client) CloseProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.CloseProviderOperationParams) (*billing.ProviderOperation, error)",
       "func (c *Client) CreateAlertWebhook(ctx context.Context, req billing.CreateAlertWebhookParams, options ...RequestOption) (*billing.AlertWebhook, error)",
-      "func (c *Client) CreateCheckoutSession(ctx context.Context, request billing.CreateCheckoutSessionParams, requestOptions ...RequestOption) (*billing.CheckoutSessionLink, error)",
       "func (c *Client) CreateCreditGrants(ctx context.Context, items []billing.CreateCreditGrantParams, requestOptions ...RequestOption) ([]billing.CreditGrant, error)",
       "func (c *Client) CreateOrder(ctx context.Context, params billing.CreateOrderParams, requestOptions ...RequestOption) (*billing.Order, error)",
       "func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error)",
@@ -67,7 +65,6 @@
       "func (c *Client) IncrementProviderOperationTx(ctx context.Context, tx pgx.Tx, req billing.IncrementProviderOperationParams) (*billing.ProviderOperation, error)",
       "func (c *Client) ListAlertWebhooks(ctx context.Context, params billing.AlertWebhookListParams, options ...RequestOption) (*billing.ListPage[billing.AlertWebhook], error)",
       "func (c *Client) ListBalanceTransactions(ctx context.Context, customer billing.CustomerID, params billing.BalanceTransactionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.BalanceTransaction], error)",
-      "func (c *Client) ListCheckoutOptions(ctx context.Context, query billing.CheckoutOptionListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CheckoutOption], error)",
       "func (c *Client) ListCreditGrants(ctx context.Context, params billing.CreditGrantListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CreditGrant], error)",
       "func (c *Client) ListCustomers(ctx context.Context, params billing.CustomerListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.Customer], error)",
       "func (c *Client) ListEntitlements(ctx context.Context, params billing.EntitlementListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.CustomerEntitlement], error)",
@@ -156,7 +153,6 @@
       "type Authenticator = billingauth.Authenticator",
       "type CCBillPSP struct {\n\tAccountID string `psp:\"account_id\"`\n\tArchived  bool   `psp:\"archived\"`\n\n\tSalt             string `psp:\"secrets.salt,required\"`\n\tDatalinkUsername string `psp:\"secrets.datalink_username\"`\n\tDatalinkPassword string `psp:\"secrets.datalink_password\"`\n}",
       "type CaptchaConfig = config.CaptchaConfig",
-      "type CheckoutConfig = config.CheckoutConfig",
       "type Client struct {\n}",
       "type ClientOption func(*Client)",
       "type Config = config.Config",
@@ -208,16 +204,13 @@
     ],
     "adapters/fiber": [
       "const RouteNamePrefix = \"openrails.\"",
-      "func CheckoutFramePolicy(client *openrails.Client) fiber.Handler",
       "func Mount(app *fiber.App, client *openrails.Client, selection openrails.Routes) error"
     ],
     "adapters/gin": [
-      "func CheckoutFramePolicy(client *openrails.Client) gin.HandlerFunc",
       "func Mount(router *gin.Engine, client *openrails.Client, selection openrails.Routes) error",
       "func MountRoutes(router *gin.Engine, routes []openrails.Route) error"
     ],
     "adapters/http": [
-      "func CheckoutFramePolicy(client *openrails.Client) func(http.Handler) http.Handler",
       "func Mount(target any, client *openrails.Client, selection openrails.Routes) error"
     ],
     "billing": [
@@ -237,7 +230,6 @@
       "const (\n\tCatalogObjectProduct CatalogObjectKind = \"product\"\n\tCatalogObjectPrice   CatalogObjectKind = \"price\"\n\tCatalogObjectMeter   CatalogObjectKind = \"meter\"\n)",
       "const (\n\tChannelRail   PaymentChannel = \"rail\"\n\tChannelManual PaymentChannel = \"manual\"\n)",
       "const (\n\tChargeSucceeded ChargeOutcome = \"succeeded\"\n\tChargeFailed    ChargeOutcome = \"failed\"\n)",
-      "const (\n\tCheckoutAttemptCreated        CheckoutAttemptStatus = \"created\"\n\tCheckoutAttemptRequiresAction CheckoutAttemptStatus = \"requires_action\"\n\tCheckoutAttemptProcessing     CheckoutAttemptStatus = \"processing\"\n\tCheckoutAttemptSucceeded      CheckoutAttemptStatus = \"succeeded\"\n\tCheckoutAttemptFailed         CheckoutAttemptStatus = \"failed\"\n\tCheckoutAttemptExpired        CheckoutAttemptStatus = \"expired\"\n\tCheckoutAttemptCanceled       CheckoutAttemptStatus = \"canceled\"\n)",
       "const (\n\tCheckoutHosted CheckoutUIMode = \"hosted\"\n\n\tCheckoutEmbedded CheckoutUIMode = \"embedded\"\n)",
       "const (\n\tCodeCardDeclined = \"card_declined\"\n\n\tCodePaymentMethodStale = \"payment_method_stale\"\n\n\tCodePaymentProviderRejected = \"payment_provider_rejected\"\n\n\tCodePaymentMethodRequired = \"payment_method_required\"\n)",
       "const (\n\tCodeCredentialExpired                    = \"credential_expired\"\n\tCodeCredentialRevoked                    = \"credential_revoked\"\n\tCodeServiceCredentialCustomerScopeDenied = \"service_credential_customer_scope_denied\"\n\tCodeHostPrincipalInvalid                 = \"host_principal_invalid\"\n\tCodePermissionRequired                   = \"permission_required\"\n\tCodeMerchantUnresolved                   = \"merchant_unresolved\"\n\tCodeInvokerScopedPrincipal               = \"invoker_scoped_principal\"\n\tCodeApplicationRequired                  = \"application_required\"\n\tCodeStepUpRequired                       = \"step_up_required\"\n\tCodeStepUpUnavailable                    = \"step_up_unavailable\"\n\tCodeAuthenticationUnavailable            = \"authentication_unavailable\"\n\tCodeAuthorizationUnavailable             = \"authorization_unavailable\"\n)",
@@ -594,21 +586,12 @@
       "type ChangeSubscriptionParams struct {\n\tPriceID        *PriceID `json:\"price_id,omitempty\"`\n\tQuantity       *int     `json:\"quantity,omitempty\"`\n\tReason         string   `json:\"reason,omitempty\"`\n\tIdempotencyKey string   `json:\"-\"`\n}",
       "type ChargeOutcome string",
       "type CheckEntitlementsParams struct {\n\tCustomerID   CustomerID `json:\"customer_id\"`\n\tEntitlements []string   `json:\"entitlements\"`\n\tPrefixes     []string   `json:\"prefixes,omitempty\"`\n\tPrefixLimit  int        `json:\"prefix_limit,omitempty\"`\n\tAt           time.Time  `json:\"at,omitzero\"`\n}",
-      "type CheckoutAttempt struct {\n\tID              CheckoutAttemptID     `json:\"id\"`\n\tCustomerID      CustomerID            `json:\"customer_id\"`\n\tStatus          CheckoutAttemptStatus `json:\"status\"`\n\tMode            string                `json:\"mode\"`\n\tPriceID         *PriceID              `json:\"price_id\"`\n\tAmount          *int64                `json:\"amount,string\"`\n\tCurrency        *string               `json:\"currency\"`\n\tPaymentID       *PaymentID            `json:\"payment_id\"`\n\tSubscriptionID  *SubscriptionID       `json:\"subscription_id\"`\n\tPaymentMethodID *PaymentMethodID      `json:\"payment_method_id\"`\n\tNextAction      *NextAction           `json:\"next_action\"`\n\tOperation       *PaymentOperation     `json:\"operation\"`\n\n\tFailure   *PaymentFailure   `json:\"failure\"`\n\tExpiresAt *time.Time        `json:\"expires_at\"`\n\tCreatedAt time.Time         `json:\"created_at\"`\n\tMetadata  map[string]string `json:\"metadata\"`\n}",
       "type CheckoutAttemptID uuid.UUID",
-      "type CheckoutAttemptStatus string",
-      "type CheckoutCustomerIdentity struct {\n\tID            CustomerID `json:\"id\"`\n\tVerifiedEmail string     `json:\"verified_email\"`\n\tUsername      string     `json:\"username\"`\n\n\tClientIP string `json:\"client_ip\"`\n}",
-      "type CheckoutOption struct {\n\tPSP   string `json:\"psp\"`\n\tPSPID PSPID  `json:\"psp_id\"`\n\tRail  Rail   `json:\"rail\"`\n\n\tMode string `json:\"mode\"`\n\n\tDriver string `json:\"driver,omitempty\"`\n\n\tPublicConfig map[string]string `json:\"public_config,omitempty\"`\n\n\tStatus     string `json:\"status,omitempty\"`\n\tRetryAfter int    `json:\"retry_after,omitempty\"`\n}",
-      "type CheckoutOptionListParams struct {\n\tPriceID    PriceID\n\tPriceKey   string\n\tProductKey string\n}",
-      "type CheckoutPaymentOptions struct {\n\tPSP string `json:\"psp,omitempty\"`\n\n\tPaymentMethodID PaymentMethodID `json:\"payment_method_id,omitzero\"`\n\tPaymentToken    string          `json:\"payment_token,omitempty\"`\n\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n\n\tTokenSymbol string `json:\"token_symbol,omitempty\"`\n\tWallet      string `json:\"wallet,omitempty\"`\n}",
       "type CheckoutRoutingMatch struct {\n\tCurrency string `json:\"currency,omitempty\"`\n\tProduct  string `json:\"product,omitempty\"`\n\tPrice    string `json:\"price,omitempty\"`\n\tMode     string `json:\"mode,omitempty\"`\n\tCountry  string `json:\"country,omitempty\"`\n}",
       "type CheckoutRoutingRule struct {\n\tMatch CheckoutRoutingMatch `json:\"match,omitempty\"`\n\n\tPrefer []string `json:\"prefer\"`\n}",
-      "type CheckoutSessionLink struct {\n\tID        string    `json:\"id\"`\n\tURL       *string   `json:\"url\"`\n\tExpiresAt time.Time `json:\"expires_at\"`\n}",
       "type CheckoutUIMode string",
       "type CloseProviderOperationParams struct {\n\tOperationID string                        `json:\"-\"`\n\tKind        ProviderBillingResolutionKind `json:\"kind\"`\n\tCostAmount  *int64                        `json:\"cost_amount,string\"`\n\tAttestedBy  string                        `json:\"attested_by\"`\n\tReference   string                        `json:\"reference\"`\n\tNote        string                        `json:\"note\"`\n}",
       "type CreateAlertWebhookParams struct {\n\tName    string             `json:\"name\"`\n\tURL     string             `json:\"url\"`\n\tFormat  AlertWebhookFormat `json:\"format\"`\n\tEnabled *bool              `json:\"enabled\"`\n}",
-      "type CreateCheckoutAttemptParams struct {\n\tCustomer CheckoutCustomerIdentity `json:\"customer\"`\n\n\tPriceID    PriceID `json:\"price_id\"`\n\tPriceKey   string  `json:\"price_key\"`\n\tProductKey string  `json:\"product_key,omitempty\"`\n\n\tAmount *int64 `json:\"amount,string,omitempty\"`\n\n\tAutoRenew *bool `json:\"auto_renew,omitempty\"`\n\n\tEntitlement    string                 `json:\"entitlement\"`\n\tOfferKind      OfferKind              `json:\"offer_kind\"`\n\tPaymentOptions CheckoutPaymentOptions `json:\"payment\"`\n\tMetadata       map[string]string      `json:\"metadata\"`\n\tIdempotencyKey string                 `json:\"-\"`\n\n\tSuccessURL string `json:\"success_url\"`\n\tCancelURL  string `json:\"cancel_url\"`\n}",
-      "type CreateCheckoutSessionParams struct {\n\tCustomer   CheckoutCustomerIdentity `json:\"customer\"`\n\tPriceID    PriceID                  `json:\"price_id\"`\n\tPriceKey   string                   `json:\"price_key\"`\n\tProductKey string                   `json:\"product_key,omitempty\"`\n\n\tAmount *int64 `json:\"amount,string,omitempty\"`\n\n\tAutoRenew *bool `json:\"auto_renew,omitempty\"`\n\n\tSuccessURL string `json:\"success_url\"`\n}",
       "type CreateCreditGrantBatchParams struct {\n\tItems []CreateCreditGrantParams `json:\"items\"`\n}",
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",
       "type CreateCreditGrantParams struct {\n\tCustomerID  CustomerID `json:\"customer_id\"`\n\tCurrency    string     `json:\"currency\"`\n\tAmount      int64      `json:\"amount,string\"`\n\tSourceID    string     `json:\"source_id\"`\n\tSource      string     `json:\"source\"`\n\tInvoker     string     `json:\"invoker,omitempty\"`\n\tExpiresAt   *time.Time `json:\"expires_at,omitempty\"`\n\tDescription *string    `json:\"description,omitempty\"`\n}",
@@ -1058,8 +1041,7 @@
     "internal/config": [
       "type AlertWebhookConfig struct {\n\tName string `yaml:\"name,omitempty\"`\n\tURL  string `yaml:\"url\"`\n\n\tFormat string `yaml:\"format,omitempty\"`\n\n\tEnabled *bool `yaml:\"enabled,omitempty\"`\n}",
       "type CaptchaConfig struct {\n\tProvider  string\n\tSiteKey   string\n\tSecretKey string\n}",
-      "type CheckoutConfig struct {\n\tPageURL string\n\n\tEmbedOrigins []string\n}",
-      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tCheckout CheckoutConfig\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
+      "type Config struct {\n\tProviderWriteMode string\n\n\tTestMode CredentialPosture\n\n\tDatabase DatabaseConfig\n\n\tMerchant MerchantDeclaration\n\n\tCatalog *catalog.Application\n\n\tPublicBillingBaseURL string\n\n\tDashboardBaseURL string\n\n\tDB *DBConfig\n\n\tRedis *RedisConfig\n\n\tLogger *LoggerConfig\n\n\tSMTP *SMTPConfig\n\n\tRateLimits *RateLimitsConfig\n\n\tRateLimitsDisabled bool\n\n\tCaptcha *CaptchaConfig\n\n\tVault *VaultConfig\n\n\tLLM *LLMConfig\n\n\tCatalogReconciliationInterval string\n\n\tProviderBillingQuiescenceInterval string\n\n\tWebhookSecretOverlap string\n\n\tReturnOrigins []string\n\n\tTrustedProxies []string\n\n\tCloudflareProxies []string\n\n\tCCBillWebhookIPAllowlist []string\n\n\tProviderSandbox *ProviderSandboxConfig\n\n\tHyperSwitch *HyperSwitchConfig\n\n\tEngineAdmissionHold bool\n}",
       "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
       "type CredentialPosture string",
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
@@ -1091,7 +1073,7 @@
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tAuthMount string\n\n\tKVMount string\n\n\tTransitMount string\n}"
     ],
     "internal/nmimock": [
-      "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n}",
+      "type Card struct {\n\tBrand, Last4 string\n\n\tDecline string\n\n\tAVS, CVV string\n\n\tBIN string\n\n\tNetworkToken bool\n\n\tExp string\n\n\tVaultsDeclined bool\n}",
       "type LedgerEntry struct {\n\tTransactionID, OrderID, Vault string\n\tLast4                         string\n\tCents, RefundedCents          int64\n}"
     ],
     "internal/stripemock": [
@@ -1367,7 +1349,6 @@
     "internal/http/handlers": [
       "type CustomerCancelSubscriptionParams struct {\n\tReason    string `json:\"reason\"`\n\tSignature string `json:\"signature\"`\n}",
       "type CustomerChangeSubscriptionParams struct {\n\tPriceID   *billing.PriceID `json:\"price_id\"`\n\tQuantity  *int             `json:\"quantity\"`\n\tSignature string           `json:\"signature\"`\n}",
-      "type MintCheckoutSessionParams struct {\n\tPriceID    billing.PriceID `json:\"price_id\"`\n\tPriceKey   string          `json:\"price_key\"`\n\tProductKey string          `json:\"product_key,omitempty\"`\n\tAmount     *int64          `json:\"amount,string,omitempty\"`\n\tAutoRenew  *bool           `json:\"auto_renew,omitempty\"`\n\tSuccessURL string          `json:\"success_url\" binding:\"omitempty,url\"`\n}",
       "type PaginatedResponse[T any] struct {\n\tItems  []T   `json:\"items\"`\n\tTotal  int64 `json:\"total\"`\n\tLimit  int   `json:\"limit\"`\n\tOffset int   `json:\"offset\"`\n}",
       "type PreviewSubscriptionChangeParams struct {\n\tPriceID  *billing.PriceID `json:\"price_id\"`\n\tQuantity *int             `json:\"quantity\"`\n}",
       "type SolanaPayGetResponse struct {\n\tLabel string `json:\"label\"`\n\tIcon  string `json:\"icon\"`\n}",
@@ -1528,20 +1509,6 @@
       "type stripeCheckoutSession struct {\n\tID            string `json:\"id\"`\n\tURL           string `json:\"url\"`\n\tStatus        string `json:\"status\"`\n\tPaymentStatus string `json:\"payment_status\"`\n\tPaymentIntent string `json:\"payment_intent\"`\n\tAmountTotal   int64  `json:\"amount_total\"`\n\tCurrency      string `json:\"currency\"`\n}",
       "type stripeTierChangeProgress struct {\n\tUpdate   *stripeTierChangeStep `json:\"update,omitempty\"`\n\tSchedule *stripeTierChangeStep `json:\"schedule,omitempty\"`\n\tPhases   *stripeTierChangeStep `json:\"phases,omitempty\"`\n}",
       "type stripeTierChangeStep struct {\n\tSubmittedAt   time.Time                              `json:\"submitted_at\"`\n\tSubscription  *subscriptions.StripeSubscriptionState `json:\"subscription,omitempty\"`\n\tSchedule      *subscriptions.StripeScheduleState     `json:\"schedule,omitempty\"`\n\tRefusal       string                                 `json:\"refusal,omitempty\"`\n\tRefusalCode   string                                 `json:\"refusal_code,omitempty\"`\n\tRefusalStatus int                                    `json:\"refusal_status,omitempty\"`\n\tResolution    map[string]any                         `json:\"resolution,omitempty\"`\n}"
-    ],
-    "internal/modules/checkoutsession": [
-      "func (o *Offer) UnmarshalJSON(data []byte) error {\n\ttype plain Offer\n\tvar decoded plain\n\tif err := json.Unmarshal(data, \u0026decoded); err != nil {\n\t\treturn err\n\t}\n\tvar legacy struct {\n\t\tPlan map[string]json.RawMessage `json:\"plan\"`\n\t}\n\tif err := json.Unmarshal(data, \u0026legacy); err != nil {\n\t\treturn err\n\t}\n\tif _, present := legacy.Plan[\"billing_interval_hours\"]; !present {\n\t\tvar hours *int\n\t\tvar recurring bool\n\t\tif raw, ok := legacy.Plan[\"period_hours\"]; ok {\n\t\t\tif err := json.Unmarshal(raw, \u0026hours); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\tif raw, ok := legacy.Plan[\"automatically_renews\"]; ok {\n\t\t\tif err := json.Unmarshal(raw, \u0026recurring); err != nil {\n\t\t\t\treturn err\n\t\t\t}\n\t\t}\n\t\tdecoded.Plan.AccessDurationHours = hours\n\t\tif recurring {\n\t\t\tdecoded.Plan.BillingIntervalHours = hours\n\t\t}\n\t}\n\tif _, present := legacy.Plan[\"auto_renew\"]; !present {\n\t\tdecoded.Plan.AutoRenew = decoded.Plan.BillingIntervalHours != nil\n\t}\n\tif decoded.AutoRenew != nil {\n\t\tdecoded.Plan.AutoRenew = decoded.Plan.BillingIntervalHours != nil \u0026\u0026 *decoded.AutoRenew\n\t}\n\t*o = Offer(decoded)\n\treturn nil\n}",
-      "type Buyer struct {\n\tVerifiedEmail string `json:\"verified_email,omitempty\"`\n\tUsername      string `json:\"username,omitempty\"`\n}",
-      "type CheckoutSession struct {\n\tID string `json:\"id\"`\n\n\tStatus   string                  `json:\"status\"`\n\tMerchant CheckoutSessionMerchant `json:\"merchant\"`\n\tPlan     CheckoutSessionPlan     `json:\"plan\"`\n\n\tLineItems []CheckoutSessionLineItem `json:\"line_items\"`\n\tTax       *int64                    `json:\"tax,string\"`\n\n\tDueToday     *int64                       `json:\"due_today,string\"`\n\tOptions      []CheckoutSessionOption      `json:\"options\"`\n\tSavedMethods []CheckoutSessionSavedMethod `json:\"saved_methods\"`\n\n\tNextAction *billing.NextAction `json:\"next_action\"`\n\n\tOperation      *billing.PaymentOperation `json:\"operation\"`\n\tPaymentID      *billing.PaymentID        `json:\"payment_id\"`\n\tSubscriptionID *billing.SubscriptionID   `json:\"subscription_id\"`\n\tFailureMessage *string                   `json:\"failure_message\"`\n\tFailure        *billing.PaymentFailure   `json:\"failure\"`\n\tSuccessURL     *string                   `json:\"success_url\"`\n\n\tEmbedOrigin *string   `json:\"embed_origin\"`\n\tExpiresAt   time.Time `json:\"expires_at\"`\n}",
-      "type CheckoutSessionLineItem struct {\n\tLabel    string  `json:\"label\"`\n\tSublabel *string `json:\"sublabel\"`\n\tAmount   int64   `json:\"amount,string\"`\n}",
-      "type CheckoutSessionMerchant struct {\n\tDisplayName string `json:\"display_name\"`\n}",
-      "type CheckoutSessionOption struct {\n\tID string `json:\"id\"`\n\n\tPSPID billing.PSPID `json:\"psp_id\"`\n\tRail  string        `json:\"rail\"`\n\n\tMode string `json:\"mode\"`\n\n\tDriver       string            `json:\"driver\"`\n\tPublicConfig map[string]string `json:\"public_config\"`\n}",
-      "type CheckoutSessionPayResult struct {\n\tStatus         string                    `json:\"status\"`\n\tNextAction     *billing.NextAction       `json:\"next_action\"`\n\tOperation      *billing.PaymentOperation `json:\"operation\"`\n\tPaymentID      *billing.PaymentID        `json:\"payment_id\"`\n\tSubscriptionID *billing.SubscriptionID   `json:\"subscription_id\"`\n\tFailureMessage *string                   `json:\"failure_message\"`\n\tFailure        *billing.PaymentFailure   `json:\"failure\"`\n}",
-      "type CheckoutSessionPlan struct {\n\tAutoRenew            bool   `json:\"auto_renew\"`\n\tDisplayName          string `json:\"display_name\"`\n\tUnitAmount           int64  `json:\"unit_amount,string\"`\n\tCurrency             string `json:\"currency\"`\n\tUnitDecimals         int    `json:\"unit_decimals\"`\n\tBillingIntervalHours *int   `json:\"billing_interval_hours\"`\n\tAccessDurationHours  *int   `json:\"access_duration_hours\"`\n}",
-      "type CheckoutSessionSavedMethod struct {\n\tID       billing.PaymentMethodID `json:\"id\"`\n\tOptionID string                  `json:\"option_id\"`\n\tRail     string                  `json:\"rail\"`\n\tCard     *billing.CardDetails    `json:\"card\"`\n}",
-      "type Offer struct {\n\tAutoRenew           *bool               `json:\"auto_renew,omitempty\"`\n\tMerchantDisplayName string              `json:\"merchant_display_name\"`\n\tPlan                CheckoutSessionPlan `json:\"plan\"`\n\tDueToday            int64               `json:\"due_today,string\"`\n\tCustomerAmount      *int64              `json:\"customer_amount,string,omitempty\"`\n\tOptions             []Option            `json:\"options\"`\n\tBuyer               Buyer               `json:\"buyer\"`\n}",
-      "type Option struct {\n\tCheckoutSessionOption\n\tSelector string `json:\"selector\"`\n}",
-      "type PayCheckoutSessionParams struct {\n\tOptionID        string                  `json:\"option_id\"`\n\tPaymentMethodID billing.PaymentMethodID `json:\"payment_method_id,omitzero\"`\n\tPaymentToken    string                  `json:\"payment_token,omitempty\"`\n\n\tCard           *cardguard.Card         `json:\"card,omitempty\"`\n\tBillingDetails *billing.BillingDetails `json:\"billing_details,omitempty\"`\n\tTokenSymbol    string                  `json:\"token_symbol,omitempty\"`\n}"
     ],
     "internal/modules/copilot": [
       "type draftCatalogDiffArgs struct {\n\tProductKey           string `json:\"product_key\"`\n\tNewPriceKey          string `json:\"new_price_key,omitempty\"`\n\tUnitAmount           int64  `json:\"unit_amount\"`\n\tCurrency             string `json:\"currency,omitempty\"`\n\tAccessDurationHours  *int   `json:\"access_duration_hours,omitempty\"`\n\tBillingIntervalHours *int   `json:\"billing_interval_hours,omitempty\"`\n}",
@@ -1857,12 +1824,6 @@
       "fmt": "fmt",
       "json": "encoding/json"
     },
-    "billing/checkout_session.go": {
-      "time": "time"
-    },
-    "billing/commerce.go": {
-      "time": "time"
-    },
     "billing/control_plane.go": {
       "errors": "errors",
       "time": "time"
@@ -2093,7 +2054,6 @@
     },
     "embedded.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "config": "github.com/open-rails/openrails/internal/config",
       "context": "context",
       "engine": "github.com/open-rails/openrails/internal/engine",
       "errors": "errors",
@@ -2418,14 +2378,6 @@
       "http": "net/http",
       "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "strconv": "strconv",
-      "strings": "strings"
-    },
-    "internal/http/handlers/checkout_session.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "billingservice": "github.com/open-rails/openrails/internal/service",
-      "checkoutsession": "github.com/open-rails/openrails/internal/modules/checkoutsession",
-      "http": "net/http",
-      "httprequest": "github.com/open-rails/openrails/internal/http/request",
       "strings": "strings"
     },
     "internal/http/handlers/entitlements.go": {
@@ -3383,33 +3335,6 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/modules/checkoutsession/session.go": {
-      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "db": "github.com/open-rails/openrails/internal/db",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "hex": "encoding/hex",
-      "http": "net/http",
-      "json": "encoding/json",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "rand": "crypto/rand",
-      "sha256": "crypto/sha256",
-      "strconv": "strconv",
-      "strings": "strings",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "v5": "github.com/jackc/pgx/v5"
-    },
-    "internal/modules/checkoutsession/wire.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "cardguard": "github.com/open-rails/openrails/internal/cardguard",
-      "fmt": "fmt",
-      "time": "time"
     },
     "internal/modules/copilot/tools_draft.go": {
       "billing": "github.com/open-rails/openrails/billing",
@@ -4669,13 +4594,6 @@
       "url": "net/url",
       "utf8": "unicode/utf8",
       "uuid": "github.com/google/uuid"
-    },
-    "remote_commerce.go": {
-      "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "http": "net/http",
-      "strings": "strings",
-      "url": "net/url"
     },
     "remote_entitlements.go": {
       "billing": "github.com/open-rails/openrails/billing",

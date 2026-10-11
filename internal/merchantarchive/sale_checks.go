@@ -79,7 +79,11 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 	if p.OrderID != uuid.Nil {
 		bought = observed.PriceID == nil && observed.OrderID != nil && *observed.OrderID == p.OrderID
 	}
-	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || !bought || observed.Rail == nil || *observed.Rail != op.Rail || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || observed.SubscriptionID != nil {
+	subscribed, err := orderSubscription(ctx, q, op.MerchantID, p.OrderID, observed.SubscriptionID)
+	if err != nil {
+		return err
+	}
+	if observed.MerchantID != op.MerchantID || observed.CustomerID != customer || observed.PspID == nil || *observed.PspID != p.Instrument.PSPID || !bought || observed.Rail == nil || *observed.Rail != op.Rail || observed.Amount != p.Amount || observed.ListAmount != p.ListAmount || observed.Currency != p.Currency || !subscribed {
 		return errors.New("sale result points to another payment or commercial decision")
 	}
 	if !payments.PaymentStatusSucceeded(string(observed.Status)) || observed.MoneyMovement != "rail" || observed.TransactionID != evidence.TransactionID {
@@ -127,6 +131,27 @@ func validateSaleReference(ctx context.Context, q *gen.Queries, op gen.BillingPr
 		return errors.New("original access window contradicts accepted purchase")
 	}
 	return nil
+}
+
+// orderSubscription reports whether a sale payment's subscription is absent or
+// the one a line of its order produced.
+func orderSubscription(ctx context.Context, q *gen.Queries, merchantID, orderID uuid.UUID, subscriptionID *uuid.UUID) (bool, error) {
+	if subscriptionID == nil {
+		return true, nil
+	}
+	if orderID == uuid.Nil {
+		return false, nil
+	}
+	lines, err := q.ListOrderLines(ctx, gen.ListOrderLinesParams{MerchantID: merchantID, OrderIds: []uuid.UUID{orderID}})
+	if err != nil {
+		return false, err
+	}
+	for _, line := range lines {
+		if line.SubscriptionID != nil && *line.SubscriptionID == *subscriptionID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // purchaseGrantLimit bounds one purchase's original grant events: its access

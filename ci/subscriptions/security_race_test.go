@@ -88,13 +88,12 @@ func TestSecurityConcurrentConfirmChargesOnce(t *testing.T) {
 			method := c.saveCard(rail, visa)
 			session, err := c.sell(embedded, order{price: price.ID})
 			require.NoError(t, err)
-			option := session.optionAt(w.server.URL, rail)
 			g := w.chargeGate(rail)
 			var first, racers sync.WaitGroup
 			outcomes := make(chan error, 8)
 			send := func(wg *sync.WaitGroup, server string) {
 				defer wg.Done()
-				outcomes <- succeeded(session.payAt(context.WithoutCancel(t.Context()), server, option, c, order{method: method}))
+				outcomes <- succeeded(session.payAt(context.WithoutCancel(t.Context()), server, c, order{method: method}))
 			}
 			first.Add(1)
 			go send(&first, w.server.URL)

@@ -300,7 +300,10 @@ func lineQuantity(price *models.Price, ownership catalog.Ownership, asked *int) 
 // SeatBounds is a per-seat price's quantity bounds; a recurring price
 // without them has no seats.
 func SeatBounds(price *models.Price) (low, high int, ok bool) {
-	return 0, 0, false
+	if price == nil || price.Quantity == nil {
+		return 0, 0, false
+	}
+	return price.Quantity.Min, price.Quantity.Max, true
 }
 
 // claimKey is the ownership a unique product claims: its tier group, else

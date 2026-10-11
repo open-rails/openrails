@@ -61,7 +61,7 @@ func (w *world) finitePass(entitlement string) *billing.Price {
 // buyWith pays a session for price with a card saved on rail.
 func (c *customer) buyWith(rail, method string, price *billing.Price) {
 	c.w.t.Helper()
-	c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method, successURL: "https://e2e.test/return"})
+	c.mustCheckout(embedded, order{price: price.ID, rail: rail, method: method})
 }
 
 func (c *customer) entitledAt(entitlement string, at time.Time) bool {
@@ -222,9 +222,9 @@ func TestSecurityAutomationCredentialCannotCharge(t *testing.T) {
 
 	status, body := w.callAt(self.server.URL, bot, http.MethodPost, "/subscriptions/"+sub.String()+"/change", "bot-"+uuid.NewString(), map[string]any{"price_id": plus.ID})
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
-	// An automation credential cannot mint a session that pays with the
-	// customer's saved card.
-	status, body = w.callAt(self.server.URL, bot, http.MethodPost, "/checkout-sessions", "", map[string]any{"price_id": post.ID})
+	// An automation credential cannot buy with the customer's saved card.
+	status, body = w.callAt(self.server.URL, bot, http.MethodPost, "/orders", "bot-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": post.ID}},
+		"expected_total": micros(post.UnitAmount), "payment": map[string]any{"payment_method_id": c.paymentMethods()[0]["id"]}})
 	require.Contains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, status, "%v", body)
 	w.settle()
 	require.Len(t, w.railLedger("nmi"), charges, "no charge from an automation credential")
@@ -296,10 +296,11 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		require.NoError(t, err)
 		price, err := client.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-usd", UnitAmount: 1_000_000, Currency: "USD"})
 		require.NoError(t, err)
-		_, err = client.CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{
-			Customer: billing.CheckoutCustomerIdentity{ID: cid(uuid.NewString()), VerifiedEmail: "live@example.test"}, PriceID: price.ID, SuccessURL: "https://e2e.test/return",
-		})
-		require.ErrorIs(t, err, billing.ErrInvalid, "a live key is disarmed in a sandbox deployment: nothing sells")
+		// The PSP's posture is read after start: once it is, nothing sells.
+		require.Eventually(t, func() bool {
+			preview, err := client.PreviewOrder(t.Context(), billing.PreviewOrderParams{CustomerID: cid(uuid.NewString()), Lines: []billing.OrderLineParams{{PriceID: price.ID}}})
+			return err == nil && len(preview.PaymentOptions) == 0
+		}, 10*time.Second, 50*time.Millisecond, "a live key is disarmed in a sandbox deployment: nothing sells")
 		for _, call := range recorder.Mutations("") {
 			require.NotEqual(t, http.MethodPost, call.Method, "no provider mutation with a live key: %s", call.Path)
 		}

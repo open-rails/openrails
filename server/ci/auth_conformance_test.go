@@ -206,13 +206,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 		} {
 			unmounted(t, mux, route.method, route.path)
 		}
-		// Staff may hand a customer a checkout session; only the customer
-		// pays it with a saved card.
-		mint := map[string]any{"customer": map[string]any{"id": uuid.NewString()}, "price_id": billing.PriceID(uuid.New())}
-		w := call(t, mux, h.reader, http.MethodPost, "/billing/v1/admin/checkout-sessions", "", mint)
-		require.Equal(t, http.StatusForbidden, w.Code, w.Body.String())
-		w = call(t, mux, h.support, http.MethodPost, "/billing/v1/admin/checkout-sessions", "", mint)
-		require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, w.Code, w.Body.String())
+		unmounted(t, mux, http.MethodPost, "/billing/v1/admin/checkout-sessions")
 	})
 
 	t.Run("reads alone mount no write", func(t *testing.T) {

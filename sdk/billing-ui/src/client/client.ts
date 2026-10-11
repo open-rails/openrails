@@ -1,13 +1,5 @@
 import type { z } from "zod"
 
-import type { CheckoutSource } from "../source"
-import { registerCheckout, type CheckoutSourceOptions } from "./checkout"
-import {
-  checkoutSessionSchema,
-  payResultSchema,
-  type PayRequest,
-  type PayResult,
-} from "../types"
 import {
   BillingError,
   isBillingError,
@@ -18,7 +10,6 @@ import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
 import {
   accountSchema,
-  checkoutSessionLinkSchema,
   customerLinkSchema,
   networkLinkChallengeSchema,
   publicConfigSchema,
@@ -34,7 +25,6 @@ import {
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
   type Account,
-  type CheckoutSessionLink,
   type CustomerLink,
   type NetworkLinkChallenge,
   type PublicConfig,
@@ -167,10 +157,8 @@ interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   headers?: Record<string, string>
-  /** Sends no bearer: the hosted checkout session id is the credential. */
+  /** Sends no bearer: a public route. */
   anonymous?: boolean
-  /** Replaces `baseUrl` for this request. */
-  root?: string
 }
 
 /** Total wait a GET may spend on its one retry. */
@@ -233,13 +221,13 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     ...options.currencies,
   })
 
-  function url(path: string, query?: Query, root = base): string {
+  function url(path: string, query?: Query): string {
     const qs = new URLSearchParams()
     for (const [k, v] of Object.entries(query ?? {}))
       if (Array.isArray(v)) for (const item of v) qs.append(k, item)
       else if (v !== undefined && v !== "") qs.set(k, String(v))
     const q = qs.toString()
-    return `${root}${path}${q ? `?${q}` : ""}`
+    return `${base}${path}${q ? `?${q}` : ""}`
   }
 
   async function send(
@@ -266,7 +254,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     for (let attempt = 0; ; attempt++) {
       let res: Response
       try {
-        res = await doFetch(url(path, opts.query, opts.root), init)
+        res = await doFetch(url(path, opts.query), init)
       } catch (cause) {
         const delay = RETRY_DELAY_MS
         if (
@@ -728,93 +716,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     /** Currency code (upper case) to native-unit decimals. */
     currencies,
   }
-  // The purchase calls stay billing-ui's own: apps buy through <BuyButton>.
-  registerCheckout(client, {
-    /**
-     * Mints a hosted checkout session for the signed-in customer and one
-     * price; BuyButton renders it.
-     * Select a price by `priceId`, or by both `productKey` and `priceKey`.
-     * `successUrl` brings the buyer back from a redirect rail; it must be on
-     * one of this app's return origins.
-     */
-    createCheckoutSession(input: {
-      priceKey?: string
-      productKey?: string
-      priceId?: string
-      /** Customer-selected deposit in the price currency’s native units. */
-      amount?: string
-      /** Defaults to true for recurring prices; false buys the initial term only. */
-      autoRenew?: boolean
-      successUrl?: string
-    }): Promise<CheckoutSessionLink> {
-      if (
-        !input.priceKey === !input.priceId ||
-        !!input.priceKey !== !!input.productKey
-      )
-        return Promise.reject(
-          localError(
-            "invalid_request",
-            "Pass priceId, or both productKey and priceKey."
-          )
-        )
-      return json(checkoutSessionLinkSchema, "/me/checkout-sessions", {
-        method: "POST",
-        body: {
-          price_key: input.priceKey,
-          product_key: input.productKey,
-          price_id: input.priceId,
-          auto_renew: input.autoRenew,
-          amount: input.amount,
-          success_url: input.successUrl,
-        } satisfies wire.MintCheckoutSessionParams,
-      })
-    },
-
-    /**
-     * Reads and pays one hosted checkout session. By default the id is the
-     * only credential: no bearer is sent. With `customerBase` the session's
-     * customer reads and pays it on that customer surface, signed in. A
-     * refusal the buyer can answer (an invalid card form, too many attempts)
-     * resolves as `failed`; an expired or unknown session as `expired`.
-     */
-    checkoutSource(
-      sessionId: string,
-      opts: CheckoutSourceOptions = {}
-    ): CheckoutSource {
-      const path = `/checkout-sessions/${id(sessionId)}`
-      const customer = opts.customerBase?.replace(/\/+$/, "")
-      const via: RequestOptions =
-        customer === undefined ? { anonymous: true } : { root: customer }
-      return {
-        getSession: () => json(checkoutSessionSchema, path, via),
-        async pay(request: PayRequest): Promise<PayResult> {
-          try {
-            return await json(payResultSchema, `${path}/pay`, {
-              ...via,
-              method: "POST",
-              body: request satisfies Omit<
-                wire.PayCheckoutSessionParams,
-                "billing_details"
-              >,
-            })
-          } catch (err) {
-            if (!isBillingError(err)) throw err
-            switch (err.status) {
-              case 404:
-              case 410:
-                return { status: "expired" }
-              case 403:
-                return { status: "blocked", failure_message: err.message }
-              case 422:
-              case 429:
-                return { status: "failed", failure_message: err.message }
-            }
-            throw err
-          }
-        },
-      }
-    },
-  })
   return client
 }
 

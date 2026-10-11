@@ -41,7 +41,7 @@ func purchasedCreditArchive(t *testing.T, rail string) {
 	require.NoError(t, err)
 	fixed, err := c.CreatePrice(t.Context(), billing.CreatePriceParams{ProductID: bonus.ID, Key: "pack", Currency: "USD", UnitAmount: 100_000_000})
 	require.NoError(t, err)
-	buy := func(price billing.PriceID, amount *int64) *sessionPaid {
+	buy := func(price billing.PriceID, amount *int64) *paidOrder {
 		t.Helper()
 		return buyer.mustCheckout(embedded, order{price: price, amount: amount, rail: rail, method: method})
 	}

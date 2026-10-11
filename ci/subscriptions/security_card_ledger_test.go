@@ -88,16 +88,14 @@ func TestSecurityCardTestingLedger(t *testing.T) {
 					require.Equal(t, http.StatusBadGateway, c.saveFrom(on(i), fmt.Sprintf("198.51.100.%d", i+1), refusedCard), "attempt %d reaches the gateway", i)
 				}
 				require.Equal(t, 6, f.refusedSaves())
+				sold, err := c.sell(remote, order{price: price.ID})
+				require.NoError(t, err)
 				for _, r := range f.replicas {
 					require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", refusedCard), "blocked on replica %s", r.replica.name)
 					require.Equal(t, http.StatusTooManyRequests, c.saveFrom(r, "198.51.100.99", visa), "a good card is refused while blocked")
-					for _, tp := range []topology{embedded, remote} {
-						link, err := r.client[tp].CreateCheckoutSession(t.Context(), billing.CreateCheckoutSessionParams{Customer: c.identity(), PriceID: price.ID})
-						require.NoError(t, err)
-						_, err = hostedSession{w: r, id: link.ID}.buy(c, order{rail: "nmi", token: r.nmi.Tokenize(refusedCard)})
-						blocked := requireStatus(t, err, http.StatusTooManyRequests)
-						require.Equal(t, "card_attempts_blocked", blocked.Code, "%s checkout for a blocked customer", tp)
-					}
+					_, err = sale{w: r, order: sold.order}.buy(c, order{rail: "nmi", token: r.nmi.Tokenize(refusedCard)})
+					blocked := requireStatus(t, err, http.StatusTooManyRequests)
+					require.Equal(t, "card_attempts_blocked", blocked.Code, "a new card on an order for a blocked customer, on replica %s", r.replica.name)
 				}
 				require.Equal(t, 6, f.refusedSaves(), "blocked attempts never reach the gateway")
 
@@ -159,7 +157,7 @@ func TestSecurityCardTestingLedger(t *testing.T) {
 	})
 }
 
-// A checkout counts each pay's client address as the trusted proxy forwards
+// An order's pay counts its client address as the trusted proxy forwards
 // it: one address testing cards through many accounts is blocked; in attack
 // mode a tester's next card is refused before the gateway while a clean buyer
 // pays. A forwarded address that is not an IP is refused.
@@ -171,7 +169,7 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 	}
 	isDecline := func(t *testing.T, err error) {
 		t.Helper()
-		require.ErrorContains(t, err, "checkout failed")
+		require.ErrorContains(t, err, "order payment failed")
 	}
 	refused := func(t *testing.T, err error, status int) {
 		t.Helper()
@@ -199,12 +197,17 @@ func TestSecurityCardTestingThroughTheHost(t *testing.T) {
 		w := newWorld(t)
 		price := w.membership("content:members", 9_990_000).ID
 		var tester *customer
+		var last sale
 		for i := range 100 {
 			tester = w.newCustomer()
-			isDecline(t, pay(w, embedded, price, tester, fmt.Sprintf("2001:db8:77:%x::1", i+1), declined))
+			sold, err := tester.sell(embedded, order{price: price})
+			require.NoError(t, err)
+			isDecline(t, succeeded(sold.buy(tester, order{rail: "nmi", token: w.nmi.Tokenize(declined), ip: fmt.Sprintf("2001:db8:77:%x::1", i+1)})))
+			last = sold
 		}
 		sales := len(w.nmi.Sales())
-		refused(t, pay(w, embedded, price, tester, "2001:db8:77:64::1", visa), http.StatusTooManyRequests)
+		// The tester's next card, on the order its decline left open.
+		refused(t, succeeded(last.buy(tester, order{rail: "nmi", token: w.nmi.Tokenize(visa), ip: "2001:db8:77:64::1"})), http.StatusTooManyRequests)
 		require.Len(t, w.nmi.Sales(), sales, "in attack mode one recent decline blocks, before the gateway")
 		require.NoError(t, pay(w, embedded, price, w.newCustomer(), "2001:db8:77:1000::1", visa), "a clean buyer still pays")
 	})

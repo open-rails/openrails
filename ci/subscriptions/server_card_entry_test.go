@@ -18,6 +18,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
@@ -53,15 +54,27 @@ func serverEntryWorld(t *testing.T) *world {
 	return w
 }
 
-// relayPay is the payment page's one call: the merchant hands the purchase
-// to its customer as a checkout session, and the page pays it with the card
-// the buyer entered, enrolling or charging at once.
-func (w *world) relayPay(c *customer, price billing.PriceID, payment map[string]any) (int, map[string]any) {
+// relayPay is a purchase with a card entered on OpenRails: the customer
+// saves the card, which vaults it at the gateway, and pays the merchant's
+// order with it. A refused save answers its status and body, and no order.
+func (w *world) relayPay(c *customer, price billing.PriceID, card map[string]any) (int, map[string]any, *paidOrder) {
 	w.t.Helper()
-	session := w.handOver(c, price)
-	payment["option_id"] = session.option("nmi")
-	payment["billing_details"] = map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}
-	return session.pay(payment)
+	status, saved := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": card,
+		"billing_details": map[string]any{"name": "Hosted Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
+	if status != http.StatusCreated {
+		return status, saved, nil
+	}
+	paid, err := c.checkout(embedded, order{price: price, rail: "nmi", method: unwrap(saved)["id"].(string)})
+	require.NoError(w.t, err)
+	return status, saved, paid
+}
+
+// payWithCard is an order's pay naming payment, as a page that posts a card.
+func (c *customer) payWithCard(price billing.PriceID, payment map[string]any) (int, map[string]any) {
+	c.w.t.Helper()
+	sold, err := c.sell(embedded, order{price: price})
+	require.NoError(c.w.t, err)
+	return c.call(http.MethodPost, "/orders/"+sold.order.ID.String()+"/pay", "card-"+uuid.NewString(), map[string]any{"payment": payment, "expected_total": micros(sold.order.Total)})
 }
 
 // cardVaults is the form of every Customer Vault request that carried a card
@@ -112,16 +125,15 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 	t.Parallel()
 	for name, tc := range map[string]struct {
 		world          func(*testing.T) *world
-		flow, driver   string
+		flow           string
 		tokenizerKeyed bool
 	}{
-		"browser": {func(t *testing.T) *world { return newWorld(t) }, "tokenize", "collect_js", true},
-		"server":  {serverEntryWorld, "card", "card", false},
+		"browser": {func(t *testing.T) *world { return newWorld(t) }, "tokenize", true},
+		"server":  {serverEntryWorld, "card", false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			w := tc.world(t)
-			price := w.membership("content:members", 9_990_000)
 			config := publicConfig(t, w.client[embedded])
 			for _, psp := range config.Payment.PSPs {
 				if psp.Rail != "nmi" {
@@ -131,9 +143,6 @@ func TestServerCardEntryIsAdvertised(t *testing.T) {
 				require.Equal(t, tc.tokenizerKeyed, psp.Config["tokenization_key"] != "")
 				require.Equal(t, tc.tokenizerKeyed, psp.Config["tokenization_url"] != "", "a server PSP's page loads no gateway script")
 			}
-			option := w.options(billing.CheckoutOptionListParams{PriceID: price.ID})["nmi"]
-			require.Equal(t, tc.driver, option.Driver)
-			require.Equal(t, tc.tokenizerKeyed, len(option.PublicConfig) > 0)
 		})
 	}
 }
@@ -154,17 +163,16 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	_, message := errorOf(body)
 	require.Equal(t, refusal, message)
 
-	// The session's card option tokenizes in the page: it takes no card.
-	status, body = w.relayPay(c, price.ID, map[string]any{"card": entryCard(entryVisa)})
-	require.Equal(t, http.StatusUnprocessableEntity, status, "%v", body)
-	code, _ := errorOf(body)
-	require.Equal(t, "checkout_request_invalid", code)
+	// An order's payment takes no card.
+	status, body = c.payWithCard(price.ID, map[string]any{"card": entryCard(entryVisa)})
+	require.Equal(t, http.StatusBadRequest, status, "%v", body)
+	require.NotContains(t, refusalText(body), "4111")
 
 	// A field a card number used to be pasted into is an unknown field, named
 	// without its value.
 	status, body = c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "token": w.nmi.Tokenize(visa), "card_number": entryVisa})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	code, message = errorOf(body)
+	code, message := errorOf(body)
 	require.Equal(t, []string{"unknown_field", "unknown field card_number"}, []string{code, message})
 	require.NotContains(t, refusalText(body), "4111")
 
@@ -193,11 +201,12 @@ func TestServerCardEntryAdmitsOnlyTheCardField(t *testing.T) {
 		require.Equal(t, http.StatusBadRequest, status, "%s: %v", name, out)
 		require.NotContains(t, refusalText(out), "4111", "%s: a refusal never echoes the card", name)
 	}
-	status, out := w.relayPay(c, price.ID, map[string]any{"card": entryCard(entryVisa), "payment_token": "tok-1234"})
+	status, out := c.payWithCard(price.ID, map[string]any{"card": entryCard(entryVisa), "token": "tok-1234"})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
+	require.NotContains(t, refusalText(out), "4111")
 
-	// The admin API takes no card at all: cards are entered on a session.
-	status, out = w.hostJSON(http.MethodPost, "/v1/admin/checkout-sessions", map[string]any{"customer": map[string]any{"id": c.id}, "price_id": price.ID,
+	// The merchant's API takes no card at all: a card is saved by its customer.
+	status, out = w.hostJSON(http.MethodPost, "/v1/app/orders", map[string]any{"customer_id": c.id, "lines": []any{map[string]any{"price_id": price.ID}},
 		"card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadRequest, status, "%v", out)
 	code, _ := errorOf(out)
@@ -414,36 +423,34 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	require.Empty(t, w.nmi.CallsTo(http.MethodPost, "/customers", nil), "no token vault call was made")
 	require.Len(t, w.nmi.Validations(w.vaultOf(method)), 1, "the saved card is verified as a token-vaulted one is")
 
-	// Checkout: a one-time purchase with a new card, in one hosted pay call.
+	// A one-time purchase with a new card, saved and then paid with.
 	post := w.permanent("content:post")
-	status, paid := w.relayPay(c, post.ID, map[string]any{"card": entryCard(entryMastercard)})
-	require.Equal(t, http.StatusOK, status, "%v", paid)
-	require.Equal(t, "succeeded", unwrap(paid)["status"], "%v", paid)
+	status, body, paid := w.relayPay(c, post.ID, entryCard(entryMastercard))
+	require.Equal(t, http.StatusCreated, status, "%v", body)
+	require.Equal(t, "succeeded", paid.Status, "%+v", paid.Order)
 	w.settle()
 	require.True(t, c.entitled("content:post"))
 	require.Len(t, w.nmi.ledger(""), 1)
 	require.Equal(t, "1111", w.nmi.LastSale().Card.Last4)
 	require.Equal(t, "mastercard", w.nmi.LastSale().Card.Brand)
 
-	// The signed-in customer's own session pays the same way.
+	// Another customer buys the same way.
 	another := w.newCustomer()
-	own := another.session(map[string]any{"price_id": w.permanent("content:other").ID})
-	status, sold := own.pay(map[string]any{"option_id": own.option("nmi"), "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Own Payer", "address": map[string]any{"postal_code": "10001", "country": "US"}}})
-	require.Equal(t, http.StatusOK, status, "%v", sold)
-	require.Equal(t, "succeeded", sold["status"], "%v", sold)
+	status, body, sold := w.relayPay(another, w.permanent("content:other").ID, entryCard(entryVisa))
+	require.Equal(t, http.StatusCreated, status, "%v", body)
+	require.Equal(t, "succeeded", sold.Status, "%+v", sold.Order)
 	w.settle()
 	require.Len(t, w.nmi.ledger(""), 2)
 
 	// Subscription start with a new card, then a renewal on the vaulted card.
 	member := w.newCustomer()
 	price := w.membership("content:members", 9_990_000)
-	status, enrolled := w.relayPay(member, price.ID, map[string]any{"card": entryCard(entryVisa)})
-	require.Equal(t, http.StatusOK, status, "%v", enrolled)
-	require.Equal(t, "succeeded", unwrap(enrolled)["status"], "%v", enrolled)
+	status, body, enrolled := w.relayPay(member, price.ID, entryCard(entryVisa))
+	require.Equal(t, http.StatusCreated, status, "%v", body)
+	require.Equal(t, "succeeded", enrolled.Status, "%+v", enrolled.Order)
 	w.settle()
 	require.True(t, member.entitled("content:members"))
-	var sub billing.SubscriptionID
-	require.NoError(t, json.Unmarshal([]byte(`"`+unwrap(enrolled)["subscription_id"].(string)+`"`), &sub))
+	sub := *enrolled.SubscriptionID
 	end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
 	w.advanceHealthyTo(end.Add(time.Minute))
 	w.runRenewals()
@@ -455,11 +462,10 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	// the firewall refuses and one lost in transit.
 	declined := w.newCustomer()
 	w.nmi.Issue(entryVisa, card{Decline: "200"})
-	status, refusedPay := w.relayPay(declined, post.ID, map[string]any{"card": entryCard(entryVisa)})
-	require.Equal(t, http.StatusOK, status, "%v", refusedPay)
-	require.Equal(t, "failed", refusedPay["status"], "a definite decline: the buyer may try another card: %v", refusedPay)
+	status, body, _ = w.relayPay(declined, post.ID, entryCard(entryVisa))
+	require.Equal(t, http.StatusPaymentRequired, status, "a definite decline: the buyer may try another card: %v", body)
 	w.nmi.Issue(entryVisa, card{Decline: "vault"})
-	status, body := declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})
+	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa)})
 	require.Equal(t, http.StatusBadGateway, status, "a gateway rejection, as a rejected sale is: %v", body)
 	w.nmi.Issue(entryVisa, card{})
 	status, body = declined.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "token": "tok-1234"})

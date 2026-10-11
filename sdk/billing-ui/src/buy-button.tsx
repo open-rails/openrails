@@ -1,22 +1,19 @@
-// BuyButton buys one price: the purchase, the checkout and its payment are
-// billing-ui's, so the app never handles a checkout session. Today it opens a
-// checkout session in CheckoutModal; with orders (#1168) it will create an
-// order instead, and apps won't change.
+// BuyButton buys one price: it creates the signed-in customer's order and
+// pays it in OrderModal, so the app never handles the order itself.
 import * as React from "react"
 import { cn } from "cn"
 
 import type { CheckoutAppearance } from "#orck/appearance"
-import { checkoutOf } from "#orck/client/checkout"
 import { isBillingError, toBillingError } from "#orck/client/errors"
+import type { Order } from "#orck/client/types"
 import { Button } from "#orck/components/ui/button"
 import { useMessages } from "#orck/i18n/context"
 import { offerLabel } from "#orck/lib/offer-label"
-import { CheckoutModal } from "#orck/modal"
+import { OrderModal } from "#orck/modal"
 import { useCurrencyScales } from "#orck/react/config"
 import { useBillingContext } from "#orck/react/context"
 import { useProducts } from "#orck/react/hooks"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
-import type { PayResult } from "#orck/types"
 
 export interface BuyButtonProps {
   /** The product's catalog key. */
@@ -27,18 +24,16 @@ export interface BuyButtonProps {
   label?: string
   /**
    * A customer-chosen deposit, in the price currency's native units, for a
-   * price with `customer_amount`; the checkout charges exactly this.
+   * price with `customer_amount`; the order charges exactly this.
    */
   amount?: string
-  /** false buys a recurring price's first term only; default: renews. */
-  autoRenew?: boolean
-  /** Where a redirect rail (Stripe's hosted page) returns the buyer: one of the app's return origins. */
-  successUrl?: string
+  /** Where a redirect PSP (Stripe's hosted page) returns the buyer: one of the app's return origins. */
+  returnUrl?: string
   /**
-   * The purchase succeeded. A hint: the host's own gate decides access, so
-   * send the buyer to the content it guards.
+   * The order is paid. A hint: the host's own gate decides access, so send
+   * the buyer to the content it guards.
    */
-  onPaid: (result: PayResult) => void
+  onPaid: (order: Order) => void
   /**
    * Buying needs a signed-in customer: called instead of the checkout when
    * `signedIn` is false or OpenRails answers 401.
@@ -51,15 +46,6 @@ export interface BuyButtonProps {
 }
 
 export function BuyButton(props: BuyButtonProps) {
-  return props.label === undefined ? (
-    <CatalogLabel {...props} />
-  ) : (
-    <Purchase {...props} label={props.label} />
-  )
-}
-
-// CatalogLabel reads the price from the public catalog to label the button.
-function CatalogLabel(props: BuyButtonProps) {
   const m = useMessages()
   const { locale } = useUiSettings()
   const scales = useCurrencyScales()
@@ -70,60 +56,65 @@ function CatalogLabel(props: BuyButtonProps) {
   return (
     <Purchase
       {...props}
-      label={price ? offerLabel(price, scales, m, locale) : ""}
-      disabled={!price}
+      priceId={price?.id}
+      label={props.label ?? (price ? offerLabel(price, scales, m, locale) : "")}
     />
   )
 }
 
-function Purchase({
-  product,
-  price,
+export type PurchaseProps = Omit<BuyButtonProps, "product" | "price"> & {
+  /** The price to buy; the button waits while it is unknown. */
+  priceId?: string
+  label: string
+}
+
+// An unpaid order of the customer's that holds what is being bought: the
+// refusal names it, and the customer pays that one instead.
+function heldBy(err: unknown): string | undefined {
+  if (!isBillingError(err) || err.code !== "already_owned") return undefined
+  const owner = err.metadata.owned_by
+  return typeof owner === "string" && owner.startsWith("ord_")
+    ? owner
+    : undefined
+}
+
+/** One price's button and its order. Requires `BillingProvider`. */
+export function Purchase({
+  priceId,
   label,
   amount,
-  autoRenew,
-  successUrl,
+  returnUrl,
   onPaid,
   onSignInRequired,
   signedIn,
   appearance,
   className,
-  disabled,
-}: BuyButtonProps & { label: string; disabled?: boolean }) {
+}: PurchaseProps) {
   const m = useMessages()
   const scope = useScopeProps(appearance)
   const { client } = useBillingContext()
-  const [session, setSession] = React.useState<string>()
+  const [orderId, setOrderId] = React.useState<string>()
   const [starting, setStarting] = React.useState(false)
   const [failure, setFailure] = React.useState<string>()
-  // One source per session: Checkout drops the result of a payment whose
-  // source changed, and saving a card re-renders the tree.
-  const source = React.useMemo(
-    () =>
-      session
-        ? // The customer's surface: their saved cards pay too.
-          checkoutOf(client).checkoutSource(session, {
-            customerBase: `${client.baseUrl}/me`,
-          })
-        : null,
-    [client, session]
-  )
+  // One key per purchase: a second click before it is paid answers the same
+  // order instead of creating another.
+  const [key, setKey] = React.useState(() => crypto.randomUUID())
 
   const buy = async () => {
     if (signedIn === false) return onSignInRequired()
+    if (!priceId) return
     setFailure(undefined)
     setStarting(true)
     try {
-      const { id } = await checkoutOf(client).createCheckoutSession({
-        productKey: product,
-        priceKey: price,
-        amount,
-        autoRenew,
-        successUrl,
+      const { order } = await client.createOrder({
+        lines: [{ price_id: priceId, ...(amount ? { amount } : {}) }],
+        idempotencyKey: key,
       })
-      setSession(id)
+      setOrderId(order.id)
     } catch (err) {
-      if (isBillingError(err) && err.status === 401) onSignInRequired()
+      const held = heldBy(err)
+      if (held) setOrderId(held)
+      else if (isBillingError(err) && err.status === 401) onSignInRequired()
       else setFailure(m.error(toBillingError(err)))
     } finally {
       setStarting(false)
@@ -137,7 +128,10 @@ function Purchase({
       // A styling root is a size container; a button sizes to its label.
       style={{ ...scope.style, containerType: "normal" }}
     >
-      <Button disabled={disabled || starting} onClick={() => void buy()}>
+      <Button
+        disabled={(signedIn !== false && !priceId) || starting}
+        onClick={() => void buy()}
+      >
         {label}
       </Button>
       {failure ? (
@@ -145,16 +139,18 @@ function Purchase({
           {failure}
         </span>
       ) : null}
-      {source ? (
-        <CheckoutModal
+      {orderId ? (
+        <OrderModal
           open
-          onOpenChange={(open) => !open && setSession(undefined)}
-          source={source}
+          onOpenChange={(open) => !open && setOrderId(undefined)}
+          orderId={orderId}
+          returnUrl={returnUrl}
           appearance={appearance}
-          onComplete={(result) => {
-            if (result.status !== "succeeded") return
-            setSession(undefined)
-            onPaid(result)
+          onSettled={(order) => {
+            if (order.status !== "complete") return
+            setOrderId(undefined)
+            setKey(crypto.randomUUID())
+            onPaid(order)
           }}
         />
       ) : null}

@@ -64,7 +64,7 @@ func TestSelfServiceAuthorization(t *testing.T) {
 	delegated := authtest.Application(userB)
 	delegated.Invoker = billingauth.Invoker{Issuer: "https://cozy.example", ID: "u_42"}
 	invoker := map[string]string{"Authorization": "Bearer " + fake.Issue(authtest.Grant{Identity: delegated})}
-	for _, route := range []string{"GET /v1/me", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/checkout-sessions"} {
+	for _, route := range []string{"GET /v1/me", "POST /v1/me/subscriptions/sub_1/cancel", "GET /v1/me/payment-methods", "POST /v1/me/orders/ord_1/pay"} {
 		method, path, _ := strings.Cut(route, " ")
 		require.Equal(t, http.StatusForbidden, reach(payer, method, path, invoker), route)
 	}
@@ -85,7 +85,7 @@ func TestCustomerRouteInventories(t *testing.T) {
 		return CustomerMount{Auth: authtest.Deny{}, Providers: providers}
 	}
 	require.Subset(t, collect(func(r router.Router) { RegisterCustomerRoutes(r, nil, mount(all)) }), []string{
-		"POST /me/checkout-sessions", "POST /me/stripe/billing-portal-sessions",
+		"POST /me/orders", "POST /me/stripe/billing-portal-sessions",
 		"POST /me/subscriptions/{id}/change", "POST /me/subscriptions/{id}/cancel", "PUT /me/default-payment-methods/{currency}",
 	})
 

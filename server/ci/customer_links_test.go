@@ -220,7 +220,7 @@ func (w *world) me(method, path, authorization string, body any) *httptest.Respo
 		require.NoError(w.t, err)
 		q.body = string(raw)
 	}
-	if method == http.MethodPost && strings.Contains(path, "/checkout-sessions") {
+	if method == http.MethodPost && strings.HasPrefix(path, "/orders") {
 		q.idempotencyKey = uuid.NewString()
 	}
 	return serve(w.handler, q)
@@ -595,15 +595,8 @@ func (w *world) subscribe(mid billing.MerchantID, authorization string) billing.
 	}
 	card := ok(w.me(http.MethodPost, "/payment-methods", authorization, map[string]any{"psp_id": psps.Items[0].ID, "token": w.gatewayOf(mid).Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 		"billing_details": map[string]any{"name": "Network Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}))["id"]
-	session := ok(w.me(http.MethodPost, "/checkout-sessions", authorization, map[string]any{"price_id": price.ID}))["id"].(string)
-	var option any
-	for _, raw := range ok(w.me(http.MethodGet, "/checkout-sessions/"+session, authorization, nil))["options"].([]any) {
-		if o := raw.(map[string]any); o["rail"] == "nmi" {
-			option = o["id"]
-		}
-	}
-	paid := ok(w.me(http.MethodPost, "/checkout-sessions/"+session+"/pay", authorization, map[string]any{"option_id": option, "payment_method_id": card}))
-	require.Equal(w.t, "succeeded", paid["status"], "%v", paid)
+	paid := ok(w.me(http.MethodPost, "/orders", authorization, map[string]any{"lines": []any{map[string]any{"price_id": price.ID}}, "expected_total": "9990000", "payment": map[string]any{"payment_method_id": card}}))
+	require.Equal(w.t, "complete", paid["status"], "%v", paid)
 	for _, raw := range ok(w.me(http.MethodGet, "/subscriptions", authorization, nil))["data"].([]any) {
 		if sub := raw.(map[string]any); sub["price_id"] == price.ID.String() {
 			id, err := billing.ParseSubscriptionID(sub["id"].(string))
