@@ -54,6 +54,8 @@ type RecordUsageParams struct {
 	// Amount is the host-priced cost (>= 0). 0 leaves the event to its
 	// meters' rate cards; an event no priced meter consumes is metered only.
 	Amount int64
+	// Resource is what was metered (an endpoint, a plan slug); empty is none.
+	Resource string
 	// Key is the idempotency coordinate; its operation must be
 	// UsageOperation(EventType), so two event types at one (source, source_id)
 	// post two distinct charges.
@@ -290,6 +292,7 @@ func (s *MoneyService) RecordUsage(ctx context.Context, params RecordUsageParams
 			Invoker:          params.Invoker,
 			Currency:         cur,
 			EventType:        params.EventType,
+			Resource:         nilIfEmpty(strings.TrimSpace(params.Resource)),
 			Dimensions:       params.Dimensions,
 			Amount:           charge,
 			ForgivenAmount:   forgiven,

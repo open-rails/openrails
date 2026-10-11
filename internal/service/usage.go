@@ -81,15 +81,6 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 	if err != nil {
 		return nil, err
 	}
-	metadata := in.Metadata
-	if in.Resource = strings.TrimSpace(in.Resource); in.Resource != "" {
-		if metadata == nil {
-			metadata = map[string]any{}
-		}
-		if _, ok := metadata["resource"]; !ok {
-			metadata["resource"] = in.Resource
-		}
-	}
 	payer := in.CustomerID
 	params := money.RecordUsageParams{
 		Payer:      &payer,
@@ -98,8 +89,9 @@ func (s *Service) RecordUsage(ctx context.Context, in RecordUsageInput) (*billin
 		EventType:  strings.TrimSpace(in.EventType),
 		Dimensions: in.Dimensions,
 		Amount:     in.Amount,
+		Resource:   in.Resource,
 		Key:        in.Key,
-		Metadata:   metadata,
+		Metadata:   in.Metadata,
 		OccurredAt: in.OccurredAt,
 		Failed:     in.Failed,
 		Delegated:  in.InvokerType == billing.InvokerTypeDelegated,
