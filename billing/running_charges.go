@@ -10,8 +10,8 @@ import (
 // is stopped: round_half_up(RatePerHour x whole seconds / 3600), per second,
 // no minimum. Nothing is written while it runs. What it has accrued is taken
 // off the customer's available balance on every read (Balance.AccruedAmount),
-// and reaches the ledger when the charge stops and before a credit lot it
-// draws is expired, revoked or refunded.
+// and reaches the ledger when the charge stops, once a day at 00:00 UTC, and
+// before a credit lot it draws is expired, revoked or refunded.
 
 // RunningChargeID names one running charge; on the wire "rch_<uuid>".
 type RunningChargeID uuid.UUID
@@ -109,9 +109,12 @@ type RunningCharge struct {
 }
 
 // RunningChargeListParams pages the merchant's running charges, newest first:
-// of CustomerID and in State when set.
+// of CustomerID and in State when set. Depleted lists only the running charges
+// of customers whose capacity has run out: confirm with GetBalance, then stop
+// what they pay for.
 type RunningChargeListParams struct {
 	PageRequest
 	CustomerID CustomerID         `form:"customer_id"`
 	State      RunningChargeState `form:"state"`
+	Depleted   bool               `form:"depleted"`
 }

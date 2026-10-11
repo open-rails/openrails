@@ -79,3 +79,50 @@ SELECT DISTINCT rc.merchant_id, rc.customer_id, rc.currency, sqlc.arg(now)::time
 FROM billing.running_charges rc
 WHERE rc.merchant_id = sqlc.arg(merchant_id)::uuid AND rc.stopped_at IS NULL
 ON CONFLICT (merchant_id, customer_id, currency) DO NOTHING;
+
+-- name: MarkBalanceWatchDue :exec
+-- Something changed what the customer's running charges may draw: its watch
+-- is looked at on the next pass. No row for a customer with no running charge.
+UPDATE billing.balance_watches
+SET next_check_at = to_timestamp(0)
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text;
+
+-- name: ListDueBalanceWatches :many
+-- The watches due, across merchants, in key order: an idle pass reads no row.
+SELECT merchant_id, customer_id, currency, next_check_at FROM billing.balance_watches
+WHERE next_check_at <= sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (next_check_at, merchant_id, customer_id, currency)
+          > (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_merchant_id)::uuid, sqlc.narg(after_customer_id)::uuid, sqlc.narg(after_currency)::text))
+ORDER BY next_check_at, merchant_id, customer_id, currency
+LIMIT sqlc.arg(row_limit)::int;
+
+-- name: LockBalanceWatch :one
+-- Taken after the customer lock: a mark that races the look waits for it.
+SELECT * FROM billing.balance_watches
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text
+FOR UPDATE;
+
+-- name: SetBalanceWatch :exec
+-- What a look found, and the notices of the crossings it is in.
+UPDATE billing.balance_watches
+SET next_check_at = sqlc.arg(next_check_at)::timestamptz, depletes_at = sqlc.narg(depletes_at)::timestamptz,
+    low_notified_at = sqlc.narg(low_notified_at)::timestamptz, depleted_at = sqlc.narg(depleted_at)::timestamptz,
+    updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND currency = sqlc.arg(currency)::text;
+
+-- name: ListDepletedRunningCharges :many
+-- The running charges of customers whose capacity has run out: the stored
+-- run-out instant has passed. Newest first.
+SELECT sqlc.embed(c)
+FROM billing.balance_watches w
+JOIN billing.running_charges c
+  ON c.merchant_id = w.merchant_id AND c.customer_id = w.customer_id AND c.currency = w.currency AND c.stopped_at IS NULL
+WHERE w.merchant_id = sqlc.arg(merchant_id)::uuid AND w.depletes_at <= sqlc.arg(now)::timestamptz
+  AND (sqlc.narg(customer_id)::uuid IS NULL OR w.customer_id = sqlc.narg(customer_id)::uuid)
+  AND (sqlc.narg(after_id)::uuid IS NULL OR c.id < sqlc.narg(after_id)::uuid)
+ORDER BY c.id DESC
+LIMIT sqlc.arg(row_limit)::int;

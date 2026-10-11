@@ -100,6 +100,11 @@ func TestRunningChargeRoutes(t *testing.T) {
 	require.Empty(t, list["data"])
 	status, body = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?state=paused", nil)
 	require.Equal(t, "state", refusal(status, body, http.StatusBadRequest, billing.CodeInvalidQuery)["param"])
+	status, list = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?depleted=true", nil)
+	require.Equal(t, http.StatusOK, status, "%v", list)
+	require.Empty(t, list["data"], "6.4 USD is left")
+	status, body = w.merchantJSON(usage, http.MethodGet, "/v1/app/running-charges?depleted=maybe", nil)
+	require.Equal(t, "depleted", refusal(status, body, http.StatusBadRequest, billing.CodeInvalidQuery)["param"])
 
 	// The customer's own balance shows the accrual without a posting.
 	status, me := c.call(http.MethodGet, "", "", nil)

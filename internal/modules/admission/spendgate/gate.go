@@ -213,6 +213,10 @@ func (g *Gate) Admit(ctx context.Context, q *gen.Queries, in AdmitInput) (Decisi
 	if err != nil {
 		return Decision{}, err
 	}
+	// A hold takes capacity from the customer's running charges.
+	if err := q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{MerchantID: mid.UUID(), CustomerID: in.Customer, Currency: in.Currency}); err != nil {
+		return Decision{}, err
+	}
 	return Decision{Allowed: true, ExpiresAt: row.ExpiresAt, State: "open", AvailableAmount: row.AvailableAmount}, nil
 }
 

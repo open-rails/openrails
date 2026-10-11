@@ -40,7 +40,7 @@ var meteringRoutes = []Route{
 	{Method: GET, Path: "/v1/app/running-charges/{reference}", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "GetRunningCharge",
 		Responses: []Reply{{200, billing.RunningCharge{}}}, Errors: codes("running_charge_not_found"), Handler: h(handlers.GetRunningCharge)},
 	{Method: GET, Path: "/v1/app/running-charges", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "ListRunningCharges",
-		Query: params(cursorPage, text("customer_id"), text("state")), Responses: []Reply{{200, billing.ListPage[billing.RunningCharge]{}}},
+		Query: params(cursorPage, text("customer_id"), Param{Name: "depleted", Kind: "boolean"}, text("state")), Responses: []Reply{{200, billing.ListPage[billing.RunningCharge]{}}},
 		Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListRunningCharges)},
 	{Method: POST, Path: "/v1/app/provider-operations", Group: App, Auth: AuthApplication, Permission: NeedCosts, Name: "OpenProviderOperation", IdempotencyKey: true,
 		Request: billing.OpenProviderOperationParams{}, Responses: []Reply{{201, billing.ProviderOperation{}}, {200, billing.ProviderOperation{}}},

@@ -77,7 +77,7 @@ func GetRunningCharge(r *httprequest.Request) {
 
 // ListRunningCharges pages the merchant's charges, newest first.
 //
-//	GET /app/running-charges?customer_id&state&limit&cursor
+//	GET /app/running-charges?customer_id&state&depleted&limit&cursor
 func ListRunningCharges(r *httprequest.Request) {
 	if !requireMerchantRoutePrincipal(r) {
 		return

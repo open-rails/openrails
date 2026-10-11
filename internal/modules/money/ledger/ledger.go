@@ -311,6 +311,13 @@ func (l *Ledger) ApplyIdempotent(ctx context.Context, t Transfer) (tr gen.Billin
 		OrderID:                t.Order,
 	})
 	if err == nil {
+		// A transfer that names a customer changes what its running charges
+		// may draw: its balance watch, if it has one, is due.
+		if t.Customer != nil {
+			if err := l.q.MarkBalanceWatchDue(ctx, gen.MarkBalanceWatchDueParams{MerchantID: l.merchant, CustomerID: *t.Customer, Currency: t.Currency}); err != nil {
+				return gen.BillingLedgerTransfer{}, false, fmt.Errorf("ledger: mark the balance watch due: %w", err)
+			}
+		}
 		return tr, true, nil
 	}
 	// Zero rows = ON CONFLICT DO NOTHING fired. Read the committed receipt;

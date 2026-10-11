@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -20,11 +21,12 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/merchantarchive"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // A merchant archive carries running charges as they stand, a running one
-// included, and a restore watches every running one again: the watch is
-// derived, not archived.
+// included, with the balance events the host acknowledged, and a restore
+// watches every running one again: the watch is derived, not archived.
 func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
 	w := newWorld(t)
 	c := w.client[embedded]
@@ -46,6 +48,23 @@ func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
 	_, err = c.StopRunningCharge(t.Context(), "archive-stopped", billing.StopRunningChargeParams{StoppedAt: &stoppedAt})
 	require.NoError(t, err)
 	start("archive-running")
+
+	// A customer already past its balance: the watcher tells the host, which
+	// acknowledges the event before the cutover.
+	broke := w.newCustomer()
+	_, err = c.StartRunningCharge(t.Context(), billing.StartRunningChargeParams{
+		Reference: "archive-depleted", CustomerID: broke.cid(), Currency: "USD", RatePerHour: 3_600_000, StartedAt: &startedAt,
+	})
+	require.NoError(t, err)
+	watcher := riverjobs.BalanceWatchWorker{DB: engine.Graph(w.rt).Runtime.DB, Money: engine.Graph(w.rt).Runtime.MoneyService}
+	require.NoError(t, watcher.Work(t.Context(), &river.Job[riverjobs.BalanceWatchArgs]{}))
+	events, err := c.ListHostEvents(t.Context(), billing.HostEventListParams{Type: billing.HostEventBalanceDepleted})
+	require.NoError(t, err)
+	require.Len(t, events.Items, 1)
+	require.Equal(t, broke.cid(), events.Items[0].Balance.CustomerID)
+	require.EqualValues(t, -3_600_000, events.Items[0].Balance.AvailableAmount)
+	_, err = c.AcknowledgeHostEvents(t.Context(), []billing.HostEventID{events.Items[0].ID})
+	require.NoError(t, err)
 
 	merchantID := c.MerchantID()
 	w.stop()
@@ -75,12 +94,13 @@ func TestRunningChargesSurviveAMerchantArchive(t *testing.T) {
 		return out
 	}
 	original := pgx.Identifier{w.schema}.Sanitize()
-	require.JSONEq(t, rows(original, "running_charges", "id"), rows(quoted, "running_charges", "id"), "both charges, exactly as they stood")
+	require.JSONEq(t, rows(original, "running_charges", "id"), rows(quoted, "running_charges", "id"), "every charge, exactly as it stood")
+	require.JSONEq(t, rows(original, "host_outbox", "id"), rows(quoted, "host_outbox", "id"), "the acknowledged balance event")
 	var watched, due int
-	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*), count(*) FILTER (WHERE next_check_at <= now()) FROM "+quoted+".balance_watches WHERE merchant_id=$1 AND customer_id=$2 AND currency='USD'",
-		merchantID.UUID(), payer.cid().UUID()).Scan(&watched, &due))
-	require.Equal(t, 1, watched, "the running charge is watched again")
-	require.Equal(t, 1, due, "and due at once")
+	require.NoError(t, w.pool.QueryRow(t.Context(), "SELECT count(*), count(*) FILTER (WHERE next_check_at <= now()) FROM "+quoted+".balance_watches WHERE merchant_id=$1",
+		merchantID.UUID()).Scan(&watched, &due))
+	require.Equal(t, 2, watched, "each customer with a running charge is watched again")
+	require.Equal(t, 2, due, "and due at once")
 
 	// The same artifact again is a replay, not a second set of charges.
 	replay, err := merchantarchive.Restore(t.Context(), destination, merchantID, bytes.NewReader(artifact.Bytes()))

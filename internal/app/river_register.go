@@ -141,6 +141,9 @@ func (r *Runtime) addBillingWorkersToRegistry(ctx context.Context, workers *rive
 	}); err != nil {
 		return fmt.Errorf("add credit expiry worker: %w", err)
 	}
+	if err := addTrackedWorker(r, workers, &riverjobs.BalanceWatchWorker{DB: r.DB, Money: r.MoneyService}); err != nil {
+		return fmt.Errorf("add balance watch worker: %w", err)
+	}
 	if err := addTrackedWorker(r, workers, &riverjobs.OrderExpiryWorker{DB: r.DB, Orders: r.Orders, Clock: clock}); err != nil {
 		return fmt.Errorf("add order expiry worker: %w", err)
 	}
@@ -659,6 +662,24 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 		},
 		&river.PeriodicJobOpts{RunOnStart: false},
+	))
+
+	// Every 30 seconds: the balance watches that are due, of customers with
+	// a running charge. It runs on start so a restart adds no lag to a
+	// run-out; an idle pass is one indexed read. Outstanding passes coalesce.
+	jobs = append(jobs, r.healthPeriodic(
+		riverjobs.BalanceWatchInterval,
+		func() (river.JobArgs, *river.InsertOpts) {
+			return riverjobs.BalanceWatchArgs{}, &river.InsertOpts{
+				Queue: riverjobs.QueueBilling,
+				UniqueOpts: river.UniqueOpts{ByQueue: true, ByState: []rivertype.JobState{
+					rivertype.JobStateAvailable, rivertype.JobStatePending,
+					rivertype.JobStateRunning, rivertype.JobStateRetryable,
+					rivertype.JobStateScheduled,
+				}},
+			}
+		},
+		&river.PeriodicJobOpts{RunOnStart: true},
 	))
 
 	// Every 5 minutes: expire orders past their expiry.

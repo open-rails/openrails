@@ -68,10 +68,16 @@ func (c *Client) GetRunningCharge(ctx context.Context, reference string, request
 }
 
 // ListRunningCharges is one page of the merchant's running charges, newest
-// first: of params.CustomerID and in params.State when set.
+// first: of params.CustomerID and in params.State when set. With
+// params.Depleted it lists only the running charges of customers whose
+// capacity has run out, whether or not the watcher has looked yet: confirm
+// with GetBalance, then stop what they pay for.
 func (c *Client) ListRunningCharges(ctx context.Context, params billing.RunningChargeListParams, requestOptions ...RequestOption) (*billing.ListPage[billing.RunningCharge], error) {
 	q := pageValues(nil, params.PageRequest)
 	setQuery(q, map[string]string{"customer_id": params.CustomerID.String(), "state": string(params.State)})
+	if params.Depleted {
+		q.Set("depleted", "true")
+	}
 	var out billing.ListPage[billing.RunningCharge]
 	if err := c.do(ctx, http.MethodGet, withQuery("/v1/app/running-charges", q), nil, &out, requestOptions...); err != nil {
 		return nil, err

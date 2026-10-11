@@ -52,7 +52,24 @@ const (
 	// HostEventCustomerPaymentAuthorityRevoked: the customer ended the
 	// merchant's authority to charge its cards without it.
 	HostEventCustomerPaymentAuthorityRevoked HostEventType = "customer.payment_authority_revoked"
+	// The balance of a customer with a running charge went under its low
+	// line, or its capacity reached zero: once per crossing.
+	HostEventBalanceLow      HostEventType = "balance.low"
+	HostEventBalanceDepleted HostEventType = "balance.depleted"
 )
+
+// BalanceHostEvent is balance.low or balance.depleted: the customer's balance
+// in one currency as the crossing was seen, at AsOf. On balance.depleted,
+// stop what the customer's running charges pay for.
+type BalanceHostEvent struct {
+	CustomerID         CustomerID `json:"customer_id"`
+	Currency           string     `json:"currency"`
+	AvailableAmount    int64      `json:"available_amount,string"`
+	OwedAmount         int64      `json:"owed_amount,string"`
+	AccrualRatePerHour int64      `json:"accrual_rate_per_hour,string"`
+	AsOf               time.Time  `json:"as_of"`
+	DepletesAt         time.Time  `json:"depletes_at"`
+}
 
 // OrderHostEvent is one order transition: the order's status and its
 // payment's as the transition left them. Number and PaymentID are set on
@@ -122,6 +139,8 @@ type HostEvent struct {
 	CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
 	// PaymentAuthority is set for customer.payment_authority_revoked.
 	PaymentAuthority *PaymentAuthorityHostEvent `json:"payment_authority"`
+	// Balance is set for balance.low and balance.depleted.
+	Balance *BalanceHostEvent `json:"balance"`
 }
 
 // AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to

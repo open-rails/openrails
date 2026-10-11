@@ -343,14 +343,27 @@ func (s *MoneyService) ListRunningCharges(ctx context.Context, params billing.Ru
 		return page, err
 	}
 	args.MerchantID = merchantID.UUID()
+	now := instant(s.now())
 	var rows []gen.BillingRunningCharge
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		rows, err = s.db.Gen(ctx).ListRunningCharges(ctx, args)
+		if !params.Depleted {
+			rows, err = s.db.Gen(ctx).ListRunningCharges(ctx, args)
+			return err
+		}
+		// Only a running charge can be of a depleted customer.
+		if args.Running != nil && !*args.Running {
+			return nil
+		}
+		depleted, err := s.db.Gen(ctx).ListDepletedRunningCharges(ctx, gen.ListDepletedRunningChargesParams{
+			MerchantID: args.MerchantID, Now: now, CustomerID: args.CustomerID, AfterID: args.AfterID, RowLimit: args.RowLimit,
+		})
+		for _, row := range depleted {
+			rows = append(rows, row.BillingRunningCharge)
+		}
 		return err
 	}); err != nil {
 		return page, err
 	}
-	now := instant(s.now())
 	items := make([]billing.RunningCharge, 0, len(rows))
 	for _, row := range rows {
 		charge, err := runningChargeFromRow(row, now)
@@ -428,6 +441,11 @@ type balanceRunOut struct {
 	// what is owed goes under the low line, nil with no line.
 	depletesAt time.Time
 	lowAt      *time.Time
+	// depleted: capacity is at zero now. low: the balance is under the line now.
+	depleted, low bool
+	owed          int64
+	// checkpointDue: a charge is not yet posted through the last 00:00 UTC.
+	checkpointDue bool
 }
 
 // runOut projects bal, derived at bal.AsOf, forward under the customer's
@@ -440,6 +458,9 @@ func (s *MoneyService) runOut(ctx context.Context, q *gen.Queries, bal *models.M
 		return out, false, err
 	}
 	lines := runningLines(charges)
+	for _, c := range charges {
+		out.checkpointDue = out.checkpointDue || c.PostedThroughAt.Before(bal.AsOf.Truncate(24*time.Hour))
+	}
 	floor, owed, err := s.capacityFloor(ctx, q, bal.MerchantID, bal.CustomerID, bal.Currency, lines.overdraft)
 	if err != nil {
 		return out, false, err
@@ -467,12 +488,13 @@ func (s *MoneyService) runOut(ctx context.Context, q *gen.Queries, bal *models.M
 		return out, false, err
 	}
 	available := satSub(satSub(bal.Balance, bal.HeldBalance), unspent)
-	out.ratePerHour = lines.ratePerHour
+	out.ratePerHour, out.owed = lines.ratePerHour, owed
 	out.depletesAt = firstInstantAtOrUnder(bal.AsOf, available, lots, lines.ratePerHour, floor)
+	out.depleted = !out.depletesAt.After(bal.AsOf)
 	if lines.low > 0 {
 		// Under the line: at or under one unit less than it.
 		lowAt := firstInstantAtOrUnder(bal.AsOf, available, lots, lines.ratePerHour, satAdd(owed, lines.low-1))
-		out.lowAt = &lowAt
+		out.lowAt, out.low = &lowAt, !lowAt.After(bal.AsOf)
 	}
 	return out, true, nil
 }
@@ -521,9 +543,13 @@ func (s *MoneyService) watchBalance(ctx context.Context, q *gen.Queries, merchan
 	if !ok {
 		return q.DeleteBalanceWatch(ctx, gen.DeleteBalanceWatchParams{MerchantID: merchantID, CustomerID: customer, Currency: currency})
 	}
-	next := earlier(out.depletesAt, bal.AsOf.Truncate(24*time.Hour).Add(24*time.Hour))
+	next := earlier(out.depletesAt, nextMidnight(bal.AsOf))
 	if out.lowAt != nil {
 		next = earlier(next, *out.lowAt)
+	}
+	// A charge started in the past may already be due a day's checkpoint.
+	if out.checkpointDue {
+		next = bal.AsOf
 	}
 	return q.UpsertBalanceWatch(ctx, gen.UpsertBalanceWatchParams{
 		MerchantID: merchantID, CustomerID: customer, Currency: currency,

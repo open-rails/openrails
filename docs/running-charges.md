@@ -6,12 +6,14 @@ cost is rate × time. Admissions fit a request that ends in seconds; a running
 charge fits work that runs for hours or days.
 
 Nothing is written while a charge runs. What it has accrued is computed when
-the balance is read, and reaches the ledger when the charge stops.
+the balance is read, and reaches the ledger when the charge stops and once a
+day. One stored instant per customer says when its balance is next looked at.
 
 | | Owner |
 |---|---|
 | The balance, what has accrued and when it runs out | **OpenRails** |
 | Refusing other spend the accrual has already used | **OpenRails** |
+| Telling you a balance is low or has run out, durably | **OpenRails** |
 | Starting and stopping the work, and its instants | **you** |
 
 ## Routes and methods
@@ -24,7 +26,7 @@ Your backend's routes, behind `Permissions.Usage`, each write with an
 | `POST /v1/app/running-charges` | `Client.StartRunningCharge` | 201; 200 for the same reference and terms |
 | `POST /v1/app/running-charges/{reference}/stop` | `Client.StopRunningCharge` | 200 with the final `charged_amount` |
 | `GET /v1/app/running-charges/{reference}` | `GetRunningCharge` | 200, charged as of now |
-| `GET /v1/app/running-charges` | `ListRunningCharges` | 200, newest first, by `customer_id` and `state` |
+| `GET /v1/app/running-charges` | `ListRunningCharges` | 200, newest first, by `customer_id`, `state` and `depleted` |
 
 An embedded host also has `Client.StartRunningChargeTx` and
 `Client.StopRunningChargeTx`, which run inside a transaction of the host's own
@@ -94,6 +96,9 @@ hold would refuse it.
 ## When the ledger is written
 
 - **The stop** posts the rest of the charge.
+- **Each 00:00 UTC**, every running charge is posted through the boundary
+  exactly, whenever the watcher gets to it: one line per charge per day, and
+  no posting straddles a day or a month.
 - **Before a credit lot is expired, revoked or refunded**, what accrued while
   the lot lived is posted first and draws that lot, so credit never expires
   under a charge it should have paid.
@@ -106,13 +111,33 @@ number of postings sums to `charged_amount`.
 
 ## Running out
 
-OpenRails does not stop your work. Read the balance (`depletes_at`, or
-`available_amount` against your own line), stop what you run, then stop the
-charge. Spend past the balance is real spend: it is posted as owed, and the
-next funding repays it.
+OpenRails does not stop your work; it tells you when to. Each customer with a
+running charge has one watch: the earliest of the instant its balance goes
+under the low line, the instant its capacity reaches zero, and the next 00:00
+UTC. A deposit, a capture, a spend, a refund, an expiry or a new hold marks the
+watch due; every 30 seconds one job looks at the watches that are due, and at
+nothing else.
+
+It reaches you two ways:
+
+- **Events** ([host events](api/endpoints.md#host-events)), once per crossing
+  and armed again when the balance is back above the line: `balance.low`
+  (what is available less what is owed is under the low line) and
+  `balance.depleted` (capacity is at zero). Each carries `balance`:
+  `customer_id`, `currency`, `available_amount`, `owed_amount`,
+  `accrual_rate_per_hour`, `as_of` and `depletes_at`.
+- **State**: `GET /v1/app/running-charges?depleted=true`
+  (`billing.RunningChargeListParams` with `Depleted`) lists the running charges
+  of customers whose stored run-out instant has passed, whether or not the
+  watcher has looked yet. Confirm with `GetBalance`, stop what you run, then
+  stop the charge.
+
+Overshoot past the line is at most the watcher's 30 seconds plus your own
+pass, times the rate. It is real spend: it is posted as owed, and the next
+funding repays it.
 
 ## Retention
 
 `running_charges` rows are permanent. A merchant archive carries them, running
-ones included; `balance_watches`, the next instant each customer with a running
-charge is looked at, is derived and rebuilt.
+ones included; `balance_watches` is derived, and a restore watches every
+running charge again.

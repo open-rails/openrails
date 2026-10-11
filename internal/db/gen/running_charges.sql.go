@@ -174,6 +174,133 @@ func (q *Queries) InsertRunningCharge(ctx context.Context, arg InsertRunningChar
 	return i, err
 }
 
+const listDepletedRunningCharges = `-- name: ListDepletedRunningCharges :many
+SELECT c.id, c.merchant_id, c.reference, c.customer_id, c.currency, c.rate_per_hour, c.overdraft_amount, c.low_balance_amount, c.resource, c.started_at, c.stopped_at, c.posted_through_at, c.posted_amount, c.created_at, c.updated_at
+FROM billing.balance_watches w
+JOIN billing.running_charges c
+  ON c.merchant_id = w.merchant_id AND c.customer_id = w.customer_id AND c.currency = w.currency AND c.stopped_at IS NULL
+WHERE w.merchant_id = $1::uuid AND w.depletes_at <= $2::timestamptz
+  AND ($3::uuid IS NULL OR w.customer_id = $3::uuid)
+  AND ($4::uuid IS NULL OR c.id < $4::uuid)
+ORDER BY c.id DESC
+LIMIT $5::int
+`
+
+type ListDepletedRunningChargesParams struct {
+	MerchantID uuid.UUID
+	Now        time.Time
+	CustomerID *uuid.UUID
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+type ListDepletedRunningChargesRow struct {
+	BillingRunningCharge BillingRunningCharge
+}
+
+// The running charges of customers whose capacity has run out: the stored
+// run-out instant has passed. Newest first.
+func (q *Queries) ListDepletedRunningCharges(ctx context.Context, arg ListDepletedRunningChargesParams) ([]ListDepletedRunningChargesRow, error) {
+	rows, err := q.db.Query(ctx, listDepletedRunningCharges,
+		arg.MerchantID,
+		arg.Now,
+		arg.CustomerID,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDepletedRunningChargesRow
+	for rows.Next() {
+		var i ListDepletedRunningChargesRow
+		if err := rows.Scan(
+			&i.BillingRunningCharge.ID,
+			&i.BillingRunningCharge.MerchantID,
+			&i.BillingRunningCharge.Reference,
+			&i.BillingRunningCharge.CustomerID,
+			&i.BillingRunningCharge.Currency,
+			&i.BillingRunningCharge.RatePerHour,
+			&i.BillingRunningCharge.OverdraftAmount,
+			&i.BillingRunningCharge.LowBalanceAmount,
+			&i.BillingRunningCharge.Resource,
+			&i.BillingRunningCharge.StartedAt,
+			&i.BillingRunningCharge.StoppedAt,
+			&i.BillingRunningCharge.PostedThroughAt,
+			&i.BillingRunningCharge.PostedAmount,
+			&i.BillingRunningCharge.CreatedAt,
+			&i.BillingRunningCharge.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDueBalanceWatches = `-- name: ListDueBalanceWatches :many
+SELECT merchant_id, customer_id, currency, next_check_at FROM billing.balance_watches
+WHERE next_check_at <= $1::timestamptz
+  AND ($2::timestamptz IS NULL
+       OR (next_check_at, merchant_id, customer_id, currency)
+          > ($2::timestamptz, $3::uuid, $4::uuid, $5::text))
+ORDER BY next_check_at, merchant_id, customer_id, currency
+LIMIT $6::int
+`
+
+type ListDueBalanceWatchesParams struct {
+	Now             time.Time
+	AfterAt         *time.Time
+	AfterMerchantID *uuid.UUID
+	AfterCustomerID *uuid.UUID
+	AfterCurrency   *string
+	RowLimit        int32
+}
+
+type ListDueBalanceWatchesRow struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Currency    string
+	NextCheckAt time.Time
+}
+
+// The watches due, across merchants, in key order: an idle pass reads no row.
+func (q *Queries) ListDueBalanceWatches(ctx context.Context, arg ListDueBalanceWatchesParams) ([]ListDueBalanceWatchesRow, error) {
+	rows, err := q.db.Query(ctx, listDueBalanceWatches,
+		arg.Now,
+		arg.AfterAt,
+		arg.AfterMerchantID,
+		arg.AfterCustomerID,
+		arg.AfterCurrency,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDueBalanceWatchesRow
+	for rows.Next() {
+		var i ListDueBalanceWatchesRow
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.Currency,
+			&i.NextCheckAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRunningCharges = `-- name: ListRunningCharges :many
 SELECT id, merchant_id, reference, customer_id, currency, rate_per_hour, overdraft_amount, low_balance_amount, resource, started_at, stopped_at, posted_through_at, posted_amount, created_at, updated_at FROM billing.running_charges
 WHERE merchant_id = $1::uuid
@@ -285,6 +412,56 @@ func (q *Queries) ListRunningChargesByCustomer(ctx context.Context, arg ListRunn
 	return items, nil
 }
 
+const lockBalanceWatch = `-- name: LockBalanceWatch :one
+SELECT merchant_id, customer_id, currency, next_check_at, depletes_at, low_notified_at, depleted_at, updated_at FROM billing.balance_watches
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text
+FOR UPDATE
+`
+
+type LockBalanceWatchParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// Taken after the customer lock: a mark that races the look waits for it.
+func (q *Queries) LockBalanceWatch(ctx context.Context, arg LockBalanceWatchParams) (BillingBalanceWatch, error) {
+	row := q.db.QueryRow(ctx, lockBalanceWatch, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var i BillingBalanceWatch
+	err := row.Scan(
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.Currency,
+		&i.NextCheckAt,
+		&i.DepletesAt,
+		&i.LowNotifiedAt,
+		&i.DepletedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markBalanceWatchDue = `-- name: MarkBalanceWatchDue :exec
+UPDATE billing.balance_watches
+SET next_check_at = to_timestamp(0)
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND currency = $3::text
+`
+
+type MarkBalanceWatchDueParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// Something changed what the customer's running charges may draw: its watch
+// is looked at on the next pass. No row for a customer with no running charge.
+func (q *Queries) MarkBalanceWatchDue(ctx context.Context, arg MarkBalanceWatchDueParams) error {
+	_, err := q.db.Exec(ctx, markBalanceWatchDue, arg.MerchantID, arg.CustomerID, arg.Currency)
+	return err
+}
+
 const postRunningCharge = `-- name: PostRunningCharge :one
 UPDATE billing.running_charges
 SET posted_through_at = $1::timestamptz,
@@ -354,6 +531,41 @@ type RebuildBalanceWatchesParams struct {
 // A restored merchant's running charges are watched again, due at once.
 func (q *Queries) RebuildBalanceWatches(ctx context.Context, arg RebuildBalanceWatchesParams) error {
 	_, err := q.db.Exec(ctx, rebuildBalanceWatches, arg.Now, arg.MerchantID)
+	return err
+}
+
+const setBalanceWatch = `-- name: SetBalanceWatch :exec
+UPDATE billing.balance_watches
+SET next_check_at = $1::timestamptz, depletes_at = $2::timestamptz,
+    low_notified_at = $3::timestamptz, depleted_at = $4::timestamptz,
+    updated_at = $5::timestamptz
+WHERE merchant_id = $6::uuid AND customer_id = $7::uuid
+  AND currency = $8::text
+`
+
+type SetBalanceWatchParams struct {
+	NextCheckAt   time.Time
+	DepletesAt    *time.Time
+	LowNotifiedAt *time.Time
+	DepletedAt    *time.Time
+	Now           time.Time
+	MerchantID    uuid.UUID
+	CustomerID    uuid.UUID
+	Currency      string
+}
+
+// What a look found, and the notices of the crossings it is in.
+func (q *Queries) SetBalanceWatch(ctx context.Context, arg SetBalanceWatchParams) error {
+	_, err := q.db.Exec(ctx, setBalanceWatch,
+		arg.NextCheckAt,
+		arg.DepletesAt,
+		arg.LowNotifiedAt,
+		arg.DepletedAt,
+		arg.Now,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
 	return err
 }
 

@@ -1094,6 +1094,7 @@ of leader neither delays nor repeats a period's run.
 
 | Worker | Cadence |
 |---|---|
+| Balance watch (+ start; only the watches that are due) | 30 s |
 | Provider-intent executor | 1 min + start |
 | Provider-intent verifier · admission-denial flush · worker health check (health check + start) | 5 min |
 | Notification email sweep | 10 min |
