@@ -114,6 +114,7 @@ func TestEnvKeyRouting(t *testing.T) {
 		"AUTHKIT_ACTIVE_KEY_ID":            "signing_key.active_key_id",
 		"AUTH_KEYS_PATH":                   "auth.keys.path",
 		"AUTH_SIGN_IN_DPOP":                "auth.sign_in.dpop",
+		"AUTH_RESOURCE_ID":                 "auth.resource.id",
 		"AUTH_RESOURCE_PUBLIC_URL":         "auth.resource.public_url",
 		"AUTH_HTTP_DIRECT_PEER_IP":         "auth.http.direct_peer_ip",
 		"AUTH_ISSUER":                      "auth.issuer",
