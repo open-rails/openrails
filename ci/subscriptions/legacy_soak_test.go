@@ -116,6 +116,7 @@ func TestLegacyNMIRefreshPSPs(t *testing.T) {
 			// A second member keeps the NMI roster non-empty: an empty roster never
 			// proves absence.
 			l := w.mirrorBook(tp, w.bookTier("monthly", 999, 30), 2)[0]
+			w.refreshProviders() // an established book: its coverage is complete
 			w.nmi.DeleteSchedule(l.railSub)
 			w.advance(time.Hour)
 

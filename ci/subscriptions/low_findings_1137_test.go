@@ -54,6 +54,7 @@ func TestUndoRunKeepsLaterLifecycle(t *testing.T) {
 	w.nmi.RunDue()
 	w.advance(20 * day)
 	w.cliPull("nmi", true)
+	w.refreshProviders() // the verifier's read
 	w.until(func() bool { return w.subscription(embedded, l.sub).Status == billing.SubscriptionCanceled }, "the verifier ends the parked membership")
 	var run uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT destructive_run_id FROM billing.destructive_run_before_images WHERE row_id = $1 AND table_name = 'subscriptions'`), l.sub.UUID()).Scan(&run))

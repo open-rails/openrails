@@ -20,6 +20,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/nmimock"
 	"github.com/open-rails/openrails/internal/providerrecovery"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
@@ -48,6 +49,7 @@ func TestReadonlyProviderRecoveryAppliesReceiptsWithoutDestruction(t *testing.T)
 	require.NoError(t, err)
 	before := len(w.nmi.Calls())
 	readsBefore := w.nmi.Reads()
+	w.periodics = []string{riverjobs.KindProviderRefresh}
 	w.start() // real RunOnStart, including bounded catch-up continuation
 	require.Eventually(t, func() bool {
 		var count int
@@ -123,6 +125,7 @@ func testRestoredProviderBook(t *testing.T, alreadyPaid bool) {
 	}
 	target := handoffTarget(t, source)
 	target.declare = source.declare
+	target.periodics = []string{riverjobs.KindProviderRefresh, riverjobs.KindDunning} // normal startup
 	targetDB, err := db.NewWithPGXPool(target.pool, target.schema)
 	require.NoError(t, err)
 	directory, err := merchants.NewDirectoryService(targetDB.DataPool())
@@ -276,6 +279,7 @@ func TestStartupRecoversInvoiceOnlyBackupWithoutCharging(t *testing.T) {
 			target := handoffTarget(t, source)
 			target.declare = source.declare
 			target.cfg = func(cfg *config.Config) { cfg.ProviderWriteMode = mode }
+			target.periodics = []string{riverjobs.KindProviderRefresh}
 			targetDB, err := db.NewWithPGXPool(target.pool, target.schema)
 			require.NoError(t, err)
 			directory, err := merchants.NewDirectoryService(targetDB.DataPool())

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
 // River runs the startup provider refresh only once its leader is elected,
@@ -15,6 +17,7 @@ import (
 func TestFaultFixtureWaitsForLateStartupRefresh(t *testing.T) {
 	t.Parallel()
 	w := prepareWorld(t, 12)
+	w.periodics = []string{riverjobs.KindProviderRefresh}
 	_, err := w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.river_leader (elected_at, expires_at, leader_id, name)
 		VALUES (now(), now() + interval '8 seconds', 'departing-process', 'default')`))
 	require.NoError(t, err)

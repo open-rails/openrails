@@ -93,6 +93,7 @@ func TestCLIPullNMIDeclineEndsOnce(t *testing.T) {
 	require.Equal(t, billing.SubscriptionActive, w.subscription(embedded, l.sub).Status, "nothing told OpenRails yet")
 
 	w.cliPull("nmi", true)
+	w.refreshProviders() // the verifier's read
 	w.until(func() bool { return w.subscription(embedded, l.sub).Status == "canceled" }, "the verifier ends the parked membership")
 	require.False(t, l.c.entitled(l.ent))
 	// The delete waits out its cooling-off window, then runs.

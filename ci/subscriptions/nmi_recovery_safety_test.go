@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails/internal/config"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/stretchr/testify/require"
 )
 
@@ -18,7 +19,9 @@ func TestEngineNMIWholePeriodOutageNeverStartsFreshCharge(t *testing.T) {
 	for _, admitted := range []bool{false, true} {
 		t.Run(map[bool]string{false: "not_admitted", true: "accepted_not_submitted"}[admitted], func(t *testing.T) {
 			t.Parallel()
-			w := newWorld(t)
+			w := prepareWorld(t, 12)
+			w.periodics = []string{riverjobs.KindProviderRefresh} // the restart's startup refresh
+			w.start()
 			e := enroll(t, w, "nmi", embedded)
 			end := e.periodEnd()
 			e.refreshBeforePeriodEnd()

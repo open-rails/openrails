@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 )
@@ -111,15 +113,15 @@ func (e *engineCase) refreshBeforePeriodEnd() {
 }
 
 // settleRefreshes drains every provider refresh and the scans its completion
-// requests, the process's own startup refresh included. River inserts that
-// refresh only once its leader is elected, which under load comes after a
-// scenario has moved the clock; completing after a fault, it would request
-// another due pass.
+// requests, the process's own startup refresh included when the world
+// schedules it. River inserts that refresh only once its leader is elected,
+// which under load comes after a scenario has moved the clock; completing
+// after a fault, it would request another due pass.
 func (w *world) settleRefreshes() {
 	w.t.Helper()
 	kinds := []string{"openrails.provider_refresh", "openrails.provider_refresh_merchant", "openrails.dunning", "openrails.invoice"}
 	require.Eventually(w.t, func() bool {
-		if w.replica == nil {
+		if w.replica == nil && slices.Contains(w.periodics, riverjobs.KindProviderRefresh) {
 			var started bool
 			if err := w.pool.QueryRow(w.t.Context(), w.q(`SELECT EXISTS (SELECT 1 FROM billing.river_job WHERE kind = 'openrails.provider_refresh')`)).Scan(&started); err != nil || !started {
 				return false
@@ -270,7 +272,9 @@ func TestEngineRenewalRunsOnItsOwnSchedule(t *testing.T) {
 	for _, rail := range rails {
 		t.Run(rail, func(t *testing.T) {
 			t.Parallel()
-			w := newWorld(t)
+			w := prepareWorld(t, 12)
+			w.periodics = []string{riverjobs.KindDunning, riverjobs.KindProviderRefresh}
+			w.start()
 			e := enroll(t, w, rail, embedded)
 			end := e.periodEnd()
 			e.toPeriodEnd()

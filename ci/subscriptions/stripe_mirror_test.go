@@ -110,6 +110,7 @@ func TestStripeEventMidConvergeIsNotLost(t *testing.T) {
 	w.converge()
 	// The imported book's provider coverage completes first: without it the
 	// recovery gate holds the cancellation and River backs the follow-up off.
+	w.refreshProviders()
 	w.settleRefreshes()
 
 	g := newGate(func(r *http.Request) bool {

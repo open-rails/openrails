@@ -106,7 +106,7 @@ func (p *solanaPay) runWorkers(w *world) {
 func (p *solanaPay) replica() *world {
 	b := p.w
 	r := &world{t: b.t, pool: b.pool, dsn: b.dsn, schema: b.schema, slug: b.slug, stripe: b.stripe, nmi: b.nmi, auth: b.auth,
-		cfg: b.cfg, declare: b.declare, mount: b.mount, clock: b.clock, queries: b.queries}
+		cfg: b.cfg, periodics: b.periodics, declare: b.declare, mount: b.mount, clock: b.clock, queries: b.queries}
 	r.start()
 	b.t.Cleanup(r.stop)
 	p.runWorkers(r)

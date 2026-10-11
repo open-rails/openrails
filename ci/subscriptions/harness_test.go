@@ -274,6 +274,12 @@ type world struct {
 	nmi    *nmiFake
 	auth   *verifier
 	cfg    func(*config.Config)
+	// periodics are the periodic jobs (River IDs) this world schedules. A
+	// world schedules none by default: each fires on the wall clock, so a
+	// test crossing its boundary would see work it never ran (the catalog
+	// pull's Stripe reads, the rebill watch's NMI probes). Tests run the
+	// passes they exercise; a scheduled fleet keeps the whole schedule.
+	periodics []string
 	// declare adjusts the merchant's provider declaration before start.
 	declare func(map[string]openrails.PSPConfig)
 	// custodians are the merchant's declared card custodians.
@@ -501,8 +507,10 @@ func (w *world) start() {
 	}
 	jobs, err := riverkit.New(t.Context(), pool, riverConfig, rt.RiverJobs())
 	require.NoError(t, err)
-	if w.replica != nil && !w.replica.f.scheduled {
-		jobs.PeriodicJobs().Clear()
+	if w.replica == nil || !w.replica.f.scheduled {
+		ids := engine.Graph(rt).Runtime.PeriodicJobIDs()
+		require.Subset(t, ids, w.periodics, "the periodics the world schedules exist")
+		jobs.PeriodicJobs().RemoveManyByID(slices.DeleteFunc(ids, func(id string) bool { return slices.Contains(w.periodics, id) }))
 	}
 	require.NoError(t, jobs.Start(context.WithoutCancel(t.Context())))
 	w.jobs = jobs
