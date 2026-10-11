@@ -37,6 +37,8 @@ const linkPrefix = "/v1/network/links/{link_id}"
 // path names a merchant.
 func networkRoutes() []Route {
 	out := []Route{
+		{Method: GET, Path: "/v1/network/notifications", Group: Network, Auth: AuthNetwork, When: FeatureCustomerNetwork, NoConn: true,
+			Query: params(queryOf(handlers.MyNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.NetworkNotification]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListNetworkNotifications)},
 		{Method: GET, Path: "/v1/network/links", Group: Network, Auth: AuthNetwork, When: FeatureCustomerNetwork, NoConn: true,
 			Query: pageParams, Responses: []Reply{{200, billing.ListPage[billing.NetworkLink]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListNetworkLinks)},
 		{Method: GET, Path: "/v1/network/subscriptions", Group: Network, Auth: AuthNetwork, When: FeatureCustomerNetwork, NoConn: true,
@@ -51,6 +53,8 @@ func networkRoutes() []Route {
 		key       string
 		sensitive bool
 	}{
+		{"GET /v1/me/notifications", false},
+		{"POST /v1/me/notifications/read", false},
 		{"GET /v1/me/subscriptions/{id}", false},
 		{"POST /v1/me/subscriptions/{id}/cancel", true},
 		{"POST /v1/me/subscriptions/{id}/resume", true},
@@ -72,7 +76,7 @@ func networkRoutes() []Route {
 // throughLink is the customer route key through one of the account's links:
 // the same operation under /v1/network/links/{link_id}.
 func throughLink(key string, sensitive bool) Route {
-	for _, list := range [][]Route{subscriptionsRoutes, paymentMethodsRoutes, ordersRoutes, agreementsRoutes} {
+	for _, list := range [][]Route{subscriptionsRoutes, paymentMethodsRoutes, ordersRoutes, agreementsRoutes, opsRoutes} {
 		for _, r := range list {
 			if r.Key() != key {
 				continue

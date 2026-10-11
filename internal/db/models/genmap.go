@@ -351,9 +351,11 @@ func NotificationFromGen(n gen.BillingNotification) (*NotificationQueue, error) 
 	}
 	m := &NotificationQueue{
 		ID:         n.ID,
+		MerchantID: n.MerchantID,
 		CustomerID: *n.CustomerID,
 		EventType:  NotificationEventType(n.EventType),
 		Seen:       n.ReadAt != nil,
+		ReadAt:     n.ReadAt,
 		CreatedAt:  n.CreatedAt,
 	}
 	if err := FromJSONB(n.Data, &m.Data, "notifications.data"); err != nil {

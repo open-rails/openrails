@@ -9,6 +9,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
+	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/pagination"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
@@ -16,6 +17,41 @@ import (
 // MyNotificationsQuery is the customer's notification list query.
 type MyNotificationsQuery struct {
 	Seen *bool `form:"seen"`
+}
+
+// ListCustomerNotifications is the host's read of one customer's retained
+// inbox. The application's merchant scope is selected by authentication.
+func ListCustomerNotifications(r *httprequest.Request) {
+	customer, err := billing.ParseCustomerID(r.Param("customer_id"))
+	if err != nil || customer.IsZero() {
+		r.APIError(api.Coded("invalid_customer_id", "").WithParam("customer_id"))
+		return
+	}
+	var query MyNotificationsQuery
+	if !r.BindQuery(&query) {
+		return
+	}
+	page, ok := r.Page()
+	if !ok {
+		return
+	}
+	ctx := r.Request.Context()
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		writeRefusal(r, err, "list notifications failed")
+		return
+	}
+	notes, err := customerNotificationPage(page, func(afterAt *time.Time, afterID *uuid.UUID, fetch int32) ([]gen.BillingNotification, error) {
+		return r.State.DB.Gen(ctx).ListCustomerNotifications(ctx, gen.ListCustomerNotificationsParams{
+			MerchantID: mid.UUID(), CustomerID: customer.UUID(), Seen: query.Seen, AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		})
+	})
+	if err != nil {
+		writeRefusal(r, err, "list notifications failed")
+		return
+	}
+	r.SetHeader("Cache-Control", "no-store")
+	r.SuccessJSON(notes)
 }
 
 // customerScope is the merchant and customer a /me request acts for.

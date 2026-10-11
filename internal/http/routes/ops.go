@@ -8,6 +8,8 @@ import (
 // opsRoutes is how a merchant watches its books: findings (the one inbox),
 // worker health, metrics, the dashboard and host events.
 var opsRoutes = []Route{
+	{Method: GET, Path: "/v1/app/customers/{customer_id}/notifications", Group: App, Auth: AuthApplication, Permission: needCustomers, Name: "ListCustomerNotifications",
+		Query: params(queryOf(handlers.MyNotificationsQuery{}), pageParams), Responses: []Reply{{200, billing.ListPage[billing.Notification]{}}}, Errors: codes("invalid_customer_id", "invalid_cursor"), Handler: h(handlers.ListCustomerNotifications)},
 	{Method: GET, Path: "/v1/app/host-events", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "ListHostEvents",
 		Query: params(queryOf(handlers.HostEventsQuery{}), idsParam, pageParams), Responses: []Reply{{200, billing.ListPage[billing.HostEvent]{}}}, Errors: codes("invalid_cursor", "invalid_host_event_request"), Handler: h(handlers.ServiceListHostEvents)},
 	{Method: POST, Path: "/v1/app/host-events/acknowledge", Group: App, Auth: AuthApplication, Permission: needEvents, Name: "AcknowledgeHostEvents", IdempotencyKey: true,
