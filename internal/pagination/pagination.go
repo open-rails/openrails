@@ -133,3 +133,25 @@ func After(cursor string) (at *time.Time, id *uuid.UUID, err error) {
 	}
 	return &position.At, &position.ID, nil
 }
+
+// SortedTimeID is a TimeID in one of a list's several orders; its cursor
+// names the order, so a cursor of another order is refused.
+type SortedTimeID struct {
+	Sort string    `json:"s"`
+	At   time.Time `json:"t"`
+	ID   uuid.UUID `json:"i"`
+}
+
+// AfterSorted reads a SortedTimeID cursor of order sort as a keyset query's
+// nullable arguments: both nil on the first page.
+func AfterSorted(cursor, sort string) (at *time.Time, id *uuid.UUID, err error) {
+	var position SortedTimeID
+	present, err := Decode(cursor, &position)
+	if err != nil || !present {
+		return nil, nil, err
+	}
+	if position.Sort != sort || position.At.IsZero() || position.ID == uuid.Nil {
+		return nil, nil, ErrInvalidCursor
+	}
+	return &position.At, &position.ID, nil
+}

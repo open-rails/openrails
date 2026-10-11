@@ -16,8 +16,26 @@ const (
 	SubscriptionUnverified SubscriptionStatus = "unverified"
 )
 
+// SubscriptionSort orders a subscription list. Each order has one direction;
+// ordered by a time a subscription may lack, the list holds only those with it.
+type SubscriptionSort string
+
+const (
+	// SubscriptionSortCreatedAt is the newest first, the default.
+	SubscriptionSortCreatedAt SubscriptionSort = "created_at"
+	// SubscriptionSortCurrentPeriodEndsAt is the soonest period end first.
+	SubscriptionSortCurrentPeriodEndsAt SubscriptionSort = "current_period_ends_at"
+	// SubscriptionSortCanceledAt is the latest cancellation first.
+	SubscriptionSortCanceledAt SubscriptionSort = "canceled_at"
+)
+
+// SubscriptionSorts is every SubscriptionSort.
+func SubscriptionSorts() []SubscriptionSort {
+	return []SubscriptionSort{SubscriptionSortCreatedAt, SubscriptionSortCurrentPeriodEndsAt, SubscriptionSortCanceledAt}
+}
+
 // SubscriptionListParams filters one page of the merchant's subscriptions,
-// newest first.
+// in Sort's order (newest first by default).
 type SubscriptionListParams struct {
 	PageRequest
 	// IDs instead reads 1 to MaxBatchItems named subscriptions in one page,
@@ -30,6 +48,7 @@ type SubscriptionListParams struct {
 	Dunning bool
 	Rail    string
 	PriceID PriceID
+	Sort    SubscriptionSort
 }
 
 // Subscription is one subscription's lifecycle and recovery state. The

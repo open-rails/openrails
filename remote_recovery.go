@@ -26,6 +26,9 @@ func (c *Client) ListSubscriptions(ctx context.Context, params billing.Subscript
 	if !params.PriceID.IsZero() {
 		q.Set("price_id", params.PriceID.String())
 	}
+	if params.Sort != "" {
+		q.Set("sort", string(params.Sort))
+	}
 	if err := setIDs(q, params.IDs); err != nil {
 		return nil, err
 	}

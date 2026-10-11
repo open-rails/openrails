@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/pagination"
+	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/timeutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -31,6 +33,8 @@ type GetSubscriptionsFilters struct {
 	ExpiresBefore  *time.Time         `form:"expires_before" time_format:"2006-01-02"`
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool `form:"dunning"`
+	// Sort is the list's order; empty is created_at.
+	Sort billing.SubscriptionSort `form:"sort"`
 	// IDs, when not nil, reads those subscriptions instead, in one page.
 	IDs []uuid.UUID `form:"-"`
 }
@@ -199,13 +203,17 @@ func (f GetSubscriptionsFilters) repo() SubscriptionFilters {
 		UserID: customer, Status: f.Status, PriceID: f.PriceID.UUID(), Rail: f.Rail,
 		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore,
 		CanceledAfter: f.CanceledAfter, CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore,
-		Dunning: f.Dunning,
+		Dunning: f.Dunning, Sort: f.Sort,
 	}
 }
 
-// ListSubscribers is one page of the merchant's subscriptions matching f,
-// newest first.
+// ListSubscribers is one page of the merchant's subscriptions matching f, in
+// f.Sort's order. A cursor of another order is refused.
 func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscriptionsFilters, page billing.PageRequest) (billing.ListPage[*models.Subscription], error) {
+	sortKey := subscriptionSortKey(f.Sort)
+	if sortKey == nil && f.Sort != "" && f.Sort != billing.SubscriptionSortCreatedAt {
+		return billing.ListPage[*models.Subscription]{}, ErrInvalidSubscriptionSort
+	}
 	if f.IDs != nil {
 		rows, err := s.subscriptionRepo.ListByIDs(ctx, f.IDs)
 		return billing.ListPage[*models.Subscription]{Items: rows}, err
@@ -214,7 +222,18 @@ func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscrip
 	if err != nil {
 		return billing.ListPage[*models.Subscription]{}, err
 	}
-	afterAt, afterID, err := pagination.After(page.Cursor)
+	position := func(sub *models.Subscription) any { return pagination.TimeID{At: sub.CreatedAt, ID: sub.ID} }
+	var afterAt *time.Time
+	var afterID *uuid.UUID
+	switch f.Sort {
+	case "", billing.SubscriptionSortCreatedAt:
+		afterAt, afterID, err = pagination.After(page.Cursor)
+	default:
+		afterAt, afterID, err = pagination.AfterSorted(page.Cursor, string(f.Sort))
+		position = func(sub *models.Subscription) any {
+			return pagination.SortedTimeID{Sort: string(f.Sort), At: *sortKey(sub), ID: sub.ID}
+		}
+	}
 	if err != nil {
 		return billing.ListPage[*models.Subscription]{}, err
 	}
@@ -222,9 +241,22 @@ func (s *SubscriptionService) ListSubscribers(ctx context.Context, f GetSubscrip
 	if err != nil {
 		return billing.ListPage[*models.Subscription]{}, err
 	}
-	return pagination.Cut(rows, limit, func(sub *models.Subscription) any {
-		return pagination.TimeID{At: sub.CreatedAt, ID: sub.ID}
-	}), nil
+	return pagination.Cut(rows, limit, position), nil
+}
+
+// ErrInvalidSubscriptionSort is a sort the subscription list does not offer.
+var ErrInvalidSubscriptionSort = apperr.New(http.StatusBadRequest, billing.CodeInvalidQuery, "sort is invalid").WithParam("sort")
+
+// subscriptionSortKey is the time a non-default order sorts by; nil for
+// created_at or an unknown order. Its rows always carry it.
+func subscriptionSortKey(sort billing.SubscriptionSort) func(*models.Subscription) *time.Time {
+	switch sort {
+	case billing.SubscriptionSortCurrentPeriodEndsAt:
+		return func(sub *models.Subscription) *time.Time { return sub.CurrentPeriodEndsAt }
+	case billing.SubscriptionSortCanceledAt:
+		return func(sub *models.Subscription) *time.Time { return sub.CanceledAt }
+	}
+	return nil
 }
 
 // CountSubscribers is how many of the merchant's subscriptions match f.

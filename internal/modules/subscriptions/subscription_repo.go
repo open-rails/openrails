@@ -12,6 +12,7 @@ import (
 	safecast "github.com/ccoveille/go-safecast/v2"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -30,6 +31,8 @@ type SubscriptionFilters struct {
 	ExpiresBefore  *time.Time
 	// Dunning keeps the subscriptions past_due or awaiting_method.
 	Dunning bool
+	// Sort picks ListPage's order; Count ignores it.
+	Sort billing.SubscriptionSort
 }
 
 type SubscriptionRepo struct {
@@ -658,8 +661,9 @@ func (r *SubscriptionRepo) filterArgs(f SubscriptionFilters) (customer *uuid.UUI
 	return customer, status, rail, price, nil
 }
 
-// ListPage is one page of the merchant's subscriptions matching f, newest
-// first, with their details: up to fetch rows after (afterAt, afterID).
+// ListPage is one page of the merchant's subscriptions matching f in
+// f.Sort's order, with their details: up to fetch rows after (afterAt,
+// afterID).
 func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, fetch int32, afterAt *time.Time, afterID *uuid.UUID) ([]*models.Subscription, error) {
 	mid, err := merchant.Require(ctx)
 	if err != nil {
@@ -669,12 +673,31 @@ func (r *SubscriptionRepo) ListPage(ctx context.Context, f SubscriptionFilters, 
 	if err != nil {
 		return nil, err
 	}
-	rows, err := r.db.Gen(ctx).ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
-		MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
-		CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
-		CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
-		AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
-	})
+	q := r.db.Gen(ctx)
+	var rows []gen.BillingSubscription
+	switch f.Sort {
+	case billing.SubscriptionSortCurrentPeriodEndsAt:
+		rows, err = q.ListSubscriptionsPageByPeriodEnd(ctx, gen.ListSubscriptionsPageByPeriodEndParams{
+			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		})
+	case billing.SubscriptionSortCanceledAt:
+		rows, err = q.ListSubscriptionsPageByCanceledAt(ctx, gen.ListSubscriptionsPageByCanceledAtParams{
+			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		})
+	default:
+		rows, err = q.ListSubscriptionsPage(ctx, gen.ListSubscriptionsPageParams{
+			MerchantID: mid.UUID(), CustomerID: customer, Status: status, PriceID: price, Rail: rail,
+			CreatedAfter: f.CreatedAfter, CreatedBefore: f.CreatedBefore, CanceledAfter: f.CanceledAfter,
+			CanceledBefore: f.CanceledBefore, ExpiresBefore: f.ExpiresBefore, Dunning: f.Dunning,
+			AfterAt: afterAt, AfterID: afterID, RowLimit: fetch,
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
