@@ -202,7 +202,7 @@ func (s *Service) insert(ctx context.Context, p gen.InsertCustomerLinkParams) (b
 		existing, err := q.GetActiveCustomerLinkByCustomer(ctx, gen.GetActiveCustomerLinkByCustomerParams{MerchantID: p.MerchantID, CustomerID: p.CustomerID})
 		switch {
 		case err == nil && existing.AccountID == p.AccountID:
-			out = linkOf(existing)
+			out = customernetwork.LinkOf(existing)
 			return nil
 		case err == nil:
 			return errLinkConflict
@@ -218,7 +218,7 @@ func (s *Service) insert(ctx context.Context, p gen.InsertCustomerLinkParams) (b
 		if err != nil {
 			return err
 		}
-		out, created = linkOf(row), true
+		out, created = customernetwork.LinkOf(row), true
 		method := out.Method
 		return enqueue(ctx, q, row, billing.HostEventCustomerNetworkLinked, billing.CustomerNetworkHostEvent{AccountID: out.AccountID, Method: &method}, row.LinkedAt)
 	})
@@ -237,23 +237,6 @@ func enqueue(ctx context.Context, q *gen.Queries, row gen.BillingCustomerLink, k
 	return q.EnqueueCustomerNetworkEvent(ctx, gen.EnqueueCustomerNetworkEventParams{
 		MerchantID: row.MerchantID, EventType: string(kind), CustomerID: row.CustomerID, OccurredAt: at, Data: data, LinkID: row.ID.String(),
 	})
-}
-
-func linkOf(row gen.BillingCustomerLink) billing.CustomerLink {
-	out := billing.CustomerLink{
-		ID: billing.CustomerLinkID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), CustomerID: billing.CustomerID(row.CustomerID),
-		AccountID: billing.NetworkAccountID(row.AccountID), Method: billing.CustomerLinkMethod(row.Method), Status: billing.CustomerLinkStatus(row.Status),
-		LinkedAt: row.LinkedAt.UTC(),
-	}
-	if row.RevokedAt != nil {
-		at := row.RevokedAt.UTC()
-		out.RevokedAt = &at
-	}
-	if row.RevokedBy != nil {
-		by := billing.CustomerLinkRevokedBy(*row.RevokedBy)
-		out.RevokedBy = &by
-	}
-	return out
 }
 
 // consented reports whether account's consent to clientID holds scope.
@@ -316,6 +299,15 @@ func (s *Service) CustomerOf(ctx context.Context, mid billing.MerchantID, accoun
 		return billing.CustomerID{}, false, err
 	}
 	return billing.CustomerID(row.CustomerID), true, nil
+}
+
+// Admit refuses an account that has not accepted the network terms.
+func (s *Service) Admit(ctx context.Context, account billing.NetworkAccountID) error {
+	version, err := s.termsVersion(ctx, account.String())
+	if err == nil && version == "" {
+		return billingauth.Refusal(billing.CodeNetworkTermsRequired)
+	}
+	return err
 }
 
 // AdmitNative admits the account as the merchant's own customer: refused

@@ -16,6 +16,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/customernetwork"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/http/middleware"
@@ -569,6 +570,76 @@ func (e *Env) subjectIssuer(v billingauth.Verified, c billingauth.Identity) (str
 func grants(v billingauth.Verified, scope string) bool {
 	scoped, ok := v.(interface{ Scopes() []string })
 	return ok && slices.Contains(scoped.Scopes(), scope)
+}
+
+// networkGates gate a network route: the account itself and, under one of
+// its active links, the customer that link names, at its merchant.
+func (e *Env) networkGates(route Route) []router.Middleware {
+	a := e.Customers
+	if IsNilAuth(a) {
+		panic(MountError{Route: route.Key(), Reason: "a network route needs Routes.Auth"})
+	}
+	return []router.Middleware{verify(route, a), e.networkCheck(route, a)}
+}
+
+func (e *Env) networkCheck(route Route, a billingauth.Authenticator) router.Middleware {
+	throughLink := strings.HasPrefix(route.Path, linkPrefix+"/")
+	return func(next router.Handler) router.Handler {
+		return func(r *httprequest.Request) {
+			v, c, ok := subject(r, route, a)
+			if !ok {
+				return
+			}
+			// The deployment's own user acting for itself, signed in to its
+			// account, never through a merchant's client.
+			b, bound := v.(auth.Bound)
+			account, err := billing.ParseNetworkAccountID(c.Subject)
+			if !billingauth.SelfActing(c) || c.SubjectKind != billingauth.SubjectUser || c.Issuer == "" || c.Issuer != e.NativeIssuer ||
+				bound && b.BoundScope() != (billingauth.Scope{}) || err != nil || account.IsZero() || account.String() != c.Subject {
+				refuseCode(r, route, a, billing.CodePermissionRequired, "")
+				return
+			}
+			ctx := r.Request.Context()
+			network := e.Runtime.Network
+			if err := network.Admit(ctx, account); err != nil {
+				refuse(r, route, a, stepCan, err)
+				return
+			}
+			if route.Sensitive {
+				if err := recentSignIn(ctx, v); err != nil {
+					refuse(r, route, a, stepRecentSignIn, err)
+					return
+				}
+			}
+			r.Request = r.Request.WithContext(customernetwork.WithAccount(ctx, account))
+			if !throughLink {
+				next(r)
+				return
+			}
+			id, err := billing.ParseCustomerLinkID(r.Param("link_id"))
+			if err != nil || id.IsZero() {
+				refuseCode(r, route, a, billing.CodeResourceNotFound, "")
+				return
+			}
+			link, active, err := network.ActiveLink(ctx, account, id)
+			switch {
+			case err != nil:
+				refuse(r, route, a, stepCan, err)
+				return
+			case !active:
+				refuseCode(r, route, a, billing.CodeResourceNotFound, "")
+				return
+			}
+			// The link proves the account is that customer: it acts as it,
+			// itself, in person when it signed in.
+			as := c
+			as.Subject = link.CustomerID.String()
+			as.Invoker = auth.Invoker{Issuer: c.Issuer, ID: as.Subject}
+			if bindCustomer(r, as, link.CustomerID, billingauth.Target{MerchantID: link.MerchantID}) {
+				next(r)
+			}
+		}
+	}
 }
 
 // bindCustomer binds the admitted customer and its scope: the only place a

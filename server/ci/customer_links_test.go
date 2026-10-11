@@ -3,6 +3,7 @@
 package ci_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,6 +12,7 @@ import (
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -40,9 +42,9 @@ import (
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/customernetwork"
 	"github.com/open-rails/openrails/internal/hostedcheckout"
+	"github.com/open-rails/openrails/internal/nmimock"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/vaultfake"
-	"github.com/open-rails/openrails/openrailstest/nmimock"
 	"github.com/open-rails/openrails/server"
 	"github.com/open-rails/openrails/server/internal/bootstrap/serverboot"
 	"github.com/open-rails/openrails/server/internal/network"
@@ -59,28 +61,52 @@ const (
 // its AuthKit the OpenID provider merchants' clients sign accounts in at,
 // served over HTTPS at its issuer, with a hosted checkout host whose page's
 // client the server declares. The shop has its own login (a trusted issuer)
-// and an NMI PSP; the rival has its own login.
+// and an NMI PSP; the rival has its own login. The mart has an NMI PSP too,
+// at a gateway of its own.
 type world struct {
-	t       *testing.T
-	srv     *server.Server
-	handler http.Handler
-	as      *authtest.AuthorizationServer
-	gateway *nmimock.Mock
+	t                    *testing.T
+	srv                  *server.Server
+	handler              http.Handler
+	as                   *authtest.AuthorizationServer
+	gateway, martGateway *nmimock.Mock
+	now                  func() time.Time
 
-	shop, rival             billing.MerchantID
+	shop, rival, mart       billing.MerchantID
 	shopLogin, rivalLogin   issuerKey
 	shopClient, rivalClient iam.OAuthClientCreated
 	shopKey, rivalKey       iam.APIKeyCreated
 }
 
-func newWorld(t *testing.T) *world {
+func newWorld(t *testing.T) *world { return newWorldAt(t, nil) }
+
+// newWorldAt is a world whose engine and gateway keep clock's time; nil is
+// the wall clock.
+func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 	t.Helper()
 	f := newFixture(t)
 	ctx := t.Context()
 	vault := vaultfake.New("e2e-root")
 	t.Cleanup(vault.Close)
-	gateway := nmimock.New(nmimock.Options{})
+	now := time.Now
+	if clock != nil {
+		now = clock.Now
+	}
+	gateway, martGateway := nmimock.New(nmimock.Options{Clock: now}), nmimock.New(nmimock.Options{Clock: now})
 	t.Cleanup(gateway.Close)
+	t.Cleanup(martGateway.Close)
+	// The sandbox has one NMI URL; each PSP's security key reaches its own
+	// gateway, so neither sees the other's transactions.
+	gateways := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		form, _ := url.ParseQuery(string(body))
+		if form.Get("security_key") == "mart" || r.URL.Query().Get("security_key") == "mart" || r.Header.Get("Authorization") == "mart" {
+			martGateway.ServeHTTP(rw, r)
+			return
+		}
+		gateway.ServeHTTP(rw, r)
+	}))
+	t.Cleanup(gateways.Close)
 	var served atomic.Pointer[http.Handler]
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if h := served.Load(); h != nil {
@@ -99,9 +125,12 @@ func newWorld(t *testing.T) *world {
 		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.Vault = &openrails.VaultConfig{Address: vault.URL(), Token: vault.Token}
-		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
+		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateways.URL}
+		if clock != nil {
+			deps.Engine.Clock = clock
+		}
 	})
-	shop := uniqueName("network-shop")
+	shop, mart := uniqueName("network-shop"), uniqueName("network-mart")
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
 	require.NoError(t, os.WriteFile(manifest, []byte(fmt.Sprintf(`version: 1
 merchants:
@@ -113,7 +142,15 @@ merchants:
         account_id: test
         secrets: {security_key: test, webhook_signing_secret: test}
         settings: {tokenization_key: test}
-`, shop)), 0o600))
+  %s:
+    display_name: Network Mart
+    psps:
+      nmi:
+        rail: nmi
+        account_id: mart
+        secrets: {security_key: mart, webhook_signing_secret: mart}
+        settings: {tokenization_key: mart}
+`, shop, mart)), 0o600))
 	graph, plane := operator.Of(srv)
 	require.NoError(t, serverboot.ReconcileBootMerchantManifest(ctx, graph.Config, graph, plane, manifest, nil, ""))
 	handler, err := standaloneHandler(srv)
@@ -123,9 +160,11 @@ merchants:
 
 	m, err := graph.Runtime.Merchants.GetBySlug(ctx, shop)
 	require.NoError(t, err)
+	mm, err := graph.Runtime.Merchants.GetBySlug(ctx, mart)
+	require.NoError(t, err)
 	label := strings.ReplaceAll(f.schema, "_", "-")
-	w := &world{t: t, srv: srv, handler: handler, as: authtest.Attach(t, srv.AuthKit(), ts), gateway: gateway,
-		shop: m.ID, rival: provision(t, srv, uniqueName("network-rival")),
+	w := &world{t: t, srv: srv, handler: handler, as: authtest.Attach(t, srv.AuthKit(), ts), gateway: gateway, martGateway: martGateway, now: now,
+		shop: m.ID, mart: mm.ID, rival: provision(t, srv, uniqueName("network-rival")),
 		shopLogin: newIssuerKey(t, "https://shop-"+label+".e2e.test"), rivalLogin: newIssuerKey(t, "https://rival-"+label+".e2e.test")}
 	trust(t, srv, w.shop, w.shopLogin.app(t, "viewer", nil))
 	trust(t, srv, w.rival, w.rivalLogin.app(t, "viewer", nil))
@@ -152,6 +191,14 @@ func (w *world) account(terms bool) authtest.User {
 		require.NoError(w.t, w.srv.AuthKit().AcceptAgreements(w.t.Context(), u.ID, []iam.AgreementRef{{Key: network.TermsAgreement, Version: networkTerms}}))
 	}
 	return u
+}
+
+// gatewayOf is the merchant's NMI gateway.
+func (w *world) gatewayOf(mid billing.MerchantID) *nmimock.Mock {
+	if mid == w.mart {
+		return w.martGateway
+	}
+	return w.gateway
 }
 
 // customer is a customer token from a merchant's own login.
@@ -186,7 +233,7 @@ func (w *world) challenge(authorization string) billing.NetworkLinkChallenge {
 	var c billing.NetworkLinkChallenge
 	require.NoError(w.t, json.Unmarshal(r.Body.Bytes(), &c))
 	require.True(w.t, strings.HasPrefix(c.ID, "lnc_"))
-	require.WithinDuration(w.t, time.Now().Add(network.ChallengeTTL), c.ExpiresAt, 10*time.Second)
+	require.WithinDuration(w.t, w.now().Add(network.ChallengeTTL), c.ExpiresAt, 10*time.Second)
 	return c
 }
 
@@ -526,13 +573,14 @@ func TestCustomerLinkRefusals(t *testing.T) {
 	require.Len(t, links, 2, "one customer at each merchant")
 }
 
-// subscribe buys a monthly plan as the customer: a card saved at the shop's
-// NMI PSP and a checkout paid with it.
-func (w *world) subscribe(authorization string) billing.SubscriptionID {
+// subscribe buys a monthly plan as the customer: a card saved at the
+// merchant's NMI PSP and a checkout paid with it.
+func (w *world) subscribe(mid billing.MerchantID, authorization string) billing.SubscriptionID {
 	w.t.Helper()
-	ctx, at := w.t.Context(), openrails.ForMerchantID(w.shop)
+	ctx, at := w.t.Context(), openrails.ForMerchantID(mid)
 	hours := 720
-	product, err := w.srv.Client().CreateProduct(ctx, billing.CreateProductParams{Key: "members-" + uuid.NewString()[:8], DisplayName: "Members", Entitlements: []string{"content:members"}}, at)
+	key := "members-" + uuid.NewString()[:8]
+	product, err := w.srv.Client().CreateProduct(ctx, billing.CreateProductParams{Key: key, DisplayName: "Members", Entitlements: []string{"content:" + key}}, at)
 	require.NoError(w.t, err)
 	price, err := w.srv.Client().CreatePrice(ctx, billing.CreatePriceParams{ProductID: product.ID, Key: product.Key + "-monthly", Currency: "USD", UnitAmount: 9_990_000, BillingIntervalHours: &hours, AccessDurationHours: &hours}, at)
 	require.NoError(w.t, err)
@@ -545,7 +593,7 @@ func (w *world) subscribe(authorization string) billing.SubscriptionID {
 		require.NoError(w.t, json.Unmarshal(r.Body.Bytes(), &out))
 		return out
 	}
-	card := ok(w.me(http.MethodPost, "/payment-methods", authorization, map[string]any{"psp_id": psps.Items[0].ID, "token": w.gateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
+	card := ok(w.me(http.MethodPost, "/payment-methods", authorization, map[string]any{"psp_id": psps.Items[0].ID, "token": w.gatewayOf(mid).Tokenize(nmimock.Card{Brand: "visa", Last4: "4242"}),
 		"billing_details": map[string]any{"name": "Network Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}))["id"]
 	session := ok(w.me(http.MethodPost, "/checkout-sessions", authorization, map[string]any{"price_id": price.ID}))["id"].(string)
 	var option any
@@ -556,11 +604,15 @@ func (w *world) subscribe(authorization string) billing.SubscriptionID {
 	}
 	paid := ok(w.me(http.MethodPost, "/checkout-sessions/"+session+"/pay", authorization, map[string]any{"option_id": option, "payment_method_id": card}))
 	require.Equal(w.t, "succeeded", paid["status"], "%v", paid)
-	subs := ok(w.me(http.MethodGet, "/subscriptions", authorization, nil))["data"].([]any)
-	require.Len(w.t, subs, 1)
-	id, err := billing.ParseSubscriptionID(subs[0].(map[string]any)["id"].(string))
-	require.NoError(w.t, err)
-	return id
+	for _, raw := range ok(w.me(http.MethodGet, "/subscriptions", authorization, nil))["data"].([]any) {
+		if sub := raw.(map[string]any); sub["price_id"] == price.ID.String() {
+			id, err := billing.ParseSubscriptionID(sub["id"].(string))
+			require.NoError(w.t, err)
+			return id
+		}
+	}
+	w.t.Fatal("no subscription to the plan")
+	return billing.SubscriptionID{}
 }
 
 // Unlinking is refused while the customer's cards still pay subscriptions
@@ -575,7 +627,7 @@ func TestUnlinkingCustomers(t *testing.T) {
 	apiBase := w.srv.AuthKit().APIBase()
 	sub := uuid.NewString()
 	token := w.customer(w.shopLogin, sub, nil)
-	subscription := w.subscribe(token)
+	subscription := w.subscribe(w.shop, token)
 	ann := w.account(true)
 	link := w.connect(token, w.shopClient, ann)
 	account := link.AccountID

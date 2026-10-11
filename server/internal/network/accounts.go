@@ -12,6 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/customernetwork"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
@@ -24,7 +25,7 @@ const linkPage = 200
 func (s *Service) Links(ctx context.Context, account billing.NetworkAccountID) ([]billing.CustomerLink, error) {
 	out := []billing.CustomerLink{}
 	err := s.eachLink(ctx, account.UUID(), func(row gen.BillingCustomerLink) error {
-		out = append(out, linkOf(row))
+		out = append(out, customernetwork.LinkOf(row))
 		return nil
 	})
 	return out, err
@@ -67,7 +68,7 @@ func (s *Service) Unlink(ctx context.Context, account billing.NetworkAccountID, 
 	case err != nil:
 		return billing.CustomerLink{}, err
 	}
-	link := linkOf(row)
+	link := customernetwork.LinkOf(row)
 	if link.Status == billing.CustomerLinkActive {
 		if inUse, err := s.inUse(ctx, row); err != nil {
 			return billing.CustomerLink{}, err
@@ -93,6 +94,19 @@ func (s *Service) Unlink(ctx context.Context, account billing.NetworkAccountID, 
 		return billing.CustomerLink{}, err
 	}
 	return link, nil
+}
+
+// ActiveLink is one of the account's links while it is active.
+func (s *Service) ActiveLink(ctx context.Context, account billing.NetworkAccountID, id billing.CustomerLinkID) (billing.CustomerLink, bool, error) {
+	row, err := s.db.GenDirectory().GetCustomerLinkOfAccount(ctx, gen.GetCustomerLinkOfAccountParams{AccountID: account.UUID(), ID: id.UUID()})
+	switch {
+	case db.IsNotFound(err):
+		return billing.CustomerLink{}, false, nil
+	case err != nil:
+		return billing.CustomerLink{}, false, err
+	}
+	link := customernetwork.LinkOf(row)
+	return link, link.Status == billing.CustomerLinkActive, nil
 }
 
 // inUse reports whether the link's customer has a subscription at its
@@ -132,13 +146,13 @@ func (s *Service) revoke(ctx context.Context, row gen.BillingCustomerLink, by bi
 			if db.IsNotFound(err) {
 				return errLinkNotFound
 			}
-			out = linkOf(current)
+			out = customernetwork.LinkOf(current)
 			return err
 		}
 		if err != nil {
 			return err
 		}
-		out = linkOf(revoked)
+		out = customernetwork.LinkOf(revoked)
 		return enqueue(ctx, q, revoked, billing.HostEventCustomerNetworkUnlinked, billing.CustomerNetworkHostEvent{AccountID: out.AccountID, RevokedBy: &by}, now)
 	})
 	return out, err

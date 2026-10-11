@@ -36,13 +36,14 @@ var groupPaths = map[Group][]string{
 	Metrics:        {"/v1/admin/metrics/", "/v1/admin/dashboard/"},
 	App:            {"/v1/app/"},
 	Customer:       {"/v1/me/"},
+	Network:        {"/v1/network/"},
 	Webhooks:       {"/v1/webhooks/"},
 }
 
 // pathParams are the names a path parameter takes: a resource's own id is
 // {id}, its customer {customer_id}; the rest name an identity the caller
 // chose, by what it is.
-var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "entitlement", "user_id", "rail", "account_id", "currency", "price_id"}
+var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "entitlement", "user_id", "rail", "account_id", "currency", "price_id", "link_id"}
 
 var pathParam = regexp.MustCompile(`\{([a-z_]+)\}`)
 
@@ -180,9 +181,24 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	// and merchant configuration in a file.
 	require.Equal(t, []string{
 		"catalog_copilot POST /v1/admin/catalog/ask",
+		"customer_network DELETE /v1/network/links/{link_id}",
+		"customer_network DELETE /v1/network/links/{link_id}/payment-methods/{id}",
 		"customer_network GET /v1/app/customers",
+		"customer_network GET /v1/network/links",
+		"customer_network GET /v1/network/links/{link_id}/orders/{id}",
+		"customer_network GET /v1/network/links/{link_id}/payment-methods",
+		"customer_network GET /v1/network/links/{link_id}/subscriptions/{id}",
+		"customer_network GET /v1/network/orders",
+		"customer_network GET /v1/network/subscriptions",
 		"customer_network POST /v1/me/network-link",
 		"customer_network POST /v1/me/network-link/challenges",
+		"customer_network POST /v1/network/links/{link_id}/orders/{id}/confirm",
+		"customer_network POST /v1/network/links/{link_id}/orders/{id}/pay",
+		"customer_network POST /v1/network/links/{link_id}/payment-methods",
+		"customer_network POST /v1/network/links/{link_id}/revoke-authority",
+		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/cancel",
+		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/resume",
+		"customer_network PUT /v1/network/links/{link_id}/subscriptions/{id}/payment-method",
 		"dashboard_generation POST /v1/admin/dashboard/widgets/generate",
 		"merchant_config_edits DELETE /v1/admin/alert-webhooks/{id}",
 		"merchant_config_edits PATCH /v1/admin/alert-webhooks/{id}",

@@ -100,7 +100,7 @@ var sensitiveRoutes = []string{
 // that tier checks: a staff route its group's permission, a customer route
 // none, and no customer path names a customer.
 func TestEveryRouteDeclaresOneTier(t *testing.T) {
-	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthCustomer, AuthMerchant, AuthSignedIn, AuthApplication, AuthProvider, AuthProvisioning}
+	tiers := []Tier{AuthPublic, AuthCheckoutSession, AuthSessionID, AuthCustomer, AuthMerchant, AuthSignedIn, AuthApplication, AuthProvider, AuthProvisioning, AuthNetwork}
 	var open, sensitive []string
 	names := map[string]string{}
 	for _, r := range Catalog() {
@@ -112,7 +112,7 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 		if Sensitive(r) {
 			sensitive = append(sensitive, key)
 		}
-		require.False(t, r.Sensitive && r.Auth != AuthMerchant, "%s: only a merchant route steps up", key)
+		require.False(t, r.Sensitive && r.Auth != AuthMerchant && r.Auth != AuthNetwork, "%s: only a merchant or network route steps up", key)
 		if r.ClientMethod() {
 			require.NotEmpty(t, r.Name, "%s: a Client method calls it", key)
 			require.Empty(t, names[r.Name], "%s: %s already names %s", key, r.Name, names[r.Name])
@@ -139,6 +139,11 @@ func TestEveryRouteDeclaresOneTier(t *testing.T) {
 			require.False(t, Sensitive(r), "%s: customer self-service never steps up", key)
 			for _, param := range []string{"{customer_id}", "{subject}", "{user_id}"} {
 				require.NotContains(t, r.Path, param, "%s: a customer route takes its customer from the gate only", key)
+			}
+		case AuthNetwork:
+			require.Equal(t, Network, r.Group, key)
+			for _, param := range []string{"{customer_id}", "{subject}", "{user_id}"} {
+				require.NotContains(t, r.Path, param, "%s: a network route takes its customer from the account's link only", key)
 			}
 		}
 	}

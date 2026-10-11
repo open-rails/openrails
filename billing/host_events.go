@@ -49,6 +49,9 @@ const (
 	// A customer linked to, or unlinked from, an openrails.dev account.
 	HostEventCustomerNetworkLinked   HostEventType = "customer.network_linked"
 	HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"
+	// HostEventCustomerPaymentAuthorityRevoked: the customer ended the
+	// merchant's authority to charge its cards without it.
+	HostEventCustomerPaymentAuthorityRevoked HostEventType = "customer.payment_authority_revoked"
 )
 
 // OrderHostEvent is one order transition: the order's status and its
@@ -117,6 +120,8 @@ type HostEvent struct {
 	Order *OrderHostEvent `json:"order"`
 	// CustomerNetwork is set for the customer.network_* events.
 	CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
+	// PaymentAuthority is set for customer.payment_authority_revoked.
+	PaymentAuthority *PaymentAuthorityHostEvent `json:"payment_authority"`
 }
 
 // AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to

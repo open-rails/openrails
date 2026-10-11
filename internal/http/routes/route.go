@@ -64,6 +64,9 @@ const (
 	App Group = "app"
 	// Webhooks is inbound provider callbacks.
 	Webhooks Group = "webhooks"
+	// Network is the openrails.dev account across its linked merchants
+	// (/v1/network): the network portal's API.
+	Network Group = "network"
 )
 
 // Tier is what a route checks before its handler runs.
@@ -94,6 +97,11 @@ const (
 	// AuthProvisioning: the merchant's provisioning token, which opens only
 	// these routes, or what AuthApplication admits.
 	AuthProvisioning Tier = "provisioning"
+	// AuthNetwork: the deployment's own account acting for itself, signed in
+	// to it (not through a merchant's client), having accepted the network
+	// terms; under one of its links, as the customer that link names. A
+	// Sensitive route needs a recent sign-in.
+	AuthNetwork Tier = "network"
 )
 
 // Feature is the configuration a route needs to be mounted.
@@ -363,7 +371,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, resource := range [][]Route{
 		metaRoutes, configRoutes, checkoutRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, invoicesRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
-		merchantRoutes, opsRoutes, provisioningRoutes, customerNetworkRoutes,
+		merchantRoutes, opsRoutes, provisioningRoutes, customerNetworkRoutes, networkRoutes(),
 	} {
 		all = append(all, resource...)
 	}
@@ -379,6 +387,9 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		appRead := r.Group == App && r.Level == LevelRead && r.Method == POST
 		if leveled != (r.Level == LevelRead || r.Level == LevelUpdate) && !appRead || !leveled && r.Level != "" && !appRead {
 			panic("routes: " + r.Key() + ": an admin or catalog route, and only one, reads or updates; a programmatic POST may say it reads")
+		}
+		if (r.Group == Network) != (r.Auth == AuthNetwork) || r.Group == Network && !strings.HasPrefix(r.Path, "/v1/network/") {
+			panic("routes: " + r.Key() + ": a network route, and only one, is the account's, under /v1/network")
 		}
 		if (r.Group == Access) != (r.Auth == AuthSignedIn) {
 			panic("routes: " + r.Key() + ": the access route, and only it, takes any signed-in caller")
@@ -447,6 +458,8 @@ func TierErrors(tier Tier) []string {
 		own = append(slices.Clone(staff), authenticated...)
 	case AuthApplication:
 		own = append(append([]string{billing.CodeApplicationRequired}, staff...), authenticated...)
+	case AuthNetwork:
+		own = append([]string{billing.CodeNetworkTermsRequired, billing.CodeStepUpRequired, billing.CodeStepUpUnavailable, billing.CodeResourceNotFound}, authenticated...)
 	default:
 		return sortedCodes(common)
 	}

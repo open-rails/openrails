@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/db/gen"
 )
 
 // Credential is the merchant-side proof a request carries.
@@ -48,4 +49,41 @@ type Network interface {
 	// merchant's customer through admit: refused while the account is linked
 	// to another customer there; linked when it accepted the network terms.
 	AdmitNative(ctx context.Context, merchant billing.MerchantID, subject billing.CustomerID, admit func(context.Context) error) error
+	// Admit refuses an account that has not accepted the network terms.
+	Admit(ctx context.Context, account billing.NetworkAccountID) error
+	// ActiveLink is one of the account's links while it is active.
+	ActiveLink(ctx context.Context, account billing.NetworkAccountID, link billing.CustomerLinkID) (billing.CustomerLink, bool, error)
+	// Unlink ends one of the account's links.
+	Unlink(ctx context.Context, account billing.NetworkAccountID, link billing.CustomerLinkID) (billing.CustomerLink, error)
+}
+
+type accountKey struct{}
+
+// WithAccount binds the openrails.dev account a network route acts for.
+func WithAccount(ctx context.Context, account billing.NetworkAccountID) context.Context {
+	return context.WithValue(ctx, accountKey{}, account)
+}
+
+// AccountFrom is the account a network route acts for.
+func AccountFrom(ctx context.Context) (billing.NetworkAccountID, bool) {
+	a, ok := ctx.Value(accountKey{}).(billing.NetworkAccountID)
+	return a, ok && !a.IsZero()
+}
+
+// LinkOf is a stored link as the API answers it.
+func LinkOf(row gen.BillingCustomerLink) billing.CustomerLink {
+	out := billing.CustomerLink{
+		ID: billing.CustomerLinkID(row.ID), MerchantID: billing.MerchantID(row.MerchantID), CustomerID: billing.CustomerID(row.CustomerID),
+		AccountID: billing.NetworkAccountID(row.AccountID), Method: billing.CustomerLinkMethod(row.Method), Status: billing.CustomerLinkStatus(row.Status),
+		LinkedAt: row.LinkedAt.UTC(),
+	}
+	if row.RevokedAt != nil {
+		at := row.RevokedAt.UTC()
+		out.RevokedAt = &at
+	}
+	if row.RevokedBy != nil {
+		by := billing.CustomerLinkRevokedBy(*row.RevokedBy)
+		out.RevokedBy = &by
+	}
+	return out
 }

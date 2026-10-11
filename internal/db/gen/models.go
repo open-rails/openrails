@@ -525,7 +525,7 @@ type BillingGrant struct {
 	Quantity *int32
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions and customer links. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links and payment authority revocations. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID

@@ -247,6 +247,8 @@ func New(deps Dependencies) (*Server, error) {
 	// a host-supplied DelegatedAuthenticator overrides the control plane's
 	// delegated-token verifier (#339).
 	s.registerSelfServiceRoutes(mux)
+	// The openrails.dev account's own routes, with the customer network.
+	s.registerNetworkRoutes(mux)
 
 	// Canonical account-specific webhook surface: /v1/webhooks/:provider/:account_id for
 	// direct Stripe. The handler resolves the PSP from the payload/route, derives

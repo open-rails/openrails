@@ -226,6 +226,8 @@ func (e *Env) gates(route Route) []router.Middleware {
 		mw = append(mw, conn...)
 	case AuthSignedIn:
 		mw = append(e.signedInGates(route), conn...)
+	case AuthNetwork:
+		mw = append(e.networkGates(route), conn...)
 	case AuthMerchant:
 		mw = append(mw, e.staffGates(route)...)
 		// The staff gate stays outermost; the actor-keyed operation limiter
@@ -475,6 +477,22 @@ func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
 // customer.
 func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) {
 	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer))
+}
+
+// NetworkMount is the network portal's surface (/v1/network): the
+// Authenticator that says who the account is, and the issuer of the
+// deployment's own accounts.
+type NetworkMount struct {
+	Auth         billingauth.Authenticator
+	NativeIssuer string
+}
+
+// RegisterNetworkRoutes mounts the openrails.dev account's routes, where the
+// deployment runs the customer network, on a router rooted at /v1/network.
+func RegisterNetworkRoutes(rr router.Router, rt *app.Runtime, m NetworkMount) {
+	env := newEnv(rt, Options{NativeIssuer: m.NativeIssuer})
+	env.Customers = m.Auth
+	env.mount(rr, "/v1/network", in(Network))
 }
 
 // admitCustomer is the runtime's customers, each its subject's issuer's. The

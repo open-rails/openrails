@@ -105,8 +105,9 @@ answers a page of at most one.
 
 ## Unlinking
 
-- The account ends a link with `server.Server.UnlinkCustomer`; a portal lists
-  them with `server.Server.CustomerLinks`. It is refused while the customer has
+- The account ends a link with `DELETE /v1/network/links/{link_id}` (`204`)
+  or `server.Server.UnlinkCustomer`; a portal lists them with
+  `GET /v1/network/links` or `server.Server.CustomerLinks`. It is refused while the customer has
   a subscription at that merchant that is not canceled: cancel it or move it
   to another card first. The merchant's clients lose the account's consent and
   refresh tokens ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)), so a
@@ -121,11 +122,55 @@ answers a page of at most one.
 
 A revoked link is kept 24 months, then deleted.
 
+## The account's API (`/v1/network`)
+
+The network portal calls it from the browser, on the server's API host, with
+the account's own openrails.dev session or access token: the account itself,
+signed in at openrails.dev, that accepted the network terms. A token one of a
+merchant's clients holds acts at that merchant only, and a merchant's own
+login's customer is no account: both are `403 permission_required`. An
+account without the terms is `403 network_terms_required`.
+
+| Route | Does |
+|---|---|
+| `GET /v1/network/links` | the account's active links, each with its merchant |
+| `GET /v1/network/subscriptions` | its subscriptions at all of them, newest first, each with its `link_id` and `merchant_id` |
+| `GET /v1/network/orders` | its orders at all of them, renewals included, likewise |
+| `DELETE /v1/network/links/{link_id}` | unlink (below) |
+| `POST /v1/network/links/{link_id}/revoke-authority` | end the link's merchant's payment authority (below) |
+
+The account acts at a merchant only through its link there, never by naming
+the merchant: under `/v1/network/links/{link_id}` it is that link's customer,
+through the same operations `/v1/me` runs: `subscriptions/{id}` (read,
+`cancel`, `resume`, `payment-method`), `payment-methods` (list, add, delete)
+and `orders/{id}` (read, `pay`, `confirm`). A link that is not the account's,
+or has ended, is `404 resource_not_found`. A cancel follows the merchant's
+operation: at the period's end, and a schedule the provider bills while the
+merchant's destructive actions are disarmed is `409 provider_cancel_held`.
+
+Every change needs a recent sign-in: a stale one is `401 step_up_required`
+with `WWW-Authenticate: Bearer error="insufficient_user_authentication"` and
+its `max_age` ([RFC 9470](https://www.rfc-editor.org/rfc/rfc9470)). Reads
+need none.
+
+### Revoking a merchant's payment authority
+
+It ends every live agreement of the customer at that merchant: each mandate
+becomes `revoked` with `end_reason: customer_revoked`, and the merchant hears
+`customer.payment_authority_revoked`. Nothing is canceled. The merchant can no
+longer charge the customer's saved cards there (`402
+payment_method_stale`): the next renewal is an open order, listed in
+`GET /v1/network/orders`, that the customer pays with a card added again,
+until the subscription's dunning window ends it. Revoking again ends nothing.
+
 ## Host events
 
 | Type | `customer_network` |
 |---|---|
 | `customer.network_linked` | `customer_id`, `account_id`, `method` |
 | `customer.network_unlinked` | `customer_id`, `account_id`, `revoked_by`: `customer`, `account_deleted` or `merchant_left` |
+
+`customer.payment_authority_revoked` carries `payment_authority`:
+`{customer_id, revoked_mandates}`.
 
 Read and acknowledge them like every host event (`GET /v1/app/host-events`).

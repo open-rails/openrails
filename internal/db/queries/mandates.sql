@@ -140,3 +140,18 @@ SELECT subscription_id::uuid AS subscription_id, id FROM billing.mandates
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY (sqlc.arg(subscription_ids)::uuid[])
   AND kind = 'recurring' AND status IN ('active', 'requires_reconsent')
 LIMIT sqlc.arg(row_limit)::int;
+
+-- name: RevokeCustomerMandates :many
+-- The customer ended the merchant's authority to charge its cards without
+-- it: every live agreement, of every card.
+UPDATE billing.mandates SET status = 'revoked', end_reason = 'customer_revoked',
+    ended_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND status IN ('active', 'requires_reconsent')
+RETURNING *;
+
+-- name: EnqueuePaymentAuthorityRevoked :exec
+INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
+VALUES (sqlc.arg(merchant_id)::uuid, 'customer.payment_authority_revoked', 'customer', sqlc.arg(customer_id)::uuid,
+    sqlc.arg(occurred_at)::timestamptz, sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
+ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;
