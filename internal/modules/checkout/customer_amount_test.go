@@ -44,16 +44,16 @@ func TestCustomerAmountSelection(t *testing.T) {
 func TestCustomerAmountBoundToAttemptReplay(t *testing.T) {
 	request := &CheckoutAttemptCreateRequest{PriceID: testPriceID, Amount: new(int64(100_000_000)), Payment: CheckoutAttemptPaymentRequest{Rail: "stripe"}}
 	response := &CheckoutAttemptResponse{Amount: new(int64(100_000_000)), Payment: CheckoutAttemptPaymentResponse{Rail: "stripe"}}
-	payload, err := json.Marshal(checkoutAttemptIdempotencyResult{RequestFingerprint: checkoutAttemptRequestFingerprintForRail(request, nil, "stripe"), Response: response})
+	payload, err := json.Marshal(checkoutAttemptIdempotencyResult{RequestFingerprint: checkoutAttemptRequestFingerprint(request), Response: response})
 	require.NoError(t, err)
-	replay, err := decodeCheckoutAttemptIdempotencyResult(payload, request, nil)
+	replay, err := decodeCheckoutAttemptIdempotencyResult(payload, request)
 	require.NoError(t, err)
 	require.Equal(t, response, replay)
 	request.Amount = new(int64(200_000_000))
-	_, err = decodeCheckoutAttemptIdempotencyResult(payload, request, nil)
+	_, err = decodeCheckoutAttemptIdempotencyResult(payload, request)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 	request.Amount = nil
-	_, err = decodeCheckoutAttemptIdempotencyResult(payload, request, nil)
+	_, err = decodeCheckoutAttemptIdempotencyResult(payload, request)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
 }
 
@@ -67,11 +67,4 @@ func TestCustomerAmountOnlyAdvertisesSupportedRails(t *testing.T) {
 	for _, rail := range []string{"solana", "ccbill"} {
 		require.Equal(t, models.CheckoutRoutingSkipModeUnsupported, service.checkoutRailSkipReason(price, railTarget{PSP: rail, Rail: rail}, &config.ResolvedPSP{}, models.CheckoutAttemptModeOneOff))
 	}
-}
-
-func TestCreditOnlyDepositIsNotPermanentOwnership(t *testing.T) {
-	price := &models.Price{Currency: "USD"}
-	product := &models.Product{CreditGrant: &catalog.CreditGrantSpec{Currency: "USD", FromPayment: true}}
-	require.NoError(t, validateOfferAssertion(price, product, "", ""))
-	require.ErrorIs(t, validateOfferAssertion(price, product, "", billing.OfferPermanent), ErrCheckoutAttemptValidation)
 }

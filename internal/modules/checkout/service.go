@@ -195,11 +195,6 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 	if response, found, err := s.replayInitialMembership(ctx, req, user); found || err != nil {
 		return response, err
 	}
-	if s.NMISaleService != nil {
-		if response, found, err := s.NMISaleService.replayAcceptedRequest(ctx, req, user); found || err != nil {
-			return response, err
-		}
-	}
 	if req.acceptedPurchase != nil {
 		mid, err := merchant.Require(ctx)
 		if err != nil {
@@ -282,22 +277,6 @@ func (s *CheckoutService) Checkout(ctx context.Context, req *CheckoutRequest, us
 				return &CheckoutResponse{
 					Status:  "blocked",
 					Message: fmt.Sprintf("You already have an equivalent product (%s) in this tier", existingProduct.DisplayName),
-				}, nil
-			}
-		}
-
-		// Webhook-independent guard: the local check sees only what webhooks
-		// wrote, so for Stripe also ask Stripe whether this customer already
-		// holds an active or trialing subscription in the same tier group.
-		if rail == "stripe" {
-			blocked, err := s.stripeTierGroupConflict(ctx, user, *product.TierGroup)
-			if err != nil {
-				return nil, fmt.Errorf("failed to check stripe tier group: %w", err)
-			}
-			if blocked {
-				return &CheckoutResponse{
-					Status:  "blocked",
-					Message: "You already have an active subscription in this tier",
 				}, nil
 			}
 		}
@@ -394,29 +373,20 @@ func (s *CheckoutService) processOneTimePurchase(
 	}
 	price = priceForCheckoutTarget(price, target)
 	switch {
-	case rails.IsNMI(models.Rail(target.Rail)):
-		if custodianHeld(target) {
-			// Same rail and gateway, but a custodian holds the card, so the
-			// sale goes through its detokenizing proxy. The PSP decides this.
-			if s.CustodianSaleService == nil {
-				return nil, errors.New("custodian-held card checkout is not configured")
-			}
-			ctx = db.WithCustodianID(ctx, *target.Scope.CustodianID)
-			idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "custodian_sale")
-			return s.CustodianSaleService.Process(ctx, req, user, price, product, idempotencyKey)
+	case rails.IsNMI(models.Rail(target.Rail)) && custodianHeld(target):
+		// Same rail and gateway, but a custodian holds the card, so the sale
+		// goes through its detokenizing proxy. The PSP decides this.
+		if s.CustodianSaleService == nil {
+			return nil, errors.New("custodian-held card checkout is not configured")
 		}
-		return s.processNMISale(ctx, req, user, price, product, coverage, target)
+		ctx = db.WithCustodianID(ctx, *target.Scope.CustodianID)
+		idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "custodian_sale")
+		return s.CustodianSaleService.Process(ctx, req, user, price, product, idempotencyKey)
 	case target.Rail == "solana":
 		return s.processSolanaPurchase(ctx, req, user, price, product, coverage)
-	case target.Rail == "ccbill":
-		return nil, errors.New("ccbill does not support one-time purchases; use a subscription price instead")
-	case target.Rail == "stripe" && strings.TrimSpace(req.PaymentMethodID) != "":
-		// A saved card is charged in the page, exactly like an NMI sale.
-		return s.processNMISale(ctx, req, user, price, product, coverage, target)
-	case target.Rail == "stripe":
-		return s.processStripePayment(ctx, req, user, price, product)
 	default:
-		return nil, fmt.Errorf("unsupported rail for one-time purchases: %s", target.Rail)
+		// A card on a PSP's own vault buys through an order.
+		return nil, fmt.Errorf("%w: a card purchase is an order", ErrCheckoutAttemptValidation)
 	}
 }
 
@@ -546,24 +516,6 @@ func initialMembershipResponseFromIntent(intent gen.BillingProviderIntent) (*Che
 	return resp, nil
 }
 
-// processNMISale handles NMI one-time sale (card purchase)
-func (s *CheckoutService) processNMISale(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-	coverage *CoverageInfo,
-	target railTarget,
-) (*CheckoutResponse, error) {
-	_ = coverage
-	if s.NMISaleService == nil {
-		return nil, errors.New("NMI sale service unavailable")
-	}
-	idempotencyKey := s.getIdempotencyKey(req, user.ID, price.ID, "nmi_sale")
-	return s.NMISaleService.Process(ctx, req, user, price, product, idempotencyKey, target)
-}
-
 // processSolanaPurchase handles Solana one-time purchases
 func (s *CheckoutService) processSolanaPurchase(
 	ctx context.Context,
@@ -574,61 +526,6 @@ func (s *CheckoutService) processSolanaPurchase(
 	coverage *CoverageInfo,
 ) (*CheckoutResponse, error) {
 	return nil, errors.New("solana checkout is handled via /v1/checkout attempts")
-}
-
-func (s *CheckoutService) processStripePayment(
-	ctx context.Context,
-	req *CheckoutRequest,
-	user *UserIdentity,
-	price *models.Price,
-	product *models.Product,
-) (*CheckoutResponse, error) {
-	if err := moneyutil.RequireFiatCurrency(price.Currency); err != nil {
-		return nil, err
-	}
-	_, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
-	if err != nil {
-		return nil, err
-	}
-	minor, err := moneyutil.NativeToRailMinorExact(price.Currency, price.Amount)
-	if err != nil {
-		return nil, err
-	}
-	if product == nil || product.ID != price.ProductID {
-		return nil, errors.New("checkout product does not match accepted price")
-	}
-	name := strings.TrimSpace(product.DisplayName)
-	if name == "" {
-		name = product.Key
-	}
-	inline := &stripeCheckoutInlinePrice{Name: name, Currency: price.Currency, AmountMinor: minor}
-	successURL := strings.TrimSpace(req.SuccessURL)
-	cancelURL := strings.TrimSpace(req.CancelURL)
-	if successURL == "" || cancelURL == "" {
-		return nil, errors.New("stripe success_url and cancel_url are required")
-	}
-
-	created, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
-		Mode:              "payment",
-		AcceptedPurchase:  req.acceptedPurchase != nil,
-		InlinePrice:       inline,
-		SuccessURL:        successURL,
-		CancelURL:         cancelURL,
-		UserID:            user.ID,
-		CustomerEmail:     userEmail(user),
-		InternalPriceID:   price.ID.String(),
-		CheckoutAttemptID: req.CheckoutAttemptID,
-		IdempotencyKey:    req.IdempotencyKey,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return &CheckoutResponse{
-		Status:      "redirect_required",
-		Action:      "new",
-		Message:     "Redirect to Stripe checkout",
-		RedirectURL: created.URL,
-	}, nil
 }
 
 // railCustomerStore is the slice of RailCustomerService used for
@@ -647,28 +544,11 @@ type stripeCustomerClient interface {
 	ListActiveSubscriptionsForCustomer(ctx context.Context, customerID string) ([]subscriptions.StripeSubscriptionSummary, error)
 }
 
-// stripePriceResolver maps a Stripe price id back to the local product's tier
-// group. Backed by PriceService + ProductService at runtime.
-type stripePriceResolver interface {
-	GetByStripePriceID(ctx context.Context, stripePriceID string) (*models.Price, error)
-}
-
-type productResolver interface {
-	GetByID(ctx context.Context, id uuid.UUID) (*models.Product, error)
-}
-
 func (s *CheckoutService) customerStore() railCustomerStore {
 	if s.RailCustomerService == nil {
 		return nil
 	}
 	return s.RailCustomerService
-}
-
-func (s *CheckoutService) stripeClient() stripeCustomerClient {
-	if s.StripeService == nil {
-		return nil
-	}
-	return s.StripeService
 }
 
 // resolveStripeCustomerWith returns the durable Stripe customer id for a user,
@@ -721,92 +601,6 @@ func resolveStripeCustomerWith(ctx context.Context, store railCustomerStore, cli
 		return "", fmt.Errorf("record stripe customer mapping: %w", err)
 	}
 	return customerID, nil
-}
-
-// stripeTierGroupConflict is the production wiring of the webhook-independent
-// duplicate guard.
-func (s *CheckoutService) stripeTierGroupConflict(ctx context.Context, user *UserIdentity, tierGroup string) (bool, error) {
-	var prices stripePriceResolver
-	if s.PriceService != nil {
-		prices = s.PriceService
-	}
-	var products productResolver
-	if s.ProductService != nil {
-		products = s.ProductService
-	}
-	return stripeTierGroupConflictWith(ctx, s.customerStore(), s.stripeClient(), prices, products, user, tierGroup)
-}
-
-// stripeTierGroupConflictWith reports whether the user already has an active or
-// trialing Stripe subscription whose price maps to the requested tier group.
-// It asks Stripe, so a missed webhook cannot admit a parallel subscription. It
-// never creates a customer: with none mapped or found there is no Stripe-side
-// subscription to conflict with.
-func stripeTierGroupConflictWith(ctx context.Context, store railCustomerStore, client stripeCustomerClient, prices stripePriceResolver, products productResolver, user *UserIdentity, tierGroup string) (bool, error) {
-	tierGroup = strings.TrimSpace(tierGroup)
-	if tierGroup == "" {
-		return false, nil
-	}
-	if user == nil || strings.TrimSpace(user.ID) == "" {
-		return false, nil
-	}
-	if store == nil || client == nil || prices == nil || products == nil {
-		return false, nil
-	}
-
-	// Find the customer without creating one: local mapping, then Stripe search.
-	customerID, err := store.GetCustomerID(ctx, user.ID, "stripe")
-	if err != nil && !db.IsNotFound(err) {
-		return false, fmt.Errorf("lookup stripe customer mapping: %w", err)
-	}
-	customerID = strings.TrimSpace(customerID)
-	if customerID == "" {
-		found, err := client.FindCustomerIDByAppUserID(ctx, user.ID)
-		if err != nil {
-			return false, fmt.Errorf("search stripe customer: %w", err)
-		}
-		customerID = strings.TrimSpace(found)
-	}
-	if customerID == "" {
-		return false, nil
-	}
-
-	subs, err := client.ListActiveSubscriptionsForCustomer(ctx, customerID)
-	if err != nil {
-		return false, fmt.Errorf("list stripe subscriptions: %w", err)
-	}
-	for _, sub := range subs {
-		stripePriceID := strings.TrimSpace(sub.PriceID)
-		if stripePriceID == "" {
-			continue
-		}
-		price, err := prices.GetByStripePriceID(ctx, stripePriceID)
-		if err != nil {
-			if db.IsNotFound(err) {
-				// Unknown price (e.g. legacy/manual sub) — cannot map to a tier
-				// group, so skip rather than block.
-				continue
-			}
-			return false, fmt.Errorf("map stripe price %s: %w", stripePriceID, err)
-		}
-		if price == nil {
-			continue
-		}
-		product, err := products.GetByID(ctx, price.ProductID)
-		if err != nil {
-			if db.IsNotFound(err) {
-				continue
-			}
-			return false, fmt.Errorf("load product for stripe price %s: %w", stripePriceID, err)
-		}
-		if product == nil || product.TierGroup == nil {
-			continue
-		}
-		if strings.TrimSpace(*product.TierGroup) == tierGroup {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // userEmail returns the caller's email when present, so Stripe Checkout can

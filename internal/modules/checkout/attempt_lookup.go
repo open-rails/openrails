@@ -63,7 +63,7 @@ func (s *CheckoutAttemptService) LookupSession(ctx context.Context, req *Checkou
 	}
 	canonicalizeCheckoutPaymentName(&req.Payment)
 	stored, _ := session.RailState[checkoutAttemptFingerprintKey].(string)
-	fingerprint := checkoutAttemptRequestFingerprintForRail(req, user, string(session.Rail))
+	fingerprint := checkoutAttemptRequestFingerprint(req)
 	if stored == "" || stored != fingerprint {
 		// A buyer retrying a finished attempt with other details (a new card
 		// after a decline) must learn it finished, or its host never moves on.

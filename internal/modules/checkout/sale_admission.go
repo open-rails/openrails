@@ -1,30 +1,18 @@
 package checkout
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"strings"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
-	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/intents"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
 	"github.com/open-rails/openrails/internal/modules/entitlements"
-	"github.com/open-rails/openrails/internal/modules/mandates"
-	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
-	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
-	"github.com/open-rails/openrails/internal/shared/apperr"
-	"github.com/open-rails/openrails/internal/shared/uuidutil"
 )
 
 func (s *CheckoutPurchaseService) transactionBound(d *db.DB) *CheckoutPurchaseService {
@@ -47,97 +35,6 @@ func saleRequestFingerprint(req *CheckoutRequest, user *UserIdentity, price uuid
 	return fmt.Sprintf("%x", digest)
 }
 
-func ownsSaleRequest(in gen.BillingProviderIntent, customer string, price uuid.UUID, fingerprint string) error {
-	p, err := payments.DecodeNMISalePayload(in)
-	if err != nil {
-		return err
-	}
-	if p.UserID != customer || p.PriceID != price || p.RequestFingerprint != fingerprint {
-		return apperr.Conflictf("checkout idempotency key belongs to another accepted purchase")
-	}
-	return nil
-}
-
 func saleReplayParams(in gen.BillingProviderIntent) intents.EnqueueParams {
 	return intents.EnqueueParams{MerchantID: in.MerchantID, Provider: in.Rail, PspID: *in.PspID, IntentType: payments.TypeNMISale, PriceID: in.PriceID, Payload: json.RawMessage(in.Payload), IdempotencyKey: in.IdempotencyKey, NextAttemptAt: in.NextAttemptAt, Origin: intents.Origin(in.Origin)}
-}
-
-func (s *CheckoutNMISaleService) prepareAcceptedSale(ctx context.Context, d *db.DB, req *CheckoutRequest, user *UserIdentity, priceID, methodID uuid.UUID, target railTarget, fingerprint string) (payments.NMISalePayload, error) {
-	var out payments.NMISalePayload
-	purchase := s.PurchaseService.transactionBound(d)
-	mid, err := merchant.Require(ctx)
-	if err != nil {
-		return out, err
-	}
-	var price *models.Price
-	var product *models.Product
-	eligibility := &EligibilityResult{Status: EligibilityAllowed}
-	if req.acceptedPurchase != nil {
-		price, product = req.acceptedPurchase.catalog(mid.UUID())
-		if price.ID != priceID {
-			return out, errors.New("accepted session price mismatch")
-		}
-	} else {
-		price, err = purchase.PriceService.GetByID(ctx, priceID)
-		if err != nil {
-			return out, err
-		}
-		price, err = CheckoutPriceForAmount(price, req.Amount)
-		if err != nil {
-			return out, err
-		}
-		product, err = purchase.ProductService.GetByID(ctx, price.ProductID)
-		if err != nil {
-			return out, err
-		}
-		eligibility, err = purchase.CheckPurchaseEligibility(ctx, user.ID, price.ID)
-		if err != nil {
-			return out, err
-		}
-	}
-	if price.IsRecurring() {
-		return out, errors.New("sale requires a one-time price")
-	}
-	if eligibility.Status != EligibilityAllowed {
-		return out, apperr.Conflictf("purchase is not eligible: %s", eligibility.Reason)
-	}
-	method, err := d.Gen(ctx).GetPaymentMethodForShare(ctx, gen.GetPaymentMethodForShareParams{MerchantID: mid.UUID(), ID: methodID})
-	if err != nil {
-		return out, err
-	}
-	if target.Scope == nil || !charge.ChargeableOn(method, target.Scope.ID) || method.CustomerID.String() != user.ID || method.Custodian != models.CustodianPSP || !paymentmethods.Chargeable(method) {
-		return out, errors.New("sale instrument does not match customer and provider")
-	}
-	now := purchase.now().UTC().Truncate(time.Microsecond)
-	start := now
-	if eligibility.Coverage != nil && eligibility.Coverage.EndDate != nil && eligibility.Coverage.EndDate.After(start) {
-		start = eligibility.Coverage.EndDate.UTC()
-	}
-	if req.acceptedPurchase != nil {
-		now, start = req.acceptedPurchase.AcceptedAt, req.acceptedPurchase.EntitlementStart
-	}
-	var end *time.Time
-	if price.AccessDurationHours != nil && *price.AccessDurationHours > 0 {
-		v := now.Add(time.Duration(*price.AccessDurationHours) * time.Hour)
-		end = &v
-	}
-	instrument := charge.FreezeInstrument(method, target.Scope.ID)
-	if instrument.Mandate, err = mandates.Citable(ctx, d.Gen(ctx), mid.UUID(), method.CustomerID, method.ID, target.Scope.ID, method.Rail, charge.AgreementCardOnFile); err != nil {
-		return out, err
-	}
-	out = payments.NMISalePayload{Provider: target.Rail, PSP: target.PSP, Amount: price.Amount, Currency: price.Currency, Description: fmt.Sprintf("Purchase: %s", product.DisplayName), UserID: user.ID, PriceID: price.ID, E2ERunID: strings.TrimSpace(req.Metadata["e2e_run_id"]), PaymentMethodID: method.ID, Instrument: instrument, PaymentID: uuidutil.NewV7(), ProductID: product.ID, ListAmount: price.Amount, AcceptedAt: now, AccessDurationHours: price.AccessDurationHours, EntitlementStart: start, OwnershipStart: now, OwnershipEnd: end, Eligibility: string(eligibility.Status), RequestFingerprint: fingerprint}
-	out.CreditGrant, err = acceptedCreditGrant(product, price)
-	if err != nil {
-		return out, err
-	}
-	if req.acceptedPurchase != nil {
-		out.CreditGrant = models.CloneCreditGrantSnapshot(req.acceptedPurchase.CreditGrant)
-		out.PaymentID = req.acceptedPurchase.PaymentID
-		id, err := billing.ParseCheckoutAttemptID(req.CheckoutAttemptID)
-		if err != nil {
-			return out, err
-		}
-		out.CheckoutAttemptID = id.UUID()
-	}
-	return out, nil
 }

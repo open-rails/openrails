@@ -8,18 +8,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/internal/config"
-	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/payments"
 )
 
 type checkoutSaleIdempotencyResult struct {
@@ -73,145 +69,6 @@ func NewCheckoutNMISaleService(
 		PaymentMethodResolver:    pmResolver,
 		RailPaymentMethodService: railPMService,
 	}
-}
-
-// Process runs a one-time NMI sale as a write-through provider intent: durable
-// intent first (unique on the checkout idempotency key), inline execution, and
-// a provider order id derived from the intent id. A crash at any point leaves
-// an intent the scheduled executor/verifier resolves against the same order
-// id: never a blind retry under a fresh key, never a charged-but-unrecorded
-// sale.
-func (s *CheckoutNMISaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string, target railTarget) (*CheckoutResponse, error) {
-	// Rows and intents speak rail vocabulary; the provider (account key) pins
-	// the NMI client.
-	provider := target.Rail
-	if provider == "" {
-		return nil, errors.New("rail is required")
-	}
-	if s.Intents == nil {
-		return nil, errors.New("checkout sale intent executor not wired")
-	}
-	if _, err := customerIDFromUser(user.ID); err != nil {
-		return nil, err
-	}
-
-	if s.RailPaymentMethodService == nil || s.RailPaymentMethodService.DB == nil {
-		return nil, errors.New("sale database unavailable")
-	}
-	database := s.RailPaymentMethodService.DB
-	fingerprint := saleRequestFingerprint(req, user, price.ID, target)
-	prior, err := intents.NewStore(database).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(idempotencyKey))
-	if err == nil {
-		if err := ownsSaleRequest(prior, user.ID, price.ID, fingerprint); err != nil {
-			return nil, err
-		}
-		// The canonical operation owns replay, including uncertain or declined
-		// outcomes. No Redis success shortcut may bypass its request binding.
-		intent, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
-		if err != nil {
-			return nil, err
-		}
-		return renderSaleOperation(intent)
-	}
-	if !db.IsNotFound(err) {
-		return nil, err
-	}
-
-	// Fail fast on misconfiguration instead of parking a user-facing checkout.
-	if err := s.requireArmed(ctx, target); err != nil {
-		return nil, err
-	}
-
-	req.attempt = cardAttempt{target: price.ID.String(), owner: attempts.OwnerNone}
-	railCustomerRef, railMethodRef, resolvedMethod, createdPaymentMethod, err := s.PaymentMethodResolver.ResolvePaymentMethod(ctx, req, user, target)
-	if err != nil {
-		return nil, err
-	}
-	if resolvedMethod == nil {
-		return nil, errors.New("sale requires a saved instrument")
-	}
-	tid, err := merchant.Require(ctx)
-	if err != nil {
-		return nil, err
-	}
-	var intent gen.BillingProviderIntent
-	err = database.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		bound := database.NewWithPgxTx(tx)
-		customer, err := customerIDFromUser(user.ID)
-		if err != nil {
-			return err
-		}
-		if _, err := bound.Gen(ctx).LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: tid.UUID(), ID: customer}); err != nil {
-			return err
-		}
-		prior, err := intents.NewStore(bound).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(idempotencyKey))
-		if err == nil {
-			intent = prior
-			return ownsSaleRequest(prior, user.ID, price.ID, fingerprint)
-		}
-		if !db.IsNotFound(err) {
-			return err
-		}
-		// A new operation is admitted only for a session still open, under its
-		// lock, so a request whose claim lapsed can never charge a session
-		// another request already settled.
-		if err := admitForSession(ctx, tx, tid.UUID(), req.CheckoutAttemptID); err != nil {
-			return err
-		}
-		prepared, err := s.prepareAcceptedSale(ctx, bound, req, user, price.ID, resolvedMethod.ID, target, fingerprint)
-		if err != nil {
-			return err
-		}
-		prepared.NewCard = createdPaymentMethod
-		if prepared.Instrument.RailCustomerRef != railCustomerRef || prepared.Instrument.RailMethodRef != railMethodRef {
-			return errors.New("sale instrument changed during admission")
-		}
-		intent, err = intents.NewStore(bound).Enqueue(ctx, intents.EnqueueParams{MerchantID: tid.UUID(), Provider: provider, PspID: prepared.Instrument.PSPID, IntentType: payments.TypeNMISale, PriceID: &prepared.PriceID, Payload: prepared, IdempotencyKey: NMISaleIdempotencyKey(idempotencyKey), NextAttemptAt: prepared.AcceptedAt, Origin: intents.OriginUser, OriginReason: "checkout one-time sale"})
-		if err != nil {
-			return err
-		}
-		return ownsSaleRequest(intent, user.ID, price.ID, fingerprint)
-	})
-	if err != nil {
-		return nil, err
-	}
-	intent, err = s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(intent), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, price.ID, fingerprint) })
-	if err != nil {
-		return nil, err
-	}
-	return renderSaleOperation(intent)
-}
-
-// A committed request is replayed before current catalog, provider routing or
-// coverage can reinterpret the accepted purchase. Caller/body checks still run.
-func (s *CheckoutNMISaleService) replayAcceptedRequest(ctx context.Context, req *CheckoutRequest, user *UserIdentity) (*CheckoutResponse, bool, error) {
-	if req == nil || user == nil || req.IdempotencyKey == "" || s.RailPaymentMethodService == nil || s.RailPaymentMethodService.DB == nil {
-		return nil, false, nil
-	}
-	prior, err := intents.NewStore(s.RailPaymentMethodService.DB).GetByIdempotencyKey(ctx, NMISaleIdempotencyKey(req.IdempotencyKey))
-	if db.IsNotFound(err) {
-		return nil, false, nil
-	}
-	if err != nil {
-		return nil, false, err
-	}
-	p, err := payments.DecodeNMISalePayload(prior)
-	if err != nil {
-		return nil, true, err
-	}
-	fingerprint := saleRequestFingerprint(req, user, p.PriceID, railTarget{PSP: p.PSP})
-	if err := ownsSaleRequest(prior, user.ID, p.PriceID, fingerprint); err != nil {
-		return nil, true, err
-	}
-	if s.Intents == nil {
-		return nil, true, errors.New("sale executor is unavailable")
-	}
-	operation, err := s.Intents.EnqueueOwnedAndExecute(ctx, saleReplayParams(prior), func(in gen.BillingProviderIntent) error { return ownsSaleRequest(in, user.ID, p.PriceID, fingerprint) })
-	if err != nil {
-		return nil, true, err
-	}
-	response, err := renderSaleOperation(operation)
-	return response, true, err
 }
 
 func renderSaleOperation(intent gen.BillingProviderIntent) (*CheckoutResponse, error) {

@@ -2,10 +2,7 @@ package checkout
 
 import (
 	"context"
-	"io"
-	"net/http"
 	"net/url"
-	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -15,61 +12,8 @@ import (
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 	"github.com/open-rails/openrails/internal/merchants"
-	"github.com/open-rails/openrails/internal/railresolve"
 )
-
-type roundTrip func(*http.Request) (*http.Response, error)
-
-func (f roundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
-
-// A one-time Stripe checkout prices inline from the accepted local terms, in
-// whole minor units, under a derived provider idempotency key.
-func TestStripeOneTimeCheckoutWire(t *testing.T) {
-	cfg := &config.Config{TestMode: config.CredentialPostureSandbox, ProviderWriteMode: config.ProviderWriteModeFull}
-	svc := &CheckoutService{Config: cfg, Rails: railresolve.FixedSet{"stripe": {Rail: models.RailStripe, AccountID: "acct_test", Stripe: &config.StripeRailConfig{SecretKey: "sk_test_synthetic"}}}}
-	product := &models.Product{ID: uuid.New(), DisplayName: "Accepted post"}
-	price := &models.Price{ID: uuid.New(), ProductID: product.ID, Amount: 12_340_000, Currency: "USD"}
-	calls := 0
-	svc.StripeClients = stripeapi.NewFactory(roundTrip(func(r *http.Request) (*http.Response, error) {
-		calls++
-		require.Equal(t, "/v1/checkout/sessions", r.URL.Path)
-		require.Equal(t, stripeCheckoutIdempotencyKey("accepted-inline"), r.Header.Get(stripeapi.IdempotencyKeyHeader))
-		require.NoError(t, r.ParseForm())
-		require.Equal(t, "payment", r.Form.Get("mode"))
-		require.Empty(t, r.Form.Get("line_items[0][price]"))
-		require.Equal(t, "usd", r.Form.Get("line_items[0][price_data][currency]"))
-		require.Equal(t, "1234", r.Form.Get("line_items[0][price_data][unit_amount]"))
-		require.Equal(t, "Accepted post", r.Form.Get("line_items[0][price_data][product_data][name]"))
-		require.Equal(t, price.ID.String(), r.Form.Get("metadata[internal_price_id]"))
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"cs_test_accepted","url":"https://checkout.stripe.test/accepted"}`))}, nil
-	}))
-	req := &CheckoutRequest{SuccessURL: "https://app.example/success", CancelURL: "https://app.example/cancel", IdempotencyKey: "accepted-inline"}
-	result, err := svc.processStripePayment(context.Background(), req, &UserIdentity{ID: uuid.NewString()}, price, product)
-	require.NoError(t, err)
-	require.Equal(t, "https://checkout.stripe.test/accepted", result.RedirectURL)
-
-	for name, mutate := range map[string]func(*CheckoutRequest, *models.Price, *models.Product) *models.Product{
-		"missing return url": func(r *CheckoutRequest, _ *models.Price, p *models.Product) *models.Product {
-			r.CancelURL = " "
-			return p
-		},
-		"sub-cent amount": func(_ *CheckoutRequest, pr *models.Price, p *models.Product) *models.Product {
-			pr.Amount = 12_340_001
-			return p
-		},
-		"product is not the price's": func(_ *CheckoutRequest, _ *models.Price, _ *models.Product) *models.Product {
-			return &models.Product{ID: uuid.New(), DisplayName: "x"}
-		},
-	} {
-		r, pr := *req, *price
-		p := mutate(&r, &pr, product)
-		_, err := svc.processStripePayment(context.Background(), &r, &UserIdentity{ID: uuid.NewString()}, &pr, p)
-		require.Error(t, err, name)
-	}
-	require.Equal(t, 1, calls, "refusals never reach Stripe")
-}
 
 // ccbillScope is a one-account PSP catalog for credential resolution.
 type ccbillScope struct{ scope merchants.PSPScope }

@@ -183,7 +183,7 @@ func (s *CheckoutAttemptService) createPaymentMethodSetup(ctx context.Context, r
 	canonical.Payment.Rail = "nmi"
 	canonical.Payment.Email = email
 	canonical.Payment.NameOnCard = name
-	fingerprint := checkoutAttemptRequestFingerprintForRail(&canonical, user, "nmi")
+	fingerprint := checkoutAttemptRequestFingerprint(&canonical)
 	id := captureSessionID(owner, customer, req.IdempotencyKey)
 	session, err := s.repo.GetByID(ctx, id)
 	if err == nil {

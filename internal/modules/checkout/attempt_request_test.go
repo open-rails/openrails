@@ -23,18 +23,14 @@ import (
 
 const testPriceID = "price_11111111-1111-1111-1111-111111111111"
 
-// The fingerprint is a durable replay identity: its projection is frozen,
-// whitespace-insensitive where the executor trims, and CCBill hashes the
-// verified email it actually sends instead of the browser's.
+// The fingerprint is a durable replay identity: whitespace-insensitive where
+// the executor trims, and a replay under another body conflicts.
 func TestCheckoutAttemptFingerprint(t *testing.T) {
 	base := CheckoutAttemptCreateRequest{
-		PriceID: testPriceID, Payment: CheckoutAttemptPaymentRequest{Rail: "stripe"},
+		PriceID: testPriceID, Payment: CheckoutAttemptPaymentRequest{Rail: "solana", TokenSymbol: "USDC"},
 		Metadata:   map[string]string{"post": "post-123"},
 		SuccessURL: "https://app.example/success", CancelURL: "https://app.example/cancel",
 	}
-	// Frozen: a changed projection strands a durable checkout's replays.
-	require.Equal(t, "16bcd6409061636fa9b36976d89edba8a00418354a70ba379fe98dd514b68c65", checkoutAttemptRequestFingerprint(&base))
-
 	for name, mutate := range map[string]func(*CheckoutAttemptCreateRequest){
 		"price":             func(r *CheckoutAttemptCreateRequest) { r.PriceID = "price_22222222-2222-2222-2222-222222222222" },
 		"id spelled as key": func(r *CheckoutAttemptCreateRequest) { r.PriceKey, r.PriceID = r.PriceID, "" },
@@ -43,7 +39,6 @@ func TestCheckoutAttemptFingerprint(t *testing.T) {
 		"name on card":      func(r *CheckoutAttemptCreateRequest) { r.Payment.NameOnCard = "María José" },
 		"metadata value":    func(r *CheckoutAttemptCreateRequest) { r.Metadata = map[string]string{"post": "post-124"} },
 		"selected amount":   func(r *CheckoutAttemptCreateRequest) { r.Amount = new(int64(100000000)) },
-		"offer kind":        func(r *CheckoutAttemptCreateRequest) { r.OfferKind = billing.OfferRecurring },
 	} {
 		changed := base
 		mutate(&changed)
@@ -54,26 +49,18 @@ func TestCheckoutAttemptFingerprint(t *testing.T) {
 	padded.Metadata = map[string]string{" post ": " post-123 ", "  ": "dropped"}
 	require.Equal(t, checkoutAttemptRequestFingerprint(&base), checkoutAttemptRequestFingerprint(&padded))
 
-	ccbill := CheckoutAttemptCreateRequest{PriceID: testPriceID, Payment: CheckoutAttemptPaymentRequest{Rail: "merchant-ccbill", Email: "browser-a@example.test", NameOnCard: "Buyer", Zip: "10001", Country: "US"}}
-	otherBrowser := ccbill
-	otherBrowser.Payment.Email = "browser-b@example.test"
-	verified, changedVerified := "verified@example.test", "changed@example.test"
-	user := &UserIdentity{ID: "user_123", Email: &verified}
-	require.Equal(t, checkoutAttemptRequestFingerprintForRail(&ccbill, user, "ccbill"), checkoutAttemptRequestFingerprintForRail(&otherBrowser, user, "ccbill"))
-	require.NotEqual(t, checkoutAttemptRequestFingerprintForRail(&ccbill, user, "stripe"), checkoutAttemptRequestFingerprintForRail(&otherBrowser, user, "stripe"))
-
-	// A replay decodes under the rail that executed, and a changed verified
-	// identity conflicts rather than replaying another identity's form.
-	response := &CheckoutAttemptResponse{Payment: CheckoutAttemptPaymentResponse{Rail: "ccbill"}}
-	payload, err := json.Marshal(checkoutAttemptIdempotencyResult{RequestFingerprint: checkoutAttemptRequestFingerprintForRail(&ccbill, user, "ccbill"), Response: response})
+	response := &CheckoutAttemptResponse{Payment: CheckoutAttemptPaymentResponse{Rail: "solana"}}
+	payload, err := json.Marshal(checkoutAttemptIdempotencyResult{RequestFingerprint: checkoutAttemptRequestFingerprint(&base), Response: response})
 	require.NoError(t, err)
-	got, err := decodeCheckoutAttemptIdempotencyResult(payload, &otherBrowser, user)
+	got, err := decodeCheckoutAttemptIdempotencyResult(payload, &padded)
 	require.NoError(t, err)
 	require.Equal(t, response, got)
-	_, err = decodeCheckoutAttemptIdempotencyResult(payload, &otherBrowser, &UserIdentity{ID: "user_123", Email: &changedVerified})
+	other := base
+	other.PriceID = "price_22222222-2222-2222-2222-222222222222"
+	_, err = decodeCheckoutAttemptIdempotencyResult(payload, &other)
 	require.ErrorIs(t, err, ErrCheckoutAttemptConflict)
 	require.ErrorIs(t, err, billing.ErrIdempotencyKeyReused)
-	_, err = decodeCheckoutAttemptIdempotencyResult(json.RawMessage(`{}`), &ccbill, user)
+	_, err = decodeCheckoutAttemptIdempotencyResult(json.RawMessage(`{}`), &base)
 	require.Error(t, err)
 }
 
@@ -142,7 +129,7 @@ func TestCheckoutAttemptPANFirewall(t *testing.T) {
 	}
 }
 
-func TestPriceSelectorAndOfferAssertion(t *testing.T) {
+func TestPriceSelector(t *testing.T) {
 	for _, tc := range []struct {
 		id, key string
 		ok      bool
@@ -166,38 +153,6 @@ func TestPriceSelectorAndOfferAssertion(t *testing.T) {
 			require.ErrorIs(t, err, ErrCheckoutAttemptValidation, "%q %q", tc.id, tc.key)
 		}
 	}
-
-	permanent := &models.Price{}
-	finite := &models.Price{AccessDurationHours: intPtr(24)}
-	recurring := &models.Price{BillingIntervalHours: intPtr(720), AccessDurationHours: intPtr(720)}
-	product := &models.Product{Entitlements: []string{"forever", "timed"}}
-	for _, tc := range []struct {
-		name  string
-		price *models.Price
-		key   string
-		kind  billing.OfferKind
-		ok    bool
-	}{
-		{"no assertion", recurring, "", "", true},
-		{"permanent", permanent, "forever", billing.OfferPermanent, true},
-		{"finite", finite, "timed", billing.OfferFinite, true},
-		{"recurring", recurring, "timed", billing.OfferRecurring, true},
-		{"name does not determine duration", permanent, "timed", billing.OfferPermanent, true},
-		{"finite price is not permanent", finite, "", billing.OfferPermanent, false},
-		{"recurring price is not finite", recurring, "", billing.OfferFinite, false},
-		{"one-off price is not recurring", finite, "", billing.OfferRecurring, false},
-		{"entitlement not granted", recurring, "other", "", false},
-		{"blank entitlement", recurring, "  ", "", false},
-		{"NUL in entitlement", recurring, "for\x00ever", "", false},
-		{"oversized entitlement", recurring, strings.Repeat("k", 257), "", false},
-	} {
-		err := validateOfferAssertion(tc.price, product, tc.key, tc.kind)
-		if tc.ok {
-			require.NoError(t, err, tc.name)
-		} else {
-			require.ErrorIs(t, err, ErrCheckoutAttemptValidation, tc.name)
-		}
-	}
 }
 
 // Blanks are "not supplied"; everything else must match an allowed origin
@@ -213,8 +168,9 @@ func TestValidateReturnURLs(t *testing.T) {
 	require.Error(t, nilSvc.validateReturnURLs("https://billing.example/done"))
 }
 
-// Per-rail input contracts match what each executor consumes: CCBill needs
-// only name, postal code, ISO country and the VERIFIED email.
+// Per-rail input contracts match what each executor consumes; a card on a
+// PSP's own vault buys through an order, so only NMI (custodian) and Solana
+// sessions remain.
 func TestValidatePaymentPerRail(t *testing.T) {
 	verified := "buyer@example.test"
 	user := &UserIdentity{ID: "user_123", Email: &verified}
@@ -226,18 +182,12 @@ func TestValidatePaymentPerRail(t *testing.T) {
 		user       *UserIdentity
 		want       string
 	}{
-		{"stripe hosted needs nothing", "stripe", CheckoutAttemptPaymentRequest{}, user, ""},
-		{"stripe saved method needs ownership service", "stripe", CheckoutAttemptPaymentRequest{PaymentMethodID: pmID}, user, "payment method service unavailable"},
 		{"nmi token", "nmi", CheckoutAttemptPaymentRequest{PaymentToken: "tok"}, user, ""},
 		{"nmi neither", "nmi", CheckoutAttemptPaymentRequest{}, user, "payment_method_id or payment_token is required"},
 		{"nmi both", "nmi", CheckoutAttemptPaymentRequest{PaymentToken: "tok", PaymentMethodID: pmID}, user, "either payment_token or payment_method_id"},
 		{"nmi malformed method", "nmi", CheckoutAttemptPaymentRequest{PaymentMethodID: "card_1"}, user, "invalid payment_method_id"},
-		{"ccbill minimal identity", "ccbill", CheckoutAttemptPaymentRequest{NameOnCard: "Prince", Zip: " 55401 ", Country: " us "}, user, ""},
-		{"ccbill name", "ccbill", CheckoutAttemptPaymentRequest{Zip: "1", Country: "US"}, user, "name_on_card"},
-		{"ccbill postal", "ccbill", CheckoutAttemptPaymentRequest{NameOnCard: "B", Country: "US"}, user, "zip"},
-		{"ccbill country letters", "ccbill", CheckoutAttemptPaymentRequest{NameOnCard: "B", Zip: "1", Country: "12"}, user, "country"},
-		{"ccbill country length", "ccbill", CheckoutAttemptPaymentRequest{NameOnCard: "B", Zip: "1", Country: "USA"}, user, "country"},
-		{"ccbill unverified email", "ccbill", CheckoutAttemptPaymentRequest{NameOnCard: "B", Zip: "1", Country: "US"}, &UserIdentity{ID: "u"}, "verified email"},
+		{"stripe", "stripe", CheckoutAttemptPaymentRequest{}, user, "unsupported rail"},
+		{"ccbill", "ccbill", CheckoutAttemptPaymentRequest{NameOnCard: "Prince", Zip: "55401", Country: "US"}, user, "unsupported rail"},
 		{"unsupported rail", "paypal", CheckoutAttemptPaymentRequest{}, user, "unsupported rail"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -252,13 +202,6 @@ func TestValidatePaymentPerRail(t *testing.T) {
 		})
 	}
 
-	payment := &CheckoutAttemptPaymentRequest{Email: "spoofed@example.test", NameOnCard: "Prince", Zip: " 55401 ", Country: " us "}
-	require.NoError(t, svc.validateCCBillInput(payment, user))
-	require.Equal(t, "55401", payment.Zip)
-	require.Equal(t, "US", payment.Country)
-	fields := svc.buildRailFields("ccbill", payment, user)
-	require.Equal(t, verified, fields["email"], "the verified email wins over browser input")
-	require.NotContains(t, fields, "address1")
 }
 
 func TestCanonicalizeCheckoutPaymentName(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
@@ -168,11 +167,6 @@ func (s *CheckoutAttemptService) admitPurchaseSession(ctx context.Context, sessi
 		}
 		if price.IsRecurring() || session.Amount == nil || *session.Amount != price.Amount || session.Currency == nil || *session.Currency != price.Currency {
 			return fmt.Errorf("%w: purchase terms changed", ErrCheckoutAttemptConflict)
-		}
-		key, _ := session.RailState["requested_entitlement"].(string)
-		kind, _ := session.RailState["requested_offer_kind"].(string)
-		if err := validateOfferAssertion(price, product, key, billing.OfferKind(kind)); err != nil {
-			return err
 		}
 		purchase := NewCheckoutPurchaseService(catalog.NewPriceService(d), catalog.NewProductService(d), payments.NewPaymentService(d, s.clock), entitlements.NewEntitlementService(d, s.clock), nil, s.clock)
 		purchase.SubscriptionService = subscriptions.NewSubscriptionService(d, purchase.PriceService, purchase.ProductService, nil, s.clock)

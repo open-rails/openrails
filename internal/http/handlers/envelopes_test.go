@@ -10,7 +10,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	solanago "github.com/gagliardetto/solana-go"
 	"github.com/sirupsen/logrus"
@@ -29,7 +28,6 @@ import (
 	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/solana/recurring"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	billingservice "github.com/open-rails/openrails/internal/service"
 	"github.com/open-rails/openrails/internal/shared/apperr"
@@ -73,10 +71,7 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		"psp":      writePSPError,
 		"metering": writeMeteringError,
 		"refusal":  func(r *httprequest.Request, err error) { writeRefusal(r, err, "request failed") },
-		"checkout": func(r *httprequest.Request, err error) {
-			writeCheckoutAttemptError(r, err)
-		},
-		"tier": writeChangeTierError,
+		"tier":     writeChangeTierError,
 	}
 	type want struct {
 		status      int
@@ -217,9 +212,6 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 	const raw = "raw processor detail that must stay server-side"
 	declined := "Your card was declined. Contact your bank or try a different card."
 	surfaces := map[string]func(*httprequest.Request, error){
-		"checkout": func(r *httprequest.Request, err error) {
-			writeCheckoutAttemptError(r, err)
-		},
 		"tier": writeChangeTierError,
 	}
 	for _, tc := range []struct {
@@ -242,26 +234,6 @@ func TestPaymentRefusalEnvelope(t *testing.T) {
 			require.NotContains(t, got.Raw, raw)
 		}
 	}
-
-	checkoutStatus := map[error]int{
-		fmt.Errorf("sale: %w", checkout.ErrCheckoutProcessing): 409,
-		checkout.ErrCheckoutAttemptPending:                     409,
-		checkout.ErrCheckoutAttemptConflict:                    409,
-		checkout.ErrCheckoutAttemptNotFound:                    404,
-		checkout.ErrCheckoutAttemptForbidden:                   403,
-		checkout.ErrCheckoutAttemptExpired:                     410,
-		checkout.ErrCheckoutAttemptValidation:                  400,
-		checkout.ErrCheckoutCaptureUnavailable:                 503,
-		fmt.Errorf("x: %w", billing.ErrIdempotencyKeyReused):   422,
-	}
-	for err, status := range checkoutStatus {
-		got := render(t, func(r *httprequest.Request) { writeCheckoutAttemptError(r, err) })
-		require.Equal(t, status, got.Status, "%v", err)
-	}
-	blocked := render(t, func(r *httprequest.Request) {
-		writeCheckoutAttemptError(r, &checkout.CardAttemptsBlockedError{RetryAfter: 90 * time.Second})
-	})
-	require.Equal(t, []any{429, "card_attempts_blocked"}, []any{blocked.Status, blocked.Code})
 
 	tierStatus := map[error]int{
 		fmt.Errorf("upgrade: %w", checkout.ErrCheckoutProcessing): 409,
@@ -312,18 +284,6 @@ func TestTierChangeOutcomeEnvelope(t *testing.T) {
 		require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
 		require.Equal(t, status, body.Status)
 	}
-}
-
-func TestInsufficientUSDCCarriesFundingMetadata(t *testing.T) {
-	got := render(t, func(r *httprequest.Request) {
-		writeCheckoutAttemptError(r, &recurring.InsufficientUSDCError{HaveBaseUnits: 250_000, NeedBaseUnits: 1_500_000})
-	})
-	require.Equal(t, []any{402, "insufficient_funds", "usdc_balance"}, []any{got.Status, got.Code, got.param()})
-	require.Equal(t, map[string]any{
-		"asset": "USDC", "network": "solana",
-		"amount": "1.5", "balance": "0.25", "shortfall": "1.25",
-		"amount_base_units": "1500000", "balance_base_units": "250000", "shortfall_base_units": "1250000",
-	}, got.Metadata["usdc_funding"])
 }
 
 func TestProviderTransportErrorsAreNotEchoed(t *testing.T) {

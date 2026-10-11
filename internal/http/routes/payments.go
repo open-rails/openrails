@@ -36,7 +36,6 @@ var paymentsRoutes = []Route{
 		Query: paymentListQuery(), Responses: []Reply{{200, billing.ListPage[billing.Payment]{}}}, Errors: codes("invalid_cursor"), Handler: h(handlers.ListMyPayments)},
 }
 
-
 // paymentListQuery is the query of a payment list.
 func paymentListQuery(extra ...Param) []Param {
 	return params(cursorPage, extra, text("kind"), text("order_id"), text("rail"), text("status"), text("subscription_id"), text("transaction_id"))

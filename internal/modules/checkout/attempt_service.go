@@ -59,7 +59,6 @@ const (
 	// idempotent resume) lands on the requested PSP, not a re-resolved one (#848).
 	checkoutAttemptPSPFieldKey = "psp"
 	defaultCheckoutAttemptTTL  = 15 * time.Minute
-	redirectCheckoutAttemptTTL = 24 * time.Hour
 	// solanaFinalizeWait bounds how long a page confirm waits for a transfer
 	// to finalize (~13 s normally) before answering "processing".
 	solanaFinalizeWait = 60 * time.Second
@@ -286,7 +285,7 @@ func (s *CheckoutAttemptService) createSession(ctx context.Context, req *Checkou
 			if rec.Status != idempotency.StatusSucceeded {
 				return nil, ErrCheckoutAttemptPending
 			}
-			cached, err := decodeCheckoutAttemptIdempotencyResult(rec.Result, req, user)
+			cached, err := decodeCheckoutAttemptIdempotencyResult(rec.Result, req)
 			if err != nil {
 				return nil, err
 			}
@@ -331,7 +330,7 @@ func (s *CheckoutAttemptService) createSession(ctx context.Context, req *Checkou
 	}
 
 	if claim != nil {
-		fingerprint := checkoutAttemptRequestFingerprintForRail(req, user, resp.Payment.Rail)
+		fingerprint := checkoutAttemptRequestFingerprint(req)
 		payload, _ := json.Marshal(checkoutAttemptIdempotencyResult{RequestFingerprint: fingerprint, Response: resp})
 		completeCheckoutIdempotency(ctx, claim, checkoutAttemptIdempotencyOp, req.IdempotencyKey, payload)
 	}
@@ -362,25 +361,13 @@ func canonicalizeCheckoutPaymentName(payment *CheckoutAttemptPaymentRequest) {
 	payment.NameOnCard = cardholdername.Canonical("", payment.FirstName, payment.LastName)
 }
 
+// checkoutAttemptRequestFingerprint hashes the inputs a session executes: its
+// durable replay identity.
 func checkoutAttemptRequestFingerprint(req *CheckoutAttemptCreateRequest) string {
-	return checkoutAttemptRequestFingerprintForRail(req, nil, "")
-}
-
-// checkoutAttemptRequestFingerprintForRail hashes the inputs the resolved rail
-// actually executes. CCBill ignores browser payment.email and takes the verified
-// account email from UserIdentity, so its idempotency projection must do the
-// same. Other rails retain the request payload unchanged.
-func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest, user *UserIdentity, resolvedRail string) string {
 	if req == nil {
 		return ""
 	}
 	payment := req.Payment
-	if strings.EqualFold(strings.TrimSpace(resolvedRail), string(models.RailCCBill)) {
-		payment.Email = ""
-		if user != nil && user.Email != nil {
-			payment.Email = strings.TrimSpace(*user.Email)
-		}
-	}
 	payload, _ := json.Marshal(struct {
 		CancelAfterInitial bool `json:",omitempty"`
 		PriceID            string
@@ -392,28 +379,24 @@ func checkoutAttemptRequestFingerprintForRail(req *CheckoutAttemptCreateRequest,
 		Metadata           map[string]string
 		SuccessURL         string
 		CancelURL          string
-		Entitlement        string            `json:",omitempty"`
-		OfferKind          billing.OfferKind `json:",omitempty"`
 	}{
 		CancelAfterInitial: req.AutoRenew != nil && !*req.AutoRenew,
 		PriceID:            strings.TrimSpace(req.PriceID),
 		PriceKey:           req.PriceKey, ProductKey: req.ProductKey, Amount: req.Amount,
-		Mode:        strings.TrimSpace(req.Mode),
-		Payment:     payment,
-		Metadata:    normalizeMetadata(req.Metadata),
-		SuccessURL:  strings.TrimSpace(req.SuccessURL),
-		CancelURL:   strings.TrimSpace(req.CancelURL),
-		Entitlement: req.Entitlement,
-		OfferKind:   req.OfferKind,
+		Mode:       strings.TrimSpace(req.Mode),
+		Payment:    payment,
+		Metadata:   normalizeMetadata(req.Metadata),
+		SuccessURL: strings.TrimSpace(req.SuccessURL),
+		CancelURL:  strings.TrimSpace(req.CancelURL),
 	})
 	sum := sha256.Sum256(payload)
 	return hex.EncodeToString(sum[:])
 }
 
-func decodeCheckoutAttemptIdempotencyResult(payload json.RawMessage, req *CheckoutAttemptCreateRequest, user *UserIdentity) (*CheckoutAttemptResponse, error) {
+func decodeCheckoutAttemptIdempotencyResult(payload json.RawMessage, req *CheckoutAttemptCreateRequest) (*CheckoutAttemptResponse, error) {
 	var cached checkoutAttemptIdempotencyResult
 	if err := json.Unmarshal(payload, &cached); err == nil && cached.Response != nil {
-		fingerprint := checkoutAttemptRequestFingerprintForRail(req, user, cached.Response.Payment.Rail)
+		fingerprint := checkoutAttemptRequestFingerprint(req)
 		if cached.RequestFingerprint != "" && fingerprint != "" && cached.RequestFingerprint != fingerprint {
 			return nil, fmt.Errorf("%w: %w", ErrCheckoutAttemptConflict, billing.ErrIdempotencyKeyReused)
 		}
@@ -436,7 +419,7 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		existing, err := s.repo.GetByID(ctx, idempotentCheckoutAttemptID(mid.UUID(), req.IdempotencyKey))
 		if err == nil {
 			stored, _ := existing.RailState[checkoutAttemptFingerprintKey].(string)
-			if existing.CustomerID.String() != user.ID || stored == "" || stored != checkoutAttemptRequestFingerprintForRail(req, user, string(existing.Rail)) {
+			if existing.CustomerID.String() != user.ID || stored == "" || stored != checkoutAttemptRequestFingerprint(req) {
 				return nil, fmt.Errorf("%w: %w", ErrCheckoutAttemptConflict, billing.ErrIdempotencyKeyReused)
 			}
 			existing.IdempotencyKey = normalize.OptionalString(req.IdempotencyKey)
@@ -463,9 +446,6 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 	}
 	price, err = CheckoutPriceForAmount(price, req.Amount)
 	if err != nil {
-		return nil, err
-	}
-	if err := validateOfferAssertion(price, product, req.Entitlement, req.OfferKind); err != nil {
 		return nil, err
 	}
 
@@ -519,10 +499,10 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 	}
 	ctx = db.WithPSPID(ctx, pspID)
 	price = priceForCheckoutTarget(price, decision.Target)
-
-	if rail == "stripe" && strings.TrimSpace(req.IdempotencyKey) == "" {
-		return nil, fmt.Errorf("%w: idempotency key is required for stripe checkout", ErrCheckoutAttemptValidation)
+	if err := s.requireSessionPurchase(ctx, rail, decision.Target, &req.Payment); err != nil {
+		return nil, err
 	}
+
 	mode, err := s.resolveMode(req.Mode, rail, price)
 	if err != nil {
 		return nil, err
@@ -538,15 +518,12 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 
 	now := s.now()
 	ttl := defaultCheckoutAttemptTTL
-	if rail == "ccbill" || rail == "stripe" {
-		ttl = redirectCheckoutAttemptTTL
-	}
 	sessionID := uuidutil.NewV7()
 	idempotencyKey := strings.TrimSpace(req.IdempotencyKey)
 	requestFingerprint := ""
 	if idempotencyKey != "" {
 		sessionID = idempotentCheckoutAttemptID(price.MerchantID, idempotencyKey)
-		requestFingerprint = checkoutAttemptRequestFingerprintForRail(req, user, rail)
+		requestFingerprint = checkoutAttemptRequestFingerprint(req)
 	}
 	railState := map[string]any{}
 	if req.AutoRenew != nil {
@@ -554,12 +531,6 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 	}
 	if req.Amount != nil {
 		railState["customer_selected"] = true
-	}
-	if req.OfferKind != "" {
-		railState["requested_offer_kind"] = string(req.OfferKind)
-	}
-	if req.Entitlement != "" {
-		railState["requested_entitlement"] = req.Entitlement
 	}
 	if requestFingerprint != "" {
 		railState[checkoutAttemptFingerprintKey] = requestFingerprint
@@ -606,47 +577,30 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 	// A saved custodian card creates a priced agreement for a later verified
 	// customer action. Persist the quote with the row before returning it.
 	engineEnrollment := mode == models.CheckoutAttemptModeSubscription && rails.NewSubscriptionFor(models.Rail(rail)) == rails.NewSubscriptionEngine
-	// A new NMI card is vaulted first: engine memberships charge saved methods.
-	var vaulted *models.PaymentMethod
-	if engineEnrollment && req.Payment.PaymentMethodID == "" && (strings.TrimSpace(req.Payment.PaymentToken) != "" || req.Payment.Card != nil) && rails.IsNMI(models.Rail(rail)) {
-		vaulted, err = s.vaultEnrollmentCard(ctx, &req.Payment, session, decision.Target, user)
+	if engineEnrollment && req.Payment.PaymentMethodID != "" {
+		parsed, err := billing.ParsePaymentMethodID(req.Payment.PaymentMethodID)
 		if err != nil {
-			return nil, err
-		}
-		session.RailState[initialMembershipVaultedMethodKey] = vaulted.ID.String()
-	}
-	if engineEnrollment && (req.Payment.PaymentMethodID != "" || vaulted != nil) {
-		var methodID uuid.UUID
-		if vaulted != nil {
-			methodID = vaulted.ID
-		} else {
-			parsed, err := billing.ParsePaymentMethodID(req.Payment.PaymentMethodID)
-			if err != nil {
-				return nil, ErrCheckoutAttemptValidation
-			}
-			methodID = parsed.UUID()
+			return nil, ErrCheckoutAttemptValidation
 		}
 		mid, err := merchant.Require(ctx)
 		if err != nil {
-			s.discardEnrollmentCard(ctx, vaulted)
 			return nil, err
 		}
-		method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: methodID})
+		method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: parsed.UUID()})
 		if err == nil {
 			err = quoteInitialMembership(ctx, session, price, product, method, now)
 		}
 		if err != nil {
-			s.discardEnrollmentCard(ctx, vaulted)
 			return nil, err
 		}
 		session.Status = models.CheckoutAttemptStatusRequiresAction
 	}
 
-	// Engine-collected rails enroll only on a quoted saved method; an on-chain
-	// plan enrolls through the subscriber's wallet below.
+	// Engine-collected rails enroll only on a quoted saved custodian-held
+	// method; an on-chain plan enrolls through the subscriber's wallet below.
 	if engineEnrollment {
 		if _, quoted := session.RailState[initialMembershipQuoteKey]; !quoted {
-			return nil, fmt.Errorf("%w: engine enrollment requires an NMI card token or a saved NMI or Stripe method", ErrPaymentMethodRequired)
+			return nil, fmt.Errorf("%w: engine enrollment requires a saved custodian-held method", ErrPaymentMethodRequired)
 		}
 	}
 
@@ -664,7 +618,6 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 		create = s.admitSolanaSubscribeSession
 	}
 	if err := create(ctx, session); err != nil {
-		s.discardEnrollmentCard(ctx, vaulted)
 		if idempotencyKey != "" {
 			existing, getErr := s.repo.GetByID(ctx, session.ID)
 			if getErr == nil {
@@ -690,6 +643,32 @@ func (s *CheckoutAttemptService) createSessionWithValidation(ctx context.Context
 
 	session.UpdatedAt = s.now()
 	return s.saveInitializedSession(ctx, session)
+}
+
+// requireSessionPurchase admits what the session path still sells: a Solana
+// purchase or subscription, or a purchase with a custodian-held card. A card
+// on a PSP's own vault buys through an order.
+func (s *CheckoutAttemptService) requireSessionPurchase(ctx context.Context, rail string, target railTarget, payment *CheckoutAttemptPaymentRequest) error {
+	if rail == string(models.RailSolana) || custodianHeld(target) {
+		return nil
+	}
+	refused := fmt.Errorf("%w: a card purchase is an order (POST /v1/me/orders)", ErrCheckoutAttemptValidation)
+	if strings.TrimSpace(payment.PaymentMethodID) == "" || s.db == nil {
+		return refused
+	}
+	id, err := billing.ParsePaymentMethodID(payment.PaymentMethodID)
+	if err != nil {
+		return refused
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return err
+	}
+	method, err := s.db.Gen(ctx).GetPaymentMethodByID(ctx, gen.GetPaymentMethodByIDParams{MerchantID: mid.UUID(), ID: id.UUID()})
+	if err != nil || method.Custodian == models.CustodianPSP {
+		return refused
+	}
+	return nil
 }
 
 func idempotentCheckoutAttemptID(merchantID uuid.UUID, key string) uuid.UUID {
@@ -1145,15 +1124,8 @@ func (s *CheckoutAttemptService) validatePayment(ctx context.Context, rail strin
 	switch {
 	case rails.IsNMI(models.Rail(rail)):
 		return s.validateNMIInput(ctx, payment, user)
-	case rail == "stripe":
-		if strings.TrimSpace(payment.PaymentMethodID) != "" {
-			return s.validateNMIInput(ctx, payment, user)
-		}
-		return s.validateStripeInput(payment)
 	case rail == "solana":
 		return s.validateSolanaInput(payment)
-	case rail == "ccbill":
-		return s.validateCCBillInput(payment, user)
 	default:
 		return fmt.Errorf("%w: unsupported rail", ErrCheckoutAttemptValidation)
 	}
@@ -1240,39 +1212,12 @@ func (s *CheckoutAttemptService) validateNMIInput(ctx context.Context, payment *
 	return nil
 }
 
-// validateStripeInput validates inputs for Stripe hosted Checkout. Stripe's
-// hosted page collects the customer's email and billing address itself, and
-// createStripeCheckoutSession sends none of those fields, so they are NOT
-// required here. Saved payment methods are not supported in the redirect flow.
-func (s *CheckoutAttemptService) validateStripeInput(payment *CheckoutAttemptPaymentRequest) error {
-	if strings.TrimSpace(payment.PaymentMethodID) != "" {
-		return fmt.Errorf("%w: saved payment methods are not supported for stripe checkout", ErrCheckoutAttemptValidation)
-	}
-	return nil
-}
-
 // validateSolanaInput requires a token symbol so the executor can resolve which
 // SPL mint to charge.
 func (s *CheckoutAttemptService) validateSolanaInput(payment *CheckoutAttemptPaymentRequest) error {
 	if strings.TrimSpace(payment.TokenSymbol) == "" {
 		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutAttemptValidation)
 	}
-	return nil
-}
-
-// validateCCBillInput requires the canonical name, country, and postal code
-// consumed by CCBill. The email comes from the authenticated, verified customer
-// identity rather than the browser request. Street, city, and state are
-// optional in CCBill's hosted-card contract.
-func (s *CheckoutAttemptService) validateCCBillInput(payment *CheckoutAttemptPaymentRequest, user *UserIdentity) error {
-	if payment == nil {
-		return fmt.Errorf("%w: payment is required", ErrCheckoutAttemptValidation)
-	}
-	if err := validateCCBillBillingIdentity(payment.NameOnCard, payment.Zip, payment.Country, user); err != nil {
-		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-	}
-	payment.Zip = strings.TrimSpace(payment.Zip)
-	payment.Country = strings.ToUpper(strings.TrimSpace(payment.Country))
 	return nil
 }
 
@@ -1291,8 +1236,6 @@ func (s *CheckoutAttemptService) initializeSession(ctx context.Context, session 
 	case rail == "solana":
 		return s.initializeSolanaSession(ctx, session, payment)
 	case rails.IsNMI(models.Rail(rail)):
-		return s.initializeCheckoutAttempt(ctx, session, payment, successURL, cancelURL, user)
-	case rail == "ccbill" || rail == "stripe":
 		return s.initializeCheckoutAttempt(ctx, session, payment, successURL, cancelURL, user)
 	default:
 		return fmt.Errorf("%w: unsupported rail", ErrCheckoutAttemptValidation)
@@ -1797,13 +1740,6 @@ func (s *CheckoutAttemptService) buildRailFields(rail string, payment *CheckoutA
 		return fields
 	}
 	email := payment.Email
-	if rail == string(models.RailCCBill) {
-		email = ""
-		if user != nil && user.Email != nil {
-			email = *user.Email
-		}
-	}
-
 	addField(fields, "payment_method_id", payment.PaymentMethodID)
 	addField(fields, "token_symbol", payment.TokenSymbol)
 	addField(fields, "wallet", payment.Wallet)

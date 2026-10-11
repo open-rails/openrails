@@ -3,12 +3,9 @@ package checkout
 import (
 	"context"
 	"fmt"
-	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/open-rails/openrails/billing"
-	catalogspec "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/catalog"
@@ -26,22 +23,6 @@ func validateCheckoutPriceSelector(id, productKey, key string) error {
 		if parsed, err := billing.ParsePriceID(id); err != nil || parsed.IsZero() {
 			return fmt.Errorf("%w: price_id must be a valid price ID; use price_key for an opaque key", ErrCheckoutAttemptValidation)
 		}
-	}
-	return nil
-}
-
-func validateOfferAssertion(price *models.Price, product *models.Product, key string, kind billing.OfferKind) error {
-	if key != "" {
-		if strings.TrimSpace(key) == "" || len(key) > catalogspec.MaxEntitlementKeyBytes || !utf8.ValidString(key) || strings.ContainsRune(key, 0) {
-			return fmt.Errorf("%w: invalid entitlement", ErrCheckoutAttemptValidation)
-		}
-		if !slices.Contains(product.Entitlements, key) {
-			return fmt.Errorf("%w: selected offer does not grant requested entitlement", ErrCheckoutAttemptValidation)
-		}
-	}
-	valid := kind == "" || kind == billing.OfferPermanent && permanentPurchase(price) && (product.CreditGrant == nil || len(product.Entitlements) > 0) || kind == billing.OfferFinite && !price.IsRecurring() && price.AccessDurationHours != nil || kind == billing.OfferRecurring && price.IsRecurring()
-	if !valid {
-		return fmt.Errorf("%w: selected price does not match requested offer kind", ErrCheckoutAttemptValidation)
 	}
 	return nil
 }

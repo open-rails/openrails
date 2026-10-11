@@ -15,7 +15,6 @@ import (
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
 // Checkout money is the catalog's. Hosts forward browser-chosen price ids and
@@ -31,17 +30,9 @@ func TestSecurityCheckoutTermsAreServerSide(t *testing.T) {
 			client := w.client[embedded]
 			ctx := t.Context()
 			member := w.membership("content:vip", 9_990_000)
-			cheap := w.membership("content:basic", 1_000_000)
 			c := w.newCustomer()
 			method := c.saveCard(rail, visa)
-			// The engine refuses a price that does not grant an asserted
-			// entitlement; no order asserts one, but the check stands.
-			_, err := w.engineCheckout(c, checkout.CheckoutAttemptCreateRequest{
-				PriceID: cheap.ID.String(), Entitlement: "content:vip", OfferKind: billing.OfferRecurring,
-				Payment: checkout.CheckoutAttemptPaymentRequest{Rail: rail, PaymentMethodID: method},
-			})
-			require.Error(t, err, "a cheaper price for other access cannot buy content:vip")
-			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
+			_, err := client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "negative-" + uuid.NewString()[:8], UnitAmount: -1, Currency: "USD"})
 			require.Error(t, err, "negative prices are refused")
 			negative := -24
 			_, err = client.CreatePrice(ctx, billing.CreatePriceParams{ProductID: member.ProductID, Key: "neg-duration-" + uuid.NewString()[:8], UnitAmount: 1_000_000, Currency: "USD", AccessDurationHours: &negative})
