@@ -106,8 +106,9 @@ func (f *fleet) spawn(i int, skew time.Duration) *world {
 	b := f.base
 	name := string(rune('a' + i))
 	r := &world{t: f.t, pool: b.pool, dsn: b.dsn, schema: b.schema, slug: b.slug, stripe: b.stripe, nmi: b.nmi, auth: b.auth, cfg: b.cfg, periodics: b.periodics, declare: b.declare, deps: b.deps,
-		clock:   clockwork.NewFakeClockAt(b.clock.Now().Add(skew)),
-		replica: &replicaEnv{f: f, name: name, queue: "replica_" + name}}
+		settings: b.settings,
+		clock:    clockwork.NewFakeClockAt(b.clock.Now().Add(skew)),
+		replica:  &replicaEnv{f: f, name: name, queue: "replica_" + name}}
 	r.start()
 	f.t.Cleanup(r.stop)
 	return r

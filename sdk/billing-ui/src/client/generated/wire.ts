@@ -262,6 +262,7 @@ export type Notification = {
   data: NotificationData
   seen: boolean
   read_at: string | null
+  action_requested?: boolean
   created_at: string
 }
 

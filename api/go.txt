@@ -794,6 +794,7 @@ pkg openrails/billing, const UsageEventIDPrefix untyped string = "uev_"
 pkg openrails/billing, const UsageFailed UsageOutcome = "failed"
 pkg openrails/billing, const UsageSucceeded UsageOutcome = "succeeded"
 pkg openrails/billing, func Currencies() []CurrencyUnits
+pkg openrails/billing, func CustomerNotificationActionRequested(string) bool
 pkg openrails/billing, func DeclineReasonFrom(error) (DeclineReason, bool)
 pkg openrails/billing, func DeclineReasons() []DeclineReason
 pkg openrails/billing, func ErrorCodes() []ErrorCode
@@ -912,6 +913,7 @@ pkg openrails/billing, method (CustomerLinkID) String() string
 pkg openrails/billing, method (CustomerLinkID) UUID() uuid.UUID
 pkg openrails/billing, method (DeclineReason) Failure() PaymentFailure
 pkg openrails/billing, method (DeclineReason) FraudSignal() bool
+pkg openrails/billing, method (Finding) InboxItem(string) (notify.Item, error)
 pkg openrails/billing, method (FindingID) IsZero() bool
 pkg openrails/billing, method (FindingID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (FindingID) String() string
@@ -933,6 +935,7 @@ pkg openrails/billing, method (NetworkAccountID) IsZero() bool
 pkg openrails/billing, method (NetworkAccountID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (NetworkAccountID) String() string
 pkg openrails/billing, method (NetworkAccountID) UUID() uuid.UUID
+pkg openrails/billing, method (Notification) InboxItem(string) (notify.Item, error)
 pkg openrails/billing, method (NotificationID) IsZero() bool
 pkg openrails/billing, method (NotificationID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (NotificationID) String() string
@@ -1665,6 +1668,7 @@ pkg openrails/billing, type Finding struct, ExternalValue *string `json:"externa
 pkg openrails/billing, type Finding struct, Field *string `json:"field"`
 pkg openrails/billing, type Finding struct, ID FindingID `json:"id"`
 pkg openrails/billing, type Finding struct, LastSeenAt time.Time `json:"last_seen_at"`
+pkg openrails/billing, type Finding struct, MerchantID MerchantID `json:"merchant_id"`
 pkg openrails/billing, type Finding struct, Notes *string `json:"operator_notes"`
 pkg openrails/billing, type Finding struct, OpenRailsValue *string `json:"openrails_value"`
 pkg openrails/billing, type Finding struct, PSPID *PSPID `json:"psp_id"`
@@ -1887,6 +1891,7 @@ pkg openrails/billing, type MerchantSettings struct, ArrearsGraceDays *int `json
 pkg openrails/billing, type MerchantSettings struct, BillingPeriodBoundary string `json:"billing_period_boundary,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, BillingPolicies []BillingPolicy `json:"billing_policies,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, BillingPolicyBindings []BillingPolicyBinding `json:"billing_policy_bindings,omitempty"`
+pkg openrails/billing, type MerchantSettings struct, ChargeReceipts *bool `json:"charge_receipts,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, Checkout *MerchantCheckoutSettings `json:"checkout,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CheckoutRouting *[]CheckoutRoutingRule `json:"checkout_routing,omitempty"`
 pkg openrails/billing, type MerchantSettings struct, CollectionThreshold *int64 `json:"collection_threshold,omitempty,string"`
@@ -2025,6 +2030,7 @@ pkg openrails/billing, type NextAction struct, Transactions []string `json:"tran
 pkg openrails/billing, type NextAction struct, Type string `json:"type"`
 pkg openrails/billing, type NextAction struct, URL *string `json:"url"`
 pkg openrails/billing, type Notification struct
+pkg openrails/billing, type Notification struct, ActionRequested bool `json:"action_requested,omitempty"`
 pkg openrails/billing, type Notification struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type Notification struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Notification struct, Data NotificationData `json:"data"`

@@ -51,6 +51,7 @@ const (
 // values.
 type Finding struct {
 	ID                 FindingID      `json:"id"`
+	MerchantID         MerchantID     `json:"merchant_id"`
 	Type               string         `json:"finding_type"`
 	Provider           *string        `json:"provider"`
 	PSPID              *PSPID         `json:"psp_id"`

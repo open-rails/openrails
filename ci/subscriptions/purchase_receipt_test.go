@@ -38,6 +38,8 @@ func receiptWorld(t *testing.T, hosted bool) (*world, *smtptest.Server, *openrai
 	}
 	w.deps = func(d *openrails.Deps) { d.UserInfo = directory }
 	w.displayName = "Host Shop"
+	enabled := true
+	w.settings.ChargeReceipts = &enabled
 	w.start()
 	if hosted {
 		w.stripe.SendWebhooksTo(w.server.URL+mountPrefix+"/v1/webhooks/stripe/"+stripeAcct, whsecStripe)
@@ -73,6 +75,56 @@ func (c *customer) receipts() []map[string]any {
 		}
 	}
 	return out
+}
+
+func TestPurchaseReceiptDefaultsOff(t *testing.T) {
+	w := newWorld(t)
+	life := w.lifetime("orders:quiet", 25_000_000)
+	c := w.newCustomer()
+	card := c.saveCard("nmi", visa)
+	paid := c.order(http.MethodPost, "/orders", "buy-"+uuid.NewString(), map[string]any{
+		"lines": []any{line(life, 0)}, "expected_total": micros(25_000_000), "payment": map[string]any{"payment_method_id": card},
+	})
+	require.Equal(t, http.StatusCreated, paid.status, "%v", paid.body)
+	require.Equal(t, "complete", orderOf(paid)["status"])
+	require.Empty(t, c.receipts(), "successful purchase does not create optional receipt without opt-in")
+}
+
+func TestUsageChargeReceiptOptIn(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(map[bool]string{false: "disabled", true: "enabled"}[enabled], func(t *testing.T) {
+			f := startFleet(t, 1, false, nil, func(w *world) { w.settings.ChargeReceipts = &enabled })
+			w := f.any()
+			c := w.newCustomer()
+			method := c.saveCard("nmi", visa)
+			first := newNMIInvoice(f, c)
+			w.refreshProviders()
+			w.settleCollectionScans()
+			paid := payNMIInvoice(t.Context(), w, c, first, method, "establish-agreement")
+			require.NoError(t, paid.err)
+			require.Equal(t, http.StatusOK, paid.status, string(paid.body))
+			f.settle()
+			c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
+			invoice := newNMIInvoice(f, c)
+			f.awaitPasses(invoicePasses(f, true))
+			w.settleCollectionScans()
+			f.settle()
+			order, err := w.client[remote].GetOrder(t.Context(), invoice)
+			require.NoError(t, err)
+			require.Equal(t, billing.OrderComplete, order.Status)
+			count := 0
+			for _, raw := range c.must(http.MethodGet, "/notifications", "", nil)["data"].([]any) {
+				if raw.(map[string]any)["event_type"] == "usage_charged" {
+					count++
+				}
+			}
+			if enabled {
+				require.Equal(t, 1, count)
+			} else {
+				require.Zero(t, count)
+			}
+		})
+	}
 }
 
 // A customer-chosen credit deposit bought through Stripe hosted Checkout from

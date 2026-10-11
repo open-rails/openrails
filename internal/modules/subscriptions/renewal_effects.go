@@ -93,6 +93,9 @@ func renewalReceiptDue(ctx context.Context, d *db.DB, sub *models.Subscription, 
 	if err != nil {
 		return false, fmt.Errorf("load renewal receipt policy: %w", err)
 	}
+	if cfg.ChargeReceipts == nil || !*cfg.ChargeReceipts {
+		return false, nil
+	}
 	hours := DefaultRenewalReceiptMinIntervalHours
 	if cfg.RenewalReceiptMinIntervalHours != nil {
 		hours = *cfg.RenewalReceiptMinIntervalHours

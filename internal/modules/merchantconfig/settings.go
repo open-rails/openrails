@@ -73,6 +73,7 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 	}
 	cfg.CollectionThreshold, cfg.MonthlyFloor, cfg.ArrearsDelinquencyFloor = in.CollectionThreshold, in.MonthlyFloor, in.ArrearsDelinquencyFloor
 	cfg.RepriceNoticeWindowDays, cfg.RenewalReceiptMinIntervalHours, cfg.ArrearsGraceDays = in.RepriceNoticeWindowDays, in.RenewalReceiptMinIntervalHours, in.ArrearsGraceDays
+	cfg.ChargeReceipts = in.ChargeReceipts
 	if in.BillingPeriodBoundary != "" {
 		if NormalizeBillingBoundary(in.BillingPeriodBoundary) == "" {
 			return Settings{}, fmt.Errorf("invalid billing_period_boundary %q", in.BillingPeriodBoundary)

@@ -26,6 +26,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/modules/attempts"
 	"github.com/open-rails/openrails/internal/modules/collection"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 	"github.com/open-rails/openrails/internal/modules/orders/usage"
 	"github.com/open-rails/openrails/internal/modules/payments"
@@ -524,8 +525,14 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			return fmt.Errorf("order %s no longer accepts the frozen amount %d; confirmed charge %s needs repair: %w", p.OrderID, p.Amount, transactionID, err)
 		}
 		if p.Initiator == charge.InitiatorMerchant {
-			if err := queueUsageReceipt(ctx, q, intent.MerchantID, paid, p.PaymentID, chargedAmount, currency, now); err != nil {
+			enabled, err := merchantconfig.NewStore(h.DB).ChargeReceiptsEnabled(ctx)
+			if err != nil {
 				return err
+			}
+			if enabled {
+				if err := queueUsageReceipt(ctx, q, intent.MerchantID, paid, p.PaymentID, chargedAmount, currency, now); err != nil {
+					return err
+				}
 			}
 		}
 		if err := usage.EndCollection(ctx, q, intent.MerchantID, p.OrderID, intent.ID, true, nil, now); err != nil {

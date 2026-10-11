@@ -38,6 +38,9 @@ type MerchantConfiguration struct {
 	// Nil ⇒ DefaultPriceIncreaseNoticeDays; zero enforces none.
 	RepriceNoticeWindowDays *int `json:"reprice_notice_window_days,omitempty"`
 
+	// ChargeReceipts enables optional successful-charge receipts; absent is off.
+	ChargeReceipts *bool `json:"charge_receipts,omitempty"`
+
 	// RenewalReceiptMinIntervalHours spaces renewal receipts per subscription.
 	// Nil ⇒ subscriptions.DefaultRenewalReceiptMinIntervalHours; zero sends
 	// one receipt per renewal.

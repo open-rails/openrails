@@ -123,8 +123,8 @@ func (c *customer) renewedReceipts() []map[string]any {
 	return receipts
 }
 
-// Renewal receipts are spaced by the merchant's policy (default: one per
-// subscription per day). Hourly and daily members get at most one per day;
+// Enabled renewal receipts are spaced by the merchant's policy (default:
+// one per subscription per day). Hourly and daily members get at most one per day;
 // a monthly member gets exactly one per renewal.
 func TestCadenceRenewalReceipts(t *testing.T) {
 	t.Parallel()
@@ -137,7 +137,10 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 	} {
 		t.Run(fmt.Sprintf("%dh", row.hours), func(t *testing.T) {
 			t.Parallel()
-			w := newWorld(t)
+			w := prepareWorld(t, 12)
+			enabled := true
+			w.settings.ChargeReceipts = &enabled
+			w.start()
 			price := w.cadencePrice(embedded, "receipts", "content:receipts", 1_990_000, row.hours)
 			c := w.newCustomer()
 			sub := c.subscribe(embedded, "stripe", price.ID.String(), "content:receipts", c.saveCard("stripe", visa))
@@ -166,6 +169,30 @@ func TestCadenceRenewalReceipts(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRoutineChargeReceiptsOptIn(t *testing.T) {
+	w := newVaultWorld(t)
+	price := w.cadencePrice(embedded, "optional-receipts", "content:optional-receipts", 1_990_000, 720)
+	c := w.newCustomer()
+	sub := c.subscribe(embedded, "stripe", price.ID.String(), "content:optional-receipts", c.saveCard("stripe", visa))
+	renew := func() {
+		end := *w.subscription(embedded, sub).CurrentPeriodEndsAt
+		w.advanceHealthyTo(end.Add(time.Second))
+		w.runRenewals()
+		require.True(t, w.subscription(embedded, sub).CurrentPeriodEndsAt.After(end))
+	}
+	renew()
+	require.Empty(t, c.renewedReceipts(), "optional receipt defaults off while the renewal still charges")
+	enabled := true
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{ChargeReceipts: &enabled}))
+	renew()
+	require.Len(t, c.renewedReceipts(), 1)
+	enabled = false
+	require.NoError(t, w.applySettings(t.Context(), billing.MerchantSettings{ChargeReceipts: &enabled}))
+	renew()
+	require.Len(t, c.renewedReceipts(), 1, "explicit false disables future routine receipts")
+	require.Len(t, completed(w.payments(embedded, c.id)), 4, "preferences never change billing")
 }
 
 // staffJSON posts a JSON body to a merchant route with the staff credential.

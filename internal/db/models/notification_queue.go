@@ -88,7 +88,7 @@ func (nq *NotificationQueue) DataJSONB() ([]byte, error) { return json.Marshal(n
 
 // View is the wire shape of the row.
 func (nq *NotificationQueue) View() billing.Notification {
-	return billing.Notification{ID: billing.NotificationID(nq.ID), MerchantID: billing.MerchantID(nq.MerchantID), CustomerID: billing.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, ReadAt: nq.ReadAt, CreatedAt: nq.CreatedAt}
+	return billing.Notification{ID: billing.NotificationID(nq.ID), MerchantID: billing.MerchantID(nq.MerchantID), CustomerID: billing.CustomerID(nq.CustomerID), EventType: string(nq.EventType), Data: nq.Data, Seen: nq.Seen, ReadAt: nq.ReadAt, ActionRequested: billing.CustomerNotificationActionRequested(string(nq.EventType)), CreatedAt: nq.CreatedAt}
 }
 
 // IsSeen checks if the notification has been seen by the user
