@@ -217,9 +217,18 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey` | `client.PreviewOrder(`: the preview's `PaymentOptions` |
 | `GetCheckoutConfig(ctx)` | Removed: `GET /v1/me/config` answers a merchant's customers its PSPs as `payment` |
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.OrderID`, `ord_` ids, `billing.Order` |
-| `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
+| `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `authenticate`, `solana_pay`, `solana_sign_transactions`), `url`, `psp_id`, `transactions` and `payload` |
 | `CheckoutPaymentOptions` (`Card`, `Rail`, flat `NameOnCard`, `Address1`, `Zip`, …) | Removed: a Client never pays; the customer's order payment names a saved card, a token with `billing.BillingDetails`, a Solana token or a return URL |
 | `CreatePaymentMethodSession`, `CreateSolanaCancelSession`, `CreateSolanaTierChangeSession` | Removed |
+
+Checkouts in flight at the upgrade complete. A Stripe Checkout page opened
+before the upgrade and paid after it is booked from its checkout attempt's
+accepted terms (credits included) when `checkout.session.completed` arrives,
+so keep that event, and `checkout.session.async_payment_succeeded`, enabled
+for a day after upgrading. A card sale still pending settles through its
+provider operation, and a Solana transfer for a transaction already handed to
+the wallet is credited. A checkout not yet paid cannot be paid after the
+upgrade; its buyer buys through an order.
 
 ### Subscriptions
 
