@@ -15,13 +15,13 @@ func pspWriteErrors(own ...string) []string {
 var pspsRoutes = []Route{
 	{Method: GET, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListPSPs",
 		Query: params(queryOf(handlers.PSPListQuery{}), idsParam, integer("limit"), text("cursor")), Responses: []Reply{{200, billing.ListPage[billing.PSP]{}}}, Errors: codes("invalid_cursor", "invalid_param", "invalid_query", "service_unavailable"), Handler: h(handlers.ListPSPs)},
-	{Method: POST, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreatePSP", Sensitive: true, When: FeatureMerchantConfigManages,
+	{Method: POST, Path: "/v1/merchant/psps", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreatePSP", When: FeatureMerchantConfigManages,
 		Request: billing.CreatePSPParams{}, Responses: []Reply{{201, billing.PSP{}}}, Errors: pspWriteErrors("psp_claim_requires_proof", "psp_exists", "psp_key_taken"), Handler: h(handlers.CreatePSP)},
 	{Method: GET, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetPSP",
 		Responses: []Reply{{200, billing.PSP{}}}, Errors: codes("invalid_param", "psp_not_found", "service_unavailable"), Handler: h(handlers.GetPSP)},
 	// Settings change, credentials rotate and the PSP archives here. Archiving
 	// never calls the provider: a terminated account archives too.
-	{Method: PATCH, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdatePSP", Sensitive: true, When: FeatureMerchantConfigManages,
+	{Method: PATCH, Path: "/v1/merchant/psps/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdatePSP", When: FeatureMerchantConfigManages,
 		Request: billing.UpdatePSPParams{}, Responses: []Reply{{200, billing.PSP{}}}, Errors: pspWriteErrors("psp_last_active", "psp_not_found"), Handler: h(handlers.UpdatePSP)},
 	// or#288: which PSP a checkout would get, and why. A projection of the
 	// PSP catalog, so it takes the same read.
@@ -31,7 +31,7 @@ var pspsRoutes = []Route{
 	// reads each PSP's catalog for drift, which it records as findings: a
 	// heavy pull that may overwrite local state, so it is the merchant
 	// configuration's.
-	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: MerchantConfig, Auth: AuthMerchant, Name: "RefreshPSPs", Sensitive: true,
+	{Method: POST, Path: "/v1/merchant/psps/refresh", Group: MerchantConfig, Auth: AuthMerchant, Name: "RefreshPSPs",
 		Responses: []Reply{{202, billing.PSPRefresh{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RefreshPSPs)},
 
 	// The provider callback surface. The provider's account identity resolves

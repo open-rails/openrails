@@ -14,13 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// SEC: the standalone server asks AuthKit for a recent sign-in (Sensitive)
-// before an owner moves money or grants access, and offers the same check
-// (CheckRecentSignIn) to a hosted product's credential changes. A live owner
-// session whose sign-in is stale, as a stolen token's is, gets 401
-// step_up_required (RFC 9470) with AuthKit's step-up methods; a recent
-// sign-in, and the owner's API key, pass. Reads need no step-up.
-func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
+// OpenRails admin operations rely on permission rather than a recent
+// sign-in. AuthKit still exposes its recent-sign-in check for credential
+// and role grants, so the same stale session fails that check directly.
+func TestSecurityOwnerOperationsNeedNoRecentSignIn(t *testing.T) {
 	f := newFixture(t)
 	cp := f.newServer(t, edits(reserving(), resourced))
 	handler, err := standaloneHandler(cp)
@@ -47,11 +44,9 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		{http.MethodPost, "/v1/merchant/billing-import", map[string]any{}},
 	} {
 		w := staleAt.call(t, handler, op.method, op.path, op.body)
-		require.Equal(t, http.StatusUnauthorized, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
-		require.Contains(t, w.Body.String(), `"code":"step_up_required"`, "%s %s", op.method, op.path)
-		require.Contains(t, w.Header().Get("WWW-Authenticate"), `error="insufficient_user_authentication"`)
-		require.Contains(t, w.Header().Get("WWW-Authenticate"), `max_age=900`)
-		require.Contains(t, w.Body.String(), `"max_age":900`, "AuthKit's challenge reaches the client: %s", w.Body.String())
+		require.NotContains(t, []int{http.StatusUnauthorized, http.StatusForbidden}, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
+		require.NotContains(t, w.Body.String(), "step_up_required", "%s %s", op.method, op.path)
+		require.Empty(t, w.Header().Get("WWW-Authenticate"))
 
 		w = freshAt.call(t, handler, op.method, op.path, op.body)
 		require.NotContains(t, w.Body.String(), "step_up_required", "%s %s, fresh", op.method, op.path)

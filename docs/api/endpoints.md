@@ -92,11 +92,9 @@ pair is in [routes.md](routes.md)), whatever the credential: the `merchant:`
 name held at the merchant, or the `root:` name held in the root scope
 ([auth](../auth.md#permissions)). On the standalone server an API key carries its role's, a trusted issuer's token
 the `permissions` it asserts within its ceiling, and a user session the user's
-role in the merchant's group. A person also needs a recent sign-in on a
-`sensitive` route: otherwise `401 step_up_required` (RFC 9470: `WWW-Authenticate:
-Bearer error="insufficient_user_authentication", max_age="900"`), with the
-step-up methods in `metadata`, or `403 step_up_unavailable` for a credential
-with no sign-in of its own; an application never steps up. A `/v1/app` route refuses a person
+role in the merchant's group. Admin operations do not require a recent
+sign-in. Customer-network routes marked `sensitive` retain their
+recent-sign-in policy. A `/v1/app` route refuses a person
 (`403 application_required`), and answers a retried write's `Idempotency-Key`
 with the first response; the key sent with another request is
 `422 idempotency_key_reused`.
@@ -223,8 +221,8 @@ subscription to another price of its tier group, to other seats, or both:
 - **A change back** to the subscription's current price and seats cancels its
   pending change and charges nothing.
 - **Staff** change a subscription at the customer's request through
-  `POST /v1/admin/subscriptions/{id}/change`, which needs a recent sign-in and
-  a `reason`. It behaves as the customer's own change: an upgrade or more
+  `POST /v1/admin/subscriptions/{id}/change`, which needs the staff write
+  permission and a `reason`. It behaves as the customer's own change: an upgrade or more
   seats is charged now, merchant-initiated under the card's recurring
   agreement (`409 stored_credential_required` when the card has none
   active), and fewer seats or a downgrade wait for the renewal. The reason and

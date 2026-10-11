@@ -57,10 +57,10 @@ var ordersRoutes = []Route{
 		Query: params(cursorPage, idsParam, text("customer_id"), text("price_id"), text("subscription_id"), text("status"), text("origin"), text("overdue")), Responses: []Reply{{200, billing.ListPage[billing.Order]{}}}, Errors: codes("invalid_cursor", "invalid_query", "service_unavailable"), Handler: h(handlers.ListOrders)},
 	{Method: GET, Path: "/v1/admin/orders/{id}", Group: Admin, Auth: AuthMerchant, Name: "GetOrder", Level: LevelRead,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: orderReadErrors, Handler: h(handlers.GetOrder)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/void", Group: Admin, Auth: AuthMerchant, Name: "VoidOrder", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
+	{Method: POST, Path: "/v1/admin/orders/{id}/void", Group: Admin, Auth: AuthMerchant, Name: "VoidOrder", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.VoidOrder)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationDestructive,
+	{Method: POST, Path: "/v1/admin/orders/{id}/mark-uncollectible", Group: Admin, Auth: AuthMerchant, Name: "MarkOrderUncollectible", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: usageActionErrors, Handler: h(handlers.MarkOrderUncollectible)},
-	{Method: POST, Path: "/v1/admin/orders/{id}/retry-collection", Group: Admin, Auth: AuthMerchant, Name: "RetryOrderCollection", Level: LevelUpdate, Sensitive: true, Limit: middleware.AdminOperationOffChannel, IdempotencyKey: true,
+	{Method: POST, Path: "/v1/admin/orders/{id}/retry-collection", Group: Admin, Auth: AuthMerchant, Name: "RetryOrderCollection", Level: LevelUpdate, Limit: middleware.AdminOperationOffChannel, IdempotencyKey: true,
 		Request: billing.RetryOrderCollectionParams{}, Responses: []Reply{{200, billing.Order{}}}, Errors: usageRetryErrors, Handler: h(handlers.RetryOrderCollection)},
 }
