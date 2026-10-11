@@ -154,9 +154,12 @@ it("reads and writes the range in the URL", () => {
   expect(widgetQuery(today, { preset: "7d" })).toBe(today.query)
 })
 
-
 it("keeps existing widget presentation editable without AI authoring", async () => {
-  routes["POST /admin/metrics/query"] = { range: today.query.range, columns: [], rows: [] }
+  routes["POST /admin/metrics/query"] = {
+    range: today.query.range,
+    columns: [],
+    rows: [],
+  }
   const saved = vi.fn()
   await mount(
     <QueryClientProvider client={client()}>
@@ -170,6 +173,12 @@ it("keeps existing widget presentation editable without AI authoring", async () 
   expect(document.body.textContent).not.toContain("Refine")
   expect(document.querySelector("textarea")).toBeNull()
   await click("Save changes")
-  expect(saved).toHaveBeenCalledWith({ title: today.title, viz: today.viz, fixed_range: true })
-  expect(requests.some((request) => request.path.includes("widgets/generate"))).toBe(false)
+  expect(saved).toHaveBeenCalledWith({
+    title: today.title,
+    viz: today.viz,
+    fixed_range: true,
+  })
+  expect(
+    requests.some((request) => request.path.includes("widgets/generate"))
+  ).toBe(false)
 })
