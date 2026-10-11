@@ -10593,6 +10593,966 @@
           "request"
         ]
       }
+    },
+    "/v1/network/links": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NetworkLink"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/subscriptions": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NetworkSubscription"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/orders": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/NetworkOrder"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}": {
+      "delete": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_param",
+          "network_link_in_use",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/revoke-authority": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentAuthorityRevocation"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/subscriptions/{id}": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_param",
+          "resource_not_found",
+          "subscription_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/subscriptions/{id}/cancel": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerCancelSubscriptionParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "authentication_required",
+          "cancel_unsupported_on_rail",
+          "invalid_param",
+          "payment_in_progress",
+          "provider_cancel_held",
+          "service_unavailable",
+          "solana_rpc_unavailable",
+          "solana_transaction_refused",
+          "subscription_not_active",
+          "subscription_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/subscriptions/{id}/resume": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "authentication_required",
+          "invalid_param",
+          "service_unavailable",
+          "subscription_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/subscriptions/{id}/payment-method": {
+      "put": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSubscriptionPaymentMethodParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Subscription"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "authentication_required",
+          "card_declined",
+          "default_payment_method_required",
+          "invalid_param",
+          "payment_method_not_psp_vaulted",
+          "payment_method_psp_mismatch",
+          "payment_method_same_vault",
+          "payment_method_stale",
+          "payment_provider_rejected",
+          "rebill_terms_committed",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/payment-methods": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PaymentMethod"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_cursor"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      },
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentMethodParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentMethod"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "card_attempts_blocked",
+          "card_declined",
+          "card_not_saved",
+          "card_requires_https",
+          "invalid_param",
+          "payment_duplicate_refused",
+          "payment_method_stale",
+          "payment_provider_rejected",
+          "provider_outcome_unknown",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/payment-methods/{id}": {
+      "delete": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Accepted"
+          },
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "invalid_param",
+          "payment_method_delete_failed",
+          "payment_method_delete_unsupported",
+          "rate_limit_exceeded",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/orders/{id}": {
+      "get": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/orders/{id}/pay": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PayOrderParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "card_attempts_blocked",
+          "card_declined",
+          "customer_action_required",
+          "idempotency_key_in_use",
+          "idempotency_key_required",
+          "idempotency_key_reused",
+          "invalid_param",
+          "order_not_payable",
+          "order_payment_in_progress",
+          "order_total_changed",
+          "payment_failed",
+          "payment_method_stale",
+          "payment_option_unavailable",
+          "payment_provider_rejected",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network",
+          "request"
+        ]
+      }
+    },
+    "/v1/network/links/{link_id}/orders/{id}/confirm": {
+      "post": {
+        "tags": [
+          "network"
+        ],
+        "parameters": [
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Order"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "network",
+        "x-openrails-sensitive": true,
+        "x-openrails-mounted-when": "customer_network",
+        "x-openrails-errors": [
+          "card_declined",
+          "customer_action_required",
+          "customer_session_required",
+          "payment_failed",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:network"
+        ]
+      }
     }
   },
   "components": {
@@ -15240,6 +16200,7 @@
             "enum": [
               "customer.network_linked",
               "customer.network_unlinked",
+              "customer.payment_authority_revoked",
               "delinquency.cleared",
               "delinquency.entered",
               "delinquency.grace",
@@ -15317,6 +16278,16 @@
                 "type": "null"
               }
             ]
+          },
+          "payment_authority": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentAuthorityHostEvent"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -15329,7 +16300,8 @@
           "delinquency",
           "product_entitlements",
           "order",
-          "customer_network"
+          "customer_network",
+          "payment_authority"
         ]
       },
       "HostEventLookup": {
@@ -16800,6 +17772,21 @@
           }
         }
       },
+      "NetworkLink": {
+        "type": "object",
+        "properties": {
+          "link": {
+            "$ref": "#/components/schemas/CustomerLink"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/PublicMerchant"
+          }
+        },
+        "required": [
+          "link",
+          "merchant"
+        ]
+      },
       "NetworkLinkChallenge": {
         "type": "object",
         "properties": {
@@ -16818,6 +17805,44 @@
           "id",
           "nonce",
           "expires_at"
+        ]
+      },
+      "NetworkOrder": {
+        "type": "object",
+        "properties": {
+          "link_id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "order": {
+            "$ref": "#/components/schemas/Order"
+          }
+        },
+        "required": [
+          "link_id",
+          "merchant_id",
+          "order"
+        ]
+      },
+      "NetworkSubscription": {
+        "type": "object",
+        "properties": {
+          "link_id": {
+            "type": "string"
+          },
+          "merchant_id": {
+            "type": "string"
+          },
+          "subscription": {
+            "$ref": "#/components/schemas/Subscription"
+          }
+        },
+        "required": [
+          "link_id",
+          "merchant_id",
+          "subscription"
         ]
       },
       "NewPriceDraft": {
@@ -18651,6 +19676,51 @@
           "enriched_at",
           "mandate_id",
           "sent_initial_transaction_id"
+        ]
+      },
+      "PaymentAuthorityHostEvent": {
+        "type": "object",
+        "properties": {
+          "customer_id": {
+            "type": "string"
+          },
+          "revoked_mandates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "customer_id",
+          "revoked_mandates"
+        ]
+      },
+      "PaymentAuthorityRevocation": {
+        "type": "object",
+        "properties": {
+          "merchant_id": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "revoked_mandates": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "revoked_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "merchant_id",
+          "customer_id",
+          "revoked_mandates",
+          "revoked_at"
         ]
       },
       "PaymentConfig": {
@@ -22601,6 +23671,28 @@
       "merchant_unresolved",
       "permission_required",
       "rate_limit_exceeded",
+      "step_up_required",
+      "step_up_unavailable"
+    ],
+    "tier:network": [
+      "authentication_required",
+      "authentication_unavailable",
+      "authorization_unavailable",
+      "captcha_invalid",
+      "captcha_required",
+      "credential_expired",
+      "credential_revoked",
+      "database_busy",
+      "internal_error",
+      "merchant_binding_mismatch",
+      "merchant_directory_unavailable",
+      "merchant_not_found",
+      "merchant_selector_invalid",
+      "merchant_unresolved",
+      "network_terms_required",
+      "permission_required",
+      "rate_limit_exceeded",
+      "resource_not_found",
       "step_up_required",
       "step_up_unavailable"
     ],

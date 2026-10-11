@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (176), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (191), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -255,3 +255,25 @@ Inbound provider callbacks.
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
 | POST | `/v1/webhooks/{rail}/{account_id}` | provider_signature | — | `application/json` | 200 `WebhookReceipt` |  |
+
+## Customer network (`/v1/network`)
+
+The openrails.dev account across the merchants it is linked at, where the standalone server runs the customer network: an account of the server's own signed in to it, having accepted the network terms. At `{merchant_id}` it acts as the customer its link there names, through the same operations as `/v1/me`; a sensitive route needs a recent sign-in.
+
+| Method | Path | Tier | Permission | Request | Response | Notes |
+|---|---|---|---|---|---|---|
+| GET | `/v1/network/links` | network | — | — | 200 `ListPage<NetworkLink>` | when `customer_network` |
+| GET | `/v1/network/subscriptions` | network | — | — | 200 `ListPage<NetworkSubscription>` | when `customer_network` |
+| GET | `/v1/network/orders` | network | — | — | 200 `ListPage<NetworkOrder>` | when `customer_network` |
+| DELETE | `/v1/network/links/{link_id}` | network | — | — | 204 — | when `customer_network`; sensitive |
+| POST | `/v1/network/links/{link_id}/revoke-authority` | network | — | — | 200 `PaymentAuthorityRevocation` | when `customer_network`; sensitive |
+| GET | `/v1/network/links/{link_id}/subscriptions/{id}` | network | — | — | 200 `Subscription` | when `customer_network` |
+| POST | `/v1/network/links/{link_id}/subscriptions/{id}/cancel` | network | — | `CustomerCancelSubscriptionParams` | 200 `Subscription` | when `customer_network`; sensitive |
+| POST | `/v1/network/links/{link_id}/subscriptions/{id}/resume` | network | — | — | 200 `Subscription` | when `customer_network`; sensitive |
+| PUT | `/v1/network/links/{link_id}/subscriptions/{id}/payment-method` | network | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | when `customer_network`; sensitive |
+| GET | `/v1/network/links/{link_id}/payment-methods` | network | — | — | 200 `ListPage<PaymentMethod>` | when `customer_network` |
+| POST | `/v1/network/links/{link_id}/payment-methods` | network | — | `CreatePaymentMethodParams` | 201 `PaymentMethod` | when `customer_network`; sensitive |
+| DELETE | `/v1/network/links/{link_id}/payment-methods/{id}` | network | — | — | 202 —<br>204 — | when `customer_network`; sensitive |
+| GET | `/v1/network/links/{link_id}/orders/{id}` | network | — | — | 200 `Order` | when `customer_network` |
+| POST | `/v1/network/links/{link_id}/orders/{id}/pay` | network | — | `PayOrderParams` | 200 `Order` | when `customer_network`; sensitive; `Idempotency-Key` |
+| POST | `/v1/network/links/{link_id}/orders/{id}/confirm` | network | — | — | 200 `Order` | when `customer_network`; sensitive |

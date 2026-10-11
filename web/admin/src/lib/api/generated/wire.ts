@@ -1027,7 +1027,7 @@ export type HeldEntitlements = {
 export type HostEvent = {
   id: string
   merchant_id: string
-  type: "customer.network_linked" | "customer.network_unlinked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
+  type: "customer.network_linked" | "customer.network_unlinked" | "customer.payment_authority_revoked" | "delinquency.cleared" | "delinquency.entered" | "delinquency.grace" | "order.canceled" | "order.completed" | "order.expired" | "order.payment_failed" | "order.requires_action" | "order.voided" | "payment.settled" | "product.entitlements_changed"
   occurred_at: string
   acknowledged_at: string | null
   payment: PaymentSettledEvent | null
@@ -1035,6 +1035,7 @@ export type HostEvent = {
   product_entitlements: ProductEntitlementsChangedEvent | null
   order: OrderHostEvent | null
   customer_network: CustomerNetworkHostEvent | null
+  payment_authority: PaymentAuthorityHostEvent | null
 }
 
 export type HostEventLookup = {
@@ -1335,10 +1336,27 @@ export type MintCheckoutSessionParams = {
   success_url?: string
 }
 
+export type NetworkLink = {
+  link: CustomerLink
+  merchant: PublicMerchant
+}
+
 export type NetworkLinkChallenge = {
   id: string
   nonce: string
   expires_at: string
+}
+
+export type NetworkOrder = {
+  link_id: string
+  merchant_id: string
+  order: Order
+}
+
+export type NetworkSubscription = {
+  link_id: string
+  merchant_id: string
+  subscription: Subscription
 }
 
 export type NewPriceDraft = {
@@ -1700,6 +1718,18 @@ export type PaymentAttempt = {
   enriched_at: string | null
   mandate_id: string | null
   sent_initial_transaction_id: string
+}
+
+export type PaymentAuthorityHostEvent = {
+  customer_id: string
+  revoked_mandates: string[]
+}
+
+export type PaymentAuthorityRevocation = {
+  merchant_id: string
+  customer_id: string
+  revoked_mandates: string[]
+  revoked_at: string
 }
 
 export type PaymentConfig = {

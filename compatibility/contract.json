@@ -264,7 +264,7 @@
       "const (\n\tErrorTypeInvalidRequest = \"invalid_request_error\"\n\tErrorTypeAuthentication = \"authentication_error\"\n\tErrorTypeAuthorization  = \"authorization_error\"\n\tErrorTypeCard           = \"card_error\"\n\tErrorTypeRateLimit      = \"rate_limit_error\"\n\tErrorTypeAPI            = \"api_error\"\n)",
       "const (\n\tFindingApprove FindingOutcome = \"approve\"\n\n\tFindingIgnore FindingOutcome = \"ignore\"\n)",
       "const (\n\tGrantReasonComp   GrantReason = \"comp\"\n\tGrantReasonStaff  GrantReason = \"staff\"\n\tGrantReasonImport GrantReason = \"import\"\n\n\tGrantReasonMigration GrantReason = \"migration\"\n)",
-      "const (\n\tHostEventPaymentSettled     HostEventType = \"payment.settled\"\n\tHostEventDelinquencyGrace   HostEventType = \"delinquency.grace\"\n\tHostEventDelinquencyEntered HostEventType = \"delinquency.entered\"\n\tHostEventDelinquencyCleared HostEventType = \"delinquency.cleared\"\n\n\tHostEventProductEntitlementsChanged HostEventType = \"product.entitlements_changed\"\n\n\tHostEventOrderCompleted      HostEventType = \"order.completed\"\n\tHostEventOrderRequiresAction HostEventType = \"order.requires_action\"\n\tHostEventOrderPaymentFailed  HostEventType = \"order.payment_failed\"\n\tHostEventOrderCanceled       HostEventType = \"order.canceled\"\n\tHostEventOrderExpired        HostEventType = \"order.expired\"\n\n\tHostEventOrderVoided HostEventType = \"order.voided\"\n\n\tHostEventCustomerNetworkLinked   HostEventType = \"customer.network_linked\"\n\tHostEventCustomerNetworkUnlinked HostEventType = \"customer.network_unlinked\"\n)",
+      "const (\n\tHostEventPaymentSettled     HostEventType = \"payment.settled\"\n\tHostEventDelinquencyGrace   HostEventType = \"delinquency.grace\"\n\tHostEventDelinquencyEntered HostEventType = \"delinquency.entered\"\n\tHostEventDelinquencyCleared HostEventType = \"delinquency.cleared\"\n\n\tHostEventProductEntitlementsChanged HostEventType = \"product.entitlements_changed\"\n\n\tHostEventOrderCompleted      HostEventType = \"order.completed\"\n\tHostEventOrderRequiresAction HostEventType = \"order.requires_action\"\n\tHostEventOrderPaymentFailed  HostEventType = \"order.payment_failed\"\n\tHostEventOrderCanceled       HostEventType = \"order.canceled\"\n\tHostEventOrderExpired        HostEventType = \"order.expired\"\n\n\tHostEventOrderVoided HostEventType = \"order.voided\"\n\n\tHostEventCustomerNetworkLinked   HostEventType = \"customer.network_linked\"\n\tHostEventCustomerNetworkUnlinked HostEventType = \"customer.network_unlinked\"\n\n\tHostEventCustomerPaymentAuthorityRevoked HostEventType = \"customer.payment_authority_revoked\"\n)",
       "const (\n\tInvoiceActionVoid            InvoiceAction = \"void\"\n\tInvoiceActionUncollectible   InvoiceAction = \"mark_uncollectible\"\n\tInvoiceActionRecordPayment   InvoiceAction = \"record_payment\"\n\tInvoiceActionRetryCollection InvoiceAction = \"retry_collection\"\n)",
       "const (\n\tInvoiceDraft         InvoiceStatus = \"draft\"\n\tInvoiceOpen          InvoiceStatus = \"open\"\n\tInvoicePaid          InvoiceStatus = \"paid\"\n\tInvoiceVoided        InvoiceStatus = \"voided\"\n\tInvoiceUncollectible InvoiceStatus = \"uncollectible\"\n)",
       "const (\n\tInvokerTypeCustomer InvokerType = \"customer\"\n\n\tInvokerTypeDelegated InvokerType = \"delegated\"\n)",
@@ -707,7 +707,7 @@
       "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n}",
       "type GrantReason string",
       "type HeldEntitlements struct {\n\tKeys      []string `json:\"keys\"`\n\tTruncated bool     `json:\"truncated\"`\n}",
-      "type HostEvent struct {\n\tID             HostEventID           `json:\"id\"`\n\tMerchantID     MerchantID            `json:\"merchant_id\"`\n\tType           HostEventType         `json:\"type\"`\n\tOccurredAt     time.Time             `json:\"occurred_at\"`\n\tAcknowledgedAt *time.Time            `json:\"acknowledged_at\"`\n\tPayment        *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency    *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n}",
+      "type HostEvent struct {\n\tID             HostEventID           `json:\"id\"`\n\tMerchantID     MerchantID            `json:\"merchant_id\"`\n\tType           HostEventType         `json:\"type\"`\n\tOccurredAt     time.Time             `json:\"occurred_at\"`\n\tAcknowledgedAt *time.Time            `json:\"acknowledged_at\"`\n\tPayment        *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency    *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n\n\tPaymentAuthority *PaymentAuthorityHostEvent `json:\"payment_authority\"`\n}",
       "type HostEventID uuid.UUID",
       "type HostEventListParams struct {\n\tPageRequest\n\tIDs                 []HostEventID\n\tType                HostEventType\n\tIncludeAcknowledged bool\n\tPaymentID           PaymentID\n}",
       "type HostEventLookup struct {\n\tHostEvents map[HostEventID]*HostEvent `json:\"host_events\"`\n}",
@@ -769,7 +769,10 @@
       "type MigrationFallback string",
       "type NetworkAccountID uuid.UUID",
       "type NetworkCustomerListParams struct {\n\tNetworkAccountID NetworkAccountID `form:\"-\"`\n}",
+      "type NetworkLink struct {\n\tLink     CustomerLink   `json:\"link\"`\n\tMerchant PublicMerchant `json:\"merchant\"`\n}",
       "type NetworkLinkChallenge struct {\n\tID        string    `json:\"id\"`\n\tNonce     string    `json:\"nonce\"`\n\tExpiresAt time.Time `json:\"expires_at\"`\n}",
+      "type NetworkOrder struct {\n\tLinkID     CustomerLinkID `json:\"link_id\"`\n\tMerchantID MerchantID     `json:\"merchant_id\"`\n\tOrder      Order          `json:\"order\"`\n}",
+      "type NetworkSubscription struct {\n\tLinkID       CustomerLinkID `json:\"link_id\"`\n\tMerchantID   MerchantID     `json:\"merchant_id\"`\n\tSubscription Subscription   `json:\"subscription\"`\n}",
       "type NewPriceDraft struct {\n\tProductKey  string            `json:\"product_key\"`\n\tReviewText  string            `json:\"review_text\"`\n\tCreatePrice CreatePriceParams `json:\"create_price\"`\n}",
       "type NextAction struct {\n\tType         string            `json:\"type\"`\n\tURL          *string           `json:\"url\"`\n\tTransactions []string          `json:\"transactions\"`\n\tPSPID        *PSPID            `json:\"psp_id\"`\n\tPayload      map[string]string `json:\"payload\"`\n}",
       "type Notification struct {\n\tID         NotificationID   `json:\"id\"`\n\tCustomerID CustomerID       `json:\"customer_id\"`\n\tEventType  string           `json:\"event_type\"`\n\tData       NotificationData `json:\"data\"`\n\tSeen       bool             `json:\"seen\"`\n\tCreatedAt  time.Time        `json:\"created_at\"`\n}",
@@ -816,6 +819,8 @@
       "type PaymentAttempt struct {\n\tID PaymentAttemptID `json:\"id\"`\n\n\tKind string `json:\"kind\"`\n\n\tOwner string `json:\"owner\"`\n\n\tCardEntry string `json:\"card_entry\"`\n\n\tSource       string        `json:\"source\"`\n\tObservedVia  string        `json:\"observed_via\"`\n\tCategory     string        `json:\"category\"`\n\tReason       DeclineReason `json:\"reason\"`\n\tAction       string        `json:\"action\"`\n\tResponseCode string        `json:\"response_code\"`\n\tResponseText string        `json:\"response_text\"`\n\n\tIssuerCode string `json:\"issuer_code\"`\n\tIssuerText string `json:\"issuer_text\"`\n\tAVSResult  string `json:\"avs_result\"`\n\tCVVResult  string `json:\"cvv_result\"`\n\n\tCard          *CardDetails `json:\"card\"`\n\tCardBIN       string       `json:\"card_bin\"`\n\tTokenType     string       `json:\"token_type\"`\n\tTransactionID string       `json:\"transaction_id\"`\n\tRail          string       `json:\"rail\"`\n\tPSPID         PSPID        `json:\"psp_id\"`\n\tCustomerID    CustomerID   `json:\"customer_id\"`\n\tAmount        int64        `json:\"amount,string\"`\n\tCurrency      string       `json:\"currency\"`\n\tAttemptedAt   time.Time    `json:\"attempted_at\"`\n\n\tInvoiceID       *InvoiceID       `json:\"invoice_id\"`\n\tOrderID         *OrderID         `json:\"order_id\"`\n\tCycleID         *RenewalID       `json:\"cycle_id\"`\n\tSubscriptionID  *SubscriptionID  `json:\"subscription_id\"`\n\tPaymentMethodID *PaymentMethodID `json:\"payment_method_id\"`\n\tPaymentID       *PaymentID       `json:\"payment_id\"`\n\tEnrichedAt      *time.Time       `json:\"enriched_at\"`\n\n\tMandateID                *MandateID `json:\"mandate_id\"`\n\tSentInitialTransactionID string     `json:\"sent_initial_transaction_id\"`\n}",
       "type PaymentAttemptID uuid.UUID",
       "type PaymentAttemptListParams struct {\n\tPageRequest\n\tIDs                                                    []PaymentAttemptID\n\tKind, Owner, Category, Reason, ResponseCode, CardEntry []string\n\tSource, ObservedVia, AVSResult, CVVResult              []string\n\tPSPID                                                  PSPID\n\tCustomerID                                             CustomerID\n\tPaymentID                                              PaymentID\n\tInvoiceID                                              InvoiceID\n\tOrderID                                                OrderID\n\tSubscriptionID                                         SubscriptionID\n\tCycleID                                                RenewalID\n\tSince, Until                                           time.Time\n}",
+      "type PaymentAuthorityHostEvent struct {\n\tCustomerID      CustomerID  `json:\"customer_id\"`\n\tRevokedMandates []MandateID `json:\"revoked_mandates\"`\n}",
+      "type PaymentAuthorityRevocation struct {\n\tMerchantID      MerchantID  `json:\"merchant_id\"`\n\tCustomerID      CustomerID  `json:\"customer_id\"`\n\tRevokedMandates []MandateID `json:\"revoked_mandates\"`\n\tRevokedAt       time.Time   `json:\"revoked_at\"`\n}",
       "type PaymentChannel string",
       "type PaymentConfig struct {\n\tPSPs []PSPPaymentConfig `json:\"psps\"`\n\n\tSolana *SolanaPaymentConfig `json:\"solana\"`\n}",
       "type PaymentFailure struct {\n\tReason  string `json:\"reason\"`\n\tMessage string `json:\"message\"`\n\tField   string `json:\"field,omitempty\"`\n}",
@@ -1397,6 +1402,7 @@
       "type StripePortalSession struct {\n\tURL string `json:\"url\"`\n}",
       "type WebhookReceipt struct {\n\tStatus string  `json:\"status\"`\n\tCode   *string `json:\"code\"`\n}",
       "type entitlementCursor struct {\n\tCustomer uuid.UUID `json:\"c\"`\n\tKey      string    `json:\"k\"`\n}",
+      "type networkPosition struct {\n\tAt time.Time `json:\"a\"`\n\tM  uuid.UUID `json:\"m\"`\n\tI  uuid.UUID `json:\"i\"`\n}",
       "type stripeThinEnvelope struct {\n\tID            string          `json:\"id\"`\n\tObject        string          `json:\"object\"`\n\tType          string          `json:\"type\"`\n\tAccount       string          `json:\"account\"`\n\tContext       string          `json:\"context\"`\n\tCreated       json.RawMessage `json:\"created\"`\n\tSnapshotEvent string          `json:\"snapshot_event\"`\n\tRelatedObject *struct {\n\t\tID   string `json:\"id\"`\n\t\tType string `json:\"type\"`\n\t\tURL  string `json:\"url\"`\n\t} `json:\"related_object\"`\n\tData struct {\n\t\tObject             json.RawMessage `json:\"object\"`\n\t\tPreviousAttributes json.RawMessage `json:\"previous_attributes\"`\n\t} `json:\"data\"`\n}"
     ],
     "internal/http/routes": [
@@ -1974,6 +1980,9 @@
     "billing/metrics.go": {
       "time": "time"
     },
+    "billing/network.go": {
+      "time": "time"
+    },
     "billing/notifications.go": {
       "time": "time"
     },
@@ -2476,6 +2485,18 @@
       "timeutil": "github.com/open-rails/openrails/internal/shared/timeutil",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil"
+    },
+    "internal/http/handlers/network.go": {
+      "billing": "github.com/open-rails/openrails/billing",
+      "billingservice": "github.com/open-rails/openrails/internal/service",
+      "customernetwork": "github.com/open-rails/openrails/internal/customernetwork",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "httprequest": "github.com/open-rails/openrails/internal/http/request",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "uuid": "github.com/google/uuid"
     },
     "internal/http/handlers/solana_pay.go": {
       "api": "github.com/open-rails/openrails/internal/api",
