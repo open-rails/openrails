@@ -167,7 +167,7 @@ by paying them, never by an API call.
 
 ## Also notified
 
-The customer gets an in-app notification on the two rungs it can act on:
+The customer gets an in-app notification and an email on the two rungs it can act on:
 `account_delinquent` and `account_delinquency_cleared`. Entering grace is silent —
 the collection ladder has already told them the charge failed.
 

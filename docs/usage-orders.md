@@ -57,7 +57,11 @@ uncollectible usage orders without a collection in flight, oldest first.
 Billing an order queues `order_due`; one still owed past its due date queues
 `order_overdue` once, at the next pass; a decline that ends its collection
 (the retry schedule exhausted, or a decline no retry fixes) queues
-`order_collection_stopped`.
+`order_collection_stopped`. Each is also emailed to the customer, as are a
+declined charge (`payment_method_failed`) and a card that needs replacing
+(`payment_method_update_required`). Each links to the merchant profile's
+`billing_url` (else its `support_url`), and the `order_due` email of an order
+charged to the card on file says how to cancel those charges there.
 
 ## Staff actions
 

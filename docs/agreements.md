@@ -46,4 +46,6 @@ open `usage_order`.
 - The customer gets an email: the cancellation of the subscription and when it
   ends, or the end of usage charges and what is still owed.
 - Every receipt of a recurring or usage charge says how to cancel: it links to
-  the merchant profile's `billing_url` (else its `support_url`).
+  the merchant profile's `billing_url` (else its `support_url`). So do the
+  notice of a usage order the card on file will pay (`order_due`) and the
+  advance notice of a subscription's scheduled price or plan change.
