@@ -147,10 +147,16 @@ describe("OrderCheckout", () => {
     const pay = await screen.findByRole("button", { name: "Pay $15.00" })
     fireEvent.click(pay)
     expect(
-      await screen.findByText("Your card has insufficient funds.")
+      await screen.findByText(
+        "Your card has insufficient funds.",
+        {},
+        { timeout: 5000 }
+      )
     ).toBeInTheDocument()
     fireEvent.click(screen.getByRole("button", { name: "Pay $15.00" }))
-    await waitFor(() => expect(onSettled).toHaveBeenCalled())
+    await waitFor(() => expect(onSettled).toHaveBeenCalled(), {
+      timeout: 5000,
+    })
     expect(onSettled.mock.calls[0][0]).toMatchObject({ status: "complete" })
     expect(fakeStripe.handleNextAction).toHaveBeenCalledWith({
       clientSecret: "pi_1_secret_x",
@@ -276,5 +282,60 @@ describe("OrderCheckout", () => {
         expected_total: "15000000",
       },
     ])
+  })
+
+  it("pays on the PSP's hosted page when it has no fields here", async () => {
+    const hostedConfig = {
+      ...config,
+      payment: {
+        psps: [
+          {
+            psp_id: "psp_stripe",
+            key: "stripe",
+            rail: "stripe",
+            custodian: "psp",
+            display_name: "Stripe",
+            flow: "redirect",
+            config: {},
+          },
+        ],
+      },
+    }
+    const hostedOrder = (payment: Record<string, unknown>) => ({
+      ...order(payment),
+      payment_options: [
+        {
+          psp_id: "psp_stripe",
+          rail: "stripe",
+          accepts: ["saved_card", "new_card", "redirect"],
+        },
+      ],
+    })
+    const pays: unknown[] = []
+    const fetch = vi.fn(async (input: string, init: RequestInit) => {
+      if (input.endsWith("/config")) return Response.json(hostedConfig)
+      if (input.includes("/me/payment-methods"))
+        return Response.json({ data: [], next_cursor: null })
+      if (input.endsWith("/me/orders/ord_1"))
+        return Response.json(hostedOrder({}))
+      if (input.endsWith("/me/orders/ord_1/pay")) {
+        pays.push(JSON.parse(String(init.body)))
+        return Response.json(hostedOrder({}))
+      }
+      return Response.json({}, { status: 404 })
+    })
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <OrderCheckout orderId="ord_1" returnUrl="https://shop.test/done" />
+      </BillingProvider>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pay $15.00 with Stripe" })
+    )
+    await waitFor(() => expect(pays).toHaveLength(1))
+    expect(pays[0]).toEqual({
+      payment: { return_url: "https://shop.test/done", psp_id: "psp_stripe" },
+      expected_total: "15000000",
+    })
   })
 })

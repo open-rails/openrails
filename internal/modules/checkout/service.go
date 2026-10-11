@@ -605,7 +605,7 @@ func (s *CheckoutService) processStripePayment(
 		return nil, errors.New("stripe success_url and cancel_url are required")
 	}
 
-	urlStr, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
+	created, err := s.createStripeCheckoutSession(ctx, stripeCheckoutParams{
 		Mode:              "payment",
 		AcceptedPurchase:  req.acceptedPurchase != nil,
 		InlinePrice:       inline,
@@ -624,7 +624,7 @@ func (s *CheckoutService) processStripePayment(
 		Status:      "redirect_required",
 		Action:      "new",
 		Message:     "Redirect to Stripe checkout",
-		RedirectURL: urlStr,
+		RedirectURL: created.URL,
 	}, nil
 }
 
@@ -835,18 +835,31 @@ type stripeCheckoutParams struct {
 	InternalPriceID   string
 	TrialEnd          int64
 	CheckoutAttemptID string
-	IdempotencyKey    string
+	// OrderID names the order a payment-mode session pays.
+	OrderID        string
+	IdempotencyKey string
 }
 
-func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (string, error) {
+// stripeCheckoutSession is a Checkout Session as OpenRails reads it.
+type stripeCheckoutSession struct {
+	ID            string `json:"id"`
+	URL           string `json:"url"`
+	Status        string `json:"status"`
+	PaymentStatus string `json:"payment_status"`
+	PaymentIntent string `json:"payment_intent"`
+	AmountTotal   int64  `json:"amount_total"`
+	Currency      string `json:"currency"`
+}
+
+func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, params stripeCheckoutParams) (stripeCheckoutSession, error) {
 	if params.InlinePrice != nil {
 		if err := moneyutil.RequireFiatCurrency(params.InlinePrice.Currency); err != nil {
-			return "", err
+			return stripeCheckoutSession{}, err
 		}
 	}
 	stripeProc, _, err := subscriptions.RequireStripeSecretKey(ctx, s.Rails)
 	if err != nil {
-		return "", err
+		return stripeCheckoutSession{}, err
 	}
 	values := url.Values{}
 	values.Set("mode", params.Mode)
@@ -863,7 +876,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	}
 	if params.InlinePrice != nil {
 		if params.Mode != "payment" || params.PriceID != "" || params.InlinePrice.AmountMinor < 0 || strings.TrimSpace(params.InlinePrice.Name) == "" {
-			return "", errors.New("invalid inline checkout price")
+			return stripeCheckoutSession{}, errors.New("invalid inline checkout price")
 		}
 		values.Set("line_items[0][price_data][currency]", strings.ToLower(params.InlinePrice.Currency))
 		values.Set("line_items[0][price_data][unit_amount]", strconv.FormatInt(int64(params.InlinePrice.AmountMinor), 10))
@@ -873,9 +886,14 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	}
 	values.Set("line_items[0][quantity]", "1")
 	values.Set("metadata[user_id]", params.UserID)
-	values.Set("metadata[internal_price_id]", params.InternalPriceID)
+	if params.InternalPriceID != "" {
+		values.Set("metadata[internal_price_id]", params.InternalPriceID)
+	}
 	if strings.TrimSpace(params.CheckoutAttemptID) != "" {
 		values.Set("metadata[checkout_attempt_id]", strings.TrimSpace(params.CheckoutAttemptID))
+	}
+	if params.OrderID != "" {
+		values.Set("metadata[order_id]", params.OrderID)
 	}
 	if params.Mode == "subscription" {
 		values.Set("subscription_data[metadata][user_id]", params.UserID)
@@ -890,7 +908,7 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "https://api.stripe.com/v1/checkout/sessions", strings.NewReader(values.Encode()))
 	if err != nil {
-		return "", err
+		return stripeCheckoutSession{}, err
 	}
 	req.Header.Set("Authorization", "Bearer "+strings.TrimSpace(stripeProc.Stripe.SecretKey))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -899,27 +917,27 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 	client := s.StripeClients.Client(s.Config, 0)
 	if params.AcceptedPurchase {
 		if s.PurchaseService == nil || s.PurchaseService.database == nil {
-			return "", errors.New("accepted checkout dispatch database unavailable")
+			return stripeCheckoutSession{}, errors.New("accepted checkout dispatch database unavailable")
 		}
 		mid, err := merchant.Require(ctx)
 		if err != nil {
-			return "", err
+			return stripeCheckoutSession{}, err
 		}
 		id, err := billing.ParseCheckoutAttemptID(params.CheckoutAttemptID)
 		if err != nil {
-			return "", err
+			return stripeCheckoutSession{}, err
 		}
 		claimed, err := s.PurchaseService.database.Gen(ctx).ClaimHostedPurchaseDispatch(ctx, gen.ClaimHostedPurchaseDispatchParams{MerchantID: mid.UUID(), ID: id.UUID()})
 		if err != nil {
-			return "", err
+			return stripeCheckoutSession{}, err
 		}
 		if claimed == 0 {
-			return "", ErrCheckoutAttemptPending
+			return stripeCheckoutSession{}, ErrCheckoutAttemptPending
 		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("stripe checkout failed: %w", err)
+		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout failed: %w", err)
 	}
 	defer resp.Body.Close()
 	body, _ := io.ReadAll(resp.Body)
@@ -928,18 +946,16 @@ func (s *CheckoutService) createStripeCheckoutSession(ctx context.Context, param
 		if msg == "" {
 			msg = fmt.Sprintf("stripe checkout failed (%d)", resp.StatusCode)
 		}
-		return "", errors.New(msg)
+		return stripeCheckoutSession{}, errors.New(msg)
 	}
-	var out struct {
-		URL string `json:"url"`
-	}
+	var out stripeCheckoutSession
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", fmt.Errorf("stripe checkout parse failed: %w", err)
+		return stripeCheckoutSession{}, fmt.Errorf("stripe checkout parse failed: %w", err)
 	}
-	if strings.TrimSpace(out.URL) == "" {
-		return "", errors.New("stripe checkout returned empty URL")
+	if strings.TrimSpace(out.URL) == "" || strings.TrimSpace(out.ID) == "" {
+		return stripeCheckoutSession{}, errors.New("stripe checkout returned no session")
 	}
-	return out.URL, nil
+	return out, nil
 }
 
 func stripeCheckoutIdempotencyKey(key string) string {

@@ -17395,6 +17395,9 @@
           },
           "token_symbol": {
             "type": "string"
+          },
+          "return_url": {
+            "type": "string"
           }
         }
       },

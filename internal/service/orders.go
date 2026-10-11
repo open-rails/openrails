@@ -108,6 +108,7 @@ type orderPayment struct {
 	method uuid.UUID
 	card   *checkout.OrderCard
 	solana *checkout.OrderSolana
+	hosted *checkout.OrderHosted
 }
 
 func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayment, error) {
@@ -117,16 +118,22 @@ func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayme
 		}
 		return orderPayment{}, nil
 	}
-	saved, token, wallet := p.PaymentMethodID != nil && !p.PaymentMethodID.IsZero(), strings.TrimSpace(p.Token) != "", strings.TrimSpace(p.TokenSymbol) != ""
+	saved, token, wallet, hosted := p.PaymentMethodID != nil && !p.PaymentMethodID.IsZero(), strings.TrimSpace(p.Token) != "", strings.TrimSpace(p.TokenSymbol) != "", strings.TrimSpace(p.ReturnURL) != ""
 	switch {
-	case btoi(saved)+btoi(token)+btoi(wallet) != 1:
-		return orderPayment{}, apperr.Invalidf("payment names exactly one of payment_method_id, token or token_symbol").WithParam("payment")
+	case btoi(saved)+btoi(token)+btoi(wallet)+btoi(hosted) != 1:
+		return orderPayment{}, apperr.Invalidf("payment names exactly one of payment_method_id, token, token_symbol or return_url").WithParam("payment")
 	case saved && (reusable != nil || p.PSPID != nil || p.BillingDetails != nil):
 		return orderPayment{}, apperr.Invalidf("psp_id, billing_details and reusable describe a new card").WithParam("payment")
 	case saved:
 		return orderPayment{method: p.PaymentMethodID.UUID()}, nil
-	case wallet && (reusable != nil || p.BillingDetails != nil):
+	case (wallet || hosted) && (reusable != nil || p.BillingDetails != nil):
 		return orderPayment{}, apperr.Invalidf("billing_details and reusable describe a new card").WithParam("payment")
+	case hosted:
+		pay := &checkout.OrderHosted{ReturnURL: strings.TrimSpace(p.ReturnURL)}
+		if p.PSPID != nil {
+			pay.PSPID = p.PSPID.UUID()
+		}
+		return orderPayment{hosted: pay}, nil
 	case wallet:
 		pay := &checkout.OrderSolana{TokenSymbol: strings.TrimSpace(p.TokenSymbol)}
 		if p.PSPID != nil {
@@ -241,7 +248,7 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 // attempt, which never charges twice.
 func (s *Service) resumePayment(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, pay orderPayment, key string) (checkout.OrderCharge, error) {
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id)
-	if err != nil || (pay.method == uuid.Nil && pay.card == nil && pay.solana == nil) || order.Status != string(billing.OrderOpen) {
+	if err != nil || (pay.method == uuid.Nil && pay.card == nil && pay.solana == nil && pay.hosted == nil) || order.Status != string(billing.OrderOpen) {
 		return checkout.OrderCharge{}, err
 	}
 	return s.payOrder(ctx, rt, actor, order, pay, key)
@@ -370,7 +377,7 @@ func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderAct
 		return checkout.OrderCharge{}, err
 	}
 	user := &checkout.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
-	return rt.Checkout.PayOrder(ctx, checkout.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Key: key, User: user, Prices: quote.prices, Products: quote.products})
+	return rt.Checkout.PayOrder(ctx, checkout.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Solana: pay.solana, Hosted: pay.hosted, Key: key, User: user, Prices: quote.prices, Products: quote.products})
 }
 
 // ConfirmOrder reads the provider after the customer completed next_action;
@@ -585,6 +592,13 @@ func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, p
 	}
 	if pay.solana != nil {
 		_, err := checkout.SolanaOption(options, pay.solana.PSPID)
+		return err
+	}
+	if pay.hosted != nil {
+		if err := s.rt.CheckoutAttemptService.CheckReturnURL(pay.hosted.ReturnURL); err != nil {
+			return err
+		}
+		_, err := checkout.HostedOption(options, pay.hosted.PSPID)
 		return err
 	}
 	pm, err := s.rt.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pay.method, customer.String())

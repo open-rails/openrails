@@ -1,11 +1,15 @@
 # Changelog
 
-## Orders take Solana
+## Orders take Solana and hosted pages
 
 - `<OrderCheckout>` offers an order's Solana option: one button per token,
   then the Solana Pay QR of the order's `solana_pay` next action, confirmed
   until the transfer lands.
-- `OrderPaymentInput` gains `{ token_symbol, psp_id? }`.
+- A PSP with no fields in the page (Stripe without a publishable key) takes
+  the order on its hosted page: `<OrderCheckout>` sends the customer there and
+  back to `returnUrl` (default: the current page).
+- `OrderPaymentInput` gains `{ token_symbol, psp_id? }` and
+  `{ return_url, psp_id? }`.
 
 ## OrderCheckout pays an order
 

@@ -34,6 +34,11 @@ type webhookCheckoutAttemptStore interface {
 	MarkSucceededWithSubscription(ctx context.Context, sessionID uuid.UUID, paymentID uuid.UUID, transactionID string, subscriptionID uuid.UUID) error
 	MarkFailed(ctx context.Context, sessionID uuid.UUID, failureMessage, failureCode string) error
 	MarkProviderCheckoutClosed(ctx context.Context, sessionID uuid.UUID, status models.CheckoutAttemptStatus) error
+	// SettleOrderCheckout completes the order a paid Stripe Checkout Session
+	// pays; CloseOrderCheckout returns it to requires_payment_method when the
+	// session expired or its delayed payment failed.
+	SettleOrderCheckout(ctx context.Context, attemptID uuid.UUID, sessionID, paymentIntent, currency string, amountMinor int64) error
+	CloseOrderCheckout(ctx context.Context, attemptID uuid.UUID, failed bool) error
 }
 
 // WebhookMessage is the runtime representation of a webhook event that needs dispatching.

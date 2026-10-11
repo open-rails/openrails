@@ -138,6 +138,14 @@ func (s *recordingCheckoutAttemptStore) MarkProviderCheckoutClosed(_ context.Con
 	return nil
 }
 
+func (s *recordingCheckoutAttemptStore) SettleOrderCheckout(context.Context, uuid.UUID, string, string, string, int64) error {
+	return nil
+}
+
+func (s *recordingCheckoutAttemptStore) CloseOrderCheckout(context.Context, uuid.UUID, bool) error {
+	return nil
+}
+
 func stripeEventJSON(t *testing.T, eventType string, object any) []byte {
 	t.Helper()
 	payload, err := json.Marshal(map[string]any{"id": "evt_" + uuid.NewString(), "type": eventType, "created": 1700000000, "data": map[string]any{"object": object}})

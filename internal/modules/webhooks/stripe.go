@@ -738,6 +738,9 @@ func (s *StripeWebhookService) handleCheckoutSessionExpired(ctx context.Context,
 	if err := json.Unmarshal(obj, &sess); err != nil {
 		return fmt.Errorf("parse checkout session: %w", err)
 	}
+	if orderCheckout(sess) {
+		return s.CheckoutAttemptService.CloseOrderCheckout(ctx, parseCheckoutAttemptID(sess.Metadata), false)
+	}
 
 	sessionID := parseCheckoutAttemptID(sess.Metadata)
 	if sessionID == uuid.Nil {
@@ -788,6 +791,12 @@ func (s *StripeWebhookService) handleCheckoutSessionCompleted(ctx context.Contex
 			"payment_status":      sess.PaymentStatus,
 		}).Info("Stripe checkout session not paid; waiting for async payment success")
 		return nil
+	}
+	if orderCheckout(sess) {
+		if s.CheckoutAttemptService == nil {
+			return errors.New("order checkout settlement unavailable")
+		}
+		return s.CheckoutAttemptService.SettleOrderCheckout(ctx, parseCheckoutAttemptID(sess.Metadata), sess.ID, sess.PaymentIntent, sess.Currency, sess.AmountTotal)
 	}
 	priceID, price, err := s.resolvePriceFromMetadata(ctx, sess.Metadata, nil)
 	if err != nil {
@@ -872,10 +881,18 @@ func (s *StripeWebhookService) handleCheckoutSessionAsyncPaymentFailed(ctx conte
 	if sessionID == uuid.Nil {
 		return nil
 	}
+	if orderCheckout(sess) {
+		return s.CheckoutAttemptService.CloseOrderCheckout(ctx, sessionID, true)
+	}
 	if err := s.CheckoutAttemptService.MarkProviderCheckoutClosed(ctx, sessionID, models.CheckoutAttemptStatusFailed); err != nil {
 		return fmt.Errorf("mark stripe checkout failed: %w", err)
 	}
 	return nil
+}
+
+// orderCheckout reports a Checkout Session that pays an order's attempt.
+func orderCheckout(sess stripeCheckoutSession) bool {
+	return strings.TrimSpace(sess.Metadata["order_id"]) != "" && parseCheckoutAttemptID(sess.Metadata) != uuid.Nil
 }
 
 func parseCheckoutAttemptID(metadata map[string]string) uuid.UUID {

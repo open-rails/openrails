@@ -43,7 +43,7 @@ func TestStripeOneTimeCheckoutWire(t *testing.T) {
 		require.Equal(t, "1234", r.Form.Get("line_items[0][price_data][unit_amount]"))
 		require.Equal(t, "Accepted post", r.Form.Get("line_items[0][price_data][product_data][name]"))
 		require.Equal(t, price.ID.String(), r.Form.Get("metadata[internal_price_id]"))
-		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"url":"https://checkout.stripe.test/accepted"}`))}, nil
+		return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"id":"cs_test_accepted","url":"https://checkout.stripe.test/accepted"}`))}, nil
 	}))
 	req := &CheckoutRequest{SuccessURL: "https://app.example/success", CancelURL: "https://app.example/cancel", IdempotencyKey: "accepted-inline"}
 	result, err := svc.processStripePayment(context.Background(), req, &UserIdentity{ID: uuid.NewString()}, price, product)

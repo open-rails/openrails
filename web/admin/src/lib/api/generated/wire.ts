@@ -1466,6 +1466,7 @@ export type OrderPaymentParams = {
   psp_id?: string
   billing_details?: BillingDetails
   token_symbol?: string
+  return_url?: string
 }
 
 export type OrderPreview = {

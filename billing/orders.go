@@ -56,8 +56,8 @@ type OrderLineParams struct {
 }
 
 // OrderPaymentParams names how to pay: exactly one of a saved card
-// (PaymentMethodID), a card just entered (Token) or a Solana wallet
-// (TokenSymbol, the token it pays in).
+// (PaymentMethodID), a card just entered (Token), a Solana wallet
+// (TokenSymbol, the token it pays in) or the PSP's hosted page (ReturnURL).
 type OrderPaymentParams struct {
 	PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
 	// Token is the single-use output of the PSP's own card fields: a Stripe
@@ -72,6 +72,10 @@ type OrderPaymentParams struct {
 	// /v1/solana/tokens): the order answers requires_action with a solana_pay
 	// next_action, a Solana Pay transaction request the wallet completes.
 	TokenSymbol string `json:"token_symbol,omitempty"`
+	// ReturnURL pays on the PSP's hosted page (Stripe Checkout, an option
+	// that accepts redirect): the order answers requires_action with a
+	// redirect_to_url next action, and the customer comes back to ReturnURL.
+	ReturnURL string `json:"return_url,omitempty"`
 }
 
 // PreviewMyOrderParams prices lines for the signed-in customer without
@@ -179,8 +183,8 @@ type OrderLine struct {
 }
 
 // OrderPaymentOption is one PSP that can take an order's lines, and what it
-// accepts: saved_card and new_card on a card PSP, solana_pay on Solana (an
-// order of one-time lines).
+// accepts: saved_card and new_card on a card PSP, redirect (its hosted page)
+// on Stripe and solana_pay on Solana, both for one-time lines.
 type OrderPaymentOption struct {
 	PSPID   PSPID    `json:"psp_id"`
 	Rail    string   `json:"rail"`

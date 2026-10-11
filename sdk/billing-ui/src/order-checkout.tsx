@@ -64,6 +64,7 @@ const SOLANA_POLL_MS = 3000
 export function OrderCheckout({
   orderId,
   client: given,
+  returnUrl,
   savedPaymentMethods = true,
   serverCardEntry = true,
   onSettled,
@@ -161,6 +162,15 @@ export function OrderCheckout({
   const psp: PspConfig | undefined =
     cardPsps.find((item) => item.psp_id === pspID) ?? cardPsps[0]
   const solana = options.find((option) => option.accepts.includes("solana_pay"))
+  // A PSP with no fields in this page takes the order on its hosted page.
+  const hosted = psps.filter(
+    (item) =>
+      cardSetupDriver(item) === null &&
+      options.some(
+        (option) =>
+          option.psp_id === item.psp_id && option.accepts.includes("redirect")
+      )
+  )
   const tokens = solana ? (config?.payment?.solana?.tokens ?? []) : []
 
   if (!order)
@@ -370,11 +380,29 @@ export function OrderCheckout({
                 </form>
               )}
             </>
-          ) : solana ? null : (
+          ) : solana || hosted.length > 0 ? null : (
             <p role="alert" className="text-sm text-destructive">
               {m.t("paymentMethods.unavailable")}
             </p>
           )}
+          {hosted.map((item) => (
+            <form
+              key={item.psp_id}
+              onSubmit={(event) => {
+                event.preventDefault()
+                void pay(async () => ({
+                  return_url: returnUrl ?? window.location.href,
+                  psp_id: item.psp_id,
+                }))
+              }}
+            >
+              <PayButton
+                label={`${payLabel} with ${item.display_name}`}
+                processing={busy}
+                disabled={!open}
+              />
+            </form>
+          ))}
           {solana && tokens.length > 0 ? (
             <div className="grid gap-2 border-t border-border pt-4">
               {tokens.map((token) => (

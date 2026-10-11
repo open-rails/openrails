@@ -265,7 +265,7 @@ func (s *CheckoutAttemptService) BuildOrderSolanaTransaction(ctx context.Context
 		if err := s.startOrderSolana(ctx, order, next, session.PspID, railStateText(attempt.RailState, "token_symbol"), session.ID); err != nil && !errors.Is(err, orders.ErrInProgress) {
 			return nil, err
 		}
-		if order, attempt, err = s.solanaOrderAttempt(ctx, orderID); err != nil {
+		if _, attempt, err = s.solanaOrderAttempt(ctx, orderID); err != nil {
 			return nil, err
 		}
 	}

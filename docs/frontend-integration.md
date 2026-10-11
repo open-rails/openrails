@@ -303,6 +303,11 @@ A merchant order is one your backend creates for a customer (`CreateOrder`,
 unless `expires_at` says otherwise, and the customer pays it on your site with
 `POST /v1/me/orders/{id}/pay`. Staff read orders and never pay them.
 
+An order of one-time lines can also be paid on the PSP's hosted page (Stripe
+Checkout, an option with `accepts: ["redirect"]`): `payment: {return_url,
+psp_id?}` answers `requires_action` with a `redirect_to_url` next action, and
+the customer comes back to `return_url` (an allowed origin) once they paid.
+
 An order of one-time lines can be paid from a Solana wallet: a payment option
 with `accepts: ["solana_pay"]` takes `payment: {token_symbol, psp_id?}`
 (the tokens are in `GET /v1/config`'s `payment.solana`). The order answers
@@ -312,8 +317,8 @@ completes when the transfer lands, and `confirm` asks OpenRails to read the
 chain now.
 
 billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
-card, a new card in the PSP's fields or a Solana wallet, then any
-`next_action` and `confirm`.
+card, a new card in the PSP's fields, the PSP's hosted page (`returnUrl`) or a
+Solana wallet, then any `next_action` and `confirm`.
 It uses only the order API and `GET /v1/config`, through the provider's client
 or one passed as `client`.
 

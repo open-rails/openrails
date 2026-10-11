@@ -63,19 +63,26 @@ func (s *CheckoutAttemptService) saleService() *CheckoutNMISaleService {
 	return cs.NMISaleService
 }
 
-// OrderOption is one PSP that can take every line of an order.
+// OrderOption is one PSP that can take every line of an order. Hosted: the
+// order can also be paid on the PSP's hosted page (Stripe Checkout, one-time
+// lines only).
 type OrderOption struct {
-	PSPID uuid.UUID
-	Rail  string
+	PSPID  uuid.UUID
+	Rail   string
+	Hosted bool
 }
 
 // Solana reports a Solana Pay option.
 func (o OrderOption) Solana() bool { return models.Rail(o.Rail) == models.RailSolana }
 
-// Accepts is how the option is paid: saved_card and new_card, or solana_pay.
+// Accepts is how the option is paid: saved_card, new_card and on a hosted
+// page redirect; or solana_pay.
 func (o OrderOption) Accepts() []string {
-	if o.Solana() {
+	switch {
+	case o.Solana():
 		return []string{"solana_pay"}
+	case o.Hosted:
+		return []string{"saved_card", "new_card", "redirect"}
 	}
 	return []string{"saved_card", "new_card"}
 }
@@ -108,6 +115,13 @@ func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*mod
 		}
 		out = line
 	}
+	oneTime := true
+	for _, price := range prices {
+		oneTime = oneTime && !price.IsRecurring()
+	}
+	for i := range out {
+		out[i].Hosted = oneTime && models.Rail(out[i].Rail) == models.RailStripe
+	}
 	if out == nil {
 		out = []OrderOption{}
 	}
@@ -131,6 +145,7 @@ type OrderPayInput struct {
 	PaymentMethodID uuid.UUID
 	Card            *OrderCard
 	Solana          *OrderSolana
+	Hosted          *OrderHosted
 	Key             string
 	User            *UserIdentity
 	Prices          []*models.Price
@@ -171,7 +186,7 @@ func OrderAttemptID(merchantID, orderID uuid.UUID, key string) uuid.UUID {
 // new card is charged and saved in one provider request.
 func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput) (OrderCharge, error) {
 	payments := 0
-	for _, named := range []bool{in.PaymentMethodID != uuid.Nil, in.Card != nil, in.Solana != nil} {
+	for _, named := range []bool{in.PaymentMethodID != uuid.Nil, in.Card != nil, in.Solana != nil, in.Hosted != nil} {
 		if named {
 			payments++
 		}
@@ -179,8 +194,11 @@ func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput)
 	if in.Order == nil || in.User == nil || in.Key == "" || payments != 1 {
 		return OrderCharge{}, errors.New("order payment needs its order, customer, key and one payment")
 	}
-	if in.Solana != nil {
+	switch {
+	case in.Solana != nil:
 		return s.payOrderSolana(ctx, in)
+	case in.Hosted != nil:
+		return s.payOrderHosted(ctx, in)
 	}
 	if err := s.guardCardAttempt(ctx, in.User); err != nil {
 		return OrderCharge{}, err
@@ -561,11 +579,14 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 	if !order.AwaitsCustomer() || order.AttemptID == nil {
 		return nil, nil
 	}
-	if attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID); err != nil || solana {
-		if err != nil {
-			return nil, err
-		}
+	attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID)
+	switch {
+	case err != nil:
+		return nil, err
+	case solana:
 		return s.orderSolanaAction(order, attempt), nil
+	case hostedAttempt(attempt):
+		return orderHostedAction(attempt), nil
 	}
 	checkout, ok := s.checkoutService.(*CheckoutService)
 	if !ok || resolver == nil {
@@ -591,11 +612,14 @@ func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders
 	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
 		return OrderCharge{}, nil
 	}
-	if attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID); err != nil || solana {
-		if err != nil {
-			return OrderCharge{}, err
-		}
+	attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID)
+	switch {
+	case err != nil:
+		return OrderCharge{}, err
+	case solana:
 		return OrderCharge{}, s.pollSolanaOrderNow(ctx, attempt)
+	case hostedAttempt(attempt):
+		return s.confirmOrderHosted(ctx, attempt)
 	}
 	checkout, ok := s.checkoutService.(*CheckoutService)
 	if !ok {
@@ -633,8 +657,12 @@ const orderClosedKey = "order_closed"
 func (s *CheckoutAttemptService) AbandonOrderAttempt(ctx context.Context, attemptID uuid.UUID) error {
 	// A Solana attempt has nothing to cancel: a transfer landing after the
 	// order closed is recorded for review.
-	if _, solana, err := s.orderSolanaAttempt(ctx, attemptID); err != nil || solana {
+	attempt, solana, err := s.orderSolanaAttempt(ctx, attemptID)
+	switch {
+	case err != nil || solana:
 		return err
+	case hostedAttempt(attempt):
+		return s.abandonOrderHosted(ctx, attempt)
 	}
 	operation, err := s.OrderOperation(ctx, attemptID)
 	if err != nil || operation.Status == intents.StatusSucceeded || operation.Status == intents.StatusFailedTerminal {

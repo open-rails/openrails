@@ -103,6 +103,7 @@ var pendingNumericMoney = map[string]string{
 	"internal/modules/webhooks/stripe.go:stripeCharge.Amount amount":                                                         notHTTPProviderWire,
 	"internal/modules/webhooks/stripe.go:stripeCharge.AmountRefunded amount_refunded":                                        notHTTPProviderWire,
 	"internal/modules/webhooks/stripe.go:stripeCheckoutSession.AmountTotal amount_total":                                     notHTTPProviderWire,
+	"internal/modules/checkout/service.go:stripeCheckoutSession.AmountTotal amount_total":                                    notHTTPProviderWire,
 	"internal/modules/webhooks/stripe.go:stripeDispute.Amount amount":                                                        notHTTPProviderWire,
 	"internal/modules/webhooks/stripe.go:stripeInvoice.AmountDue amount_due":                                                 notHTTPProviderWire,
 	"internal/modules/webhooks/stripe.go:stripeInvoice.AmountPaid amount_paid":                                               notHTTPProviderWire,

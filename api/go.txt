@@ -2280,6 +2280,7 @@ pkg openrails/billing, type OrderPaymentParams struct
 pkg openrails/billing, type OrderPaymentParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, PSPID *PSPID `json:"psp_id,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
+pkg openrails/billing, type OrderPaymentParams struct, ReturnURL string `json:"return_url,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, Token string `json:"token,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, TokenSymbol string `json:"token_symbol,omitempty"`
 pkg openrails/billing, type OrderPaymentStatus string

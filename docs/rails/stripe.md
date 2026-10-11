@@ -181,6 +181,15 @@ the session's `success_url`. Completion arrives via `checkout.session.completed`
 (and the async-payment variants) on the webhook; the Stripe session carries the
 `checkout_attempt_id` metadata key.
 
+An order of one-time lines can be paid the same way: its Stripe option accepts
+`redirect`, and `payment: {return_url, psp_id?}` opens a payment-mode Checkout
+Session for the order's total. The order answers `requires_action` with
+`next_action: {type: "redirect_to_url", url}`; the session's completion (its
+webhook, or `POST /v1/me/orders/{id}/confirm` reading it) completes the order,
+and its expiry returns the order to `requires_payment_method`. Canceling or
+expiring the order expires the session. `return_url` must be on an allowed
+origin.
+
 ### Card updates
 
 `payment_method.automatically_updated` (Stripe's card updater) and
