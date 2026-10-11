@@ -3,6 +3,7 @@ package openrails
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -42,7 +43,8 @@ type Client struct {
 	adopted    atomic.Pointer[billing.MerchantID]
 	// token mints the per-call Bearer of a remote handle. It is the sole
 	// credential; a mint failure fails the call.
-	token func(context.Context) (string, error)
+	token     func(context.Context) (string, error)
+	assertion *AssertionKey
 }
 
 // MerchantID is the handle's merchant. A NewRemoteMerchant handle has none
@@ -64,6 +66,25 @@ type RemoteCredential struct {
 	// the backend obtains from its issuer. It must be safe for concurrent
 	// use; an error or an empty token fails the call.
 	Token func(context.Context) (string, error)
+	// Assertion signs customer tokens (CustomerToken, CustomerAssertion).
+	// Nil leaves them unavailable.
+	Assertion *AssertionKey
+}
+
+// AssertionKey is a merchant backend's signing key, registered with the
+// server's AuthKit as the merchant's remote application.
+type AssertionKey struct {
+	// Issuer is the remote application's issuer: the assertions' iss.
+	Issuer string
+	// KeyID is the kid the key is registered under.
+	KeyID string
+	// Signer holds the private key: RSA (RS256), ECDSA P-256, P-384 or P-521
+	// (ES256, ES384, ES512) or Ed25519 (EdDSA).
+	Signer crypto.Signer
+	// TokenURL is the token endpoint assertions are redeemed at, and their
+	// aud: the server's AuthKit issuer followed by /oauth2/token. It is not
+	// discovered.
+	TokenURL string
 }
 
 // RemoteOptions configures NewRemote.
@@ -151,7 +172,10 @@ func newRemoteHandle(baseURL string, client *http.Client, timeout time.Duration,
 	case token == nil:
 		return nil, fmt.Errorf("an APIKey or a Token is required")
 	}
-	return &Client{baseURL: baseURL, client: client, timeout: timeout, merchantID: id, token: token}, nil
+	if err := credential.Assertion.validate(); err != nil {
+		return nil, err
+	}
+	return &Client{baseURL: baseURL, client: client, timeout: timeout, merchantID: id, token: token, assertion: credential.Assertion}, nil
 }
 
 // Merchant is the handle of merchant id, acting with the credential filed

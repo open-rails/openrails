@@ -26,9 +26,12 @@ import (
 // Client method and every Client method is exactly one merchant route. The
 // two lists below are every exception, each with its reason.
 
-// handleMethods say what a handle is; they call no route.
+// handleMethods say what a handle is or ask the token endpoint, which is no
+// merchant route.
 var handleMethods = map[string]string{
-	"MerchantID": "the handle's merchant",
+	"MerchantID":        "the handle's merchant",
+	"CustomerToken":     "mints a customer's access token at the issuer's token endpoint",
+	"CustomerAssertion": "signs the assertion a frontend redeems for that token",
 }
 
 // engineMethods are everything an Engine has: its lifecycle, the HTTP surface

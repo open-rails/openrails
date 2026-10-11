@@ -2,6 +2,9 @@ package openrails
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"io"
@@ -58,6 +61,8 @@ func okResponse(body string) *http.Response {
 func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 	key := RemoteCredential{APIKey: "key"}
 	token := func(context.Context) (string, error) { return "t", nil }
+	signer, err := rsa.GenerateKey(rand.Reader, 2048)
+	require.NoError(t, err)
 	for _, base := range []string{"", "not a url", "ftp://example.com", "http://", "https://user:pass@example.com", "https://example.com?x=y", "https://example.com?", "https://example.com#f"} {
 		remote, err := NewRemote(base, RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: key}})
 		require.ErrorContains(t, err, "base URL", base)
@@ -66,10 +71,24 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 		require.ErrorContains(t, err, "base URL", base)
 		require.Nil(t, handle)
 	}
+	assertion := func(edit func(*AssertionKey)) *AssertionKey {
+		k := &AssertionKey{Issuer: "https://shop.example", KeyID: "k1", Signer: signer, TokenURL: "https://billing.example/oauth2/token"}
+		edit(k)
+		return k
+	}
 	for name, credential := range map[string]RemoteCredential{
-		"no credential": {},
-		"blank key":     {APIKey: "  "},
-		"key and token": {APIKey: "k", Token: token},
+		"no credential":         {},
+		"blank key":             {APIKey: "  "},
+		"key and token":         {APIKey: "k", Token: token},
+		"assertion alone":       {Assertion: assertion(func(*AssertionKey) {})},
+		"assertion no issuer":   {APIKey: "k", Assertion: assertion(func(k *AssertionKey) { k.Issuer = " " })},
+		"assertion no key id":   {APIKey: "k", Assertion: assertion(func(k *AssertionKey) { k.KeyID = "" })},
+		"assertion no signer":   {APIKey: "k", Assertion: assertion(func(k *AssertionKey) { k.Signer = nil })},
+		"assertion no endpoint": {APIKey: "k", Assertion: assertion(func(k *AssertionKey) { k.TokenURL = "" })},
+		"assertion bad endpoint": {APIKey: "k", Assertion: assertion(func(k *AssertionKey) {
+			k.TokenURL = "billing.example/oauth2/token"
+		})},
+		"assertion key family": {APIKey: "k", Assertion: assertion(func(k *AssertionKey) { k.Signer = unsupportedSigner{} })},
 	} {
 		remote, err := NewRemote("https://openrails.test", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: credential}})
 		require.Error(t, err, name)
@@ -96,6 +115,14 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 	client := remoteHandle(t, server.URL+"/", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: {APIKey: " sk-test "}}})
 	require.NoError(t, readConfiguration(client, t.Context()))
 	require.Equal(t, "GET /v1/admin/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
+}
+
+// unsupportedSigner holds a key of no JWS family.
+type unsupportedSigner struct{}
+
+func (unsupportedSigner) Public() crypto.PublicKey { return struct{}{} }
+func (unsupportedSigner) Sign(io.Reader, []byte, crypto.SignerOpts) ([]byte, error) {
+	return nil, errors.New("unsupported")
 }
 
 // One Remote holds a credential per merchant: each handle sends its own and
