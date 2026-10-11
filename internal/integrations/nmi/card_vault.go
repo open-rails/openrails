@@ -36,14 +36,6 @@ func (c *NMIClient) CreateCustomerVaultFromCard(ctx context.Context, vaultID, bi
 	return &CreateCustomerVaultResponse{CustomerVaultID: id}, nil
 }
 
-// AddCustomerBillingFromCard stores card as the further billing entry
-// billingID of an existing vault.
-func (c *NMIClient) AddCustomerBillingFromCard(ctx context.Context, vaultID, billingID string, data CreateCustomerVaultData, card *cardguard.Card) error {
-	defer card.Zero()
-	_, err := c.vaultCard(ctx, "add_billing", vaultID, billingID, data, card)
-	return err
-}
-
 func (c *NMIClient) vaultCard(ctx context.Context, action, vaultID, billingID string, data CreateCustomerVaultData, card *cardguard.Card) (url.Values, error) {
 	if err := c.checkConfiguration(); err != nil {
 		return nil, err

@@ -56,6 +56,7 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 				{http.MethodPut, "/subscriptions/" + aliceSub.String() + "/payment-method", map[string]any{"payment_method_id": malloryCard}},
 				{http.MethodPut, "/subscriptions/" + mallorySub.String() + "/payment-method", map[string]any{"payment_method_id": aliceCard}},
 
+				{http.MethodPatch, "/payment-methods/" + aliceCard, map[string]any{"exp_month": 12, "exp_year": 2039}},
 				{http.MethodDelete, "/payment-methods/" + aliceCard, nil},
 			} {
 				status, body := mallory.call(tc.method, tc.path, "idor-"+uuid.NewString(), tc.body)
@@ -66,10 +67,6 @@ func TestSecurityCustomerCannotActOnAnotherCustomer(t *testing.T) {
 			require.Contains(t, []int{http.StatusBadRequest, http.StatusForbidden, http.StatusNotFound}, status, "%v", body)
 			_, missing := mallory.call(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": "pm_" + uuid.NewString()})
 			require.Equal(t, fmt.Sprint(missing["error"].(map[string]any)["message"]), fmt.Sprint(body["error"].(map[string]any)["message"]))
-			if rail == "nmi" {
-				status, body := mallory.call(http.MethodPut, "/payment-methods/"+aliceCard, "", map[string]any{"payment_token": w.nmi.Tokenize(mastercard)})
-				refused(t, status, body, "replace Alice's card")
-			}
 			w.settle()
 
 			// Mallory's own reads never include Alice's rows.

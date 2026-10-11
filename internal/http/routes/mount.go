@@ -76,8 +76,6 @@ type Options struct {
 type External struct {
 	// Meta: the process surface.
 	Live, Ready http.Handler
-	// Captcha discovery, beside the checkout routes.
-	CaptchaStatus, CaptchaScript http.Handler
 }
 
 // Env is one assembly mounting routes: its options and the gates built from

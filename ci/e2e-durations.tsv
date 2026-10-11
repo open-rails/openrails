@@ -224,8 +224,6 @@ ci/subscriptions	TestNMIDeclineDiscoveredLateIsDunned	6.8
 ci/subscriptions	TestNMIDeclineHistory	11.9
 ci/subscriptions	TestNMIDeclineReport	11.7
 ci/subscriptions	TestNMIFiveDayRestartRecovery	50.2
-ci/subscriptions	TestNMIInPlaceCardReplacementWithoutBrand	7.4
-ci/subscriptions	TestNMIInPlaceReplacementEstablishesAgreement	11.6
 ci/subscriptions	TestNMIInvoiceAcceptedBeforeFiveDayRestart	13.2
 ci/subscriptions	TestNMIInvoiceFiveDayStartupRecovery	42.6
 ci/subscriptions	TestNMIInvoiceReplicaCrashAfterProviderCommit	29.1
@@ -251,7 +249,6 @@ ci/subscriptions	TestNMIVoidedRenewalIsNoPayment	6.7
 ci/subscriptions	TestNMIYenReversalsAreReadInYen	6.6
 ci/subscriptions	TestNewCardAttemptsCardAddAndSale	19.3
 ci/subscriptions	TestNewCardAttemptsFatFinger	8.7
-ci/subscriptions	TestNewCardAttemptsReplacement	6.1
 ci/subscriptions	TestNewCardAttemptsSaleDeclined	7.4
 ci/subscriptions	TestOffChannelPaymentIdempotency	11.4
 ci/subscriptions	TestOfflineBillingHandoff	122.7

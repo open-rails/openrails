@@ -1,26 +1,21 @@
 // Package embedhttp assembles the embedded billing HTTP surface as a gin-free
 // net/http handler (issue #282/#285). It is the keystone that lets pkg/embedded
 // expose NewHTTPHandler without importing gin: route groups are registered via
-// the neutral router.NewMux (request.NewHTTP backend) and the captcha discovery
-// routes are plain net/http handlers, all wrapped with the net/http base
-// middleware stack (security headers, CORS, body limit, merchant resolution).
+// the neutral router.NewMux (request.NewHTTP backend), all wrapped with the
+// net/http base middleware stack (security headers, CORS, body limit, merchant
+// resolution).
 //
 // The gin Server (internal/http) and standalone cmd/ keep gin; this package is
 // the gin-free analogue of the embedded assembly that used to live there.
 package embedhttp
 
 import (
-	"encoding/json"
 	"net/http"
-	"strconv"
-	"strings"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/captcha"
-	captchaembed "github.com/open-rails/openrails/internal/captcha/embed"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
@@ -117,10 +112,6 @@ func (s *Assembler) NewRoutes(opts Options) *router.Table {
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, EmbeddedV1Prefix, s.Runtime, recordBrowser), s.Runtime, httproutes.Options{
 		Auth:           s.Auth,
 		ProviderRoutes: &providerRoutes,
-		External: httproutes.External{
-			CaptchaStatus: http.HandlerFunc(s.captchaStatusHandler),
-			CaptchaScript: http.HandlerFunc(s.captchaClientScriptHandler),
-		},
 	})
 	if opts.Permissions.Staff() != (httproutes.Permissions{}) {
 		httproutes.RegisterStaffRoutes(router.NewMux(mux, EmbeddedV1Prefix, s.Runtime), s.Runtime, httproutes.Options{
@@ -194,114 +185,4 @@ func (s *Assembler) validateAuthBoundary(opts Options) error {
 		return httproutes.MountError{Route: "admin API", Reason: "needs Routes.Auth"}
 	}
 	return nil
-}
-
-// captchaStatusHandler is the gin-free captcha status endpoint (issue #282).
-func (s *Assembler) captchaStatusHandler(w http.ResponseWriter, r *http.Request) {
-	var cfg *config.CaptchaConfig
-	if s != nil && s.Cfg != nil {
-		cfg = s.Cfg.Captcha
-	}
-	var store *captcha.ChallengeStore
-	var resolver *iputil.TrustedProxies
-	if s != nil {
-		store = s.CaptchaStore
-		if s.Runtime != nil {
-			resolver = s.Runtime.TrustedProxies
-		}
-	}
-	CaptchaStatusHandler(cfg, store, resolver)(w, r)
-}
-
-// captchaClientScriptHandler is the gin-free captcha client-script endpoint.
-func (s *Assembler) captchaClientScriptHandler(w http.ResponseWriter, r *http.Request) {
-	var cfg *config.CaptchaConfig
-	if s != nil && s.Cfg != nil {
-		cfg = s.Cfg.Captcha
-	}
-	CaptchaClientScriptHandler(cfg)(w, r)
-}
-
-// CaptchaStatusHandler is the captcha discovery endpoint shared by the embedded
-// and standalone surfaces (#670: one implementation, two mounts). resolver
-// must be the SAME trusted-proxy resolver RateLimitHTTP enforces with (#746),
-// or the subject key checked here can diverge from the one actually
-// challenged.
-func CaptchaStatusHandler(cfg *config.CaptchaConfig, store *captcha.ChallengeStore, resolver *iputil.TrustedProxies) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		resp := billing.CaptchaStatus{Enabled: config.CaptchaEnabled(cfg), TokenHeader: captcha.TokenHeader, ClientScriptURL: captchaClientScriptURL(r)}
-		if cfg != nil {
-			provider := config.CaptchaProvider(cfg)
-			resp.Provider = &provider
-		}
-		if config.CaptchaEnabled(cfg) && store != nil {
-			for _, subjectKey := range middleware.RateLimitSubjectKeysHTTP(r, resolver) {
-				if store.IsChallenged(r.Context(), subjectKey) {
-					resp.Required = true
-					break
-				}
-			}
-		}
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
-// CaptchaClientScriptHandler serves the captcha client bootstrap script.
-func CaptchaClientScriptHandler(cfg *config.CaptchaConfig) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		script := buildCaptchaClientScript(cfg)
-		w.Header().Set("Cache-Control", "no-store")
-		w.Header().Set("Content-Type", "application/javascript; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(script))
-	}
-}
-
-func captchaClientScriptURL(r *http.Request) string {
-	if r == nil || r.URL == nil {
-		return "/v1/captcha/client.js"
-	}
-	path := r.URL.Path
-	if strings.HasSuffix(path, "/status") {
-		return strings.TrimSuffix(path, "/status") + "/client.js"
-	}
-	return "/v1/captcha/client.js"
-}
-
-func writeJSON(w http.ResponseWriter, code int, body any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	_ = json.NewEncoder(w).Encode(body)
-}
-
-func buildCaptchaClientScript(cfg *config.CaptchaConfig) string {
-	enabled := config.CaptchaEnabled(cfg)
-	provider := ""
-	siteKey := ""
-	scriptURL := ""
-	action := ""
-	if cfg != nil {
-		provider = config.CaptchaProvider(cfg)
-		action = config.CaptchaAction
-	}
-	if enabled {
-		siteKey = strings.TrimSpace(cfg.SiteKey)
-		scriptURL = config.CaptchaScriptURL(cfg)
-	}
-
-	return strings.NewReplacer(
-		"__OPENRAILS_CAPTCHA_ENABLED__", strconv.FormatBool(enabled),
-		"__OPENRAILS_CAPTCHA_PROVIDER__", jsonLiteral(provider),
-		"__OPENRAILS_CAPTCHA_SITE_KEY__", jsonLiteral(siteKey),
-		"__OPENRAILS_CAPTCHA_SCRIPT_URL__", jsonLiteral(scriptURL),
-		"__OPENRAILS_CAPTCHA_ACTION__", jsonLiteral(action),
-	).Replace(captchaembed.ClientScriptTemplate)
-}
-
-func jsonLiteral(value string) string {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return "\"\""
-	}
-	return string(raw)
 }

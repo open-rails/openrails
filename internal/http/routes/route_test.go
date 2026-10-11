@@ -153,7 +153,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	raw := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	providers := routesurface.AllProviderRoutes()
 	opts := Options{Auth: authtest.Deny{}, ProviderRoutes: &providers, Scope: testScope, Permissions: staffPermissions, Capabilities: &billing.Capabilities{}, External: External{
-		Live: raw, Ready: raw, CaptchaStatus: raw, CaptchaScript: raw,
+		Live: raw, Ready: raw,
 	}}
 	customers := CustomerMount{Auth: authtest.Deny{}, Providers: providers}
 
@@ -217,8 +217,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	seen = map[string]int{}
 	none := routesurface.ProviderRoutes{}
 	RegisterUserRoutes(recorder{base: "/v1", seen: seen}, nil, Options{ProviderRoutes: &none})
-	require.NotContains(t, seen, "GET /v1/solana/tokens")
-	require.NotContains(t, seen, "GET /v1/captcha/status")
+	require.NotContains(t, seen, "GET /v1/checkout-attempts/{id}/solana-pay")
 	require.Contains(t, seen, "GET /v1/catalog/products")
 
 	reads, staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}, map[string]int{}

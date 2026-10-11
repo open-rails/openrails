@@ -75,12 +75,10 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/modules/checkout/attempt_service.go:setSolanaQuoteState": "persists token_price_usd / fx_rate (RATES); token_amount is written as a decimal string",
 
 		// --- Solana token feed + display: rates, not amounts ---------------
-		"internal/integrations/pyth/client.go:Price":                           "Pyth Price/Conf are the feed's quoted RATE and its confidence interval",
-		"internal/integrations/pyth/client.go:PriceUSD":                        "returns the token's USD RATE; no amount is computed here",
-		"internal/integrations/pyth/client.go:validateParsedPrice":             "sanity-bounds the parsed RATE",
-		"internal/integrations/pyth/client.go:parsePythNumber":                 "parses the feed's mantissa+exponent RATE encoding; the boundary where float starts, never an amount",
-		"internal/http/handlers/solana_supported_tokens.go:rateString":         "spells a provider RATE (token USD price, FX) as the exact decimal string of the float the feed quoted",
-		"internal/http/handlers/solana_supported_tokens.go:GetSupportedTokens": "builds a symbol -> RATE map for the token list response",
+		"internal/integrations/pyth/client.go:Price":               "Pyth Price/Conf are the feed's quoted RATE and its confidence interval",
+		"internal/integrations/pyth/client.go:PriceUSD":            "returns the token's USD RATE; no amount is computed here",
+		"internal/integrations/pyth/client.go:validateParsedPrice": "sanity-bounds the parsed RATE",
+		"internal/integrations/pyth/client.go:parsePythNumber":     "parses the feed's mantissa+exponent RATE encoding; the boundary where float starts, never an amount",
 
 		// --- reconcile: fractions, counts and durations --------------------
 		"internal/reconcile/cancel_budget.go:DefaultMaxCancelsPerPass": "0.05 / 0.10 are cancel-budget FRACTIONS of a roster, not amounts",

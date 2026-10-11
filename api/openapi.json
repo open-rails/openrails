@@ -92,54 +92,6 @@
         ]
       }
     },
-    "/v1/solana/tokens": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "parameters": [
-          {
-            "name": "price_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "wallet",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SupportedTokensResponse"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-mounted-when": "solana",
-        "x-openrails-errors": [
-          "resource_conflict"
-        ],
-        "x-openrails-error-sets": [
-          "tier:public",
-          "request"
-        ]
-      }
-    },
     "/v1/checkout-sessions/{id}": {
       "get": {
         "tags": [
@@ -695,62 +647,6 @@
         "x-openrails-error-sets": [
           "tier:merchant",
           "request"
-        ]
-      }
-    },
-    "/v1/captcha/status": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CaptchaStatus"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:public"
-        ]
-      }
-    },
-    "/v1/captcha/client.js": {
-      "get": {
-        "tags": [
-          "checkout"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/javascript": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [],
-        "x-openrails-auth": "public",
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:public"
         ]
       }
     },
@@ -8528,78 +8424,6 @@
       }
     },
     "/v1/me/payment-methods/{id}": {
-      "put": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ReplacePaymentMethodCardParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethod"
-                }
-              }
-            }
-          },
-          "202": {
-            "description": "Accepted"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_declined",
-          "card_not_saved",
-          "card_requires_https",
-          "invalid_param",
-          "payment_method_update_failed",
-          "payment_method_update_retry_required",
-          "payment_method_update_unsupported",
-          "payment_provider_rejected",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      },
       "patch": {
         "tags": [
           "customer"
@@ -12226,40 +12050,6 @@
           "script_url",
           "action",
           "token_header"
-        ]
-      },
-      "CaptchaStatus": {
-        "type": "object",
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "required": {
-            "type": "boolean"
-          },
-          "provider": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "token_header": {
-            "type": "string"
-          },
-          "client_script_url": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "enabled",
-          "required",
-          "provider",
-          "token_header",
-          "client_script_url"
         ]
       },
       "CaptureAdmissionParams": {
@@ -21236,20 +21026,6 @@
           "attempts"
         ]
       },
-      "ReplacePaymentMethodCardParams": {
-        "type": "object",
-        "properties": {
-          "payment_token": {
-            "type": "string"
-          },
-          "card": {
-            "$ref": "#/components/schemas/CardEntry"
-          },
-          "billing_details": {
-            "$ref": "#/components/schemas/BillingDetails"
-          }
-        }
-      },
       "ResolveFindingParams": {
         "type": "object",
         "properties": {
@@ -22114,20 +21890,6 @@
           "replayed"
         ]
       },
-      "SupportedTokensResponse": {
-        "type": "object",
-        "properties": {
-          "tokens": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/TokenInfo"
-            }
-          }
-        },
-        "required": [
-          "tokens"
-        ]
-      },
       "TieredPrice": {
         "type": "object",
         "properties": {
@@ -22145,104 +21907,6 @@
             }
           }
         }
-      },
-      "TokenBalance": {
-        "type": "object",
-        "properties": {
-          "amount": {
-            "type": "string"
-          },
-          "units": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "sufficient": {
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "amount",
-          "units",
-          "sufficient"
-        ]
-      },
-      "TokenInfo": {
-        "type": "object",
-        "properties": {
-          "symbol": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "mint": {
-            "type": "string"
-          },
-          "decimals": {
-            "type": "integer"
-          },
-          "price": {
-            "type": "string"
-          },
-          "preferred": {
-            "type": "boolean"
-          },
-          "recurring_eligible": {
-            "type": "boolean"
-          },
-          "quote": {
-            "$ref": "#/components/schemas/TokenQuote"
-          },
-          "balance": {
-            "$ref": "#/components/schemas/TokenBalance"
-          }
-        },
-        "required": [
-          "symbol",
-          "name",
-          "mint",
-          "decimals",
-          "preferred",
-          "recurring_eligible"
-        ]
-      },
-      "TokenQuote": {
-        "type": "object",
-        "properties": {
-          "amount": {
-            "type": "string"
-          },
-          "units": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "token_price_usd": {
-            "type": "string"
-          },
-          "fx_rate": {
-            "type": "string"
-          },
-          "fx_currency": {
-            "type": "string"
-          },
-          "quoted_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "amount",
-          "units",
-          "token_price_usd",
-          "fx_rate",
-          "fx_currency",
-          "quoted_at",
-          "expires_at"
-        ]
       },
       "TrustLevel": {
         "type": "object",
@@ -23599,11 +23263,6 @@
       "status": 502,
       "type": "api_error",
       "meaning": "The provider could not update the payment method."
-    },
-    "payment_method_update_retry_required": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The card was not updated; tokenize it again."
     },
     "payment_method_update_unsupported": {
       "status": 400,

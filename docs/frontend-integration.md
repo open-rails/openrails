@@ -62,7 +62,7 @@ POST /v1/me/subscriptions/{id}/resume      undo a scheduled cancel → the Subsc
 POST /v1/me/subscriptions/{id}/change body {"price_id":"price_...", "quantity": 3} → a SubscriptionChange (plan or seats)
 PUT  /v1/me/subscriptions/{id}/payment-method  its own saved card, or null to follow the default → the Subscription
 GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a PSP
-PUT|DELETE /v1/me/payment-methods/{id}    replace NMI card / provider-aware delete
+PATCH|DELETE /v1/me/payment-methods/{id}  edit expiry, billing details, reuse / provider-aware delete
 POST /v1/me/checkout-sessions             mint a checkout session for a price → {id, url, expires_at}
 POST /v1/me/stripe/billing-portal-sessions → {"url": ...} Stripe's portal (merchants with a Stripe PSP)
 GET  /v1/me/notifications                 billing notifications
@@ -122,8 +122,7 @@ take their PSPs from it.
   merchant's checkout routing (a catch-all `checkout_routing` rule naming one PSP
   makes it the only checkout PSP). Other armed PSPs stay listed for existing cards.
   - `wallet` — the buyer's wallet pays; the document's `solana` object carries the
-    network and accepted tokens, and `GET /v1/solana/tokens?wallet=` adds a
-    wallet's balances.
+    network and accepted tokens.
 - `status: "temporarily_unavailable"` marks a PSP whose credentials could not be
   checked just now: it is listed without `config`, the document is not cached, and
   `retry_after` says how many seconds to wait before asking again.
@@ -359,11 +358,10 @@ card the bank wants to authenticate answers `status: requires_action` with a
 `next_action` (Stripe.js `handleNextAction` with `payload.client_secret`), then
 `POST /v1/me/payment-methods/{id}/confirm` saves it. The token may come from the PSP's
 fields on any page of yours, an iframe on another domain of yours included; OpenRails
-offers no page of its own for it. `PUT` on the method replaces an NMI
-card with a new `payment_token` or `card`. OpenRails reads the saved card's brand, last
+offers no page of its own for it. OpenRails reads the saved card's brand, last
 four and expiry from the PSP; the browser never states them. `PATCH` edits the card in
 place: `exp_month` with `exp_year`, `billing_details`, and `reusable` (kept for one-click
-buys). A method's `status` is `active`, `closed` (the bank closed it), `replaced` or
+buys). The card number never changes: a new card is a new payment method. A method's `status` is `active`, `closed` (the bank closed it), `replaced` or
 `removed`; only an active one is charged. When its issuer reissues it under another brand,
 its `mandates` turn `requires_reconsent`; paying an order with it (a renewal it bills
 included), with the customer present, verifies the card and restores them. Checkout with a fresh `payment_token` also persists a payment method
@@ -375,13 +373,6 @@ exact JSON body for an exact-request retry. A different token is a new attempt a
 must use a new key. If create returns `provider_outcome_unknown`, refresh the payment
 method list before starting another attempt because the provider mutation may have
 completed.
-
-Stored-card replacement is durable. A confirmed replacement returns the updated
-payment method. `202 Accepted` has no body and means OpenRails is still resolving the
-provider outcome; repeat the exact request to inspect the same attempt. A
-`409 payment_method_update_retry_required` means that attempt did not update the card
-and Collect.js must tokenize it again. OpenRails never blindly resubmits a single-use
-Collect.js token after an ambiguous provider response.
 
 Deleting a stored NMI method returns `204 No Content` after provider and local
 removal are confirmed, or `202 Accepted` with no body while the durable delete is

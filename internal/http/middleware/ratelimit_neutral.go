@@ -354,13 +354,6 @@ func rateLimitSubjectsHTTP(r *http.Request, resolver *iputil.TrustedProxies) []R
 	return subjects
 }
 
-// RateLimitSubjectKeysHTTP returns the subject keys RateLimitHTTP enforces, for
-// the captcha-status handler. resolver must be the one RateLimitHTTP was built
-// with, or the keys diverge.
-func RateLimitSubjectKeysHTTP(r *http.Request, resolver *iputil.TrustedProxies) []string {
-	return SubjectKeys(rateLimitSubjectsHTTP(r, resolver))
-}
-
 // SubjectKeys returns the non-empty Key of each subject.
 func SubjectKeys(subjects []RateLimitSubject) []string {
 	keys := make([]string, 0, len(subjects))
@@ -455,9 +448,6 @@ func resolveRateLimitPolicy(cfg *config.RateLimitsConfig, req *http.Request) (*c
 		return nil, ""
 	}
 	bucket := ClassifyBucket(strings.ToLower(policyRequestPath(req)), req.Method)
-	if bucket == "captcha" {
-		return nil, bucket
-	}
 	switch bucket {
 	case "webhook":
 		return (*cfg)["webhook"], bucket
@@ -487,8 +477,6 @@ func ClassifyBucket(path, method string) string {
 
 	method = strings.ToUpper(method)
 	switch {
-	case path == "/v1/captcha/status" || path == "/v1/captcha/client.js":
-		return "captcha"
 	case method == http.MethodPost && path == "/v1/admin/metrics/ask":
 		return "metrics-ask"
 	case method == http.MethodPost && path == "/v1/admin/catalog/ask":

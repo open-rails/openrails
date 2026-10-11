@@ -222,23 +222,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid
   AND park_reason IS NULL
 RETURNING id, customer_id, psp_id;
 
--- name: ReplacePaymentMethodCard :execrows
--- An in-place card replacement moves the method onto the verified billing
--- entry; its agreements are replaced in the same transaction.
-UPDATE billing.payment_methods SET
-    rail_method_ref = sqlc.arg(new_rail_method_ref)::text,
-    card_brand = sqlc.narg(card_brand)::text,
-    card_last4 = sqlc.narg(card_last4)::text,
-    card_exp_month = sqlc.narg(card_exp_month)::smallint,
-    card_exp_year = sqlc.narg(card_exp_year)::smallint,
-    metadata = sqlc.narg(metadata),
-    park_reason = NULL,
-    parked_at = NULL,
-    updated_at = sqlc.arg(updated_at)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND rail_method_ref = sqlc.arg(old_rail_method_ref)::text
-  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%');
-
 -- name: ListVaultPaymentMethods :many
 -- #1115: the stored cards on one NMI vault of one PSP.
 SELECT * FROM billing.payment_methods

@@ -39,7 +39,7 @@ func (m *Mock) directPost(form url.Values) string {
 			return rejected(err)
 		}
 		return answer("response", "1", "responsetext", "Subscription added", "subscription_id", id, "orderid", form.Get("orderid"), "response_code", "100")
-	case form.Get("customer_vault") == "add_customer", form.Get("customer_vault") == "add_billing":
+	case form.Get("customer_vault") == "add_customer":
 		return m.vaultCard(form)
 	}
 	m.odd = append(m.odd, "POST transact.php type="+form.Get("type")+" recurring="+form.Get("recurring"))
@@ -356,8 +356,8 @@ func (m *Mock) plan(id string) (Plan, bool) {
 }
 
 // vaultCard is the Customer Vault taking a card number itself (no token):
-// add_customer creates the vault, add_billing adds an entry to one. The
-// caller's customer_vault_id and billing_id are kept when given.
+// add_customer creates the vault. The caller's customer_vault_id and
+// billing_id are kept when given.
 func (m *Mock) vaultCard(form url.Values) string {
 	number := strings.NewReplacer(" ", "", "-", "").Replace(form.Get("ccnumber"))
 	if !luhn(number) {
@@ -380,27 +380,14 @@ func (m *Mock) vaultCard(form url.Values) string {
 	if billing == "" {
 		billing = m.next("bill")
 	}
-	text := "Customer Added"
-	if form.Get("customer_vault") == "add_billing" {
-		v := m.vaults[id]
-		if v == nil {
-			return rejected("Invalid Customer Vault Id REFID:3187654327")
-		}
-		if _, taken := v.cardFor(billing); taken {
-			return rejected("Duplicate Billing Id REFID:3187654328")
-		}
-		v.Extra = append(v.Extra, Billing{ID: billing, Card: c})
-		text = "Billing Information Added"
-	} else {
-		if id == "" {
-			id = m.next("vault")
-		}
-		if m.vaults[id] != nil {
-			return rejected("Duplicate Customer Vault Id REFID:3187654329")
-		}
-		m.vaults[id] = &Vault{ID: id, BillingID: billing, Card: c}
+	if id == "" {
+		id = m.next("vault")
 	}
-	return answer("response", "1", "responsetext", text, "authcode", "", "transactionid", "", "avsresponse", "", "cvvresponse", "",
+	if m.vaults[id] != nil {
+		return rejected("Duplicate Customer Vault Id REFID:3187654329")
+	}
+	m.vaults[id] = &Vault{ID: id, BillingID: billing, Card: c}
+	return answer("response", "1", "responsetext", "Customer Added", "authcode", "", "transactionid", "", "avsresponse", "", "cvvresponse", "",
 		"orderid", "", "type", "", "response_code", "100", "customer_vault_id", id)
 }
 

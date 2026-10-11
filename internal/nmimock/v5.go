@@ -118,22 +118,6 @@ func (m *Mock) v5(method string, seg []string, q url.Values, body []byte) (int, 
 		}
 		data, next, more := page(data, q)
 		return http.StatusOK, obj{"customers": data, "next_cursor": next, "has_more": more}
-	case seg[0] == "customers" && len(seg) == 3 && seg[2] == "billing" && method == http.MethodPost:
-		v, ok := m.vaults[seg[1]]
-		if !ok {
-			return v5NotFound()
-		}
-		var one paymentDetails
-		_ = json.Unmarshal(body, &one)
-		t := one.PaymentDetails.PaymentToken
-		c, ok := m.cardOf(t)
-		if !ok {
-			return v5Invalid("invalid payment token")
-		}
-		delete(m.tokens, t)
-		b := Billing{ID: m.next("bill"), Card: c}
-		v.Extra = append(v.Extra, b)
-		return http.StatusOK, obj{"object": "billing", "id": b.ID}
 	case seg[0] == "customers" && len(seg) == 4 && seg[2] == "billing" && method == http.MethodDelete:
 		v, ok := m.vaults[seg[1]]
 		if !ok || !v.removeBilling(seg[3]) {

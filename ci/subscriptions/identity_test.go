@@ -238,7 +238,6 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/payment-operations/{id}/authentication/confirm": {"/payment-operations/" + op + "/authentication/confirm", map[string]any{}},
 		"GET /v1/me/invoices/{id}":                                   {"/invoices/" + invoice, nil},
 		"POST /v1/me/invoices/{id}/pay-now":                          {"/invoices/" + invoice + "/pay-now", map[string]any{"payment_method_id": bCard}},
-		"PUT /v1/me/payment-methods/{id}":                            {"/payment-methods/" + aCard, map[string]any{"payment_token": w.nmi.Tokenize(mastercard), "billing_details": map[string]any{"name": "Not Mine"}}},
 		"PATCH /v1/me/payment-methods/{id}":                          {"/payment-methods/" + aCard, map[string]any{"exp_month": 12, "exp_year": 2039, "reusable": false}},
 		"DELETE /v1/me/payment-methods/{id}":                         {"/payment-methods/" + aCard, nil},
 		"PUT /v1/me/default-payment-methods/{currency}":              {"/default-payment-methods/USD", map[string]any{"payment_method_id": aCard}},

@@ -143,22 +143,6 @@ func (s *Server) handle(mux router.Registrar, pattern string, h http.Handler) {
 	mux.Handle(pattern, h)
 }
 
-// handleBrowser is handle plus browser-tier CORS registration (#765): use for
-// raw net/http handlers (not routed through router.Router) that belong to the
-// checkout/self-service surface, e.g. the captcha discovery endpoints
-// registered alongside RegisterUserRoutes.
-func (s *Server) handleBrowser(mux router.Registrar, pattern string, h http.Handler) {
-	if s.nativeBrowser == nil {
-		s.nativeBrowser = map[string]bool{}
-	}
-	s.nativeBrowser[pattern] = true
-	s.handle(mux, pattern, h)
-	if s.browserTierRoutes == nil {
-		s.browserTierRoutes = middleware.NewBrowserTierRoutes()
-	}
-	s.browserTierRoutes.Add(pattern)
-}
-
 // New assembles the standalone surface over the engine's initialized runtime
 // and the server's control plane.
 func New(deps Dependencies) (*Server, error) {

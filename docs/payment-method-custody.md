@@ -170,6 +170,5 @@ the customer (`awaiting_method`); it never charges another card.
 Provider mirror: none is needed. OpenRails names the exact instrument on
 every charge (Stripe payment method id, NMI billing id), so Stripe's customer
 default and NMI's vault priority never select a card for OpenRails-owned
-billing. A provider-owned NMI schedule bills its vault's priority-1 entry; an
-in-place replacement removes the old entry, leaving the new card as the
-vault's only card.
+billing. A provider-owned NMI schedule bills its vault's priority-1 entry;
+every saved NMI card is a vault of its own.

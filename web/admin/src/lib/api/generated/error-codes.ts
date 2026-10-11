@@ -123,7 +123,6 @@ export type OpenRailsErrorCode =
   | "payment_method_same_vault"
   | "payment_method_stale"
   | "payment_method_update_failed"
-  | "payment_method_update_retry_required"
   | "payment_method_update_unsupported"
   | "payment_not_found"
   | "payment_not_refundable"
@@ -338,7 +337,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   payment_method_same_vault: { status: 409, type: "invalid_request_error", meaning: "The card is in the provider vault the subscription already bills." },
   payment_method_stale: { status: 402, type: "card_error", meaning: "The saved payment method can no longer be charged; collect the card again." },
   payment_method_update_failed: { status: 502, type: "api_error", meaning: "The provider could not update the payment method." },
-  payment_method_update_retry_required: { status: 409, type: "invalid_request_error", meaning: "The card was not updated; tokenize it again." },
   payment_method_update_unsupported: { status: 400, type: "invalid_request_error", meaning: "This payment method cannot be updated through OpenRails." },
   payment_not_found: { status: 404, type: "invalid_request_error", meaning: "The payment or payment operation does not exist." },
   payment_not_refundable: { status: 400, type: "invalid_request_error", meaning: "The payment is not a completed rail charge, or the amount exceeds what remains refundable." },

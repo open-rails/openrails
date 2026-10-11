@@ -260,13 +260,3 @@ type RenameMerchantParams struct {
 	// rename interval. Empty is the operator's rename.
 	ActorUserID string `json:"-"`
 }
-
-// CaptchaStatus says whether this caller must solve a captcha before its next
-// request, and how: send the solved token in TokenHeader.
-type CaptchaStatus struct {
-	Enabled         bool    `json:"enabled"`
-	Required        bool    `json:"required"`
-	Provider        *string `json:"provider"`
-	TokenHeader     string  `json:"token_header"`
-	ClientScriptURL string  `json:"client_script_url"`
-}

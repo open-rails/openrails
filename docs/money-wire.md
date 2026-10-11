@@ -22,8 +22,6 @@ beside a `currency`. No field name carries a currency.
   is refused.
 - **Currency codes** are upper-case ISO 4217 spelling on every response,
   whatever case a request sent.
-- **Rates are not money.** Provider rates (`/v1/solana/tokens` `price`,
-  `token_price_usd`, `fx_rate`) are decimal strings of the quoted float.
 - Counts are numbers. Durations are integer seconds (`window_seconds`,
   `retry_after_seconds`); day buckets are `YYYY-MM-DD`.
 
@@ -84,10 +82,7 @@ integers), the admin customer billing profile balances and metrics money cells
 away from zero, never a float) use the same decimal strings. Finding evidence,
 recommendation params and notification data are wire too and spell money the
 same way; stored event payloads, row metadata and River job arguments are
-internal records and keep integers. Provider rates (`/v1/solana/tokens`
-`price`, `token_price_usd`, `fx_rate`) are decimal strings of the float the
-feed quoted (`strconv.FormatFloat(rate, 'f', -1, 64)`): a rate is not money,
-but the browser never parses a JSON float either.
+internal records and keep integers.
 
 `testdata/wire/*.json` are the canonical success, error, null, empty-list, list,
 time and int64-boundary fixtures; Go (`wire_fixtures_test.go`) and the admin UI

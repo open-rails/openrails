@@ -464,23 +464,6 @@ func TestV5RefundOutcomes(t *testing.T) {
 	}
 }
 
-func TestAddCustomerBillingEntryNamesTheAddedCard(t *testing.T) {
-	for _, tc := range []struct {
-		name, body, want string
-	}{
-		{"billing object", `{"object":"billing","id":"B2"}`, "B2"},
-		{"whole customer", `{"object":"customer","id":"v1","billing":[{"id":"B1"},{"id":"B2"}]}`, "B2"},
-		{"unnamed", `{"object":"customer","id":"v1","billing":[{"id":"B1"}]}`, ""},
-		{"two new entries", `{"object":"customer","id":"v1","billing":[{"id":"B1"},{"id":"B2"},{"id":"B3"}]}`, ""},
-	} {
-		f := newNMIFake(t, reply(tc.body))
-		got, err := f.client(t).AddCustomerBillingEntry(t.Context(), "v1", CreateCustomerVaultData{PaymentToken: "tok"}, []string{"B1"})
-		require.Equal(t, tc.want, got, tc.name)
-		require.Equal(t, tc.want == "", IsTransportAmbiguous(err), tc.name)
-		require.Equal(t, "/customers/v1/billing", f.Calls()[0].Path)
-	}
-}
-
 // A canceled caller context aborts the in-flight call; a mutation aborted
 // mid-flight stays an unknown outcome.
 func TestStalledGatewayHonorsCallerContext(t *testing.T) {

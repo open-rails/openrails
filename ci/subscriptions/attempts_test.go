@@ -140,15 +140,3 @@ func TestNewCardAttemptsCardAddAndSale(t *testing.T) {
 	require.Equal(t, []string{"initial", "approved", "none", "new"}, []string{rows[1].Kind, rows[1].Category, rows[1].Owner, rows[1].CardEntry})
 	require.Equal(t, w.nmiRequests(), 4, "two verifications, one refused, and a sale")
 }
-
-// A replacement card's verification is an attempt on the card-save target.
-func TestNewCardAttemptsReplacement(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	e := enroll(t, w, "nmi", embedded)
-	e.replaceCard(mastercard)
-	rows := w.attempts(e.c.id)
-	last := rows[len(rows)-1]
-	require.Equal(t, []string{"verify", "approved", "new", "card_save", mastercard.Last4}, []string{last.Kind, last.Category, last.CardEntry, str(last.Target), str(last.Last4)})
-	require.Equal(t, w.nmiRequests(), len(rows), "save, initial charge and replacement")
-}

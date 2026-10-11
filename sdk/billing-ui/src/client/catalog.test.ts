@@ -1,6 +1,6 @@
 // Catalog, plan-change and Solana calls. Bodies mirror the Go wire types
 // (billing.Product, billing.Price, billing.SubscriptionChange*,
-// billing.PublicConfig, handlers.SupportedTokensResponse).
+// billing.PublicConfig).
 import { describe, expect, it, vi } from "vitest"
 
 import currenciesFixture from "../../../../testdata/wire/currencies.json"
@@ -308,46 +308,6 @@ describe("Solana", () => {
     await expect(client.getConfig()).rejects.toMatchObject({
       status: 500,
       code: "internal_error",
-    })
-  })
-
-  it("quotes tokens for a price and wallet", async () => {
-    const quoted = {
-      ...token,
-      price: "0.9998",
-      quote: {
-        amount: "18446744073709.551615",
-        units: "18446744073709551615",
-        token_price_usd: "0.9998",
-        fx_rate: "1",
-        fx_currency: "USD",
-        quoted_at: "2026-09-16T00:00:00Z",
-        expires_at: "2026-09-16T00:15:00Z",
-      },
-      balance: { amount: "1.5", units: "1500000", sufficient: false },
-    }
-    const { client, request } = served(
-      json(200, { tokens: [quoted, { ...token, symbol: "SOL" }] }),
-      json(200, {
-        tokens: [{ ...quoted, quote: { ...quoted.quote, units: 1.8e19 } }],
-      })
-    )
-    const tokens = await client.listSolanaTokens({
-      priceId: "price_1",
-      wallet: "wallet1",
-    })
-    expect(request().url).toBe(
-      "/billing/v1/solana/tokens?price_id=price_1&wallet=wallet1"
-    )
-    expect(tokens[0]).toMatchObject({
-      symbol: "USDC",
-      price: "0.9998",
-      quote: { units: "18446744073709551615", fx_currency: "USD" },
-      balance: { units: "1500000", sufficient: false },
-    })
-    expect(tokens[1].quote).toBeUndefined()
-    await expect(client.listSolanaTokens()).rejects.toMatchObject({
-      code: "invalid_response",
     })
   })
 

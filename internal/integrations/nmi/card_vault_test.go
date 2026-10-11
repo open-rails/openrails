@@ -48,12 +48,6 @@ func TestCardVaultWire(t *testing.T) {
 		require.Empty(t, header.Values(absent), absent)
 	}
 	require.False(t, cardguard.Unseal(card, func([]byte, []byte, int, int) {}), "the card is wiped once the gateway has it")
-
-	card = wireCard(t)
-	require.NoError(t, c.AddCustomerBillingFromCard(t.Context(), "700000000000000001", "b-2", CreateCustomerVaultData{Zip: "10001"}, card))
-	require.Equal(t, "billing_id=b-2&customer_vault=add_billing&customer_vault_id=700000000000000001&security_key=wire-key&zip=10001"+
-		"&ccnumber=4111111111111111&ccexp=1027&cvv=999", body)
-	require.False(t, cardguard.Unseal(card, func([]byte, []byte, int, int) {}))
 }
 
 // However the call ends, the card is wiped and no error carries it.

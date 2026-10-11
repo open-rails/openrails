@@ -591,52 +591,6 @@ export const subscriptionChangeSchema = z.object({
 })
 export type SubscriptionChange = z.infer<typeof subscriptionChangeSchema>
 
-const tokenUnits = z.string().regex(/^\d+$/, "units must be a uint64 string")
-
-export const solanaTokenSchema = z.object({
-  symbol: z.string(),
-  name: z.string().nullish(),
-  mint: z.string(),
-  decimals: z.number(),
-  /** USD price as an exact decimal string; absent without a feed quote. */
-  price: z.string().nullish(),
-  /** The stablecoin to present first. */
-  preferred: z.boolean().nullish(),
-  /** Can back a recurring subscription, not only a one-off payment. */
-  recurring_eligible: z.boolean().nullish(),
-  /** What the requested price costs in this token. */
-  quote: z
-    .object({
-      /** Display decimal of `units`. */
-      amount: z.string(),
-      /** Exact on-chain base units. */
-      units: tokenUnits,
-      token_price_usd: z.string().nullish(),
-      fx_rate: z.string().nullish(),
-      fx_currency: z.string().nullish(),
-      quoted_at: time.nullish(),
-      expires_at: time.nullish(),
-    })
-    .nullish(),
-  /** The requested wallet's holding. */
-  balance: z
-    .object({
-      amount: z.string(),
-      units: tokenUnits,
-      /** Covers `quote`. */
-      sufficient: z.boolean().nullish(),
-    })
-    .nullish(),
-})
-export type SolanaToken = z.infer<typeof solanaTokenSchema>
-
-export const solanaTokensSchema = z.object({
-  tokens: z
-    .array(solanaTokenSchema)
-    .nullish()
-    .transform((v) => v ?? []),
-})
-
 /**
  * The merchant's browser payment setup: its armed PSPs with their public
  * values and, with a Solana PSP, the network and accepted tokens a wallet

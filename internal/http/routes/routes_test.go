@@ -248,7 +248,7 @@ func TestUserRoutes(t *testing.T) {
 		require.NotRegexp(t, `/v1/checkout(/|$)`, key, "no engine checkout door for browsers")
 	}
 	oneOff := inventory(routesurface.ProviderRoutes{Solana: true})
-	require.Subset(t, oneOff, []string{"GET /v1/solana/tokens", "POST /v1/checkout-attempts/{id}/solana-pay"})
+	require.Subset(t, oneOff, []string{"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay"})
 	for _, key := range inventory(routesurface.ProviderRoutes{Solana: true, SolanaSigning: true}) {
 		require.NotContains(t, key, "/solana/recurring")
 	}

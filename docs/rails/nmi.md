@@ -96,7 +96,7 @@ only with that assessment in hand.
 What OpenRails does in `server` mode:
 
 - The card is vaulted with the classic Customer Vault call
-  (`customer_vault=add_customer` / `add_billing`, `ccnumber`, `ccexp`, `cvv`)
+  (`customer_vault=add_customer`, `ccnumber`, `ccexp`, `cvv`)
   under a vault id and billing id OpenRails derives from a durable operation.
   Charges, subscriptions and rebills then use the vault exactly as for a
   token-vaulted card.
@@ -278,8 +278,7 @@ doesn't surprise you:
   and an invoice's collection stops with failure code
   `stored_credential_required`. Saving a card verifies it for reuse without
   `billing_method`; moving a subscription onto a card without a recurring
-  agreement verifies one first. Replacing a card ends its mandates; the
-  subscriptions it pays take the replacement's recurring verification.
+  agreement verifies one first.
 - **Confirm recurring classification per processor.** OpenRails sends
   `billing_method=recurring` on the initial recurring CIT and later recurring
   charges, matching NMI's Credential on File guide. The Classic API reference
@@ -308,11 +307,10 @@ NMI refuses a sale or verification whose card and amount match one it just
 processed (`response=3`, code 300, "Duplicate transaction"), whatever the order
 id. The refused request charged nothing: tier-change prorations, one-off sales
 and card saves answer `409 payment_duplicate_refused` (try again in a few
-minutes), a customer-present enrollment fails, and a replacement-card
-verification retries on its own. A scheduled renewal or dunning recovery is
-different: the matching charge may be this period's payment (for an
-NMI-scheduled subscription, NMI's own schedule), so it stays unknown and is
-never re-sent. An engine renewal completes if its own order shows the charge;
+minutes) and a customer-present enrollment fails. A scheduled renewal or
+dunning recovery is different: the matching charge may be this period's
+payment (for an NMI-scheduled subscription, NMI's own schedule), so it stays
+unknown and is never re-sent. An engine renewal completes if its own order shows the charge;
 otherwise it raises `life.submission.unresolved`, naming the vault's matching
 charges under other orders. A recovery waits for the operator
 (`openrails intents resolve`).

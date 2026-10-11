@@ -1283,12 +1283,6 @@ pkg openrails/billing, type CaptchaConfig struct, Provider string `json:"provide
 pkg openrails/billing, type CaptchaConfig struct, ScriptURL string `json:"script_url"`
 pkg openrails/billing, type CaptchaConfig struct, SiteKey string `json:"site_key"`
 pkg openrails/billing, type CaptchaConfig struct, TokenHeader string `json:"token_header"`
-pkg openrails/billing, type CaptchaStatus struct
-pkg openrails/billing, type CaptchaStatus struct, ClientScriptURL string `json:"client_script_url"`
-pkg openrails/billing, type CaptchaStatus struct, Enabled bool `json:"enabled"`
-pkg openrails/billing, type CaptchaStatus struct, Provider *string `json:"provider"`
-pkg openrails/billing, type CaptchaStatus struct, Required bool `json:"required"`
-pkg openrails/billing, type CaptchaStatus struct, TokenHeader string `json:"token_header"`
 pkg openrails/billing, type CaptureAdmissionParams struct
 pkg openrails/billing, type CaptureAdmissionParams struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type CaptureAdmissionParams struct, Usage *CaptureUsage `json:"usage,omitempty"`
@@ -3009,10 +3003,6 @@ pkg openrails/billing, type RenewalListParams struct, Owner []string
 pkg openrails/billing, type RenewalListParams struct, PSPID PSPID
 pkg openrails/billing, type RenewalListParams struct, SubscriptionID SubscriptionID
 pkg openrails/billing, type RenewalListParams struct, embedded PageRequest
-pkg openrails/billing, type ReplacePaymentMethodCardParams struct
-pkg openrails/billing, type ReplacePaymentMethodCardParams struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
-pkg openrails/billing, type ReplacePaymentMethodCardParams struct, Card *Card `json:"card,omitempty"`
-pkg openrails/billing, type ReplacePaymentMethodCardParams struct, PaymentToken string `json:"payment_token,omitempty"`
 pkg openrails/billing, type ResolveFindingParams struct
 pkg openrails/billing, type ResolveFindingParams struct, Notes string `json:"notes"`
 pkg openrails/billing, type ResolveFindingParams struct, Outcome FindingOutcome `json:"outcome"`

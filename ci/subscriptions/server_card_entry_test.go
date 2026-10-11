@@ -18,7 +18,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	log "github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/require"
@@ -146,7 +145,6 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	w := prepareWorld(t, 12)
 	w.start()
 	c := w.newCustomer()
-	method := c.saveCard("nmi", visa)
 	price := w.permanent("content:post")
 	writes := len(w.nmi.Calls())
 	const refusal = "card must be tokenized by the payment provider before calling OpenRails"
@@ -154,11 +152,6 @@ func TestBrowserCardEntryRefusesCards(t *testing.T) {
 	status, body := c.call(http.MethodPost, "/payment-methods", "", map[string]any{"psp_id": w.psp["nmi"], "card": entryCard(entryVisa), "billing_details": map[string]any{"name": "Card Holder"}})
 	require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	_, message := errorOf(body)
-	require.Equal(t, refusal, message)
-
-	status, body = c.call(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"card": entryCard(entryVisa)})
-	require.Equal(t, http.StatusBadRequest, status, "%v", body)
-	_, message = errorOf(body)
 	require.Equal(t, refusal, message)
 
 	// The session's card option tokenizes in the page: it takes no card.
@@ -457,18 +450,6 @@ func TestServerCardEntryLeavesNoCardAtRest(t *testing.T) {
 	require.True(t, w.subscription(embedded, sub).CurrentPeriodEndsAt.After(end), "the renewal charged the vaulted card")
 	require.Len(t, w.nmi.ledger(""), 4, "two purchases, the first period and its renewal")
 	require.Len(t, w.cardVaults("add_customer"), 4, "each new card was vaulted once")
-
-	// Card update: the saved card is replaced by another, entered the same way.
-	replaced := unwrap(c.must(http.MethodPut, "/payment-methods/"+method, "replace-"+uuid.NewString(), map[string]any{"card": entryCard(entryMastercard)}))
-	w.settle()
-	shown, _ = replaced["card"].(map[string]any)
-	require.Equal(t, []any{"mastercard", "1111"}, []any{shown["brand"], shown["last4"]}, "%v", replaced)
-	staged := w.cardVaults("add_billing")
-	require.Len(t, staged, 1)
-	require.Equal(t, []string{entryMastercard, "1027", entryCVC, w.vaultOf(method)}, []string{staged[0].Get("ccnumber"), staged[0].Get("ccexp"), staged[0].Get("cvv"), staged[0].Get("customer_vault_id")})
-	require.Equal(t, w.methodRow(method, "rail_method_ref"), staged[0].Get("billing_id"), "the method now charges the entry the replacement named")
-	require.Equal(t, "mastercard", w.nmi.Vault(w.vaultOf(method)).Card.Brand, "the replaced entry is retired")
-	require.Empty(t, w.nmi.Vault(w.vaultOf(method)).Extra)
 
 	// A card the issuer declines, one the gateway refuses to store, a request
 	// the firewall refuses and one lost in transit.

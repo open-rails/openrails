@@ -1460,56 +1460,6 @@ func (q *Queries) ParkPaymentMethodByMethodRef(ctx context.Context, arg ParkPaym
 	return items, nil
 }
 
-const replacePaymentMethodCard = `-- name: ReplacePaymentMethodCard :execrows
-UPDATE billing.payment_methods SET
-    rail_method_ref = $1::text,
-    card_brand = $2::text,
-    card_last4 = $3::text,
-    card_exp_month = $4::smallint,
-    card_exp_year = $5::smallint,
-    metadata = $6,
-    park_reason = NULL,
-    parked_at = NULL,
-    updated_at = $7::timestamptz
-WHERE merchant_id = $8::uuid AND id = $9::uuid
-  AND rail_method_ref = $10::text
-  AND (park_reason IS NULL OR park_reason NOT LIKE 'delete:%')
-`
-
-type ReplacePaymentMethodCardParams struct {
-	NewRailMethodRef string
-	CardBrand        *string
-	CardLast4        *string
-	CardExpMonth     *int16
-	CardExpYear      *int16
-	Metadata         []byte
-	UpdatedAt        time.Time
-	MerchantID       uuid.UUID
-	ID               uuid.UUID
-	OldRailMethodRef string
-}
-
-// An in-place card replacement moves the method onto the verified billing
-// entry; its agreements are replaced in the same transaction.
-func (q *Queries) ReplacePaymentMethodCard(ctx context.Context, arg ReplacePaymentMethodCardParams) (int64, error) {
-	result, err := q.db.Exec(ctx, replacePaymentMethodCard,
-		arg.NewRailMethodRef,
-		arg.CardBrand,
-		arg.CardLast4,
-		arg.CardExpMonth,
-		arg.CardExpYear,
-		arg.Metadata,
-		arg.UpdatedAt,
-		arg.MerchantID,
-		arg.ID,
-		arg.OldRailMethodRef,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const setPaymentMethodMetadata = `-- name: SetPaymentMethodMetadata :execrows
 UPDATE billing.payment_methods SET metadata = $1, updated_at = $2::timestamptz
 WHERE merchant_id = $3::uuid AND id = $4::uuid AND status = 'active'

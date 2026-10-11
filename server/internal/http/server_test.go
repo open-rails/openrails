@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -14,9 +13,7 @@ import (
 
 	auth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
-	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/middleware"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
@@ -29,61 +26,6 @@ func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRe
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, req)
 	return w
-}
-
-func captchaServer(provider string, store *captcha.ChallengeStore) *Server {
-	cfg := &config.CaptchaConfig{}
-	if provider != "" {
-		cfg = &config.CaptchaConfig{Provider: provider, SiteKey: "site-key", SecretKey: "secret-key"}
-	}
-	return &Server{cfg: &config.Config{Captcha: cfg}, runtime: &app.Runtime{}, captchaStore: store}
-}
-
-// Captcha discovery is mounted under each surface prefix, reports a pending
-// challenge for the caller's address, and never serves the secret.
-func TestCaptchaDiscoveryRoutes(t *testing.T) {
-	store := captcha.NewChallengeStore(abusestate.New(nil))
-	store.MarkChallenged(context.Background(), "ip:203.0.113.50", time.Minute)
-
-	status := func(s *Server, prefix, remote string) string {
-		mux := http.NewServeMux()
-		s.registerUserRoutesAt(mux, prefix)
-		req := httptest.NewRequest(http.MethodGet, prefix+"/captcha/status", nil)
-		req.RemoteAddr = remote
-		w := serve(t, mux, req)
-		require.Equal(t, http.StatusOK, w.Code)
-		require.NotContains(t, w.Body.String(), "key")
-		return w.Body.String()
-	}
-	body := func(enabled, required bool, prefix string) string {
-		b, _ := json.Marshal(map[string]any{"enabled": enabled, "required": required, "provider": "turnstile", "token_header": "X-Captcha-Token", "client_script_url": prefix + "/captcha/client.js"})
-		return string(b)
-	}
-	on := captchaServer(config.CaptchaProviderTurnstile, store)
-	require.JSONEq(t, body(true, true, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.50:1234"))
-	require.JSONEq(t, body(true, false, StandaloneV1Prefix), status(on, StandaloneV1Prefix, "203.0.113.51:1234"))
-	require.JSONEq(t, body(true, false, EmbeddedV1Prefix), status(on, EmbeddedV1Prefix, "203.0.113.51:1234"))
-	require.JSONEq(t, body(false, false, StandaloneV1Prefix), status(captchaServer("", store), StandaloneV1Prefix, "203.0.113.50:1234"))
-
-	for _, tc := range []struct {
-		provider string
-		want     []string
-	}{
-		{config.CaptchaProviderHCaptcha, []string{`provider: "hcaptcha"`, "https://js.hcaptcha.com/1/api.js?render=explicit", "site-key"}},
-		{config.CaptchaProviderRecaptchaV3, []string{`provider: "recaptcha-v3"`, "https://www.google.com/recaptcha/api.js?render=site-key", `action: "billing_challenge"`, "window.grecaptcha.execute(cfg.siteKey, { action: cfg.action })"}},
-		{"", []string{"enabled: false"}},
-	} {
-		mux := http.NewServeMux()
-		captchaServer(tc.provider, nil).registerUserRoutesAt(mux, StandaloneV1Prefix)
-		w := serve(t, mux, httptest.NewRequest(http.MethodGet, "/v1/captcha/client.js", nil))
-		require.Equal(t, http.StatusOK, w.Code)
-		require.Equal(t, "application/javascript; charset=utf-8", w.Header().Get("Content-Type"))
-		require.Contains(t, w.Body.String(), "window.OpenRailsCaptcha")
-		for _, want := range tc.want {
-			require.Contains(t, w.Body.String(), want, tc.provider)
-		}
-		require.NotContains(t, w.Body.String(), "secret-key")
-	}
 }
 
 func TestStandaloneMetaRoutes(t *testing.T) {

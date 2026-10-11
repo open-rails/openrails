@@ -128,7 +128,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `payment_method_same_vault` | 409 | `invalid_request_error` | The card is in the provider vault the subscription already bills. |
 | `payment_method_stale` | 402 | `card_error` | The saved payment method can no longer be charged; collect the card again. |
 | `payment_method_update_failed` | 502 | `api_error` | The provider could not update the payment method. |
-| `payment_method_update_retry_required` | 409 | `invalid_request_error` | The card was not updated; tokenize it again. |
 | `payment_method_update_unsupported` | 400 | `invalid_request_error` | This payment method cannot be updated through OpenRails. |
 | `payment_not_found` | 404 | `invalid_request_error` | The payment or payment operation does not exist. |
 | `payment_not_refundable` | 400 | `invalid_request_error` | The payment is not a completed rail charge, or the amount exceeds what remains refundable. |

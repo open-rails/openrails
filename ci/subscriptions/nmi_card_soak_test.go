@@ -13,7 +13,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
-	"github.com/open-rails/openrails/internal/nmimock"
 )
 
 // storedCard is a saved method's local row, read as the engine sees it, and
@@ -118,38 +117,6 @@ func TestNMISavedCardVerificationRefused(t *testing.T) {
 	require.NotEmpty(t, w.storedCard(funds).onFileRef, "insufficient funds does not fail a verification")
 	require.Zero(t, len(w.nmi.Attempts()))
 	require.Empty(t, w.nmi.Unexpected())
-}
-
-// NMI's customer record may omit card_type. An in-place card replacement
-// completes with the brand read from the masked number; a record missing the
-// last four or expiry ends the replacement with an operator finding instead
-// of retrying forever.
-func TestNMIInPlaceCardReplacementWithoutBrand(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	c := w.newCustomer()
-	method := c.saveCard("nmi", mastercard)
-	vault := w.storedCard(method).vault
-	w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.NoBrand = true })
-	replacement := card{Brand: "visa", Last4: "1111"}
-	c.must(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"payment_token": w.nmi.Tokenize(replacement)})
-	w.settle()
-	got := w.storedCard(method)
-	require.Equal(t, "1111", got.lastFour, "the replacement completes")
-	require.Equal(t, "visa", got.cardType, "the brand comes from the masked number")
-
-	gap := c.saveCard("nmi", visa)
-	gapVault := w.storedCard(gap).vault
-	w.nmi.EditVault(gapVault, func(v *nmimock.Vault) { v.Card.Last4 = "" })
-	status, body := c.call(http.MethodPut, "/payment-methods/"+gap, "", map[string]any{"payment_token": w.nmi.Tokenize(mastercard)})
-	t.Logf("data gap replacement: %d %v", status, body)
-	w.settle()
-	require.Contains(t, w.openFindings("life.payment_method_update.provider_data_gap"), strings.TrimPrefix(gap, "pm_"))
-	var open int
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT count(*) FROM billing.provider_intents WHERE intent_type = 'nmi_payment_method_update'
-		AND status IN ('pending', 'in_flight', 'unknown_needs_verify', 'failed_retryable')`)).Scan(&open))
-	require.Zero(t, open, "a deterministic data gap is not retried")
-	require.Equal(t, visa.Last4, w.storedCard(gap).lastFour, "the local card is unchanged")
 }
 
 // A tier group can be assigned to, and changed on, a product with live

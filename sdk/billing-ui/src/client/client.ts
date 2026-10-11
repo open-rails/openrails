@@ -29,7 +29,6 @@ import {
   paymentMethodSchema,
   paymentSchema,
   productSchema,
-  solanaTokensSchema,
   subscriptionSchema,
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
@@ -49,7 +48,6 @@ import {
   type Payment,
   type PaymentMethod,
   type Product,
-  type SolanaToken,
   type Subscription,
   type SubscriptionChange,
   type SubscriptionChangePreview,
@@ -685,27 +683,6 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      */
     getConfig(signal?: AbortSignal): Promise<PublicConfig> {
       return json(publicConfigSchema, "/config", { signal, anonymous: true })
-    },
-
-    /**
-     * Accepted tokens with live prices. `priceId` adds each token's `quote`;
-     * `wallet` adds its `balance`.
-     */
-    async listSolanaTokens(
-      opts: {
-        priceId?: string
-        wallet?: string
-        signal?: AbortSignal
-      } = {}
-    ): Promise<SolanaToken[]> {
-      const { tokens } = await json(solanaTokensSchema, "/solana/tokens", {
-        query: {
-          price_id: opts.priceId,
-          wallet: opts.wallet,
-        },
-        signal: opts.signal,
-      })
-      return tokens
     },
 
     /** Currency code (upper case) to native-unit decimals. */

@@ -147,15 +147,6 @@ type CreatePaymentMethodParams struct {
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 }
 
-// ReplacePaymentMethodCardParams replaces a saved card in place, with a new
-// token or card; subscriptions it pays keep paying with the new card. Billing
-// details that are present replace the saved ones.
-type ReplacePaymentMethodCardParams struct {
-	PaymentToken   string          `json:"payment_token,omitempty"`
-	Card           *Card           `json:"card,omitempty"`
-	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
-}
-
 // UpdatePaymentMethodParams edits a saved card in place: its expiry (both
 // fields together), its billing details, and whether it is kept for one-click
 // buys. An absent field is unchanged; the card number never changes, so a new

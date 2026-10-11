@@ -265,9 +265,9 @@ default not set is `400 default_payment_method_required`.
   `402 card_declined`, an abandoned one is removed after a day). A declined
   card is `402 card_declined`; a save the PSP refuses is
   `502 payment_provider_rejected`.
-- **Replace** (`PUT`): the updated method when confirmed, `202` with no body
-  while the provider outcome is still being resolved (repeat the same request),
-  `409 payment_method_update_retry_required` when a fresh token is needed.
+- **Edit** (`PATCH`): expiry (`exp_month` with `exp_year`), `billing_details`
+  and `reusable`. The card number never changes: a new card is a new payment
+  method, saved and then made the default or a subscription's card.
 - **Delete**: `204` when the provider and the local record are both gone, `202`
   while that converges. Stripe cards are managed in Stripe's billing portal
   (`POST /v1/me/stripe/billing-portal-sessions`).

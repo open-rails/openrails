@@ -98,9 +98,6 @@ func (s *Store) Enqueue(ctx context.Context, p EnqueueParams) (gen.BillingProvid
 	if p.IntentType == subscriptions.TypeInitialMembership {
 		return s.enqueueInitialMembership(ctx, p)
 	}
-	if p.IntentType == TypeNMIPaymentMethodUpdate {
-		return s.enqueueNMIMethodUpdate(ctx, p)
-	}
 	if p.IntentType == TypeNMIPaymentMethodDelete {
 		return s.enqueueNMIMethodDelete(ctx, p)
 	}

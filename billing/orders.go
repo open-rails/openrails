@@ -75,9 +75,10 @@ type OrderPaymentParams struct {
 	// option takes new cards.
 	PSPID          *PSPID          `json:"psp_id,omitempty"`
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
-	// TokenSymbol pays from a Solana wallet in this token (GET
-	// /v1/solana/tokens): the order answers requires_action with a solana_pay
-	// next_action, a Solana Pay transaction request the wallet completes.
+	// TokenSymbol pays from a Solana wallet in this token (one of GET
+	// /v1/config's payment.solana.tokens): the order answers requires_action
+	// with a solana_pay next_action, a Solana Pay transaction request the
+	// wallet completes.
 	TokenSymbol string `json:"token_symbol,omitempty"`
 	// ReturnURL pays on the PSP's hosted page (Stripe Checkout, an option
 	// that accepts redirect): the order answers requires_action with a

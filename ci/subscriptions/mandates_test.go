@@ -25,17 +25,6 @@ func (w *world) mandates(tp topology, customer billing.CustomerID) []billing.Man
 	return out
 }
 
-func (w *world) mandate(tp topology, customer billing.CustomerID, id billing.MandateID) billing.Mandate {
-	w.t.Helper()
-	for _, m := range w.mandates(tp, customer) {
-		if m.ID == id {
-			return m
-		}
-	}
-	w.t.Fatalf("mandate %s not listed", id)
-	return billing.Mandate{}
-}
-
 // subscriptionMandate is the subscription's one live recurring mandate.
 func (w *world) subscriptionMandate(tp topology, customer billing.CustomerID, sub billing.SubscriptionID) billing.Mandate {
 	w.t.Helper()

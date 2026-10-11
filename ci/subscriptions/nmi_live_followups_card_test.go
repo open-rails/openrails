@@ -9,90 +9,9 @@ import (
 	"time"
 
 	"github.com/open-rails/openrails"
-	"github.com/open-rails/openrails/billing"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 )
-
-// billingIDs is the vault's billing entries at NMI, primary first.
-func (f *nmiFake) billingIDs(vault string) []string {
-	v := f.Vault(vault)
-	if v == nil {
-		return nil
-	}
-	ids := []string{v.BillingID}
-	for _, b := range v.Extra {
-		ids = append(ids, b.ID)
-	}
-	return ids
-}
-
-// An in-place card replacement first verifies the new card as a recurring
-// agreement: card and mandate change together, the old card is retired at NMI,
-// and the next renewal cites the new agreement. A card that fails verification
-// is not adopted and the previous card keeps billing.
-func TestNMIInPlaceReplacementEstablishesAgreement(t *testing.T) {
-	t.Parallel()
-	for _, tp := range []topology{embedded, remote} {
-		t.Run(string(tp), func(t *testing.T) {
-			t.Parallel()
-			w := newWorld(t)
-			e := enroll(t, w, "nmi", tp)
-			before := w.storedCard(e.method)
-			agreement := w.subscriptionMandate(tp, e.c.cid(), e.sub)
-			require.NotNil(t, agreement.InitialTransactionID)
-			verified := len(w.nmi.Validations(before.vault))
-
-			// Refused: nothing changes, at NMI or locally.
-			refused := card{Brand: "mastercard", Last4: "0051", Decline: "200"}
-			status, body := e.c.call(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"payment_token": w.nmi.Tokenize(refused)})
-			require.Equal(t, http.StatusPaymentRequired, status, "%v", body)
-			require.Equal(t, "card_declined", errorCode(body))
-			w.settle()
-			require.Equal(t, before, w.storedCard(e.method), "a refused replacement leaves the card")
-			require.Equal(t, agreement, w.subscriptionMandate(tp, e.c.cid(), e.sub), "and the subscription's mandate")
-			require.Equal(t, []string{before.billing}, w.nmi.billingIDs(before.vault), "the refused card is removed from the vault")
-			require.Len(t, w.nmi.Validations(before.vault), verified+1, "one verification for the refused card")
-
-			// Replaced: one new verification, adopted with the card.
-			e.replaceCard(mastercard)
-			after := w.storedCard(e.method)
-			all := w.nmi.Validations(before.vault)
-			require.Len(t, all, verified+2, "exactly one verification for the replacement card")
-			latest := all[len(all)-1]
-			require.True(t, latest.Approved)
-			require.Equal(t, mastercard.Last4, latest.Card.Last4, "the verification is of the new card")
-			require.Equal(t, "customer", latest.Form.Get("initiated_by"))
-			require.Equal(t, "stored", latest.Form.Get("stored_credential_indicator"))
-			require.Equal(t, "recurring", latest.Form.Get("billing_method"))
-			require.Empty(t, latest.Form.Get("amount"), "a verification moves no funds")
-			require.True(t, strings.HasPrefix(latest.Form.Get("orderid"), "pmu-"))
-			require.Equal(t, before.vault, after.vault, "the method keeps its vault")
-			require.Equal(t, latest.BillingID, after.billing, "the method moves onto the verified card")
-			moved := w.subscriptionMandate(tp, e.c.cid(), e.sub)
-			require.NotEqual(t, agreement.ID, moved.ID, "the replaced card's mandate ended")
-			require.Equal(t, latest.TransactionID, str(moved.InitialTransactionID), "the agreement is the new card's verification")
-			require.Equal(t, billing.MandateEndReplaced, *w.mandate(tp, e.c.cid(), agreement.ID).EndReason)
-			require.Equal(t, mastercard.Last4, after.lastFour)
-			require.Equal(t, "mastercard", after.cardType)
-			require.Equal(t, []string{after.billing}, w.nmi.billingIDs(before.vault), "the replaced card is retired at NMI")
-
-			sales := len(w.nmi.ledger(""))
-			end := e.periodEnd()
-			e.toFreshPeriodEnd()
-			w.runRenewals()
-			require.True(t, e.periodEnd().After(end))
-			require.Len(t, w.nmi.ledger(""), sales+1, "exactly one renewal")
-			renewal := w.nmi.LastSale()
-			require.Equal(t, mastercard.Last4, renewal.Card.Last4)
-			require.Equal(t, after.billing, renewal.BillingID)
-			require.Equal(t, "merchant", renewal.InitiatedBy)
-			require.Equal(t, "used", renewal.Indicator)
-			require.Equal(t, latest.TransactionID, renewal.Initial, "the MIT cites the agreement established on the card it charges")
-			require.Empty(t, w.nmi.Unexpected())
-		})
-	}
-}
 
 // A provider refresh reads the vault roster before the local one. A card
 // saved in between is present at NMI and must not be reported missing; a

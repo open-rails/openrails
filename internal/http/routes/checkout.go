@@ -1,8 +1,6 @@
 package routes
 
 import (
-	"net/http"
-
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/http/handlers"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
@@ -13,11 +11,8 @@ import (
 // with its own), and the payment page reads and pays it by its id; a saved
 // card pays only with the customer's own proof. A checkout attempt is one charge on one
 // PSP; rail steps (a redirect, a Solana Pay link) are its next_action, and
-// Solana Pay's wallet requests address it. Public discovery serves the
-// accepted Solana tokens.
+// Solana Pay's wallet requests address it.
 var checkoutRoutes = []Route{
-	{Method: GET, Path: "/v1/solana/tokens", Group: Checkout, Auth: AuthPublic, When: FeatureSolana,
-		Query: queryOf(handlers.SupportedTokensQuery{}), Responses: []Reply{{200, handlers.SupportedTokensResponse{}}}, Errors: codes("resource_conflict"), Handler: h(handlers.GetSupportedTokens)},
 	{Method: GET, Path: "/v1/checkout-sessions/{id}", Group: Checkout, Auth: AuthCheckoutSession, Throttle: ThrottleSessionRead,
 		Responses: []Reply{{200, checkoutsession.CheckoutSession{}}}, Errors: codes("card_attempts_blocked", "card_declined", "card_not_saved", "checkout_session_not_found", "checkout_session_unavailable", "idempotency_key_reused", "insufficient_funds", "invalid_param", "payment_method_required", "payment_method_stale", "payment_provider_rejected", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable", "subscription_paid_through", "subscription_resumable"), Handler: h(handlers.GetCheckoutSession)},
 	{Method: POST, Path: "/v1/checkout-sessions/{id}/pay", Group: Checkout, Auth: AuthCheckoutSession, Throttle: ThrottleSessionPay,
@@ -40,11 +35,4 @@ var checkoutRoutes = []Route{
 		Request: billing.CreateCheckoutSessionParams{}, Responses: []Reply{{201, billing.CheckoutSessionLink{}}}, Errors: codes("authentication_required", "checkout_offer_unavailable", "checkout_session_unavailable", "invalid_param", "resource_access_denied", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ServiceCreateCheckoutSession)},
 	{Method: GET, Path: "/v1/admin/checkout-options", Group: Admin, Auth: AuthMerchant, Name: "ListCheckoutOptions", Level: LevelRead,
 		Query: params(text("price_id"), text("product_key"), text("price_key")), Responses: []Reply{{200, billing.ListPage[billing.CheckoutOption]{}}}, Errors: codes("invalid_param", "resource_not_found", "service_unavailable"), Handler: h(handlers.ListCheckoutOptions)},
-
-	// Captcha discovery: whether this caller must solve one, and the script
-	// that does. The assembly builds both from its captcha configuration.
-	{Method: GET, Path: "/v1/captcha/status", Group: Checkout, Auth: AuthPublic, NoConn: true,
-		Responses: []Reply{{200, billing.CaptchaStatus{}}}, Bind: external(func(x *External) http.Handler { return x.CaptchaStatus })},
-	{Method: GET, Path: "/v1/captcha/client.js", Group: Checkout, Auth: AuthPublic, NoConn: true,
-		Responses: []Reply{{200, Stream{"application/javascript"}}}, Bind: external(func(x *External) http.Handler { return x.CaptchaScript })},
 }

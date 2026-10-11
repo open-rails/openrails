@@ -284,14 +284,6 @@ export type CaptchaConfig = {
   token_header: string
 }
 
-export type CaptchaStatus = {
-  enabled: boolean
-  required: boolean
-  provider: string | null
-  token_header: string
-  client_script_url: string
-}
-
 export type CaptureAdmissionParams = {
   amount?: string
   usage?: CaptureUsage
@@ -2203,12 +2195,6 @@ export type Renewal = {
   attempts: PaymentAttempt[]
 }
 
-export type ReplacePaymentMethodCardParams = {
-  payment_token?: string
-  card?: CardEntry
-  billing_details?: BillingDetails
-}
-
 export type ResolveFindingParams = {
   outcome?: "approve" | "ignore"
   notes?: string
@@ -2410,41 +2396,9 @@ export type SubscriptionRetryNowResult = {
   replayed: boolean
 }
 
-export type SupportedTokensResponse = {
-  tokens: TokenInfo[]
-}
-
 export type TieredPrice = {
   mode?: "graduated" | "volume"
   tiers?: RateTier[]
-}
-
-export type TokenBalance = {
-  amount: string
-  units: string
-  sufficient: boolean
-}
-
-export type TokenInfo = {
-  symbol: string
-  name: string
-  mint: string
-  decimals: number
-  price?: string
-  preferred: boolean
-  recurring_eligible: boolean
-  quote?: TokenQuote
-  balance?: TokenBalance
-}
-
-export type TokenQuote = {
-  amount: string
-  units: string
-  token_price_usd: string
-  fx_rate: string
-  fx_currency: string
-  quoted_at: string
-  expires_at: string
 }
 
 export type TrustLevel = {

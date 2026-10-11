@@ -75,17 +75,6 @@ func TestNMINameParts(t *testing.T) {
 	}
 }
 
-func TestPreparePaymentMethodUpdate(t *testing.T) {
-	t.Parallel()
-	token := "  token-1  "
-	req := &UpdatePaymentMethodRequest{PaymentToken: &token}
-	require.NoError(t, preparePaymentMethodUpdate(req))
-	require.Equal(t, "token-1", *req.PaymentToken)
-
-	blank := " "
-	require.EqualError(t, preparePaymentMethodUpdate(&UpdatePaymentMethodRequest{PaymentToken: &blank}), "payment_token is required")
-}
-
 func TestVaultedCardReadsTheGatewayRecord(t *testing.T) {
 	t.Parallel()
 	card := vaultedCard(nmi.V5BillingCardData{CardNumber: "4xxxxxxxxxxx1111", CardExp: "1230"}, nil)
@@ -131,12 +120,6 @@ func TestResolveNMIClientIsMerchantScopedAndFailsClosed(t *testing.T) {
 	}
 }
 
-type updateExecutor struct{ out PaymentMethodUpdateOutcome }
-
-func (f updateExecutor) ExecutePaymentMethodUpdate(context.Context, *models.PaymentMethod, *UpdatePaymentMethodRequest) (PaymentMethodUpdateOutcome, error) {
-	return f.out, nil
-}
-
 type deleteExecutor struct {
 	out    PaymentMethodDeleteOutcome
 	called int
@@ -169,29 +152,6 @@ func vaultService(t *testing.T, del PaymentMethodDeleteExecutor) (*RailPaymentMe
 func TestPaymentMethodIntentOutcomes(t *testing.T) {
 	t.Parallel()
 	ctx := merchant.WithID(context.Background(), dbtest.TestMerchantID)
-	token := "token-1"
-	update := func(out PaymentMethodUpdateOutcome) (*models.PaymentMethod, *models.PaymentMethod, error) {
-		svc, pm := vaultService(t, nil)
-		svc.UpdateIntents = updateExecutor{out: out}
-		if out.Done {
-			out.Method = pm
-			svc.UpdateIntents = updateExecutor{out: out}
-		}
-		got, err := svc.UpdatePaymentMethod(ctx, pm, &UpdatePaymentMethodRequest{PaymentToken: &token})
-		return pm, got, err
-	}
-	pm, got, err := update(PaymentMethodUpdateOutcome{Done: true})
-	require.NoError(t, err)
-	require.Same(t, pm, got)
-	_, _, err = update(PaymentMethodUpdateOutcome{})
-	require.ErrorIs(t, err, ErrPaymentMethodUpdateProcessing)
-	_, _, err = update(PaymentMethodUpdateOutcome{Terminal: true, Retokenize: true})
-	require.ErrorIs(t, err, ErrPaymentMethodRetokenize)
-	_, _, err = update(PaymentMethodUpdateOutcome{Terminal: true, Reason: "provider state conflict"})
-	var updateFailed *PaymentMethodUpdateFailedError
-	require.ErrorAs(t, err, &updateFailed)
-	require.Equal(t, "provider state conflict", updateFailed.Reason)
-
 	for _, tc := range []struct {
 		out   PaymentMethodDeleteOutcome
 		check func(error)
@@ -247,8 +207,6 @@ func TestDeletePaymentMethodGuards(t *testing.T) {
 		}
 		require.ErrorIs(t, svc.CleanupPaymentMethodBestEffort(ctx, pm), ErrPaymentMethodCustodianUnsupported, kind)
 		_, err := svc.ResolveClientForPaymentMethod(ctx, pm)
-		require.ErrorIs(t, err, ErrPaymentMethodCustodianUnsupported, kind)
-		_, err = svc.UpdatePaymentMethod(ctx, pm, &UpdatePaymentMethodRequest{})
 		require.ErrorIs(t, err, ErrPaymentMethodCustodianUnsupported, kind)
 	}
 }

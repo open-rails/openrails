@@ -56,7 +56,6 @@ export type {
   PaymentRecovery,
   Price,
   Product,
-  SolanaToken,
   Subscription,
   SubscriptionDunning,
   SubscriptionProduct,

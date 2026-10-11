@@ -175,8 +175,8 @@ for host components.
 ## Catalog and plan changes
 
 The client also reads the public catalog and changes a subscription's plan.
-The catalog and Solana reads are public routes, served only when the host
-mounts OpenRails' checkout routes; `GET /config` is always served.
+The catalog read is a public route, served only when the host mounts
+OpenRails' checkout routes; `GET /config` is always served.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
@@ -184,7 +184,6 @@ mounts OpenRails' checkout routes; `GET /config` is always served.
 | `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
 | `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |
-| `listSolanaTokens({ priceId, wallet })`                                                             | `GET /solana/tokens`                                            |
 
 ```ts
 const preview = await billing.previewSubscriptionChange(sub.id, { quantity: 5 }) // amount_due_now, effective

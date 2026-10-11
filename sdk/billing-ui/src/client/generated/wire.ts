@@ -59,14 +59,6 @@ export type CaptchaConfig = {
   token_header: string
 }
 
-export type CaptchaStatus = {
-  enabled: boolean
-  required: boolean
-  provider: string | null
-  token_header: string
-  client_script_url: string
-}
-
 export type CardDetails = {
   brand: string | null
   last4: string | null
@@ -741,12 +733,6 @@ export type RailDefinition = {
   setting_keys: string[]
 }
 
-export type ReplacePaymentMethodCardParams = {
-  payment_token?: string
-  card?: CardEntry
-  billing_details?: BillingDetails
-}
-
 export type RetrySubscriptionNowParams = {
   payment_method_id?: string
 }
@@ -908,38 +894,6 @@ export type SubscriptionRetryNowResult = {
   subscription: Subscription
   operation: PaymentOperation
   replayed: boolean
-}
-
-export type SupportedTokensResponse = {
-  tokens: TokenInfo[]
-}
-
-export type TokenBalance = {
-  amount: string
-  units: string
-  sufficient: boolean
-}
-
-export type TokenInfo = {
-  symbol: string
-  name: string
-  mint: string
-  decimals: number
-  price?: string
-  preferred: boolean
-  recurring_eligible: boolean
-  quote?: TokenQuote
-  balance?: TokenBalance
-}
-
-export type TokenQuote = {
-  amount: string
-  units: string
-  token_price_usd: string
-  fx_rate: string
-  fx_currency: string
-  quoted_at: string
-  expires_at: string
 }
 
 export type UpdatePaymentMethodParams = {

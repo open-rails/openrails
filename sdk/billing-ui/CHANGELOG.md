@@ -1,5 +1,10 @@
 # Changelog
 
+## No Solana token list
+
+- `listSolanaTokens` and `SolanaToken` are gone with `GET /v1/solana/tokens`:
+  the accepted tokens are `getConfig()`'s `payment.solana.tokens`.
+
 ## Apple Pay and Google Pay
 
 - `<OrderCheckout wallets>` offers Apple Pay and Google Pay through a Stripe

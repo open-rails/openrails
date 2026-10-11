@@ -62,23 +62,6 @@ func (w *world) methodVersions(method string) []string {
 	return out
 }
 
-// notificationCodes is the failure code of each of the customer's
-// notifications of a kind.
-func (c *customer) notificationCodes(kind string) []string {
-	c.w.t.Helper()
-	items, _ := c.must(http.MethodGet, "/notifications?limit=100", "", nil)["data"].([]any)
-	var out []string
-	for _, item := range items {
-		n := item.(map[string]any)
-		if n["event_type"] == kind {
-			data, _ := n["data"].(map[string]any)
-			code, _ := data["failure_code"].(string)
-			out = append(out, code)
-		}
-	}
-	return out
-}
-
 // arrearsInvoice runs up 50 USD of usage for c and invoices it. A scheduled
 // collection may already have collected it under the customer's mandate.
 func (w *world) arrearsInvoice(c *customer) billing.InvoiceID {
@@ -131,100 +114,6 @@ func (w *world) invoice(id billing.InvoiceID) *billing.Invoice {
 
 func credentialFields(s *nmimock.Sale) []string {
 	return []string{s.InitiatedBy, s.Indicator, s.Initial}
-}
-
-// collectionMandate is c's active unscheduled mandate for currency.
-func (w *world) collectionMandate(c *customer, currency string) billing.Mandate {
-	w.t.Helper()
-	var live []billing.Mandate
-	for _, m := range w.mandates(embedded, c.cid()) {
-		if m.Kind == billing.MandateUnscheduled && str(m.Currency) == currency && m.Status == billing.MandateActive {
-			live = append(live, m)
-		}
-	}
-	require.Len(w.t, live, 1, "one active collection mandate per currency")
-	return live[0]
-}
-
-// invoiceAttempt is c's invoice attempt for a provider transaction.
-func (w *world) invoiceAttempt(c *customer, transaction string) billing.PaymentAttempt {
-	w.t.Helper()
-	page, err := w.client[embedded].ListPaymentAttempts(w.t.Context(), billing.PaymentAttemptListParams{CustomerID: c.cid(), Kind: []string{"invoice"}})
-	require.NoError(w.t, err)
-	for _, a := range page.Items {
-		if a.TransactionID == transaction {
-			return a
-		}
-	}
-	w.t.Fatalf("no invoice attempt for %s", transaction)
-	return billing.PaymentAttempt{}
-}
-
-// A card replaced in place ends the replaced card's mandates: its
-// verification declares a recurring agreement, which no subscription of this
-// customer takes. Invoice collection stops for the customer rather than cite
-// the old card's collection mandate; the customer's own payment anchors the
-// new card's, and later collections cite it.
-func TestReplacedCardDropsUnscheduledAgreement(t *testing.T) {
-	t.Parallel()
-	w := newWorld(t)
-	c := w.newCustomer()
-	method := c.saveCard("nmi", visa)
-	saved := w.nmi.Validations(w.vaultOf(method))[0]
-	first := w.arrearsInvoice(c)
-	w.refreshProviders()
-	w.settleCollectionScans()
-	c.must(http.MethodPost, "/invoices/"+first.String()+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": method})
-	w.settle()
-	_, old := w.agreements(method)
-	require.Equal(t, saved.TransactionID, old, "saving the card stored it for reuse")
-	require.Equal(t, []string{"customer", "used", old}, credentialFields(w.nmi.LastSale()), "the customer's payment uses it")
-	c.must(http.MethodPut, "/default-payment-methods/USD", "", map[string]any{"payment_method_id": method})
-	replaced := w.collectionMandate(c, "USD")
-	require.Equal(t, old, str(replaced.InitialTransactionID), "the collection mandate cites the card's lineage")
-
-	c.must(http.MethodPut, "/payment-methods/"+method, "", map[string]any{"payment_token": w.nmi.Tokenize(mastercard)})
-	w.settle()
-	recurring, unscheduled := w.agreements(method)
-	require.Empty(t, unscheduled, "the replaced card's collection mandate goes with it")
-	require.Empty(t, recurring, "no subscription takes the replacement's recurring verification")
-	ended := w.mandate(embedded, c.cid(), replaced.ID)
-	require.Equal(t, billing.MandateEnded, ended.Status)
-	require.Equal(t, billing.MandateEndReplaced, *ended.EndReason)
-	verified := w.nmi.Validations(w.vaultOf(method))
-	require.Equal(t, "recurring", verified[len(verified)-1].Form.Get("billing_method"))
-
-	second := w.arrearsInvoice(c)
-	sent := len(w.nmi.Attempts())
-	w.collectInvoices()
-	require.Len(t, w.nmi.Attempts(), sent, "no merchant-initiated charge without the new card's agreement")
-	stopped := w.invoice(second)
-	require.Equal(t, agreementRequired, *stopped.LastCollectionFailureCode)
-	require.Nil(t, stopped.NextCollectionAttemptAt, "collection waits for the customer")
-	require.Contains(t, c.notificationCodes("payment_method_update_required"), agreementRequired)
-
-	w.refreshProviders()
-	c.must(http.MethodPost, "/invoices/"+second.String()+"/pay-now", "pay-"+uuid.NewString(), map[string]any{"payment_method_id": method})
-	w.settle()
-	sale := w.nmi.LastSale()
-	require.Equal(t, mastercard.Last4, sale.Card.Last4)
-	require.Equal(t, []string{"customer", "stored", ""}, credentialFields(sale), "the customer's payment starts the new card's agreement")
-	_, unscheduled = w.agreements(method)
-	require.Equal(t, sale.TransactionID, unscheduled)
-	collection := w.collectionMandate(c, "USD")
-	require.Equal(t, unscheduled, str(collection.InitialTransactionID), "the customer's payment anchors the new collection mandate")
-
-	third := w.arrearsInvoice(c)
-	w.refreshProviders()
-	w.collectInvoices()
-	sale = w.nmi.LastSale()
-	require.Equal(t, []string{"merchant", "used", unscheduled}, credentialFields(sale), "collection cites the new card's mandate")
-	require.Equal(t, billing.InvoicePaid, w.invoice(third).Status)
-	require.NotEqual(t, old, sale.Initial)
-	attempt := w.invoiceAttempt(c, sale.TransactionID)
-	require.NotNil(t, attempt.MandateID)
-	require.Equal(t, collection.ID, *attempt.MandateID)
-	require.Equal(t, unscheduled, attempt.SentInitialTransactionID)
 }
 
 // NMI's Account Updater reissues a member's card. A same-brand reissue keeps

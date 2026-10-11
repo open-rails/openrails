@@ -46,9 +46,6 @@ type RailPaymentMethodService struct {
 	// DeleteIntents routes DeletePaymentMethod through the durable nmi_vault_delete
 	// provider intent (#674 tail); wired at runtime assembly.
 	DeleteIntents PaymentMethodDeleteExecutor
-	// UpdateIntents routes UpdatePaymentMethod through the durable
-	// nmi_payment_method_update provider intent (#928); wired at runtime assembly.
-	UpdateIntents PaymentMethodUpdateExecutor
 	clock         clockwork.Clock
 
 	// CardVaults routes a card the server received through the durable
@@ -126,29 +123,6 @@ type CreatePaymentMethodRequest struct {
 	// Card is the card itself, for a PSP whose card_entry is server (#1129);
 	// never beside PaymentToken. It is wiped before CreatePaymentMethod returns.
 	Card *cardguard.Card
-}
-
-type UpdatePaymentMethodRequest struct {
-	PaymentToken *string
-	Provider     *string
-	NameOnCard   *string
-	FirstName    *string
-	LastName     *string
-	Address1     *string
-	City         *string
-	State        *string
-	Zip          *string
-	Country      *string
-	Phone        *string
-	Email        *string
-	Company      *string
-	Address2     *string
-
-	// Card replaces PaymentToken for a PSP whose card_entry is server (#1129).
-	// AttemptKey is the caller's retry identity for that replacement: a card
-	// is never hashed into one.
-	Card       *cardguard.Card
-	AttemptKey string
 }
 
 // PaymentMethodError carries additional context for payment method creation failures, including localization codes.
@@ -620,138 +594,10 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-var (
-	ErrPaymentMethodUpdateProcessing = errors.New("payment method update is processing; retry the same request to check the result")
-	ErrPaymentMethodRetokenize       = errors.New("payment method was not updated; tokenize the card again")
-	// ErrPaymentDuplicateRefused: the provider refused the card verification
-	// unprocessed as a duplicate of an identical recent request; nothing was
-	// saved and the same request succeeds after its window.
-	ErrPaymentDuplicateRefused = errors.New("the payment provider refused the card verification as a duplicate of an identical recent request; try again in a few minutes")
-)
-
-// PaymentMethodUpdateValidationError is a caller-correctable replacement
-// request error. Message is safe to return through public surfaces.
-type PaymentMethodUpdateValidationError struct {
-	Message string
-}
-
-func (e *PaymentMethodUpdateValidationError) Error() string {
-	if e == nil {
-		return "invalid payment method update"
-	}
-	return e.Message
-}
-
-// PaymentMethodUpdateFailedError means the durable replacement reached an
-// unrecoverable provider/local conflict. Reason is operator-only.
-type PaymentMethodUpdateFailedError struct {
-	Reason string
-}
-
-func (e *PaymentMethodUpdateFailedError) Error() string {
-	if e == nil || strings.TrimSpace(e.Reason) == "" {
-		return "payment method update failed permanently"
-	}
-	return "payment method update failed permanently: " + e.Reason
-}
-
-// PaymentMethodUpdateOutcome mirrors the durable intent state without making
-// paymentmethods import intents (which would create a cycle).
-type PaymentMethodUpdateOutcome struct {
-	Method     *models.PaymentMethod
-	Done       bool
-	Retokenize bool
-	Terminal   bool
-	Reason     string
-	// DeclineCode is set when the issuer refused to verify the replacement
-	// card; the method keeps its previous card.
-	DeclineCode string
-}
-
-type PaymentMethodUpdateExecutor interface {
-	ExecutePaymentMethodUpdate(ctx context.Context, pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) (PaymentMethodUpdateOutcome, error)
-}
-
-// UpdatePaymentMethod replaces an NMI card through the durable provider intent.
-func (s *RailPaymentMethodService) UpdatePaymentMethod(ctx context.Context, pm *models.PaymentMethod, req *UpdatePaymentMethodRequest) (*models.PaymentMethod, error) {
-	if pm == nil {
-		return nil, errors.New("payment method is required")
-	}
-	if req == nil {
-		return nil, errors.New("payment method update is required")
-	}
-	if pm.Custodian != models.CustodianPSP {
-		return nil, ErrPaymentMethodCustodianUnsupported
-	}
-	if strings.HasPrefix(pm.ParkReason, "delete:") {
-		return nil, ErrPaymentMethodDeleteProcessing
-	}
-	rail := strings.ToLower(string(pm.Rail))
-	if rail == "" {
-		return nil, errors.New("payment method rail is required")
-	}
-
-	if !rails.SupportsPaymentMethodCRUD(models.Rail(rail)) {
-		return nil, RailPaymentMethodsUnsupported(rail)
-	}
-	defer req.Card.Zero()
-	if req.Card != nil {
-		entry, err := s.CardEntryForPSP(ctx, pm.HoldingPSP())
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", ErrPaymentMethodProviderUnavailable, err)
-		}
-		if entry != config.CardEntryServer {
-			return nil, ErrCardEntryNotEnabled
-		}
-	}
-	if err := preparePaymentMethodUpdate(req); err != nil {
-		return nil, err
-	}
-	if _, _, err := s.resolveNMIClient(ctx, rail, pm.PspID); err != nil {
-		return nil, fmt.Errorf("%w: rail '%s' is not configured: %w", ErrPaymentMethodProviderUnavailable, rail, err)
-	}
-	if s.UpdateIntents == nil {
-		return nil, errors.New("payment method update intent executor not wired")
-	}
-	out, err := s.UpdateIntents.ExecutePaymentMethodUpdate(ctx, pm, req)
-	if err != nil {
-		return nil, fmt.Errorf("post payment method update intent: %w", err)
-	}
-	switch {
-	case out.Done:
-		return out.Method, nil
-	case out.Retokenize:
-		return nil, ErrPaymentMethodRetokenize
-	case out.DeclineCode != "":
-		return nil, &PaymentMethodError{Err: errors.New(out.Reason), LocalizationID: out.DeclineCode, Message: "card verification failed: " + out.Reason}
-	case out.Terminal:
-		return nil, &PaymentMethodUpdateFailedError{Reason: out.Reason}
-	default:
-		return nil, ErrPaymentMethodUpdateProcessing
-	}
-}
-
-func preparePaymentMethodUpdate(req *UpdatePaymentMethodRequest) error {
-	token := ""
-	if req.PaymentToken != nil {
-		token = strings.TrimSpace(*req.PaymentToken)
-	}
-	switch {
-	case req.Card != nil && token != "":
-		return &PaymentMethodUpdateValidationError{Message: ErrCardWithToken.Error()}
-	case req.Card == nil && token == "":
-		return &PaymentMethodUpdateValidationError{Message: "payment_token is required"}
-	}
-	req.PaymentToken = &token
-	if req.NameOnCard != nil {
-		canonical := cardholdername.Canonical(*req.NameOnCard, "", "")
-		req.NameOnCard = &canonical
-		first, last := nmiNameParts("", "", *req.NameOnCard)
-		req.FirstName = &first
-		req.LastName = &last
-	}
-	return nil
-}
+// ErrPaymentDuplicateRefused: the provider refused the card verification
+// unprocessed as a duplicate of an identical recent request; nothing was
+// saved and the same request succeeds after its window.
+var ErrPaymentDuplicateRefused = errors.New("the payment provider refused the card verification as a duplicate of an identical recent request; try again in a few minutes")
 
 // ErrPaymentMethodDeleteProcessing: the durable vault-delete intent could not confirm
 // the remote delete inline (transport-ambiguous outcome, parked provider). The

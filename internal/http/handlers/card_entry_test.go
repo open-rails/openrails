@@ -70,9 +70,6 @@ func TestPaymentMethodBodiesTakeACard(t *testing.T) {
 	var create billing.CreatePaymentMethodParams
 	require.Empty(t, bind(`{"psp_id":"`+billing.PSPID(uuid.New()).String()+`",`+cardBody+`}`, &create).Body.String())
 	require.Equal(t, []string{"visa", "1111", "10/27"}, []string{create.Card.Brand(), create.Card.LastFour(), create.Card.Expiry()})
-	var update billing.ReplacePaymentMethodCardParams
-	require.Empty(t, bind(`{`+cardBody+`}`, &update).Body.String())
-	require.NotNil(t, update.Card)
 	var pay checkoutsession.PayCheckoutSessionParams
 	require.Empty(t, bind(`{"option_id":"option_card",`+cardBody+`}`, &pay).Body.String())
 	require.NotNil(t, pay.Card)

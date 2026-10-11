@@ -187,17 +187,15 @@ func TestVaultCardByNumber(t *testing.T) {
 	created, err := c.CreateCustomerVaultFromCard(ctx, "700000000000000001", "900000000000000001", nmi.CreateCustomerVaultData{FirstName: "A", LastName: "B"}, typed("4111111111111111"))
 	require.NoError(t, err)
 	require.Equal(t, "700000000000000001", created.CustomerVaultID)
-	require.NoError(t, c.AddCustomerBillingFromCard(ctx, "700000000000000001", "900000000000000002", nmi.CreateCustomerVaultData{}, typed("5431111111111111")))
 	customer, found, err := c.GetCustomer(ctx, "700000000000000001")
 	require.NoError(t, err)
 	require.True(t, found)
-	require.Len(t, customer.Billing, 2)
+	require.Len(t, customer.Billing, 1)
 	require.Equal(t, []string{"900000000000000001", "4xxxxxxxxxxx1111", "1027", "visa"},
 		[]string{customer.Billing[0].ID, customer.Billing[0].PaymentDetails.CardNumber, customer.Billing[0].PaymentDetails.CardExp, customer.Billing[0].PaymentDetails.CardType})
-	require.Equal(t, []string{"900000000000000002", "mastercard"}, []string{customer.Billing[1].ID, customer.Billing[1].PaymentDetails.CardType})
-	_, err = c.RunSale(ctx, nmi.SaleParams{CustomerVaultID: "700000000000000001", BillingID: "900000000000000002", Amount: 999, Currency: "USD", OrderID: "order-card", StoredCredential: cit()})
+	_, err = c.RunSale(ctx, nmi.SaleParams{CustomerVaultID: "700000000000000001", BillingID: "900000000000000001", Amount: 999, Currency: "USD", OrderID: "order-card", StoredCredential: cit()})
 	require.NoError(t, err)
-	require.Equal(t, "mastercard", m.LastSale().Card.Brand)
+	require.Equal(t, "visa", m.LastSale().Card.Brand)
 
 	// The gateway refuses a taken vault or billing id and a card the issuer
 	// will not let it store; each refusal is definite, never ambiguous.
@@ -206,12 +204,6 @@ func TestVaultCardByNumber(t *testing.T) {
 		"taken vault id": func() error {
 			_, err := c.CreateCustomerVaultFromCard(ctx, "700000000000000001", "b", nmi.CreateCustomerVaultData{}, typed("4111111111111111"))
 			return err
-		},
-		"taken billing id": func() error {
-			return c.AddCustomerBillingFromCard(ctx, "700000000000000001", "900000000000000002", nmi.CreateCustomerVaultData{}, typed("4111111111111111"))
-		},
-		"unknown vault": func() error {
-			return c.AddCustomerBillingFromCard(ctx, "missing", "b", nmi.CreateCustomerVaultData{}, typed("4111111111111111"))
 		},
 		"refused card": func() error {
 			_, err := c.CreateCustomerVaultFromCard(ctx, "700000000000000002", "b", nmi.CreateCustomerVaultData{}, typed("6011000991300009"))

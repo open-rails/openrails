@@ -100,8 +100,6 @@ func TestPaymentMethodRequestMapping(t *testing.T) {
 	for _, field := range []string{"card_number", "number", "pan", "cvv", "cvc", "provider", "last_four", "card_type", "expiry_date", "name_on_card", "zip"} {
 		err := httprequest.DecodeStrict([]byte(`{"token":"tok","`+field+`":"4111111111111111"}`), &billing.CreatePaymentMethodParams{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, field)
-		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+field+`":"x"}`), &billing.ReplacePaymentMethodCardParams{})
-		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, field)
 	}
 	for _, tc := range []struct{ country, zip string }{{"US", "80202"}, {"DE", "10115"}, {"JP", "100-0001"}, {"BR", "01001-000"}} {
 		name, phone := "Ada Lovelace", "+49 30 123456"

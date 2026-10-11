@@ -22,10 +22,6 @@ import (
 func (s *Server) registerUserRoutesAt(mux router.Registrar, apiPrefix string) {
 	httproutes.RegisterUserRoutes(router.NewMuxRecorded(mux, apiPrefix, s.runtime, s.recordBrowserRoute), s.runtime, httproutes.Options{
 		Auth: s.auth, Scope: s.scope, ResolveMerchant: s.resolveMerchant, NativeIssuer: s.controlPlane.Issuer(),
-		External: httproutes.External{
-			CaptchaStatus: embedhttp.CaptchaStatusHandler(s.cfg.Captcha, s.captchaStore, s.trustedProxies()),
-			CaptchaScript: embedhttp.CaptchaClientScriptHandler(s.cfg.Captcha),
-		},
 	})
 }
 

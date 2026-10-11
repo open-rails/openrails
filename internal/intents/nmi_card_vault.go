@@ -107,7 +107,9 @@ func (h *NMICardVaultHandler) now() time.Time {
 }
 
 // reenterCard ends a vaulting that cannot be established or repeated.
-func reenterCard(reason string) Outcome { return retokenizeTerminal(reason) }
+func reenterCard(reason string) Outcome {
+	return TerminalWithEvidence(reason, map[string]any{"retokenize": true})
+}
 
 func (h *NMICardVaultHandler) advance(ctx context.Context, intent gen.BillingProviderIntent, verifying bool) Outcome {
 	var payload NMICardVaultPayload

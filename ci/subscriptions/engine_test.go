@@ -396,19 +396,13 @@ func TestEngineDeclinePolicy(t *testing.T) {
 	}
 }
 
-// replaceCard is the customer giving the membership a new card: on Stripe a
-// new off-session card selected for the membership, on NMI the membership's
-// vault updated in place.
+// replaceCard is the customer giving the membership a new card: a new
+// payment method, selected for the membership.
 func (e *engineCase) replaceCard(c card) {
-	t := e.w.t
-	t.Helper()
-	if e.rail == "stripe" {
-		method := e.c.saveCard("stripe", c)
-		e.c.must(http.MethodPut, "/subscriptions/"+e.sub.String()+"/payment-method", "", map[string]any{"payment_method_id": method})
-		e.method = method
-		return
-	}
-	e.c.must(http.MethodPut, "/payment-methods/"+e.method, "", map[string]any{"payment_token": e.w.nmi.Tokenize(c)})
+	e.w.t.Helper()
+	method := e.c.saveCard(e.rail, c)
+	e.c.must(http.MethodPut, "/subscriptions/"+e.sub.String()+"/payment-method", "", map[string]any{"payment_method_id": method})
+	e.method = method
 	e.w.settle()
 }
 

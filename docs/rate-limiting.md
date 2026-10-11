@@ -43,7 +43,6 @@ bucket. Details: `trusted_proxies` in [operator-guide.md](operator-guide.md).
 | `metrics-ask` | `metrics-ask` | 10 | `POST /v1/admin/metrics/ask` |
 | `catalog-ask` | `catalog-ask` | 10 | `POST /v1/admin/catalog/ask` (including drafting) |
 | `dashboard-generate` | `dashboard-generate` | 10 | `POST /v1/admin/dashboard/widgets/generate` |
-| `captcha` | — | unlimited | `/v1/captcha/status`, `/v1/captcha/client.js` |
 
 Every other route is unlimited here: a generic per-address ceiling belongs to the proxy in front
 of OpenRails (Traefik). A bucket left out of `rate_limits` is not limited, any other key refuses
@@ -102,8 +101,8 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
   before authentication (the configured merchant or its `api_host`); an individual solve never
   clears it. Without a captcha configured, nothing is challenged and the ledger's blocks are the
   whole policy.
-- Clients poll `GET /v1/captcha/status` and load `/v1/captcha/client.js` — both exempt from
-  limiting.
+- A client renders the challenge from `GET /v1/config`'s `captcha` block, or from the
+  `captcha_required` error's metadata, and resends with `X-Captcha-Token`.
 
 ## Card-testing ledger
 

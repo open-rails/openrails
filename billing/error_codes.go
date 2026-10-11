@@ -210,7 +210,6 @@ var errorCodes = []ErrorCode{
 	{"payment_method_delete_failed", 502, fault, "The provider could not delete the payment method."},
 	{"payment_method_update_unsupported", 400, invalid, "This payment method cannot be updated through OpenRails."},
 	{"payment_method_update_failed", 502, fault, "The provider could not update the payment method."},
-	{"payment_method_update_retry_required", 409, invalid, "The card was not updated; tokenize it again."},
 	{"provider_outcome_unknown", 409, fault, "The provider did not confirm the outcome; read the resource before retrying."},
 	{"card_not_saved", 409, fault, "The card was not saved; enter it again."},
 	{"card_attempts_blocked", 429, limit, "Too many declined card attempts; try again later."},

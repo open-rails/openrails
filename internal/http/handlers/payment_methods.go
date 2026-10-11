@@ -10,7 +10,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	identity "github.com/open-rails/openrails/internal/billingidentity"
-	"github.com/open-rails/openrails/internal/cardguard"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/hostedcheckout"
@@ -24,23 +23,16 @@ import (
 	"github.com/open-rails/openrails/internal/modules/mandates"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
-	"github.com/open-rails/openrails/internal/modules/payments/rails"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
 	log "github.com/sirupsen/logrus"
 )
 
 const (
-	createPaymentMethodTimeout = 28 * time.Second
-	// Replacement performs a provider read, one bounded mutation, and a
-	// confirmation read. Leave enough room for all three NMI deadlines plus
-	// the durable ledger transitions around them.
-	updatePaymentMethodTimeout              = 50 * time.Second
+	createPaymentMethodTimeout              = 28 * time.Second
 	codePaymentMethodProviderOutcomeUnknown = "provider_outcome_unknown"
 	codePaymentMethodDeleteFailed           = "payment_method_delete_failed"
 	codePaymentMethodDeleteUnsupported      = "payment_method_delete_unsupported"
-	codePaymentMethodUpdateFailed           = "payment_method_update_failed"
-	codePaymentMethodUpdateRetryRequired    = "payment_method_update_retry_required"
 )
 
 // ListPaymentMethods (GET /me/payment-methods) is one page of the caller's
@@ -291,115 +283,6 @@ func createPaymentMethodProviderError(err error) *api.APIError {
 		return nil
 	}
 	return api.Coded(codePaymentMethodProviderOutcomeUnknown, "The payment provider did not confirm whether the card was saved. Refresh your payment methods before trying again.")
-}
-
-// ReplacePaymentMethodCard (PUT /me/payment-methods/{id}) replaces a saved
-// card in place; 202 while the provider converges.
-func ReplacePaymentMethodCard(r *httprequest.Request) {
-	user := r.GetUser()
-	if user == nil {
-		r.ErrorCode(billing.CodeAuthenticationRequired, "")
-		return
-	}
-	var body billing.ReplacePaymentMethodCardParams
-	if !r.BindJSON(&body) {
-		return
-	}
-	defer body.Card.Zero()
-	methodID, err := billing.ParsePaymentMethodID(r.Param("id"))
-	if err != nil || methodID.IsZero() {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "invalid payment method id").WithParam("id"))
-		return
-	}
-
-	token := strings.TrimSpace(body.PaymentToken)
-	attemptKey := ""
-	if body.Card != nil {
-		if !cardFieldAdmitted(r, token != "", billingDetailStrings(body.BillingDetails)...) {
-			return
-		}
-		// A retry of this replacement is recognised by its Idempotency-Key,
-		// never by the card.
-		if attemptKey = strings.TrimSpace(r.Header("Idempotency-Key")); attemptKey == "" {
-			attemptKey = uuid.NewString()
-		} else if len(attemptKey) > 255 || cardguard.ContainsPAN(attemptKey) {
-			r.APIError(api.Coded(billing.CodeInvalidParam, "Idempotency-Key must be at most 255 bytes and carry no card data"))
-			return
-		}
-	} else if token == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "payment_token or card is required").WithParam("payment_token"))
-		return
-	}
-
-	pm, ok := ownedPaymentMethod(r, methodID.UUID(), user.ID)
-	if !ok {
-		return
-	}
-	if !rails.SupportsPaymentMethodCRUD(pm.Rail) {
-		r.APIError(api.Coded(codePaymentMethodUpdateUnsupported, paymentmethods.RailPaymentMethodsUnsupported(string(pm.Rail)).Error()))
-		return
-	}
-
-	update := &paymentmethods.UpdatePaymentMethodRequest{PaymentToken: &token, Card: body.Card, AttemptKey: attemptKey}
-	if body.BillingDetails != nil {
-		details := billingDetailsInput(body.BillingDetails)
-		update.NameOnCard, update.Address1, update.Address2 = &details.Name, &details.Line1, &details.Line2
-		update.City, update.State, update.Zip, update.Country = &details.City, &details.State, &details.PostalCode, &details.Country
-		update.Phone, update.Email = &details.Phone, &details.Email
-	}
-
-	ctx, cancel := r.Budget(updatePaymentMethodTimeout)
-	defer cancel()
-
-	updated, err := r.State.RailPaymentMethodService.UpdatePaymentMethod(ctx, pm, update)
-	if err != nil {
-		fields := log.Fields{"payment_method_id": pm.ID, "user_id": user.ID, "rail": pm.Rail}
-		switch {
-		case writeCardEntryError(r, err):
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteUnsafe):
-			r.ErrorCode(billing.CodeResourceConflict, "Payment method changed before the update could be accepted")
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodDeleteProcessing):
-			r.ErrorCode(billing.CodeResourceConflict, "Payment method deletion is already processing")
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodCustodianUnsupported), errors.Is(err, paymentmethods.ErrPaymentMethodsUnsupportedOnRail):
-			r.ErrorCode(codePaymentMethodUpdateUnsupported, err.Error())
-			return
-		case errors.Is(err, merchants.ErrConfigUnavailable), errors.Is(err, paymentmethods.ErrPaymentMethodProviderUnavailable):
-			log.WithError(err).WithFields(fields).Warn("Payment method update unavailable because provider credentials could not be loaded")
-			r.ErrorCode(billing.CodeServiceUnavailable, "Payment rail credentials are temporarily unavailable")
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodUpdateProcessing):
-			log.WithError(err).WithFields(fields).Info("Payment method update is still converging")
-			r.Status(http.StatusAccepted)
-			return
-		case errors.Is(err, paymentmethods.ErrPaymentMethodRetokenize):
-			log.WithError(err).WithFields(fields).Info("Payment method update requires a fresh token")
-			r.ErrorCode(codePaymentMethodUpdateRetryRequired, "The card was not updated. Enter the card again to create a fresh token.")
-			return
-		}
-		var validation *paymentmethods.PaymentMethodUpdateValidationError
-		if errors.As(err, &validation) {
-			r.ErrorCode(billing.CodeInvalidParam, validation.Message)
-			return
-		}
-		var refused *paymentmethods.PaymentMethodError
-		if errors.As(err, &refused) {
-			log.WithError(err).WithFields(fields).Info("Replacement card refused by the issuer; the previous card stays in use")
-			writePaymentMethodError(r, refused)
-			return
-		}
-		var terminal *paymentmethods.PaymentMethodUpdateFailedError
-		if errors.As(err, &terminal) {
-			log.WithError(err).WithFields(fields).Error("Payment method update failed permanently")
-			r.ErrorCode(codePaymentMethodUpdateFailed, "Payment method could not be updated at the payment provider")
-			return
-		}
-		r.InternalError("Failed to update payment method", err)
-		return
-	}
-	writePaymentMethod(r, http.StatusOK, identity.CustomerIDFromString(user.ID), updated)
 }
 
 // DeletePaymentMethod (DELETE /me/payment-methods/{id}): 204, or 202 while

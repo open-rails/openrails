@@ -107,7 +107,6 @@ func TestClassifyBucket(t *testing.T) {
 	for _, tc := range []struct{ method, path, want string }{
 		{"POST", "/v1/webhooks/stripe", "webhook"},
 		{"POST", "/billing/v1/webhooks/stripe/acct_test", "webhook"},
-		{"GET", "/billing/v1/captcha/client.js", "captcha"},
 		{"POST", "/v1/me/checkout-sessions", "checkout"},
 		{"POST", "/billing/v1/checkout-sessions/ocs_1/pay", "checkout"},
 		{"POST", "/billing/v1/me/checkout-sessions/{id}/pay", "checkout"},
@@ -211,8 +210,6 @@ func TestCaptchaEscalation(t *testing.T) {
 		{path: "/v1/me/payment-methods", want: 403, body: "captcha_required"},
 		{path: "/v1/webhooks/stripe", want: 200},
 		{path: "/v1/webhooks/stripe", want: 429},
-		{method: "GET", path: "/v1/captcha/status", want: 200},
-		{method: "GET", path: "/billing/v1/captcha/client.js", want: 200},
 		{path: "/v1/me/payment-methods", token: "bad", want: 403, body: "captcha_invalid"},
 		{path: "/v1/me/payment-methods", token: "good", want: 200},
 		{path: "/v1/me/checkout-sessions", want: 200},
@@ -320,7 +317,6 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 		{"/billing/v1/checkout-sessions/{id}/pay", "/api/pay/v1/checkout-sessions/ocs_a%2Fb/pay?x=1", "checkout", "checkout", true},
 		{"/billing/v1/me/payment-methods", "/api/pay/v1/me/payment-methods", "payment-methods", "payment", true},
 		{"/billing/v1/webhooks/{provider}/{account_id}", "/api/pay/v1/webhooks/stripe/acct_test", "webhook", "webhook", false},
-		{"/billing/v1/captcha/status", "/api/pay/v1/captcha/status", "captcha", "", false},
 	} {
 		req := httptest.NewRequest(http.MethodPost, tc.actual, nil)
 		originalURL, originalURI := *req.URL, req.RequestURI
