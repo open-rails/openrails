@@ -43,7 +43,7 @@ var groupPaths = map[Group][]string{
 // pathParams are the names a path parameter takes: a resource's own id is
 // {id}, its customer {customer_id}; the rest name an identity the caller
 // chose, by what it is.
-var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "entitlement", "user_id", "rail", "account_id", "currency", "price_id", "link_id"}
+var pathParams = []string{"id", "customer_id", "product_key", "key", "meter_key", "request_id", "operation_id", "reference", "entitlement", "user_id", "rail", "account_id", "currency", "price_id", "link_id"}
 
 var pathParam = regexp.MustCompile(`\{([a-z_]+)\}`)
 

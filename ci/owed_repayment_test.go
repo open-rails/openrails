@@ -3,7 +3,6 @@
 package ci_test
 
 import (
-	"crypto/sha256"
 	"testing"
 	"time"
 
@@ -20,10 +19,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/purchasedcredits"
 )
 
-// A provider bill above the hold leaves a prepaid customer owing. No new hold
-// is granted against that debt, and the customer's next funding repays it
-// first: exactly, once, from cash value only, through the invoice that claims
-// it, and back to owed when the funding payment is charged back.
+// A running charge stopped past the balance leaves a prepaid customer owing.
+// No capacity is granted against that debt, and the customer's next funding
+// repays it first: exactly, once, from cash value only, through the invoice
+// that claims it, and back to owed when the funding payment is charged back.
 func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	f := newFixture(t)
 	client := f.runtime(t, "owed-"+uuid.NewString()[:8])
@@ -48,12 +47,25 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.NoError(t, err)
 		return g
 	}
-	open := func(customer billing.CustomerID, operationID string, amount int64) error {
-		body := []byte(`{"rental":"` + operationID + `"}`)
-		_, err := client.OpenProviderOperation(ctx, billing.OpenProviderOperationParams{
-			OperationID: operationID, CustomerID: customer, RecordOwner: "user:1", Currency: "USD", Amount: amount,
-			ClaimReference: "claim:" + operationID, AuthorizationBody: body, AuthorizationBodySHA256: billing.SHA256(sha256.Sum256(body)),
-		})
+	// charge runs the customer amount in the hour before now.
+	charge := func(customer billing.CustomerID, reference string, amount int64) {
+		t.Helper()
+		stoppedAt := time.Now().UTC().Truncate(time.Microsecond)
+		startedAt := stoppedAt.Add(-time.Hour)
+		_, err := client.StartRunningCharge(ctx, billing.StartRunningChargeParams{Reference: reference, CustomerID: customer, Currency: "USD", RatePerHour: amount, StartedAt: &startedAt})
+		require.NoError(t, err)
+		stopped, err := client.StopRunningCharge(ctx, reference, billing.StopRunningChargeParams{StoppedAt: &stoppedAt})
+		require.NoError(t, err)
+		require.Equal(t, amount, stopped.ChargedAmount)
+	}
+	// fits asks whether the customer's capacity covers amount: a start that
+	// names it as its minimum, stopped at once.
+	fits := func(customer billing.CustomerID, reference string, amount int64) error {
+		started, err := client.StartRunningCharge(ctx, billing.StartRunningChargeParams{Reference: reference, CustomerID: customer, Currency: "USD", RatePerHour: 1, MinimumAmount: amount})
+		if err != nil {
+			return err
+		}
+		_, err = client.StopRunningCharge(ctx, reference, billing.StopRunningChargeParams{StoppedAt: &started.StartedAt})
 		return err
 	}
 	balance := func(customer billing.CustomerID) *billing.Balance {
@@ -62,10 +74,9 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		return bal
 	}
 	// overdraw leaves the customer owing `owed` above a fully spent `held`.
-	overdraw := func(customer billing.CustomerID, operationID string, held, owed int64) {
-		grant(customer, held, operationID+"-seed")
-		require.NoError(t, open(customer, operationID, held))
-		settleProviderCost(t, ctx, database, client, operationID, held+owed)
+	overdraw := func(customer billing.CustomerID, reference string, held, owed int64) {
+		grant(customer, held, reference+"-seed")
+		charge(customer, reference, held+owed)
 		bal := balance(customer)
 		require.EqualValues(t, 0, bal.BalanceAmount)
 		require.EqualValues(t, owed, bal.OwedAmount)
@@ -96,7 +107,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 	t.Run("funding repays exactly once, cash value only", func(t *testing.T) {
 		customer := newCustomer()
 		overdraw(customer, "od-exact", 1_000_000, 300_000)
-		require.ErrorIs(t, open(customer, "od-exact-next", 1), billing.ErrInsufficientCredits)
+		require.ErrorIs(t, fits(customer, "od-exact-next", 1), billing.ErrInsufficientCredits)
 
 		small := grant(customer, 100_000, "small")
 		bal := balance(customer)
@@ -115,7 +126,7 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		bal = balance(customer)
 		require.EqualValues(t, 150_000, bal.OwedAmount)
 		require.EqualValues(t, 100_000, bal.BalanceAmount)
-		require.ErrorIs(t, open(customer, "od-exact-bonus", 1), billing.ErrInsufficientCredits, "owed exceeds the balance")
+		require.ErrorIs(t, fits(customer, "od-exact-bonus", 1), billing.ErrInsufficientCredits, "owed exceeds the balance")
 
 		_, params := purchase(customer, 20_000_000, 20_000_000)
 		bal = balance(customer)
@@ -125,21 +136,13 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		require.NoError(t, err)
 		require.EqualValues(t, 19_950_000, balance(customer).BalanceAmount, "a replayed funding repays nothing again")
 		require.Len(t, repayments(customer), 3)
-		require.NoError(t, open(customer, "od-exact-after", 19_950_000))
+		require.ErrorIs(t, fits(customer, "od-exact-over", 19_950_001), billing.ErrInsufficientCredits)
+		require.NoError(t, fits(customer, "od-exact-after", 19_950_000))
 	})
 
-	t.Run("prepaid holds and admissions exclude money owed", func(t *testing.T) {
+	t.Run("prepaid capacity and admissions exclude money owed", func(t *testing.T) {
 		customer := newCustomer()
 		grant(customer, 2_000_000, "seed")
-		require.NoError(t, open(customer, "od-cap-a", 1_000_000))
-		require.NoError(t, open(customer, "od-cap-b", 1_000_000))
-		settleProviderCost(t, ctx, database, client, "od-cap-a", 1_500_000)
-		_, err := client.ReleaseProviderOperation(ctx, billing.ReleaseProviderOperationParams{OperationID: "od-cap-b", ReleaseReference: "never-created:b"})
-		require.NoError(t, err)
-		bal := balance(customer)
-		require.EqualValues(t, 1_000_000, bal.BalanceAmount)
-		require.EqualValues(t, 500_000, bal.OwedAmount)
-
 		deadline := time.Now().Add(time.Hour)
 		admit := func(id string, amount int64) billing.AdmissionVerdict {
 			v, err := client.Admit(ctx, []billing.AdmitParams{{RequestID: id, CustomerID: customer, Invoker: customer.String(),
@@ -147,15 +150,24 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 			require.NoError(t, err)
 			return v[0]
 		}
+		// A hold keeps half the balance from the charge: the charge draws the
+		// rest and owes what is left of it.
+		require.True(t, admit("od-cap-hold", 1_000_000).Allowed())
+		charge(customer, "od-cap-a", 1_500_000)
+		_, err := releaseAdmission(ctx, client, "od-cap-hold")
+		require.NoError(t, err)
+		bal := balance(customer)
+		require.EqualValues(t, 1_000_000, bal.BalanceAmount)
+		require.EqualValues(t, 500_000, bal.OwedAmount)
+
 		require.False(t, admit("od-cap-admit-over", 500_001).Allowed())
 		require.True(t, admit("od-cap-admit", 500_000).Allowed())
+		require.ErrorIs(t, fits(customer, "od-cap-held", 1), billing.ErrInsufficientCredits, "the admission holds what the debt left")
 		_, err = releaseAdmission(ctx, client, "od-cap-admit")
 		require.NoError(t, err)
 
-		require.ErrorIs(t, open(customer, "od-cap-over", 500_001), billing.ErrInsufficientCredits)
-		require.NoError(t, open(customer, "od-cap-fit", 500_000))
-		_, err = client.IncrementProviderOperation(ctx, billing.IncrementProviderOperationParams{OperationID: "od-cap-fit", Ordinal: 1, Amount: 1, MinimumAmount: 1})
-		require.ErrorIs(t, err, billing.ErrInsufficientCredits)
+		require.ErrorIs(t, fits(customer, "od-cap-over", 500_001), billing.ErrInsufficientCredits)
+		require.NoError(t, fits(customer, "od-cap-fit", 500_000))
 	})
 
 	t.Run("arrears capacity is unchanged", func(t *testing.T) {
@@ -163,13 +175,12 @@ func TestPrepaidOverdraftRepaidByNextFunding(t *testing.T) {
 		_, err := client.UpdateCustomer(ctx, customer, billing.UpdateCustomerParams{CreditLimits: []billing.CreditLimit{{Currency: "USD", Amount: 1_000_000}}})
 		require.NoError(t, err)
 		grant(customer, 500_000, "seed")
-		require.NoError(t, open(customer, "ar-a", 500_000))
-		settleProviderCost(t, ctx, database, client, "ar-a", 800_000)
+		charge(customer, "ar-a", 800_000)
 		bal := balance(customer)
 		require.Equal(t, billing.BillingModeArrears, bal.BillingMode)
 		require.EqualValues(t, 300_000, bal.OwedAmount)
-		require.ErrorIs(t, open(customer, "ar-over", 700_001), billing.ErrInsufficientCredits)
-		require.NoError(t, open(customer, "ar-line", 700_000), "the remaining credit line, not the prepaid rule")
+		require.ErrorIs(t, fits(customer, "ar-over", 700_001), billing.ErrInsufficientCredits)
+		require.NoError(t, fits(customer, "ar-line", 700_000), "the remaining credit line, not the prepaid rule")
 		grant(customer, 200_000, "arrears-funding")
 		require.EqualValues(t, 100_000, balance(customer).OwedAmount, "funding repays arrears debt too")
 	})

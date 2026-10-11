@@ -296,7 +296,7 @@ func TestPurchasedCreditAccounting(t *testing.T) {
 					return err
 				}
 				require.EqualValues(t, 0, capacity.Balance-capacity.Held, "the expired unrefunded half must never authorize new work")
-				require.Equal(t, capacity.Held, held, "balance and admission reserve the same unavailable amount")
+				require.Equal(t, capacity.Held, held.Held, "balance and admission reserve the same unavailable amount")
 				return nil
 			}))
 		}

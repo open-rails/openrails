@@ -43,7 +43,11 @@ SELECT
          AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
        JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
          FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
-           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0))::bigint AS held,
+           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)
+     -- What the customer's running charges have accrued and not posted.
+     + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
+              FROM billing.running_charges rc
+             WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0))::bigint AS held,
     COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- The customer's own arrears account, in the same point lookup. Debt is a

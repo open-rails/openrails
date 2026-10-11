@@ -15,8 +15,12 @@ type MoneyBalance struct {
 	Currency    string    `json:"currency"`
 	Balance     int64     `json:"balance"`
 	HeldBalance int64     `json:"held_balance"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	// Accrued is the part of HeldBalance the customer's running charges have
+	// accrued and not posted, as of AsOf.
+	Accrued   int64     `json:"accrued"`
+	AsOf      time.Time `json:"as_of"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type MoneyTransaction struct {

@@ -1,5 +1,12 @@
 # Changelog
 
+## Running charges
+
+- `Balance` gains `accrued_amount`, `accrual_rate_per_hour`, `as_of` and
+  `depletes_at`: what the customer's running charges have charged and not yet
+  posted, the rate they draw the balance at, and when it runs out.
+  `available_amount` is net of the accrual.
+
 ## Orders replace checkout sessions
 
 - Breaking: `<BuyButton>` and `<Offers>` create the customer's order and pay

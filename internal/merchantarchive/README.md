@@ -20,7 +20,7 @@ Merchant directory/authority settings are never copied over the destination.
 
 The fixed profiles in `contract/profiles.go` cover 48 retained tables, including mandates, card versions,
 ledger accounts/transfers, invoices, grants, entitlements, admission receipts,
-rating and provider-refresh watermarks, webhook deduplication, acknowledged host
+running charges, rating and provider-refresh watermarks, webhook deduplication, acknowledged host
 events, and completed checkout and provider-intent coordinates. Scalar money is
 encoded as decimal strings; nested money contracts use integer JSON tokens.
 The archive targets the reviewed OpenRails table inventory. Co-located host,
@@ -42,6 +42,9 @@ not sufficient coverage.
   attempts, subscription `gateway_response`, and the metadata inside admission
   capture terms. Keys, nesting and string values are not a schema or secret
   detector boundary. JSON syntax, depth and archive framing limits still apply.
+- Running charges are retained as they stand, running ones included; their
+  balance watches are derived and excluded, and restore watches every running
+  charge again.
 - Maintenance history retains every prune/converge-enforce/merchant-purge row,
   including unreferenced runs. Nonempty coverage, affected, summary or inventory
   fields refuse. Reconciliation runs are diagnostic and excluded. Other run

@@ -14,8 +14,9 @@ func withAdmission(list ...string) []string { return codes(append(list, admissio
 var usageQuery = params(text("currency"), text("from"), text("group_by"), text("to"))
 
 // meteringRoutes is spend as it happens: admissions and their holds, usage
-// events (failed usage included) and the customer's own report, and the
-// provider operations a host settles against its own upstream costs.
+// events (failed usage included) and the customer's own report, the charges
+// that run at a rate until they are stopped, and the provider operations a
+// host settles against its own upstream costs.
 var meteringRoutes = []Route{
 	{Method: POST, Path: "/v1/app/admissions", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "Admit", IdempotencyKey: true,
 		Request: billing.AdmitBatchParams{}, Responses: []Reply{{200, billing.AdmitBatchResult{}}}, Errors: codes("invalid_param"), Handler: h(handlers.Admit)},
@@ -30,6 +31,17 @@ var meteringRoutes = []Route{
 		Request: billing.RecordUsageBatchParams{}, Responses: []Reply{{200, billing.RecordUsageBatchResult{}}}, Errors: codes("invalid_param"), Handler: h(handlers.RecordUsage)},
 	{Method: GET, Path: "/v1/me/usage", Group: Customer, Auth: AuthCustomer,
 		Query: usageQuery, Responses: []Reply{{200, billing.Usage{}}}, Errors: codes("currency_unsupported"), Handler: h(handlers.GetMyUsage)},
+	{Method: POST, Path: "/v1/app/running-charges", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "StartRunningCharge", IdempotencyKey: true,
+		Request: billing.StartRunningChargeParams{}, Responses: []Reply{{201, billing.RunningCharge{}}, {200, billing.RunningCharge{}}},
+		Errors: codes("currency_unsupported", "idempotency_key_reused", "insufficient_credits", "invalid_param"), Handler: h(handlers.StartRunningCharge)},
+	{Method: POST, Path: "/v1/app/running-charges/{reference}/stop", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "StopRunningCharge", IdempotencyKey: true,
+		Request: billing.StopRunningChargeParams{}, Responses: []Reply{{200, billing.RunningCharge{}}},
+		Errors: codes("idempotency_key_reused", "invalid_param", "running_charge_not_found"), Handler: h(handlers.StopRunningCharge)},
+	{Method: GET, Path: "/v1/app/running-charges/{reference}", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "GetRunningCharge",
+		Responses: []Reply{{200, billing.RunningCharge{}}}, Errors: codes("running_charge_not_found"), Handler: h(handlers.GetRunningCharge)},
+	{Method: GET, Path: "/v1/app/running-charges", Group: App, Auth: AuthApplication, Permission: NeedUsage, Name: "ListRunningCharges",
+		Query: params(cursorPage, text("customer_id"), text("state")), Responses: []Reply{{200, billing.ListPage[billing.RunningCharge]{}}},
+		Errors: codes("invalid_cursor", "invalid_query"), Handler: h(handlers.ListRunningCharges)},
 	{Method: POST, Path: "/v1/app/provider-operations", Group: App, Auth: AuthApplication, Permission: NeedCosts, Name: "OpenProviderOperation", IdempotencyKey: true,
 		Request: billing.OpenProviderOperationParams{}, Responses: []Reply{{201, billing.ProviderOperation{}}, {200, billing.ProviderOperation{}}},
 		Errors: codes("insufficient_credits", "invalid_param", "provider_operation_conflict"), Handler: h(handlers.ServiceOpenProviderOperation)},

@@ -53,12 +53,14 @@ func TestCustomerRead(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, debtor.cid(), got.ID)
 		require.Equal(t, []billing.CreditLimit{limit}, got.Settings.CreditLimits)
-		require.Equal(t, []billing.Balance{{CustomerID: debtor.cid(), Currency: "USD", BillingMode: billing.BillingModeArrears, OwedAmount: owed}}, got.Balances)
+		require.Len(t, got.Balances, 1)
+		require.Equal(t, []billing.Balance{{CustomerID: debtor.cid(), Currency: "USD", BillingMode: billing.BillingModeArrears, OwedAmount: owed, AsOf: got.Balances[0].AsOf}}, got.Balances)
 		require.Empty(t, got.DefaultPaymentMethods)
 
 		got, err = w.client[tp].GetCustomer(ctx, saver.cid())
 		require.NoError(t, err)
-		require.Equal(t, []billing.Balance{{CustomerID: saver.cid(), Currency: "USD", BillingMode: billing.BillingModePrepaid, BalanceAmount: 5_000_000, AvailableAmount: 5_000_000}}, got.Balances)
+		require.Len(t, got.Balances, 1)
+		require.Equal(t, []billing.Balance{{CustomerID: saver.cid(), Currency: "USD", BillingMode: billing.BillingModePrepaid, BalanceAmount: 5_000_000, AvailableAmount: 5_000_000, AsOf: got.Balances[0].AsOf}}, got.Balances)
 		require.Equal(t, []billing.DefaultPaymentMethod{{Currency: "USD", PaymentMethodID: cardID}}, got.DefaultPaymentMethods)
 
 		page, err := w.client[tp].ListCustomers(ctx, billing.CustomerListParams{IDs: []billing.CustomerID{saver.cid()}})

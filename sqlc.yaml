@@ -59,6 +59,7 @@ sql:
       - "internal/migrate/postgres/0060_checkout_ui_mode.up.sql"
       - "internal/migrate/postgres/0061_usage_orders.up.sql"
       - "internal/migrate/postgres/0062_drop_checkout_sessions.up.sql"
+      - "internal/migrate/postgres/0063_running_charges.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

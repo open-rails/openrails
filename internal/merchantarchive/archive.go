@@ -257,6 +257,10 @@ func Restore(ctx context.Context, database *db.DB, id billing.MerchantID, in io.
 		if err := validateReferences(ctx, tx, id); err != nil {
 			return err
 		}
+		// A running charge restored is watched again, due at once.
+		if err := q.RebuildBalanceWatches(ctx, gen.RebuildBalanceWatchesParams{MerchantID: id.UUID(), Now: restoreNow}); err != nil {
+			return err
+		}
 		if err := landReadonly(ctx, q, id, restoreNow); err != nil {
 			return err
 		}

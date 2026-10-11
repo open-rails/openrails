@@ -769,7 +769,7 @@ func (q *Queries) ListLapsedCreditLotMerchants(ctx context.Context, arg ListLaps
 }
 
 const listLapsedCreditLots = `-- name: ListLapsedCreditLots :many
-SELECT g.id,
+SELECT g.id, g.ends_at::timestamptz AS ends_at,
     (g.amount - COALESCE((
         SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id
@@ -795,6 +795,7 @@ type ListLapsedCreditLotsParams struct {
 
 type ListLapsedCreditLotsRow struct {
 	ID        uuid.UUID
+	EndsAt    time.Time
 	Remaining int64
 }
 
@@ -814,7 +815,7 @@ func (q *Queries) ListLapsedCreditLots(ctx context.Context, arg ListLapsedCredit
 	var items []ListLapsedCreditLotsRow
 	for rows.Next() {
 		var i ListLapsedCreditLotsRow
-		if err := rows.Scan(&i.ID, &i.Remaining); err != nil {
+		if err := rows.Scan(&i.ID, &i.EndsAt, &i.Remaining); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -1212,7 +1213,7 @@ WHERE g.merchant_id = $1::uuid
   AND g.customer_id = $2::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = $3::text
   AND g.starts_at <= $4::timestamptz
-  AND (g.ends_at IS NULL OR g.ends_at > $4::timestamptz)
+  AND (g.ends_at IS NULL OR g.ends_at > COALESCE($5::timestamptz, $4::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
@@ -1224,6 +1225,7 @@ type ListSpendableCreditLotsParams struct {
 	CustomerID uuid.UUID
 	Currency   string
 	AsOf       time.Time
+	LiveAt     *time.Time
 }
 
 type ListSpendableCreditLotsRow struct {
@@ -1235,13 +1237,15 @@ type ListSpendableCreditLotsRow struct {
 
 // ListSpendableCreditLots: live (started, unexpired, non-terminated) credit lots
 // with their remainder, less the share a pending refund reserves. FIFO:
-// soonest expiry first.
+// soonest expiry first. A running charge's posting through an instant draws
+// the lots that had not lapsed just before it (live_at).
 func (q *Queries) ListSpendableCreditLots(ctx context.Context, arg ListSpendableCreditLotsParams) ([]ListSpendableCreditLotsRow, error) {
 	rows, err := q.db.Query(ctx, listSpendableCreditLots,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 		arg.AsOf,
+		arg.LiveAt,
 	)
 	if err != nil {
 		return nil, err

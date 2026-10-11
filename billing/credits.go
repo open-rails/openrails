@@ -186,16 +186,29 @@ const (
 	BillingModeArrears BillingMode = "arrears"
 )
 
-// Balance is a customer's money in one currency. AvailableAmount is
-// BalanceAmount less HeldAmount; OwedAmount is unpaid arrears.
+// Balance is a customer's money in one currency, as of AsOf. AvailableAmount
+// is BalanceAmount less HeldAmount and AccruedAmount; OwedAmount is unpaid
+// arrears.
+//
+// AccruedAmount is what the customer's running charges have accrued and the
+// ledger has not been posted, and AccrualRatePerHour their rates summed: until
+// DepletesAt a page shows AvailableAmount - AccrualRatePerHour x hours since
+// AsOf, without reading again. DepletesAt is when the customer's capacity
+// (what is available less what is owed, plus its overdraft or credit line)
+// reaches zero at that rate, counting each credit lot's expiry; null with no
+// running charge.
 type Balance struct {
-	CustomerID      CustomerID  `json:"customer_id"`
-	Currency        string      `json:"currency"`
-	BillingMode     BillingMode `json:"billing_mode"`
-	BalanceAmount   int64       `json:"balance_amount,string"`
-	HeldAmount      int64       `json:"held_amount,string"`
-	AvailableAmount int64       `json:"available_amount,string"`
-	OwedAmount      int64       `json:"owed_amount,string"`
+	CustomerID         CustomerID  `json:"customer_id"`
+	Currency           string      `json:"currency"`
+	BillingMode        BillingMode `json:"billing_mode"`
+	BalanceAmount      int64       `json:"balance_amount,string"`
+	HeldAmount         int64       `json:"held_amount,string"`
+	AccruedAmount      int64       `json:"accrued_amount,string"`
+	AvailableAmount    int64       `json:"available_amount,string"`
+	OwedAmount         int64       `json:"owed_amount,string"`
+	AccrualRatePerHour int64       `json:"accrual_rate_per_hour,string"`
+	AsOf               time.Time   `json:"as_of"`
+	DepletesAt         *time.Time  `json:"depletes_at"`
 }
 
 // BudgetWindow caps spend at Limit per WindowSeconds, in Currency (the

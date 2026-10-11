@@ -310,7 +310,9 @@ func TestProviderBillingRefusal(t *testing.T) {
 		require.True(t, replay.Replayed)
 		require.Equal(t, auth.TerminalReference, replay.TerminalReference)
 		require.Equal(t, auth.Resolution, replay.Resolution)
-		require.Equal(t, bal, balance(debtor), "a replay charges nothing")
+		after := balance(debtor)
+		after.AsOf = bal.AsOf
+		require.Equal(t, bal, after, "a replay charges nothing")
 		changed := req
 		changed.CostAmount = cost(400_000)
 		_, err = client.CloseProviderOperation(ctx, changed)

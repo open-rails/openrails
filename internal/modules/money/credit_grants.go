@@ -170,6 +170,17 @@ func (s *MoneyService) RevokeCreditGrant(ctx context.Context, grantID uuid.UUID,
 		if row.Termination != "" || current.State == billing.CreditGrantExpired || current.RemainingAmount <= 0 {
 			return ErrCreditGrantUnavailable
 		}
+		// What running charges accrued is spend the lots have funded: it is
+		// posted before the remainder is read.
+		if err := s.settleRunningCharges(ctx, q, mid.UUID(), payer, row.Currency); err != nil {
+			return err
+		}
+		if row, err = q.GetCreditGrant(ctx, args); err != nil {
+			return err
+		}
+		if current = creditGrantFromRow(row, s.now()); current.RemainingAmount <= 0 {
+			return ErrCreditGrantUnavailable
+		}
 		original, err := q.GetGrant(ctx, gen.GetGrantParams{MerchantID: mid.UUID(), ID: grantID})
 		if err != nil {
 			return err

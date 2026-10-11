@@ -239,7 +239,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	// remainders that CreditSpend cannot draw: cap the balance leg at the
 	// spendable-lot total so a lapsed lot never fails the spend outright.
 	lots, lerr := q.ListSpendableCreditLots(ctx, gen.ListSpendableCreditLotsParams{
-		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
+		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now, LiveAt: s.lotsLiveAt(),
 	})
 	if lerr != nil {
 		return 0, 0, false, lerr
@@ -300,7 +300,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 	}
 
 	if fromBalance > 0 {
-		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, key, "", fromBalance)
+		_, balanceApplied, werr := s.withdrawBalanceAndBlocks(ctx, q, payer, userID, cur, key, s.postingResource(), fromBalance)
 		if werr != nil {
 			return 0, 0, false, werr
 		}

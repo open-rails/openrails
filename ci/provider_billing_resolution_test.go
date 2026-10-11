@@ -238,7 +238,9 @@ func TestProviderBillingResolution(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, replay.Replayed)
 		require.Equal(t, auth.TerminalReference, replay.TerminalReference)
-		require.Equal(t, bal, balance(settler), "a replay charges nothing")
+		after := balance(settler)
+		after.AsOf = bal.AsOf
+		require.Equal(t, bal, after, "a replay charges nothing")
 		changed := req
 		changed.CostAmount = cost(1_400_000)
 		_, err = resolve(changed)

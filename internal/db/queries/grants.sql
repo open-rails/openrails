@@ -120,7 +120,8 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid AND g.id = sqlc.arg(grant_id):
 
 -- ListSpendableCreditLots: live (started, unexpired, non-terminated) credit lots
 -- with their remainder, less the share a pending refund reserves. FIFO:
--- soonest expiry first.
+-- soonest expiry first. A running charge's posting through an instant draws
+-- the lots that had not lapsed just before it (live_at).
 -- name: ListSpendableCreditLots :many
 SELECT g.id, g.amount, g.ends_at,
     (g.amount - COALESCE((
@@ -142,7 +143,7 @@ WHERE g.merchant_id = sqlc.arg(merchant_id)::uuid
   AND g.customer_id = sqlc.arg(customer_id)::uuid
   AND g.kind = 'credit' AND g.event = 'grant' AND g.currency = sqlc.arg(currency)::text
   AND g.starts_at <= sqlc.arg(as_of)::timestamptz
-  AND (g.ends_at IS NULL OR g.ends_at > sqlc.arg(as_of)::timestamptz)
+  AND (g.ends_at IS NULL OR g.ends_at > COALESCE(sqlc.narg(live_at)::timestamptz, sqlc.arg(as_of)::timestamptz))
   AND NOT EXISTS (
       SELECT 1 FROM billing.grants tt WHERE tt.merchant_id = g.merchant_id AND tt.supersedes_id = g.id AND tt.event IN ('revoke', 'expire', 'supersede')
   )
@@ -151,7 +152,7 @@ ORDER BY g.ends_at ASC NULLS LAST, g.created_at ASC;
 -- ListLapsedCreditLots: credit lots past their expiry with an unspent remainder
 -- to claw to expired_credits.
 -- name: ListLapsedCreditLots :many
-SELECT g.id,
+SELECT g.id, g.ends_at::timestamptz AS ends_at,
     (g.amount - COALESCE((
         SELECT SUM(CASE WHEN t.transfer_type = 'credit_refund_restore' THEN -t.amount ELSE t.amount END) FROM billing.ledger_transfers t
         WHERE t.merchant_id = g.merchant_id AND t.grant_id = g.id

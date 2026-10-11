@@ -12,9 +12,9 @@ import (
 
 // The Tx methods run the same commands as the Client inside tx, a
 // transaction from the host's pool on this engine's database, for provider
-// operations that must commit atomically with host rows. OpenRails binds the
-// engine's merchant to tx and never commits or rolls it back; after an error
-// the host rolls back.
+// operations and running charges that must commit atomically with host rows.
+// OpenRails binds the engine's merchant to tx and never commits or rolls it
+// back; after an error the host rolls back.
 
 // OpenProviderOperationTx reserves capacity; commit it with the host's
 // provider obligation before calling the provider.
@@ -73,6 +73,27 @@ func (e *Engine) CloseProviderOperationTx(ctx context.Context, tx pgx.Tx, req bi
 		return nil, err
 	}
 	return e.svc.CloseProviderOperationTx(ctx, tx, req)
+}
+
+// StartRunningChargeTx starts a charge, or answers the one its reference
+// names; commit it with the host's fact that the work is ready.
+func (e *Engine) StartRunningChargeTx(ctx context.Context, tx pgx.Tx, params billing.StartRunningChargeParams) (*billing.RunningCharge, error) {
+	ctx, err := e.bind(ctx)
+	if err != nil {
+		return nil, err
+	}
+	charge, _, err := e.svc.StartRunningChargeTx(ctx, tx, params)
+	return charge, err
+}
+
+// StopRunningChargeTx stops a charge and posts the rest of it; commit it with
+// the host's fact that the work was released.
+func (e *Engine) StopRunningChargeTx(ctx context.Context, tx pgx.Tx, reference string, params billing.StopRunningChargeParams) (*billing.RunningCharge, error) {
+	ctx, err := e.bind(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return e.svc.StopRunningChargeTx(ctx, tx, reference, params)
 }
 
 // bind applies the engine's merchant exactly as the in-process Client does.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/money/ledger"
 )
@@ -21,7 +22,8 @@ type CustomerMoney struct {
 }
 
 // CustomersMoney reads the named customers' money: the ledger counters and
-// settings in one read each, then the held total of each balance account.
+// settings in one read each, then the held total of each balance account and
+// the run-out of each that a running charge draws.
 func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID) (map[uuid.UUID]*CustomerMoney, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -76,11 +78,12 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 				m.Defaults = append(m.Defaults, billing.DefaultPaymentMethod{Currency: row.Currency, PaymentMethodID: billing.PaymentMethodID(*row.DefaultPaymentMethodID)})
 			}
 		}
+		now := instant(s.now())
 		for _, c := range currencies {
 			k := key{c.CustomerID, c.Currency}
-			var held int64
+			bal := &models.MoneyBalance{MerchantID: mid.UUID(), CustomerID: k.customer, Currency: k.currency, Balance: balance[k], AsOf: now}
 			if hasBalance[k] {
-				if held, err = s.heldAmount(ctx, q, mid.UUID(), k.customer, k.currency); err != nil {
+				if bal.HeldBalance, bal.Accrued, err = s.heldAmount(ctx, q, mid.UUID(), k.customer, k.currency, now); err != nil {
 					return err
 				}
 			}
@@ -88,11 +91,12 @@ func (s *MoneyService) CustomersMoney(ctx context.Context, customers []uuid.UUID
 			if billingMode == "" {
 				billingMode = BillingModePrepaid
 			}
+			b, err := s.PublicBalance(ctx, bal, billing.BillingMode(billingMode), owed[k])
+			if err != nil {
+				return err
+			}
 			m := out[k.customer]
-			m.Balances = append(m.Balances, billing.Balance{
-				CustomerID: billing.CustomerID(k.customer), Currency: k.currency, BillingMode: billing.BillingMode(billingMode),
-				BalanceAmount: balance[k], HeldAmount: held, AvailableAmount: balance[k] - held, OwedAmount: owed[k],
-			})
+			m.Balances = append(m.Balances, *b)
 		}
 		return nil
 	})

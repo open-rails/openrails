@@ -72,6 +72,21 @@ type BillingAdmissionOperation struct {
 	ReleasedAt     *time.Time
 }
 
+// One row per customer and currency with a running charge: when its balance is next looked at (the low line, the run-out or the next 00:00 UTC, whichever is first) and what the last look found. Derived from the running charges and the balance; stopping the last charge deletes the row.
+type BillingBalanceWatch struct {
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Currency    string
+	NextCheckAt time.Time
+	// When the customer's capacity reaches zero at the rate of its running charges, as last computed; in the past while it is at zero.
+	DepletesAt *time.Time
+	// When balance.low was sent for the current crossing; null once the balance is back above the line.
+	LowNotifiedAt *time.Time
+	// When balance.depleted was sent for the current crossing; null once capacity is back above zero.
+	DepletedAt *time.Time
+	UpdatedAt  time.Time
+}
+
 // Global by design, one row: the PostgreSQL cluster (system identifier), database and schema this billing book was armed in. Every provider write reads it; anywhere else the book is a copy and is readonly until `openrails book arm`. A promoted physical replica keeps all three; a physical clone does too, so rotate PSP credentials before running one.
 type BillingBookIdentity struct {
 	Singleton        bool
@@ -509,7 +524,7 @@ type BillingGrant struct {
 	Quantity *int32
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links and payment authority revocations. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links, payment authority revocations and the low and depleted balance of a customer with a running charge. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -1494,6 +1509,29 @@ type BillingReconciliationState struct {
 	SourceDomain    string
 	FullyReconciled bool
 	UpdatedAt       time.Time
+}
+
+// One row per running charge: a customer charged rate_per_hour (native units of currency) from started_at until stopped_at. No row changes while it runs; a posting moves what accrued through posted_through_at to the ledger, and a stopped charge is posted through stopped_at. Retention: permanent, never pruned.
+type BillingRunningCharge struct {
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	// The host's name for what it charges for: unique per merchant, and the identity a repeated start or stop is matched on.
+	Reference   string
+	CustomerID  uuid.UUID
+	Currency    string
+	RatePerHour int64
+	// How far below zero this charge lets a prepaid customer's capacity reach; the smallest among a customer's running charges applies.
+	OverdraftAmount int64
+	// The balance under which the customer is told it is low; the largest among a customer's running charges applies, 0 is no line.
+	LowBalanceAmount int64
+	Resource         *string
+	StartedAt        time.Time
+	StoppedAt        *time.Time
+	PostedThroughAt  time.Time
+	// What the ledger has been posted: running_charge_total through posted_through_at.
+	PostedAmount int64
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // A subscription's change waiting for its renewal: the price (price_id) and, for a per-seat price, the seats (quantity; NULL keeps the subscription's) it bills from its first renewal on or after effective_at. At most one is scheduled per subscription. source is change (a tier or seat change) or migration (price_migration_id). blocked is a migration's move its provider could not take; blocked_reason says why, and a push failure (rail_push_failed:) is re-driven. Retention: permanent, never pruned.

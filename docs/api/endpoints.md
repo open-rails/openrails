@@ -294,6 +294,8 @@ or retries a past-due subscription the PSP schedules
   unspent remainder (`409 credit_grant_held` while holds need it).
 - **Admissions** authorize spend before work starts and settle it after. See
   [request admission](../admission-operations.md).
+- **Running charges** bill at a rate per hour from a start to a stop, with
+  nothing written in between. See [running charges](../running-charges.md).
 - **Usage events** (`POST /v1/app/usage-events`, up to 1,000 per call, one
   result per item) are idempotent on `(source, source_id)`; `occurred_at` may be
   up to 35 days old. An item with `outcome: failed` is work that cost and did

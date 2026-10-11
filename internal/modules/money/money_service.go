@@ -35,6 +35,7 @@ import (
 func (s *MoneyService) grantLedger(q *gen.Queries, tenantID uuid.UUID) *grants.Ledger {
 	gl := grants.New(q, tenantID)
 	gl.SetClock(s.now)
+	gl.DrawLotsLiveAt(s.lotsLiveAt())
 	return gl
 }
 
@@ -85,6 +86,8 @@ type MoneyService struct {
 	usageRecoveryResolver NMIClientResolver
 	db                    *db.DB
 	clock                 clockwork.Clock
+	// posting is set on the service a running charge's posting runs on.
+	posting *runningChargePosting
 }
 
 func NewMoneyService(database *db.DB, clocks ...clockwork.Clock) *MoneyService {
@@ -725,7 +728,7 @@ func (s *MoneyService) withdrawBalanceAndBlocks(ctx context.Context, q *gen.Quer
 // lockBalance is the per-customer spend mutex: it ensures the customers row
 // exists, FOR UPDATE-locks it, and returns the balance derived under the lock
 // (Balance = ledger counters, HeldBalance = open authorizations + live
-// reservations). Every spend/hold/capture/deposit/expiry path calls it first,
+// reservations + running-charge accrual). Every spend/hold/capture/deposit/expiry path calls it first,
 // so mutations on one customer never interleave (no overdraft).
 func (s *MoneyService) lockBalance(ctx context.Context, q *gen.Queries, payer identity.CustomerID, invokerID, currency string) (*models.MoneyBalance, error) {
 	cur := normalizeCurrency(currency)
@@ -762,31 +765,36 @@ func (s *MoneyService) deriveBalance(ctx context.Context, q *gen.Queries, tenant
 			return nil, err
 		}
 	}
-	var held int64
+	now := instant(s.now())
+	var held, accrued int64
 	if found {
-		if held, err = s.heldAmount(ctx, q, tenantID, payerID, cur); err != nil {
+		if held, accrued, err = s.heldAmount(ctx, q, tenantID, payerID, cur, now); err != nil {
 			return nil, err
 		}
 	}
-	// One held total covers live request reservations and provider authorizations.
-	// Every ordinary spend path therefore respects both without double counting.
+	// One held total covers live request reservations, provider authorizations
+	// and what running charges have accrued. Every ordinary spend path
+	// therefore respects all of them without double counting.
 	return &models.MoneyBalance{
 		MerchantID:  tenantID,
 		CustomerID:  payerID,
 		Currency:    cur,
 		Balance:     bal,
 		HeldBalance: held,
+		Accrued:     accrued,
+		AsOf:        now,
 	}, nil
 }
 
 // heldAmount is the one held total against a customer's balance in a
-// currency: live request reservations and provider authorizations.
-func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string) (int64, error) {
-	now := s.now()
-	return q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
+// currency as of now (live request reservations, provider authorizations and
+// running-charge accrual), and the accrual apart.
+func (s *MoneyService) heldAmount(ctx context.Context, q *gen.Queries, tenantID, payerID uuid.UUID, cur string, now time.Time) (held, accrued int64, err error) {
+	row, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{
 		MerchantID: tenantID, CustomerID: payerID, Currency: cur, AsOf: now,
-		HeldSince: now.Add(-retention.AdmissionMaxHold),
+		HeldSince: now.Add(-retention.AdmissionMaxHold), AccruedAsOf: s.accruedAsOf(),
 	})
+	return row.Held, row.Accrued, err
 }
 
 func (s *MoneyService) withdrawTx(ctx context.Context, q *gen.Queries, params WithdrawParams) (*models.MoneyTransaction, error) {

@@ -198,7 +198,8 @@ func (q *Queries) GetAdmissionOperation(ctx context.Context, arg GetAdmissionOpe
 }
 
 const getFinancialHeldAmount = `-- name: GetFinancialHeldAmount :one
-SELECT (COALESCE((SELECT SUM(oa.authorized_amount)
+SELECT (h.claims + h.accrued)::bigint AS held, h.accrued::bigint AS accrued
+FROM (SELECT (COALESCE((SELECT SUM(oa.authorized_amount)
               FROM billing.operation_authorizations oa
              WHERE oa.merchant_id = $1::uuid AND oa.customer_id = $2::uuid AND oa.currency = $3::text AND oa.state = 'open'), 0)
      + COALESCE((SELECT SUM(ao.estimated_amount)
@@ -222,31 +223,44 @@ SELECT (COALESCE((SELECT SUM(oa.authorized_amount)
          AND g.spec_snapshot->'deposit'->'paid_amount' IS NOT NULL
        JOIN LATERAL (SELECT GREATEST(g.amount-COALESCE(sum(CASE WHEN lt.transfer_type='credit_refund_restore' THEN -lt.amount ELSE lt.amount END),0),0)::numeric AS remaining
          FROM billing.ledger_transfers lt WHERE lt.merchant_id=g.merchant_id AND lt.grant_id=g.id
-           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0))::bigint AS held
+           AND lt.transfer_type IN ('credit_spend','owed_repayment','credit_expire','credit_revoke','credit_refund','credit_refund_restore')) lot ON true),0)) AS claims,
+     COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, COALESCE($6::timestamptz, $5::timestamptz)) - rc.posted_amount, 0))
+              FROM billing.running_charges rc
+             WHERE rc.merchant_id = $1::uuid AND rc.customer_id = $2::uuid AND rc.currency = $3::text AND rc.stopped_at IS NULL), 0) AS accrued) h
 `
 
 type GetFinancialHeldAmountParams struct {
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-	Currency   string
-	HeldSince  time.Time
-	AsOf       time.Time
+	MerchantID  uuid.UUID
+	CustomerID  uuid.UUID
+	Currency    string
+	HeldSince   time.Time
+	AsOf        time.Time
+	AccruedAsOf *time.Time
 }
 
-// The one financial hold total: open operation authorizations plus open,
-// unexpired admission reservations. GetAdmissionCapacity computes the same sum.
-// A live hold was admitted within the hold lifetime, which is held_since.
-func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHeldAmountParams) (int64, error) {
+type GetFinancialHeldAmountRow struct {
+	Held    int64
+	Accrued int64
+}
+
+// The one financial hold total: open operation authorizations, open, unexpired
+// admission reservations, pending refunds, and what the customer's running
+// charges have accrued and not posted (accrued, also answered apart).
+// GetAdmissionCapacity computes the same sum. A live hold was admitted within
+// the hold lifetime, which is held_since. A posting through an instant holds
+// the accrual as of it (accrued_as_of); every other read, as of as_of.
+func (q *Queries) GetFinancialHeldAmount(ctx context.Context, arg GetFinancialHeldAmountParams) (GetFinancialHeldAmountRow, error) {
 	row := q.db.QueryRow(ctx, getFinancialHeldAmount,
 		arg.MerchantID,
 		arg.CustomerID,
 		arg.Currency,
 		arg.HeldSince,
 		arg.AsOf,
+		arg.AccruedAsOf,
 	)
-	var held int64
-	err := row.Scan(&held)
-	return held, err
+	var i GetFinancialHeldAmountRow
+	err := row.Scan(&i.Held, &i.Accrued)
+	return i, err
 }
 
 const insertAdmissionOperation = `-- name: InsertAdmissionOperation :one

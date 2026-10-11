@@ -33,6 +33,13 @@ func (s *Service) ValidateRefund(ctx context.Context, paymentID uuid.UUID, addit
 		if err != nil {
 			return err
 		}
+		// What running charges accrued is spend the lots have funded: it is
+		// posted before the refundable remainder is read.
+		lots := grants.New(q, mid.UUID())
+		lots.SetClock(s.now)
+		if _, err := lots.SettleRunningCharges(ctx, grant.CustomerID, stringValue(grant.Currency), s.now()); err != nil {
+			return err
+		}
 		balance, held, err := s.lockBalance(ctx, q, mid.UUID(), grant.CustomerID, stringValue(grant.Currency))
 		if err != nil {
 			return err
@@ -117,6 +124,10 @@ func (s *Service) ApplyReversal(ctx context.Context, paymentID, reversalID uuid.
 		grantLedger := grants.New(q, mid.UUID())
 		grantLedger.SetClock(s.now)
 		if _, err := grantLedger.ExpireLapsed(ctx, g.CustomerID, currency); err != nil {
+			return err
+		}
+		// What running charges accrued is spend the lots have funded.
+		if _, err := grantLedger.SettleRunningCharges(ctx, g.CustomerID, currency, s.now()); err != nil {
 			return err
 		}
 		remaining, err := q.GetCreditLotRemaining(ctx, gen.GetCreditLotRemainingParams{MerchantID: mid.UUID(), GrantID: g.ID})

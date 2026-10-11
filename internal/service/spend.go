@@ -35,16 +35,8 @@ func (s *Service) GetBalance(ctx context.Context, customer identity.CustomerID, 
 		if err != nil {
 			return err
 		}
-		out = &billing.Balance{
-			CustomerID:      customer,
-			Currency:        currency,
-			BillingMode:     billing.BillingMode(settings.BillingMode),
-			BalanceAmount:   bal.Balance,
-			HeldAmount:      bal.HeldBalance,
-			AvailableAmount: bal.Balance - bal.HeldBalance,
-			OwedAmount:      owed,
-		}
-		return nil
+		out, err = s.moneyService().PublicBalance(ctx, bal, billing.BillingMode(settings.BillingMode), owed)
+		return err
 	})
 	return out, err
 }

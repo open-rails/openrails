@@ -293,6 +293,7 @@ var errorCodes = []ErrorCode{
 	{"admission_captured", 409, invalid, "The admission was captured; it can no longer be released."},
 	{"hold_not_found", 404, invalid, "The admission holds nothing open: it was captured, released or lapsed."},
 	{"currency_unsupported", 400, invalid, "The currency is not in OpenRails' registry."},
+	{"running_charge_not_found", 404, invalid, "No running charge was started under this reference."},
 	{"provider_operation_not_found", 404, invalid, "The provider operation does not exist."},
 	{"provider_operation_conflict", 409, invalid, "The provider operation call repeats a committed one with a changed term; param names it."},
 	{"provider_operation_not_open", 409, invalid, "The provider operation's hold is no longer open."},

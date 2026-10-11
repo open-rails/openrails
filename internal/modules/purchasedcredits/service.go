@@ -185,5 +185,5 @@ func (s *Service) lockBalance(ctx context.Context, q *gen.Queries, mid, customer
 	}
 	now := s.now()
 	held, err := q.GetFinancialHeldAmount(ctx, gen.GetFinancialHeldAmountParams{MerchantID: mid, CustomerID: customer, Currency: currency, AsOf: now, HeldSince: now.Add(-retention.AdmissionMaxHold)})
-	return balance, held, err
+	return balance, held.Held, err
 }

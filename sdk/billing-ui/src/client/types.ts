@@ -519,14 +519,23 @@ export const paymentSchema = z.object({
 })
 export type Payment = z.infer<typeof paymentSchema>
 
-/** A customer's money in one currency. */
+/**
+ * A customer's money in one currency, as of `as_of`. `accrued_amount` is what
+ * its running charges have charged and the ledger does not hold yet, already
+ * taken off `available_amount`; until `depletes_at` (null with no running
+ * charge) show `available_amount - accrual_rate_per_hour x hours since as_of`.
+ */
 export const balanceSchema = z.object({
   currency: z.string(),
   billing_mode: z.string(),
   balance_amount: amount,
   held_amount: amount,
+  accrued_amount: amount,
   available_amount: amount,
   owed_amount: amount,
+  accrual_rate_per_hour: amount,
+  as_of: z.string(),
+  depletes_at: z.string().nullable(),
 })
 export type Balance = z.infer<typeof balanceSchema>
 

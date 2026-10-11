@@ -79,6 +79,9 @@ type Ledger struct {
 	merchant uuid.UUID
 	money    *ledger.Ledger
 	now      func() time.Time
+	// liveAt, when set, is the instant CreditSpend's lots must not have
+	// lapsed by, in place of now.
+	liveAt *time.Time
 }
 
 // New binds a grant Ledger to a query handle and merchant. Compose it inside a
@@ -260,6 +263,12 @@ func (l *Ledger) terminate(ctx context.Context, grantID uuid.UUID, event, reason
 	effective := asOf
 	if effective.IsZero() {
 		effective = l.now()
+	}
+	if Kind(g.Kind) == Credit && g.Currency != nil {
+		// What the customer's running charges accrued draws the lot while it lives.
+		if _, err := l.SettleRunningCharges(ctx, g.CustomerID, *g.Currency, l.now()); err != nil {
+			return gen.BillingGrant{}, err
+		}
 	}
 	sup := grantID
 	r := reason
