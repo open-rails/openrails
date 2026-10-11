@@ -164,6 +164,30 @@ func (s *CheckoutCustodianSaleService) charger(cfg *custodialPSP) (*nmiproxy.Cha
 	return nmiproxy.New(bt, nmiproxy.GatewayConfig{SecurityKey: cfg.GatewaySecurityKey, DirectPostURL: posture.DirectPostURL, Posture: posture}), nil
 }
 
+// basisTheory is the Basis Theory custody of the NMI PSP psp: its proxy
+// charger and the custodian's API.
+func (s *CheckoutCustodianSaleService) basisTheory(ctx context.Context, psp uuid.UUID) (*custodialPSP, *nmiproxy.Charger, *basistheory.Client, error) {
+	if s == nil {
+		return nil, nil, nil, errors.New("custodian checkout is not configured")
+	}
+	cfg, err := s.resolveConfig(db.WithPSPID(ctx, psp))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if cfg.Scope.ID != psp {
+		return nil, nil, nil, errors.New("the custodian's PSP resolved as another account")
+	}
+	bt, err := s.btClient(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	proxy, err := s.charger(cfg)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return cfg, proxy, bt, nil
+}
+
 // Process runs the custodian-held-card one-time sale as a write-through intent,
 // mirroring CheckoutNMISaleService.Process.
 func (s *CheckoutCustodianSaleService) Process(ctx context.Context, req *CheckoutRequest, user *UserIdentity, price *models.Price, product *models.Product, idempotencyKey string) (*CheckoutResponse, error) {
@@ -617,7 +641,7 @@ func (h *CustodianSaleIntentHandler) finalizeApproved(ctx context.Context, inten
 		// Network-token provisioning: armed by config, idempotent per PAN, and
 		// never load-bearing; any failure warns and the instrument stays pan_proxy.
 		if cfg.Custody.NetworkTokens && token != nil {
-			h.provisionNetworkToken(ctx, bt, merchantID, *instrumentID, token.ID, orderID)
+			h.Sale.provisionNetworkToken(ctx, bt, merchantID, *instrumentID, token.ID, orderID)
 		}
 	}
 
@@ -706,7 +730,7 @@ func (h *CustodianSaleIntentHandler) ensureInstrument(ctx context.Context, merch
 
 // provisionNetworkToken creates (or dedups onto) the card's network token and
 // persists id/status/PAR. Failures warn — NT is never load-bearing on NMI.
-func (h *CustodianSaleIntentHandler) provisionNetworkToken(ctx context.Context, bt *basistheory.Client, merchantID, instrumentID uuid.UUID, tokenID, orderID string) {
+func (s *CheckoutCustodianSaleService) provisionNetworkToken(ctx context.Context, bt *basistheory.Client, merchantID, instrumentID uuid.UUID, tokenID, orderID string) {
 	nt, err := bt.CreateNetworkToken(ctx, basistheory.NetworkTokenRequest{
 		TokenID:        tokenID,
 		IdempotencyKey: "btnt:" + orderID,
@@ -716,13 +740,13 @@ func (h *CustodianSaleIntentHandler) provisionNetworkToken(ctx context.Context, 
 			Warn("custodian sale: network token provisioning failed; instrument stays pan_proxy (never load-bearing)")
 		return
 	}
-	if h.Sale.DB == nil {
+	if s.DB == nil {
 		return
 	}
-	err = h.Sale.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
-		_, err := paymentmethods.ApplyCardLifecycle(ctx, h.Sale.DB.NewWithPgxTx(tx).Gen(ctx), paymentmethods.CardEvent{
+	err = s.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		_, err := paymentmethods.ApplyCardLifecycle(ctx, s.DB.NewWithPgxTx(tx).Gen(ctx), paymentmethods.CardEvent{
 			MerchantID: merchantID, PaymentMethodID: instrumentID, Source: paymentmethods.SourceNetworkToken, EventRef: "provision:" + orderID,
-			Card: paymentmethods.Card{NetworkTokenID: nt.ID, NetworkTokenStatus: nt.Status, NetworkTokenPAR: nt.PAR}, At: h.Sale.PurchaseService.now(),
+			Card: paymentmethods.Card{NetworkTokenID: nt.ID, NetworkTokenStatus: nt.Status, NetworkTokenPAR: nt.PAR}, At: s.PurchaseService.now(),
 		})
 		return err
 	})

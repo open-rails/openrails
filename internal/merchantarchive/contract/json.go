@@ -274,9 +274,10 @@ var jsonRules = map[string]jsonRule{
 		"payment_method_id": uuidValue, "payment_id": uuidValue, "product_id": uuidValue, "list_amount": moneyStringValue, "accepted_at": textValue, "entitlements": acceptedEntitlementsJSON, "legacy_entitlements": dictionary(nullable(integerValue)), "access_duration_hours": nullable(integerValue), "entitlement_start": textValue, "ownership_start": textValue, "ownership_end": nullable(textValue), "eligibility": textValue,
 		"instrument": frozenInstrumentJSON,
 		// An order's sale: its order, and a new card the charge saves.
-		"order_id": uuidValue, "recurring": booleanValue, "new_card": booleanValue, "token": textValue, "fingerprint": textValue,
-		"billing": object(map[string]jsonRule{"first_name": textValue, "last_name": textValue, "address1": textValue, "address2": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue, "phone": textValue, "email": textValue}),
-		"card":    object(map[string]jsonRule{"brand": textValue, "last4": textValue, "exp_month": integerValue, "exp_year": integerValue}),
+		"order_id": uuidValue, "recurring": booleanValue, "new_card": booleanValue, "token": textValue, "fingerprint": textValue, "reuse": booleanValue, "purchase_scoped": booleanValue,
+		"hyperswitch": object(map[string]jsonRule{"account_id": textValue, "profile_id": textValue, "api_base_url": textValue}),
+		"billing":     object(map[string]jsonRule{"first_name": textValue, "last_name": textValue, "address1": textValue, "address2": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue, "phone": textValue, "email": textValue}),
+		"card":        object(map[string]jsonRule{"brand": textValue, "last4": textValue, "exp_month": integerValue, "exp_year": integerValue}),
 	}),
 	"provider_intents.nmi_sale.result_evidence": nullable(object(map[string]jsonRule{
 		"stripe_payment_intent_id": textValue, "authentication_required": booleanValue, "decline_code": textValue,

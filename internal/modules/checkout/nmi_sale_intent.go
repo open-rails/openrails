@@ -23,7 +23,9 @@ import (
 	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
+	hscharge "github.com/open-rails/openrails/internal/modules/payments/rails/hyperswitch"
 	"github.com/open-rails/openrails/internal/modules/payments/rails/nmidirect"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 	log "github.com/sirupsen/logrus"
 )
@@ -112,12 +114,33 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 	if err != nil {
 		return h.complete(ctx, in, nil, intents.TerminalWithEvidence(err.Error(), map[string]any{"not_executed": true}))
 	}
+	var proxy *hscharge.Charger
+	if p.HyperSwitch != nil {
+		if proxy, err = hyperSwitchProxy(ctx, h.Sale.Config, h.database(), *p.HyperSwitch, p.Instrument, client); err != nil {
+			return intents.Parked(err.Error())
+		}
+	}
+	var held *nmiproxy.Charger
+	if p.Instrument.Custodian == models.CustodianBasisTheory {
+		if h.Sale.Config == nil || config.IsProviderReadOnly(h.Sale.Config) {
+			return intents.Parked("Basis Theory sale writes unavailable")
+		}
+		if _, held, _, err = h.Sale.Custody.basisTheory(ctx, *in.PspID); err != nil {
+			return intents.Parked("Basis Theory custody cannot be armed: " + err.Error())
+		}
+	}
 	if outcome, fenced := h.fenceSale(ctx, in, p); !fenced {
 		return outcome
 	}
 	minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
 	if err != nil {
 		return intents.Ambiguous(err.Error())
+	}
+	if proxy != nil {
+		return h.submitHyperSwitchSale(ctx, in, p, proxy, client, minor)
+	}
+	if held != nil {
+		return h.submitBasisTheorySale(ctx, in, p, held, client, minor)
 	}
 	params := nmi.SaleParams{CustomerVaultID: p.Instrument.RailCustomerRef, BillingID: p.Instrument.RailMethodRef, Amount: minor, Currency: p.Currency, OrderDescription: p.Description, OrderID: payments.NMISaleOrderReference(in.ID, p.E2ERunID), StoredCredential: credential}
 	if p.Token != "" {
@@ -162,6 +185,46 @@ func (h *NMISaleIntentHandler) Execute(ctx context.Context, in gen.BillingProvid
 		return intents.Ambiguous("sale response has no transaction candidate")
 	}
 	return h.collect(ctx, in, client, response.TransactionID)
+}
+
+// submitHyperSwitchSale charges an order's HyperSwitch-held card through the
+// custodian's NMI proxy: the customer-present storing charge of the
+// subscription the order opens.
+func (h *NMISaleIntentHandler) submitHyperSwitchSale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, proxy *hscharge.Charger, client *nmi.NMIClient, minor moneyutil.Cents) intents.Outcome {
+	result, refusal, err := proxy.ChargeInitialRecurring(ctx, charge.Request{Instrument: charge.Instrument{Rail: "nmi", CustomerRef: p.Instrument.RailCustomerRef, MethodRef: p.Instrument.RailMethodRef},
+		AmountMinor: minor, Currency: p.Currency, Description: p.Description, OrderRef: payments.NMISaleOrderReference(in.ID, p.E2ERunID), Context: p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement())})
+	return h.proxyOutcome(ctx, in, client, result, refusal, err)
+}
+
+// submitBasisTheorySale charges the card a Basis Theory token intent
+// collected through the custodian's proxy, in the customer's presence.
+func (h *NMISaleIntentHandler) submitBasisTheorySale(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, proxy *nmiproxy.Charger, client *nmi.NMIClient, minor moneyutil.Cents) intents.Outcome {
+	result, refusal, err := proxy.WithSource(nmiproxy.Source{TokenIntentID: p.Token}).Sale(ctx, charge.Request{Instrument: charge.Instrument{Rail: nmiproxy.Rail},
+		AmountMinor: minor, Currency: p.Currency, Description: p.Description, OrderRef: payments.NMISaleOrderReference(in.ID, p.E2ERunID), Context: p.Instrument.Cites(charge.InitiatorCustomer, p.Agreement())})
+	return h.proxyOutcome(ctx, in, client, result, refusal, err)
+}
+
+// proxyOutcome is a custodian proxy's answer to a sale: refused before it
+// reached the gateway, declined there, or charged.
+func (h *NMISaleIntentHandler) proxyOutcome(ctx context.Context, in gen.BillingProviderIntent, client *nmi.NMIClient, result charge.Result, refusal *nmi.CustomerVaultError, err error) intents.Outcome {
+	var evidence map[string]any
+	reason := "sale declined"
+	switch {
+	case errors.Is(err, charge.ErrNotDispatched):
+		evidence, reason = map[string]any{"request_refused": true}, "the custodian refused the sale before sending it"
+	case err != nil:
+		return intents.Ambiguous("sale outcome requires provider verification")
+	case refusal != nil:
+		evidence = map[string]any{"declined": true, "response_code": refusal.ResponseCode, "localization_id": refusal.LocalizationID, "avs_response": refusal.AVSResponse, "cvv_response": refusal.CVVResponse, "decline_transaction_id": refusal.TransactionID}
+	case result.TransactionID == "" || result.Declined:
+		return intents.Ambiguous("sale response has no transaction candidate")
+	default:
+		return h.collect(ctx, in, client, result.TransactionID)
+	}
+	if err := intents.NewStore(h.database()).RecordProgress(ctx, in.ID, evidence); err != nil {
+		return intents.Ambiguous("cannot retain sale refusal: " + err.Error())
+	}
+	return h.complete(ctx, in, nil, intents.TerminalWithEvidence(reason, evidence))
 }
 
 // fenceSale re-checks the accepted instrument and takes the write-once
@@ -450,6 +513,9 @@ func (h *NMISaleIntentHandler) complete(ctx context.Context, in gen.BillingProvi
 		return intents.Ambiguous("sale receipt retained; local completion pending: " + err.Error())
 	}
 	discardCard(ctx, h.Sale.RailPaymentMethodService, declined)
+	if saved != nil && saved.Custodian == models.CustodianBasisTheory {
+		h.provisionNetworkToken(ctx, in, p, saved)
+	}
 	return outcome
 }
 
@@ -499,7 +565,16 @@ func recordSaleAttempt(ctx context.Context, d *db.DB, in gen.BillingProviderInte
 		a.Target, a.OrderID, a.NewCard = p.OrderID.String(), &p.OrderID, p.NewCard
 	}
 	a.Amount, a.Currency, a.PaymentMethodID, a.ProviderIntentID = p.Amount, p.Currency, method, &in.ID
-	a.TokenType = charge.TokenTypePSPToken
+	a.TokenType = saleTokenType(p)
 	a.Sent = p.Instrument.Mandate
 	return attempts.Record(ctx, d.Gen(ctx), a)
+}
+
+// saleTokenType is the credential form a sale presents: the PSP's own stored
+// card, or a custodian-held card through its proxy.
+func saleTokenType(p payments.NMISalePayload) string {
+	if p.Instrument.CustodianHeld() {
+		return payments.DefaultTokenType("nmi", p.Instrument.Custodian)
+	}
+	return charge.TokenTypePSPToken
 }

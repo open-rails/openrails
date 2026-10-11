@@ -19,7 +19,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/nmi"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
@@ -155,18 +154,14 @@ func newHyperSwitchMember(t *testing.T) (*world, *hyperSwitchMember) {
 		FROM billing.custodians WHERE merchant_id = $1 AND kind = 'hyperswitch' RETURNING id`), mid.UUID(), m.c.cid().UUID()).Scan(&m.method))
 
 	price := w.membershipEvery("content:hs", 9_990_000, monthHours)
-	// Checkout sessions offer no custodian PSP; the engine's checkout sells
-	// through it.
-	got, err := w.engineCheckout(m.c, checkout.CheckoutAttemptCreateRequest{
-		PriceID: price.ID.String(), Payment: checkout.CheckoutAttemptPaymentRequest{Rail: "nmi", PaymentMethodID: "pm_" + m.method.String()},
-	})
-	require.NoError(t, err)
-	require.Equal(t, "succeeded", got.Status, "%+v", got)
-	w.settle()
-	var raw uuid.UUID
-	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.subscriptions WHERE merchant_id = $1 AND customer_id = $2`), mid.UUID(), m.c.cid().UUID()).Scan(&raw))
-	m.sub = billing.SubscriptionID(raw)
+	// The HyperSwitch-held card pays the order that opens the membership.
+	paid := m.c.mustCheckout(embedded, order{price: price.ID, rail: "nmi", method: billing.PaymentMethodID(m.method).String()})
+	require.NotNil(t, paid.SubscriptionID, "%+v", paid.Order)
+	m.sub = *paid.SubscriptionID
 	require.Equal(t, 1, hs.sales(), "the first period is charged through the proxy")
+	var token string
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT token_type FROM billing.payments WHERE id = $1`), paid.PaymentID.UUID()).Scan(&token))
+	require.Equal(t, "pan_via_proxy", token, "the custodian's proxy presented the card")
 	m.end = *w.subscription(embedded, m.sub).CurrentPeriodEndsAt
 	return w, m
 }
@@ -220,4 +215,19 @@ func TestHyperSwitchUpdaterIsMirroredOnDecline(t *testing.T) {
 	w.settle()
 	require.Equal(t, 2, m.hs.sales(), "the renewal is collected on the reissued card")
 	require.True(t, w.subscription(embedded, m.sub).CurrentPeriodEndsAt.After(m.end))
+}
+
+// HyperSwitch's proxy takes no one-time card-on-file charge: its card pays
+// an order that opens a subscription, and an order of one-time lines is
+// refused without a charge.
+func TestHyperSwitchCardPaysSubscriptionOrdersOnly(t *testing.T) {
+	t.Parallel()
+	w, m := newHyperSwitchMember(t)
+	life := w.permanent("content:hs-once")
+	sales := m.hs.sales()
+	_, err := m.c.checkout(embedded, order{price: life.ID, rail: "nmi", method: billing.PaymentMethodID(m.method).String()})
+	var status *billing.StatusError
+	require.ErrorAs(t, err, &status)
+	require.Equal(t, billing.CodePaymentOptionUnavailable, status.Code)
+	require.Equal(t, sales, m.hs.sales(), "nothing was charged")
 }

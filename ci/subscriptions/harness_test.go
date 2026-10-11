@@ -541,6 +541,9 @@ func (w *world) start() {
 		if rail := string(psp.Rail); w.psp[rail].IsZero() || psp.Key == rail {
 			w.psp[rail] = psp.ID
 		}
+		if string(psp.Rail) != psp.Key {
+			w.psp[psp.Key] = psp.ID
+		}
 	}
 	for _, rail := range []string{"stripe", "nmi"} {
 		if _, declared := psps[rail]; declared {

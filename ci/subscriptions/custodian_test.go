@@ -3,7 +3,6 @@
 package subscriptions_test
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -14,14 +13,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/engine"
-	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
 
@@ -191,6 +187,9 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
+	// The merchant sells cards through its custodian's PSP.
+	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"nmi-bt"}}}
+	w.settings = billing.MerchantSettings{CheckoutRouting: &routing}
 	w.start()
 	// The gateway takes the card number through the proxy; the mock files
 	// those sales under one keyed-card record.
@@ -202,27 +201,24 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 	rt := engine.Graph(w.rt).Runtime
 	rt.CheckoutService.CustodianSaleService.BTBaseURLOverride = btURL
 
-	buy := func(c *customer, price billing.PriceID, number string) {
+	// The page's Basis Theory Elements collect the card; its token intent
+	// pays the order on the custodian's PSP. The order names the card it
+	// kept and the proxy presented.
+	buy := func(c *customer, price billing.PriceID, number string) (card, token string) {
 		t.Helper()
-		ctx := merchant.WithID(t.Context(), rt.DeclaredMerchants()[0])
-		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			res, err := rt.CheckoutService.Checkout(ctx, &checkout.CheckoutRequest{PriceID: price.String(), Rail: "nmi-bt", BTTokenIntentID: bt.collect(number), IdempotencyKey: uuid.NewString()}, &checkout.UserIdentity{ID: c.id})
-			if err != nil {
-				return err
-			}
-			if res.Status != "success" {
-				return fmt.Errorf("checkout answered %+v", res)
-			}
-			return nil
-		}))
-		w.settle()
+		paid := c.mustCheckout(embedded, order{price: price, rail: "nmi-bt", token: bt.collect(number)})
+		require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT COALESCE(pm.rail_method_ref, ''), COALESCE(p.token_type, '') FROM billing.orders o
+			JOIN billing.payments p ON p.merchant_id = o.merchant_id AND p.id = o.payment_id
+			LEFT JOIN billing.payment_methods pm ON pm.merchant_id = o.merchant_id AND pm.id = o.payment_method_id WHERE o.id = $1`), paid.Order.ID.UUID()).Scan(&card, &token))
+		require.Equal(t, "pan_via_proxy", token)
+		return card, token
 	}
 	const number = "4111111111111111"
 	first, second := w.permanent("content:first"), w.permanent("content:second")
 	alice, bob := w.newCustomer(), w.newCustomer()
 
-	buy(alice, first.ID, number)
-	buy(bob, first.ID, number)
+	aliceFirst, _ := buy(alice, first.ID, number)
+	bobFirst, _ := buy(bob, first.ID, number)
 	sales := bt.salesOf(number)
 	require.Len(t, sales, 2)
 	for i, sale := range sales {
@@ -232,9 +228,11 @@ func TestCustodianSaleAnchorsOnlyOnItsOwnCustomer(t *testing.T) {
 	require.Equal(t, []custodianMethod{{Token: aliceCard[0].Token, Unscheduled: sales[0].TransactionID}}, aliceCard)
 	require.Equal(t, []custodianMethod{{Token: bobCard[0].Token, Unscheduled: sales[1].TransactionID}}, bobCard)
 	require.NotEqual(t, aliceCard[0].Token, bobCard[0].Token, "each customer's card is its own token")
+	require.Equal(t, []string{aliceCard[0].Token, bobCard[0].Token}, []string{aliceFirst, bobFirst}, "each order names the card it kept")
 
-	buy(alice, second.ID, number)
-	buy(bob, second.ID, number)
+	aliceSecond, _ := buy(alice, second.ID, number)
+	bobSecond, _ := buy(bob, second.ID, number)
+	require.Equal(t, []string{aliceFirst, bobFirst}, []string{aliceSecond, bobSecond}, "a returning card pays as the customer's own")
 	sales = bt.salesOf(number)
 	require.Len(t, sales, 4)
 	require.Equal(t, []string{"customer", "used", sales[0].TransactionID}, []string{sales[2].InitiatedBy, sales[2].Indicator, sales[2].InitialTxnID}, "alice's charge names her agreement")

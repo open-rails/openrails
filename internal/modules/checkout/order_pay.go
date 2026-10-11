@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -20,6 +21,7 @@ import (
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/decline"
+	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/attempts"
@@ -29,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/modules/payments/charge"
 	"github.com/open-rails/openrails/internal/modules/payments/rails"
+	"github.com/open-rails/openrails/internal/modules/payments/rails/nmiproxy"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 	"github.com/open-rails/openrails/internal/shared/cardholdername"
 	"github.com/open-rails/openrails/internal/shared/uuidutil"
@@ -65,22 +68,28 @@ func (s *CheckoutAttemptService) saleService() *CheckoutNMISaleService {
 
 // OrderOption is one PSP that can take every line of an order. Hosted: the
 // order can also be paid on the PSP's hosted page (Stripe Checkout, one-time
-// lines only).
+// lines only). Custodian is the kind of the third party holding the cards
+// the PSP charges, CustodianID its account; "" when the PSP holds its own.
 type OrderOption struct {
-	PSPID  uuid.UUID
-	Rail   string
-	Hosted bool
+	PSPID       uuid.UUID
+	Rail        string
+	Hosted      bool
+	Custodian   string
+	CustodianID *uuid.UUID
 }
 
 // Solana reports a Solana Pay option.
 func (o OrderOption) Solana() bool { return models.Rail(o.Rail) == models.RailSolana }
 
 // Accepts is how the option is paid: saved_card, new_card and on a hosted
-// page redirect; or solana_pay.
+// page redirect; or solana_pay. A Basis Theory PSP takes the card its
+// Elements collected.
 func (o OrderOption) Accepts() []string {
 	switch {
 	case o.Solana():
 		return []string{"solana_pay"}
+	case o.Custodian == models.CustodianBasisTheory:
+		return []string{"new_card"}
 	case o.Hosted:
 		return []string{"saved_card", "new_card", "redirect"}
 	}
@@ -89,7 +98,8 @@ func (o OrderOption) Accepts() []string {
 
 // OrderOptions are the PSPs that sell every line on rails OpenRails charges
 // itself: a card on NMI or Stripe, every recurring line an engine-owned
-// subscription; or a Solana wallet, for one-time lines.
+// subscription; or a Solana wallet, for one-time lines. A Basis Theory
+// custodian's PSP sells one-time lines.
 func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
 	if len(prices) == 0 || len(prices) != len(products) {
 		return []OrderOption{}, nil
@@ -128,13 +138,44 @@ func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*mod
 	for _, price := range prices {
 		oneTime = oneTime && !price.IsRecurring()
 	}
-	for i := range out {
-		out[i].Hosted = oneTime && models.Rail(out[i].Rail) == models.RailStripe
+	options := []OrderOption{}
+	for _, o := range out {
+		o.Hosted = oneTime && models.Rail(o.Rail) == models.RailStripe
+		if models.Rail(o.Rail) == models.RailNMI {
+			var err error
+			if o.Custodian, o.CustodianID, err = s.custodyOf(ctx, o); err != nil {
+				return nil, err
+			}
+		}
+		if o.Custodian != models.CustodianBasisTheory || oneTime {
+			options = append(options, o)
+		}
 	}
-	if out == nil {
-		out = []OrderOption{}
+	return options, nil
+}
+
+// custodyOf is who holds the cards an NMI option's PSP charges.
+func (s *CheckoutAttemptService) custodyOf(ctx context.Context, o OrderOption) (string, *uuid.UUID, error) {
+	checkout, ok := s.checkoutService.(*CheckoutService)
+	if !ok {
+		return "", nil, errors.New("order payment is unavailable")
 	}
-	return out, nil
+	target, err := checkout.resolveRailTargetForPSP(ctx, o.Rail, o.PSPID)
+	if err != nil {
+		return "", nil, err
+	}
+	if target.Scope == nil || target.Scope.CustodianID == nil {
+		return "", nil, nil
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	custodian, err := s.db.Gen(ctx).GetCustodian(ctx, gen.GetCustodianParams{MerchantID: mid.UUID(), ID: *target.Scope.CustodianID})
+	if err != nil {
+		return "", nil, err
+	}
+	return custodian.Kind, target.Scope.CustodianID, nil
 }
 
 func containsOption(options []OrderOption, psp uuid.UUID) bool {
@@ -228,8 +269,10 @@ type newCard struct {
 	fingerprint string
 	reuse       bool
 	// saved is the customer's own method for the card, when they saved it
-	// before: the order charges that instead.
-	saved uuid.UUID
+	// before: the order charges that instead, presenting collected when a
+	// custodian holds it.
+	saved     uuid.UUID
+	collected string
 }
 
 func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput) (OrderCharge, error) {
@@ -281,6 +324,9 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 	var chosen *OrderOption
 	var card *newCard
 	methodID := in.PaymentMethodID
+	// collected is a custodian's fresh collection of a card the customer
+	// already holds: the charge presents it on that PSP.
+	var collected string
 	if in.Card != nil {
 		if chosen, err = NewCardOption(options, in.Card.PSPID); err != nil {
 			return OrderCharge{}, err
@@ -289,7 +335,7 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 			return OrderCharge{}, err
 		}
 		if card.saved != uuid.Nil {
-			methodID, card = card.saved, nil
+			methodID, collected, card = card.saved, card.collected, nil
 		}
 	}
 	if card == nil {
@@ -300,18 +346,35 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 			}
 			return OrderCharge{}, err
 		}
-		if method.Custodian != models.CustodianPSP || method.ParkReason != "" || method.Status != paymentmethods.StatusActive || (method.Rail != models.RailNMI && method.Rail != models.RailStripe) {
-			return OrderCharge{}, fmt.Errorf("%w: the payment method cannot pay an order", ErrPaymentMethodStale)
+		if method.ParkReason != "" || method.Status != paymentmethods.StatusActive || (method.Rail != models.RailNMI && method.Rail != models.RailStripe) {
+			return OrderCharge{}, fmt.Errorf("%w: the payment method cannot pay this order", ErrPaymentMethodStale)
 		}
-		chosen = nil
-		for i, o := range options {
-			if rails.SameRail(method.Rail, models.Rail(o.Rail)) && method.ChargeableOn(o.PSPID) {
+		// A HyperSwitch-held card pays an order that opens a subscription
+		// (its proxy takes no one-time card-on-file charge); a Basis Theory
+		// card pays one-time lines as its Elements collected it again.
+		heldElsewhere := method.Custodian != models.CustodianPSP
+		switch {
+		case !heldElsewhere:
+		case method.CustodianID == nil:
+			return OrderCharge{}, orders.ErrOptionMissing
+		case method.Custodian == models.CustodianHyperSwitch && order.HasRecurring() && collected == "":
+		case method.Custodian == models.CustodianBasisTheory && !order.HasRecurring() && collected != "":
+		default:
+			return OrderCharge{}, orders.ErrOptionMissing
+		}
+		if collected == "" {
+			chosen = nil
+			for i, o := range options {
+				// A held card is charged through the PSP its custodian serves.
+				if !rails.SameRail(method.Rail, models.Rail(o.Rail)) || !method.ChargeableOn(o.PSPID) || heldElsewhere && (o.CustodianID == nil || *o.CustodianID != *method.CustodianID) {
+					continue
+				}
 				chosen = &options[i]
 				break
 			}
-		}
-		if chosen == nil {
-			return OrderCharge{}, orders.ErrOptionMissing
+			if chosen == nil {
+				return OrderCharge{}, orders.ErrOptionMissing
+			}
 		}
 	}
 	target, err := checkout.resolveRailTargetForPSP(ctx, chosen.Rail, chosen.PSPID)
@@ -373,7 +436,17 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 					return err
 				}
 			}
-			payload.PaymentMethodID, payload.Instrument, charged = methodID, instrument, &methodID
+			if row.Custodian == models.CustodianHyperSwitch {
+				if s.config == nil || s.config.HyperSwitch == nil {
+					return errors.New("HyperSwitch custody is not configured")
+				}
+				binding, err := charge.FreezeHyperSwitchBinding(ctx, q, charge.CustodyOf(d), row, chosen.PSPID, s.config.HyperSwitch.APIBaseURL)
+				if err != nil {
+					return fmt.Errorf("%w: %w", ErrPaymentMethodStale, err)
+				}
+				payload.HyperSwitch = &binding
+			}
+			payload.PaymentMethodID, payload.Instrument, payload.Token, charged = methodID, instrument, collected, &methodID
 		}
 		intent, err = intents.NewStore(d).Enqueue(ctx, intents.EnqueueParams{MerchantID: mid.UUID(), Provider: target.Rail, PspID: chosen.PSPID,
 			IntentType: payments.TypeNMISale, Payload: payload, IdempotencyKey: operationKey, NextAttemptAt: now, Origin: intents.OriginUser, OriginReason: "order payment"})
@@ -452,6 +525,9 @@ func (s *CheckoutAttemptService) prepareNewCard(ctx context.Context, checkout *C
 	if d := in.Card.Billing; d != nil && d.Address != nil && d.Address.Country != nil {
 		billingCountry = *d.Address.Country
 	}
+	if option.Custodian == models.CustodianBasisTheory {
+		return s.prepareBasisTheoryCard(ctx, checkout, in, option, token, billingCountry)
+	}
 	out := &newCard{instrument: charge.FrozenInstrument{PSPID: option.PSPID, Custodian: models.CustodianPSP}}
 	if models.Rail(option.Rail) != models.RailStripe {
 		out.token, out.billing = token, newCardBilling(in.Card.Billing, in.User)
@@ -507,6 +583,42 @@ func (s *CheckoutAttemptService) prepareNewCard(ctx context.Context, checkout *C
 	out.card, out.fingerprint = method.Card, method.Fingerprint
 	out.reuse = mandates.KeepsNewCard(in.Card.Reusable, billingCountry, method.CardCountry)
 	return out, nil
+}
+
+// prepareBasisTheoryCard is a card the page's Basis Theory Elements
+// collected into a token intent, charged through the custodian's proxy. A
+// number the customer's custodian already holds is that card.
+func (s *CheckoutAttemptService) prepareBasisTheoryCard(ctx context.Context, checkout *CheckoutService, in OrderPayInput, option OrderOption, token, billingCountry string) (*newCard, error) {
+	if option.CustodianID == nil || checkout.CustodianSaleService == nil {
+		return nil, errors.New("Basis Theory custody is not configured")
+	}
+	_, _, bt, err := checkout.CustodianSaleService.basisTheory(ctx, option.PSPID)
+	if err != nil {
+		return nil, err
+	}
+	intent, err := bt.GetTokenIntent(ctx, token)
+	if basistheory.IsNotFound(err) {
+		return nil, apperr.Invalidf("payment.token is no live Basis Theory token intent: collect the card again").WithParam("payment.token")
+	}
+	if err != nil {
+		return nil, err
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if fingerprint := strings.TrimSpace(intent.Fingerprint); fingerprint != "" {
+		held, err := s.db.Gen(ctx).GetPaymentMethodByFingerprint(ctx, gen.GetPaymentMethodByFingerprintParams{MerchantID: mid.UUID(), CustomerID: in.Order.CustomerID,
+			Custodian: models.CustodianBasisTheory, CustodianID: *option.CustodianID, Fingerprint: fingerprint})
+		switch {
+		case err == nil && paymentmethods.Chargeable(held):
+			return &newCard{saved: held.ID, collected: token}, nil
+		case err != nil && !db.IsNotFound(err):
+			return nil, err
+		}
+	}
+	return &newCard{instrument: charge.FrozenInstrument{PSPID: option.PSPID, Custodian: models.CustodianBasisTheory, CustodianID: option.CustodianID},
+		token: token, reuse: mandates.KeepsNewCard(in.Card.Reusable, billingCountry, "")}, nil
 }
 
 // newCardBilling is who a new NMI card bills: the details entered with it,
@@ -734,7 +846,8 @@ func (h *NMISaleIntentHandler) completeOrder(ctx context.Context, d *db.DB, in g
 		// kept for one-click buys when the customer keeps it.
 		reuse := !p.Recurring && p.Instrument.Mandate == nil && !stripe
 		if p.NewCard {
-			reuse = p.Reuse
+			// A card a custodian could not keep pays without being kept.
+			reuse = p.Reuse && saved != nil
 			if saved != nil {
 				if err := paymentmethods.NewPaymentMethodRepo(d).Create(ctx, saved); err != nil {
 					return err
@@ -747,7 +860,7 @@ func (h *NMISaleIntentHandler) completeOrder(ctx context.Context, d *db.DB, in g
 		}
 		paid := orders.Charge{PaymentID: p.PaymentID, AttemptID: p.CheckoutAttemptID, PSPID: *in.PspID, Rail: in.Rail,
 			TransactionID: receipt.TransactionID(), Amount: p.Amount, Currency: p.Currency, PurchasedAt: p.AcceptedAt,
-			TokenType: charge.TokenTypePSPToken, Metadata: metadata, Cites: p.Instrument.Mandate, StoringRef: storing, Reuse: reuse}
+			TokenType: saleTokenType(p), Metadata: metadata, Cites: p.Instrument.Mandate, StoringRef: storing, Reuse: reuse}
 		if method != nil {
 			paid.PaymentMethodID = *method
 		}
@@ -799,6 +912,9 @@ func (h *NMISaleIntentHandler) newCardMethod(ctx context.Context, in gen.Billing
 	if err != nil {
 		return nil, err
 	}
+	if p.Instrument.Custodian == models.CustodianBasisTheory {
+		return h.basisTheoryMethod(ctx, in, p, customer)
+	}
 	psp := *in.PspID
 	method := &models.PaymentMethod{ID: p.PaymentMethodID, CustomerID: customer, PspID: &psp, Rail: models.Rail(in.Rail), Custodian: models.CustodianPSP}
 	if in.Rail == string(models.RailStripe) {
@@ -828,6 +944,44 @@ func (h *NMISaleIntentHandler) newCardMethod(ctx context.Context, in gen.Billing
 		}
 	}
 	return method, nil
+}
+
+// basisTheoryMethod is the card a Basis Theory sale charged, converted to
+// the custodian's durable token. A token intent that expired before its
+// conversion leaves the order paid with no card kept.
+func (h *NMISaleIntentHandler) basisTheoryMethod(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, customer uuid.UUID) (*models.PaymentMethod, error) {
+	_, _, bt, err := h.Sale.Custody.basisTheory(ctx, *in.PspID)
+	if err != nil {
+		return nil, err
+	}
+	reference := payments.NMISaleOrderReference(in.ID, p.E2ERunID)
+	token, err := bt.ConvertTokenIntent(ctx, p.Token, basistheory.ConvertOpts{IdempotencyKey: "btconv:" + reference})
+	if basistheory.IsNotFound(err) {
+		log.WithContext(ctx).WithField("order_reference", reference).Error("Basis Theory token intent expired before conversion: the order is paid with no card kept")
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	method := &models.PaymentMethod{ID: p.PaymentMethodID, CustomerID: customer, Rail: models.RailNMI, RailMethodRef: token.ID, Custodian: models.CustodianBasisTheory,
+		CustodianID: p.Instrument.CustodianID, Fingerprint: token.Fingerprint, ChargeVia: nmiproxy.ViaPANProxy}
+	if token.Card != nil {
+		method.Card = models.ParseCard(token.Card.Brand, token.Card.Last4, "")
+		if token.Card.ExpirationMonth >= 1 && token.Card.ExpirationMonth <= 12 && token.Card.ExpirationYear >= 2000 {
+			method.Card.ExpMonth, method.Card.ExpYear = token.Card.ExpirationMonth, token.Card.ExpirationYear
+		}
+	}
+	return method, nil
+}
+
+// provisionNetworkToken gives a new Basis Theory card its network token when
+// the custodian provisions them; never load-bearing.
+func (h *NMISaleIntentHandler) provisionNetworkToken(ctx context.Context, in gen.BillingProviderIntent, p payments.NMISalePayload, saved *models.PaymentMethod) {
+	cfg, _, bt, err := h.Sale.Custody.basisTheory(ctx, *in.PspID)
+	if err != nil || !cfg.Custody.NetworkTokens {
+		return
+	}
+	h.Sale.Custody.provisionNetworkToken(ctx, bt, in.MerchantID, saved.ID, saved.RailMethodRef, payments.NMISaleOrderReference(in.ID, p.E2ERunID))
 }
 
 func evidenceText(evidence map[string]any, key string) string {

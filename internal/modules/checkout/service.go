@@ -160,6 +160,7 @@ func NewCheckoutService(
 	if railPMService != nil {
 		service.CustodianSaleService.DB = railPMService.DB
 	}
+	service.NMISaleService.Custody = service.CustodianSaleService
 	return service
 }
 

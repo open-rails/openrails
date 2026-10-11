@@ -233,8 +233,10 @@ it answers exactly what the first request answered.
 
 `payment` is a saved card, `{payment_method_id}`, or a card just entered,
 `{token, psp_id?, billing_details?}`: the single-use output of the PSP's own
-fields (a Stripe `pm_` from Elements, an NMI Collect.js `payment_token`).
-`psp_id` may be left out while one payment option takes new cards. One provider
+fields (a Stripe `pm_` from Elements, an NMI Collect.js `payment_token`, or the
+token intent Basis Theory Elements made for a PSP whose `custodian` is
+`basis_theory`). `psp_id` may be left out while one payment option takes new
+cards. One provider
 request charges and saves a new card: a Stripe PaymentIntent with
 `setup_future_usage: off_session`, an NMI sale with `customer_vault=add_customer`.
 Nothing is vaulted or verified first; a declined card is not saved. Outside the
@@ -243,6 +245,12 @@ EEA and the UK a new card is kept for one-click buys; there it needs
 for that purchase only is charged without stored-credential fields. Saving a
 card without buying (`POST /v1/me/payment-methods`, a Stripe SetupIntent) is the
 one two-step flow.
+
+A card a custodian holds pays through its proxy. A Basis Theory PSP's option
+accepts `new_card` and sells one-time lines: the sale charges the token intent,
+then keeps the card as the custodian's token; a number the customer's
+custodian already holds pays as that saved card. A HyperSwitch-held saved card
+pays an order that opens a subscription.
 
 An order has two statuses, as Stripe's Order and PaymentIntent do: `status` is
 `open`, `processing` (the provider has the payment), `complete` (paid and

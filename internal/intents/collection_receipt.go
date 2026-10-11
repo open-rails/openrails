@@ -65,7 +65,8 @@ func decodeCollectedTerms(in gen.BillingProviderIntent) (collectedTerms, error) 
 			return collectedTerms{}, err
 		}
 		minor, err := moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
-		token := p.Token != ""
+		// A custodian's token reaches the gateway through its proxy: no vault.
+		token := p.Token != "" && !p.Instrument.CustodianHeld()
 		return collectedTerms{Rail: in.Rail, Currency: p.Currency, AmountMinor: minor, Instrument: p.Instrument, ProviderCustomerRef: p.Instrument.RailCustomerRef,
 			OrderReference: payments.NMISaleOrderReference(in.ID, p.E2ERunID), NewVault: token && !p.PurchaseScoped, NoVault: token && p.PurchaseScoped}, err
 

@@ -4,7 +4,6 @@ package subscriptions_test
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,7 +18,6 @@ import (
 	"github.com/open-rails/openrails/internal/engine"
 	"github.com/open-rails/openrails/internal/integrations/basistheory"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/nmimock"
 )
@@ -162,6 +160,9 @@ func TestBasisTheoryUpdaterKeepsTheMethod(t *testing.T) {
 	w.declare = func(psps map[string]openrails.PSPConfig) {
 		psps["nmi-bt"] = openrails.NMIPSP{AccountID: "e2e-nmi-bt", SecurityKey: "e2e-nmi-bt-key", WebhookSigningSecret: "nmi_bt_webhook_e2e", Custodian: "bt"}.PSPConfig()
 	}
+	// The merchant sells cards through its custodian's PSP.
+	routing := []billing.CheckoutRoutingRule{{Prefer: []string{"nmi-bt"}}}
+	w.settings = billing.MerchantSettings{CheckoutRouting: &routing}
 	w.start()
 	keyed := w.nmi.AddVault(nmimock.Card{Brand: "visa", Last4: "1111"})
 	bt.gateway = func(form url.Values, number string) string {
@@ -171,19 +172,11 @@ func TestBasisTheoryUpdaterKeepsTheMethod(t *testing.T) {
 	rt := engine.Graph(w.rt).Runtime
 	rt.CheckoutService.CustodianSaleService.BTBaseURLOverride = btURL
 	ctx := merchant.WithID(t.Context(), rt.DeclaredMerchants()[0])
+	// The page's Basis Theory Elements collect the card; its token intent
+	// pays the order on the custodian's PSP.
 	buy := func(c *customer, price billing.PriceID, number string) {
 		t.Helper()
-		require.NoError(t, rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-			res, err := rt.CheckoutService.Checkout(ctx, &checkout.CheckoutRequest{PriceID: price.String(), Rail: "nmi-bt", BTTokenIntentID: bt.collect(number), IdempotencyKey: uuid.NewString()}, &checkout.UserIdentity{ID: c.id})
-			if err != nil {
-				return err
-			}
-			if res.Status != "success" {
-				return fmt.Errorf("checkout answered %+v", res)
-			}
-			return nil
-		}))
-		w.settle()
+		c.mustCheckout(embedded, order{price: price, rail: "nmi-bt", token: bt.collect(number)})
 	}
 	var custodian uuid.UUID
 	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT id FROM billing.custodians`)).Scan(&custodian))

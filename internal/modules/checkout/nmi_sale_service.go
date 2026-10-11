@@ -57,6 +57,8 @@ type CheckoutNMISaleService struct {
 	Intents intentExecutor
 	// Orders settles an order sale in its completion transaction.
 	Orders *orders.Service
+	// Custody charges cards a Basis Theory custodian holds.
+	Custody *CheckoutCustodianSaleService
 }
 
 func NewCheckoutNMISaleService(

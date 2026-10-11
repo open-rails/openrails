@@ -93,6 +93,23 @@ func (c *Charger) Charge(ctx context.Context, req charge.Request) (charge.Result
 	return c.chargeThroughProxy(ctx, req, src, nil)
 }
 
+// Sale is a customer-present charge of the card a token intent collected,
+// answering the gateway's refusal itself. A BT pre-forward failure reached
+// no gateway.
+func (c *Charger) Sale(ctx context.Context, req charge.Request) (charge.Result, *nmi.CustomerVaultError, error) {
+	if err := moneyutil.RequireFiatCurrency(req.Currency); err != nil {
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, err)
+	}
+	if c == nil || c.BT == nil || strings.TrimSpace(c.Source.TokenIntentID) == "" || req.Context.Initiator != charge.InitiatorCustomer {
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, errors.New("a proxy sale charges a collected card in the customer's presence"))
+	}
+	res, refusal, err := c.proxySale(ctx, req, c.Source, nil)
+	if pe, ok := basistheory.IsBTProxyError(err); ok && !basistheory.IsTransportAmbiguous(err) {
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, pe)
+	}
+	return res, refusal, err
+}
+
 func (c *Charger) chargeNetworkToken(ctx context.Context, req charge.Request, src Source) (charge.Result, error) {
 	var cryptogram *basistheory.Cryptogram
 	if req.Context.Initiator == charge.InitiatorCustomer {
@@ -126,18 +143,30 @@ func canFallBackToPAN(err error) bool {
 }
 
 func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, src Source, cryptogram *basistheory.Cryptogram) (charge.Result, error) {
+	res, refusal, err := c.proxySale(ctx, req, src, cryptogram)
+	if refusal != nil {
+		code := nmidirect.FailureCode(refusal)
+		message := refusal.Error()
+		return charge.Result{TokenType: res.TokenType, Declined: true, FailureCode: &code, FailureMessage: &message}, nil
+	}
+	return res, err
+}
+
+// proxySale sends one sale through the proxy; refusal is the gateway's hard
+// decline.
+func (c *Charger) proxySale(ctx context.Context, req charge.Request, src Source, cryptogram *basistheory.Cryptogram) (charge.Result, *nmi.CustomerVaultError, error) {
 	form, err := SaleForm(req, src, c.Gateway, cryptogram)
 	if err != nil {
-		return charge.Result{}, err
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, err)
 	}
 	if err := c.Gateway.Posture.RequireArmedFor(ctx, c.Gateway.directPostURL(), c.Gateway.SecurityKey); err != nil {
-		return charge.Result{}, errors.Join(charge.ErrNotDispatched, err)
+		return charge.Result{}, nil, errors.Join(charge.ErrNotDispatched, err)
 	}
 	proxyRes, err := c.BT.ProxyForm(ctx, c.Gateway.directPostURL(), form)
 	if err != nil {
 		// Ambiguous (may have forwarded), BT pre-forward failure (clean,
 		// NOT a decline), or readonly — all the caller's to classify.
-		return charge.Result{}, err
+		return charge.Result{}, nil, err
 	}
 
 	tokenType := charge.TokenTypePANViaProxy
@@ -150,18 +179,11 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 	if err != nil {
 		var vaultErr *nmi.CustomerVaultError
 		if errors.As(err, &vaultErr) && nmidirect.IsHardDecline(vaultErr.ResponseCode) {
-			code := nmidirect.FailureCode(vaultErr)
-			message := vaultErr.Error()
-			return charge.Result{
-				TokenType:      tokenType,
-				Declined:       true,
-				FailureCode:    &code,
-				FailureMessage: &message,
-			}, nil
+			return charge.Result{TokenType: tokenType}, vaultErr, nil
 		}
 		// Transient gateway condition (420/421/430) or unreadable body
 		// (transport-ambiguous): the caller's retry/verify machinery owns it.
-		return charge.Result{}, err
+		return charge.Result{}, nil, err
 	}
 
 	res := charge.Result{
@@ -173,5 +195,5 @@ func (c *Charger) chargeThroughProxy(ctx context.Context, req charge.Request, sr
 	if req.Context.Storing() {
 		res.CapturedRef = res.TransactionID
 	}
-	return res, nil
+	return res, nil, nil
 }

@@ -67,7 +67,9 @@ type NMISalePayload struct {
 	// and is its storing transaction (Token on NMI, Instrument's pm_ on
 	// Stripe), and PaymentMethodID names the method its success creates.
 	NewCard bool `json:"new_card,omitempty"`
-	// Token is an order's NMI Collect.js token; Billing the vault's details.
+	// Token is an order's NMI Collect.js token, or the Basis Theory token
+	// intent that collected a custodian-held card; Billing the vault's
+	// details.
 	Token   string          `json:"token,omitempty"`
 	Billing *NewCardBilling `json:"billing,omitempty"`
 	// Card and Fingerprint are a new Stripe card as Stripe reported it.
@@ -78,6 +80,9 @@ type NMISalePayload struct {
 	// no Reuse): no stored-credential agreement, and nothing is saved.
 	Reuse          bool `json:"reuse,omitempty"`
 	PurchaseScoped bool `json:"purchase_scoped,omitempty"`
+	// HyperSwitch binds an order's HyperSwitch-held card to the custodian
+	// account that holds it: the sale goes through its NMI proxy.
+	HyperSwitch *charge.HyperSwitchBinding `json:"hyperswitch,omitempty"`
 }
 
 // NewCardBilling is who a new NMI card bills, for its vault.
@@ -181,8 +186,25 @@ func validateOrderSale(in gen.BillingProviderIntent, p NMISalePayload, customer 
 		return err
 	}
 	nmiToken := in.Rail != "stripe" && p.NewCard
-	if p.Instrument.CustodianHeld() || p.Provider != in.Rail || (p.Instrument.RailCustomerRef == "") != nmiToken || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" ||
-		(p.Token != "") != nmiToken || p.PurchaseScoped != (p.NewCard && !p.Recurring && !p.Reuse) || p.Reuse && !p.NewCard || p.NewCard && p.Instrument.Mandate != nil {
+	// A HyperSwitch-held card pays an order that opens a subscription, as its
+	// recurring storing charge. A Basis Theory card pays one-time lines as
+	// its token intent presents it: a new card, or one the customer holds.
+	custody := true
+	switch p.Instrument.Custodian {
+	case models.CustodianPSP:
+		custody = p.HyperSwitch == nil
+	case models.CustodianHyperSwitch:
+		hs := p.HyperSwitch
+		custody = hs != nil && hs.Validate() == nil && in.Rail == "nmi" && p.Recurring && !p.NewCard
+	case models.CustodianBasisTheory:
+		custody = p.HyperSwitch == nil && in.Rail == "nmi" && !p.Recurring && p.Token != "" && p.Instrument.RailCustomerRef == "" && p.NewCard == (p.Instrument.RailMethodRef == "")
+	}
+	if !custody {
+		return errors.New("order sale custody contradicts its order")
+	}
+	bt := p.Instrument.Custodian == models.CustodianBasisTheory
+	if p.Provider != in.Rail || !bt && ((p.Instrument.RailCustomerRef == "") != nmiToken || (p.Token != "") != nmiToken) || in.Rail == "stripe" && p.Instrument.RailMethodRef == "" ||
+		p.PurchaseScoped != (p.NewCard && !p.Recurring && !p.Reuse) || p.Reuse && !p.NewCard || p.NewCard && p.Instrument.Mandate != nil {
 		return errors.New("order sale instrument contradicts its order")
 	}
 	_, err = moneyutil.NativeToRailMinorExact(p.Currency, p.Amount)
