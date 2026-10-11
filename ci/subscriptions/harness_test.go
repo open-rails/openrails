@@ -24,7 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	riverkit "github.com/open-rails/helpers/river"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
@@ -119,7 +119,7 @@ var (
 // rootScope is where the verifier's roles hold their root: permissions.
 var rootScope = auth.Scope{Authority: issuer, ID: "root"}
 
-// RootScope is rootScope (helpers/auth Root).
+// RootScope is rootScope (authkit/auth Root).
 func (*verifier) RootScope(context.Context) (auth.Scope, error) { return rootScope, nil }
 
 // heldIn is the role holding perm in the scope of this id alone.

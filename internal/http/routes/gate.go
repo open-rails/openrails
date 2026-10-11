@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
@@ -269,7 +269,7 @@ func pin(r *httprequest.Request, target billingauth.Target) {
 // boundMerchant is the one merchant v's credential is bound to, by the
 // first of three bindings, and nothing of the request:
 //
-//   - the scope it is bound to (helpers/auth Bound), which is a merchant's in
+//   - the scope it is bound to (authkit/auth Bound), which is a merchant's in
 //     the Authenticator's root authority, its id the merchant's; a scope that
 //     is not never falls through to the next binding;
 //   - the merchant that declares its issuer (MerchantDeclaration.Issuer);
@@ -353,7 +353,7 @@ func (e *Env) bound(r *httprequest.Request, route Route, a any) (billingauth.Ver
 	return v, c, target, true
 }
 
-// rootScope is where a's root: permissions are held (helpers/auth Root). A
+// rootScope is where a's root: permissions are held (authkit/auth Root). A
 // panic, or a scope that is not whole, is the provider's fault.
 func rootScope(ctx context.Context, a any) (scope billingauth.Scope, err error) {
 	root, ok := a.(auth.Root)
@@ -403,7 +403,7 @@ func asked(a any, pair Pair) Pair {
 // root scope to ask in, or knows neither name.
 func needs(route Route, a billingauth.Authenticator) Pair {
 	if _, ok := a.(auth.Root); !ok {
-		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: staff and programmatic routes ask its RootScope"})
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a authkit/auth Root: staff and programmatic routes ask its RootScope"})
 	}
 	pair := route.Needs()
 	if pair == (Pair{}) {
@@ -518,8 +518,8 @@ type customerOf struct {
 // customers (issuer ""): a person whose credential is bound to no scope (the
 // user of the issuer the merchant declares), an account of the
 // Authenticator's own authority bound to the merchant, and the customer the
-// merchant's own backend names in an assertion (RFC 7523: the token's client
-// is the application that asserted it). Any other bound credential's user is
+// merchant's own backend names in an assertion (auth.Asserted). Any other
+// bound credential's user is
 // its issuer's, pinned to it. A token of the Authenticator's own authority
 // that carries scopes but not ScopeSelf, such as a console's, was not issued
 // to act as a customer; one that says nothing of its scopes is the host's
@@ -541,7 +541,7 @@ func customerIssuer(ctx context.Context, a any, v billingauth.Verified, c billin
 	case !bound:
 		return customerOf{self: true}, nil
 	}
-	if client, ok := v.(interface{ ClientID() string }); ok && client.ClientID() == c.Issuer {
+	if asserted, ok := v.(auth.Asserted); ok && asserted.Asserted() {
 		return customerOf{self: true}, nil
 	}
 	return customerOf{issuer: c.Issuer, self: true}, nil
@@ -555,7 +555,7 @@ func (e *Env) networkGates(route Route) []router.Middleware {
 		panic(MountError{Route: route.Key(), Reason: "a network route needs Routes.Auth"})
 	}
 	if _, ok := a.(auth.Root); !ok {
-		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a helpers/auth Root: a network account is its root authority's own"})
+		panic(MountError{Route: route.Key(), Reason: "Routes.Auth (" + authName(a) + ") is not a authkit/auth Root: a network account is its root authority's own"})
 	}
 	return []router.Middleware{verify(route, a), e.networkCheck(route, a)}
 }

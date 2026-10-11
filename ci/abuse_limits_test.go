@@ -17,7 +17,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/open-rails/helpers/auth"
+	"github.com/open-rails/authkit/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"

@@ -8,7 +8,7 @@ import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jonboulle/clockwork"
-	"github.com/open-rails/helpers/userinfo"
+	"github.com/open-rails/authkit/userinfo"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -35,7 +35,7 @@ type Deps struct {
 	// Config.SMTP.
 	Email EmailSender
 
-	// UserInfo is the host's directory (helpers/userinfo.Lookup, AuthKit's
+	// UserInfo is the host's directory (authkit/userinfo.Lookup, AuthKit's
 	// Client.UserInfo()): who each customer is, asked whenever OpenRails emails
 	// a customer or shows one, and never copied. Nil keeps the copy SCIM
 	// pushes fill instead (RouteGroups.Programmatic); without either,
@@ -52,7 +52,7 @@ type Deps struct {
 	Clock           clockwork.Clock
 }
 
-// UserInfo is helpers/userinfo's Lookup: the host's directory, read in
+// UserInfo is authkit/userinfo's Lookup: the host's directory, read in
 // process.
 type UserInfo = userinfo.Lookup
 

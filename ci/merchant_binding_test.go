@@ -81,7 +81,7 @@ func merchantPerms() []billing.Permission {
 	return out
 }
 
-// boundTo issues credentials bound to merchant mid's group (helpers/auth
+// boundTo issues credentials bound to merchant mid's group (authkit/auth
 // Bound), as a host's AuthKit does: its staff member, an API key and a
 // customer token holding nothing, a group-bound mint.
 type boundTo struct {

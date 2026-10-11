@@ -17,8 +17,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/open-rails/authkit"
+	"github.com/open-rails/authkit/userinfo"
 	riverhelpers "github.com/open-rails/helpers/river"
-	"github.com/open-rails/helpers/userinfo"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails"

@@ -15,7 +15,7 @@ Right after `Authenticate`, OpenRails reads the first that applies:
 
 | Binding | The merchant is | Credentials |
 |---|---|---|
-| Scope | the merchant whose scope the credential's `BoundScope` is (helpers/auth `Bound`): `{Authority: the Authenticator's RootScope authority, ID: the merchant's id}`. A scope of no live merchant is refused; it never falls through to the issuer | an API key of the merchant's group; a merchant application's token; a trusted issuer's token; a customer token minted for the merchant; a console token exchanged for it; a host's own session bound to it |
+| Scope | the merchant whose scope the credential's `BoundScope` is (authkit/auth `Bound`): `{Authority: the Authenticator's RootScope authority, ID: the merchant's id}`. A scope of no live merchant is refused; it never falls through to the issuer | an API key of the merchant's group; a merchant application's token; a trusted issuer's token; a customer token minted for the merchant; a console token exchanged for it; a host's own session bound to it |
 | Issuer | the merchant whose `MerchantDeclaration.Issuer` is the credential's issuer. An issuer belongs to one merchant of an engine | a single-merchant host's own sign-ins, its customers' and its staff's |
 | Object | the merchant of the row an OpenRails secret opens | a checkout URL's secret, a checkout session or attempt, a PSP's webhook signature, a provisioning token, the in-process handle |
 
