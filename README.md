@@ -277,7 +277,7 @@ Metrics reads stay independently grantable. The old operator URLs under
 `/v1/admin/` and the old `billing` permission names are not aliases; update
 custom roles and trusted-issuer grants when upgrading.
 
-Admin changes do not require a recent sign-in. Applications can require 2FA
+Admin and operator changes do not require a recent sign-in. Applications can require 2FA
 and DPoP for their admin credentials; destructive-operation ceilings provide
 an additional limit on destructive actions.
 
