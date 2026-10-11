@@ -69,7 +69,7 @@ const answer = (body: { measures: string[]; grain: string }) => {
 }
 
 it("tables the daily and monthly reports and downloads each as CSV", async () => {
-  routes["POST /admin/metrics/query"] = (request) =>
+  routes["POST /metrics/query"] = (request) =>
     answer(request.body as { measures: string[]; grain: string })
   const files: { name: string; text: Promise<string> }[] = []
   let blob: Blob | undefined
@@ -98,7 +98,7 @@ it("tables the daily and monthly reports and downloads each as CSV", async () =>
     expect(document.querySelectorAll("tbody tr")).toHaveLength(4)
   )
   const bodies = requests
-    .filter((r) => r.path === "/admin/metrics/query")
+    .filter((r) => r.path === "/metrics/query")
     .map((r) => r.body)
   expect(bodies).toEqual(
     expect.arrayContaining([

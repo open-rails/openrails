@@ -731,7 +731,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
      */
     async listProducts(opts: ProductListOptions): Promise<Page<Product>> {
       if (opts.keys.length === 0) return { data: [], next_cursor: null }
-      return json(productPage, "/catalog/products", {
+      return json(productPage, "/products", {
         query: { merchant: opts.merchant, keys: opts.keys },
         signal: opts.signal,
         public: true,

@@ -3,7 +3,7 @@
 ### What it is
 
 A React SPA (`web/admin`, Vite), the staff dashboard, driving the
-`/v1/admin/*` and `/v1/operator/*` API. It is the browser UI for the **merchant operator**, the
+`/v1/admin/*`, `/v1/catalog/*`, `/v1/merchant/*` and `/v1/metrics/*` APIs. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, settings. It holds no state and no privileges of its own; every
 action is a staff-route call its permission admits the caller for.

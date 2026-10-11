@@ -111,7 +111,7 @@ func TestOwnAuthGates(t *testing.T) {
 		require.ElementsMatch(t, []string{"ann@shop.example", "pat@shop.example"}, s.customers(t, support, acme))
 		s.switchTo(t, support, globex, http.StatusForbidden)
 		require.ElementsMatch(t, []string{"ann@shop.example", "pat@shop.example"}, s.customers(t, support, acme), "the refused switch changed nothing")
-		requireCode(t, s.call(t, support, http.MethodPost, "/billing/v1/operator/catalog/apply", map[string]any{}), http.StatusForbidden, "permission_required")
+		requireCode(t, s.call(t, support, http.MethodPost, "/billing/v1/catalog/apply", map[string]any{}), http.StatusForbidden, "permission_required")
 	})
 
 	t.Run("a stale sign-in reads but cannot refund", func(t *testing.T) {

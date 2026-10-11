@@ -44,7 +44,7 @@ var openTiers = []Tier{AuthPublic, AuthProvider}
 // reviewed change.
 var openRoutes = []string{
 	"GET /health/live", "GET /health/ready", "GET /v1/config",
-	"GET /v1/catalog/products",
+	"GET /v1/products",
 	"GET /v1/orders/{id}/solana-pay", "POST /v1/orders/{id}/solana-pay",
 	"POST /v1/webhooks/{rail}/{account_id}",
 }
@@ -52,15 +52,15 @@ var openRoutes = []string{
 // sensitiveRoutes are the routes that also ask a person for a recent sign-in:
 // those that move money or remove access. A change is reviewed.
 var sensitiveRoutes = []string{
-	"DELETE /v1/operator/alert-webhooks/{id}",
-	"DELETE /v1/operator/provisioning-tokens/{id}",
-	"GET /v1/operator/billing-archive",
+	"DELETE /v1/merchant/alert-webhooks/{id}",
+	"DELETE /v1/merchant/provisioning-tokens/{id}",
+	"GET /v1/merchant/billing-archive",
 	"PATCH /v1/admin/customers/{customer_id}",
-	"PATCH /v1/operator/alert-webhooks/{id}",
-	"PATCH /v1/operator/catalog/prices/{id}",
-	"PATCH /v1/operator/catalog/products/{id}",
-	"PATCH /v1/operator/configuration",
-	"PATCH /v1/operator/psps/{id}",
+	"PATCH /v1/catalog/prices/{id}",
+	"PATCH /v1/catalog/products/{id}",
+	"PATCH /v1/merchant/alert-webhooks/{id}",
+	"PATCH /v1/merchant/configuration",
+	"PATCH /v1/merchant/psps/{id}",
 	"POST /v1/admin/credit-grants",
 	"POST /v1/admin/credit-grants/{id}/revoke",
 	"POST /v1/admin/orders/{id}/mark-uncollectible",
@@ -73,19 +73,19 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/subscriptions/{id}/cancel",
 	"POST /v1/admin/subscriptions/{id}/change",
 	"POST /v1/admin/subscriptions/{id}/resume",
-	"POST /v1/operator/alert-webhooks",
-	"POST /v1/operator/billing-archive",
-	"POST /v1/operator/billing-import",
-	"POST /v1/operator/catalog/apply",
-	"POST /v1/operator/catalog/prices",
-	"POST /v1/operator/catalog/products",
-	"POST /v1/operator/price-migrations",
-	"POST /v1/operator/price-migrations/{id}/cancel",
-	"POST /v1/operator/provisioning-tokens",
-	"POST /v1/operator/psps",
-	"POST /v1/operator/psps/refresh",
+	"POST /v1/catalog/apply",
+	"POST /v1/catalog/price-migrations",
+	"POST /v1/catalog/price-migrations/{id}/cancel",
+	"POST /v1/catalog/prices",
+	"POST /v1/catalog/products",
+	"POST /v1/merchant/alert-webhooks",
+	"POST /v1/merchant/billing-archive",
+	"POST /v1/merchant/billing-import",
+	"POST /v1/merchant/provisioning-tokens",
+	"POST /v1/merchant/psps",
+	"POST /v1/merchant/psps/refresh",
 	"PUT /v1/admin/subscriptions/{id}/payment-method",
-	"PUT /v1/operator/catalog/meters/{key}",
+	"PUT /v1/catalog/meters/{key}",
 }
 
 // Every catalog route declares exactly one tier of the closed set, and what
@@ -1029,7 +1029,7 @@ func TestBoundMerchant(t *testing.T) {
 	rt := gatedRuntime(t)
 	app, person := authtest.Application("app"), authtest.User(userA)
 	gone := billing.MerchantID(uuid.New())
-	const findings = "GET /v1/operator/findings"
+	const findings = "GET /v1/merchant/findings"
 	for name, tc := range map[string]struct {
 		auth     billingauth.Authenticator
 		merchant billing.MerchantID

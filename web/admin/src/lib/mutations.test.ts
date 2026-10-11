@@ -74,7 +74,7 @@ const cases: Case[] = [
         outcome: "approve",
         notes: "verified",
       }),
-    "POST /operator/findings/find_1/resolve",
+    "POST /merchant/findings/find_1/resolve",
     ["ops"],
     { outcome: "approve", notes: "verified" },
   ],
@@ -177,14 +177,14 @@ const cases: Case[] = [
   [
     "asks the catalog copilot without invalidating the catalog",
     (_c, g) => g(M.askCatalogCopilot(), "what do we sell?"),
-    "POST /operator/catalog/ask",
+    "POST /catalog/ask",
     [],
   ],
   [
     "loads the live price and product behind a copilot draft",
     (_c, g) =>
       g(M.loadCatalogPriceDraft(), { productKey: "pro", priceKey: "monthly" }),
-    "GET /operator/catalog/products",
+    "GET /catalog/products",
     [],
   ],
   [
@@ -194,14 +194,14 @@ const cases: Case[] = [
         document: JSON.stringify(application),
         force: false,
       }),
-    "POST /operator/catalog/apply",
+    "POST /catalog/apply",
     catalogTree,
     application,
   ],
   [
     "re-reads the PSPs and refreshes drift alone",
     (c, g) => g(M.refreshPSPs(c), undefined),
-    "POST /operator/psps/refresh",
+    "POST /merchant/psps/refresh",
     ["drift"],
   ],
   [
@@ -212,21 +212,21 @@ const cases: Case[] = [
         display_name: "Pro",
         description: "",
       }),
-    "POST /operator/catalog/products",
+    "POST /catalog/products",
     catalogTree,
   ],
   [
     "archives a product",
     (c, g) =>
       g(M.setProductActive(c), { id: "prod_1", active: false, revision: 4 }),
-    "PATCH /operator/catalog/products/prod_1",
+    "PATCH /catalog/products/prod_1",
     catalogTree,
     { archived: true, expected_revision: 4 },
   ],
   [
     "creates a price",
     (c, g) => g(M.createPrice(c), price),
-    "POST /operator/catalog/prices",
+    "POST /catalog/prices",
     catalogTree,
     price,
   ],
@@ -234,7 +234,7 @@ const cases: Case[] = [
     "restores a price",
     (c, g) =>
       g(M.setPriceActive(c), { id: "price_1", active: true, revision: 2 }),
-    "PATCH /operator/catalog/prices/price_1",
+    "PATCH /catalog/prices/price_1",
     catalogTree,
     { archived: false, expected_revision: 2 },
   ],
@@ -242,34 +242,34 @@ const cases: Case[] = [
     "previews affected subscribers without writing catalog state",
     (_c, g) =>
       g(M.previewPriceChange(), { productKey: "pro", priceKey: "monthly" }),
-    "POST /operator/price-migrations/preview",
+    "POST /catalog/price-migrations/preview",
     [],
     { product_key: "pro", price_key: "monthly" },
   ],
   [
     "cancels a price migration",
     (c, g) => g(M.cancelPriceMigration(c), "pmig_1"),
-    "POST /operator/price-migrations/pmig_1/cancel",
+    "POST /catalog/price-migrations/pmig_1/cancel",
     catalogTree,
   ],
   [
     "stores a usage meter",
     (c, g) => g(M.putUsageMeter(c), { key: "tokens", meter }),
-    "PUT /operator/catalog/meters/tokens",
+    "PUT /catalog/meters/tokens",
     meterTree,
     meter,
   ],
   [
     "stores a default rate card",
     (c, g) => g(M.putDefaultUsageRateCard(c), { meter: storedMeter, rateCard }),
-    "PUT /operator/catalog/meters/tokens",
+    "PUT /catalog/meters/tokens",
     meterTree,
     { ...meter, rate_card: rateCard, expected_revision: 3 },
   ],
   [
     "removes a default rate card",
     (c, g) => g(M.deleteDefaultUsageRateCard(c), storedMeter),
-    "PUT /operator/catalog/meters/tokens",
+    "PUT /catalog/meters/tokens",
     meterTree,
     { ...meter, rate_card: null, expected_revision: 3 },
   ],
@@ -280,7 +280,7 @@ const cases: Case[] = [
         expected_revision: 4,
         display_name: "Acme",
       }),
-    "PATCH /operator/configuration",
+    "PATCH /merchant/configuration",
     ["settings"],
     { expected_revision: 4, display_name: "Acme" },
   ],
@@ -288,7 +288,7 @@ const cases: Case[] = [
     "adds a PSP",
     (c, g) =>
       g(M.createPSP(c), { key: "mobius", rail: "nmi", account_id: "gw_1" }),
-    "POST /operator/psps",
+    "POST /merchant/psps",
     ["psps"],
     { key: "mobius", rail: "nmi", account_id: "gw_1" },
   ],
@@ -299,7 +299,7 @@ const cases: Case[] = [
         id: "psp_1",
         psp: { expected_revision: 3, credentials: { security_key: "sk" } },
       }),
-    "PATCH /operator/psps/psp_1",
+    "PATCH /merchant/psps/psp_1",
     ["psps"],
     { expected_revision: 3, credentials: { security_key: "sk" } },
   ],
@@ -310,7 +310,7 @@ const cases: Case[] = [
         id: "psp_1",
         psp: { archived: true, expected_revision: 3, allow_last: true },
       }),
-    "PATCH /operator/psps/psp_1",
+    "PATCH /merchant/psps/psp_1",
     ["psps"],
     { archived: true, expected_revision: 3, allow_last: true },
   ],
@@ -322,7 +322,7 @@ const cases: Case[] = [
         url: "https://hooks.example/a",
         format: "slack",
       }),
-    "POST /operator/alert-webhooks",
+    "POST /merchant/alert-webhooks",
     ["settings", "webhooks"],
     { name: "ops", url: "https://hooks.example/a", format: "slack" },
   ],
@@ -330,14 +330,14 @@ const cases: Case[] = [
     "edits an alert webhook",
     (c, g) =>
       g(M.updateWebhook(c), { id: "awh_1", webhook: { enabled: false } }),
-    "PATCH /operator/alert-webhooks/awh_1",
+    "PATCH /merchant/alert-webhooks/awh_1",
     ["settings", "webhooks"],
     { enabled: false },
   ],
   [
     "deletes an alert webhook",
     (c, g) => g(M.deleteWebhook(c), "awh_1"),
-    "DELETE /operator/alert-webhooks/awh_1",
+    "DELETE /merchant/alert-webhooks/awh_1",
     ["settings", "webhooks"],
   ],
   [
@@ -353,7 +353,7 @@ let requests: Recorded[]
 let routes: Record<string, Reply>
 beforeEach(async () => {
   routes = {
-    "/operator/catalog/products": {
+    "/catalog/products": {
       data: [
         {
           id: "prod_1",
@@ -379,9 +379,9 @@ it.each(cases)("%s", async (_name, run, expected, invalidates, body) => {
   // A PSP write refuses to dispatch once the merchant changed; the switch
   // comes after the scoped request instead.
   const pspWrite = {
-    "adds a PSP": "POST /operator/psps",
-    "rotates PSP credentials": "PATCH /operator/psps/psp_1",
-    "archives one PSP by update": "PATCH /operator/psps/psp_1",
+    "adds a PSP": "POST /merchant/psps",
+    "rotates PSP credentials": "PATCH /merchant/psps/psp_1",
+    "archives one PSP by update": "PATCH /merchant/psps/psp_1",
   }[_name]
   if (pspWrite) {
     routes[pspWrite] = () => {
@@ -440,7 +440,7 @@ it("stores a saved dashboard on the merchant that saved it", async () => {
     },
   ]
   const saved = { widgets, is_default: false }
-  routes["PUT /operator/dashboard"] = saved
+  routes["PUT /merchant/dashboard"] = saved
   selectMerchant("merchant-a")
   const options = M.saveDashboard(queryClient)
   selectMerchant("merchant-b")
@@ -510,11 +510,11 @@ describe("price change", () => {
   it("creates the replacement price before migrating to it", async () => {
     const queryClient = client()
     const seeded = seedCache(queryClient, "merchant-a")
-    routes["POST /operator/catalog/prices"] = { id: "price_2" }
+    routes["POST /catalog/prices"] = { id: "price_2" }
     await exec(queryClient, M.changePrice(queryClient), change)
     expect(calls(requests).slice(0, 2)).toEqual([
-      "POST /operator/catalog/prices",
-      "POST /operator/price-migrations",
+      "POST /catalog/prices",
+      "POST /catalog/price-migrations",
     ])
     expect(requests[1].body).toEqual({
       product_key: "pro",
@@ -528,7 +528,7 @@ describe("price change", () => {
   it("refreshes the catalog when scheduling fails after the price was created", async () => {
     const queryClient = client()
     const seeded = seedCache(queryClient, "merchant-a")
-    routes["POST /operator/price-migrations"] = () =>
+    routes["POST /catalog/price-migrations"] = () =>
       Response.json({ error: { message: "schedule failed" } }, { status: 503 })
     await expect(
       exec(queryClient, M.changePrice(queryClient), change)

@@ -18,7 +18,7 @@ products:
   vi.stubGlobal("fetch", fetcher)
   await applyCatalog(raw)
   expect(fetcher).toHaveBeenCalledWith(
-    "/v1/operator/catalog/apply",
+    "/v1/catalog/apply",
     expect.objectContaining({ method: "POST", body: raw })
   )
   const headers = new Headers(

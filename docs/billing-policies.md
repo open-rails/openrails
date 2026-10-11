@@ -85,7 +85,7 @@ settings:
 ```
 
 The same settings through the API, as the `settings` of
-`PATCH /v1/operator/configuration`:
+`PATCH /v1/merchant/configuration`:
 
 ```json
 {

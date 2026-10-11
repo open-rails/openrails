@@ -21,7 +21,7 @@ type metricsTable struct {
 // metricsQuery runs one metrics query as staff.
 func (w *world) metricsQuery(query any) metricsTable {
 	w.t.Helper()
-	status, res := w.staffJSON(http.MethodPost, "/v1/admin/metrics/query", query)
+	status, res := w.staffJSON(http.MethodPost, "/v1/metrics/query", query)
 	require.Equal(w.t, http.StatusOK, status, "%v: %v", query, res)
 	var names []string
 	for _, col := range res["columns"].([]any) {
@@ -89,7 +89,7 @@ func TestDefaultDashboardWidgetsQuery(t *testing.T) {
 	declinedPay(t, paid, err)
 	w.settle()
 
-	status, res := w.staffJSON(http.MethodGet, "/v1/admin/dashboard", nil)
+	status, res := w.staffJSON(http.MethodGet, "/v1/metrics/dashboard", nil)
 	require.Equal(t, http.StatusOK, status, "%v", res)
 	require.Equal(t, true, res["is_default"])
 	picked := map[string]string{"from": yesterday.Format(time.DateOnly), "to": today.Format(time.DateOnly)}

@@ -175,7 +175,7 @@ func TestTrustedIssuerTokens(t *testing.T) {
 	trust(t, srv, rivalID, other.app(t, "owner", nil))
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	const customers, psps = "/v1/admin/customers", "/v1/operator/psps"
+	const customers, psps = "/v1/admin/customers", "/v1/merchant/psps"
 	bearer := func(token string) string { return "Bearer " + token }
 
 	t.Run("accepted", func(t *testing.T) {
@@ -374,7 +374,7 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 	trust(t, srv, shopID, iam.RemoteApplication{Issuer: as.URL, Mode: iam.RemoteApplicationModeStatic, PublicKeys: pinned, Enabled: true, Role: owner})
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	const customers, psps = "/v1/admin/customers", "/v1/operator/psps"
+	const customers, psps = "/v1/admin/customers", "/v1/merchant/psps"
 
 	user := authtest.NewUser(t, as.Client)
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(user.ID), admin)

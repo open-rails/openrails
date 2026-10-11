@@ -30,10 +30,10 @@ var scimPathShape = regexp.MustCompile(`^/v1/app/scim/v2(/([A-Z][A-Za-z]*|\{[a-z
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
 	Admin:          {"/v1/admin/"},
-	CatalogAdmin:   {"/v1/operator/catalog/", "/v1/operator/price-migrations/"},
+	CatalogAdmin:   {"/v1/catalog/"},
 	Access:         {"/v1/admin/access/"},
-	MerchantConfig: {"/v1/operator/"},
-	Metrics:        {"/v1/admin/metrics/", "/v1/admin/dashboard/"},
+	MerchantConfig: {"/v1/merchant/"},
+	Metrics:        {"/v1/metrics/"},
 	App:            {"/v1/app/"},
 	Customer:       {"/v1/me/"},
 	Network:        {"/v1/network/"},
@@ -180,7 +180,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	// A bare runtime has no merchant directory, no LLM, no customer network
 	// and merchant configuration in a file.
 	require.Equal(t, []string{
-		"catalog_copilot POST /v1/operator/catalog/ask",
+		"catalog_copilot POST /v1/catalog/ask",
 		"customer_network DELETE /v1/network/links/{link_id}",
 		"customer_network DELETE /v1/network/links/{link_id}/payment-methods/{id}",
 		"customer_network GET /v1/app/customers",
@@ -200,21 +200,21 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/cancel",
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/resume",
 		"customer_network PUT /v1/network/links/{link_id}/subscriptions/{id}/payment-method",
-		"dashboard_generation POST /v1/admin/dashboard/widgets/generate",
-		"merchant_config_edits DELETE /v1/operator/alert-webhooks/{id}",
-		"merchant_config_edits PATCH /v1/operator/alert-webhooks/{id}",
-		"merchant_config_edits PATCH /v1/operator/configuration",
-		"merchant_config_edits PATCH /v1/operator/psps/{id}",
-		"merchant_config_edits POST /v1/operator/alert-webhooks",
-		"merchant_config_edits POST /v1/operator/psps",
-		"metrics_ask POST /v1/admin/metrics/ask",
+		"dashboard_generation POST /v1/metrics/dashboard/widgets/generate",
+		"merchant_config_edits DELETE /v1/merchant/alert-webhooks/{id}",
+		"merchant_config_edits PATCH /v1/merchant/alert-webhooks/{id}",
+		"merchant_config_edits PATCH /v1/merchant/configuration",
+		"merchant_config_edits PATCH /v1/merchant/psps/{id}",
+		"merchant_config_edits POST /v1/merchant/alert-webhooks",
+		"merchant_config_edits POST /v1/merchant/psps",
+		"metrics_ask POST /v1/metrics/ask",
 	}, sorted(unmounted))
 
 	// The archive routes are also a surface of their own (the database-only
 	// CLI runtime).
 	archive := map[string]int{}
-	RegisterStaffRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/operator/billing-archive")
-	require.Equal(t, map[string]int{"GET /v1/operator/billing-archive": 1, "POST /v1/operator/billing-archive": 1}, archive)
+	RegisterStaffRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/merchant/billing-archive")
+	require.Equal(t, map[string]int{"GET /v1/merchant/billing-archive": 1, "POST /v1/merchant/billing-archive": 1}, archive)
 }
 
 func sorted(list []string) []string {
@@ -234,7 +234,7 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	none := routesurface.ProviderRoutes{}
 	RegisterUserRoutes(recorder{base: "/v1", seen: seen}, nil, Options{ProviderRoutes: &none})
 	require.NotContains(t, seen, "GET /v1/checkout-attempts/{id}/solana-pay")
-	require.Contains(t, seen, "GET /v1/catalog/products")
+	require.Contains(t, seen, "GET /v1/products")
 
 	staff, edits, configuration := map[string]int{}, map[string]int{}, map[string]int{}
 	mount := func(seen map[string]int, groups config.RouteGroups) {
@@ -248,20 +248,20 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.Contains(t, staff, "GET /v1/admin/payments")
 	require.Contains(t, staff, "POST /v1/admin/subscriptions/{id}/change/preview")
 	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds", "the admin group mounts its changes with its reads")
-	require.NotContains(t, staff, "GET /v1/operator/catalog/products", "the catalog is its own group")
-	require.NotContains(t, staff, "POST /v1/operator/price-migrations")
-	require.NotContains(t, staff, "POST /v1/admin/metrics/query")
+	require.NotContains(t, staff, "GET /v1/catalog/products", "the catalog is its own group")
+	require.NotContains(t, staff, "POST /v1/catalog/price-migrations")
+	require.NotContains(t, staff, "POST /v1/metrics/query")
 	require.Contains(t, staff, "GET /v1/admin/entitlements", "a lookup is a read")
-	require.Contains(t, edits, "POST /v1/operator/catalog/products")
-	require.Contains(t, edits, "GET /v1/operator/catalog/products", "catalog reads are Catalog's")
-	require.Contains(t, edits, "POST /v1/operator/price-migrations")
+	require.Contains(t, edits, "POST /v1/catalog/products")
+	require.Contains(t, edits, "GET /v1/catalog/products", "catalog reads are Catalog's")
+	require.Contains(t, edits, "POST /v1/catalog/price-migrations")
 	require.NotContains(t, edits, "GET /v1/admin/payments")
-	require.NotContains(t, configuration, "GET /v1/operator/catalog/products")
-	require.Contains(t, configuration, "GET /v1/operator/psps", "a configuration read is MerchantConfig's")
-	require.Contains(t, configuration, "PUT /v1/operator/dashboard", "the layout is configuration")
-	require.NotContains(t, configuration, "GET /v1/admin/dashboard")
-	require.Contains(t, metrics, "GET /v1/admin/dashboard")
-	require.Contains(t, metrics, "POST /v1/admin/metrics/query")
+	require.NotContains(t, configuration, "GET /v1/catalog/products")
+	require.Contains(t, configuration, "GET /v1/merchant/psps", "a configuration read is MerchantConfig's")
+	require.Contains(t, configuration, "PUT /v1/merchant/dashboard", "the layout is configuration")
+	require.NotContains(t, configuration, "GET /v1/metrics/dashboard")
+	require.Contains(t, metrics, "GET /v1/metrics/dashboard")
+	require.Contains(t, metrics, "POST /v1/metrics/query")
 	require.NotContains(t, metrics, "GET /v1/admin/payments")
 	for _, seen := range []map[string]int{staff, edits, configuration, metrics} {
 		require.Contains(t, seen, "GET /v1/admin/access", "every staff group brings the access read")
@@ -360,23 +360,43 @@ func TestExportedPermissionsAreTheCatalogs(t *testing.T) {
 	}
 }
 
-// Operators configure the merchant and catalog on their own path. Registering
-// every staff group does not bring back the former admin aliases.
-func TestOperatorRoutesHaveNoAdminAliases(t *testing.T) {
+// Staff groups have separate paths. Registering every group does not bring
+// back the former admin or operator aliases for management and metrics.
+func TestManagementRoutesHaveNoLegacyAliases(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := merchantSurface(rt, Options{Auth: authtest.Deny{}, Groups: everyGroup, live: live})
 	keys := routeKeys(table)
-	var operators int
+	var management int
 	for _, route := range Catalog() {
-		if route.Group != CatalogAdmin && route.Group != MerchantConfig {
+		var previous []string
+		switch route.Group {
+		case CatalogAdmin:
+			require.True(t, strings.HasPrefix(route.Path, "/v1/catalog/"), route.Key())
+			suffix := strings.TrimPrefix(route.Path, "/v1/catalog/")
+			if !strings.HasPrefix(suffix, "price-migrations") {
+				suffix = "catalog/" + suffix
+			}
+			previous = []string{"/v1/admin/" + suffix, "/v1/operator/" + suffix}
+		case MerchantConfig:
+			require.True(t, strings.HasPrefix(route.Path, "/v1/merchant/"), route.Key())
+			suffix := strings.TrimPrefix(route.Path, "/v1/merchant/")
+			previous = []string{"/v1/admin/" + suffix, "/v1/operator/" + suffix}
+		case Metrics:
+			require.True(t, strings.HasPrefix(route.Path, "/v1/metrics/"), route.Key())
+			suffix := strings.TrimPrefix(route.Path, "/v1/metrics/")
+			if !strings.HasPrefix(suffix, "dashboard") {
+				suffix = "metrics/" + suffix
+			}
+			previous = []string{"/v1/admin/" + suffix}
+		default:
 			continue
 		}
-		operators++
-		require.True(t, strings.HasPrefix(route.Path, "/v1/operator/"), route.Key())
-		old := strings.Replace(route.Path, "/v1/operator/", "/v1/admin/", 1)
-		_, found := Lookup(route.Method, old)
-		require.False(t, found, "%s %s must not remain as an alias", route.Method, old)
-		require.NotContains(t, keys, route.Method+" "+old)
+		management++
+		for _, old := range previous {
+			_, found := Lookup(route.Method, old)
+			require.False(t, found, "%s %s must not remain as an alias", route.Method, old)
+			require.NotContains(t, keys, route.Method+" "+old)
+		}
 	}
-	require.Positive(t, operators)
+	require.Positive(t, management)
 }

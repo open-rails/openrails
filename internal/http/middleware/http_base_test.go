@@ -65,7 +65,7 @@ func (r unreadable) Read([]byte) (int, error) {
 func TestArchiveBodyLimit(t *testing.T) {
 	h := RequestLimitsHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusUnauthorized) }))
 	w := httptest.NewRecorder()
-	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/host/billing/v1/operator/billing-archive", unreadable{t}))
+	h.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/host/billing/v1/merchant/billing-archive", unreadable{t}))
 	require.Equal(t, http.StatusUnauthorized, w.Code)
 
 	body := bytes.Repeat([]byte("x"), 2<<20)
@@ -79,16 +79,16 @@ func TestArchiveBodyLimit(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{http.MethodPost, "/v1/operator/billing-archive", 204},
-		{http.MethodPost, "/host/v1/operator/billing-archive", 204},
-		{http.MethodPost, "/v2/operator/billing-archive", 413},
+		{http.MethodPost, "/v1/merchant/billing-archive", 204},
+		{http.MethodPost, "/host/v1/merchant/billing-archive", 204},
+		{http.MethodPost, "/v2/merchant/billing-archive", 413},
 		{http.MethodPost, "/v1/admin/billing-archive", 413},
-		{http.MethodPost, "/v1/operator/billing-import", 413},
-		{http.MethodPost, "/v1/operator/billing-archive/other", 413},
-		{http.MethodPost, "/unrelated/../v1/operator/billing-archive", 413},
-		{http.MethodPost, "//v1/operator/billing-archive", 413},
-		{http.MethodPost, "/v1/operator/%62illing-archive", 413},
-		{http.MethodGet, "/v1/operator/billing-archive", 413},
+		{http.MethodPost, "/v1/merchant/billing-import", 413},
+		{http.MethodPost, "/v1/merchant/billing-archive/other", 413},
+		{http.MethodPost, "/unrelated/../v1/merchant/billing-archive", 413},
+		{http.MethodPost, "//v1/merchant/billing-archive", 413},
+		{http.MethodPost, "/v1/merchant/%62illing-archive", 413},
+		{http.MethodGet, "/v1/merchant/billing-archive", 413},
 	} {
 		w := httptest.NewRecorder()
 		h.ServeHTTP(w, httptest.NewRequest(tc.method, tc.path, bytes.NewReader(body)))
@@ -97,7 +97,7 @@ func TestArchiveBodyLimit(t *testing.T) {
 
 	called := false
 	h = RequestLimitsHTTP(DefaultMaxBodyBytes)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
-	req := httptest.NewRequest(http.MethodPost, "/v1/operator/billing-archive", strings.NewReader("unused"))
+	req := httptest.NewRequest(http.MethodPost, "/v1/merchant/billing-archive", strings.NewReader("unused"))
 	req.ContentLength = archivewire.MaxBytes + 1
 	w = httptest.NewRecorder()
 	h.ServeHTTP(w, req)
@@ -132,8 +132,8 @@ func TestPermissiveCORSHTTP(t *testing.T) {
 		{tier.Match, http.MethodGet, "/v1/products", true, 200},
 		{tier.Match, http.MethodOptions, "/v1/products", true, 204},
 		{tier.Match, http.MethodOptions, "/v1/me/abc", true, 204},
-		{tier.Match, http.MethodGet, "/v1/operator/configuration", false, 200},
-		{tier.Match, http.MethodOptions, "/v1/operator/configuration", false, 200},
+		{tier.Match, http.MethodGet, "/v1/merchant/configuration", false, 200},
+		{tier.Match, http.MethodOptions, "/v1/merchant/configuration", false, 200},
 		{nilTier.Match, http.MethodGet, "/v1/products", false, 200},
 		{nil, http.MethodGet, "/v1/products", false, 200},
 		{AllRequests, http.MethodPost, "/anything", true, 200},

@@ -35,7 +35,7 @@ it("offers creation only to a caller holding the catalog", async () => {
       merchant_config: false,
       metrics: false,
     }),
-    "GET /operator/catalog/products": { data: [], next_cursor: null },
+    "GET /catalog/products": { data: [], next_cursor: null },
   })
   const queries = await mountProducts()
   expect(document.body.textContent).toContain("No products yet")
@@ -48,7 +48,7 @@ it("offers creation only to a caller holding the catalog", async () => {
   })
   expect(button("Apply catalog")).toBeDefined()
   expect(
-    requests.some((r) => r.path.startsWith("/operator/catalog/revision"))
+    requests.some((r) => r.path.startsWith("/catalog/revision"))
   ).toBe(false)
 })
 
@@ -56,7 +56,7 @@ it("offers creation only to a caller holding the catalog", async () => {
 it("edits a product at the revision it read", async () => {
   browserEnvironment()
   const requests = await server({
-    "GET /operator/catalog/products": {
+    "GET /catalog/products": {
       data: [
         aProduct("prod_pro", 0, {
           key: "pro",
@@ -72,9 +72,9 @@ it("edits a product at the revision it read", async () => {
     button("Deactivate")!.click()
   })
   const patch = requests.find((r) => r.method === "PATCH")
-  expect(patch?.path).toBe("/operator/catalog/products/prod_pro")
+  expect(patch?.path).toBe("/catalog/products/prod_pro")
   expect(patch?.body).toEqual({ archived: true, expected_revision: 7 })
   expect(
-    requests.some((r) => r.path.startsWith("/operator/catalog/revision"))
+    requests.some((r) => r.path.startsWith("/catalog/revision"))
   ).toBe(false)
 })

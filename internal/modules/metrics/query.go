@@ -26,7 +26,7 @@ const (
 	DefaultLimit = 1000
 )
 
-// Query is the POST /v1/admin/metrics/query body.
+// Query is the POST /v1/metrics/query body.
 type Query = billing.MetricsQuery
 
 // QueryRange bounds the query window. Date-only values are inclusive UTC days;

@@ -20,7 +20,7 @@
 
 - Breaking: `listProducts({ merchant, keys })`, `useProducts({ merchant, keys
   })` and `<BuyButton merchant>` take the merchant's id, and `<Offers>` takes
-  it with `keys`: `GET /catalog/products?merchant=<id>&keys=…`. The read sends
+  it with `keys`: `GET /products?merchant=<id>&keys=…`. The read sends
   no bearer, signed in or out.
 - Breaking: `getConfig()` and `useConfig()` are the deployment's part alone
   (`capabilities`, `currencies`, `captcha`, `network`); `PublicConfig` loses
@@ -259,7 +259,7 @@
 
 ## The public catalog is under /catalog
 
-- `listProducts()` reads `GET /catalog/products` (was `GET /products`).
+- `listProducts()` reads `GET /products` (was `GET /products`).
 
 ## One public configuration
 

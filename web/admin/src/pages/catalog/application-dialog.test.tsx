@@ -23,7 +23,7 @@ beforeEach(async () => {
   browserEnvironment()
   response = () => receipt()
   requests = await server({
-    "POST /operator/catalog/apply": () => response(),
+    "POST /catalog/apply": () => response(),
   })
   selectMerchant("merchant-one")
   await mount(

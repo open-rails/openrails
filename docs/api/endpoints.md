@@ -68,8 +68,9 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 - **Health.** `/health/live` and `/health/ready` on the standalone server; a
   failing dependency is logged, never answered.
 
-Catalog and merchant configuration routes live under `/v1/operator/`;
-customer support and metrics remain under `/v1/admin/`. Findings reads and
+Catalog management lives under `/v1/catalog/`, merchant configuration under
+`/v1/merchant/`;
+customer support uses `/v1/admin/` and metrics uses `/v1/metrics/`. Findings reads and
 resolutions require the `merchant_config` route group and
 `merchant:config:manage` (or `root:config:manage` in the root scope). Customer-support
 read or manage permissions do not grant access to this operator inbox.
@@ -79,10 +80,10 @@ read or manage permissions do not grant access to this operator inbox.
 | Routes | Credential |
 |---|---|
 | Public: `/v1/config` | none: it is the deployment's, the same for every caller |
-| Public: `/v1/catalog/products` | none: the request names its merchant, `?merchant=<merchant id>` |
+| Public: `/v1/products` | none: the request names its merchant, `?merchant=<merchant id>` |
 | Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link, and the order names its merchant |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
-| Customer support and metrics: `/v1/admin/*`; catalog and merchant configuration: `/v1/operator/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
+| Customer support: `/v1/admin/*`; metrics: `/v1/metrics/*`; catalog: `/v1/catalog/*`; merchant configuration: `/v1/merchant/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
 | Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
 | Provider webhooks: `/v1/webhooks/{rail}/{account_id}` | the provider's signature |
 
@@ -323,7 +324,7 @@ or retries a past-due subscription the PSP schedules
   (`invoker_type: delegated`) are never charged and count toward
   `delegated_invoker_wasted_spend_limits`, past which admission refuses it
   `failure_rate_limited`. Usage is reported through
-  `POST /v1/admin/metrics/query` (`usage_units`, `usage_revenue`,
+  `POST /v1/metrics/query` (`usage_units`, `usage_revenue`,
   `forgiven_usage` by `customer`, `invoker`, `outcome`, `sku` or `rate_card`).
 - **Arrears**: [delinquency](../arrears-delinquency.md) and
   [billing policies](../billing-policies.md).
@@ -347,9 +348,9 @@ A price's terms never change: the same key with other terms makes a new version
 and archives the old one. Price keys are product-local and immutable; each has
 automatic revisions starting at zero. `PATCH` archives or restores a price and
 merges `psp_links`. `GET …/prices/{id}?verify=true` reads each linked PSP's
-copy and reports drift; `GET /v1/operator/findings?type=catalog.*` lists the open
+copy and reports drift; `GET /v1/merchant/findings?type=catalog.*` lists the open
 drift findings, each with the `psp_id` that was compared, and
-`POST /v1/operator/psps/refresh` (merchant configuration) reads every PSP's
+`POST /v1/merchant/psps/refresh` (merchant configuration) reads every PSP's
 catalog again.
 
 ## PSPs

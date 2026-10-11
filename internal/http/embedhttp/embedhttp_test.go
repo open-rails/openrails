@@ -97,7 +97,7 @@ func TestNewRoutes(t *testing.T) {
 		key := e.Method + " " + e.Path
 		keys = append(keys, key)
 		require.Equal(t, strings.HasPrefix(e.Path, "/billing/v1/checkout") || strings.HasPrefix(e.Path, "/billing/v1/captcha") ||
-			slices.Contains([]string{"/billing/v1/catalog/products", "/billing/v1/config"}, e.Path), e.Browser, key)
+			slices.Contains([]string{"/billing/v1/products", "/billing/v1/config"}, e.Path), e.Browser, key)
 		require.False(t, strings.HasPrefix(e.Path, "/billing/v1/webhooks/"), "callbacks need a webhook-capable rail")
 	}
 	require.Contains(t, keys, "GET /billing/v1/config")
@@ -105,7 +105,7 @@ func TestNewRoutes(t *testing.T) {
 	require.Contains(t, keys, "GET /billing/v1/admin/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/admin/payments")
 	require.Contains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "the admin group mounts its changes")
-	require.NotContains(t, keys, "GET /billing/v1/operator/psps", "configuration needs MerchantConfig")
+	require.NotContains(t, keys, "GET /billing/v1/merchant/psps", "configuration needs MerchantConfig")
 }
 
 // A route whose permissions the Auth knows neither of is not mounted, and

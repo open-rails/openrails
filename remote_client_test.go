@@ -114,7 +114,7 @@ func TestNewRemoteValidatesConfigurationWithoutIO(t *testing.T) {
 	defer server.Close()
 	client := remoteHandle(t, server.URL+"/", RemoteOptions{Credentials: map[billing.MerchantID]RemoteCredential{testMerchant: {APIKey: " sk-test "}}})
 	require.NoError(t, readConfiguration(client, t.Context()))
-	require.Equal(t, "GET /v1/operator/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
+	require.Equal(t, "GET /v1/merchant/configuration Bearer sk-test application/json", seen.Load(), "trailing base slash trimmed, key trimmed")
 }
 
 // unsupportedSigner holds a key of no JWS family.
@@ -198,7 +198,7 @@ func TestHandleRefusesAResponseBoundToAnotherMerchant(t *testing.T) {
 	var calls atomic.Int64
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if r.URL.Path != "/v1/operator/configuration" {
+		if r.URL.Path != "/v1/merchant/configuration" {
 			http.NotFound(w, r)
 			return
 		}
@@ -289,7 +289,7 @@ func TestExtraHeadersCannotCarryACredential(t *testing.T) {
 	})
 	extra := http.Header{"authorization": {"Bearer broader-key"}, "Authorization": {"Bearer broader-key"}, "X-Trace": {"kept"}}
 	original := extra.Clone()
-	require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/operator/configuration", nil, nil, extra))
+	require.NoError(t, client.doWithHeaders(t.Context(), http.MethodGet, "/v1/merchant/configuration", nil, nil, extra))
 	require.True(t, reflect.DeepEqual(extra, original), "request mutated the caller's header map")
 }
 

@@ -21,7 +21,7 @@ func (c *Client) ListFindings(ctx context.Context, req billing.FindingListParams
 		return nil, err
 	}
 	var out billing.ListPage[billing.Finding]
-	if err := c.do(ctx, http.MethodGet, "/v1/operator/findings?"+q.Encode(), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings?"+q.Encode(), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -33,7 +33,7 @@ func (c *Client) GetFinding(ctx context.Context, id billing.FindingID, options .
 		return nil, invalidErr("finding id is required")
 	}
 	var out billing.Finding
-	if err := c.do(ctx, http.MethodGet, "/v1/operator/findings/"+id.String(), nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/merchant/findings/"+id.String(), nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -46,7 +46,7 @@ func (c *Client) ResolveFinding(ctx context.Context, id billing.FindingID, req b
 		return nil, invalidErr("finding id is required")
 	}
 	var out billing.FindingResolution
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/findings/"+id.String()+"/resolve", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/findings/"+id.String()+"/resolve", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

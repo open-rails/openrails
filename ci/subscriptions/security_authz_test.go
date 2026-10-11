@@ -236,7 +236,7 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	// leaves staff of A acting at A on A's mount, and at B's mount A's
 	// credentials are no credential.
 	merchantGet := func(server, token, slug string) int {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/operator/findings", nil)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, server+mountPrefix+"/v1/merchant/findings", nil)
 		require.NoError(t, err)
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set(retiredMerchantHeader, slug)
@@ -252,10 +252,10 @@ func TestSecurityMerchantIsolation(t *testing.T) {
 	// never the 503 of an authorization outage.
 	sid := uuid.NewString()
 	session := w.auth.sessionToken(t, "staff", sid)
-	status, body := w.merchantCall(session, http.MethodGet, "/v1/operator/findings")
+	status, body := w.merchantCall(session, http.MethodGet, "/v1/merchant/findings")
 	require.Equal(t, http.StatusOK, status, body)
 	w.auth.revoked.Store(sid, struct{}{})
-	status, body = w.merchantCall(session, http.MethodGet, "/v1/operator/findings")
+	status, body = w.merchantCall(session, http.MethodGet, "/v1/merchant/findings")
 	require.Equal(t, http.StatusUnauthorized, status, body)
 	require.Contains(t, body, `"credential_revoked"`)
 	require.Equal(t, http.StatusOK, merchantGet(w.server.URL, staff, w.slug), "another session is unaffected")

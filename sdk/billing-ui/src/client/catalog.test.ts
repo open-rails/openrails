@@ -67,7 +67,7 @@ describe("catalog", () => {
       keys: ["plus", "bare"],
     })
     expect(request()).toMatchObject({
-      url: `/billing/v1/catalog/products?merchant=${MERCHANT}&keys=plus&keys=bare`,
+      url: `/billing/v1/products?merchant=${MERCHANT}&keys=plus&keys=bare`,
       method: "GET",
     })
     expect(request().headers.get("Authorization")).toBeNull()

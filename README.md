@@ -256,13 +256,13 @@ you turn it on, embedded or standalone:
 
 | Route group | Turned on by | Caller must hold | Who may call it |
 |---|---|---|---|
-| public (`/v1/catalog/products`, `/v1/config`, an order's Solana Pay request) | always on | nothing | anyone |
+| public (`/v1/products`, `/v1/config`, an order's Solana Pay request) | always on | nothing | anyone |
 | customer (`/v1/me`) | always on | a sign-in | a signed-in customer, for their own billing |
 | webhooks (`/v1/webhooks`) | always on | a valid signature | payment processors |
 | admin: customer support (`/v1/admin`) | `RouteGroups.Admin` | `root:customer:read`; changes `root:customer:manage` | staff, or your backend |
-| catalog (`/v1/operator/catalog`, `/v1/operator/price-migrations`) | `RouteGroups.Catalog`; with a declared merchant's `Catalog`, the file skips what an edit changed | `root:catalog:manage` | operators |
-| merchant config (`/v1/operator`) | `RouteGroups.MerchantConfig` | `root:config:manage` | operators |
-| business metrics, read-only (`/v1/admin/metrics`, `/v1/admin/dashboard`) | `RouteGroups.Metrics` | `root:metrics:read` | staff, or your backend |
+| catalog (`/v1/catalog`, `/v1/catalog/price-migrations`) | `RouteGroups.Catalog`; with a declared merchant's `Catalog`, the file skips what an edit changed | `root:catalog:manage` | operators |
+| merchant config (`/v1/merchant`) | `RouteGroups.MerchantConfig` | `root:config:manage` | operators |
+| business metrics, read-only (`/v1/metrics`, `/v1/metrics/dashboard`) | `RouteGroups.Metrics` | `root:metrics:read` | staff, or your backend |
 | programmatic (`/v1/app`) | `RouteGroups.Programmatic` | an application credential holding the route's permission (`root:entitlements:read`, `root:usage:manage`, …) | your backend, never a person |
 | user provisioning (`/v1/app/scim/v2`) | `RouteGroups.Programmatic`, without `Deps.UserInfo` | an application credential or a provisioning token | your user directory |
 | admin console (`/admin`) | `AdminConsole: true`, with at least one staff group on | each area's permission | staff, in the browser |
@@ -271,8 +271,8 @@ Each permission is also admitted by its `merchant:` name, held in the scope of
 the merchant the request acts on.
 
 Customer-support staff use `merchant:customer:read` and
-`merchant:customer:manage`. Catalog and merchant configuration are separate
-operator capabilities under `/v1/operator/`, including findings and PSP refresh.
+`merchant:customer:manage`. Catalog management uses `/v1/catalog/`; merchant configuration uses
+`/v1/merchant/`, including findings and PSP refresh.
 Metrics reads stay independently grantable. The old operator URLs under
 `/v1/admin/` and the old `billing` permission names are not aliases; update
 custom roles and trusted-issuer grants when upgrading.
@@ -565,7 +565,7 @@ until `RouteGroups` turns it on:
   catalog either way.
 - `RouteGroups.MerchantConfig`: the merchant's own configuration: settings,
   PSPs and their credentials, reading and resolving findings, pulling the PSPs'
-  state again (`POST /v1/operator/psps/refresh`), billing import and export, the metrics
+  state again (`POST /v1/merchant/psps/refresh`), billing import and export, the metrics
   dashboard's layout. Callers need `root:config:manage`. Hosts upgrading must
   enable this group to keep the findings routes available; `Admin` alone
   no longer mounts them.
@@ -782,7 +782,7 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `GET /billing/v1/catalog/products` | a merchant's products on sale named by key, each with its current prices (`?merchant=<merchant id>&keys=`) |
+| `GET /billing/v1/products` | a merchant's products on sale named by key, each with its current prices (`?merchant=<merchant id>&keys=`) |
 | `GET`, `POST /billing/v1/orders/{id}/solana-pay` | the Solana Pay request a wallet signs for an order (when a Solana PSP is declared) |
 | `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, the rails a PSP can be declared on, and the captcha to solve when asked (always mounted) |
 
@@ -863,8 +863,10 @@ your backend's application `root:customer:read` too: customer support's reads ta
 application as readily as a person.
 
 The staff route groups (`RouteGroups.Admin`, `Catalog`, `MerchantConfig`,
-`Metrics`) publish `/billing/v1/admin/*` for customer support and metrics, and
-`/billing/v1/operator/*` for catalog and configuration, for staff and machines rather than
+`Metrics`) publish `/billing/v1/admin/*` for customer support, `/billing/v1/metrics/*`
+for metrics,
+`/billing/v1/catalog/*` for catalog management and `/billing/v1/merchant/*`
+for merchant configuration, for staff and machines rather than
 your users, each route behind the permission of its group, and each has one
 method on the Go `Client`. Every route and its permission are in the [route
 table](docs/api/routes.md); the conventions are in the [API
@@ -1168,7 +1170,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 | on | Readable and changeable by staff holding `root:catalog:manage`; with a declared merchant's `Catalog`, the file skips what an edit changed | Available |
 
 Customers and your site read the live catalog at
-`/v1/catalog/products?merchant=<merchant id>` either way. Turning HTTP changes off does not make the database read-only or prevent
+`/v1/products?merchant=<merchant id>` either way. Turning HTTP changes off does not make the database read-only or prevent
 later client edits. The startup example above applies `catalog.yaml` through
 `MerchantDeclaration.Catalog` on every boot; with the group on, staff edits and the file
 share the catalog as above. The standalone server mounts them with

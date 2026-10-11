@@ -484,11 +484,11 @@ func ClassifyBucket(path, method string) string {
 
 	method = strings.ToUpper(method)
 	switch {
-	case method == http.MethodPost && path == "/v1/admin/metrics/ask":
+	case method == http.MethodPost && path == "/v1/metrics/ask":
 		return "metrics-ask"
-	case method == http.MethodPost && path == "/v1/operator/catalog/ask":
+	case method == http.MethodPost && path == "/v1/catalog/ask":
 		return "catalog-ask"
-	case method == http.MethodPost && path == "/v1/admin/dashboard/widgets/generate":
+	case method == http.MethodPost && path == "/v1/metrics/dashboard/widgets/generate":
 		return "dashboard-generate"
 	case strings.HasPrefix(path, "/v1/webhooks"):
 		return "webhook"

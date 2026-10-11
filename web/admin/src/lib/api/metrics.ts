@@ -86,22 +86,22 @@ export interface GeneratedWidget {
 }
 
 export const metricsQuery = (query: MetricsQuery, signal?: AbortSignal) =>
-  api<MetricsResult>("/admin/metrics/query", {
+  api<MetricsResult>("/metrics/query", {
     method: "POST",
     body: query,
     signal,
   })
 
 export const getDashboard = (signal?: AbortSignal) =>
-  api<Dashboard>("/admin/dashboard", { signal })
+  api<Dashboard>("/metrics/dashboard", { signal })
 
 export const putDashboard = (widgets: Widget[]) =>
-  api<Dashboard>("/operator/dashboard", { method: "PUT", body: { widgets } })
+  api<Dashboard>("/merchant/dashboard", { method: "PUT", body: { widgets } })
 
 // generateWidget: prompt → validated {query,title,viz}; baseQuery makes the
 // prompt refine that query.
 export const generateWidget = (prompt: string, baseQuery?: MetricsQuery) =>
-  api<GeneratedWidget>("/admin/dashboard/widgets/generate", {
+  api<GeneratedWidget>("/metrics/dashboard/widgets/generate", {
     method: "POST",
     body: baseQuery ? { prompt, base_query: baseQuery } : { prompt },
   })
@@ -120,7 +120,7 @@ export interface AskResponse {
 // askMetrics: free-form question → LLM-run metrics queries + answer. Not
 // mounted when llm.ask_enabled / the LLM key are not configured.
 export const askMetrics = (question: string) =>
-  api<AskResponse>("/admin/metrics/ask", {
+  api<AskResponse>("/metrics/ask", {
     method: "POST",
     body: { question },
   })

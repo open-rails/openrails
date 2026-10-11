@@ -44,7 +44,7 @@ What import does **not** do:
 **Client**: `client.ImportBilling(ctx, billing.DeclaredBilling{...})` on the
 merchant's handle, in every deployment (an `openrails.New` engine's
 `Merchant(id)` in process, or `openrails.NewRemoteMerchant`). Resolve a public
-name once and keep the merchant's UUID. **HTTP**: `POST /v1/operator/billing-import`
+name once and keep the merchant's UUID. **HTTP**: `POST /v1/merchant/billing-import`
 with the identical JSON body — merchant from the authenticated credential,
 mounted with `RouteGroups.MerchantConfig` and checked like the merchant's
 other configuration. The HTTP body cap (1 MiB) forces large books to
@@ -120,7 +120,7 @@ imported members are entitled immediately (a replay re-derives). Operator/manual
 comps — access with no payment behind it — ride the same book as
 `admin_grants` (grant-ledger facts, idempotent by `source_id`); OpenRails
 derives the windows. `Client.ImportBilling` posts the same book over
-`POST /v1/operator/billing-import`.
+`POST /v1/merchant/billing-import`.
 
 ### The migration playbook
 
@@ -238,7 +238,7 @@ OpenRails.
    schedule once; card updates repoint the schedule to the new vault; refunds
    go to NMI, and a refund with `revoke_access` also ends the membership and
    deletes its NMI schedule (refused with `provider_cancel_held` while
-   disarmed). `Client.RefreshPSPs` (`POST /v1/operator/psps/refresh`)
+   disarmed). `Client.RefreshPSPs` (`POST /v1/merchant/psps/refresh`)
    runs the merchant's provider refresh now, from embedded or remote hosts;
    otherwise it runs every two hours, and NMI's own subscription webhooks
    converge the schedule they name at once. Tier changes (same tier group,

@@ -43,12 +43,12 @@ const (
 	// or MerchantCustomerManage by its Level, or their root: twins.
 	Admin Group = "admin"
 	// CatalogAdmin is the catalog, its reads and edits, document
-	// applications and moving subscribers between prices at /v1/operator, behind
+	// applications and moving subscribers between prices at /v1/catalog, behind
 	// billing.MerchantCatalogManage or its root: twin. A document skips an
 	// object whose field an edit set differently.
 	CatalogAdmin Group = "catalog"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
-	// findings, billing import and export, the dashboard layout at /v1/operator, behind
+	// findings, billing import and export, the dashboard layout at /v1/merchant, behind
 	// billing.MerchantConfigManage or its root: twin.
 	MerchantConfig Group = "merchant_config"
 	// Metrics is the merchant's business metrics, read-only: revenue and

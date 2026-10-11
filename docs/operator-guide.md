@@ -127,7 +127,7 @@ alert on optional ones at 0 as degraded), and per job kind
 `openrails_worker_consecutive_failures{kind}` and
 `openrails_worker_last_success_timestamp_seconds{kind}`. Beyond that there is
 no runtime telemetry endpoint.
-`/v1/admin/metrics`, `/query`, and `/schema` are authenticated merchant
+`/v1/metrics`, `/query`, and `/schema` are authenticated merchant
 business analytics, not process/runtime metrics.
 
 **Healthy looks like**: `openrails intents` shows a near-empty active set (the
@@ -214,7 +214,7 @@ Cutover](operations.md#cutover-booting-against-production-credentials).
   Vault document (paths, shapes and minimal policies: [vault.md](vault.md)).
   Postgres holds no credential.
 - **Rotation within the same PSP**: with Vault, `Client.UpdatePSP`
-  (`PATCH /v1/operator/psps/{id}`) with the expected revision; the new credential
+  (`PATCH /v1/merchant/psps/{id}`) with the expected revision; the new credential
   is checked with the provider before it is written, and every replica reloads
   at once. With a manifest, change the file and restart.
 - **Pointing credentials at a different account** trips the account guard:
@@ -233,7 +233,7 @@ names a PSP (`payment.psp`, its key) gets that PSP; a request that names none is
 - **Default** (no policy declared): stripe → nmi → ccbill → solana, first one that can
   serve the price.
 - **Policy**: the `checkout_routing` merchant setting, declared under `settings:`
-  in the merchant's YAML or set through `PATCH /v1/operator/configuration`. Ordered
+  in the merchant's YAML or set through `PATCH /v1/merchant/configuration`. Ordered
   rules, first match wins; each rule's `prefer` list is both the ranking and the
   whitelist, so a rule can pin a product to one rail. Conditions: `currency`, `product`,
   `price`, `mode`, `country` — all optional, all AND-ed; a rule with no conditions is the
@@ -253,14 +253,14 @@ checkout_routing:
 - **Why did this customer get CCBill?** `checkout_attempts.routing_reason` holds the
   decision: policy, matched rule, winner, ranked fallbacks, and every skipped candidate
   with its class. Written once at creation, never rewritten.
-- **Preview without charging**: `POST /v1/operator/psps/routing-preview`
+- **Preview without charging**: `POST /v1/merchant/psps/routing-preview`
   with `{"price_id": "...", "country": "US"}` returns the same decision a real session
   would make, including the exact `routing_reason` it would store.
 
 ### Observability
 
-- **Metrics / analytics API**: `GET /v1/admin/metrics/schema` (self-describing
-  measure/dimension registry) + `POST /v1/admin/metrics/query` — aggregate-only,
+- **Metrics / analytics API**: `GET /v1/metrics/schema` (self-describing
+  measure/dimension registry) + `POST /v1/metrics/query` — aggregate-only,
   scoped to the API key's merchant, designed to be driven by an LLM agent.
   [metrics-for-llms.md](metrics-for-llms.md).
 - **Logs**: structured logrus to stdout; level via `logger.level` in

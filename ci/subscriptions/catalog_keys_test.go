@@ -239,7 +239,7 @@ func TestProductsWithoutALivePriceAreNotForSale(t *testing.T) {
 	page, err = c.ListProducts(t.Context(), billing.ProductListParams{ForSale: &forSale})
 	require.NoError(t, err)
 	require.Equal(t, []string{sold.Key}, productKeys(t, page))
-	status, body := w.staff(http.MethodGet, "/v1/operator/catalog/products?for_sale=false")
+	status, body := w.staff(http.MethodGet, "/v1/catalog/products?for_sale=false")
 	require.Equal(t, http.StatusOK, status, body)
 	require.Contains(t, body, granted.Key)
 
@@ -298,7 +298,7 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 
 	get := func(query string) (int, map[string]any) {
 		t.Helper()
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/catalog/products?"+query, nil)
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/products?"+query, nil)
 		require.NoError(t, err)
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)

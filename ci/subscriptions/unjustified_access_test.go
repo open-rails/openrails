@@ -35,7 +35,7 @@ func TestUnjustifiedAccessFindingCountsAndClears(t *testing.T) {
 
 	freeloaders := func() int64 {
 		t.Helper()
-		status, body := w.staffJSON(http.MethodPost, "/v1/admin/metrics/query", map[string]any{"measures": []string{"freeloaders"}, "range": nowRange()})
+		status, body := w.staffJSON(http.MethodPost, "/v1/metrics/query", map[string]any{"measures": []string{"freeloaders"}, "range": nowRange()})
 		require.Equal(t, http.StatusOK, status, "%v", body)
 		row := body["rows"].([]any)[0].([]any)
 		return number(t, row[len(row)-1])

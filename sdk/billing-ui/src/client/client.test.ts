@@ -311,7 +311,7 @@ describe("listProducts", () => {
     const page = await client.listProducts({ merchant: MERCHANT, keys: ["a", "c"] })
     expect(page.data.map((p) => p.key)).toEqual(["a"])
     const [url] = server.fetch.mock.calls[0]!
-    expect(String(url)).toBe(`/billing/v1/catalog/products?merchant=${MERCHANT}&keys=a&keys=c`)
+    expect(String(url)).toBe(`/billing/v1/products?merchant=${MERCHANT}&keys=a&keys=c`)
   })
 
   it("answers another merchant's catalog as the server does", async () => {

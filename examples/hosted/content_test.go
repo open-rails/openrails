@@ -439,7 +439,7 @@ func (a *stack) priceOf(t *testing.T, product, price string) (map[string]string,
 		MerchantID string `json:"merchant_id"`
 	}
 	a.call(t, "", http.MethodGet, a.URL+"/api/courses?limit=1", nil, &store)
-	a.call(t, "", http.MethodGet, a.ServerURL+"/v1/catalog/products?"+url.Values{"merchant": {store.MerchantID}, "keys": {product}}.Encode(), nil, &catalog)
+	a.call(t, "", http.MethodGet, a.ServerURL+"/v1/products?"+url.Values{"merchant": {store.MerchantID}, "keys": {product}}.Encode(), nil, &catalog)
 	for _, p := range catalog.Data {
 		for _, offer := range p.Prices {
 			if p.Key == product && offer.Key == price {

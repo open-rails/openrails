@@ -46,9 +46,9 @@ func TestMerchantHostNamesNothing(t *testing.T) {
 		}
 		return out
 	}
-	require.Equal(t, []string{"host-b"}, keys(get("/v1/operator/catalog/products", key)), "the key's merchant, not the Host's")
+	require.Equal(t, []string{"host-b"}, keys(get("/v1/catalog/products", key)), "the key's merchant, not the Host's")
 	require.Equal(t, http.StatusOK, get("/v1/admin/customers", key).Code)
-	public := "/v1/catalog/products?" + url.Values{"merchant": {b.String()}, "keys": {"host-a", "host-b"}}.Encode()
+	public := "/v1/products?" + url.Values{"merchant": {b.String()}, "keys": {"host-a", "host-b"}}.Encode()
 	require.Equal(t, []string{"host-b"}, keys(get(public, "")), "the merchant the query names, not the Host's")
 
 	w := get("/v1/admin/customers", "")

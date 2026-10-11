@@ -20,7 +20,7 @@ test("Offers looks a merchant's products up by key", async ({
   const reads: { search: string; authorization: string | null }[] = []
   page.on("request", (r) => {
     const url = new URL(r.url())
-    if (url.pathname.endsWith("/catalog/products"))
+    if (url.pathname.endsWith("/products"))
       reads.push({
         search: url.search,
         authorization: r.headers()["authorization"] ?? null,
@@ -58,7 +58,7 @@ test("the public catalog takes its merchant and product keys alone", async ({
   const merchant = await merchantId(request)
   const named = `merchant=${merchant}`
   const found = await request.get(
-    `/billing/v1/catalog/products?${named}&keys=e2e-lifetime&keys=no-such-product`
+    `/billing/v1/products?${named}&keys=e2e-lifetime&keys=no-such-product`
   )
   expect(found.status()).toBe(200)
   const page = (await found.json()) as {
@@ -77,7 +77,7 @@ test("the public catalog takes its merchant and product keys alone", async ({
     ["keys=e2e-lifetime", "merchant"],
     ["merchant=billing-ui-e2e&keys=e2e-lifetime", "merchant"],
   ]) {
-    const refused = await request.get(`/billing/v1/catalog/products?${query}`)
+    const refused = await request.get(`/billing/v1/products?${query}`)
     expect(refused.status(), query).toBe(400)
     expect((await refused.json()).error, query).toMatchObject({
       code: "invalid_query",
@@ -86,7 +86,7 @@ test("the public catalog takes its merchant and product keys alone", async ({
   }
 
   const unknown = await request.get(
-    "/billing/v1/catalog/products?merchant=0190a000-0000-7000-8000-00000000000a&keys=e2e-lifetime"
+    "/billing/v1/products?merchant=0190a000-0000-7000-8000-00000000000a&keys=e2e-lifetime"
   )
   expect(unknown.status()).toBe(404)
   expect((await unknown.json()).error).toMatchObject({

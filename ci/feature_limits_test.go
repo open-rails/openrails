@@ -67,15 +67,15 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 		calls      *int
 		trusted    func() error
 	}{
-		{"/v1/admin/metrics/ask", `{"question":"Summarize"}`, &dashboardLLM.asks, func() error {
+		{"/v1/metrics/ask", `{"question":"Summarize"}`, &dashboardLLM.asks, func() error {
 			_, err := client.AskMetrics(t.Context(), billing.AskMetricsParams{Question: "Summarize"})
 			return err
 		}},
-		{"/v1/operator/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
+		{"/v1/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
 			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
 			return err
 		}},
-		{"/v1/admin/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
+		{"/v1/metrics/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
 			_, err := client.GenerateDashboardWidget(t.Context(), billing.GenerateDashboardWidgetParams{Prompt: "Cancellations per day"})
 			return err
 		}},

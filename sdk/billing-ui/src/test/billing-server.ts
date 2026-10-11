@@ -408,7 +408,7 @@ export function fakeBilling(
             embed_origins: [],
           },
         })
-      if (key === "GET /catalog/products") {
+      if (key === "GET /products") {
         // A lookup by product key: one merchant, and 1 to 100 keys.
         const other = [...url.searchParams.keys()].find(
           (n) => n !== "keys" && n !== "merchant"

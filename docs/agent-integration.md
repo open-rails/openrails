@@ -78,7 +78,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    `push-merchant-config --insert` → `apply-catalog --merchant NAME --file PATH`.
    Register your backend as a client at the merchant's trusted issuer. Verify: its
    client-credentials token works via `client.GetMerchantConfiguration(ctx)` (Go) or an
-   authenticated `GET /v1/operator/configuration` call.
+   authenticated `GET /v1/merchant/configuration` call.
 3. **Backend.** Each credential acts at its one merchant ([merchant-binding.md](merchant-binding.md)).
    Go hosts: root SDK `openrails.NewRemoteMerchant` with a `RemoteCredential`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).

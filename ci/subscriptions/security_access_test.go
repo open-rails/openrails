@@ -255,7 +255,7 @@ func TestSecurityFindingOverrideCannotRetarget(t *testing.T) {
 		{"subscription_id": victim.sub.String()},
 		{"customer_id": victim.c.id},
 	} {
-		status, body := w.staffJSON(http.MethodPost, "/v1/operator/findings/fnd_"+finding+"/resolve", map[string]any{"outcome": "approve", "notes": "x", "override_params": override})
+		status, body := w.staffJSON(http.MethodPost, "/v1/merchant/findings/fnd_"+finding+"/resolve", map[string]any{"outcome": "approve", "notes": "x", "override_params": override})
 		require.Equal(t, http.StatusBadRequest, status, "%v %v", override, body)
 		require.Contains(t, fmt.Sprint(body), "override_params", "refused for its override, not its id")
 	}

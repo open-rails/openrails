@@ -161,9 +161,9 @@ func TestFindingsRequireMerchantConfiguration(t *testing.T) {
 				method, path string
 				body         any
 			}{
-				{http.MethodGet, "/v1/operator/findings", nil},
-				{http.MethodGet, "/v1/operator/findings/fnd_" + id, nil},
-				{http.MethodPost, "/v1/operator/findings/fnd_" + id + "/resolve", map[string]any{"outcome": "ignore", "notes": "Reviewed by the operator"}},
+				{http.MethodGet, "/v1/merchant/findings", nil},
+				{http.MethodGet, "/v1/merchant/findings/fnd_" + id, nil},
+				{http.MethodPost, "/v1/merchant/findings/fnd_" + id + "/resolve", map[string]any{"outcome": "ignore", "notes": "Reviewed by the operator"}},
 			} {
 				status, body := w.merchantJSON(token, op.method, op.path, op.body)
 				want := http.StatusForbidden

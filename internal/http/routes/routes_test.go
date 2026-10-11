@@ -81,9 +81,9 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 
 	read, write, catalog, admin, metrics := needAdminRead, needAdminUpdate, needCatalog, needMerchantConfig, needMetrics
 	for key, perm := range map[string]Pair{
-		"GET /v1/operator/billing-archive":                 admin,
-		"POST /v1/operator/billing-archive":                admin,
-		"POST /v1/operator/billing-import":                 admin,
+		"GET /v1/merchant/billing-archive":                 admin,
+		"POST /v1/merchant/billing-archive":                admin,
+		"POST /v1/merchant/billing-import":                 admin,
 		"GET /v1/admin/entitlements":                       read,
 		"POST /v1/admin/product-access":                    write,
 		"POST /v1/admin/product-access/{id}/revoke":        write,
@@ -101,29 +101,29 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 		"POST /v1/admin/subscriptions/{id}/cancel":         write,
 		"POST /v1/admin/subscriptions/{id}/change":         write,
 		"POST /v1/admin/subscriptions/{id}/change/preview": read,
-		"POST /v1/operator/price-migrations/preview":       catalog,
-		"POST /v1/operator/price-migrations":               catalog,
+		"POST /v1/catalog/price-migrations/preview":        catalog,
+		"POST /v1/catalog/price-migrations":                catalog,
 		"POST /v1/admin/orders/{id}/void":                  write,
 		"POST /v1/admin/orders/{id}/mark-uncollectible":    write,
 		"POST /v1/admin/orders/{id}/retry-collection":      write,
-		"POST /v1/admin/metrics/query":                     metrics,
-		"PUT /v1/operator/dashboard":                       admin,
-		"GET /v1/operator/findings":                        admin,
-		"GET /v1/operator/findings/{id}":                   admin,
-		"POST /v1/operator/findings/{id}/resolve":          admin,
-		"GET /v1/operator/configuration":                   admin,
-		"PATCH /v1/operator/configuration":                 admin,
-		"PATCH /v1/operator/alert-webhooks/{id}":           admin,
-		"GET /v1/operator/psps":                            admin,
-		"POST /v1/operator/psps":                           admin,
-		"GET /v1/operator/psps/{id}":                       admin,
-		"PATCH /v1/operator/psps/{id}":                     admin,
-		"POST /v1/operator/psps/routing-preview":           admin,
-		"POST /v1/operator/psps/refresh":                   admin,
-		"GET /v1/operator/catalog/products":                catalog,
-		"GET /v1/operator/catalog/prices/{id}/history":     catalog,
-		"POST /v1/operator/catalog/apply":                  catalog,
-		"PUT /v1/operator/catalog/meters/{key}":            catalog,
+		"POST /v1/metrics/query":                           metrics,
+		"PUT /v1/merchant/dashboard":                       admin,
+		"GET /v1/merchant/findings":                        admin,
+		"GET /v1/merchant/findings/{id}":                   admin,
+		"POST /v1/merchant/findings/{id}/resolve":          admin,
+		"GET /v1/merchant/configuration":                   admin,
+		"PATCH /v1/merchant/configuration":                 admin,
+		"PATCH /v1/merchant/alert-webhooks/{id}":           admin,
+		"GET /v1/merchant/psps":                            admin,
+		"POST /v1/merchant/psps":                           admin,
+		"GET /v1/merchant/psps/{id}":                       admin,
+		"PATCH /v1/merchant/psps/{id}":                     admin,
+		"POST /v1/merchant/psps/routing-preview":           admin,
+		"POST /v1/merchant/psps/refresh":                   admin,
+		"GET /v1/catalog/products":                         catalog,
+		"GET /v1/catalog/prices/{id}/history":              catalog,
+		"POST /v1/catalog/apply":                           catalog,
+		"PUT /v1/catalog/meters/{key}":                     catalog,
 		"GET /v1/admin/orders":                             read,
 		"POST /v1/admin/payments":                          write,
 	} {
@@ -142,8 +142,8 @@ func TestMerchantRouteAuthorization(t *testing.T) {
 // Merchant configuration reads mount whatever holds it; its edits mount only
 // where Vault does: a file is read-only.
 func TestConfigurationEditsMountOnlyWhereEditable(t *testing.T) {
-	reads := []string{"GET /operator/configuration", "GET /operator/psps", "GET /operator/psps/{id}", "GET /operator/alert-webhooks"}
-	edits := []string{"PATCH /operator/configuration", "POST /operator/psps", "PATCH /operator/psps/{id}", "POST /operator/alert-webhooks", "PATCH /operator/alert-webhooks/{id}", "DELETE /operator/alert-webhooks/{id}"}
+	reads := []string{"GET /merchant/configuration", "GET /merchant/psps", "GET /merchant/psps/{id}", "GET /merchant/alert-webhooks"}
+	edits := []string{"PATCH /merchant/configuration", "POST /merchant/psps", "PATCH /merchant/psps/{id}", "POST /merchant/alert-webhooks", "PATCH /merchant/alert-webhooks/{id}", "DELETE /merchant/alert-webhooks/{id}"}
 	for _, editable := range []bool{false, true} {
 		cfg := &config.Config{}
 		if editable {
@@ -174,17 +174,17 @@ func TestCatalogWritePolicy(t *testing.T) {
 	RegisterStaffRoutes(router.NewMux(staff, "", rt), rt, Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{Admin: true}})
 	RegisterStaffRoutes(router.NewMux(edits, "", rt), rt, Options{Auth: authtest.Deny{}, Groups: config.RouteGroups{Catalog: true}})
 	require.Contains(t, routeKeys(staff), "POST /admin/credit-grants")
-	require.NotContains(t, routeKeys(staff), "POST /operator/psps/refresh", "the PSP pull is the merchant configuration's")
+	require.NotContains(t, routeKeys(staff), "POST /merchant/psps/refresh", "the PSP pull is the merchant configuration's")
 	for _, key := range routeKeys(staff) {
 		_, path, _ := strings.Cut(key, " ")
 		route, ok := Lookup(strings.Fields(key)[0], "/v1"+path)
 		require.True(t, ok, key)
 		require.NotEqual(t, CatalogAdmin, route.Group, "%s: the catalog is Catalog's", key)
 	}
-	for _, key := range []string{"GET /operator/catalog/meters", "GET /operator/catalog/products", "GET /operator/price-migrations", "POST /operator/price-migrations/preview"} {
+	for _, key := range []string{"GET /catalog/meters", "GET /catalog/products", "GET /catalog/price-migrations", "POST /catalog/price-migrations/preview"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
-	for _, key := range []string{"POST /operator/catalog/apply", "PATCH /operator/catalog/prices/{id}", "POST /operator/catalog/prices", "PUT /operator/catalog/meters/{key}"} {
+	for _, key := range []string{"POST /catalog/apply", "PATCH /catalog/prices/{id}", "POST /catalog/prices", "PUT /catalog/meters/{key}"} {
 		require.Contains(t, routeKeys(edits), key)
 	}
 
@@ -192,7 +192,7 @@ func TestCatalogWritePolicy(t *testing.T) {
 	// owner edits its catalog whatever a mount publishes.
 	inProcess := &router.Table{}
 	RegisterStaffRoutes(router.NewMux(inProcess, "", rt), rt, HostOptions())
-	require.Contains(t, routeKeys(inProcess), "POST /operator/catalog/apply")
+	require.Contains(t, routeKeys(inProcess), "POST /catalog/apply")
 }
 
 // Administrative velocity limits apply per operation class after
@@ -233,7 +233,7 @@ func TestUserRoutes(t *testing.T) {
 		return routeKeys(table)
 	}
 	none := inventory(routesurface.ProviderRoutes{})
-	require.Subset(t, none, []string{"GET /v1/catalog/products"})
+	require.Subset(t, none, []string{"GET /v1/products"})
 	for _, key := range none {
 		require.NotContains(t, key, "solana")
 		require.NotRegexp(t, `/v1/checkout(/|$)`, key, "no engine checkout door for browsers")

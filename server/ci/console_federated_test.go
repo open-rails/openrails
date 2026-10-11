@@ -97,7 +97,7 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 	flow := authtest.CodeFlow{ClientID: console, ClientSecret: secret, RedirectURI: callback, Resource: boot.Issuer.Resource, Scopes: strings.Fields(boot.Issuer.Scope)}
 	tokens := as.Authorize(t, user, flow)
 	findings := func(token string) int {
-		return serve(handler, rsRequest{path: "/v1/operator/findings", authorization: "Bearer " + token}).Code
+		return serve(handler, rsRequest{path: "/v1/merchant/findings", authorization: "Bearer " + token}).Code
 	}
 	require.Equal(t, http.StatusOK, findings(tokens.AccessToken), "the issuer's token is bound to the merchant whose group trusts it")
 	require.Equal(t, http.StatusNotFound, serve(handler, rsRequest{path: "/v1/merchants", authorization: "Bearer " + tokens.AccessToken}).Code, "the console's merchants come from the host")

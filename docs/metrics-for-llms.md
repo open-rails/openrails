@@ -19,9 +19,9 @@ token-lean tables. No SDK.
 
 | Method + path | Purpose |
 |---|---|
-| `GET /v1/admin/metrics/schema` | The registry dump — the LLM context document |
-| `POST /v1/admin/metrics/query` | Run one composable query |
-| `POST /v1/admin/metrics/ask` | Hosted Q&A: `{"question":"..."}`, LLM runs `/query` server-side |
+| `GET /v1/metrics/schema` | The registry dump — the LLM context document |
+| `POST /v1/metrics/query` | Run one composable query |
+| `POST /v1/metrics/ask` | Hosted Q&A: `{"question":"..."}`, LLM runs `/query` server-side |
 
 **Schema first.** The `/schema` JSON is designed to ride in a system prompt: every measure
 carries description + formula + allowed dims; dimensions carry enum values; `query_shape`
@@ -33,7 +33,7 @@ A measure's `class` is how it aggregates: `additive`, `distinct`, `ratio`, `diff
 ## Query shape
 
 ```json
-POST /v1/admin/metrics/query
+POST /v1/metrics/query
 {"measures":["cancellations"],"by":["time"],"grain":"day","range":{"last":"7d"}}
 ```
 

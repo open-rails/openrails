@@ -33,7 +33,7 @@ that went, and what replaced it; the sections below give the details.
 | `WithMerchant`, `ForMerchantID`, `WithDefaultMerchant`, `WithMerchantID`, `CredentialTarget`, `openrails.RequestMerchant` | The merchant's handle: `Merchant(id)` on the engine or the remote, or `openrails.NewRemoteMerchant` |
 | `Routes.Scope`, `Routes.Permissions` and the host's own permission names | Each route checks its `billing.Permission` pair: the `merchant:` name in the merchant's scope, the `root:` name in the Authenticator's `RootScope` |
 | Codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | `403 merchant_unresolved` (bound to no live merchant), `403 customer_issuer_mismatch` (another issuer's customer) |
-| Public reads finding their merchant by Host or the configured merchant | `GET /v1/catalog/products` takes `merchant=<merchant id>`; `GET /v1/config` is the deployment's, `GET /v1/me/config` the merchant's for a bound credential |
+| Public reads finding their merchant by Host or the configured merchant | `GET /v1/products` takes `merchant=<merchant id>`; `GET /v1/config` is the deployment's, `GET /v1/me/config` the merchant's for a bound credential |
 | billing-ui's `anonymous` call option | Public reads send no token; customer calls send a merchant-bound one (`tokenSource`) |
 | The console's merchant in `sessionStorage`, sent as the header | A token exchanged for the chosen merchant, held in memory |
 | The client merchant-selection guide | [Merchant binding](merchant-binding.md) |
@@ -116,7 +116,7 @@ products:
         amount: 4.99 USD
 ```
 
-The JSON body of `POST /v1/operator/catalog/apply` (was `/v1/merchant/catalog/applications`) and the Go
+The JSON body of `POST /v1/catalog/apply` (was `/v1/merchant/catalog/applications`) and the Go
 `catalog.Application` (`Products`, `Prices` and `Meters` are maps) change the
 same way. Plain lists such as `entitlements`, `psps` and `rate_cards` stay lists.
 
@@ -340,7 +340,7 @@ fields (`400 unknown_field`), and every error code is in
 - The purchase-review routes (`/v1/merchant/purchase-reviews`): a purchase under
   review is a finding.
 - Merchant API hosts: `GET /v1/admin/api-host`, `api_host` in a configuration
-  application and in `GET /v1/operator/configuration`, and the capability
+  application and in `GET /v1/merchant/configuration`, and the capability
   `api_host`. A request's Host names no merchant.
 - `GET /v1/merchant/repair-alerts`: read `/v1/merchant/notifications`.
 - Delegated access tokens (`delegated-access+jwt`), remote-application tokens
@@ -371,14 +371,14 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
 | The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential bound to no merchant here is `403 merchant_unresolved`; a missing permission `403 permission_required` |
 | The `OpenRails-Merchant` header (a merchant's slug or `id:<uuid>`) and its codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | Removed: the credential binds the merchant, by its group (the merchant id), its declared issuer or the OpenRails object it was issued for; anything else is `403 merchant_unresolved`. A customer of another issuer whose subject is already taken is `403 customer_issuer_mismatch` |
-| `/v1/merchant/payment-providers…` | `/v1/operator/psps`, `/v1/operator/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/operator/psps/routing-preview`, `/v1/operator/psps/refresh`; rails in `GET /v1/config` |
+| `/v1/merchant/payment-providers…` | `/v1/merchant/psps`, `/v1/merchant/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/merchant/psps/routing-preview`, `/v1/merchant/psps/refresh`; rails in `GET /v1/config` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions`, `/v1/merchant/checkout-sessions…` (engine checkout) | `POST /v1/app/orders` (an unpaid order for a customer), `POST /v1/me/orders` and `POST /v1/me/orders/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/credit-grants?customer_id=`, `/v1/admin/credit-grants/{id}/revoke` |
 | `/v1/merchant/credits/balance`, `/v1/merchant/credit-limit`, `/v1/merchant/trust-level` | `/v1/admin/customers/{customer_id}/balance`; credit limits and trust levels are customer settings, `PATCH /v1/admin/customers/{customer_id}` |
 | `/v1/merchant/customers/{id}/credit-transactions` | `/v1/admin/customers/{customer_id}/balance/transactions` |
 | `PUT …/spend-delegations:upsert` | Removed |
 | `/v1/merchant/admissions/{id}/…` | `POST /v1/app/admissions/{request_id}/capture`, `POST /v1/app/admissions/release`, `POST /v1/app/admissions/extend`, with the host backend's credential |
-| `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/app/usage-events`, `POST /v1/admin/metrics/query` |
+| `POST /v1/merchant/usage/report`, `/usage/rollup` | `POST /v1/app/usage-events`, `POST /v1/metrics/query` |
 | `/v1/merchant/users/{user_id}/…` | `GET /v1/admin/product-access` with `customer_id` and `product_id` |
 | `POST /v1/merchant/customers/entitlements:batch`, `…/effective-tier` | `POST /v1/app/entitlements/check` (your backend) or `GET /v1/admin/entitlements` (staff); the effective tier is removed |
 | `GET /v1/merchant/customers/{id}` answered the billing profile | It answers the `Customer`: settings, balances, arrears and default cards; subscriptions, payments, cards, entitlements and product access are their own lists |
@@ -386,19 +386,19 @@ fields (`400 unknown_field`), and every error code is in
 | `/v1/me/payment-methods/stripe-setup…`, `/v1/me/payment-method-setups…` | `POST /v1/me/payment-methods` with a Stripe `pm_` as `token`; `/v1/me/payment-methods/{id}/confirm` after 3-D Secure |
 | `PUT /v1/me/default-payment-method` with `currency` | `PUT /v1/me/default-payment-methods/{currency}`; a subscription's `payment_method_id` is its own card, `null` follows the default |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
-| `/v1/merchant/webhooks…` | `/v1/operator/alert-webhooks` |
-| `GET /v1/catalog/products` found its merchant by the request's Host or the configured merchant | It takes `merchant=<merchant id>` beside `keys`, signed in or out: `400 invalid_query` without one id, `404 resource_not_found` for no live merchant |
+| `/v1/merchant/webhooks…` | `/v1/merchant/alert-webhooks` |
+| `GET /v1/catalog/products` found its merchant by the request's Host or the configured merchant | `GET /v1/products` takes `merchant=<merchant id>` beside `keys`, signed in or out: `400 invalid_query` without one id, `404 resource_not_found` for no live merchant |
 | `GET /v1/config` carried the merchant's `payment` and `merchant` | It is the deployment's part alone (`capabilities`, `currencies`, `rails`, `captcha`, `network`). `GET /v1/me/config` answers `{payment, merchant}` to a credential bound to the merchant: a customer's token, or a checkout URL's secret on the checkout host |
 | `GET` and `POST /v1/orders/{id}/solana-pay` needed a Host or header naming the merchant on a server of many | The order names its merchant; a public route no longer answers `merchant_not_found` |
-| `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/operator/price-migrations`, `/v1/operator/price-migrations/{id}` |
+| `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/catalog/price-migrations`, `/v1/catalog/price-migrations/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | Removed: the meter's rate card prices every customer; `PATCH` the product or price |
-| `/v1/merchant/catalog/applications`, `/v1/admin/catalog/applications` | `POST /v1/operator/catalog/apply` |
+| `/v1/merchant/catalog/applications`, `/v1/admin/catalog/applications` | `POST /v1/catalog/apply` |
 | `/v1/merchant/catalog/revision`, `/v1/admin/catalog/revision` | Removed: an apply's receipt reports the catalog revision; each object carries its own |
-| A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/operator/catalog/*` |
-| `POST /v1/import/billing` | `POST /v1/operator/billing-import` |
+| A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/catalog/*` |
+| `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
 | `/scim/v2/*`; a client-credentials token with scope `scim` | `/v1/app/scim/v2/*`, in the programmatic routes: an application credential, or the merchant's provisioning token |
-| `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema`, `GET /v1/admin/dashboard`, `POST /v1/admin/metrics/ask` behind `AdminRead`; `POST /v1/admin/dashboard/widgets/generate` behind `MerchantConfig`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes in the metrics and catalog groups (`billing.MerchantMetricsRead`, `billing.MerchantCatalogManage`, or their `root:` twins); `GET /v1/admin/access` answers what the caller holds |
-| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/operator/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
+| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard`, `POST /v1/metrics/ask` behind `AdminRead`; `POST /v1/metrics/dashboard/widgets/generate` behind `MerchantConfig`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes in the metrics and catalog groups (`billing.MerchantMetricsRead`, `billing.MerchantCatalogManage`, or their `root:` twins); `GET /v1/admin/access` answers what the caller holds |
+| `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
 
 ### Shapes
@@ -582,7 +582,7 @@ not a catalog ownership mode.
 
 A price key is scoped to its product: `ListPrices` with `ProductKey` and `Key`
 reads a key's prices, and `ListPriceHistory(ctx, priceID, page)` its history
-(`GET /v1/operator/catalog/prices/{id}/history`). Checkout and repricing requests
+(`GET /v1/catalog/prices/{id}/history`). Checkout and repricing requests
 using `price_key` also supply `product_key`; requests using immutable price IDs
 keep their current shape.
 
@@ -595,14 +595,20 @@ revision, while price-key history records the new activation. A product's
 `revision` advances on actual edits without retaining full product versions.
 
 
-### Operator routes and customer-support permissions
+### Catalog, merchant configuration and customer-support permissions
 
-Catalog and merchant-configuration routes use `/v1/operator/`, including
-`/catalog`, `/price-migrations`, `/psps`, `/configuration`, `/findings`,
+Catalog management uses `/v1/catalog/`, including `/products`, `/prices`,
+`/meters`, `/apply`, `/ask` and `/price-migrations`. Merchant configuration
+uses `/v1/merchant/`, including `/psps`, `/configuration`, `/findings`,
 `/alert-webhooks`, `/billing-archive`, `/billing-import` and
-`/provisioning-tokens`. `PUT /v1/operator/dashboard` saves the layout; its
-read and metric-generation routes remain under `/v1/admin/dashboard`.
-The previous operator paths under `/v1/admin/` are not mounted.
+`/provisioning-tokens`. `PUT /v1/merchant/dashboard` saves the layout; its
+read and metric-generation routes use `/v1/metrics/dashboard`. Metrics query,
+schema and ask routes use `/v1/metrics/`; their former `/v1/admin/` paths are removed.
+The former configuration paths under `/v1/admin/` are not mounted.
+
+Public product lookup is `GET /v1/products?merchant=<merchant id>`. Update
+storefront callers: `/v1/catalog/products` now requires catalog management
+permission and never serves as an alias for the public product list.
 
 Support staff use `merchant:customer:read` and `merchant:customer:manage`,
 with matching `root:` permissions. Update custom roles, API-key roles and

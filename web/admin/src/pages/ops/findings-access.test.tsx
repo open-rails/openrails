@@ -23,8 +23,8 @@ let routes: Record<string, Reply>
 beforeEach(async () => {
   browserEnvironment()
   routes = {
-    "GET /operator/findings": { data: [], next_cursor: null },
-    "POST /admin/metrics/query": { columns: [], rows: [] },
+    "GET /merchant/findings": { data: [], next_cursor: null },
+    "POST /metrics/query": { columns: [], rows: [] },
   }
   requests = await server(routes)
   selectMerchant("merchant-a")
@@ -47,8 +47,8 @@ it("billing and catalog staff never request the findings inbox, drift or bell", 
     </QueryClientProvider>
   )
   expect(document.querySelector("[aria-label=Notifications]")).toBeNull()
-  expect(calls(requests)).not.toContain("GET /operator/findings")
-  expect(calls(requests)).not.toContain("POST /admin/metrics/query")
+  expect(calls(requests)).not.toContain("GET /merchant/findings")
+  expect(calls(requests)).not.toContain("POST /metrics/query")
   queries.clear()
 })
 
@@ -63,7 +63,7 @@ it("a merchant-config operator can open finding resolution without billing or me
     last_seen_at: "2026-10-11T00:00:00Z",
     resolved_at: null,
   }
-  routes["GET /operator/findings"] = { data: [finding], next_cursor: null }
+  routes["GET /merchant/findings"] = { data: [finding], next_cursor: null }
   queries.setQueryData(adminQueries.access().queryKey, {
     ...FULL_ACCESS,
     admin: "none",
@@ -80,8 +80,8 @@ it("a merchant-config operator can open finding resolution without billing or me
   )
   await vi.waitFor(() => expect(document.body.textContent).toContain("Resolve"))
   expect(document.querySelector("[aria-label=Notifications]")).not.toBeNull()
-  expect(calls(requests)).toContain("GET /operator/findings")
-  expect(calls(requests)).not.toContain("POST /admin/metrics/query")
+  expect(calls(requests)).toContain("GET /merchant/findings")
+  expect(calls(requests)).not.toContain("POST /metrics/query")
   await act(async () => {
     const resolve = [...document.querySelectorAll("button")].find(
       (button) => button.textContent === "Resolve"
@@ -108,11 +108,11 @@ it("merchant configuration opens the catalog drift findings query", async () => 
     </QueryClientProvider>
   )
   await vi.waitFor(() =>
-    expect(calls(requests)).toContain("GET /operator/findings")
+    expect(calls(requests)).toContain("GET /merchant/findings")
   )
   expect(
     new URLSearchParams(
-      requests.find((request) => request.path === "/operator/findings")!.query
+      requests.find((request) => request.path === "/merchant/findings")!.query
     ).get("type")
   ).toBe("catalog.*")
   expect(document.body.textContent).not.toContain(

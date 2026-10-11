@@ -12,7 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// GetMerchantDashboard handles GET /v1/admin/dashboard: the saved widget
+// GetMerchantDashboard handles GET /v1/metrics/dashboard: the saved widget
 // layout, or the seeded default template when the merchant has none.
 func GetMerchantDashboard(r *httprequest.Request) {
 	svc := r.State.DashboardService
@@ -28,7 +28,7 @@ func GetMerchantDashboard(r *httprequest.Request) {
 	r.JSON(http.StatusOK, d)
 }
 
-// PutMerchantDashboard handles PUT /v1/operator/dashboard: full-replace of the
+// PutMerchantDashboard handles PUT /v1/merchant/dashboard: full-replace of the
 // widget layout. Every widget query passes the metrics compiler before
 // persisting; errors return widget-indexed and ALL AT ONCE.
 func PutMerchantDashboard(r *httprequest.Request) {
@@ -60,7 +60,7 @@ func PutMerchantDashboard(r *httprequest.Request) {
 	r.JSON(http.StatusOK, d)
 }
 
-// GenerateDashboardWidget handles POST /v1/admin/dashboard/widgets/generate:
+// GenerateDashboardWidget handles POST /v1/metrics/dashboard/widgets/generate:
 // a prompt becomes a validated {query, title, viz}. The LLM sees only the
 // metrics schema, never data, and the route mounts only with an LLM. An
 // optional base_query (validated like any client query) is refined rather

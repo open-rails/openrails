@@ -20,7 +20,7 @@ func provisioningTokens(r *httprequest.Request) (scim.Tokens, billing.MerchantID
 	return scim.Tokens{DB: r.State.DB}, mid, true
 }
 
-// ListProvisioningTokens handles GET /v1/operator/provisioning-tokens.
+// ListProvisioningTokens handles GET /v1/merchant/provisioning-tokens.
 func ListProvisioningTokens(r *httprequest.Request) {
 	ids, ok := listIDs(r, billing.ParseProvisioningTokenID)
 	if !ok {
@@ -38,7 +38,7 @@ func ListProvisioningTokens(r *httprequest.Request) {
 	r.SuccessJSON(billing.ListPage[billing.ProvisioningToken]{Items: list})
 }
 
-// CreateProvisioningToken handles POST /v1/operator/provisioning-tokens.
+// CreateProvisioningToken handles POST /v1/merchant/provisioning-tokens.
 func CreateProvisioningToken(r *httprequest.Request) {
 	var in billing.CreateProvisioningTokenParams
 	if !r.BindJSON(&in) {
@@ -56,7 +56,7 @@ func CreateProvisioningToken(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, created)
 }
 
-// DeleteProvisioningToken handles DELETE /v1/operator/provisioning-tokens/{id}.
+// DeleteProvisioningToken handles DELETE /v1/merchant/provisioning-tokens/{id}.
 func DeleteProvisioningToken(r *httprequest.Request) {
 	id, ok := pathID(r, billing.ParseProvisioningTokenID)
 	if !ok {

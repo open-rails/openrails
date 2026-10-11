@@ -222,7 +222,7 @@ describe("plan change", () => {
       id: "price_plus",
       unit_amount: "19990000",
     })
-    expect(server.calls).toEqual(["GET /catalog/products"])
+    expect(server.calls).toEqual(["GET /products"])
   })
 
   it("changes the subscription, refetches the list and notifies the host", async () => {

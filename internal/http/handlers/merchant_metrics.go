@@ -12,14 +12,14 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// MerchantMetricsSchema handles GET /v1/admin/metrics/schema: the registry
+// MerchantMetricsSchema handles GET /v1/metrics/schema: the registry
 // dump (measures + formulas + dims + caveats + examples) —
 // the client/LLM context document.
 func MerchantMetricsSchema(r *httprequest.Request) {
 	r.JSON(http.StatusOK, metrics.Schema())
 }
 
-// MerchantMetricsQuery handles POST /v1/admin/metrics/query. Validation errors
+// MerchantMetricsQuery handles POST /v1/metrics/query. Validation errors
 // come back all at once with corrective context (did-you-mean + valid lists).
 // A relative range ends today on the deployment's clock.
 func MerchantMetricsQuery(r *httprequest.Request) {
@@ -46,7 +46,7 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 		WithMetadata(map[string]any{"errors": verr.Errors}))
 }
 
-// MerchantMetricsAsk handles POST /v1/admin/metrics/ask: an LLM answers by
+// MerchantMetricsAsk handles POST /v1/metrics/ask: an LLM answers by
 // running compiler-validated queries in the caller's merchant context. Unlike
 // widget generation it sees aggregate results, so the route mounts only with
 // llm.ask_enabled. The response carries every executed query's verbatim result.

@@ -76,12 +76,12 @@ const open = (path: string) =>
   )
 const queried = () =>
   requests
-    .filter((r) => r.path === "/admin/metrics/query")
+    .filter((r) => r.path === "/metrics/query")
     .map((r) => r.body as Record<string, unknown>)
 
 it("runs every widget over the URL's range but a fixed one over its own", async () => {
-  routes["/admin/dashboard"] = { widgets: [today, daily], is_default: true }
-  routes["POST /admin/metrics/query"] = (request) => {
+  routes["/metrics/dashboard"] = { widgets: [today, daily], is_default: true }
+  routes["POST /metrics/query"] = (request) => {
     const body = request.body as { range: { last?: string } }
     if (body.range.last === "1d")
       return {

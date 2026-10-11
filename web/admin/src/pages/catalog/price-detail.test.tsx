@@ -30,12 +30,12 @@ it("shows qualified price versions while history links keep the immutable price 
   })
   await server({
     "/config": { capabilities: { route_groups: { catalog_write: true }, features: {} } },
-    "/operator/catalog/prices/price_current": current,
-    "/operator/catalog/products/prod_premium": aProduct("prod_premium", 0, {
+    "/catalog/prices/price_current": current,
+    "/catalog/products/prod_premium": aProduct("prod_premium", 0, {
       key: "premium",
       display_name: "Premium",
     }),
-    "/operator/catalog/prices/price_current/history": {
+    "/catalog/prices/price_current/history": {
       data: [current, previous].map((price) => ({
         price,
         effective_at: price.created_at,
@@ -43,8 +43,8 @@ it("shows qualified price versions while history links keep the immutable price 
       })),
       next_cursor: null,
     },
-    "/operator/price-migrations": { data: [], next_cursor: null },
-    "/operator/psps/routing-preview": { candidates: [] },
+    "/catalog/price-migrations": { data: [], next_cursor: null },
+    "/merchant/psps/routing-preview": { candidates: [] },
   })
   selectMerchant("merchant-a")
   const queries = client()

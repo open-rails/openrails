@@ -199,7 +199,7 @@ Per merchant:
   for this one merchant and no other, within that role
   ([auth](auth.md#trusted-issuers); needs `auth.resource.id`).
 - `settings` — the merchant's settings (`billing.MerchantSettings`), the same
-  document `GET /v1/operator/configuration` reads and a configuration
+  document `GET /v1/merchant/configuration` reads and a configuration
   application changes, with the same names, units and validation
   ([merchant settings](api/merchant-settings.md)): `profile`, invoicing
   (`billing_period_boundary`, `collection_threshold`, `monthly_floor`, amounts in

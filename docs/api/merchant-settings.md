@@ -1,9 +1,9 @@
 # Merchant settings
 
 A merchant's settings (`billing.MerchantSettings`) are part of its
-configuration: `GET /v1/operator/configuration` (`Client.GetMerchantConfiguration`)
+configuration: `GET /v1/merchant/configuration` (`Client.GetMerchantConfiguration`)
 reads them with the configuration's revision, and
-`PATCH /v1/operator/configuration` (`Client.UpdateMerchantConfiguration`)
+`PATCH /v1/merchant/configuration` (`Client.UpdateMerchantConfiguration`)
 changes them against that revision where Vault holds the configuration
 ([merchant configuration](../merchant-configuration.md)). A merchant whose
 configuration is a file declares the same document under `settings:` in its

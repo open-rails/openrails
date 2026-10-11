@@ -51,7 +51,7 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 	_, err = srv.DeleteMerchant(ctx, gone)
 	require.NoError(t, err)
 
-	const catalog = "/v1/catalog/products?"
+	const catalog = "/v1/products?"
 	named := func(mid billing.MerchantID) string {
 		return catalog + url.Values{"merchant": {mid.String()}, "keys": {key}}.Encode()
 	}
@@ -76,6 +76,14 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 	keyA := merchantKey(t, srv, a, "owner")
 	id, _ = one(serve(handler, rsRequest{path: named(b), authorization: "Bearer " + keyA.Secret, header: map[string]string{retiredMerchantHeader: "id:" + a.String()}}))
 	require.Equal(t, productB, id)
+
+	// The public list cannot collide with or bypass catalog-management auth.
+	management := "/v1/catalog/products?keys=" + url.QueryEscape(key)
+	require.Equal(t, http.StatusUnauthorized, serve(handler, rsRequest{path: management}).Code)
+	viewer := merchantKey(t, srv, a, "viewer")
+	require.Equal(t, http.StatusForbidden, serve(handler, rsRequest{path: management, authorization: "Bearer " + viewer.Secret}).Code)
+	id, _ = one(serve(handler, rsRequest{path: management, authorization: "Bearer " + keyA.Secret}))
+	require.Equal(t, productA, id)
 
 	// A merchant's backend learns the id its pages name from its access read.
 	access := serve(handler, rsRequest{path: "/v1/admin/access", authorization: "Bearer " + keyA.Secret})
@@ -102,7 +110,7 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 
 	// Elsewhere the parameter names nothing: A's key reads A's rows, or the
 	// route refuses the parameter; it never reads B's.
-	for _, path := range []string{"/v1/operator/catalog/products", "/v1/app/catalog/products"} {
+	for _, path := range []string{"/v1/catalog/products", "/v1/app/catalog/products"} {
 		w := serve(handler, rsRequest{path: path + "?" + url.Values{"merchant": {b.String()}, "keys": {key}}.Encode(), authorization: "Bearer " + keyA.Secret})
 		if w.Code == http.StatusBadRequest {
 			continue

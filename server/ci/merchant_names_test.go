@@ -245,7 +245,7 @@ func TestMerchantOwnRename(t *testing.T) {
 	require.ErrorAs(t, err, &tooSoon, "the interval refuses a second rename")
 	require.True(t, tooSoon.NextRenameAt.After(time.Now()))
 	bound := f.exchanged(t, handler, token, m.MerchantID)
-	require.Equal(t, http.StatusOK, bound.call(t, handler, http.MethodGet, "/v1/operator/findings", nil).Code, "a renamed merchant keeps its id, which binds")
+	require.Equal(t, http.StatusOK, bound.call(t, handler, http.MethodGet, "/v1/merchant/findings", nil).Code, "a renamed merchant keeps its id, which binds")
 	require.Equal(t, http.StatusNotFound, bound.call(t, handler, http.MethodPut, "/v1/merchant/name", map[string]string{"name": uniqueName("shop")}).Code)
 	mid, current, err := cp.MerchantByName(ctx, next)
 	require.NoError(t, err)

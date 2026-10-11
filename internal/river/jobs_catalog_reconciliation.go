@@ -33,7 +33,7 @@ import (
 // so enumeration is structurally impossible (see the package doc on
 // internal/service/catalog_drift.go). CCBill links stay manual-only.
 //
-// A merchant's POST /v1/operator/psps/refresh runs the pass for it alone.
+// A merchant's POST /v1/merchant/psps/refresh runs the pass for it alone.
 const KindCatalogReconciliationPull = "openrails.catalog_reconciliation_pull"
 
 // CatalogReconciliationPullArgs is one pass: every armed merchant's, or

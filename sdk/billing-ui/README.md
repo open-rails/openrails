@@ -180,7 +180,7 @@ no bearer.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts({ merchant, keys })`: the products `merchant` (its id) has on sale named by `keys` (1 to 100 product keys), each with its prices, in one page; `useProducts` reads the same | `GET /catalog/products` |
+| `listProducts({ merchant, keys })`: the products `merchant` (its id) has on sale named by `keys` (1 to 100 product keys), each with its prices, in one page; `useProducts` reads the same | `GET /products` |
 | `getConfig()` (capabilities, `currencies`, `captcha`; `client.currencies` is the pinned registry) | `GET /config` |
 | `getCustomerConfig()` (the customer's merchant: `payment` with PSPs, `solana.network` and tokens, and `merchant`, its name) | `GET /me/config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |

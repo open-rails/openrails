@@ -344,7 +344,7 @@ func (a *app) buy(t *testing.T, token, product, price string) {
 		MerchantID string `json:"merchant_id"`
 	}
 	a.call(t, "", http.MethodGet, "/api/courses?limit=1", nil, &store)
-	a.call(t, "", http.MethodGet, "/billing/v1/catalog/products?merchant="+store.MerchantID+"&keys="+product, nil, &catalog)
+	a.call(t, "", http.MethodGet, "/billing/v1/products?merchant="+store.MerchantID+"&keys="+product, nil, &catalog)
 	var line map[string]string
 	var total string
 	for _, p := range catalog.Data {

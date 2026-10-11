@@ -105,7 +105,7 @@ describe("Offers", () => {
     expect(screen.queryByText("Membership")).toBeNull()
     const urls = server.fetch.mock.calls.map(([url]) => String(url))
     expect(urls).toContain(
-      `/billing/v1/catalog/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle`
+      `/billing/v1/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle`
     )
   })
 
@@ -126,9 +126,9 @@ describe("Offers", () => {
     ).toBeInTheDocument()
     const reads = server.fetch.mock.calls
       .map(([url]) => String(url))
-      .filter((url) => url.includes("/catalog/products"))
+      .filter((url) => url.includes("/products"))
     expect(reads).toEqual([
-      `/billing/v1/catalog/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle&keys=channel-membership`,
+      `/billing/v1/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle&keys=channel-membership`,
     ])
   })
 
@@ -256,7 +256,7 @@ describe("Offers", () => {
     expect(
       await screen.findByRole("button", { name: "$10.00 every 30 days" })
     ).toBeInTheDocument()
-    expect(server.calls).not.toContain("GET /catalog/products")
+    expect(server.calls).not.toContain("GET /products")
   })
 
   it("says when none of its products is on sale", async () => {
@@ -284,6 +284,6 @@ describe("Offers", () => {
     expect(
       await screen.findByText("Nothing on sale unlocks this")
     ).toBeInTheDocument()
-    expect(server.calls).not.toContain("GET /catalog/products")
+    expect(server.calls).not.toContain("GET /products")
   })
 })

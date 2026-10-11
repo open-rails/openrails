@@ -1,6 +1,6 @@
 // Package recommend is the machine-executable Recommendation an operator
 // finding carries in its evidence; approving the finding at
-// POST /v1/operator/findings/{id}/resolve executes it. A leaf package (no cycles).
+// POST /v1/merchant/findings/{id}/resolve executes it. A leaf package (no cycles).
 package recommend
 
 import (

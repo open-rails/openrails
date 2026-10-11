@@ -798,7 +798,7 @@ func TestSolanaPayRetryAfterFailedAttempt(t *testing.T) {
 func TestSolanaPayHoldsTheBillingArchive(t *testing.T) {
 	p := newSolanaPay(t)
 	refusedBy := func() string {
-		status, body := p.w.staff(http.MethodGet, "/v1/operator/billing-archive")
+		status, body := p.w.staff(http.MethodGet, "/v1/merchant/billing-archive")
 		if status == http.StatusOK {
 			return ""
 		}

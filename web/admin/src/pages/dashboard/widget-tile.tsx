@@ -1,4 +1,4 @@
-// One dashboard tile: runs its saved query (POST /v1/admin/metrics/query),
+// One dashboard tile: runs its saved query (POST /v1/metrics/query),
 // renders the viz, and offers refresh / edit / delete. Count widgets deep-link
 // to the matching admin list.
 import { HugeiconsIcon } from "@hugeicons/react"

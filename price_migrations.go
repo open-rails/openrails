@@ -18,7 +18,7 @@ func (c *Client) CreatePriceMigration(ctx context.Context, params billing.Create
 		return nil, invalidErr("to_price_id is required")
 	}
 	var out billing.PriceMigration
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/price-migrations", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/catalog/price-migrations", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -31,7 +31,7 @@ func (c *Client) PreviewPriceMigration(ctx context.Context, params billing.Creat
 		return nil, err
 	}
 	var out billing.PriceMigrationPreview
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/price-migrations/preview", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/catalog/price-migrations/preview", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -56,7 +56,7 @@ func (c *Client) ListPriceMigrations(ctx context.Context, params billing.PriceMi
 		return nil, err
 	}
 	var out billing.ListPage[billing.PriceMigration]
-	if err := c.do(ctx, http.MethodGet, "/v1/operator/price-migrations?"+q.Encode(), nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/catalog/price-migrations?"+q.Encode(), nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -69,7 +69,7 @@ func (c *Client) GetPriceMigration(ctx context.Context, id billing.PriceMigratio
 		return nil, err
 	}
 	var out billing.PriceMigration
-	if err := c.do(ctx, http.MethodGet, "/v1/operator/price-migrations/"+migration, nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/catalog/price-migrations/"+migration, nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -82,7 +82,7 @@ func (c *Client) CancelPriceMigration(ctx context.Context, id billing.PriceMigra
 		return nil, err
 	}
 	var out billing.PriceMigrationCancel
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/price-migrations/"+migration+"/cancel", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/catalog/price-migrations/"+migration+"/cancel", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

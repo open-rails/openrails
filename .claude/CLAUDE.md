@@ -50,8 +50,9 @@ through `host-four`; these are placeholders, not customer or repository names.
 - Route groups: public, customer (`/v1/me`) and webhooks are always mounted. The staff
   groups (`Routes.RouteGroups`: `Admin`, `Catalog`, `MerchantConfig`, `Metrics`) are off
   unless the host turns them on; `Programmatic` (`/v1/app`) admits applications.
-  Customer support and metrics use `/v1/admin`; Catalog and MerchantConfig use
-  `/v1/operator`, including findings and PSP refresh. Customer-support permissions
+  Customer support uses `/v1/admin`, Metrics uses `/v1/metrics`, Catalog uses `/v1/catalog`,
+  MerchantConfig uses `/v1/merchant`, including findings and PSP refresh.
+  Public product lookup is `GET /v1/products`, separate from catalog management. Customer-support permissions
   are `merchant:customer:read` and `merchant:customer:manage` (or their `root:` twins); catalog, config
   and metrics remain separate capabilities. There are no legacy-path aliases.
   No route registers a merchant or manages a
@@ -86,7 +87,7 @@ through `host-four`; these are placeholders, not customer or repository names.
   `billing.Rail` enum). A **PSP** (payment service provider) is a merchant's concrete
   ACCOUNT on a rail (e.g. "mobius", "paykings" on nmi): credentials + `account_id` + key
   (`psps.key`). A PSP is NOT the acquiring bank. Solana is the self-custody wallet slot.
-- PSP routes are `/v1/operator/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, which also archives);
+- PSP routes are `/v1/merchant/psps` (`ListPSPs`, `CreatePSP`, `UpdatePSP`, which also archives);
   rails are read in `GET /v1/config` (`rails`). Provider callbacks land on
   `/v1/webhooks/{rail}/{account_id}`.
 - A table that stores both `rail` and `psp_id` keeps them in agreement by a composite

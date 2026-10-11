@@ -12,13 +12,13 @@ import (
 	riverjobs "github.com/open-rails/openrails/internal/river"
 )
 
-// PSPListQuery filters GET /v1/operator/psps.
+// PSPListQuery filters GET /v1/merchant/psps.
 type PSPListQuery struct {
 	Rail     billing.Rail `form:"rail"`
 	Archived *bool        `form:"archived"`
 }
 
-// ListPSPs handles GET /v1/operator/psps.
+// ListPSPs handles GET /v1/merchant/psps.
 func ListPSPs(r *httprequest.Request) {
 	svc, id, ok := pspContext(r)
 	if !ok {
@@ -44,7 +44,7 @@ func ListPSPs(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// GetPSP handles GET /v1/operator/psps/{id}.
+// GetPSP handles GET /v1/merchant/psps/{id}.
 func GetPSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
 	if !ok {
@@ -58,7 +58,7 @@ func GetPSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// CreatePSP handles POST /v1/operator/psps.
+// CreatePSP handles POST /v1/merchant/psps.
 func CreatePSP(r *httprequest.Request) {
 	svc, id, ok := pspContext(r)
 	if !ok {
@@ -76,7 +76,7 @@ func CreatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, out)
 }
 
-// UpdatePSP handles PATCH /v1/operator/psps/{id}.
+// UpdatePSP handles PATCH /v1/merchant/psps/{id}.
 func UpdatePSP(r *httprequest.Request) {
 	svc, id, pspID, ok := pspPathContext(r)
 	if !ok {
@@ -94,7 +94,7 @@ func UpdatePSP(r *httprequest.Request) {
 	r.JSON(http.StatusOK, out)
 }
 
-// RefreshPSPs handles POST /v1/operator/psps/refresh: the merchant's PSP pull
+// RefreshPSPs handles POST /v1/merchant/psps/refresh: the merchant's PSP pull
 // and its catalog drift pass run now.
 func RefreshPSPs(r *httprequest.Request) {
 	ctx := r.Request.Context()

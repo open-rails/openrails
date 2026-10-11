@@ -90,7 +90,7 @@ func TestServersShareOneDatabase(t *testing.T) {
 	other, err := standaloneHandler(b)
 	require.NoError(t, err)
 	bound := f.exchanged(t, first, token, shop.MerchantID)
-	w := bound.call(t, other, http.MethodGet, "/v1/operator/findings", nil)
+	w := bound.call(t, other, http.MethodGet, "/v1/merchant/findings", nil)
 	require.Equal(t, http.StatusOK, w.Code, "the other server verifies the token and reads the merchant the first one created: %s", w.Body.String())
 
 	for i, srv := range servers {

@@ -28,7 +28,7 @@ func (c *Client) ListPSPs(ctx context.Context, params billing.PSPListParams, req
 	if err := setIDs(query, params.IDs); err != nil {
 		return nil, err
 	}
-	path := "/v1/operator/psps"
+	path := "/v1/merchant/psps"
 	if len(query) > 0 {
 		path += "?" + query.Encode()
 	}
@@ -57,7 +57,7 @@ func (c *Client) GetPSP(ctx context.Context, id billing.PSPID, requestOptions ..
 // Vault.
 func (c *Client) CreatePSP(ctx context.Context, params billing.CreatePSPParams, requestOptions ...RequestOption) (*billing.PSP, error) {
 	var out billing.PSP
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/psps", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -82,7 +82,7 @@ func (c *Client) UpdatePSP(ctx context.Context, id billing.PSPID, params billing
 // why each other PSP was passed over. Nothing is created.
 func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPSPRoutingParams, requestOptions ...RequestOption) (*billing.PSPRoutingPreview, error) {
 	var out billing.PSPRoutingPreview
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/psps/routing-preview", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/routing-preview", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -93,7 +93,7 @@ func (c *Client) PreviewPSPRouting(ctx context.Context, params billing.PreviewPS
 // schedule.
 func (c *Client) RefreshPSPs(ctx context.Context, requestOptions ...RequestOption) (*billing.PSPRefresh, error) {
 	var out billing.PSPRefresh
-	if err := c.do(ctx, http.MethodPost, "/v1/operator/psps/refresh", nil, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/merchant/psps/refresh", nil, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -103,5 +103,5 @@ func pspPath(id billing.PSPID) (string, error) {
 	if id.IsZero() {
 		return "", invalidErr("PSP id is required")
 	}
-	return "/v1/operator/psps/" + url.PathEscape(id.String()), nil
+	return "/v1/merchant/psps/" + url.PathEscape(id.String()), nil
 }

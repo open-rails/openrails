@@ -355,13 +355,13 @@ export const listProducts = (
   archived?: boolean,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Product>>("/operator/catalog/products", {
+  api<ListPage<Product>>("/catalog/products", {
     query: { limit, cursor, archived },
     signal,
   })
 
 export const getProduct = (id: string, signal?: AbortSignal) =>
-  api<Product>(`/operator/catalog/products/${id}`, { signal })
+  api<Product>(`/catalog/products/${id}`, { signal })
 
 export interface ProductRequest {
   key: string
@@ -373,12 +373,12 @@ export interface ProductRequest {
 }
 
 export const createProduct = (body: ProductRequest) =>
-  api<Product>("/operator/catalog/products", { method: "POST", body })
+  api<Product>("/catalog/products", { method: "POST", body })
 
 // updateProduct is a merge patch: omitted fields stay, null clears
 // description and tier_group; entitlements: [] clears the granted keys.
 export const updateProduct = (id: string, body: UpdateProductParams) =>
-  api<Product>(`/operator/catalog/products/${id}`, {
+  api<Product>(`/catalog/products/${id}`, {
     method: "PATCH",
     body,
   })
@@ -407,18 +407,18 @@ export const listUsageMeters = (
   cursor?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Meter>>("/operator/catalog/meters", {
+  api<ListPage<Meter>>("/catalog/meters", {
     query: { limit, cursor },
     signal,
   })
 
 export const getUsageMeter = (key: string, signal?: AbortSignal) =>
-  api<Meter>(`/operator/catalog/meters/${encodeURIComponent(key)}`, {
+  api<Meter>(`/catalog/meters/${encodeURIComponent(key)}`, {
     signal,
   })
 
 export const putUsageMeter = (key: string, body: UsageMeterRequest) =>
-  api<Meter>(`/operator/catalog/meters/${encodeURIComponent(key)}`, {
+  api<Meter>(`/catalog/meters/${encodeURIComponent(key)}`, {
     method: "PUT",
     body,
   })
@@ -445,7 +445,7 @@ export const listPrices = (
   productId?: string,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Price>>("/operator/catalog/prices", {
+  api<ListPage<Price>>("/catalog/prices", {
     query: { limit, cursor, product_id: productId },
     signal,
   })
@@ -453,13 +453,13 @@ export const listPrices = (
 // A price that declares the key of a live price with other terms becomes
 // its new version and archives the old one.
 export const createPrice = (body: CreatePriceParams) =>
-  api<Price>("/operator/catalog/prices", { method: "POST", body })
+  api<Price>("/catalog/prices", { method: "POST", body })
 
 // getPrice returns the price with its state on each linked PSP. verify=true
 // also reads every PSP's copy and reports its drift: a read, never a write,
 // and slow enough that it stays opt-in.
 export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
-  api<Price>(`/operator/catalog/prices/${id}`, {
+  api<Price>(`/catalog/prices/${id}`, {
     query: verify ? { verify: true } : undefined,
     signal,
   })
@@ -467,7 +467,7 @@ export const getPrice = (id: string, verify = false, signal?: AbortSignal) =>
 // getProductByKey reads the product a key names, with its current prices:
 // a products list filtered by key.
 export const getProductByKey = async (productKey: string) => {
-  const page = await api<ListPage<Product>>("/operator/catalog/products", {
+  const page = await api<ListPage<Product>>("/catalog/products", {
     query: { keys: productKey },
   })
   const product = page.data[0]
@@ -478,12 +478,12 @@ export const getProductByKey = async (productKey: string) => {
 // updatePrice archives or restores a price, or changes its PSP links
 // (a PSP set to null is unlinked).
 export const updatePrice = (id: string, body: UpdatePriceParams) =>
-  api<Price>(`/operator/catalog/prices/${id}`, { method: "PATCH", body })
+  api<Price>(`/catalog/prices/${id}`, { method: "PATCH", body })
 
 // getPriceHistory returns the history of a price's key, most recent first:
 // when the key moved to which price.
 export const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
-  api<ListPage<PriceKeyMovement>>(`/operator/catalog/prices/${priceId}/history`, {
+  api<ListPage<PriceKeyMovement>>(`/catalog/prices/${priceId}/history`, {
     query: { limit: PAGE_MAX },
     signal,
   })
@@ -494,7 +494,7 @@ export const getPriceHistory = (priceId: string, signal?: AbortSignal) =>
 // before the price edit lands: by key with no target it counts every
 // version's subscribers. It never writes.
 export const previewPriceMigration = (productKey: string, priceKey: string) =>
-  api<PriceMigrationPreview>("/operator/price-migrations/preview", {
+  api<PriceMigrationPreview>("/catalog/price-migrations/preview", {
     method: "POST",
     body: { product_key: productKey, price_key: priceKey },
   })
@@ -507,7 +507,7 @@ export const createPriceMigration = (
   toPriceId: string,
   effectiveAt: string
 ) =>
-  api<PriceMigration>("/operator/price-migrations", {
+  api<PriceMigration>("/catalog/price-migrations", {
     method: "POST",
     body: {
       product_key: productKey,
@@ -524,13 +524,13 @@ export const listPriceMigrations = (
   limit = 20,
   signal?: AbortSignal
 ) =>
-  api<CursorEnvelope<PriceMigration>>("/operator/price-migrations", {
+  api<CursorEnvelope<PriceMigration>>("/catalog/price-migrations", {
     query: { product_key: productKey, price_key: priceKey, limit },
     signal,
   })
 
 export const cancelPriceMigration = (id: string) =>
-  api<PriceMigrationCancel>(`/operator/price-migrations/${id}/cancel`, {
+  api<PriceMigrationCancel>(`/catalog/price-migrations/${id}/cancel`, {
     method: "POST",
   })
 
@@ -540,7 +540,7 @@ export type { CatalogApplicationReceipt } from "./generated/wire"
 // instead of parsing/re-encoding money in the browser. The server deduplicates
 // batches by their canonical content. force overwrites what edits set.
 export const applyCatalog = (document: string, force = false) =>
-  api<CatalogApplicationReceipt>("/operator/catalog/apply", {
+  api<CatalogApplicationReceipt>("/catalog/apply", {
     method: "POST",
     rawBody: document,
     headers: { "Content-Type": "application/yaml" },
@@ -550,7 +550,7 @@ export const applyCatalog = (document: string, force = false) =>
 // refreshPSPs re-reads every PSP now, its catalog drift included; the pass
 // runs in the background.
 export const refreshPSPs = () =>
-  api<PSPRefresh>("/operator/psps/refresh", { method: "POST" })
+  api<PSPRefresh>("/merchant/psps/refresh", { method: "POST" })
 
 // --- Ops ---
 
@@ -561,12 +561,12 @@ export const listFindings = (
   limit: number,
   signal?: AbortSignal
 ) =>
-  api<ListPage<Finding>>("/operator/findings", {
+  api<ListPage<Finding>>("/merchant/findings", {
     query: { ...filters, limit },
     signal,
   })
 
-export const getFinding = (id: string) => api<Finding>(`/operator/findings/${id}`)
+export const getFinding = (id: string) => api<Finding>(`/merchant/findings/${id}`)
 
 export const resolveFinding = (
   id: string,
@@ -574,28 +574,28 @@ export const resolveFinding = (
   notes: string
 ) =>
   api<{ finding: Finding; execution?: Record<string, unknown> }>(
-    `/operator/findings/${id}/resolve`,
+    `/merchant/findings/${id}/resolve`,
     { method: "POST", body: { outcome, notes } }
   )
 
 // --- Settings ---
 
 export const getMerchantConfiguration = (signal?: AbortSignal) =>
-  api<MerchantConfigurationState>("/operator/configuration", { signal })
+  api<MerchantConfigurationState>("/merchant/configuration", { signal })
 
 // Merges the fields it names. expected_revision is the revision the form
 // read; a configuration changed since is refused with revision_mismatch.
 export const updateMerchantConfiguration = (
   body: UpdateMerchantConfigurationParams
 ) =>
-  api<MerchantConfigurationState>("/operator/configuration", {
+  api<MerchantConfigurationState>("/merchant/configuration", {
     method: "PATCH",
     body,
   })
 
 // A merchant has a handful of PSPs: one page holds them all.
 export const listPSPs = (signal?: AbortSignal) =>
-  api<ListPage<PSP>>("/operator/psps?limit=500", { signal })
+  api<ListPage<PSP>>("/merchant/psps?limit=500", { signal })
 
 // The rail registry is static per build: it arrives with the configuration.
 export const listRails = async (signal?: AbortSignal) =>
@@ -604,13 +604,13 @@ export const listRails = async (signal?: AbortSignal) =>
 // Credentials are write-only and checked with the provider before anything
 // is stored.
 export const createPSP = (body: CreatePSPParams) =>
-  api<PSP>("/operator/psps", { method: "POST", body })
+  api<PSP>("/merchant/psps", { method: "POST", body })
 
 // Changes settings, rotates credentials (omitted ones keep their values) or
 // archives the PSP: the rail's last active PSP needs allow_last
 // (409 psp_last_active). expected_revision refuses a PSP changed since.
 export const updatePSP = (id: string, body: UpdatePSPParams) =>
-  api<PSP>(`/operator/psps/${encodeURIComponent(id)}`, {
+  api<PSP>(`/merchant/psps/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body,
   })
@@ -622,7 +622,7 @@ export const previewPSPRouting = (
   body: { price_id: string; country?: string; psp?: string },
   signal?: AbortSignal
 ) =>
-  api<PSPRoutingPreview>("/operator/psps/routing-preview", {
+  api<PSPRoutingPreview>("/merchant/psps/routing-preview", {
     method: "POST",
     body,
     signal,
@@ -649,14 +649,14 @@ export const updateCustomer = (customerId: string, params: UpdateCustomerParams)
 // --- Alerting: webhooks (#736) ---
 
 export const listWebhooks = (signal?: AbortSignal) =>
-  api<ListPage<AlertWebhook>>("/operator/alert-webhooks", { signal })
+  api<ListPage<AlertWebhook>>("/merchant/alert-webhooks", { signal })
 
 export const createWebhook = (body: CreateAlertWebhookParams) =>
-  api<AlertWebhook>("/operator/alert-webhooks", { method: "POST", body })
+  api<AlertWebhook>("/merchant/alert-webhooks", { method: "POST", body })
 
 // Omitted fields keep their values; the URL is write-only.
 export const updateWebhook = (id: string, body: UpdateAlertWebhookParams) =>
-  api<AlertWebhook>(`/operator/alert-webhooks/${id}`, { method: "PATCH", body })
+  api<AlertWebhook>(`/merchant/alert-webhooks/${id}`, { method: "PATCH", body })
 
 export const deleteWebhook = (id: string) =>
-  api<void>(`/operator/alert-webhooks/${id}`, { method: "DELETE" })
+  api<void>(`/merchant/alert-webhooks/${id}`, { method: "DELETE" })

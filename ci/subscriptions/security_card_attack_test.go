@@ -83,10 +83,10 @@ func TestSecurityCardAttackModeIsPerMerchant(t *testing.T) {
 	require.Equal(t, &billing.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "e2e-site", ScriptURL: config.CaptchaScriptURL(&config.CaptchaConfig{Provider: config.CaptchaProviderTurnstile, SiteKey: "e2e-site"}),
 		Action: config.CaptchaAction, TokenHeader: "X-Captcha-Token"}, public.Captcha, "the configuration says how to solve it")
 	require.NotEmpty(t, public.Rails, "and carries the rail registry")
-	status, body = attacked.staff(http.MethodGet, "/v1/operator/findings")
+	status, body = attacked.staff(http.MethodGet, "/v1/merchant/findings")
 	require.Equal(t, http.StatusOK, status, "its server-to-server API never meets a captcha: %s", body)
 
-	status, body = bystander.staff(http.MethodGet, "/v1/operator/findings")
+	status, body = bystander.staff(http.MethodGet, "/v1/merchant/findings")
 	require.Equal(t, http.StatusOK, status, "another merchant's API is untouched: %s", body)
 	status, body = bystander.newCustomer().cardSave(ip(101), visa)
 	require.Equal(t, http.StatusCreated, status, "another merchant's card routes are untouched: %s", body)

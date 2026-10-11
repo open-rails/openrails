@@ -77,7 +77,7 @@ describe("BuyButton", () => {
     expect(
       await screen.findByRole("button", { name: "Rent for 3 days, $1.99" })
     ).toBeEnabled()
-    expect(server.calls).toContain("GET /catalog/products")
+    expect(server.calls).toContain("GET /products")
   })
 
   it("asks the host to sign in, without an order, when it says the visitor is signed out", async () => {

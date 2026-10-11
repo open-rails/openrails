@@ -57,7 +57,7 @@ func TestBoundTokensAreAccessTokensForThisResource(t *testing.T) {
 		require.NoError(t, err)
 		return signed
 	}
-	routes := map[string]func(jwt.MapClaims){"/v1/me": customer, "/v1/operator/findings": machine, "/v1/app/host-events": machine}
+	routes := map[string]func(jwt.MapClaims){"/v1/me": customer, "/v1/merchant/findings": machine, "/v1/app/host-events": machine}
 	for path, shape := range routes {
 		require.Equal(t, http.StatusOK, serve(handler, rsRequest{path: path, authorization: "Bearer " + host.mint(t, shape)}).Code, "control: %s", path)
 		for name, token := range map[string]string{
@@ -120,7 +120,7 @@ func TestCredentialsReachOnlyTheirMerchant(t *testing.T) {
 	require.Equal(t, http.StatusOK, list.Code, list.Body.String())
 	require.Contains(t, list.Body.String(), alice.String())
 	require.NotContains(t, list.Body.String(), bob.String())
-	for _, path := range []string{"/v1/admin/customers/" + bob.String(), "/v1/operator/catalog/products/" + product.ID.String()} {
+	for _, path := range []string{"/v1/admin/customers/" + bob.String(), "/v1/catalog/products/" + product.ID.String()} {
 		require.Equal(t, http.StatusNotFound, call(t, handler, keyA, http.MethodGet, path, nil).Code, path)
 	}
 
@@ -147,7 +147,7 @@ func TestGroupMintIsACustomer(t *testing.T) {
 	me := serve(handler, rsRequest{path: "/v1/me", authorization: "Bearer " + minted.Value})
 	require.Equal(t, http.StatusOK, me.Code, me.Body.String())
 	require.Equal(t, mid.String(), me.Header().Get("OpenRails-Bound-Merchant"))
-	admin := serve(handler, rsRequest{path: "/v1/operator/findings", authorization: "Bearer " + minted.Value})
+	admin := serve(handler, rsRequest{path: "/v1/merchant/findings", authorization: "Bearer " + minted.Value})
 	require.Equal(t, http.StatusForbidden, admin.Code, admin.Body.String())
 	require.Equal(t, billing.CodePermissionRequired, errorCode(t, admin))
 
@@ -200,9 +200,9 @@ func TestRequestCannotNameItsMerchant(t *testing.T) {
 	require.NoError(t, err)
 	keyA := merchantKey(t, srv, a, "owner").Secret
 	for name, w := range map[string]*httptest.ResponseRecorder{
-		"a header":        callWith(t, handler, keyA, http.MethodGet, "/v1/operator/findings", nil, retiredMerchantHeader, "id:"+b.String()),
-		"a merchant Host": callWith(t, handler, keyA, http.MethodGet, "/v1/operator/findings", nil, "Host", "shop-b.api.billing.example"),
-		"a query":         callWith(t, handler, keyA, http.MethodGet, "/v1/operator/findings?merchant="+b.String(), nil),
+		"a header":        callWith(t, handler, keyA, http.MethodGet, "/v1/merchant/findings", nil, retiredMerchantHeader, "id:"+b.String()),
+		"a merchant Host": callWith(t, handler, keyA, http.MethodGet, "/v1/merchant/findings", nil, "Host", "shop-b.api.billing.example"),
+		"a query":         callWith(t, handler, keyA, http.MethodGet, "/v1/merchant/findings?merchant="+b.String(), nil),
 	} {
 		if w.Code == http.StatusBadRequest {
 			require.Equal(t, billing.CodeInvalidQuery, errorCode(t, w), name)
@@ -214,7 +214,7 @@ func TestRequestCannotNameItsMerchant(t *testing.T) {
 	body := call(t, handler, keyA, http.MethodPatch, "/v1/admin/customers/"+uuid.NewString(), map[string]any{"merchant_id": b.String()})
 	require.Equal(t, http.StatusBadRequest, body.Code, body.Body.String())
 	require.Equal(t, billing.CodeUnknownField, errorCode(t, body))
-	require.Equal(t, http.StatusNotFound, call(t, handler, keyA, http.MethodGet, "/v1/merchants/"+b.String()+"/operator/findings", nil).Code)
+	require.Equal(t, http.StatusNotFound, call(t, handler, keyA, http.MethodGet, "/v1/merchants/"+b.String()+"/merchant/findings", nil).Code)
 }
 
 // Secrets stay where they are given: through a customer token's redemption
@@ -269,7 +269,7 @@ func TestBoundTokensStayOutOfLogsAndURLs(t *testing.T) {
 	customer := decode[boundToken](t, redeemed).AccessToken
 	require.Equal(t, http.StatusOK, serve(s.handler, rsRequest{path: "/v1/me", authorization: "Bearer " + customer}).Code)
 	key := merchantKey(t, s.srv, s.mid, "owner").Secret
-	require.Equal(t, http.StatusOK, call(t, s.handler, key, http.MethodGet, "/v1/operator/findings", nil).Code)
+	require.Equal(t, http.StatusOK, call(t, s.handler, key, http.MethodGet, "/v1/merchant/findings", nil).Code)
 	owner := newAccount(t, s.srv)
 	role, ok := server.MerchantRole("owner")
 	require.True(t, ok)
@@ -278,7 +278,7 @@ func TestBoundTokensStayOutOfLogsAndURLs(t *testing.T) {
 	console := f.exchanged(t, s.handler, session, s.mid)
 	require.Equal(t, http.StatusOK, console.call(t, s.handler, http.MethodGet, "/v1/admin/access", nil).Code)
 	// A refusal logs too: a token presented at a merchant it is not bound to.
-	require.Equal(t, http.StatusForbidden, serve(s.handler, rsRequest{path: "/v1/operator/findings", authorization: "Bearer " + session}).Code)
+	require.Equal(t, http.StatusForbidden, serve(s.handler, rsRequest{path: "/v1/merchant/findings", authorization: "Bearer " + session}).Code)
 	secrets = append(secrets, assertion, customer, key, session, console.AccessToken)
 
 	var logged strings.Builder

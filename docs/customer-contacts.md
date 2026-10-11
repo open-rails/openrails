@@ -56,7 +56,7 @@ is read from its own issuer's directory, never another's.
   refused.
 - A provisioning token as `Authorization: Bearer`, for directories like Okta
   or Entra ID that cannot get a token from your issuer; it opens nothing else. Mint one with
-  `client.CreateProvisioningToken` (`POST /v1/operator/provisioning-tokens`; the
+  `client.CreateProvisioningToken` (`POST /v1/merchant/provisioning-tokens`; the
   token is answered once), list and revoke them with `ListProvisioningTokens`
   and `DeleteProvisioningToken`, or declare one in the merchant declaration's
   `secrets.scim_token` (at least 32 characters; replaced or removed with the
