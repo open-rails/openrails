@@ -157,17 +157,3 @@ type MetricsEvidence struct {
 	Query MetricsQuery `json:"query"`
 	MetricsResult
 }
-
-// GenerateDashboardWidgetParams describes a widget in words; BaseQuery, when set, is
-// an existing widget's query to refine.
-type GenerateDashboardWidgetParams struct {
-	Prompt    string        `json:"prompt"`
-	BaseQuery *MetricsQuery `json:"base_query"`
-}
-
-// GeneratedWidget is a validated widget a model wrote from a prompt.
-type GeneratedWidget struct {
-	Query MetricsQuery `json:"query"`
-	Title string       `json:"title"`
-	Viz   string       `json:"viz"`
-}

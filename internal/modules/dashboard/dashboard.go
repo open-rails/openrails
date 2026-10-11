@@ -1,6 +1,5 @@
 // Package dashboard is the configurable merchant dashboard: a saved widget grid
-// per merchant, each widget a metrics query validated before every save. The
-// optional LLM (generate.go) turns a prompt into a validated widget.
+// per merchant, each widget a metrics query validated before every save.
 package dashboard
 
 import (

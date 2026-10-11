@@ -1,9 +1,8 @@
 // Ask panel: one-shot metrics Q&A. The server's LLM runs compiler-validated
 // queries; on-screen numbers come from each query's verbatim result, never
-// from prose. Each evidence query can be saved as a widget.
+// from prose. The answer and evidence are read-only.
 import { HugeiconsIcon } from "@hugeicons/react"
 import {
-  Add01Icon,
   BubbleChatQuestionIcon,
   Cancel01Icon,
   Loading02Icon,
@@ -14,40 +13,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { ApiError } from "@/lib/api/client"
-import {
-  type AskEvidence,
-  type MetricsQuery,
-  type WidgetViz,
-} from "@/lib/api/metrics"
 import { adminMutations } from "@/lib/mutations"
 
 import { WidgetVizView } from "./widget-viz"
 
-// suggestViz picks a sensible default viz for saving an evidence query as a
-// widget (the editor lets the user override it).
-function suggestViz(query: MetricsQuery): WidgetViz {
-  if (query.by?.includes("time")) return "line"
-  if ((query.by?.length ?? 0) > 0 || query.measures.length > 1) return "table"
-  return "stat"
-}
-
-export function AskPanel({
-  enabled,
-  onAddWidget,
-}: {
-  enabled: boolean
-  // onAddWidget is absent when the layout is read-only.
-  onAddWidget?: (draft: {
-    title: string
-    viz: WidgetViz
-    query: MetricsQuery
-  }) => void
-}) {
+export function AskPanel({ enabled }: { enabled: boolean }) {
   const [question, setQuestion] = React.useState("")
   const askQuestion = useMutation(adminMutations.askMetrics())
   const asking = askQuestion.isPending
   const result = askQuestion.data
-  const asked = askQuestion.variables ?? ""
   const error = askQuestion.error
     ? askQuestion.error instanceof ApiError
       ? askQuestion.error.message
@@ -58,14 +32,6 @@ export function AskPanel({
     const q = question.trim()
     if (!q || asking) return
     askQuestion.mutate(q)
-  }
-
-  const addAsWidget = (ev: AskEvidence) => {
-    onAddWidget?.({
-      title: asked.length > 60 ? asked.slice(0, 57) + "…" : asked,
-      viz: suggestViz(ev.query),
-      query: ev.query,
-    })
   }
 
   // Enabling Ask is an operator setup step (llm.ask_enabled + an LLM key —
@@ -142,19 +108,6 @@ export function AskPanel({
                       <span className="text-xs font-medium text-muted-foreground uppercase">
                         Query {i + 1} result
                       </span>
-                      {onAddWidget && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => addAsWidget(ev)}
-                        >
-                          <HugeiconsIcon
-                            icon={Add01Icon}
-                            className="size-3.5"
-                          />{" "}
-                          Add as widget
-                        </Button>
-                      )}
                     </div>
                     <div className="max-h-64 overflow-auto">
                       <WidgetVizView viz="table" result={ev} />

@@ -19,12 +19,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
 
-type featureLimitLLM struct{ asks, generations int }
-
-func (l *featureLimitLLM) Complete(context.Context, string, []dashboard.LLMMessage) (string, error) {
-	l.generations++
-	return `{"query":{"measures":["cancellations"],"by":["time"],"grain":"day","range":{"last":"7d"}},"title":"Cancellations per day","viz":"line"}`, nil
-}
+type featureLimitLLM struct{ asks int }
 
 func (l *featureLimitLLM) CompleteTools(context.Context, string, []dashboard.ToolDef, []dashboard.ToolMessage, int) (*dashboard.ToolTurn, error) {
 	l.asks++
@@ -40,9 +35,8 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 	cfg := f.config()
 	cfg.Merchants = map[string]openrails.MerchantDeclaration{"feature-limits-" + uuid.NewString()[:8]: {}}
 	cfg.RateLimits = &openrails.RateLimitsConfig{
-		"metrics-ask":        {RequestsPerMinute: 2},
-		"catalog-ask":        {RequestsPerMinute: 2},
-		"dashboard-generate": {RequestsPerMinute: 2},
+		"metrics-ask": {RequestsPerMinute: 2},
+		"catalog-ask": {RequestsPerMinute: 2},
 	}
 	cfg.Captcha = &openrails.CaptchaConfig{SiteKey: "test-site", SecretKey: "test-secret"}
 	cfg.LLM = &openrails.LLMConfig{APIKey: "test", AskEnabled: true, CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
@@ -62,6 +56,9 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 		return mux
 	}
 	first, second := mount("/first"), mount("/second")
+	removed := httptest.NewRecorder()
+	first.ServeHTTP(removed, httptest.NewRequest(http.MethodPost, "/first/v1/admin/dashboard/widgets/generate", strings.NewReader(`{"prompt":"Add a chart"}`)))
+	require.Equal(t, http.StatusNotFound, removed.Code, "AI dashboard authoring stays absent even with an LLM configured")
 	for _, feature := range []struct {
 		path, body string
 		calls      *int
@@ -73,10 +70,6 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 		}},
 		{"/v1/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
 			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
-			return err
-		}},
-		{"/v1/metrics/dashboard/widgets/generate", `{"prompt":"Cancellations per day"}`, &dashboardLLM.generations, func() error {
-			_, err := client.GenerateDashboardWidget(t.Context(), billing.GenerateDashboardWidgetParams{Prompt: "Cancellations per day"})
 			return err
 		}},
 	} {

@@ -75,9 +75,9 @@ func TestOpenAIWireShape(t *testing.T) {
 	stub, url := newProviderStub(t, openaiText("  {\"query\":{}}  "), openaiText("final answer"))
 	llm := NewOpenAILLM("sk-test", "gpt-test", url+"/openai/v1/") // nested base path, trailing slash
 
-	got, err := llm.Complete(context.Background(), "SYS", []LLMMessage{{Role: "user", Content: "make a widget"}, {Role: "assistant", Content: "bad"}})
+	got, err := llm.CompleteTools(context.Background(), "SYS", nil, []ToolMessage{{Role: "user", Text: "ask metrics"}, {Role: "assistant", Text: "checking"}}, 0)
 	require.NoError(t, err)
-	require.Equal(t, `{"query":{}}`, got)
+	require.Equal(t, `{"query":{}}`, got.Text)
 	require.Equal(t, "/openai/v1/chat/completions", stub.paths[0])
 	require.Equal(t, "Bearer sk-test", stub.headers[0].Get("Authorization"))
 	req := stub.bodies[0]
@@ -85,7 +85,7 @@ func TestOpenAIWireShape(t *testing.T) {
 	require.EqualValues(t, openaiMaxTokens, req["max_completion_tokens"])
 	require.NotContains(t, req, "max_tokens", "reasoning models reject legacy max_tokens")
 	require.NotContains(t, req, "temperature")
-	require.JSONEq(t, `[{"role":"system","content":"SYS"},{"role":"user","content":"make a widget"},{"role":"assistant","content":"bad"}]`, mustJSON(t, req["messages"]))
+	require.JSONEq(t, `[{"role":"system","content":"SYS"},{"role":"user","content":"ask metrics"},{"role":"assistant","content":"checking"}]`, mustJSON(t, req["messages"]))
 
 	turn, err := llm.CompleteTools(context.Background(), "", []ToolDef{askToolDef()}, toolConversation, 512)
 	require.NoError(t, err)
@@ -118,7 +118,7 @@ func TestOpenAIResponseDecoding(t *testing.T) {
 	require.JSONEq(t, `{}`, string(turn.ToolCalls[1].Input), "empty arguments normalize to {}")
 
 	_, url = newProviderStub(t, openaiText("   "))
-	_, err = NewOpenAILLM("k", "m", url).Complete(context.Background(), "s", []LLMMessage{{Role: "user", Content: "q"}})
+	_, err = NewOpenAILLM("k", "m", url).CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
 	require.ErrorContains(t, err, `empty response (finish_reason "stop")`)
 }
 
@@ -154,11 +154,9 @@ func TestProviderErrorsAreSurfaced(t *testing.T) {
 	stub, url := newProviderStub(t, `{"error":{"type":"invalid_request_error","message":"model does not exist"}}`)
 	stub.status = http.StatusBadRequest
 	for name, llm := range map[string]LLM{"openai": NewOpenAILLM("k", "m", url), "anthropic": NewAnthropicLLM("k", "m", url)} {
-		_, err := llm.Complete(context.Background(), "s", []LLMMessage{{Role: "user", Content: "q"}})
+		_, err := llm.CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
 		require.ErrorContains(t, err, "status 400", name)
 		require.ErrorContains(t, err, "invalid_request_error: model does not exist", name)
-		_, err = llm.CompleteTools(context.Background(), "s", nil, []ToolMessage{{Role: "user", Text: "q"}}, 0)
-		require.ErrorContains(t, err, "status 400", name)
 	}
 }
 

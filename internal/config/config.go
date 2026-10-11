@@ -99,8 +99,7 @@ type Config struct {
 	// mounts: a KV mount makes Vault hold merchant configuration.
 	Vault *VaultConfig
 
-	// LLM is the model behind the console's natural-language widgets and
-	// questions. Without an API key those features are off.
+	// LLM is the model behind the console's metrics and catalog questions. Without an API key those features are off.
 	LLM *LLMConfig
 
 	// CatalogReconciliationInterval schedules the alert-only catalog
@@ -349,8 +348,8 @@ const (
 	LLMDefaultModelOpenAI = "gpt-5.4-nano"
 )
 
-// LLMConfig configures the model behind the console's natural-language
-// widgets and questions.
+// LLMConfig configures the model behind the console's metrics and catalog
+// questions.
 type LLMConfig struct {
 	// Provider selects the API dialect: "anthropic" (the default) or
 	// "openai". Any other value is refused.
@@ -364,7 +363,7 @@ type LLMConfig struct {
 	// APIKey is the provider credential. Empty turns the features off.
 	APIKey string
 	// AskEnabled turns on questions about metrics, which send aggregate query
-	// results to the provider (widget generation sends only the schema).
+	// results to the provider.
 	AskEnabled bool
 	// CatalogCopilotEnabled turns on read-only questions about the catalog,
 	// which send aggregate catalog and subscriber counts to the provider.
@@ -374,7 +373,7 @@ type LLMConfig struct {
 	CatalogDraftingEnabled bool
 }
 
-// LLMConfigured reports whether NL widget generation can run (fail-closed on a
+// LLMConfigured reports whether a model backend is configured (fail-closed on a
 // missing key).
 func LLMConfigured(c *LLMConfig) bool { return c != nil && strings.TrimSpace(c.APIKey) != "" }
 
@@ -917,7 +916,7 @@ func ValidateTokenDecimals(mintOrSymbol string, decimals int) error {
 type RateLimitsConfig map[string]*RateLimit
 
 // RateLimitBuckets are the buckets RateLimitsConfig may name.
-var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook", "metrics-ask", "catalog-ask", "dashboard-generate"}
+var RateLimitBuckets = []string{"checkout", "payment", "subscribe", "webhook", "metrics-ask", "catalog-ask"}
 
 // Provider write modes (#346, #355) — see Config.ProviderWriteMode. The former
 // mode=test is gone (sandbox is the orthogonal test_mode axis) and "production"
@@ -1598,11 +1597,10 @@ func DefaultRateLimits() *RateLimitsConfig {
 		// IPs), so this must absorb rebill runs without refusing legitimate
 		// payment events. Webhooks are already authenticated; this is a DoS
 		// floor, not the primary control.
-		"webhook":            &RateLimit{RequestsPerMinute: 1200},
-		"payment":            &RateLimit{RequestsPerMinute: 40},
-		"metrics-ask":        &RateLimit{RequestsPerMinute: 10},
-		"catalog-ask":        &RateLimit{RequestsPerMinute: 10},
-		"dashboard-generate": &RateLimit{RequestsPerMinute: 10},
+		"webhook":     &RateLimit{RequestsPerMinute: 1200},
+		"payment":     &RateLimit{RequestsPerMinute: 40},
+		"metrics-ask": &RateLimit{RequestsPerMinute: 10},
+		"catalog-ask": &RateLimit{RequestsPerMinute: 10},
 	}
 }
 

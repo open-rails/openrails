@@ -3,7 +3,6 @@ package copilot
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -19,10 +18,6 @@ import (
 type scriptLLM struct {
 	turns []*dashboard.ToolTurn
 	convs [][]dashboard.ToolMessage
-}
-
-func (f *scriptLLM) Complete(context.Context, string, []dashboard.LLMMessage) (string, error) {
-	return "", errors.New("not scripted")
 }
 
 func (f *scriptLLM) CompleteTools(_ context.Context, _ string, _ []dashboard.ToolDef, msgs []dashboard.ToolMessage, _ int) (*dashboard.ToolTurn, error) {

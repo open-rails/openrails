@@ -335,7 +335,6 @@ var errorCodes = []ErrorCode{
 	{"webhook_account_mismatch", 400, invalid, "The webhook's account does not match its payload."},
 	{"metrics_query_invalid", 400, invalid, "The metrics query is invalid; metadata.errors lists why."},
 	{"dashboard_invalid", 400, invalid, "The dashboard is invalid; metadata.errors lists why."},
-	{"widget_generation_invalid", 422, invalid, "The model could not produce a valid query for the prompt."},
 
 	// Billing import and archive.
 	{"as_of_required", 400, invalid, "The import needs as_of, its RFC 3339 evidence horizon."},
