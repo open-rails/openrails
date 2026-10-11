@@ -159,7 +159,7 @@ func TestCheckAuthFillsTheRouteGroupsPermissions(t *testing.T) {
 	fake := &authtest.Fake{}
 	held := []billing.Permission{
 		billing.RootBillingRead, billing.RootBillingManage, billing.RootCatalogManage, billing.RootConfigManage, billing.RootMetricsRead,
-		billing.RootEntitlementsRead, billing.RootCatalogRead, billing.RootUsageManage, billing.RootEventsRead, billing.RootOrdersManage,
+		billing.RootEntitlementsRead, billing.RootCatalogRead, billing.RootUsageManage, billing.RootEventsRead, billing.RootOrdersManage, billing.RootCustomersRead,
 	}
 	every := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}
 	staff := fake.Person(staffID, held...)

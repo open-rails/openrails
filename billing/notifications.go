@@ -14,7 +14,10 @@ type Notification struct {
 	Data       NotificationData `json:"data"`
 	Seen       bool             `json:"seen"`
 	ReadAt     *time.Time       `json:"read_at"`
-	CreatedAt  time.Time        `json:"created_at"`
+	// ActionRequested records what this event asked when emitted. It is not
+	// a claim that the underlying payment, order or account still needs action.
+	ActionRequested bool      `json:"action_requested,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // NotificationListParams pages a customer's retained billing inbox, newest

@@ -14702,6 +14702,9 @@
           "id": {
             "type": "string"
           },
+          "merchant_id": {
+            "type": "string"
+          },
           "finding_type": {
             "type": "string"
           },
@@ -14881,6 +14884,7 @@
         },
         "required": [
           "id",
+          "merchant_id",
           "finding_type",
           "provider",
           "psp_id",
@@ -15598,6 +15602,9 @@
           },
           "reprice_notice_window_days": {
             "type": "integer"
+          },
+          "charge_receipts": {
+            "type": "boolean"
           },
           "renewal_receipt_min_interval_hours": {
             "type": "integer"
@@ -16401,6 +16408,9 @@
                 "type": "null"
               }
             ]
+          },
+          "action_requested": {
+            "type": "boolean"
           },
           "created_at": {
             "type": "string",
