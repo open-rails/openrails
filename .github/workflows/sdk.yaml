@@ -99,6 +99,10 @@ jobs:
           cache-dependency-path: |
             go.sum
             server/go.sum
+      # billing-ui is a path dependency: build it before the page installs it.
+      - name: billing-ui
+        working-directory: sdk/billing-ui
+        run: pnpm install --frozen-lockfile --ignore-scripts && pnpm build
       - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm exec playwright install --with-deps chromium
       - name: Hosted checkout in a browser

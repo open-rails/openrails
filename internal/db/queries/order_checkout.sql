@@ -28,4 +28,5 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND checkout_secret_hash = sqlc.
 -- name: CountOrderDeclines :one
 -- Card attempts on an order the provider declined.
 SELECT count(*) FROM billing.checkout_attempts
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid AND status = 'failed';
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND order_id = sqlc.arg(order_id)::uuid AND status = 'failed'
+  AND deleted_at IS NULL;

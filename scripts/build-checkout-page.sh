@@ -36,6 +36,9 @@ fi
 run=(pnpm --config.verify-deps-before-run=false run)
 (cd "$build_root/sdk/billing-ui" && pnpm install --frozen-lockfile --ignore-scripts && "${run[@]}" build)
 cd "$build_root/web/checkout"
+# A path dependency is copied in at install, and pnpm keeps a copy it
+# thinks current: install afresh so the page takes this billing-ui build.
+rm -rf node_modules
 pnpm install --frozen-lockfile --ignore-scripts
 "${run[@]}" build --outDir "$out" --emptyOutDir
 test -f "$out/index.html"

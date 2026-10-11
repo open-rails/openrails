@@ -44,8 +44,8 @@ export default async function globalSetup() {
       execFileSync("docker", ["exec", pg, "pg_isready", "-h", "127.0.0.1", "-U", "postgres", "-d", "checkout"], { stdio: "ignore" })
     })
     const port = await freePort()
-    harness = spawn(bin, ["-addr", `127.0.0.1:${port}`, "-assets", path.join(page, "dist"), "-lifetime", "30m"], {
-      env: { ...process.env, DATABASE_URL: `postgres://postgres:postgres@127.0.0.1:${pgPort}/checkout?sslmode=disable` },
+    const dsn = `postgres://postgres:postgres@127.0.0.1:${pgPort}/checkout?sslmode=disable`
+    harness = spawn(bin, ["-addr", `127.0.0.1:${port}`, "-assets", path.join(page, "dist"), "-dsn", dsn, "-lifetime", "30m"], {
       stdio: ["ignore", "inherit", "inherit"],
     })
     await until(async () => {

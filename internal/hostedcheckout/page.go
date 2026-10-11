@@ -8,6 +8,7 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/config"
+	"github.com/open-rails/openrails/internal/integrations/stripeapi"
 )
 
 // railOrigins are the origins each rail's own browser fields load from:
@@ -18,7 +19,7 @@ var railOrigins = []origins{
 	{
 		script:  []string{"https://js.stripe.com", "https://*.js.stripe.com"},
 		frame:   []string{"https://js.stripe.com", "https://*.js.stripe.com", "https://hooks.stripe.com"},
-		connect: []string{"https://api.stripe.com"},
+		connect: []string{stripeapi.APIBase},
 	},
 	{
 		script:  nmiOrigins,
@@ -135,6 +136,8 @@ func Page(assets fs.FS) (http.Handler, error) {
 		if rel, ok := strings.CutPrefix(r.URL.Path, "/assets/"); ok && rel != "" && fs.ValidPath("assets/"+rel) {
 			if info, err := fs.Stat(assets, "assets/"+rel); err == nil && !info.IsDir() {
 				w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+				// #nosec G703 -- fs.ValidPath rejects "..", absolute and empty
+				// segments, and assets is an embedded or host-given fs.FS.
 				http.ServeFileFS(w, r, assets, "assets/"+rel)
 				return
 			}

@@ -15,7 +15,7 @@ import (
 // openrailstest/stripemock: production code must never reach a fake gateway.
 func TestOnlyTestsAndSandboxImportTheMock(t *testing.T) {
 	mocks := []string{"github.com/open-rails/openrails/internal/stripemock", "github.com/open-rails/openrails/openrailstest/stripemock"}
-	allowed := []string{"internal/stripemock/", "openrailstest/stripemock/", "server/cmd/openrails/sandbox_", "ci/", "sdk/billing-ui/e2e/"}
+	allowed := []string{"internal/stripemock/", "openrailstest/stripemock/", "server/cmd/openrails/sandbox_", "ci/", "server/ci/", "sdk/billing-ui/e2e/"}
 	root, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)

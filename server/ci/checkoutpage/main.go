@@ -42,7 +42,7 @@ import (
 func main() {
 	addr := flag.String("addr", "127.0.0.1:4791", "listen address")
 	assets := flag.String("assets", "", "web/checkout's build")
-	dsn := flag.String("dsn", os.Getenv("DATABASE_URL"), "Postgres DSN")
+	dsn := flag.String("dsn", "", "Postgres DSN")
 	lifetime := flag.Duration("lifetime", 30*time.Minute, "exit after this long")
 	flag.Parse()
 	if err := run(*addr, *assets, *dsn, *lifetime); err != nil {

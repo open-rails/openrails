@@ -65,6 +65,7 @@ const configured = (features: Record<string, boolean> | null) => {
       currencies: [],
       rails: [],
       payment: null,
+      merchant: null,
       captcha: null,
     })
   return render(<EditsProbe />, queries)

@@ -15,6 +15,7 @@ import (
 const countOrderDeclines = `-- name: CountOrderDeclines :one
 SELECT count(*) FROM billing.checkout_attempts
 WHERE merchant_id = $1::uuid AND order_id = $2::uuid AND status = 'failed'
+  AND deleted_at IS NULL
 `
 
 type CountOrderDeclinesParams struct {
