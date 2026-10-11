@@ -38,7 +38,6 @@
       "func (c *Client) ExportBillingArchive(ctx context.Context, dst io.Writer, requestOptions ...RequestOption) error",
       "func (c *Client) ExtendAdmissions(ctx context.Context, items []billing.ExtendAdmissionParams, requestOptions ...RequestOption) ([]billing.AdmissionResult, error)",
       "func (c *Client) GenerateDashboardWidget(ctx context.Context, req billing.GenerateDashboardWidgetParams, options ...RequestOption) (*billing.GeneratedWidget, error)",
-      "func (c *Client) GetAPIHost(ctx context.Context, options ...RequestOption) (*billing.MerchantAPIHost, error)",
       "func (c *Client) GetAdminAccess(ctx context.Context, options ...RequestOption) (*billing.AdminAccess, error)",
       "func (c *Client) GetBalance(ctx context.Context, customer billing.CustomerID, currency string, requestOptions ...RequestOption) (*billing.Balance, error)",
       "func (c *Client) GetCatalogRevision(ctx context.Context, requestOptions ...RequestOption) (*billing.CatalogRevision, error)",
@@ -530,8 +529,6 @@
       "func Permissions() []Permission",
       "func SourceRef(sourceType, id string) string",
       "func ValidateMerchantSlug(s string) error",
-      "type APIHostClaim struct {\n\tAPIHost   string        `json:\"api_host\"`\n\tCreatedAt time.Time     `json:\"created_at\"`\n\tDNSRecord APIHostRecord `json:\"dns_record\"`\n}",
-      "type APIHostRecord struct {\n\tType  string `json:\"type\"`\n\tName  string `json:\"name\"`\n\tValue string `json:\"value\"`\n}",
       "type AccessChange struct {\n\tMerchantID  MerchantID       `json:\"merchant_id\"`\n\tCustomerID  CustomerID       `json:\"customer_id\"`\n\tEntitlement string           `json:\"entitlement\"`\n\tChange      AccessChangeKind `json:\"change\"`\n\tApproved    bool             `json:\"approved\"`\n}",
       "type AccessChangeKind string",
       "type AccessCutoverReport struct {\n\tChanges []AccessChange `json:\"changes\"`\n\tNotes   []AccessNote   `json:\"notes\"`\n}",
@@ -710,9 +707,8 @@
       "type MandateStatus string",
       "type MarkNotificationsReadParams struct {\n\tNotificationIDs []NotificationID `json:\"notification_ids,omitempty\"`\n\tAll             bool             `json:\"all,omitempty\"`\n}",
       "type Merchant struct {\n\tID          MerchantID     `json:\"id\"`\n\tSlug        string         `json:\"slug\"`\n\tDisplayName *string        `json:\"display_name\"`\n\tStatus      MerchantStatus `json:\"status\"`\n\n\tRailsArmed    []Rail     `json:\"rails_armed\"`\n\tLastPaymentAt *time.Time `json:\"last_payment_at\"`\n\tCreatedAt     time.Time  `json:\"created_at\"`\n\tUpdatedAt     time.Time  `json:\"updated_at\"`\n\tDeletedAt     *time.Time `json:\"deleted_at\"`\n}",
-      "type MerchantAPIHost struct {\n\tAPIHost *string       `json:\"api_host\"`\n\tClaim   *APIHostClaim `json:\"claim\"`\n}",
       "type MerchantCheckoutSettings struct {\n\tEmbedOrigins []string `json:\"embed_origins,omitempty\"`\n}",
-      "type MerchantConfigurationState struct {\n\tRevision    int64            `json:\"revision\"`\n\tDisplayName string           `json:\"display_name\"`\n\tAPIHost     string           `json:\"api_host\"`\n\tSettings    MerchantSettings `json:\"settings\"`\n}",
+      "type MerchantConfigurationState struct {\n\tRevision    int64            `json:\"revision\"`\n\tDisplayName string           `json:\"display_name\"`\n\tSettings    MerchantSettings `json:\"settings\"`\n}",
       "type MerchantID uuid.UUID",
       "type MerchantListParams struct {\n\tPageRequest\n\n\tStatuses []MerchantStatus\n\n\tQuery string\n}",
       "type MerchantName struct {\n\tID   MerchantID `json:\"id\"`\n\tName string     `json:\"name\"`\n}",
@@ -1066,7 +1062,7 @@
       "type CustodianConfig struct {\n\tKind string `yaml:\"kind\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\n\tArchived bool `yaml:\"archived,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n\n\tSecrets map[string]string `yaml:\"secrets,omitempty\"`\n}",
       "type DBConfig struct {\n\tURL string\n\n\tHost     string\n\tPort     string\n\tDatabase string\n\tUsername string\n\tPassword string\n\n\tSSLMode string\n\n\tSQLTrace bool\n}",
       "type DatabaseConfig struct {\n\tSchema string\n\n\tRiverSchema string\n}",
-      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tDNSResolver     *net.Resolver\n\tClock           clockwork.Clock\n}",
+      "type Deps struct {\n\tPostgres *pgxpool.Pool\n\n\tRedis *redis.Client\n\n\tVault *vaultapi.Client\n\n\tConsoleAssets fs.FS\n\n\tEmail EmailSender\n\n\tUserInfo UserInfo\n\n\tStripeTransport http.RoundTripper\n\tNMITransport    http.RoundTripper\n\tFXTransport     http.RoundTripper\n\tClock           clockwork.Clock\n}",
       "type Email struct {\n\tFrom    EmailAddress\n\tTo      string\n\tSubject string\n\tText    string\n\tHTML    string\n}",
       "type EmailAddress struct {\n\tName    string\n\tAddress string\n}",
       "type EmailSender interface {\n\tSend(context.Context, Email) error\n\tCheckHealth(context.Context) error\n}",
@@ -1075,7 +1071,7 @@
       "type HyperSwitchConfig struct {\n\tAllowLoopbackHTTP bool\n\tAPIBaseURL        string\n\tSDKURL            string\n}",
       "type LLMConfig struct {\n\tProvider string\n\n\tModel string\n\n\tBaseURL string\n\n\tAPIKey string\n\n\tAskEnabled bool\n\n\tCatalogCopilotEnabled bool\n\n\tCatalogDraftingEnabled bool\n}",
       "type LoggerConfig struct {\n\tLevel string\n}",
-      "type MerchantDeclaration struct {\n\tSlug        string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tAPIHost string `yaml:\"api_host,omitempty\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
+      "type MerchantDeclaration struct {\n\tSlug        string `yaml:\"-\"`\n\tDisplayName string `yaml:\"display_name\"`\n\n\tPSPs map[string]PSPConfig `yaml:\"psps,omitempty\"`\n\n\tCustodians map[string]CustodianConfig `yaml:\"custodians,omitempty\"`\n\n\tSettings billing.MerchantSettings `yaml:\"settings,omitempty\"`\n\n\tAlertWebhooks []AlertWebhookConfig `yaml:\"alert_webhooks,omitempty\"`\n\n\tSecrets MerchantSecrets `yaml:\"secrets,omitempty\"`\n}",
       "type MerchantSecrets struct {\n\tSCIMToken string `yaml:\"scim_token,omitempty\"`\n}",
       "type NamingConfig struct {\n\tEnabled        *bool\n\tRenameInterval *time.Duration\n\tFormerNames    FormerNamesConfig\n}",
       "type PSPConfig struct {\n\tRail billing.Rail `yaml:\"rail\"`\n\n\tAccountID string `yaml:\"account_id,omitempty\"`\n\tArchived  bool   `yaml:\"archived,omitempty\"`\n\n\tCustodian string            `yaml:\"custodian,omitempty\"`\n\tSigner    *PSPSignerConfig  `yaml:\"signer,omitempty\"`\n\tSecrets   map[string]string `yaml:\"secrets,omitempty\"`\n\n\tSettings map[string]any `yaml:\"settings,omitempty\"`\n}",
@@ -1151,7 +1147,6 @@
       "const (\n\tFormerNamesFinite = config.FormerNamesFinite\n\n\tFormerNamesForever = config.FormerNamesForever\n\n\tFormerNamesImmediate = config.FormerNamesImmediate\n)",
       "const (\n\tMerchantRolesRead   = \"merchant:roles:read\"\n\tMerchantRolesManage = \"merchant:roles:manage\"\n)",
       "func (s *Server) AuthKit() *authkit.Client",
-      "func (s *Server) ClaimMerchantAPIHost(ctx context.Context, id billing.MerchantID, host string) (*billing.MerchantAPIHost, error)",
       "func (s *Server) Close(ctx context.Context) error",
       "func (s *Server) CompletePendingMerchantRetirements(ctx context.Context, limit int) (int, error)",
       "func (s *Server) CustomerLinks(ctx context.Context, account billing.NetworkAccountID) ([]billing.CustomerLink, error)",
@@ -1180,12 +1175,10 @@
       "func (s *Server) Routes() ([]openrails.Route, error)",
       "func (s *Server) Run(ctx context.Context) error",
       "func (s *Server) Serve(ctx context.Context) error",
-      "func (s *Server) SetMerchantAPIHost(ctx context.Context, id billing.MerchantID, apiHost string) error",
       "func (s *Server) Start(ctx context.Context, opts ...openrails.StartOption) error",
       "func (s *Server) SubjectHasVaultedPaymentMethod(ctx context.Context, vaultMerchant billing.MerchantID, subject string) (bool, error)",
       "func (s *Server) UnlinkCustomer(ctx context.Context, account billing.NetworkAccountID, link billing.CustomerLinkID) (*billing.CustomerLink, error)",
       "func (s *Server) UnlockAdminLockout(ctx context.Context, userID string) error",
-      "func (s *Server) VerifyMerchantAPIHost(ctx context.Context, id billing.MerchantID) (*billing.MerchantAPIHost, error)",
       "func MerchantRole(name string) (iam.Role, bool)",
       "func MerchantRoles() []iam.Role",
       "func New(ctx context.Context, cfg Config, deps Deps) (*Server, error)",
@@ -1198,11 +1191,6 @@
       "type MerchantCreationConfig = hostconfig.MerchantCreationConfig",
       "type NamingConfig = config.NamingConfig",
       "type Server struct {\n}",
-      "var ErrAPIHostClaimMissing = merchants.ErrAPIHostClaimMissing",
-      "var ErrAPIHostReserved = merchants.ErrAPIHostReserved",
-      "var ErrAPIHostTaken = merchants.ErrAPIHostTaken",
-      "var ErrAPIHostUnproven = merchants.ErrAPIHostUnproven",
-      "var ErrInvalidAPIHost = merchants.ErrInvalidAPIHost",
       "var ErrInvalidMerchantName = merchants.ErrInvalidName",
       "var ErrMerchantNotFound = merchants.ErrMerchantNotFound",
       "var ErrRenamesDisabled = merchants.ErrRenamesDisabled"
@@ -1903,8 +1891,7 @@
       "time": "time"
     },
     "billing/merchant_configuration.go": {
-      "json": "encoding/json",
-      "time": "time"
+      "json": "encoding/json"
     },
     "billing/merchant_configuration_decode.go": {
       "bytes": "bytes",
@@ -2178,7 +2165,6 @@
       "context": "context",
       "fs": "io/fs",
       "http": "net/http",
-      "net": "net",
       "pgxpool": "github.com/jackc/pgx/v5/pgxpool",
       "userinfo": "github.com/open-rails/helpers/userinfo",
       "v9": "github.com/redis/go-redis/v9",
@@ -4768,9 +4754,7 @@
     },
     "server/merchants.go": {
       "billing": "github.com/open-rails/openrails/billing",
-      "context": "context",
-      "errors": "errors",
-      "merchants": "github.com/open-rails/openrails/internal/merchants"
+      "context": "context"
     },
     "server/network.go": {
       "authkit": "github.com/open-rails/authkit",

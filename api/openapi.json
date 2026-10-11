@@ -8663,47 +8663,6 @@
         ]
       }
     },
-    "/v1/admin/api-host": {
-      "get": {
-        "tags": [
-          "merchant_config"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantAPIHost"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:config:manage",
-          "root": "root:config:manage"
-        },
-        "x-openrails-mounted-when": "merchant_directory",
-        "x-openrails-errors": [
-          "merchant_unresolved",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
     "/v1/admin/alert-webhooks": {
       "get": {
         "tags": [
@@ -11189,45 +11148,6 @@
   },
   "components": {
     "schemas": {
-      "APIHostClaim": {
-        "type": "object",
-        "properties": {
-          "api_host": {
-            "type": "string"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "dns_record": {
-            "$ref": "#/components/schemas/APIHostRecord"
-          }
-        },
-        "required": [
-          "api_host",
-          "created_at",
-          "dns_record"
-        ]
-      },
-      "APIHostRecord": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string"
-          },
-          "name": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "type",
-          "name",
-          "value"
-        ]
-      },
       "AcknowledgeHostEventsParams": {
         "type": "object",
         "properties": {
@@ -15850,35 +15770,6 @@
           "unit_amount"
         ]
       },
-      "MerchantAPIHost": {
-        "type": "object",
-        "properties": {
-          "api_host": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "claim": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/APIHostClaim"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "api_host",
-          "claim"
-        ]
-      },
       "MerchantCheckoutSettings": {
         "type": "object",
         "properties": {
@@ -15899,9 +15790,6 @@
           "display_name": {
             "type": "string"
           },
-          "api_host": {
-            "type": "string"
-          },
           "settings": {
             "$ref": "#/components/schemas/MerchantSettings"
           }
@@ -15909,7 +15797,6 @@
         "required": [
           "revision",
           "display_name",
-          "api_host",
           "settings"
         ]
       },

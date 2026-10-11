@@ -53,7 +53,6 @@ pkg openrails, method (*Client) DeleteRateOverride(context.Context, billing.Cust
 pkg openrails, method (*Client) ExportBillingArchive(context.Context, io.Writer, ...RequestOption) error
 pkg openrails, method (*Client) ExtendAdmissions(context.Context, []billing.ExtendAdmissionParams, ...RequestOption) ([]billing.AdmissionResult, error)
 pkg openrails, method (*Client) GenerateDashboardWidget(context.Context, billing.GenerateDashboardWidgetParams, ...RequestOption) (*billing.GeneratedWidget, error)
-pkg openrails, method (*Client) GetAPIHost(context.Context, ...RequestOption) (*billing.MerchantAPIHost, error)
 pkg openrails, method (*Client) GetAdminAccess(context.Context, ...RequestOption) (*billing.AdminAccess, error)
 pkg openrails, method (*Client) GetBalance(context.Context, billing.CustomerID, string, ...RequestOption) (*billing.Balance, error)
 pkg openrails, method (*Client) GetCatalogRevision(context.Context, ...RequestOption) (*billing.CatalogRevision, error)
@@ -245,7 +244,6 @@ pkg openrails, type Deps = config.Deps
 pkg openrails, type Deps struct
 pkg openrails, type Deps struct, Clock clockwork.Clock
 pkg openrails, type Deps struct, ConsoleAssets fs.FS
-pkg openrails, type Deps struct, DNSResolver *net.Resolver
 pkg openrails, type Deps struct, Email config.EmailSender
 pkg openrails, type Deps struct, FXTransport http.RoundTripper
 pkg openrails, type Deps struct, NMITransport http.RoundTripper
@@ -291,7 +289,6 @@ pkg openrails, type LoggerConfig struct
 pkg openrails, type LoggerConfig struct, Level string
 pkg openrails, type MerchantDeclaration = config.MerchantDeclaration
 pkg openrails, type MerchantDeclaration struct
-pkg openrails, type MerchantDeclaration struct, APIHost string `yaml:"api_host,omitempty"`
 pkg openrails, type MerchantDeclaration struct, AlertWebhooks []config.AlertWebhookConfig `yaml:"alert_webhooks,omitempty"`
 pkg openrails, type MerchantDeclaration struct, Custodians map[string]config.CustodianConfig `yaml:"custodians,omitempty"`
 pkg openrails, type MerchantDeclaration struct, DisplayName string `yaml:"display_name"`
@@ -1073,14 +1070,6 @@ pkg openrails/billing, method (UsageEventID) MarshalText() ([]byte, error)
 pkg openrails/billing, method (UsageEventID) String() string
 pkg openrails/billing, method (UsageEventID) UUID() uuid.UUID
 pkg openrails/billing, method (UsageEventResult) Err() error
-pkg openrails/billing, type APIHostClaim struct
-pkg openrails/billing, type APIHostClaim struct, APIHost string `json:"api_host"`
-pkg openrails/billing, type APIHostClaim struct, CreatedAt time.Time `json:"created_at"`
-pkg openrails/billing, type APIHostClaim struct, DNSRecord APIHostRecord `json:"dns_record"`
-pkg openrails/billing, type APIHostRecord struct
-pkg openrails/billing, type APIHostRecord struct, Name string `json:"name"`
-pkg openrails/billing, type APIHostRecord struct, Type string `json:"type"`
-pkg openrails/billing, type APIHostRecord struct, Value string `json:"value"`
 pkg openrails/billing, type AccessChange struct
 pkg openrails/billing, type AccessChange struct, Approved bool `json:"approved"`
 pkg openrails/billing, type AccessChange struct, Change AccessChangeKind `json:"change"`
@@ -1916,13 +1905,9 @@ pkg openrails/billing, type Merchant struct, RailsArmed []Rail `json:"rails_arme
 pkg openrails/billing, type Merchant struct, Slug string `json:"slug"`
 pkg openrails/billing, type Merchant struct, Status MerchantStatus `json:"status"`
 pkg openrails/billing, type Merchant struct, UpdatedAt time.Time `json:"updated_at"`
-pkg openrails/billing, type MerchantAPIHost struct
-pkg openrails/billing, type MerchantAPIHost struct, APIHost *string `json:"api_host"`
-pkg openrails/billing, type MerchantAPIHost struct, Claim *APIHostClaim `json:"claim"`
 pkg openrails/billing, type MerchantCheckoutSettings struct
 pkg openrails/billing, type MerchantCheckoutSettings struct, EmbedOrigins []string `json:"embed_origins,omitempty"`
 pkg openrails/billing, type MerchantConfigurationState struct
-pkg openrails/billing, type MerchantConfigurationState struct, APIHost string `json:"api_host"`
 pkg openrails/billing, type MerchantConfigurationState struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type MerchantConfigurationState struct, Revision int64 `json:"revision"`
 pkg openrails/billing, type MerchantConfigurationState struct, Settings MerchantSettings `json:"settings"`
@@ -3494,7 +3479,6 @@ pkg openrails/server, func MerchantRole(string) (iam.Role, bool)
 pkg openrails/server, func MerchantRoles() []iam.Role
 pkg openrails/server, func New(context.Context, Config, Deps) (*Server, error)
 pkg openrails/server, method (*Server) AuthKit() *authkit.Client
-pkg openrails/server, method (*Server) ClaimMerchantAPIHost(context.Context, billing.MerchantID, string) (*billing.MerchantAPIHost, error)
 pkg openrails/server, method (*Server) Close(context.Context) error
 pkg openrails/server, method (*Server) CompletePendingMerchantRetirements(context.Context, int) (int, error)
 pkg openrails/server, method (*Server) CustomerLinks(context.Context, billing.NetworkAccountID) ([]billing.CustomerLink, error)
@@ -3523,12 +3507,10 @@ pkg openrails/server, method (*Server) RiverJobs() river.Contribution
 pkg openrails/server, method (*Server) Routes() ([]openrails.Route, error)
 pkg openrails/server, method (*Server) Run(context.Context) error
 pkg openrails/server, method (*Server) Serve(context.Context) error
-pkg openrails/server, method (*Server) SetMerchantAPIHost(context.Context, billing.MerchantID, string) error
 pkg openrails/server, method (*Server) Start(context.Context, ...openrails.StartOption) error
 pkg openrails/server, method (*Server) SubjectHasVaultedPaymentMethod(context.Context, billing.MerchantID, string) (bool, error)
 pkg openrails/server, method (*Server) UnlinkCustomer(context.Context, billing.NetworkAccountID, billing.CustomerLinkID) (*billing.CustomerLink, error)
 pkg openrails/server, method (*Server) UnlockAdminLockout(context.Context, string) error
-pkg openrails/server, method (*Server) VerifyMerchantAPIHost(context.Context, billing.MerchantID) (*billing.MerchantAPIHost, error)
 pkg openrails/server, type AdminConsole = config.ConsoleMount
 pkg openrails/server, type AdminConsole struct
 pkg openrails/server, type AdminConsole struct, AuthBaseURL string
@@ -3577,11 +3559,6 @@ pkg openrails/server, type NamingConfig struct, Enabled *bool
 pkg openrails/server, type NamingConfig struct, FormerNames config.FormerNamesConfig
 pkg openrails/server, type NamingConfig struct, RenameInterval *time.Duration
 pkg openrails/server, type Server struct
-pkg openrails/server, var ErrAPIHostClaimMissing error
-pkg openrails/server, var ErrAPIHostReserved error
-pkg openrails/server, var ErrAPIHostTaken error
-pkg openrails/server, var ErrAPIHostUnproven error
-pkg openrails/server, var ErrInvalidAPIHost error
 pkg openrails/server, var ErrInvalidMerchantName error
 pkg openrails/server, var ErrMerchantNotFound error
 pkg openrails/server, var ErrRenamesDisabled error

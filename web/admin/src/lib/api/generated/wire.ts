@@ -6,18 +6,6 @@ export type ListPage<T> = {
   next_cursor: string | null
 }
 
-export type APIHostClaim = {
-  api_host: string
-  created_at: string
-  dns_record: APIHostRecord
-}
-
-export type APIHostRecord = {
-  type: string
-  name: string
-  value: string
-}
-
 export type AcknowledgeHostEventsParams = {
   host_event_ids?: string[]
 }
@@ -1017,11 +1005,6 @@ export type MatrixCell = {
   included?: number
 }
 
-export type MerchantAPIHost = {
-  api_host: string | null
-  claim: APIHostClaim | null
-}
-
 export type MerchantCheckoutSettings = {
   embed_origins?: string[]
 }
@@ -1029,7 +1012,6 @@ export type MerchantCheckoutSettings = {
 export type MerchantConfigurationState = {
   revision: number
   display_name: string
-  api_host: string
   settings: MerchantSettings
 }
 
