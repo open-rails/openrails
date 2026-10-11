@@ -3,7 +3,7 @@
 ### What it is
 
 A React SPA (`web/admin`, Vite), the staff dashboard, driving the
-`/v1/admin/*` API. It is the browser UI for the **merchant operator**, the
+`/v1/admin/*` and `/v1/operator/*` API. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, settings. It holds no state and no privileges of its own; every
 action is a staff-route call its permission admits the caller for.
@@ -14,8 +14,8 @@ It has four areas, one per staff route group: customer support
 (`Metrics`: the dashboard's charts, the Ops gauges). On load it asks
 `GET /v1/admin/access`, which any signed-in staff member may call, and shows an
 area only when its group is on and the staff member holds its permission.
-Customer support is read-only without `merchant:billing:manage` (or
-`root:billing:manage`), and the dashboard's layout is editable only to
+Customer support is read-only without `merchant:customer:manage` (or
+`root:customer:manage`), and the dashboard's layout is editable only to
 someone holding both the metrics and the merchant-config permission. Someone
 holding none of them sees only that they have no access. Each catalog edit sends the
 revision it loaded, so a product, price, meter or rate another person changed
@@ -51,7 +51,7 @@ On is one switch, where the HTTP surface is chosen:
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
-    Auth:                 ak.Authenticator(), // staff hold root:billing:read and root:billing:manage in its root group
+    Auth:                 ak.Authenticator(), // staff hold root:customer:read and root:customer:manage in its root group
     Prefix:               "/billing",         // the API at /billing/v1/*, the console at /billing/admin
     RouteGroups:          openrails.RouteGroups{Admin: true},
     AdminConsole:         true,

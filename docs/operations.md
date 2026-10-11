@@ -440,7 +440,7 @@ Rules:
 
 - **Rotating a credential within the SAME PSP**: replace the
   secret under the same PSP row — intents arm with the new value
-  transparently. `PATCH /v1/admin/psps/{id}` (and the console's
+  transparently. `PATCH /v1/operator/psps/{id}` (and the console's
   **Rotate** action) is atomic in the way that matters:
   - the **new** credential is live-probed against the provider *before*
     anything is written (NMI and CCBill today). A probe failure fails the whole
@@ -457,7 +457,7 @@ Rules:
   `account_id` would silently lie). Arm a NEW PSP and archive
   the old one; `archived` is drain-only — no new checkout/pull work selects
   it, but it remains addressable for existing obligations and inbound events.
-  `PATCH /v1/admin/psps/{id}` with `{archived: true}` makes no provider call, so it
+  `PATCH /v1/operator/psps/{id}` with `{archived: true}` makes no provider call, so it
   works when the old provider is terminated or unreachable.
 - **Pending intents stamped with the old PSP do not follow** a credential
   move: keep (or restore) the old PSP's credentials until its queue drains,

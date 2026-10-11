@@ -82,7 +82,7 @@ type FindingsQuery struct {
 	Type     string `form:"type"`
 }
 
-// AdminListFindings handles GET /v1/admin/findings: the operator work
+// AdminListFindings handles GET /v1/operator/findings: the operator work
 // list, open findings by default, most severe first, then oldest.
 func AdminListFindings(r *httprequest.Request) {
 	store, ok := findingsStore(r)
@@ -111,7 +111,7 @@ func AdminListFindings(r *httprequest.Request) {
 	r.SuccessJSON(pagination.Map(items, findingView))
 }
 
-// AdminGetFinding handles GET /v1/admin/findings/{id}.
+// AdminGetFinding handles GET /v1/operator/findings/{id}.
 func AdminGetFinding(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {
@@ -153,7 +153,7 @@ func resolveActorIdentity(r *httprequest.Request) string {
 // with the error in its notes; the next sweep re-measures, so a fix that did
 // not take reopens by re-detection.
 //
-//	POST /v1/admin/findings/{id}/resolve
+//	POST /v1/operator/findings/{id}/resolve
 func AdminResolveFinding(r *httprequest.Request) {
 	store, ok := findingsStore(r)
 	if !ok {

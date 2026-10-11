@@ -58,7 +58,7 @@ Billing an order queues `order_due`; one still owed past its due date queues
 
 ## Staff actions
 
-Each is an admin change: `billing.MerchantBillingManage` or `billing.RootBillingManage`.
+Each is an admin change: `billing.MerchantCustomerManage` or `billing.RootCustomerManage`.
 
 | Route | Client method | Behavior |
 |---|---|---|

@@ -91,7 +91,7 @@ func TestDeclaredCatalog(t *testing.T) {
 	_, err = w.client[embedded].UpdateProduct(t.Context(), product.ID, billing.UpdateProductParams{DisplayName: catalog.Value("Edited in code")})
 	require.NoError(t, err)
 	var edited map[string]any
-	status := w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &edited)
+	status := w.staffCall(http.MethodPatch, "/v1/operator/catalog/products/"+product.ID.String(), map[string]any{"display_name": "HTTP edit"}, &edited)
 	require.Equal(t, http.StatusOK, status, "a declared catalog never closes the catalog routes: %v", edited)
 	revision := w.catalogRevision()
 	w.restart()

@@ -38,9 +38,9 @@ it("scopes cached server state before a merchant is selected", () => {
 it("keeps price histories and same-named price migrations separate", async () => {
   selectMerchant("merchant-a")
   const requests = await server({
-    "/admin/catalog/prices/price_premium/history": { data: [{ price_id: "premium_price" }] },
-    "/admin/catalog/prices/price_basic/history": { data: [{ price_id: "basic_price" }] },
-    "/admin/price-migrations": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
+    "/operator/catalog/prices/price_premium/history": { data: [{ price_id: "premium_price" }] },
+    "/operator/catalog/prices/price_basic/history": { data: [{ price_id: "basic_price" }] },
+    "/operator/price-migrations": ({ query }) => ({ data: [{ id: new URLSearchParams(query).get("product_key") }] }),
   })
   const queries = client({ staleTime: Infinity })
   try {
@@ -54,10 +54,10 @@ it("keeps price histories and same-named price migrations separate", async () =>
     expect(premiumBatches.data).toEqual([{ id: "premium" }])
     expect(basicBatches.data).toEqual([{ id: "basic" }])
     expect(calls(requests)).toEqual([
-      "GET /admin/catalog/prices/price_premium/history",
-      "GET /admin/catalog/prices/price_basic/history",
-      "GET /admin/price-migrations",
-      "GET /admin/price-migrations",
+      "GET /operator/catalog/prices/price_premium/history",
+      "GET /operator/catalog/prices/price_basic/history",
+      "GET /operator/price-migrations",
+      "GET /operator/price-migrations",
     ])
     expect(new URLSearchParams(requests[2].query).get("price_key")).toBe("monthly")
     expect(new URLSearchParams(requests[3].query).get("price_key")).toBe("monthly")
@@ -128,8 +128,8 @@ describe("complete collections", () => {
     const products = Array.from({ length: 1001 }, (_, i) => aProduct(`prod_${i}`, i))
     const prices = products.map((product, i) => aPrice(`price_${i}`, product.id))
     const requests = await server({
-      "/admin/catalog/products": (request) => pageOf(products, request.query),
-      "/admin/catalog/prices": (request) => pageOf(prices, request.query),
+      "/operator/catalog/products": (request) => pageOf(products, request.query),
+      "/operator/catalog/prices": (request) => pageOf(prices, request.query),
     })
     const queries = client()
 

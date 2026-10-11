@@ -32,7 +32,7 @@ func TestOperatorDirectoryAndWorkers(t *testing.T) {
 	second, err := cp.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: prefix + "-b"})
 	require.NoError(t, err)
 	key := merchantKey(t, cp, first.MerchantID, "owner")
-	findings := func() int { return call(t, handler, key.Secret, http.MethodGet, "/v1/admin/findings", nil).Code }
+	findings := func() int { return call(t, handler, key.Secret, http.MethodGet, "/v1/operator/findings", nil).Code }
 	require.Equal(t, http.StatusOK, findings())
 
 	list := func(params billing.MerchantListParams) []billing.Merchant {

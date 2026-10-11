@@ -107,7 +107,7 @@ staff edit configuration over HTTP at the revision they read. See
 
 The server mounts the admin API and the merchant's configuration, guarded by
 OpenRails' permissions ([auth](auth.md#permissions)), held in the merchant's
-group: `billing.MerchantBillingRead` for reads, `billing.MerchantBillingManage`
+group: `billing.MerchantCustomerRead` for reads, `billing.MerchantCustomerManage`
 for actions on customers, `billing.MerchantConfigManage` for the configuration
 (PSPs, settings, billing import and export), `billing.MerchantCatalogManage`
 for catalog edits. Each one's `root:` twin, held in the server's root group,
@@ -494,7 +494,7 @@ foundation; the `openrails` CLI covers the operator's (`merchants`,
 Who a request is, and what it may do, is AuthKit's: a hosted product
 authenticates a request with `srv.AuthKit().Authenticator()` and asks the
 answer's `Can(ctx, scope, permission)`, with `srv.MerchantScope(ctx, id)` for a
-merchant's permissions (`billing.MerchantBillingRead` and the others) or the
+merchant's permissions (`billing.MerchantCustomerRead` and the others) or the
 Authenticator's `RootScope` for the `root:` ones and the operator's. Teams, invitations and API
 keys are AuthKit's (`ak.SetGroupRole`, `ak.CreateAPIKey`, its invitations) in
 the merchant's group. `Client` is the engine.

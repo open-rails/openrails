@@ -56,7 +56,7 @@ func (session) Identity() openrails.Identity {
   Invoker: openrails.Invoker{Issuer: "https://identity.example", ID: id}, Credential: openrails.Credential{Kind: openrails.CredentialSession}}
 }
 func (session) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
- return scope == staff && permission == string(billing.RootBillingRead), nil
+ return scope == staff && permission == string(billing.RootCustomerRead), nil
 }
 func (s session) CheckRecentSignIn(context.Context) error {
  if time.Since(s.signedIn) > 15*time.Minute { return &auth.Challenge{Err: auth.ErrStepUpRequired, MaxAge: 15 * time.Minute} }

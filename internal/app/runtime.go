@@ -291,9 +291,9 @@ type Runtime struct {
 	Verifier *reconcile.Verifier
 }
 
-// MerchantConfigEditable reports whether merchant configuration can change at
+// MerchantConfigManageable reports whether merchant configuration can change at
 // runtime: Vault holds it. A file is read-only.
-func (r *Runtime) MerchantConfigEditable() bool {
+func (r *Runtime) MerchantConfigManageable() bool {
 	return r != nil && r.Config != nil && config.MerchantConfigKVMount(r.Config) != ""
 }
 

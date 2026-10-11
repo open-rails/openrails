@@ -31,7 +31,7 @@ import (
 
 // The shop's Authenticator passes OpenRails' conformance check against its
 // real tables: staff hold the mounted groups' root: permissions in the root
-// scope and nowhere else, a shopper none, a reader billing:read alone; a
+// scope and nowhere else, a shopper none, a reader customer:read alone; a
 // stale sign-in must sign in again; signed-out and unknown sessions are
 // refused; staff switched to a merchant keep their root roles; and staff
 // signing out ends their session.
@@ -47,7 +47,7 @@ func TestOwnAuthConforms(t *testing.T) {
 	openrailstest.CheckAuth(t, s.routes, authtest.Cases{
 		Staff:      bearer(staffSession),
 		User:       bearer(s.signIn(t, s.user(t, "shopper@shop.example"), "acme")),
-		Holders:    map[string]func() *http.Request{string(billing.RootBillingRead): bearer(s.signIn(t, s.user(t, "reader@shop.example", "reader"), ""))},
+		Holders:    map[string]func() *http.Request{string(billing.RootCustomerRead): bearer(s.signIn(t, s.user(t, "reader@shop.example", "reader"), ""))},
 		Stale:      bearer(stale),
 		Refused:    map[string]func() *http.Request{"signed out": bearer(gone), "unknown": bearer("not-a-session")},
 		BoundStaff: bearer(s.signIn(t, staff, "acme")),
@@ -111,7 +111,7 @@ func TestOwnAuthGates(t *testing.T) {
 		require.ElementsMatch(t, []string{"ann@shop.example", "pat@shop.example"}, s.customers(t, support, acme))
 		s.switchTo(t, support, globex, http.StatusForbidden)
 		require.ElementsMatch(t, []string{"ann@shop.example", "pat@shop.example"}, s.customers(t, support, acme), "the refused switch changed nothing")
-		requireCode(t, s.call(t, support, http.MethodPost, "/billing/v1/admin/catalog/apply", map[string]any{}), http.StatusForbidden, "permission_required")
+		requireCode(t, s.call(t, support, http.MethodPost, "/billing/v1/operator/catalog/apply", map[string]any{}), http.StatusForbidden, "permission_required")
 	})
 
 	t.Run("a stale sign-in reads but cannot refund", func(t *testing.T) {

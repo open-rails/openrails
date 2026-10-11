@@ -24,7 +24,7 @@ let routes: Record<string, Reply>
 beforeEach(async () => {
   browserEnvironment()
   routes = {
-    "/admin/catalog/products": {
+    "/operator/catalog/products": {
       data: [aProduct("prod_gift", 0, { display_name: "Gift" })],
       next_cursor: null,
     },

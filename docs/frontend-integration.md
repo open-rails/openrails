@@ -276,7 +276,7 @@ field the route does not declare is refused (`unknown_field`).
 
 The chosen PSP and the reason for it are recorded on the order's attempt
 (`checkout_attempts.routing_reason`). Merchants can preview a decision without
-creating anything: `POST /v1/admin/psps/routing-preview`
+creating anything: `POST /v1/operator/psps/routing-preview`
 (`Client.PreviewPSPRouting`) with `{"price_id": "...", "country": "US"}`
 returns the winner, the ranked fallbacks, and every skipped candidate with its
 reason.

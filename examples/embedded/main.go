@@ -118,7 +118,7 @@ func run(ctx context.Context) error {
 	// OpenRails' permissions, by its own names. Held on root, they reach every
 	// merchant you serve.
 	perm := func(p billing.Permission) iam.Perm { return rbac.Root.Permission(p.Resource(), p.Action()) }
-	billingRead, billingManage := perm(billing.RootBillingRead), perm(billing.RootBillingManage)
+	billingRead, billingManage := perm(billing.RootCustomerRead), perm(billing.RootCustomerManage)
 	catalogManage, configManage, metricsRead := perm(billing.RootCatalogManage), perm(billing.RootConfigManage), perm(billing.RootMetricsRead)
 
 	rbac.Root.Role("support", billingRead, billingManage)

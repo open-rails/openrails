@@ -64,11 +64,11 @@ func newGuardedHostOn(t *testing.T, pool *pgxpool.Pool) *guardedHost {
 		everyRoot = append(everyRoot, h.perms[p])
 	}
 	h.roles = map[string]iam.Role{
-		"reader":  rbac.Root.Role("reader", h.perms[billing.RootBillingRead]),
-		"support": rbac.Root.Role("support", h.perms[billing.RootBillingRead], h.perms[billing.RootBillingManage]),
+		"reader":  rbac.Root.Role("reader", h.perms[billing.RootCustomerRead]),
+		"support": rbac.Root.Role("support", h.perms[billing.RootCustomerRead], h.perms[billing.RootCustomerManage]),
 		"admin":   rbac.Root.Role("billing-admin", everyRoot...),
 		// A merchant's own staff, in its group.
-		"merchant-support": merchant.Role("support", h.perms[billing.MerchantBillingRead], h.perms[billing.MerchantBillingManage]),
+		"merchant-support": merchant.Role("support", h.perms[billing.MerchantCustomerRead], h.perms[billing.MerchantCustomerManage]),
 		"merchant-backend": merchant.Role("backend", everyMerchant...),
 	}
 	as := authtest.NewAuthorizationServer(t,
@@ -151,7 +151,7 @@ func TestAuthKitPassesCheckAuth(t *testing.T) {
 	openrailstest.CheckAuth(t, h.routes(openrails.RouteGroups{Admin: true, Programmatic: true}), helpersauthtest.Cases{
 		Staff:       bearerRequest(authtest.SignIn(t, h.ak, staff).AccessToken),
 		User:        bearerRequest(h.customer),
-		Holders:     map[string]func() *http.Request{string(billing.RootBillingRead): bearerRequest(h.reader)},
+		Holders:     map[string]func() *http.Request{string(billing.RootCustomerRead): bearerRequest(h.reader)},
 		Stale:       bearerRequest(authtest.StaleSession(t, h.ak, h.owner)),
 		Application: bearerRequest(h.app),
 		Refused:     map[string]func() *http.Request{"forged": bearerRequest(h.customer + "x"), "signed out": bearerRequest(h.gone)},
@@ -175,8 +175,8 @@ func ask(t *testing.T, mux http.Handler, token, method, path string, body any) a
 }
 
 // Each admin route checks its permission by its level, each catalog and
-// merchant-config route its group's: the root: name (root:billing:read) in
-// AuthKit's root group or the merchant: name (merchant:billing:read) in the
+// merchant-config route its group's: the root: name (root:customer:read) in
+// AuthKit's root group or the merchant: name (merchant:customer:read) in the
 // merchant's own. A group that is off is not mounted. A write that moves
 // money still needs a recent sign-in, and the machine checkout-attempt
 // routes are gone.
@@ -216,7 +216,7 @@ func TestRouteGroupPermissions(t *testing.T) {
 		passes(t, mux, h.support, http.MethodPost, payment)
 		passes(t, mux, h.support, http.MethodPost, subscription)
 		require.Equal(t, http.StatusOK, ask(t, mux, h.customer, http.MethodGet, "/billing/v1/me/payment-methods", nil).status, "a customer needs no permission")
-		unmounted(t, mux, http.MethodGet, "/billing/v1/admin/psps")
+		unmounted(t, mux, http.MethodGet, "/billing/v1/operator/psps")
 
 		stale := authtest.StaleSession(t, h.ak, h.support)
 		passes(t, mux, stale, http.MethodGet, "/billing/v1/admin/payments")
@@ -261,21 +261,21 @@ func TestRouteGroupPermissions(t *testing.T) {
 		config, _ := f.runtimeIssued(t, "config-"+uuid.NewString()[:8], h.issuer)
 		mux, err := h.mount(t, config, openrails.RouteGroups{Admin: true, MerchantConfig: true})
 		require.NoError(t, err)
-		forbidden(t, mux, h.support, http.MethodGet, "/billing/v1/admin/psps")
-		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/admin/psps")
+		forbidden(t, mux, h.support, http.MethodGet, "/billing/v1/operator/psps")
+		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/operator/psps")
 		passes(t, mux, h.support, http.MethodGet, "/billing/v1/admin/payments")
-		unmounted(t, mux, http.MethodPost, "/billing/v1/admin/catalog/products")
+		unmounted(t, mux, http.MethodPost, "/billing/v1/operator/catalog/products")
 	})
 
 	t.Run("the catalog alone", func(t *testing.T) {
 		catalog, _ := f.runtimeIssued(t, "catalog-"+uuid.NewString()[:8], h.issuer)
 		mux, err := h.mount(t, catalog, openrails.RouteGroups{Catalog: true})
 		require.NoError(t, err)
-		forbidden(t, mux, h.support, http.MethodPost, "/billing/v1/admin/catalog/products")
-		forbidden(t, mux, h.reader, http.MethodGet, "/billing/v1/admin/catalog/products")
-		passes(t, mux, h.owner, http.MethodPost, "/billing/v1/admin/catalog/products")
-		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/admin/catalog/products")
-		unmounted(t, mux, http.MethodGet, "/billing/v1/admin/psps")
+		forbidden(t, mux, h.support, http.MethodPost, "/billing/v1/operator/catalog/products")
+		forbidden(t, mux, h.reader, http.MethodGet, "/billing/v1/operator/catalog/products")
+		passes(t, mux, h.owner, http.MethodPost, "/billing/v1/operator/catalog/products")
+		passes(t, mux, h.owner, http.MethodGet, "/billing/v1/operator/catalog/products")
+		unmounted(t, mux, http.MethodGet, "/billing/v1/operator/psps")
 		unmounted(t, mux, http.MethodGet, "/billing/v1/admin/payments")
 	})
 }
@@ -364,7 +364,7 @@ func TestMountFailsClosed(t *testing.T) {
 
 	// A host whose roles declare root's billing permissions alone.
 	rbac := authkit.NewRoles()
-	for _, p := range []billing.Permission{billing.RootBillingRead, billing.RootBillingManage} {
+	for _, p := range []billing.Permission{billing.RootCustomerRead, billing.RootCustomerManage} {
 		rbac.Root.Permission(p.Resource(), p.Action())
 	}
 	bare := authtest.NewAuthorizationServer(t,

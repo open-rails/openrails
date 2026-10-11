@@ -153,9 +153,9 @@ it("a configuration read from a file shows every value and offers no edit", asyn
   let edits = false
   const requests = await server({
     "/config": capabilities(() => edits),
-    "GET /admin/configuration": configuration(3, "Acme Retail"),
-    "GET /admin/psps": { data: [aPSP()], next_cursor: null },
-    "GET /admin/alert-webhooks": { data: [webhook], next_cursor: null },
+    "GET /operator/configuration": configuration(3, "Acme Retail"),
+    "GET /operator/psps": { data: [aPSP()], next_cursor: null },
+    "GET /operator/alert-webhooks": { data: [webhook], next_cursor: null },
   })
   selectMerchant("merchant-a")
   const queries = await page(
@@ -209,8 +209,8 @@ it("a configuration edit names the revision it opened at; one changed since clos
   let current = configuration(3, "Acme Retail")
   const requests = await server({
     "/config": capabilities(() => true),
-    "GET /admin/configuration": () => current,
-    "PATCH /admin/configuration": (request) => {
+    "GET /operator/configuration": () => current,
+    "PATCH /operator/configuration": (request) => {
       const body = request.body as UpdateMerchantConfigurationParams
       if (body.expected_revision !== current.revision) return mismatch()
       current = {
@@ -247,7 +247,7 @@ it("a configuration edit names the revision it opened at; one changed since clos
     expect.anything()
   )
   expect(document.querySelector("#s-name")).toBeNull()
-  expect(calls(requests).at(-1)).toBe("GET /admin/configuration")
+  expect(calls(requests).at(-1)).toBe("GET /operator/configuration")
   expect(document.body.textContent).toContain("Acme Holdings")
 
   // Reopened, the form holds the current values and their revision.
@@ -266,8 +266,8 @@ it("a PSP rotation at a stale revision closes, drops the secret and reloads the 
   let psp = aPSP(7)
   const requests = await server({
     "/config": capabilities(() => true),
-    "GET /admin/psps": () => ({ data: [psp], next_cursor: null }),
-    "PATCH /admin/psps/psp_a": (request) => {
+    "GET /operator/psps": () => ({ data: [psp], next_cursor: null }),
+    "PATCH /operator/psps/psp_a": (request) => {
       const body = request.body as { expected_revision: number }
       if (body.expected_revision !== psp.revision) return mismatch()
       psp = { ...psp, revision: psp.revision + 1 }
@@ -294,7 +294,7 @@ it("a PSP rotation at a stale revision closes, drops the secret and reloads the 
     expect.anything()
   )
   expect(document.querySelector("#rot-psp_a-secret_key")).toBeNull()
-  expect(calls(requests).at(-1)).toBe("GET /admin/psps")
+  expect(calls(requests).at(-1)).toBe("GET /operator/psps")
 
   await press("Rotate")
   expect(field("#rot-psp_a-secret_key").value).toBe("")
@@ -312,7 +312,7 @@ it("a PSP rotation at a stale revision closes, drops the secret and reloads the 
   await press("Archive PSP")
   expect(writes(requests).at(-1)).toMatchObject({
     method: "PATCH",
-    path: "/admin/psps/psp_a",
+    path: "/operator/psps/psp_a",
     body: { archived: true, expected_revision: 9 },
   })
 })
@@ -321,11 +321,11 @@ it("credentials and webhook URLs are write-only: never shown, sent only when typ
   browserEnvironment()
   const requests = await server({
     "/config": capabilities(() => true),
-    "GET /admin/configuration": configuration(3, "Acme Retail"),
-    "GET /admin/psps": { data: [aPSP()], next_cursor: null },
-    "GET /admin/alert-webhooks": { data: [webhook], next_cursor: null },
-    "PATCH /admin/psps/psp_a": aPSP(8),
-    "PATCH /admin/alert-webhooks/awh_1": { ...webhook, enabled: false },
+    "GET /operator/configuration": configuration(3, "Acme Retail"),
+    "GET /operator/psps": { data: [aPSP()], next_cursor: null },
+    "GET /operator/alert-webhooks": { data: [webhook], next_cursor: null },
+    "PATCH /operator/psps/psp_a": aPSP(8),
+    "PATCH /operator/alert-webhooks/awh_1": { ...webhook, enabled: false },
   })
   selectMerchant("merchant-a")
   await page(
@@ -378,7 +378,7 @@ it("credentials and webhook URLs are write-only: never shown, sent only when typ
   await press("Save")
   expect(writes(requests).at(-1)).toMatchObject({
     method: "PATCH",
-    path: "/admin/alert-webhooks/awh_1",
+    path: "/operator/alert-webhooks/awh_1",
   })
   expect(writes(requests).at(-1)!.body).toEqual({
     name: "ops",
@@ -406,10 +406,10 @@ it("an edit refused because the configuration comes from a file turns the pages 
   }
   const requests = await server({
     "/config": capabilities(() => edits),
-    "GET /admin/configuration": configuration(3, "Acme Retail"),
-    "GET /admin/psps": { data: [aPSP()], next_cursor: null },
-    "PATCH /admin/configuration": readOnly,
-    "PATCH /admin/psps/psp_a": readOnly,
+    "GET /operator/configuration": configuration(3, "Acme Retail"),
+    "GET /operator/psps": { data: [aPSP()], next_cursor: null },
+    "PATCH /operator/configuration": readOnly,
+    "PATCH /operator/psps/psp_a": readOnly,
   })
   selectMerchant("merchant-a")
   const queries = await page(
@@ -440,7 +440,7 @@ it("an edit refused because the configuration comes from a file turns the pages 
   expect(labels()).toEqual([])
   expect(document.body.innerHTML).not.toContain("sk_live_new")
   expect(writes(requests).map((request) => request.path)).toEqual([
-    "/admin/configuration",
-    "/admin/psps/psp_a",
+    "/operator/configuration",
+    "/operator/psps/psp_a",
   ])
 })

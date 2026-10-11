@@ -168,10 +168,10 @@ func TestListsReadNamedRecords(t *testing.T) {
 	customer, funded := "/v1/admin/customers/"+c.id, "/v1/admin/customers/"+d.id
 	fixtures := map[string]struct{ path, query, table, set, key string }{
 		"GET /v1/admin/customers":                                    {"/v1/admin/customers", "", "customers", "", ""},
-		"GET /v1/admin/catalog/products":                             {"/v1/admin/catalog/products", "", "products", "", ""},
-		"GET /v1/admin/catalog/prices":                               {"/v1/admin/catalog/prices", "", "prices", "", ""},
+		"GET /v1/operator/catalog/products":                          {"/v1/operator/catalog/products", "", "products", "", ""},
+		"GET /v1/operator/catalog/prices":                            {"/v1/operator/catalog/prices", "", "prices", "", ""},
 		"GET /v1/admin/subscriptions":                                {"/v1/admin/subscriptions", "", "subscriptions", "", ""},
-		"GET /v1/admin/price-migrations":                             {"/v1/admin/price-migrations", "", "price_migrations", "", ""},
+		"GET /v1/operator/price-migrations":                          {"/v1/operator/price-migrations", "", "price_migrations", "", ""},
 		"GET /v1/admin/product-access":                               {"/v1/admin/product-access", "customer_id=" + c.id, "product_access", "", ""},
 		"GET /v1/admin/credit-grants":                                {"/v1/admin/credit-grants", "customer_id=" + d.id, "grants", "", ""},
 		"GET /v1/admin/customers/{customer_id}/balance/transactions": {funded + "/balance/transactions", "currency=USD", "ledger_transfers", "", ""},
@@ -180,11 +180,11 @@ func TestListsReadNamedRecords(t *testing.T) {
 		"GET /v1/admin/payment-attempts":                             {"/v1/admin/payment-attempts", "", "payment_attempts", "", ""},
 		"GET /v1/admin/renewals":                                     {"/v1/admin/renewals", "", "rebill_cycles", "", ""},
 		"GET /v1/admin/customers/{customer_id}/payment-methods":      {customer + "/payment-methods", "", "payment_methods", "", ""},
-		"GET /v1/admin/psps":                                         {"/v1/admin/psps", "", "psps", ", account_id = 'elsewhere'", ""},
-		"GET /v1/admin/alert-webhooks":                               {"/v1/admin/alert-webhooks", "", "", "", ""},
-		"GET /v1/admin/provisioning-tokens":                          {"/v1/admin/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
+		"GET /v1/operator/psps":                                      {"/v1/operator/psps", "", "psps", ", account_id = 'elsewhere'", ""},
+		"GET /v1/operator/alert-webhooks":                            {"/v1/operator/alert-webhooks", "", "", "", ""},
+		"GET /v1/operator/provisioning-tokens":                       {"/v1/operator/provisioning-tokens", "", "provisioning_tokens", ", token_sha256 = sha256(token_sha256)", ""},
 		"GET /v1/app/host-events":                                    {"/v1/app/host-events", "include_acknowledged=true", "host_outbox", "", ""},
-		"GET /v1/admin/findings":                                     {"/v1/admin/findings", "", "reconciliation_findings", "", ""},
+		"GET /v1/operator/findings":                                  {"/v1/operator/findings", "", "reconciliation_findings", "", ""},
 	}
 	listed := 0
 	for _, route := range routes.Catalog() {

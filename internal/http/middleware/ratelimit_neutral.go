@@ -486,7 +486,7 @@ func ClassifyBucket(path, method string) string {
 	switch {
 	case method == http.MethodPost && path == "/v1/admin/metrics/ask":
 		return "metrics-ask"
-	case method == http.MethodPost && path == "/v1/admin/catalog/ask":
+	case method == http.MethodPost && path == "/v1/operator/catalog/ask":
 		return "catalog-ask"
 	case method == http.MethodPost && path == "/v1/admin/dashboard/widgets/generate":
 		return "dashboard-generate"

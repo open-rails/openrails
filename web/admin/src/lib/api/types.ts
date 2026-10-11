@@ -132,7 +132,7 @@ export interface PSPRoutingCandidate {
   skip: PSPRoutingSkip | null
 }
 
-// PSPRoutingPreview is POST /admin/psps/routing-preview (or#288): which
+// PSPRoutingPreview is POST /operator/psps/routing-preview (or#288): which
 // PSP a checkout for this price would use, and why every other PSP was passed
 // over. Read-only — it creates nothing.
 export interface PSPRoutingPreview {

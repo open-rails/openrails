@@ -25,7 +25,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 	if err := document.Validate(); err != nil {
 		return nil, invalidErr(err.Error())
 	}
-	path := "/v1/admin/catalog/apply"
+	path := "/v1/operator/catalog/apply"
 	if params.Force {
 		path = withQuery(path, url.Values{"force": {"true"}})
 	}
@@ -41,7 +41,7 @@ func (c *Client) ApplyCatalog(ctx context.Context, document *catalog.Application
 // deployment must enable it.
 func (c *Client) AskCatalog(ctx context.Context, params billing.AskCatalogParams, requestOptions ...RequestOption) (*billing.CatalogAnswer, error) {
 	var out billing.CatalogAnswer
-	if err := c.do(ctx, http.MethodPost, "/v1/admin/catalog/ask", params, &out, requestOptions...); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/v1/operator/catalog/ask", params, &out, requestOptions...); err != nil {
 		return nil, err
 	}
 	return &out, nil

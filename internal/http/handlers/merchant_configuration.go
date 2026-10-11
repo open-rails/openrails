@@ -20,7 +20,7 @@ func GetMerchantConfiguration(r *httprequest.Request) {
 	r.SuccessJSON(state)
 }
 
-// UpdateMerchantConfiguration handles PATCH /v1/admin/configuration.
+// UpdateMerchantConfiguration handles PATCH /v1/operator/configuration.
 func UpdateMerchantConfiguration(r *httprequest.Request) {
 	var params billing.UpdateMerchantConfigurationParams
 	if !r.BindJSON(&params) {

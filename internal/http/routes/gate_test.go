@@ -52,21 +52,15 @@ var openRoutes = []string{
 // sensitiveRoutes are the routes that also ask a person for a recent sign-in:
 // those that move money or remove access. A change is reviewed.
 var sensitiveRoutes = []string{
-	"DELETE /v1/admin/alert-webhooks/{id}",
-	"DELETE /v1/admin/provisioning-tokens/{id}",
-	"GET /v1/admin/billing-archive",
-	"PATCH /v1/admin/alert-webhooks/{id}",
-	"PATCH /v1/admin/catalog/prices/{id}",
-	"PATCH /v1/admin/catalog/products/{id}",
-	"PATCH /v1/admin/configuration",
+	"DELETE /v1/operator/alert-webhooks/{id}",
+	"DELETE /v1/operator/provisioning-tokens/{id}",
+	"GET /v1/operator/billing-archive",
 	"PATCH /v1/admin/customers/{customer_id}",
-	"PATCH /v1/admin/psps/{id}",
-	"POST /v1/admin/alert-webhooks",
-	"POST /v1/admin/billing-archive",
-	"POST /v1/admin/billing-import",
-	"POST /v1/admin/catalog/apply",
-	"POST /v1/admin/catalog/prices",
-	"POST /v1/admin/catalog/products",
+	"PATCH /v1/operator/alert-webhooks/{id}",
+	"PATCH /v1/operator/catalog/prices/{id}",
+	"PATCH /v1/operator/catalog/products/{id}",
+	"PATCH /v1/operator/configuration",
+	"PATCH /v1/operator/psps/{id}",
 	"POST /v1/admin/credit-grants",
 	"POST /v1/admin/credit-grants/{id}/revoke",
 	"POST /v1/admin/orders/{id}/mark-uncollectible",
@@ -74,18 +68,24 @@ var sensitiveRoutes = []string{
 	"POST /v1/admin/orders/{id}/void",
 	"POST /v1/admin/payments",
 	"POST /v1/admin/payments/{id}/refunds",
-	"POST /v1/admin/price-migrations",
-	"POST /v1/admin/price-migrations/{id}/cancel",
 	"POST /v1/admin/product-access",
 	"POST /v1/admin/product-access/{id}/revoke",
-	"POST /v1/admin/provisioning-tokens",
-	"POST /v1/admin/psps",
-	"POST /v1/admin/psps/refresh",
 	"POST /v1/admin/subscriptions/{id}/cancel",
 	"POST /v1/admin/subscriptions/{id}/change",
 	"POST /v1/admin/subscriptions/{id}/resume",
-	"PUT /v1/admin/catalog/meters/{key}",
+	"POST /v1/operator/alert-webhooks",
+	"POST /v1/operator/billing-archive",
+	"POST /v1/operator/billing-import",
+	"POST /v1/operator/catalog/apply",
+	"POST /v1/operator/catalog/prices",
+	"POST /v1/operator/catalog/products",
+	"POST /v1/operator/price-migrations",
+	"POST /v1/operator/price-migrations/{id}/cancel",
+	"POST /v1/operator/provisioning-tokens",
+	"POST /v1/operator/psps",
+	"POST /v1/operator/psps/refresh",
 	"PUT /v1/admin/subscriptions/{id}/payment-method",
+	"PUT /v1/operator/catalog/meters/{key}",
 }
 
 // Every catalog route declares exactly one tier of the closed set, and what
@@ -672,7 +672,7 @@ func TestMountFailsClosed(t *testing.T) {
 		"admin without Auth":                               staff(nil, everyGroup),
 		"admin with a typed nil Auth":                      staff((*authtest.Fake)(nil), everyGroup),
 		"admin without a root scope":                       staff(rootless{who}, everyGroup),
-		"a group whose permissions the Auth does not know": staff(catalogued{who, []billing.Permission{billing.RootBillingRead, billing.RootBillingManage}}, config.RouteGroups{Admin: true, Metrics: true}),
+		"a group whose permissions the Auth does not know": staff(catalogued{who, []billing.Permission{billing.RootCustomerRead, billing.RootCustomerManage}}, config.RouteGroups{Admin: true, Metrics: true}),
 		"customers without Auth": func() {
 			RegisterCustomerRoutes(router.NewMux(&router.Table{}, "/v1/me", rt), rt, CustomerMount{})
 		},
@@ -688,7 +688,7 @@ func TestMountFailsClosed(t *testing.T) {
 	} {
 		require.PanicsWithError(t, mountErrorFor(t, mount), mount, name)
 	}
-	require.Contains(t, mountErrorFor(t, staff(catalogued{who, []billing.Permission{billing.RootBillingRead, billing.RootBillingManage}}, config.RouteGroups{Admin: true, Metrics: true})),
+	require.Contains(t, mountErrorFor(t, staff(catalogued{who, []billing.Permission{billing.RootCustomerRead, billing.RootCustomerManage}}, config.RouteGroups{Admin: true, Metrics: true})),
 		`knows none of its permissions ["merchant:metrics:read" "root:metrics:read"]`)
 
 	// Without a group on, no staff or programmatic route is mounted at all;
@@ -741,14 +741,14 @@ func TestGateAsksThePair(t *testing.T) {
 		route  string
 		status int
 	}{
-		"the merchant: name at the merchant":      {holding(nil, held(billing.MerchantBillingRead)), payments, http.StatusNoContent},
-		"the root: name in the root scope":        {holding(held(billing.RootBillingRead), nil), payments, http.StatusNoContent},
-		"the merchant: name in the root scope":    {holding(held(billing.MerchantBillingRead), nil), payments, http.StatusForbidden},
-		"the root: name at the merchant":          {holding(nil, held(billing.RootBillingRead)), payments, http.StatusForbidden},
+		"the merchant: name at the merchant":      {holding(nil, held(billing.MerchantCustomerRead)), payments, http.StatusNoContent},
+		"the root: name in the root scope":        {holding(held(billing.RootCustomerRead), nil), payments, http.StatusNoContent},
+		"the merchant: name in the root scope":    {holding(held(billing.MerchantCustomerRead), nil), payments, http.StatusForbidden},
+		"the root: name at the merchant":          {holding(nil, held(billing.RootCustomerRead)), payments, http.StatusForbidden},
 		"neither":                                 {holding(nil, nil), payments, http.StatusForbidden},
-		"the read's name on a change":             {holding(nil, held(billing.MerchantBillingRead)), refund, http.StatusForbidden},
+		"the read's name on a change":             {holding(nil, held(billing.MerchantCustomerRead)), refund, http.StatusForbidden},
 		"another group's name":                    {holding(held(billing.RootMetricsRead), held(billing.MerchantCatalogManage)), payments, http.StatusForbidden},
-		"the change's merchant: name on a change": {holding(nil, held(billing.MerchantBillingManage)), refund, http.StatusNoContent},
+		"the change's merchant: name on a change": {holding(nil, held(billing.MerchantCustomerManage)), refund, http.StatusNoContent},
 	} {
 		got := runRoute(t, rt, tc.auth, tc.route, nil)
 		require.Equal(t, tc.status, got.status, "%s: %s", name, got.code)
@@ -757,28 +757,41 @@ func TestGateAsksThePair(t *testing.T) {
 		}
 	}
 
+	// Retired billing permission names grant no alias to the customer gates.
+	for _, old := range []struct {
+		merchant, root billing.Permission
+		route          string
+	}{
+		{"merchant:billing:read", "root:billing:read", payments},
+		{"merchant:billing:manage", "root:billing:manage", refund},
+	} {
+		got := runRoute(t, rt, holding(held(old.root), held(old.merchant)), old.route, nil)
+		require.Equal(t, http.StatusForbidden, got.status, "retired permissions %s and %s", old.merchant, old.root)
+		require.Equal(t, "permission_required", got.code)
+	}
+
 	// The merchant: name admits only at its own merchant: recordingAuth
 	// holds it at merchantA, and its issuer binds merchantB.
 	elsewhere := runtimeDeclaring(merchantB)
-	require.Equal(t, http.StatusForbidden, runRoute(t, elsewhere, holding(nil, held(billing.MerchantBillingRead)), payments, nil).status)
-	require.Equal(t, http.StatusNoContent, runRoute(t, elsewhere, holding(held(billing.RootBillingRead), nil), payments, nil).status, "the root: name reaches every merchant")
+	require.Equal(t, http.StatusForbidden, runRoute(t, elsewhere, holding(nil, held(billing.MerchantCustomerRead)), payments, nil).status)
+	require.Equal(t, http.StatusNoContent, runRoute(t, elsewhere, holding(held(billing.RootCustomerRead), nil), payments, nil).status, "the root: name reaches every merchant")
 
 	// A name the Auth does not know is never asked.
-	known := catalogued{holding(held(billing.RootBillingRead), nil), []billing.Permission{billing.RootBillingRead}}
+	known := catalogued{holding(held(billing.RootCustomerRead), nil), []billing.Permission{billing.RootCustomerRead}}
 	require.Equal(t, http.StatusNoContent, runRoute(t, rt, known, payments, nil).status)
-	require.Equal(t, []string{"Authenticate", "Can:" + string(billing.RootBillingRead)}, known.take())
+	require.Equal(t, []string{"Authenticate", "Can:" + string(billing.RootCustomerRead)}, known.take())
 
 	// A route about no one merchant names its root: permission alone.
 	rootOnly := func(a *recordingAuth) int {
 		route, _ := Lookup(GET, "/v1/admin/payments")
 		env, table := newEnv(rt, Options{Auth: a, Groups: everyGroup, live: live}), &router.Table{}
-		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, verify(route, a), env.staffCheck(route, a, Pair{Root: billing.RootBillingRead}))
+		router.NewMux(table, "", rt).Handle(route.Method, route.Path, func(r *httprequest.Request) { r.NoContent() }, verify(route, a), env.staffCheck(route, a, Pair{Root: billing.RootCustomerRead}))
 		return serveSafely(table.Handler(), httptest.NewRequest(route.Method, route.Path, nil))
 	}
-	require.Equal(t, http.StatusNoContent, rootOnly(holding(held(billing.RootBillingRead), nil)))
-	merchantHolder := holding(nil, map[billing.Permission]bool{billing.MerchantBillingRead: true, billing.RootBillingRead: true})
+	require.Equal(t, http.StatusNoContent, rootOnly(holding(held(billing.RootCustomerRead), nil)))
+	merchantHolder := holding(nil, map[billing.Permission]bool{billing.MerchantCustomerRead: true, billing.RootCustomerRead: true})
 	require.Equal(t, http.StatusForbidden, rootOnly(merchantHolder), "held at one merchant, it reaches no root-only route")
-	require.Equal(t, []string{"Authenticate", "Can:" + string(billing.RootBillingRead)}, merchantHolder.take(), "only the root scope is asked")
+	require.Equal(t, []string{"Authenticate", "Can:" + string(billing.RootCustomerRead)}, merchantHolder.take(), "only the root scope is asked")
 }
 
 func mountErrorFor(t *testing.T, mount func()) (msg string) {
@@ -940,10 +953,10 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 		want           billing.AdminAccess
 		inRoot, atShop []billing.Permission
 	}{
-		{billing.AdminAccess{Admin: billing.AccessRead}, []billing.Permission{billing.RootBillingRead}, []billing.Permission{billing.MerchantBillingRead}},
+		{billing.AdminAccess{Admin: billing.AccessRead}, []billing.Permission{billing.RootCustomerRead}, []billing.Permission{billing.MerchantCustomerRead}},
 		{billing.AdminAccess{Admin: billing.AccessUpdate, Metrics: true},
-			[]billing.Permission{billing.RootBillingRead, billing.RootBillingManage, billing.RootMetricsRead},
-			[]billing.Permission{billing.MerchantBillingRead, billing.MerchantBillingManage, billing.MerchantMetricsRead}},
+			[]billing.Permission{billing.RootCustomerRead, billing.RootCustomerManage, billing.RootMetricsRead},
+			[]billing.Permission{billing.MerchantCustomerRead, billing.MerchantCustomerManage, billing.MerchantMetricsRead}},
 		{billing.AdminAccess{Admin: billing.AccessNone, Catalog: true, MerchantConfig: true},
 			[]billing.Permission{billing.RootCatalogManage, billing.RootConfigManage},
 			[]billing.Permission{billing.MerchantCatalogManage, billing.MerchantConfigManage}},
@@ -951,10 +964,10 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 		require.Equal(t, tc.want, read(staff, root(tc.inRoot...)))
 		require.Equal(t, tc.want, read(staff, at(tc.atShop...)), "the merchant: names answer the same levels")
 	}
-	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate}, read(staff, &recordingAuth{allowed: set(billing.RootBillingManage), at: set(billing.MerchantBillingRead)}), "a name from each scope")
-	require.Equal(t, none, read(config.RouteGroups{MerchantConfig: true}, root(billing.RootBillingRead, billing.RootMetricsRead)), "a group that is off is no one's")
-	require.Equal(t, none, read(config.RouteGroups{Admin: true}, root(billing.RootBillingManage)), "an update without the read is nothing")
-	require.Equal(t, none, read(staff, root(billing.MerchantBillingRead)), "a merchant: name held in the root scope")
+	require.Equal(t, billing.AdminAccess{Admin: billing.AccessUpdate}, read(staff, &recordingAuth{allowed: set(billing.RootCustomerManage), at: set(billing.MerchantCustomerRead)}), "a name from each scope")
+	require.Equal(t, none, read(config.RouteGroups{MerchantConfig: true}, root(billing.RootCustomerRead, billing.RootMetricsRead)), "a group that is off is no one's")
+	require.Equal(t, none, read(config.RouteGroups{Admin: true}, root(billing.RootCustomerManage)), "an update without the read is nothing")
+	require.Equal(t, none, read(staff, root(billing.MerchantCustomerRead)), "a merchant: name held in the root scope")
 }
 
 const (
@@ -1016,7 +1029,7 @@ func TestBoundMerchant(t *testing.T) {
 	rt := gatedRuntime(t)
 	app, person := authtest.Application("app"), authtest.User(userA)
 	gone := billing.MerchantID(uuid.New())
-	const findings = "GET /v1/admin/findings"
+	const findings = "GET /v1/operator/findings"
 	for name, tc := range map[string]struct {
 		auth     billingauth.Authenticator
 		merchant billing.MerchantID

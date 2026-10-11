@@ -28,7 +28,7 @@ func GetMerchantDashboard(r *httprequest.Request) {
 	r.JSON(http.StatusOK, d)
 }
 
-// PutMerchantDashboard handles PUT /v1/admin/dashboard: full-replace of the
+// PutMerchantDashboard handles PUT /v1/operator/dashboard: full-replace of the
 // widget layout. Every widget query passes the metrics compiler before
 // persisting; errors return widget-indexed and ALL AT ONCE.
 func PutMerchantDashboard(r *httprequest.Request) {

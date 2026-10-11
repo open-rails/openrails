@@ -11,7 +11,7 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// ImportDeclaredBilling handles POST /v1/admin/billing-import: the HTTP door to
+// ImportDeclaredBilling handles POST /v1/operator/billing-import: the HTTP door to
 // billingimport.Import (Client.ImportBilling's body and result). The merchant
 // is the credential's. Re-posting the same book at the same as_of is a no-op;
 // the body cap forces large books into batches, which must not set

@@ -66,8 +66,8 @@ const (
 // OpenRails' permissions as the harness host's roles hold them: the root:
 // names, in its root scope.
 const (
-	staffReads   = billing.RootBillingRead
-	staffWrites  = billing.RootBillingManage
+	staffReads   = billing.RootCustomerRead
+	staffWrites  = billing.RootCustomerManage
 	staffCatalog = billing.RootCatalogManage
 	staffConfig  = billing.RootConfigManage
 	staffMetrics = billing.RootMetricsRead

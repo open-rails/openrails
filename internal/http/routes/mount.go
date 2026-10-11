@@ -150,8 +150,8 @@ func (e *Env) enabled(f Feature) bool {
 		return e.providers.SolanaSigning
 	case FeatureStripePortal:
 		return e.providers.StripePortal
-	case FeatureMerchantConfigEdits:
-		return rt.MerchantConfigEditable()
+	case FeatureMerchantConfigManages:
+		return rt.MerchantConfigManageable()
 	case FeatureCatalogCopilot:
 		return rt != nil && rt.CopilotService.Configured()
 	case FeatureMetricsAsk:

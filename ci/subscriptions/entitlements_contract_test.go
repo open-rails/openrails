@@ -29,7 +29,7 @@ func TestEntitlementListCatalogAPI(t *testing.T) {
 		require.Zero(t, stored, "a product without keys stores none")
 	}
 	var explicit billing.Product
-	require.Equal(t, http.StatusCreated, w.staffCall(http.MethodPost, "/v1/admin/catalog/products", map[string]any{
+	require.Equal(t, http.StatusCreated, w.staffCall(http.MethodPost, "/v1/operator/catalog/products", map[string]any{
 		"key": "explicit-empty-entitlements", "display_name": "Explicit empty", "entitlements": []string{},
 	}, &explicit))
 	require.NotNil(t, explicit.Entitlements)
@@ -48,7 +48,7 @@ products:
 	initial, err := w.client[embedded].ApplyCatalog(t.Context(), document, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
 	var replay billing.CatalogApplicationReceipt
-	require.Equal(t, http.StatusOK, w.staffCall(http.MethodPost, "/v1/admin/catalog/apply", map[string]any{
+	require.Equal(t, http.StatusOK, w.staffCall(http.MethodPost, "/v1/operator/catalog/apply", map[string]any{
 		"schema_version": 1, "products": map[string]any{key: map[string]any{
 			"display_name": "Opaque access", "entitlements": []string{" private key ", "premium", "post:101"},
 		}},
@@ -59,7 +59,7 @@ products:
 	require.NoError(t, err)
 	require.ElementsMatch(t, []string{"post:101", "premium", " private key "}, product.Entitlements)
 	var wire map[string]any
-	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/admin/catalog/products/"+product.ID.String(), nil, &wire))
+	require.Equal(t, http.StatusOK, w.staffCall(http.MethodGet, "/v1/operator/catalog/products/"+product.ID.String(), nil, &wire))
 	require.IsType(t, []any{}, wire["entitlements"])
 	require.NotContains(t, wire, "entitlements_spec")
 
@@ -88,11 +88,11 @@ products:
 		{"entitlements": []string{"premium", "premium"}},
 		{"entitlements": []string{" "}},
 	} {
-		status, body := w.staffJSON(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), invalid)
+		status, body := w.staffJSON(http.MethodPatch, "/v1/operator/catalog/products/"+product.ID.String(), invalid)
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)
 	}
 	for _, field := range []string{"entitlements", "entitlements_spec"} {
-		status, body := w.staffJSON(http.MethodPost, "/v1/admin/catalog/products", map[string]any{
+		status, body := w.staffJSON(http.MethodPost, "/v1/operator/catalog/products", map[string]any{
 			"key": "invalid-" + uuid.NewString(), "display_name": "Invalid", field: nil,
 		})
 		require.Equal(t, http.StatusBadRequest, status, "%v", body)

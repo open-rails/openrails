@@ -30,9 +30,9 @@ var scimPathShape = regexp.MustCompile(`^/v1/app/scim/v2(/([A-Z][A-Za-z]*|\{[a-z
 // groupPaths is where each group's routes live.
 var groupPaths = map[Group][]string{
 	Admin:          {"/v1/admin/"},
-	CatalogAdmin:   {"/v1/admin/catalog/", "/v1/admin/price-migrations/"},
+	CatalogAdmin:   {"/v1/operator/catalog/", "/v1/operator/price-migrations/"},
 	Access:         {"/v1/admin/access/"},
-	MerchantConfig: {"/v1/admin/"},
+	MerchantConfig: {"/v1/operator/"},
 	Metrics:        {"/v1/admin/metrics/", "/v1/admin/dashboard/"},
 	App:            {"/v1/app/"},
 	Customer:       {"/v1/me/"},
@@ -180,7 +180,7 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 	// A bare runtime has no merchant directory, no LLM, no customer network
 	// and merchant configuration in a file.
 	require.Equal(t, []string{
-		"catalog_copilot POST /v1/admin/catalog/ask",
+		"catalog_copilot POST /v1/operator/catalog/ask",
 		"customer_network DELETE /v1/network/links/{link_id}",
 		"customer_network DELETE /v1/network/links/{link_id}/payment-methods/{id}",
 		"customer_network GET /v1/app/customers",
@@ -201,20 +201,20 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/resume",
 		"customer_network PUT /v1/network/links/{link_id}/subscriptions/{id}/payment-method",
 		"dashboard_generation POST /v1/admin/dashboard/widgets/generate",
-		"merchant_config_edits DELETE /v1/admin/alert-webhooks/{id}",
-		"merchant_config_edits PATCH /v1/admin/alert-webhooks/{id}",
-		"merchant_config_edits PATCH /v1/admin/configuration",
-		"merchant_config_edits PATCH /v1/admin/psps/{id}",
-		"merchant_config_edits POST /v1/admin/alert-webhooks",
-		"merchant_config_edits POST /v1/admin/psps",
+		"merchant_config_edits DELETE /v1/operator/alert-webhooks/{id}",
+		"merchant_config_edits PATCH /v1/operator/alert-webhooks/{id}",
+		"merchant_config_edits PATCH /v1/operator/configuration",
+		"merchant_config_edits PATCH /v1/operator/psps/{id}",
+		"merchant_config_edits POST /v1/operator/alert-webhooks",
+		"merchant_config_edits POST /v1/operator/psps",
 		"metrics_ask POST /v1/admin/metrics/ask",
 	}, sorted(unmounted))
 
 	// The archive routes are also a surface of their own (the database-only
 	// CLI runtime).
 	archive := map[string]int{}
-	RegisterStaffRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/admin/billing-archive")
-	require.Equal(t, map[string]int{"GET /v1/admin/billing-archive": 1, "POST /v1/admin/billing-archive": 1}, archive)
+	RegisterStaffRoutesUnder(recorder{base: "/v1", seen: archive}, rt, opts, "/v1/operator/billing-archive")
+	require.Equal(t, map[string]int{"GET /v1/operator/billing-archive": 1, "POST /v1/operator/billing-archive": 1}, archive)
 }
 
 func sorted(list []string) []string {
@@ -248,17 +248,17 @@ func TestMountHonorsConfiguration(t *testing.T) {
 	require.Contains(t, staff, "GET /v1/admin/payments")
 	require.Contains(t, staff, "POST /v1/admin/subscriptions/{id}/change/preview")
 	require.Contains(t, staff, "POST /v1/admin/payments/{id}/refunds", "the admin group mounts its changes with its reads")
-	require.NotContains(t, staff, "GET /v1/admin/catalog/products", "the catalog is its own group")
-	require.NotContains(t, staff, "POST /v1/admin/price-migrations")
+	require.NotContains(t, staff, "GET /v1/operator/catalog/products", "the catalog is its own group")
+	require.NotContains(t, staff, "POST /v1/operator/price-migrations")
 	require.NotContains(t, staff, "POST /v1/admin/metrics/query")
 	require.Contains(t, staff, "GET /v1/admin/entitlements", "a lookup is a read")
-	require.Contains(t, edits, "POST /v1/admin/catalog/products")
-	require.Contains(t, edits, "GET /v1/admin/catalog/products", "catalog reads are Catalog's")
-	require.Contains(t, edits, "POST /v1/admin/price-migrations")
+	require.Contains(t, edits, "POST /v1/operator/catalog/products")
+	require.Contains(t, edits, "GET /v1/operator/catalog/products", "catalog reads are Catalog's")
+	require.Contains(t, edits, "POST /v1/operator/price-migrations")
 	require.NotContains(t, edits, "GET /v1/admin/payments")
-	require.NotContains(t, configuration, "GET /v1/admin/catalog/products")
-	require.Contains(t, configuration, "GET /v1/admin/psps", "a configuration read is MerchantConfig's")
-	require.Contains(t, configuration, "PUT /v1/admin/dashboard", "the layout is configuration")
+	require.NotContains(t, configuration, "GET /v1/operator/catalog/products")
+	require.Contains(t, configuration, "GET /v1/operator/psps", "a configuration read is MerchantConfig's")
+	require.Contains(t, configuration, "PUT /v1/operator/dashboard", "the layout is configuration")
 	require.NotContains(t, configuration, "GET /v1/admin/dashboard")
 	require.Contains(t, metrics, "GET /v1/admin/dashboard")
 	require.Contains(t, metrics, "POST /v1/admin/metrics/query")
@@ -349,13 +349,34 @@ func TestExportedPermissionsAreTheCatalogs(t *testing.T) {
 
 	// A route about no one merchant names its root: permission alone; any
 	// other pair is one permission in both personas.
-	require.NoError(t, Pair{Root: billing.RootBillingRead}.check())
+	require.NoError(t, Pair{Root: billing.RootCustomerRead}.check())
 	for _, bad := range []Pair{
-		{Merchant: billing.MerchantBillingRead},
-		{Merchant: billing.MerchantBillingRead, Root: billing.RootBillingManage},
-		{Merchant: billing.RootBillingRead, Root: billing.RootBillingRead},
-		{Merchant: billing.MerchantBillingRead, Root: billing.RootMerchantsRead},
+		{Merchant: billing.MerchantCustomerRead},
+		{Merchant: billing.MerchantCustomerRead, Root: billing.RootCustomerManage},
+		{Merchant: billing.RootCustomerRead, Root: billing.RootCustomerRead},
+		{Merchant: billing.MerchantCustomerRead, Root: billing.RootMerchantsRead},
 	} {
 		require.Error(t, bad.check(), "%v", bad)
 	}
+}
+
+// Operators configure the merchant and catalog on their own path. Registering
+// every staff group does not bring back the former admin aliases.
+func TestOperatorRoutesHaveNoAdminAliases(t *testing.T) {
+	rt := gatedRuntime(t)
+	table := merchantSurface(rt, Options{Auth: authtest.Deny{}, Groups: everyGroup, live: live})
+	keys := routeKeys(table)
+	var operators int
+	for _, route := range Catalog() {
+		if route.Group != CatalogAdmin && route.Group != MerchantConfig {
+			continue
+		}
+		operators++
+		require.True(t, strings.HasPrefix(route.Path, "/v1/operator/"), route.Key())
+		old := strings.Replace(route.Path, "/v1/operator/", "/v1/admin/", 1)
+		_, found := Lookup(route.Method, old)
+		require.False(t, found, "%s %s must not remain as an alias", route.Method, old)
+		require.NotContains(t, keys, route.Method+" "+old)
+	}
+	require.Positive(t, operators)
 }

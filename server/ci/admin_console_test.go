@@ -333,9 +333,9 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 			perms[p] = rbac.Root.Permission(p.Resource(), p.Action())
 		}
 	}
-	support := rbac.Root.Role("support", perms[billing.RootBillingRead], perms[billing.RootBillingManage])
-	admin := rbac.Root.Role("staff-admin", perms[billing.RootBillingRead], rbac.Root.Members.Read, rbac.Root.Roles.Read)
-	manager := merchant.Role("manager", perms[billing.MerchantBillingRead], merchant.Members.Read, merchant.Roles.Read)
+	support := rbac.Root.Role("support", perms[billing.RootCustomerRead], perms[billing.RootCustomerManage])
+	admin := rbac.Root.Role("staff-admin", perms[billing.RootCustomerRead], rbac.Root.Members.Read, rbac.Root.Roles.Read)
+	manager := merchant.Role("manager", perms[billing.MerchantCustomerRead], merchant.Members.Read, merchant.Roles.Read)
 	ak, _ := authkittest.New(t,
 		authkittest.WithDeps(func(d *authkit.Deps) { d.Postgres = f.pool }),
 		authkittest.WithConfig(func(c *authkit.Config) { c.Roles = rbac }))
@@ -391,13 +391,13 @@ func TestEmbeddedConsoleRolesShowRootAndMerchantStaff(t *testing.T) {
 	require.Equal(t, permissionSet{Permissions: []string{}}, me(adminToken, mid), "no group: nobody, not an error")
 	inRoot := me(adminToken, "root")
 	require.Equal(t, admin.String(), *inRoot.Role)
-	require.Subset(t, inRoot.Permissions, []string{string(billing.RootBillingRead), rbac.Root.Roles.Read.String(), rbac.Root.Members.Read.String()})
+	require.Subset(t, inRoot.Permissions, []string{string(billing.RootCustomerRead), rbac.Root.Roles.Read.String(), rbac.Root.Members.Read.String()})
 	staff := holders(adminToken, "root")
-	require.ElementsMatch(t, []string{first, second}, staff[support.String()], "the holders of root:billing:read and root:billing:manage")
+	require.ElementsMatch(t, []string{first, second}, staff[support.String()], "the holders of root:customer:read and root:customer:manage")
 	require.Equal(t, []string{adminID}, staff[admin.String()])
 	// Staff holding only OpenRails' root: names act, and AuthKit shows them no one.
 	require.Equal(t, mid, scopeOf(supportToken))
-	require.ElementsMatch(t, []string{string(billing.RootBillingRead), string(billing.RootBillingManage)}, me(supportToken, "root").Permissions)
+	require.ElementsMatch(t, []string{string(billing.RootCustomerRead), string(billing.RootCustomerManage)}, me(supportToken, "root").Permissions)
 	require.Equal(t, http.StatusForbidden, call(t, host, supportToken, http.MethodGet, ak.APIBase()+"/groups/root/members", nil).Code)
 
 	// The merchant's own group: its holders, and nobody on root.

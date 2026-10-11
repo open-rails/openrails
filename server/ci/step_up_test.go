@@ -44,7 +44,7 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		{http.MethodPost, "/v1/admin/product-access", map[string]any{"items": []any{map[string]any{"customer_id": customer, "product_id": "prod_" + uuid.NewString(), "hours": 24}}}},
 		{http.MethodPost, "/v1/admin/payments/" + uuid.NewString() + "/refunds", map[string]any{}},
 		{http.MethodPost, "/v1/admin/credit-grants", map[string]any{}},
-		{http.MethodPost, "/v1/admin/billing-import", map[string]any{}},
+		{http.MethodPost, "/v1/operator/billing-import", map[string]any{}},
 	} {
 		w := staleAt.call(t, handler, op.method, op.path, op.body)
 		require.Equal(t, http.StatusUnauthorized, w.Code, "%s %s: %s", op.method, op.path, w.Body.String())
@@ -57,7 +57,7 @@ func TestSecurityOwnerOperationsNeedRecentSignIn(t *testing.T) {
 		require.NotContains(t, w.Body.String(), "step_up_required", "%s %s, fresh", op.method, op.path)
 	}
 
-	w := staleAt.call(t, handler, http.MethodGet, "/v1/admin/findings", nil)
+	w := staleAt.call(t, handler, http.MethodGet, "/v1/operator/findings", nil)
 	require.Equal(t, http.StatusOK, w.Code, "a read needs no step-up: %s", w.Body.String())
 
 	signedIn := func(token string) error {

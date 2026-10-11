@@ -150,12 +150,12 @@ func TestEmbeddedEngineServesTwoMerchants(t *testing.T) {
 		key        string
 	}{{a, b, ka}, {b, a, kb}} {
 		mine := tc.who.mid.String()
-		staff := send(mux, tc.who.staff, http.MethodGet, "/v1/admin/catalog/products", nil)
+		staff := send(mux, tc.who.staff, http.MethodGet, "/v1/operator/catalog/products", nil)
 		require.Equal(t, http.StatusOK, staff.status, staff.body)
 		require.Equal(t, mine, staff.bound)
 		require.Contains(t, staff.body, tc.key)
 		require.NotContains(t, staff.body, `"key":"`+map[string]string{ka: kb, kb: ka}[tc.key]+`"`)
-		gone := send(mux, tc.who.staff, http.MethodGet, "/v1/admin/catalog/products/"+productOf[tc.other.mid].String(), nil)
+		gone := send(mux, tc.who.staff, http.MethodGet, "/v1/operator/catalog/products/"+productOf[tc.other.mid].String(), nil)
 		require.Equal(t, http.StatusNotFound, gone.status, "the other merchant's product, by id: %s", gone.body)
 
 		app := send(mux, tc.who.key, http.MethodPost, "/v1/app/entitlements/check", map[string]any{"customer_id": tc.who.customerID.String(), "entitlements": []string{tc.key}})
@@ -196,7 +196,7 @@ func TestEmbeddedEngineServesTwoMerchants(t *testing.T) {
 	}
 
 	// Bound to neither, no deployment default fills in.
-	unbound := auth.Person(uuid.NewString(), billing.RootBillingRead)
+	unbound := auth.Person(uuid.NewString(), billing.RootCustomerRead)
 	for _, path := range []string{"/v1/admin/payments", "/v1/me"} {
 		got := send(mux, unbound, http.MethodGet, path, nil)
 		require.Equal(t, http.StatusForbidden, got.status, "%s: %s", path, got.body)
@@ -227,7 +227,7 @@ func TestBoundScopeOfNoMerchantIsRefused(t *testing.T) {
 
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/v1/me"},
-		{http.MethodGet, "/v1/admin/findings"},
+		{http.MethodGet, "/v1/operator/findings"},
 		{http.MethodGet, "/v1/admin/access"},
 		{http.MethodGet, "/v1/app/host-events"},
 		{http.MethodGet, "/v1/app/scim/v2/Users"},
@@ -272,13 +272,13 @@ func TestRequestCannotNameItsMerchant(t *testing.T) {
 	auth := &authtest.Fake{}
 	mux := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: auth, RouteGroups: everyGroup}))
-	staff := auth.Person(uuid.NewString(), billing.RootBillingRead, billing.RootBillingManage, billing.RootConfigManage)
+	staff := auth.Person(uuid.NewString(), billing.RootCustomerRead, billing.RootCustomerManage, billing.RootConfigManage)
 	customer := auth.Person(uuid.NewString())
 
 	for name, got := range map[string]bindingCall{
-		"a header":      send(mux, staff, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+b),
-		"a slug header": send(mux, staff, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, kb),
-		"a Host":        send(mux, staff, http.MethodGet, "/v1/admin/findings", nil, "Host", kb+".api.billing.example"),
+		"a header":      send(mux, staff, http.MethodGet, "/v1/operator/findings", nil, retiredMerchantHeader, "id:"+b),
+		"a slug header": send(mux, staff, http.MethodGet, "/v1/operator/findings", nil, retiredMerchantHeader, kb),
+		"a Host":        send(mux, staff, http.MethodGet, "/v1/operator/findings", nil, "Host", kb+".api.billing.example"),
 		"a customer's":  send(mux, customer, http.MethodGet, "/v1/me", nil, retiredMerchantHeader, "id:"+b),
 		"a query":       send(mux, staff, http.MethodGet, "/v1/admin/payments?merchant="+b, nil),
 	} {
@@ -292,7 +292,7 @@ func TestRequestCannotNameItsMerchant(t *testing.T) {
 	body := send(mux, staff, http.MethodPatch, "/v1/admin/customers/"+uuid.NewString(), map[string]any{"merchant_id": b})
 	require.Equal(t, http.StatusBadRequest, body.status, body.body)
 	require.Equal(t, billing.CodeUnknownField, body.code(t))
-	path := send(mux, staff, http.MethodGet, "/v1/merchants/"+b+"/admin/findings", nil)
+	path := send(mux, staff, http.MethodGet, "/v1/merchants/"+b+"/operator/findings", nil)
 	require.Equal(t, http.StatusNotFound, path.status, path.body)
 }
 
@@ -321,7 +321,7 @@ func TestIssuerBindsASingleMerchantHost(t *testing.T) {
 	require.NoError(t, f.pool.QueryRow(t.Context(), "SELECT issuer FROM "+pgx.Identifier{f.schema, "customers"}.Sanitize()+" WHERE merchant_id = $1 AND id = $2",
 		shop.MerchantID().UUID(), uuid.MustParse(user)).Scan(&issuer))
 	require.Nil(t, issuer, "the host's own user is the merchant's own customer")
-	staff := send(mux, auth.Person(uuid.NewString(), billing.RootBillingRead), http.MethodGet, "/v1/admin/payments", nil)
+	staff := send(mux, auth.Person(uuid.NewString(), billing.RootCustomerRead), http.MethodGet, "/v1/admin/payments", nil)
 	require.Equal(t, http.StatusOK, staff.status, staff.body)
 
 	foreign := authtest.User(uuid.NewString())

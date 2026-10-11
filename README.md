@@ -195,16 +195,16 @@ rbac := authkit.NewRoles()
 // OpenRails' permissions, by its own names. Held on root, they reach every
 // merchant you serve.
 perm := func(p billing.Permission) iam.Perm { return rbac.Root.Permission(p.Resource(), p.Action()) }
-billingRead, billingManage := perm(billing.RootBillingRead), perm(billing.RootBillingManage)
+billingRead, billingManage := perm(billing.RootCustomerRead), perm(billing.RootCustomerManage)
 catalogManage, configManage, metricsRead := perm(billing.RootCatalogManage), perm(billing.RootConfigManage), perm(billing.RootMetricsRead)
 
 rbac.Root.Role("support", billingRead, billingManage)
 rbac.Root.Role("operator", billingRead, billingManage, catalogManage, configManage, metricsRead)
 ```
 
-Every permission has two names. The `root:` one (`root:billing:read`), held in
+Every permission has two names. The `root:` one (`root:customer:read`), held in
 AuthKit's root group, reaches every merchant. The `merchant:` one
-(`merchant:billing:read`), held in a merchant's own group (the group whose id
+(`merchant:customer:read`), held in a merchant's own group (the group whose id
 is the merchant's id), reaches that merchant alone: declare those on a
 `merchant` persona when you want staff of one merchant only.
 
@@ -242,7 +242,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 
 	// The staff dashboard at /billing/admin. It has one area per staff group above,
 	// shown only when that group is on and the staff member holds its permission;
-	// the admin area is read-only without billing.RootBillingManage. Here support
+	// the admin area is read-only without billing.RootCustomerManage. Here support
 	// sees and helps customers; operators see all four.
 	AdminConsole: true,
 })
@@ -259,9 +259,9 @@ you turn it on, embedded or standalone:
 | public (`/v1/catalog/products`, `/v1/config`, an order's Solana Pay request) | always on | nothing | anyone |
 | customer (`/v1/me`) | always on | a sign-in | a signed-in customer, for their own billing |
 | webhooks (`/v1/webhooks`) | always on | a valid signature | payment processors |
-| admin: customer support (`/v1/admin`) | `RouteGroups.Admin` | `root:billing:read`; changes `root:billing:manage` | staff, or your backend |
-| catalog (`/v1/admin/catalog`, `/v1/admin/price-migrations`) | `RouteGroups.Catalog`; with a declared merchant's `Catalog`, the file skips what an edit changed | `root:catalog:manage` | staff |
-| merchant config (`/v1/admin`) | `RouteGroups.MerchantConfig` | `root:config:manage` | staff |
+| admin: customer support (`/v1/admin`) | `RouteGroups.Admin` | `root:customer:read`; changes `root:customer:manage` | staff, or your backend |
+| catalog (`/v1/operator/catalog`, `/v1/operator/price-migrations`) | `RouteGroups.Catalog`; with a declared merchant's `Catalog`, the file skips what an edit changed | `root:catalog:manage` | operators |
+| merchant config (`/v1/operator`) | `RouteGroups.MerchantConfig` | `root:config:manage` | operators |
 | business metrics, read-only (`/v1/admin/metrics`, `/v1/admin/dashboard`) | `RouteGroups.Metrics` | `root:metrics:read` | staff, or your backend |
 | programmatic (`/v1/app`) | `RouteGroups.Programmatic` | an application credential holding the route's permission (`root:entitlements:read`, `root:usage:manage`, …) | your backend, never a person |
 | user provisioning (`/v1/app/scim/v2`) | `RouteGroups.Programmatic`, without `Deps.UserInfo` | an application credential or a provisioning token | your user directory |
@@ -269,6 +269,13 @@ you turn it on, embedded or standalone:
 
 Each permission is also admitted by its `merchant:` name, held in the scope of
 the merchant the request acts on.
+
+Customer-support staff use `merchant:customer:read` and
+`merchant:customer:manage`. Catalog and merchant configuration are separate
+operator capabilities under `/v1/operator/`, including findings and PSP refresh.
+Metrics reads stay independently grantable. The old operator URLs under
+`/v1/admin/` and the old `billing` permission names are not aliases; update
+custom roles and trusted-issuer grants when upgrading.
 
 Routes marked `sensitive` in the [route reference](docs/api/routes.md) also ask
 a person for a recent sign-in; findings resolutions do not.
@@ -353,8 +360,8 @@ func (v session) BoundScope() auth.Scope {
 }
 
 // Can: exactly this permission in exactly this scope. OpenRails asks a route's
-// merchant: name (merchant:billing:read) in {root.Authority, the merchant's id}
-// and its root: name (root:billing:read) in root.
+// merchant: name (merchant:customer:read) in {root.Authority, the merchant's id}
+// and its root: name (root:customer:read) in root.
 func (v session) Can(ctx context.Context, scope auth.Scope, permission string) (bool, error) {
 	if scope.Authority != root.Authority || (scope != root && v.s.MerchantID != "" && scope.ID != v.s.MerchantID) {
 		return false, nil // another authority's scope, or another merchant's while bound to one
@@ -449,7 +456,7 @@ func run(ctx context.Context) error {
 	// OpenRails' permissions, by its own names. Held on root, they reach every
 	// merchant you serve.
 	perm := func(p billing.Permission) iam.Perm { return rbac.Root.Permission(p.Resource(), p.Action()) }
-	billingRead, billingManage := perm(billing.RootBillingRead), perm(billing.RootBillingManage)
+	billingRead, billingManage := perm(billing.RootCustomerRead), perm(billing.RootCustomerManage)
 	catalogManage, configManage, metricsRead := perm(billing.RootCatalogManage), perm(billing.RootConfigManage), perm(billing.RootMetricsRead)
 
 	rbac.Root.Role("support", billingRead, billingManage)
@@ -548,7 +555,7 @@ until `RouteGroups` turns it on:
 - `RouteGroups.Admin`: customer support, the routes your staff and back office
   call at `/billing/v1/admin` to read and change customers' billing: payments
   and refunds, subscriptions, orders, credits, access and usage. Callers need
-  `root:billing:read`; changes need `root:billing:manage` (grant a role only
+  `root:customer:read`; changes need `root:customer:manage` (grant a role only
   the read for read-only staff). OpenRails decides which routes read and which
   change.
 - `RouteGroups.Catalog`: the catalog: products, prices, meters and their rates,
@@ -558,7 +565,7 @@ until `RouteGroups` turns it on:
   catalog either way.
 - `RouteGroups.MerchantConfig`: the merchant's own configuration: settings,
   PSPs and their credentials, reading and resolving findings, pulling the PSPs'
-  state again (`POST /v1/admin/psps/refresh`), billing import and export, the metrics
+  state again (`POST /v1/operator/psps/refresh`), billing import and export, the metrics
   dashboard's layout. Callers need `root:config:manage`. Hosts upgrading must
   enable this group to keep the findings routes available; `Admin` alone
   no longer mounts them.
@@ -628,7 +635,7 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 - **What each sees**: an area appears only when its group is on and the
   staff member holds its permission; on load the console asks
   `GET /v1/admin/access`, which any signed-in staff member may call. Customer
-  support is read-only without `root:billing:manage`. Editing the metrics
+  support is read-only without `root:customer:manage`. Editing the metrics
   dashboard's layout needs `root:config:manage` as well as
   `root:metrics:read`. Someone holding none of them sees only that they have
   no access.
@@ -852,11 +859,12 @@ get a token from your issuer; that token opens nothing else.
 The SCIM routes are not mounted with `Deps.UserInfo`, which asks your AuthKit
 directly: one source of truth. See [customer contacts](docs/customer-contacts.md).
 To read what it needs beyond these (a customer, their entitlement lists), give
-your backend's application `root:billing:read` too: customer support's reads take an
+your backend's application `root:customer:read` too: customer support's reads take an
 application as readily as a person.
 
 The staff route groups (`RouteGroups.Admin`, `Catalog`, `MerchantConfig`,
-`Metrics`) publish `/billing/v1/admin/*` for your staff and machines rather than
+`Metrics`) publish `/billing/v1/admin/*` for customer support and metrics, and
+`/billing/v1/operator/*` for catalog and configuration, for staff and machines rather than
 your users, each route behind the permission of its group, and each has one
 method on the Go `Client`. Every route and its permission are in the [route
 table](docs/api/routes.md); the conventions are in the [API

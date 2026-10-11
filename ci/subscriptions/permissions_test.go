@@ -39,25 +39,25 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 	}
 
 	for name, role := range map[string]string{
-		"merchant:billing:read at the merchant": heldIn(shop, billing.MerchantBillingRead),
-		"root:billing:read in the root scope":   "only:" + string(billing.RootBillingRead),
+		"merchant:customer:read at the merchant": heldIn(shop, billing.MerchantCustomerRead),
+		"root:customer:read in the root scope":   "only:" + string(billing.RootCustomerRead),
 	} {
 		status, body := get(role, "/v1/admin/customers")
 		require.Equal(t, http.StatusOK, status, "%s: %v", name, body)
 	}
 	for name, role := range map[string]string{
-		"merchant:billing:read at another merchant": heldIn(other, billing.MerchantBillingRead),
-		"merchant:billing:read in the root scope":   "only:" + string(billing.MerchantBillingRead),
-		"root:billing:read at the merchant":         heldIn(shop, billing.RootBillingRead),
-		"neither":                                   "nobody",
+		"merchant:customer:read at another merchant": heldIn(other, billing.MerchantCustomerRead),
+		"merchant:customer:read in the root scope":   "only:" + string(billing.MerchantCustomerRead),
+		"root:customer:read at the merchant":         heldIn(shop, billing.RootCustomerRead),
+		"neither":                                    "nobody",
 	} {
 		refused(name, role, http.MethodGet, "/v1/admin/customers", nil)
 	}
 
 	// A read's name opens no change.
 	for name, role := range map[string]string{
-		"merchant:billing:read alone": heldIn(shop, billing.MerchantBillingRead),
-		"root:billing:read alone":     "only:" + string(billing.RootBillingRead),
+		"merchant:customer:read alone": heldIn(shop, billing.MerchantCustomerRead),
+		"root:customer:read alone":     "only:" + string(billing.RootCustomerRead),
 	} {
 		refused(name, role, http.MethodPost, "/v1/admin/credit-grants", map[string]any{})
 	}
@@ -67,7 +67,7 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 		merchant, root billing.Permission
 		want           map[string]any
 	}{
-		{billing.MerchantBillingRead, billing.RootBillingRead, map[string]any{"admin": "read", "catalog": false, "merchant_config": false, "metrics": false}},
+		{billing.MerchantCustomerRead, billing.RootCustomerRead, map[string]any{"admin": "read", "catalog": false, "merchant_config": false, "metrics": false}},
 		{billing.MerchantCatalogManage, billing.RootCatalogManage, map[string]any{"admin": "none", "catalog": true, "merchant_config": false, "metrics": false}},
 		{billing.MerchantConfigManage, billing.RootConfigManage, map[string]any{"admin": "none", "catalog": false, "merchant_config": true, "metrics": false}},
 		{billing.MerchantMetricsRead, billing.RootMetricsRead, map[string]any{"admin": "none", "catalog": false, "merchant_config": false, "metrics": true}},
@@ -79,7 +79,7 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 			require.Equal(t, tc.want, access, role)
 		}
 	}
-	_, access := get(heldIn(other, billing.MerchantBillingRead), "/v1/admin/access")
+	_, access := get(heldIn(other, billing.MerchantCustomerRead), "/v1/admin/access")
 	require.Equal(t, "none", access["admin"], "held at another merchant")
 }
 
@@ -119,14 +119,14 @@ func TestMountNeedsARootAuthenticator(t *testing.T) {
 		require.ErrorContains(t, mount(openrails.Routes{Auth: rootless{w.auth}, RouteGroups: groups}), "helpers/auth Root", name)
 	}
 
-	err := mount(openrails.Routes{Auth: knowing{w.auth, []billing.Permission{billing.RootBillingRead}}, RouteGroups: admin})
-	require.ErrorContains(t, err, `knows none of its permissions ["merchant:billing:manage" "root:billing:manage"]`)
+	err := mount(openrails.Routes{Auth: knowing{w.auth, []billing.Permission{billing.RootCustomerRead}}, RouteGroups: admin})
+	require.ErrorContains(t, err, `knows none of its permissions ["merchant:customer:manage" "root:customer:manage"]`)
 	require.Regexp(t, `^openrails: (POST|PUT|PATCH|DELETE) /v1/admin/`, err.Error(), "the error names the route")
 
 	for name, known := range map[string][]billing.Permission{
-		"the root: names":     {billing.RootBillingRead, billing.RootBillingManage},
-		"the merchant: names": {billing.MerchantBillingRead, billing.MerchantBillingManage},
-		"one of each":         {billing.MerchantBillingRead, billing.RootBillingManage},
+		"the root: names":     {billing.RootCustomerRead, billing.RootCustomerManage},
+		"the merchant: names": {billing.MerchantCustomerRead, billing.MerchantCustomerManage},
+		"one of each":         {billing.MerchantCustomerRead, billing.RootCustomerManage},
 	} {
 		require.NoError(t, mount(openrails.Routes{Auth: knowing{w.auth, known}, RouteGroups: admin}), name)
 	}
@@ -143,9 +143,9 @@ func TestFindingsRequireMerchantConfiguration(t *testing.T) {
 		name, role string
 		allowed    bool
 	}{
-		{"billing reader", heldIn(mid.String(), billing.MerchantBillingRead), false},
-		{"billing manager", heldIn(mid.String(), billing.MerchantBillingManage), false},
-		{"root billing manager", "only:" + string(billing.RootBillingManage), false},
+		{"billing reader", heldIn(mid.String(), billing.MerchantCustomerRead), false},
+		{"billing manager", heldIn(mid.String(), billing.MerchantCustomerManage), false},
+		{"root billing manager", "only:" + string(billing.RootCustomerManage), false},
 		{"other merchant config", heldIn(uuid.NewString(), billing.MerchantConfigManage), false},
 		{"merchant config", heldIn(mid.String(), billing.MerchantConfigManage), true},
 		{"root config", "only:" + string(billing.RootConfigManage), true},
@@ -161,9 +161,9 @@ func TestFindingsRequireMerchantConfiguration(t *testing.T) {
 				method, path string
 				body         any
 			}{
-				{http.MethodGet, "/v1/admin/findings", nil},
-				{http.MethodGet, "/v1/admin/findings/fnd_" + id, nil},
-				{http.MethodPost, "/v1/admin/findings/fnd_" + id + "/resolve", map[string]any{"outcome": "ignore", "notes": "Reviewed by the operator"}},
+				{http.MethodGet, "/v1/operator/findings", nil},
+				{http.MethodGet, "/v1/operator/findings/fnd_" + id, nil},
+				{http.MethodPost, "/v1/operator/findings/fnd_" + id + "/resolve", map[string]any{"outcome": "ignore", "notes": "Reviewed by the operator"}},
 			} {
 				status, body := w.merchantJSON(token, op.method, op.path, op.body)
 				want := http.StatusForbidden

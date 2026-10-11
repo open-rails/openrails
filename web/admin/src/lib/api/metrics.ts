@@ -96,7 +96,7 @@ export const getDashboard = (signal?: AbortSignal) =>
   api<Dashboard>("/admin/dashboard", { signal })
 
 export const putDashboard = (widgets: Widget[]) =>
-  api<Dashboard>("/admin/dashboard", { method: "PUT", body: { widgets } })
+  api<Dashboard>("/operator/dashboard", { method: "PUT", body: { widgets } })
 
 // generateWidget: prompt → validated {query,title,viz}; baseQuery makes the
 // prompt refine that query.

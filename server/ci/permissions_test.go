@@ -109,12 +109,12 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		perm, method, path, body string
 		status                   int
 	}{
-		{string(billing.MerchantBillingRead), http.MethodGet, "/v1/admin/customers", "", http.StatusOK},
-		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/admin/findings", "", http.StatusOK},
-		{string(billing.MerchantBillingManage), http.MethodPatch, "/v1/admin/customers/" + customer, `{}`, http.StatusOK},
-		{string(billing.MerchantConfigManage), http.MethodPost, "/v1/admin/psps/refresh", "", http.StatusAccepted},
-		{string(billing.MerchantCatalogManage), http.MethodGet, "/v1/admin/catalog/meters", "", http.StatusOK},
-		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/admin/psps", "", http.StatusOK},
+		{string(billing.MerchantCustomerRead), http.MethodGet, "/v1/admin/customers", "", http.StatusOK},
+		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/operator/findings", "", http.StatusOK},
+		{string(billing.MerchantCustomerManage), http.MethodPatch, "/v1/admin/customers/" + customer, `{}`, http.StatusOK},
+		{string(billing.MerchantConfigManage), http.MethodPost, "/v1/operator/psps/refresh", "", http.StatusAccepted},
+		{string(billing.MerchantCatalogManage), http.MethodGet, "/v1/operator/catalog/meters", "", http.StatusOK},
+		{string(billing.MerchantConfigManage), http.MethodGet, "/v1/operator/psps", "", http.StatusOK},
 		{string(billing.MerchantMetricsRead), http.MethodGet, "/v1/admin/metrics/schema", "", http.StatusOK},
 		{string(billing.MerchantEntitlementsRead), http.MethodPost, "/v1/app/entitlements/check", `{"customer_id":"` + customer + `","entitlements":["content:any"]}`, http.StatusOK},
 		{string(billing.MerchantCatalogRead), http.MethodGet, "/v1/app/catalog/products?entitlement=content:any", "", http.StatusOK},
@@ -136,6 +136,12 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
 	}
 
+	// The former operator paths under /admin are removed, with no aliases.
+	for _, old := range []string{"/v1/admin/findings", "/v1/admin/psps", "/v1/admin/catalog/products", "/v1/admin/configuration", "/v1/admin/price-migrations"} {
+		w := send(handler, backend(every), http.MethodGet, old, "")
+		require.Equal(t, http.StatusNotFound, w.Code, "retired operator path %s: %s", old, w.Body.String())
+	}
+
 	// Without route_groups.programmatic, /v1/app is not served at all.
 	other := newFixture(t)
 	staffOnly := other.newServer(t, func(cfg *server.Config, deps *server.Deps) {
@@ -153,7 +159,7 @@ func TestStandalonePermissionsArePersonaResourceAction(t *testing.T) {
 		require.Equal(t, http.StatusNotFound, w.Code, "%s %s without programmatic: %s", route.method, route.path, w.Body.String())
 	}
 	require.Equal(t, http.StatusOK, send(handler, backend(every), http.MethodGet, "/v1/admin/customers", "").Code, "control: the admin group is on")
-	require.Equal(t, http.StatusNotFound, send(handler, backend(every), http.MethodGet, "/v1/admin/findings", "").Code, "findings require the merchant-config group")
+	require.Equal(t, http.StatusNotFound, send(handler, backend(every), http.MethodGet, "/v1/operator/findings", "").Code, "findings require the merchant-config group")
 }
 
 // A person acts at a merchant only through a token bound to it. A root
@@ -185,7 +191,7 @@ func TestRootActsOnlyThroughABoundToken(t *testing.T) {
 
 	for _, mid := range []billing.MerchantID{a, b} {
 		bound := f.exchanged(t, handler, operatorSession, mid)
-		for _, path := range []string{"/v1/admin/customers", "/v1/admin/psps", "/v1/admin/metrics/schema"} {
+		for _, path := range []string{"/v1/admin/customers", "/v1/operator/psps", "/v1/admin/metrics/schema"} {
 			w := bound.call(t, handler, http.MethodGet, path, nil)
 			require.Equal(t, http.StatusOK, w.Code, "the root holder reads %s at %s through its root: names: %s", path, mid, w.Body.String())
 			require.Equal(t, mid.String(), w.Header().Get("OpenRails-Bound-Merchant"))
@@ -197,7 +203,7 @@ func TestRootActsOnlyThroughABoundToken(t *testing.T) {
 
 	atA := f.exchanged(t, handler, supportSession, a)
 	require.Equal(t, http.StatusOK, atA.call(t, handler, http.MethodGet, "/v1/admin/customers", nil).Code, "its own merchant")
-	w := atA.call(t, handler, http.MethodGet, "/v1/admin/psps", nil)
+	w := atA.call(t, handler, http.MethodGet, "/v1/operator/psps", nil)
 	require.Equal(t, http.StatusForbidden, w.Code, "the wider ceiling grants support nothing it does not hold: %s", w.Body.String())
 	require.Equal(t, billing.CodePermissionRequired, errorCode(t, w))
 	w = atA.call(t, handler, http.MethodGet, "/v1/admin/access", nil)

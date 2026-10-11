@@ -104,7 +104,7 @@ func TestArchiveResponsesStream(t *testing.T) {
 		_, err := w.Write(book)
 		done <- err
 	}))
-	req, _ := http.NewRequestWithContext(WithMerchant(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/admin/billing-archive", nil)
+	req, _ := http.NewRequestWithContext(WithMerchant(t.Context(), bound), http.MethodGet, "http://openrails.invalid/v1/operator/billing-archive", nil)
 	res, err := transport.RoundTrip(req)
 	require.NoError(t, err)
 	select {
@@ -185,7 +185,7 @@ func TestUploadCancellationClosesRequestBody(t *testing.T) {
 		finished <- err
 		w.WriteHeader(http.StatusBadRequest)
 	}))
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/admin/billing-archive", reader)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://openrails.invalid/v1/operator/billing-archive", reader)
 	require.NoError(t, err)
 	returned := make(chan struct{})
 	go func() {

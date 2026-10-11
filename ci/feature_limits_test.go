@@ -71,7 +71,7 @@ func TestHTTPFeatureRateLimitsAreSharedAcrossMounts(t *testing.T) {
 			_, err := client.AskMetrics(t.Context(), billing.AskMetricsParams{Question: "Summarize"})
 			return err
 		}},
-		{"/v1/admin/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
+		{"/v1/operator/catalog/ask", `{"question":"Summarize"}`, &catalogLLM.asks, func() error {
 			_, err := client.AskCatalog(t.Context(), billing.AskCatalogParams{Question: "Summarize"})
 			return err
 		}},

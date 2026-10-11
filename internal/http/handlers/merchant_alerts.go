@@ -54,7 +54,7 @@ func handleAlertWriteError(r *httprequest.Request, err error) {
 	}
 }
 
-// ListAlertWebhooks handles GET /v1/admin/alert-webhooks.
+// ListAlertWebhooks handles GET /v1/operator/alert-webhooks.
 func ListAlertWebhooks(r *httprequest.Request) {
 	ids, ok := listIDs(r, billing.ParseAlertWebhookID)
 	if !ok {
@@ -72,7 +72,7 @@ func ListAlertWebhooks(r *httprequest.Request) {
 	r.SuccessJSON(billing.ListPage[billing.AlertWebhook]{Items: hooks})
 }
 
-// CreateAlertWebhook handles POST /v1/admin/alert-webhooks.
+// CreateAlertWebhook handles POST /v1/operator/alert-webhooks.
 func CreateAlertWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {
@@ -90,7 +90,7 @@ func CreateAlertWebhook(r *httprequest.Request) {
 	r.JSON(http.StatusCreated, hook)
 }
 
-// UpdateAlertWebhook handles PATCH /v1/admin/alert-webhooks/{id}.
+// UpdateAlertWebhook handles PATCH /v1/operator/alert-webhooks/{id}.
 func UpdateAlertWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {
@@ -112,7 +112,7 @@ func UpdateAlertWebhook(r *httprequest.Request) {
 	r.SuccessJSON(hook)
 }
 
-// DeleteAlertWebhook handles DELETE /v1/admin/alert-webhooks/{id}.
+// DeleteAlertWebhook handles DELETE /v1/operator/alert-webhooks/{id}.
 func DeleteAlertWebhook(r *httprequest.Request) {
 	svc, ok := alertService(r)
 	if !ok {

@@ -66,7 +66,7 @@ func TestProgrammaticRoutesNeedTheirPermission(t *testing.T) {
 			"its merchant: name in the root scope":            "only:" + string(merchant),
 			"its merchant: name at another merchant":          heldIn(uuid.NewString(), merchant),
 			"its root: name at the merchant":                  heldIn(shop, call.perm),
-			"another route's merchant: name, at the merchant": heldIn(shop, billing.MerchantBillingRead),
+			"another route's merchant: name, at the merchant": heldIn(shop, billing.MerchantCustomerRead),
 		} {
 			status, body = w.merchantJSON(application(role), call.method, call.path, call.body())
 			require.Equal(t, http.StatusForbidden, status, "%s with %s: %v", call.path, name, body)

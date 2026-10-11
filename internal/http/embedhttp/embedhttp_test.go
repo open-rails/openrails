@@ -105,7 +105,7 @@ func TestNewRoutes(t *testing.T) {
 	require.Contains(t, keys, "GET /billing/v1/admin/payments")
 	require.NotContains(t, keys, "OPTIONS /billing/v1/admin/payments")
 	require.Contains(t, keys, "POST /billing/v1/admin/payments/{id}/refunds", "the admin group mounts its changes")
-	require.NotContains(t, keys, "GET /billing/v1/admin/psps", "configuration needs MerchantConfig")
+	require.NotContains(t, keys, "GET /billing/v1/operator/psps", "configuration needs MerchantConfig")
 }
 
 // A route whose permissions the Auth knows neither of is not mounted, and
@@ -121,13 +121,13 @@ func TestMountNeedsAKnownPermission(t *testing.T) {
 		(&Assembler{Runtime: rt, Auth: catalogued{Fake: &authtest.Fake{}, known: known}}).NewRoutes(Options{Groups: config.RouteGroups{Admin: true}})
 		return nil
 	}
-	require.NoError(t, mount(billing.RootBillingRead, billing.RootBillingManage), "the root: names alone")
-	require.NoError(t, mount(billing.MerchantBillingRead, billing.MerchantBillingManage), "the merchant: names alone")
-	require.NoError(t, mount(billing.MerchantBillingRead, billing.RootBillingManage))
+	require.NoError(t, mount(billing.RootCustomerRead, billing.RootCustomerManage), "the root: names alone")
+	require.NoError(t, mount(billing.MerchantCustomerRead, billing.MerchantCustomerManage), "the merchant: names alone")
+	require.NoError(t, mount(billing.MerchantCustomerRead, billing.RootCustomerManage))
 
-	err := mount(billing.RootBillingRead)
-	require.ErrorContains(t, err, string(billing.MerchantBillingManage))
-	require.ErrorContains(t, err, string(billing.RootBillingManage))
+	err := mount(billing.RootCustomerRead)
+	require.ErrorContains(t, err, string(billing.MerchantCustomerManage))
+	require.ErrorContains(t, err, string(billing.RootCustomerManage))
 	var mountErr httproutes.MountError
 	require.ErrorAs(t, err, &mountErr)
 	method, path, _ := strings.Cut(mountErr.Route, " ")

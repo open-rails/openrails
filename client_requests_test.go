@@ -70,7 +70,7 @@ func TestClientRequestShapes(t *testing.T) {
 				BillingPolicyBindings: []billing.BillingPolicyBinding{{PolicyName: "api_line", Tier: "gold"}},
 			}})
 			return err
-		}, http.MethodPatch, "/v1/admin/configuration", "", func(t *testing.T, b map[string]any) {
+		}, http.MethodPatch, "/v1/operator/configuration", "", func(t *testing.T, b map[string]any) {
 			settings := b["settings"].(map[string]any)
 			require.Equal(t, "api_line", settings["billing_policies"].([]any)[0].(map[string]any)["name"])
 			binding := settings["billing_policy_bindings"].([]any)[0].(map[string]any)

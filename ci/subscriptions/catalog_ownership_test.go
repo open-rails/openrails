@@ -439,7 +439,7 @@ func TestCatalogEditsCarryRevisions(t *testing.T) {
 
 	// Over HTTP the refusal carries the current revision.
 	var body map[string]any
-	status := w.staffCall(http.MethodPatch, "/v1/admin/catalog/products/"+product.ID.String(), map[string]any{"display_name": "Stale", "expected_revision": 1}, &body)
+	status := w.staffCall(http.MethodPatch, "/v1/operator/catalog/products/"+product.ID.String(), map[string]any{"display_name": "Stale", "expected_revision": 1}, &body)
 	require.Equal(t, http.StatusConflict, status)
 	code, _ := errorOf(body)
 	require.Equal(t, "revision_mismatch", code)

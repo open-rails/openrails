@@ -64,7 +64,7 @@ year-old usage order must not turn into a shutoff instruction.
 ## Policy (two knobs, both defaulted)
 
 Merchant settings, declared under the merchant's `settings:` (mode 1) or
-applied through `PATCH /v1/admin/configuration` (mode 2); the
+applied through `PATCH /v1/operator/configuration` (mode 2); the
 same names in both:
 
 ```yaml

@@ -206,7 +206,7 @@ same public origin to `public_billing_base_url`, `auth.token.issuer` and
   tracking and webhook source addresses all see the controller. Behind
   Cloudflare, list its ranges in `cloudflare_proxies` as well.
 - **Body size.** Requests are capped at 1 MiB, but a billing archive import
-  (`POST /v1/admin/billing-archive`) streams up to 1 GiB: raise the controller's
+  (`POST /v1/operator/billing-archive`) streams up to 1 GiB: raise the controller's
   limit if you import over HTTP.
 
 ## Health and metrics

@@ -19,8 +19,8 @@ import (
 
 // The admin group's root: permissions, which CheckAuth fills in.
 const (
-	read  = billing.RootBillingRead
-	write = billing.RootBillingManage
+	read  = billing.RootCustomerRead
+	write = billing.RootCustomerManage
 )
 
 const (
@@ -158,7 +158,7 @@ func (v anyGrant) Can(ctx context.Context, scope billingauth.Scope, _ string) (b
 func TestCheckAuthFillsTheRouteGroupsPermissions(t *testing.T) {
 	fake := &authtest.Fake{}
 	held := []billing.Permission{
-		billing.RootBillingRead, billing.RootBillingManage, billing.RootCatalogManage, billing.RootConfigManage, billing.RootMetricsRead,
+		billing.RootCustomerRead, billing.RootCustomerManage, billing.RootCatalogManage, billing.RootConfigManage, billing.RootMetricsRead,
 		billing.RootEntitlementsRead, billing.RootCatalogRead, billing.RootUsageManage, billing.RootEventsRead, billing.RootOrdersManage,
 	}
 	every := openrails.RouteGroups{Admin: true, Catalog: true, MerchantConfig: true, Metrics: true, Programmatic: true}

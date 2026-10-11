@@ -39,16 +39,16 @@ const (
 	// Customer is a customer acting on its own account (/v1/me).
 	Customer Group = "customer"
 	// Admin is customer support, staff work on customers: staff, machines
-	// and the Go client alike, each route behind billing.MerchantBillingRead
-	// or MerchantBillingManage by its Level, or their root: twins.
+	// and the Go client alike, each route behind billing.MerchantCustomerRead
+	// or MerchantCustomerManage by its Level, or their root: twins.
 	Admin Group = "admin"
 	// CatalogAdmin is the catalog, its reads and edits, document
-	// applications and moving subscribers between prices, behind
+	// applications and moving subscribers between prices at /v1/operator, behind
 	// billing.MerchantCatalogManage or its root: twin. A document skips an
 	// object whose field an edit set differently.
 	CatalogAdmin Group = "catalog"
 	// MerchantConfig is the merchant's own configuration: PSPs, settings,
-	// billing import and export, the dashboard layout, behind
+	// findings, billing import and export, the dashboard layout at /v1/operator, behind
 	// billing.MerchantConfigManage or its root: twin.
 	MerchantConfig Group = "merchant_config"
 	// Metrics is the merchant's business metrics, read-only: revenue and
@@ -115,9 +115,9 @@ const (
 	// that is known (a server's many merchants, PSPs added later), a request
 	// whose merchant has none answers route_not_found.
 	FeatureStripePortal Feature = "stripe_portal"
-	// FeatureMerchantConfigEdits: Vault holds merchant configuration, so it
+	// FeatureMerchantConfigManages: Vault holds merchant configuration, so it
 	// can change; a file is read-only.
-	FeatureMerchantConfigEdits Feature = "merchant_config_edits"
+	FeatureMerchantConfigManages Feature = "merchant_config_edits"
 	// FeatureCatalogCopilot: llm.api_key and llm.catalog_copilot_enabled.
 	FeatureCatalogCopilot Feature = "catalog_copilot"
 	// FeatureMetricsAsk: llm.api_key and llm.ask_enabled.
@@ -130,8 +130,8 @@ const (
 )
 
 // Level is a customer-support or catalog route's: a read, or an update. A
-// support read needs billing.MerchantBillingRead, an update
-// MerchantBillingManage, or their root: twins; a catalog update refuses
+// support read needs billing.MerchantCustomerRead, an update
+// MerchantCustomerManage, or their root: twins; a catalog update refuses
 // while the catalog is not edited over HTTP.
 // Lookups, previews, checks and queries sent as POST are reads.
 type Level string

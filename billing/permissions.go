@@ -19,7 +19,7 @@ type Permission string
 // Persona is where the permission is held: "merchant" or "root".
 func (p Permission) Persona() string { return p.part(0) }
 
-// Resource is what the permission is over, such as "billing".
+// Resource is what the permission is over, such as "customer".
 func (p Permission) Resource() string { return p.part(1) }
 
 // Action is what the permission allows, such as "read" or "manage".
@@ -38,11 +38,11 @@ func (p Permission) part(i int) string {
 // scope, or its root: name in the root scope.
 const (
 	// The admin group's reads: customers, their subscriptions and payments.
-	MerchantBillingRead Permission = "merchant:billing:read"
-	RootBillingRead     Permission = "root:billing:read"
+	MerchantCustomerRead Permission = "merchant:customer:read"
+	RootCustomerRead     Permission = "root:customer:read"
 	// The admin group's changes: refunds, cancellations, credits.
-	MerchantBillingManage Permission = "merchant:billing:manage"
-	RootBillingManage     Permission = "root:billing:manage"
+	MerchantCustomerManage Permission = "merchant:customer:manage"
+	RootCustomerManage     Permission = "root:customer:manage"
 	// The catalog group.
 	MerchantCatalogManage Permission = "merchant:catalog:manage"
 	RootCatalogManage     Permission = "root:catalog:manage"
@@ -77,7 +77,7 @@ const (
 // host declares in its auth and grants in its roles.
 func Permissions() []Permission {
 	return []Permission{
-		MerchantBillingRead, RootBillingRead, MerchantBillingManage, RootBillingManage,
+		MerchantCustomerRead, RootCustomerRead, MerchantCustomerManage, RootCustomerManage,
 		MerchantCatalogManage, RootCatalogManage, MerchantConfigManage, RootConfigManage,
 		MerchantMetricsRead, RootMetricsRead,
 		MerchantEntitlementsRead, RootEntitlementsRead, MerchantCatalogRead, RootCatalogRead,

@@ -31,12 +31,12 @@ func TestMerchantRolePermissionsInTheRunningCatalog(t *testing.T) {
 		return out
 	}
 	require.Equal(t, []string{"merchant:*"}, held(controlplane.MerchantOwner))
-	require.ElementsMatch(t, []string{string(billing.MerchantBillingRead), string(billing.MerchantBillingManage)}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
-	require.Equal(t, []string{string(billing.MerchantBillingRead)}, held(controlplane.MerchantViewer), "viewer is read-only")
+	require.ElementsMatch(t, []string{string(billing.MerchantCustomerRead), string(billing.MerchantCustomerManage)}, held(controlplane.MerchantSupport), "support reads and acts on customers' billing")
+	require.Equal(t, []string{string(billing.MerchantCustomerRead)}, held(controlplane.MerchantViewer), "viewer is read-only")
 	for _, role := range []iam.Role{controlplane.MerchantSupport, controlplane.MerchantViewer} {
 		grants := held(role)
 		for _, p := range grants {
-			require.Contains(t, []billing.Permission{billing.MerchantBillingRead, billing.MerchantBillingManage}, billing.Permission(p), "%s must not hold %s", role, p)
+			require.Contains(t, []billing.Permission{billing.MerchantCustomerRead, billing.MerchantCustomerManage}, billing.Permission(p), "%s must not hold %s", role, p)
 		}
 		for _, g := range grants {
 			require.NotContains(t, g, "*", "%s holds no pattern", role)

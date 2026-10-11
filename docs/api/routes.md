@@ -81,40 +81,40 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/admin/orders` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Order>` |  |
-| GET | `/v1/admin/orders/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Order` |  |
-| POST | `/v1/admin/orders/{id}/void` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | — | 200 `Order` | sensitive; limit `destructive` |
-| POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | — | 200 `Order` | sensitive; limit `destructive` |
-| POST | `/v1/admin/orders/{id}/retry-collection` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `RetryOrderCollectionParams` | 200 `Order` | sensitive; limit `off_channel`; `Idempotency-Key` |
-| GET | `/v1/admin/subscriptions` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Subscription>` |  |
-| GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Subscription` |  |
-| POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
-| POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | — | 200 `Subscription` | sensitive |
-| POST | `/v1/admin/subscriptions/{id}/change` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
-| POST | `/v1/admin/subscriptions/{id}/change/preview` | merchant | `merchant:billing:read`<br>`root:billing:read` | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
-| PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
-| GET | `/v1/admin/entitlements` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<CustomerEntitlement>` |  |
-| GET | `/v1/admin/product-access` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
-| POST | `/v1/admin/product-access` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
-| POST | `/v1/admin/product-access/{id}/revoke` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `RevokeProductAccessParams` | 204 — | sensitive; limit `destructive` |
-| GET | `/v1/admin/customers` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Customer>` |  |
-| GET | `/v1/admin/customers/{customer_id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Customer` |  |
-| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `UpdateCustomerParams` | 200 `Customer` | sensitive; limit `grant` |
-| POST | `/v1/admin/credit-grants` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | sensitive; limit `grant` |
-| GET | `/v1/admin/credit-grants` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<CreditGrant>` |  |
-| GET | `/v1/admin/credit-grants/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `CreditGrant` |  |
-| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
-| GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<BalanceTransaction>` |  |
-| GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Balance` |  |
-| POST | `/v1/admin/payments` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
-| GET | `/v1/admin/payments` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Payment>` |  |
-| GET | `/v1/admin/payments/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Payment` |  |
-| POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |
-| GET | `/v1/admin/payment-attempts` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<PaymentAttempt>` |  |
-| GET | `/v1/admin/payment-attempts/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `PaymentAttempt` |  |
-| GET | `/v1/admin/renewals` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Renewal>` |  |
-| GET | `/v1/admin/renewals/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Renewal` |  |
-| GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<PaymentMethod>` |  |
+| GET | `/v1/admin/orders` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Order>` |  |
+| GET | `/v1/admin/orders/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Order` |  |
+| POST | `/v1/admin/orders/{id}/void` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | sensitive; limit `destructive` |
+| POST | `/v1/admin/orders/{id}/mark-uncollectible` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Order` | sensitive; limit `destructive` |
+| POST | `/v1/admin/orders/{id}/retry-collection` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RetryOrderCollectionParams` | 200 `Order` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| GET | `/v1/admin/subscriptions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Subscription>` |  |
+| GET | `/v1/admin/subscriptions/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Subscription` |  |
+| POST | `/v1/admin/subscriptions/{id}/cancel` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CancelSubscriptionParams` | 200 `Subscription` | sensitive; limit `destructive` |
+| POST | `/v1/admin/subscriptions/{id}/resume` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | — | 200 `Subscription` | sensitive |
+| POST | `/v1/admin/subscriptions/{id}/change` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `ChangeSubscriptionParams` | 200 `SubscriptionChange`<br>202 `SubscriptionChange` | sensitive; limit `off_channel`; `Idempotency-Key` |
+| POST | `/v1/admin/subscriptions/{id}/change/preview` | merchant | `merchant:customer:read`<br>`root:customer:read` | `ChangeSubscriptionParams` | 200 `SubscriptionChangePreview` |  |
+| PUT | `/v1/admin/subscriptions/{id}/payment-method` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` | sensitive |
+| GET | `/v1/admin/entitlements` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CustomerEntitlement>` |  |
+| GET | `/v1/admin/product-access` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<ProductAccessGrant>` |  |
+| POST | `/v1/admin/product-access` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateProductAccessBatchParams` | 201 `CreateProductAccessBatchResult` | sensitive; limit `grant`; `Idempotency-Key` |
+| POST | `/v1/admin/product-access/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeProductAccessParams` | 204 — | sensitive; limit `destructive` |
+| GET | `/v1/admin/customers` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Customer>` |  |
+| GET | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Customer` |  |
+| PATCH | `/v1/admin/customers/{customer_id}` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `UpdateCustomerParams` | 200 `Customer` | sensitive; limit `grant` |
+| POST | `/v1/admin/credit-grants` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreateCreditGrantBatchParams` | 201 `CreateCreditGrantBatchResult`<br>200 `CreateCreditGrantBatchResult` | sensitive; limit `grant` |
+| GET | `/v1/admin/credit-grants` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<CreditGrant>` |  |
+| GET | `/v1/admin/credit-grants/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `CreditGrant` |  |
+| POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
+| GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<BalanceTransaction>` |  |
+| GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Balance` |  |
+| POST | `/v1/admin/payments` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
+| GET | `/v1/admin/payments` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Payment>` |  |
+| GET | `/v1/admin/payments/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Payment` |  |
+| POST | `/v1/admin/payments/{id}/refunds` | merchant | `merchant:customer:manage`<br>`root:customer:manage` | `RefundPaymentParams` | 201 `Payment`<br>202 `Payment` | sensitive; limit `destructive`; `Idempotency-Key` |
+| GET | `/v1/admin/payment-attempts` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentAttempt>` |  |
+| GET | `/v1/admin/payment-attempts/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `PaymentAttempt` |  |
+| GET | `/v1/admin/renewals` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<Renewal>` |  |
+| GET | `/v1/admin/renewals/{id}` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `Renewal` |  |
+| GET | `/v1/admin/customers/{customer_id}/payment-methods` | merchant | `merchant:customer:read`<br>`root:customer:read` | — | 200 `ListPage<PaymentMethod>` |  |
 
 ## Catalog
 
@@ -122,25 +122,25 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/admin/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
-| GET | `/v1/admin/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
-| GET | `/v1/admin/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
-| PUT | `/v1/admin/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
-| POST | `/v1/admin/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
-| POST | `/v1/admin/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
-| GET | `/v1/admin/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/admin/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Product` |  |
-| PATCH | `/v1/admin/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | sensitive; catalog update |
-| POST | `/v1/admin/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | sensitive; catalog update |
-| GET | `/v1/admin/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/admin/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Price` |  |
-| GET | `/v1/admin/catalog/prices/{id}/history` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceKeyMovement>` |  |
-| PATCH | `/v1/admin/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog update |
-| POST | `/v1/admin/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive; catalog update |
-| POST | `/v1/admin/price-migrations/preview` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
-| GET | `/v1/admin/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceMigration>` |  |
-| GET | `/v1/admin/price-migrations/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigration` |  |
-| POST | `/v1/admin/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | sensitive; catalog update |
+| POST | `/v1/operator/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
+| GET | `/v1/operator/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/operator/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
+| PUT | `/v1/operator/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
+| POST | `/v1/operator/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
+| POST | `/v1/operator/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
+| GET | `/v1/operator/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/operator/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Product` |  |
+| PATCH | `/v1/operator/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | sensitive; catalog update |
+| POST | `/v1/operator/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | sensitive; catalog update |
+| GET | `/v1/operator/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/operator/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Price` |  |
+| GET | `/v1/operator/catalog/prices/{id}/history` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| PATCH | `/v1/operator/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog update |
+| POST | `/v1/operator/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive; catalog update |
+| POST | `/v1/operator/price-migrations/preview` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
+| GET | `/v1/operator/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceMigration>` |  |
+| GET | `/v1/operator/price-migrations/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigration` |  |
+| POST | `/v1/operator/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | sensitive; catalog update |
 
 ## Merchant configuration
 
@@ -148,28 +148,28 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/admin/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<PSP>` |  |
-| POST | `/v1/admin/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/admin/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `PSP` |  |
-| PATCH | `/v1/admin/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
-| POST | `/v1/admin/psps/routing-preview` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
-| POST | `/v1/admin/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` | sensitive |
-| GET | `/v1/admin/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `MerchantConfigurationState` |  |
-| PATCH | `/v1/admin/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/admin/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<AlertWebhook>` |  |
-| POST | `/v1/admin/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits`; sensitive |
-| DELETE | `/v1/admin/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits`; sensitive |
-| PATCH | `/v1/admin/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/admin/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `application/x-ndjson` | sensitive |
-| POST | `/v1/admin/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
-| POST | `/v1/admin/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
-| PUT | `/v1/admin/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
-| GET | `/v1/admin/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/admin/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
-| POST | `/v1/admin/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
-| GET | `/v1/admin/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
-| POST | `/v1/admin/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
-| DELETE | `/v1/admin/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | sensitive |
+| GET | `/v1/operator/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<PSP>` |  |
+| POST | `/v1/operator/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits`; sensitive |
+| GET | `/v1/operator/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `PSP` |  |
+| PATCH | `/v1/operator/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
+| POST | `/v1/operator/psps/routing-preview` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/operator/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` | sensitive |
+| GET | `/v1/operator/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `MerchantConfigurationState` |  |
+| PATCH | `/v1/operator/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
+| GET | `/v1/operator/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<AlertWebhook>` |  |
+| POST | `/v1/operator/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits`; sensitive |
+| DELETE | `/v1/operator/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits`; sensitive |
+| PATCH | `/v1/operator/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits`; sensitive |
+| GET | `/v1/operator/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `application/x-ndjson` | sensitive |
+| POST | `/v1/operator/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
+| POST | `/v1/operator/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
+| PUT | `/v1/operator/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
+| GET | `/v1/operator/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/operator/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
+| POST | `/v1/operator/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
+| GET | `/v1/operator/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
+| POST | `/v1/operator/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
+| DELETE | `/v1/operator/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | sensitive |
 
 ## Business metrics
 

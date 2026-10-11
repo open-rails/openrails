@@ -8,7 +8,7 @@ import (
 	billingservice "github.com/open-rails/openrails/internal/service"
 )
 
-// PreviewPSPRouting handles POST /v1/admin/psps/routing-preview: which PSP a
+// PreviewPSPRouting handles POST /v1/operator/psps/routing-preview: which PSP a
 // checkout for this price would use, and why every other PSP was passed over,
 // without creating a session.
 func PreviewPSPRouting(r *httprequest.Request) {

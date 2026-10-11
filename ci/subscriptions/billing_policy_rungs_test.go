@@ -139,6 +139,6 @@ func TestBillingPolicyRungs(t *testing.T) {
 	require.True(t, delinquent(plain))
 	require.True(t, delinquent(dangling))
 
-	status, body := w.staffJSON(http.MethodGet, "/v1/admin/findings", nil)
+	status, body := w.staffJSON(http.MethodGet, "/v1/operator/findings", nil)
 	require.Equal(t, http.StatusOK, status, "%v", body)
 }

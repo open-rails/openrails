@@ -87,7 +87,8 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 	require.NoError(t, err)
 	var public, customer bool
 	for _, r := range routes {
-		require.NotContains(t, r.Path, "/admin/", "without RouteGroups no admin or merchant-config route is mounted")
+		require.NotContains(t, r.Path, "/admin/", "without RouteGroups no admin route is mounted")
+		require.NotContains(t, r.Path, "/operator/", "without RouteGroups no catalog or merchant-config route is mounted")
 		public = public || r.Path == "/v1/catalog/products"
 		customer = customer || strings.HasPrefix(r.Path, "/v1/me/")
 	}
@@ -103,7 +104,7 @@ func TestHTTPRouteExposureMatchesSelection(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/pay/v1/me", http.StatusUnauthorized},
 		{http.MethodPost, "/api/pay/v1/me/orders", http.StatusUnauthorized},
-		{http.MethodPost, "/api/pay/v1/admin/psps", http.StatusUnauthorized},
+		{http.MethodPost, "/api/pay/v1/operator/psps", http.StatusUnauthorized},
 		{http.MethodOptions, "/api/pay/v1/me", http.StatusNoContent},
 		{http.MethodOptions, "/api/pay/v1/config", http.StatusNoContent},
 	} {
@@ -136,7 +137,7 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 		routes, err := rt.Routes(sel)
 		require.NoError(t, err)
 		for _, route := range routes {
-			if !strings.Contains(route.Path, "/admin/catalog") || route.Method == http.MethodOptions {
+			if !strings.Contains(route.Path, "/operator/catalog") || route.Method == http.MethodOptions {
 				continue
 			}
 			// Offer lookup is a read with a POST body.
@@ -153,7 +154,7 @@ func TestCatalogEditsFollowTheCatalogGroup(t *testing.T) {
 	reads, n := writes(rt, config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups()})
 	require.Zero(t, reads+n, "the catalog is its own group")
 	mux := mountAt(t, rt, config.Routes{Auth: fake, RouteGroups: authtest.AdminGroups()}, "/api/pay")
-	for _, path := range []string{"/api/pay/v1/admin/catalog/products", "/api/pay/v1/admin/catalog/prices"} {
+	for _, path := range []string{"/api/pay/v1/operator/catalog/products", "/api/pay/v1/operator/catalog/prices"} {
 		require.Contains(t, []int{http.StatusNotFound, http.StatusMethodNotAllowed}, serve(mux, http.MethodPost, path, "").Code, path)
 	}
 	// Mounts choose independently; a host's catalog document never closes them.

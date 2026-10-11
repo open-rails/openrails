@@ -12,7 +12,7 @@ order on one PSP; each pay creates one.
 | --- | --- | --- |
 | PreviewOrder | POST /v1/app/orders/preview | `merchant:orders:manage` or `root:orders:manage` |
 | CreateOrder | POST /v1/app/orders | `merchant:orders:manage` or `root:orders:manage` |
-| GetOrder, ListOrders | GET /v1/admin/orders[/{id}] | `merchant:billing:read` or `root:billing:read` |
+| GetOrder, ListOrders | GET /v1/admin/orders[/{id}] | `merchant:customer:read` or `root:customer:read` |
 | CancelOrder | POST /v1/app/orders/{id}/cancel | `merchant:orders:manage` or `root:orders:manage` |
 
 `PreviewOrder` prices lines for one customer and lists the `payment_options`

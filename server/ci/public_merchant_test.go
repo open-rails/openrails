@@ -102,7 +102,7 @@ func TestPublicCatalogNamesItsMerchant(t *testing.T) {
 
 	// Elsewhere the parameter names nothing: A's key reads A's rows, or the
 	// route refuses the parameter; it never reads B's.
-	for _, path := range []string{"/v1/admin/catalog/products", "/v1/app/catalog/products"} {
+	for _, path := range []string{"/v1/operator/catalog/products", "/v1/app/catalog/products"} {
 		w := serve(handler, rsRequest{path: path + "?" + url.Values{"merchant": {b.String()}, "keys": {key}}.Encode(), authorization: "Bearer " + keyA.Secret})
 		if w.Code == http.StatusBadRequest {
 			continue

@@ -40,8 +40,8 @@ var rootScope = auth.Scope{Authority: issuer, ID: "root"}
 // merchant's merchant: names.
 var roles = map[string][]billing.Permission{
 	"admin":   billing.Permissions(),
-	"support": {billing.MerchantBillingRead, billing.MerchantBillingManage, billing.RootBillingRead, billing.RootBillingManage},
-	"reader":  {billing.MerchantBillingRead, billing.RootBillingRead},
+	"support": {billing.MerchantCustomerRead, billing.MerchantCustomerManage, billing.RootCustomerRead, billing.RootCustomerManage},
+	"reader":  {billing.MerchantCustomerRead, billing.RootCustomerRead},
 }
 
 // shopAuth is the shop's own auth as OpenRails takes it (helpers/auth): it

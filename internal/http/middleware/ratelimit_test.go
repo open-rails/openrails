@@ -274,7 +274,7 @@ func TestCaptchaChallenges(t *testing.T) {
 		call{path: "/v1/me/orders", ip: ip, merchant: under, want: 403, body: "captcha_required"}.do(t, h)
 		call{path: "/v1/me/orders", ip: ip, merchant: under, token: "good", want: 200}.do(t, h)
 		call{path: "/v1/me/orders", ip: "198.51.100.3", merchant: under, want: 403}.do(t, h)
-		call{method: "GET", path: "/v1/admin/findings", ip: "198.51.100.3", merchant: under, want: 200}.do(t, h)
+		call{method: "GET", path: "/v1/operator/findings", ip: "198.51.100.3", merchant: under, want: 200}.do(t, h)
 		call{path: "/v1/me/orders", ip: "198.51.100.3", merchant: other, want: 200}.do(t, h)
 		call{path: "/v1/me/orders", ip: "198.51.100.4", want: 200}.do(t, h)
 		call{path: "/v1/me/orders", ip: "198.51.100.5", merchant: under, want: 200}.do(t, engine(deps, okHandler()))
@@ -291,7 +291,7 @@ func TestCaptchaChallenges(t *testing.T) {
 		deps.ChallengeStore.MarkChallenged(ctx, "ip:"+ip, time.Minute)
 		h := engine(deps, okHandler())
 		call{path: "/v1/me/payment-methods", ip: ip, want: 403, body: "captcha_required"}.do(t, h)
-		call{method: "GET", path: "/v1/admin/findings", ip: ip, want: 200}.do(t, h)
+		call{method: "GET", path: "/v1/operator/findings", ip: ip, want: 200}.do(t, h)
 		call{path: "/v1/admin/admissions", ip: ip, want: 200}.do(t, h)
 	})
 

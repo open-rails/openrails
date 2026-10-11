@@ -46,7 +46,7 @@ func TestOperationalProblemsAreFindings(t *testing.T) {
 
 	list := func(findingType string) []map[string]any {
 		t.Helper()
-		status, page := w.staffJSON(http.MethodGet, "/v1/admin/findings?type="+findingType, nil)
+		status, page := w.staffJSON(http.MethodGet, "/v1/operator/findings?type="+findingType, nil)
 		require.Equal(t, http.StatusOK, status, "%v", page)
 		var out []map[string]any
 		for _, item := range page["data"].([]any) {
@@ -63,7 +63,7 @@ func TestOperationalProblemsAreFindings(t *testing.T) {
 	stalls := list("life.worker.*")
 	require.Len(t, stalls, 1, "%v", stalls)
 	require.Equal(t, kind, stalls[0]["subject_key"])
-	status, raw := w.staff(http.MethodGet, "/v1/admin/findings?type=life.worker.stalled")
+	status, raw := w.staff(http.MethodGet, "/v1/operator/findings?type=life.worker.stalled")
 	require.Equal(t, http.StatusOK, status, raw)
 	require.NotContains(t, raw, "cus_0000")
 
@@ -88,11 +88,11 @@ func TestOperationalProblemsAreFindings(t *testing.T) {
 	require.NoError(t, monitor.RaiseAlerts(t.Context(), stalled))
 	require.Len(t, list("life.worker.*"), 1, "a fresh stall is raised again")
 
-	for _, gone := range []string{"/v1/admin/notifications", "/v1/admin/notifications/unread-count", "/v1/admin/catalog/drift"} {
+	for _, gone := range []string{"/v1/admin/notifications", "/v1/admin/notifications/unread-count", "/v1/operator/catalog/drift"} {
 		status, raw := w.staff(http.MethodGet, gone)
 		require.Equal(t, http.StatusNotFound, status, "%s: %s", gone, raw)
 	}
-	status, raw = w.staff(http.MethodGet, "/v1/admin/findings/summary")
+	status, raw = w.staff(http.MethodGet, "/v1/operator/findings/summary")
 	require.Equal(t, http.StatusBadRequest, status, "summary is no finding id: %s", raw)
 	status, raw = w.staff(http.MethodPost, "/v1/admin/notifications/read")
 	require.True(t, status == http.StatusNotFound || status == http.StatusMethodNotAllowed, "%d %s", status, raw)

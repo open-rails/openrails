@@ -20,7 +20,7 @@ func CapabilitiesFor(rt *app.Runtime, on config.RouteGroups, providerRoutes rout
 		"stripe_billing_portal":          providerRoutes.StripePortal,
 		"solana_one_time_payments":       providerRoutes.Solana,
 		"solana_subscription_management": providerRoutes.SolanaSigning,
-		"merchant_config_edits":          config && rt.MerchantConfigEditable(),
+		"merchant_config_edits":          config && rt.MerchantConfigManageable(),
 		"catalog_copilot":                catalog && rt != nil && rt.CopilotService.Configured(),
 		"metrics_ask":                    metrics && rt != nil && rt.DashboardService.AskConfigured(),
 		"dashboard_generation":           metrics && rt != nil && rt.DashboardService.NLConfigured(),

@@ -231,8 +231,8 @@ func startApp(t *testing.T) *app {
 	db := freshDatabase(t, dsn, queries)
 
 	rbac := authkit.NewRoles()
-	billingRead := rbac.Root.Permission(billing.RootBillingRead.Resource(), billing.RootBillingRead.Action())
-	billingManage := rbac.Root.Permission(billing.RootBillingManage.Resource(), billing.RootBillingManage.Action())
+	billingRead := rbac.Root.Permission(billing.RootCustomerRead.Resource(), billing.RootCustomerRead.Action())
+	billingManage := rbac.Root.Permission(billing.RootCustomerManage.Resource(), billing.RootCustomerManage.Action())
 	rbac.Root.Role("support", billingRead, billingManage)
 	ak, err := newAuth(ctx, db, rbac)
 	require.NoError(t, err)

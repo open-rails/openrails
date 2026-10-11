@@ -10,7 +10,7 @@ import (
 // full persona:resource:action, and each merchant: name has its root: twin.
 func TestPermissionsAreNamedInBothPersonas(t *testing.T) {
 	require.Equal(t, []Permission{
-		"merchant:billing:read", "root:billing:read", "merchant:billing:manage", "root:billing:manage",
+		"merchant:customer:read", "root:customer:read", "merchant:customer:manage", "root:customer:manage",
 		"merchant:catalog:manage", "root:catalog:manage", "merchant:config:manage", "root:config:manage",
 		"merchant:metrics:read", "root:metrics:read",
 		"merchant:entitlements:read", "root:entitlements:read", "merchant:catalog:read", "root:catalog:read",
@@ -27,7 +27,7 @@ func TestPermissionsAreNamedInBothPersonas(t *testing.T) {
 		require.Equal(t, merchant.Action(), root.Action(), merchant)
 		require.Equal(t, Permission(merchant.Persona()+":"+merchant.Resource()+":"+merchant.Action()), merchant)
 	}
-	for _, malformed := range []Permission{"", "billing", "root:billing", "root:billing:read:all"} {
+	for _, malformed := range []Permission{"", "billing", "root:billing", "root:customer:read:all"} {
 		require.Empty(t, malformed.Persona()+malformed.Resource()+malformed.Action(), "%q is not persona:resource:action", malformed)
 	}
 	require.NotContains(t, all, RootMerchantsRead, "no route checks an operator permission")

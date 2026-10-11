@@ -1,9 +1,9 @@
 # Merchant settings
 
 A merchant's settings (`billing.MerchantSettings`) are part of its
-configuration: `GET /v1/admin/configuration` (`Client.GetMerchantConfiguration`)
+configuration: `GET /v1/operator/configuration` (`Client.GetMerchantConfiguration`)
 reads them with the configuration's revision, and
-`PATCH /v1/admin/configuration` (`Client.UpdateMerchantConfiguration`)
+`PATCH /v1/operator/configuration` (`Client.UpdateMerchantConfiguration`)
 changes them against that revision where Vault holds the configuration
 ([merchant configuration](../merchant-configuration.md)). A merchant whose
 configuration is a file declares the same document under `settings:` in its
@@ -44,8 +44,8 @@ automatically.
   the field, as in `credit_limits[0].amount`. A customer that does not exist
   is `404 customer_not_found` (settings never create one), and an undeclared
   policy is `404 billing_policy_not_found`.
-- The read needs `billing.MerchantBillingRead` and the write
-  `billing.MerchantBillingManage`, or their `root:` twins. Every
+- The read needs `billing.MerchantCustomerRead` and the write
+  `billing.MerchantCustomerManage`, or their `root:` twins. Every
   field can change the customer's spending authority, so the write is
   sensitive: a person needs a recent sign-in for it (`step_up_required`). Writes count against the
   per-administrator grant limit, one per item.

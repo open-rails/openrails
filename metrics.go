@@ -47,7 +47,7 @@ func (c *Client) GetDashboard(ctx context.Context, options ...RequestOption) (*b
 // SetDashboard replaces the merchant's widget layout.
 func (c *Client) SetDashboard(ctx context.Context, req billing.SetDashboardParams, options ...RequestOption) (*billing.Dashboard, error) {
 	var out billing.Dashboard
-	if err := c.do(ctx, http.MethodPut, "/v1/admin/dashboard", req, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPut, "/v1/operator/dashboard", req, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil

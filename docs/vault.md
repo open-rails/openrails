@@ -18,8 +18,8 @@ OpenRails learns about them.
 
 With a KV mount named, Vault is the only source:
 
-- Staff edit configuration over HTTP (`PATCH /v1/admin/configuration`, the
-  `/v1/admin/psps` and `/v1/admin/alert-webhooks` routes) or in the console,
+- Staff edit configuration over HTTP (`PATCH /v1/operator/configuration`, the
+  `/v1/operator/psps` and `/v1/operator/alert-webhooks` routes) or in the console,
   starting from an empty configuration.
 - Automation writes the documents straight into Vault at the paths below.
 - A file that declares configuration beside Vault is refused at startup, naming
@@ -70,7 +70,7 @@ Documents use the merchant manifest's spelling. Unknown fields are refused.
 }
 ```
 
-`settings` is the document [`GET /v1/admin/configuration`](api/merchant-settings.md)
+`settings` is the document [`GET /v1/operator/configuration`](api/merchant-settings.md)
 returns. An alert webhook's `id` is a UUID you choose; `format` is `generic`,
 `discord` or `slack`.
 

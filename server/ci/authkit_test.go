@@ -46,8 +46,8 @@ func TestMerchantAPIKeysAreAuthKits(t *testing.T) {
 		return call(t, handler, token, http.MethodGet, "/v1/admin/customers", nil).Code
 	}
 	require.Equal(t, http.StatusOK, customers(viewerKey.Secret, ""), "a key names its merchant")
-	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/admin/psps", nil).Code, "a viewer reads no merchant configuration")
-	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/psps", nil).Code)
+	require.Equal(t, http.StatusForbidden, call(t, handler, viewerKey.Secret, http.MethodGet, "/v1/operator/psps", nil).Code, "a viewer reads no merchant configuration")
+	require.Equal(t, http.StatusOK, call(t, handler, ownerKey.Secret, http.MethodGet, "/v1/operator/psps", nil).Code)
 	w := callWith(t, handler, ownerKey.Secret, http.MethodGet, "/v1/admin/customers", nil, retiredMerchantHeader, "id:"+other.String())
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, mid.String(), w.Header().Get("OpenRails-Bound-Merchant"), "a key acts at its own merchant, whatever a header names")
@@ -119,7 +119,7 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.Equal(t, "owner", roles[iam.UserSubject(admin.ID)].Name())
 	handler, err := standaloneHandler(cp)
 	require.NoError(t, err)
-	require.Equal(t, http.StatusOK, call(t, handler, res.APIKeySecret, http.MethodGet, "/v1/admin/findings", nil).Code, "the deployment key acts for its merchant")
+	require.Equal(t, http.StatusOK, call(t, handler, res.APIKeySecret, http.MethodGet, "/v1/operator/findings", nil).Code, "the deployment key acts for its merchant")
 
 	customer := newAccount(t, cp)
 	for range 2 {
@@ -155,16 +155,16 @@ func TestMerchantStaffStayInTheirMerchant(t *testing.T) {
 	theirs, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: uniqueName("theirs"), OwnerUserID: newAccount(t, srv).ID})
 	require.NoError(t, err)
 
-	w := callWith(t, handler, token, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+mine.MerchantID.String())
+	w := callWith(t, handler, token, http.MethodGet, "/v1/operator/findings", nil, retiredMerchantHeader, "id:"+mine.MerchantID.String())
 	require.Equal(t, http.StatusForbidden, w.Code, "a session names no merchant, whatever a header says: %s", w.Body.String())
 	require.Contains(t, w.Body.String(), "merchant_unresolved")
 
 	bound := f.exchanged(t, handler, token, mine.MerchantID)
 	require.Equal(t, billing.ScopeMerchant, bound.Scope)
-	w = bound.call(t, handler, http.MethodGet, "/v1/admin/findings", nil)
+	w = bound.call(t, handler, http.MethodGet, "/v1/operator/findings", nil)
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
 	require.Equal(t, mine.MerchantID.String(), w.Header().Get("OpenRails-Bound-Merchant"))
-	w = bound.call(t, handler, http.MethodGet, "/v1/admin/findings", nil, retiredMerchantHeader, "id:"+theirs.MerchantID.String())
+	w = bound.call(t, handler, http.MethodGet, "/v1/operator/findings", nil, retiredMerchantHeader, "id:"+theirs.MerchantID.String())
 	require.Equal(t, mine.MerchantID.String(), w.Header().Get("OpenRails-Bound-Merchant"), "a header naming another merchant changes nothing")
 
 	_, status, body := f.exchangeFor(t, handler, token, theirs.MerchantID)

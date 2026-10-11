@@ -64,7 +64,7 @@ const (
 // customer support's reads, the content gate and offers, by OpenRails' names
 // for the merchant's own staff, and AuthKit's own for the SCIM pushes.
 var backendPermissions = []string{
-	string(billing.MerchantBillingRead), string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead),
+	string(billing.MerchantCustomerRead), string(billing.MerchantEntitlementsRead), string(billing.MerchantCatalogRead),
 	"merchant:directory:manage",
 }
 

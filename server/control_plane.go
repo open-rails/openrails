@@ -55,7 +55,7 @@ const (
 
 // MerchantRoles are the roles the server declares for a merchant's team
 // members and API keys, least privilege first: viewer
-// (billing.MerchantBillingRead), support (and MerchantBillingManage), owner
+// (billing.MerchantCustomerRead), support (and MerchantCustomerManage), owner
 // (every merchant: permission). A merchant adds its own (MerchantRole).
 func MerchantRoles() []iam.Role { return controlplane.MerchantRoles() }
 
@@ -67,7 +67,7 @@ func MerchantRole(name string) (iam.Role, bool) { return controlplane.MerchantRo
 // MerchantScope is where merchant id's staff and credentials hold their
 // merchant: permissions: its AuthKit group, whose id is the merchant's. A
 // hosted product asks a request's AuthKit Verified
-// Can(scope, billing.MerchantBillingRead) there.
+// Can(scope, billing.MerchantCustomerRead) there.
 // billing.ErrMerchantUnresolved when the merchant is not live.
 func (s *Server) MerchantScope(ctx context.Context, id billing.MerchantID) (auth.Scope, error) {
 	return s.cp.MerchantScope(ctx, id)

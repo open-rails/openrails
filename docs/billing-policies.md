@@ -85,7 +85,7 @@ settings:
 ```
 
 The same settings through the API, as the `settings` of
-`PATCH /v1/admin/configuration`:
+`PATCH /v1/operator/configuration`:
 
 ```json
 {
@@ -132,8 +132,8 @@ clears it. `GET
 /v1/admin/customers/{customer_id}` reads it, as `settings.billing_policy`.
 This is the explicit assignment, not the effective tier or default policy.
 
-The read needs `billing.MerchantBillingRead` and the write
-`billing.MerchantBillingManage`, or their `root:` twins. Customer self-service
+The read needs `billing.MerchantCustomerRead` and the write
+`billing.MerchantCustomerManage`, or their `root:` twins. Customer self-service
 cannot change it. The customer and policy must already exist under the
 request's merchant: missing/foreign customers return `404 customer_not_found`,
 and missing/foreign policies return `404 billing_policy_not_found`. No customer

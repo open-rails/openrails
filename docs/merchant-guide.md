@@ -26,7 +26,7 @@ retires an entry, and `prune: true` opts into archiving omitted products and pri
 Batches have no ordering guarantee: previously unseen content applies to current
 state. Already-applied content never becomes an implicit rollback command.
 
-The API is `POST /v1/admin/catalog/apply`, and the in-process client
+The API is `POST /v1/operator/catalog/apply`, and the in-process client
 method is `ApplyCatalog`. The operator CLI (`openrails apply-catalog`) applies the
 same document with local authority. No application ID or expected revision is
 written by the caller.
@@ -213,9 +213,11 @@ entitlement Y at time T?" against it. Full semantics: `docs/entitlements_timelin
 
 ### Managing customers day-to-day
 
-All merchant-admin operations live under `/v1/admin/*` (same public port; each
+Customer-support and metrics operations live under `/v1/admin/*`; catalog
+and merchant configuration, including findings and PSP refresh, live under
+`/v1/operator/*` (same public port; each
 route behind its group's permission, held in the merchant's group:
-`billing.MerchantBillingRead` for reads, `billing.MerchantBillingManage` for
+`billing.MerchantCustomerRead` for reads, `billing.MerchantCustomerManage` for
 actions on customers, `billing.MerchantCatalogManage` for the catalog,
 `billing.MerchantConfigManage` for the merchant's configuration and findings,
 `billing.MerchantMetricsRead` for business metrics); your backend's own calls
@@ -239,9 +241,9 @@ reference: [api/routes.md](api/routes.md).
 | Grant / revoke credit | `POST /v1/admin/credit-grants`, `POST /v1/admin/credit-grants/{id}/revoke` | Customers → profile |
 | Ask what a grant key did | `GET /v1/admin/credit-grants?customer_id=&source_id=` | — |
 | Customer settings: credit limits, trust levels, billing policy, invoice profile | `GET` / `PATCH /v1/admin/customers/{customer_id}` | Customers → profile |
-| Catalog over HTTP | `POST /v1/admin/catalog/products`, `PATCH /v1/admin/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
+| Catalog over HTTP | `POST /v1/operator/catalog/products`, `PATCH /v1/operator/catalog/products/{id}`, and the same for prices (archive with `{"archived": true}`) | Catalog |
 | Metrics | `POST /v1/admin/metrics/query`, `GET /v1/admin/metrics/schema` | Dashboard |
-| Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/admin/findings` (`?type=`), counted by `open_findings` in `POST /v1/admin/metrics/query` | Ops, header bell |
+| Findings: problems that need a merchant-config operator, catalog drift and operational alerts included | `GET /v1/operator/findings` (`?type=`), counted by `open_findings` in `POST /v1/admin/metrics/query` | Ops, header bell |
 
 A person needs a recent sign-in on routes marked `sensitive` in the
 [route reference](api/routes.md), otherwise `401 step_up_required`.
@@ -279,14 +281,14 @@ choice; the merchant setting `provider_refund_access` decides it on every rail:
 
 ### Archiving a product
 
-`PATCH /v1/admin/catalog/products/{id}` with `archived: true`
+`PATCH /v1/operator/catalog/products/{id}` with `archived: true`
 (`Client.UpdateProduct`) archives a product: it stops being for sale and is
 never deleted. Its buyers keep their access and their money, and their payments,
 orders and subscriptions keep naming it. Subscriptions on its prices stay
 grandfathered and keep renewing. Archiving refunds nobody; a refund is its own
 decision (`Client.RefundPayment`).
 
-Granting credits is money-in, an admin change (`billing.MerchantBillingManage`). Each grant item's `source_id`
+Granting credits is money-in, an admin change (`billing.MerchantCustomerManage`). Each grant item's `source_id`
 is the caller's reproducible idempotency key: retrying it can never double-credit
 (database-enforced), and a retry with a different `amount` is refused with 409.
 

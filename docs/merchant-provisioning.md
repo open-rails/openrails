@@ -199,7 +199,7 @@ Per merchant:
   for this one merchant and no other, within that role
   ([auth](auth.md#trusted-issuers); needs `auth.resource.id`).
 - `settings` — the merchant's settings (`billing.MerchantSettings`), the same
-  document `GET /v1/admin/configuration` reads and a configuration
+  document `GET /v1/operator/configuration` reads and a configuration
   application changes, with the same names, units and validation
   ([merchant settings](api/merchant-settings.md)): `profile`, invoicing
   (`billing_period_boundary`, `collection_threshold`, `monthly_floor`, amounts in
@@ -309,8 +309,8 @@ trusted issuer ([standalone](standalone-integration.md#deployment)).
 
 A key acts at its merchant alone ([merchant binding](merchant-binding.md))
 and holds one role. The declared ones (`server.MerchantRoles`) are `viewer`
-(`billing.MerchantBillingRead`: read-only, the right choice for LLM agents),
-`support` (`billing.MerchantBillingRead` and `billing.MerchantBillingManage`:
+(`billing.MerchantCustomerRead`: read-only, the right choice for LLM agents),
+`support` (`billing.MerchantCustomerRead` and `billing.MerchantCustomerManage`:
 acts on customers) and `owner` (everything, the merchant's configuration and
 the programmatic routes included). A program's key holds a custom role the
 merchant defines with only the `/v1/app` permissions its task needs

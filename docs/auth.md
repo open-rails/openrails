@@ -24,7 +24,7 @@ client brings its own host authority.
 | --- | --- | --- |
 | public, provider callbacks | nothing (a callback checks its provider's signature) | anyone |
 | customer (`/v1/me`) | `Authenticate` | a user subject acting itself, the customer; an invoker acting for someone else, or an application, is refused |
-| merchant (`/v1/admin`) | `Authenticate`, `Can` for the route's permission (its `merchant:` name in the merchant's scope, else its `root:` name in the root scope), then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
+| merchant (`/v1/admin`, `/v1/operator`) | `Authenticate`, `Can` for the route's permission (its `merchant:` name in the merchant's scope, else its `root:` name in the root scope), then the recent sign-in check when a person moves money, removes access or exports data | a person or an application holding that permission; an application has no sign-in to renew |
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
 | application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
@@ -78,8 +78,8 @@ root role at all of them.
 
 | Routes | `merchant:` | `root:` | Covers |
 |---|---|---|---|
-| admin, reads | `billing.MerchantBillingRead` | `billing.RootBillingRead` | customer support's reads |
-| admin, changes | `billing.MerchantBillingManage` | `billing.RootBillingManage` | refunds, cancellations, credits |
+| admin, reads | `billing.MerchantCustomerRead` | `billing.RootCustomerRead` | customer support's reads |
+| admin, changes | `billing.MerchantCustomerManage` | `billing.RootCustomerManage` | refunds, cancellations, credits |
 | catalog | `billing.MerchantCatalogManage` | `billing.RootCatalogManage` | the catalog and its edits |
 | merchant config | `billing.MerchantConfigManage` | `billing.RootConfigManage` | PSPs and their refresh, settings |
 | metrics | `billing.MerchantMetricsRead` | `billing.RootMetricsRead` | metrics and their assistants |
@@ -92,8 +92,8 @@ root role at all of them.
 
 A route group that is on mounts all its routes; what a caller may use is its
 roles. Each `/v1/app` route has its own permission, so a program's role grants
-only what its task needs. The names are `merchant:billing:read`,
-`root:billing:read` and so on: each route's pair is in
+only what its task needs. The names are `merchant:customer:read`,
+`root:customer:read` and so on: each route's pair is in
 [api/routes.md](api/routes.md).
 
 With AuthKit, declare each name on its persona and build roles from them:

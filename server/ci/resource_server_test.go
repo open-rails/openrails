@@ -58,7 +58,7 @@ func (k issuerKey) mint(t *testing.T, edit func(jwt.MapClaims)) string {
 	claims := jwt.MapClaims{
 		"iss": k.iss, "aud": resourceID, "sub": "user-" + uuid.NewString()[:8], "client_id": "admin-ui",
 		"iat": now.Unix(), "exp": now.Add(5 * time.Minute).Unix(), "jti": uuid.NewString(), "auth_time": now.Unix(),
-		"scope": billing.ScopeMerchant, "permissions": []string{string(billing.MerchantBillingRead)},
+		"scope": billing.ScopeMerchant, "permissions": []string{string(billing.MerchantCustomerRead)},
 	}
 	if edit != nil {
 		edit(claims)
@@ -175,7 +175,7 @@ func TestTrustedIssuerTokens(t *testing.T) {
 	trust(t, srv, rivalID, other.app(t, "owner", nil))
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	const customers, psps = "/v1/admin/customers", "/v1/admin/psps"
+	const customers, psps = "/v1/admin/customers", "/v1/operator/psps"
 	bearer := func(token string) string { return "Bearer " + token }
 
 	t.Run("accepted", func(t *testing.T) {
@@ -338,8 +338,8 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 	f := newFixture(t)
 	roles := authkit.NewRoles()
 	merchant := roles.Persona("merchant")
-	merchant.Permission("billing", "read")
-	merchant.Permission("billing", "admin")
+	merchant.Permission("customer", "read")
+	merchant.Permission("customer", "manage")
 	admin := roles.Root.Role("admin", merchant.All())
 	const console, worker, callback = "console", "billing-worker", "https://admin.host.e2e.test/callback"
 	secret := strings.Repeat("s", 48)
@@ -352,7 +352,7 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 				Clients: []authkit.OAuthClientConfig{
 					{ID: console, SecretSHA256: authtest.ClientSecretSHA256(secret), RedirectURIs: []string{callback}, Resources: []string{resourceID}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantAuthorizationCode}},
 					{ID: worker, SecretSHA256: authtest.ClientSecretSHA256(secret), Resources: []string{resourceID},
-						Permissions: []string{string(billing.MerchantBillingRead)}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
+						Permissions: []string{string(billing.MerchantCustomerRead)}, GrantTypes: []authkit.OAuthGrantType{authkit.GrantClientCredentials}},
 				},
 			}
 		}))
@@ -374,7 +374,7 @@ func TestTrustedAuthKitAuthorizationServer(t *testing.T) {
 	trust(t, srv, shopID, iam.RemoteApplication{Issuer: as.URL, Mode: iam.RemoteApplicationModeStatic, PublicKeys: pinned, Enabled: true, Role: owner})
 	handler, err := standaloneHandler(srv)
 	require.NoError(t, err)
-	const customers, psps = "/v1/admin/customers", "/v1/admin/psps"
+	const customers, psps = "/v1/admin/customers", "/v1/operator/psps"
 
 	user := authtest.NewUser(t, as.Client)
 	authtest.GrantRole(t, as.Client, iam.RootGroup(), iam.UserSubject(user.ID), admin)

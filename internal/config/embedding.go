@@ -52,8 +52,8 @@ type Routes struct {
 type RouteGroups struct {
 	// Admin is customer support (/v1/admin): customers, their
 	// subscriptions, payments, refunds, orders, credits, access and usage.
-	// Its reads need billing.MerchantBillingRead or RootBillingRead, its
-	// changes MerchantBillingManage or RootBillingManage.
+	// Its reads need billing.MerchantCustomerRead or RootCustomerRead, its
+	// changes MerchantCustomerManage or RootCustomerManage.
 	Admin bool
 	// Catalog is the catalog: products, prices, meters and their rates,
 	// archiving a product, applying a catalog document, moving subscribers

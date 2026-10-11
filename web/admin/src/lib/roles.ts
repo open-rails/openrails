@@ -201,7 +201,7 @@ export const rolesMutations = {
 // The permissions a role may hold, by what they open. Programs are the
 // /v1/app routes an API key calls; staff, the console's areas; access,
 // AuthKit's own over the team, keys and roles.
-export type PermissionSection = "programs" | "staff" | "access"
+export type PermissionSection = "programs" | "staff" | "operator" | "metrics" | "access"
 
 export interface PermissionInfo {
   label: string
@@ -231,22 +231,22 @@ const ROUTE_PERMISSIONS: Record<string, PermissionInfo> = {
     label: "Find a customer by openrails.dev account",
     section: "programs",
   },
-  "merchant:billing:read": {
+  "merchant:customer:read": {
     label: "Read customers, subscriptions and payments",
     section: "staff",
   },
-  "merchant:billing:manage": {
+  "merchant:customer:manage": {
     label: "Refunds, cancellations and credits",
     section: "staff",
   },
-  "merchant:catalog:manage": { label: "Edit the catalog", section: "staff" },
+  "merchant:catalog:manage": { label: "Manage the catalog", section: "operator" },
   "merchant:config:manage": {
-    label: "PSPs and merchant settings",
-    section: "staff",
+    label: "PSPs, findings and merchant settings",
+    section: "operator",
   },
   "merchant:metrics:read": {
     label: "Metrics and the dashboard",
-    section: "staff",
+    section: "metrics",
   },
 }
 
@@ -290,8 +290,18 @@ export const SECTIONS: {
   },
   {
     id: "staff",
-    title: "Staff (console and /v1/admin)",
-    description: "The console's areas.",
+    title: "Customer support",
+    description: "Read and manage customers and their billing.",
+  },
+  {
+    id: "operator",
+    title: "Operator capabilities",
+    description: "Manage the catalog, payment providers, findings and merchant configuration.",
+  },
+  {
+    id: "metrics",
+    title: "Business metrics",
+    description: "Read reports and dashboard metrics.",
   },
   {
     id: "access",

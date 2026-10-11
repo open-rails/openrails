@@ -85,7 +85,7 @@ const memoryStorage = (): Storage => {
 }
 
 // server stubs fetch and session storage and returns the recorded requests.
-// Routes are keyed "METHOD /admin/..." (or just the path); anything
+// Routes are keyed "METHOD /admin/..." or "METHOD /operator/..." (or just the path); anything
 // unrouted answers {} (/admin/access answers FULL_ACCESS), so a test spells
 // out only what it asserts.
 export async function server(routes: Record<string, Reply> = {}) {

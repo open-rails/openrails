@@ -31,8 +31,8 @@ const ROOT = "/groups/root"
 const WHEN = "2026-10-10T00:00:00Z"
 
 const CATALOG = [
-  "merchant:billing:read",
-  "merchant:billing:manage",
+  "merchant:customer:read",
+  "merchant:customer:manage",
   "merchant:catalog:manage",
   "merchant:catalog:read",
   "merchant:config:manage",
@@ -60,7 +60,7 @@ const role = (name: string, grants: string[], custom = false): GroupRole => ({
 })
 
 const OWNER = role("merchant:owner", ["merchant:*"])
-const VIEWER = role("merchant:viewer", ["merchant:billing:read"])
+const VIEWER = role("merchant:viewer", ["merchant:customer:read"])
 const STOREFRONT = role(
   "merchant:custom-storefront",
   ["merchant:catalog:read", "merchant:entitlements:read"],
@@ -78,14 +78,14 @@ const me = (role: string, permissions: string[]): PermissionSet => ({
 const nobody = { role: null, permissions: [] }
 
 const ROOT_CATALOG = [
-  "root:billing:read",
-  "root:billing:manage",
+  "root:customer:read",
+  "root:customer:manage",
   "root:members:read",
   "root:roles:read",
 ]
 const ROOT_SUPPORT = role("root:support", [
-  "root:billing:read",
-  "root:billing:manage",
+  "root:customer:read",
+  "root:customer:manage",
 ])
 const ROOT_ADMIN = role("root:staff-admin", ROOT_CATALOG)
 const ROOT_MEMBERS = [
@@ -308,7 +308,7 @@ it("roles show read-only without roles:manage, and not at all without roles:read
   await unmount()
 
   await open({
-    "GET /me/permissions": me("merchant:viewer", ["merchant:billing:read"]),
+    "GET /me/permissions": me("merchant:viewer", ["merchant:customer:read"]),
   })
   expect(document.body.textContent).toContain("No roles here")
 })

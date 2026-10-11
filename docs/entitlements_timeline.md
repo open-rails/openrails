@@ -36,7 +36,7 @@ the `Client`):
   `{"entitlements": {key: bool}, "quantities": {key: n}, "held": {prefix: {"keys": [...], "truncated": bool}}}`
   for up to 100 keys and 10 prefixes at one instant (`Client.CheckEntitlements`).
 
-Staff read with the admin API (`billing.MerchantBillingRead` or `billing.RootBillingRead`):
+Staff read with the admin API (`billing.MerchantCustomerRead` or `billing.RootCustomerRead`):
 
 - `GET /v1/admin/entitlements?customer_id=&entitlement=&prefix=&at=&cursor=&limit=` —
   the keys customers hold at one instant, by customer then key in byte order

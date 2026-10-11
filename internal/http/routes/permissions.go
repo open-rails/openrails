@@ -47,8 +47,8 @@ func (p Pair) check() error {
 
 // The staff groups' pairs, and the programmatic routes' own (Route.Permission).
 var (
-	needAdminRead      = Pair{billing.MerchantBillingRead, billing.RootBillingRead}
-	needAdminUpdate    = Pair{billing.MerchantBillingManage, billing.RootBillingManage}
+	needAdminRead      = Pair{billing.MerchantCustomerRead, billing.RootCustomerRead}
+	needAdminUpdate    = Pair{billing.MerchantCustomerManage, billing.RootCustomerManage}
 	needCatalog        = Pair{billing.MerchantCatalogManage, billing.RootCatalogManage}
 	needMerchantConfig = Pair{billing.MerchantConfigManage, billing.RootConfigManage}
 	needMetrics        = Pair{billing.MerchantMetricsRead, billing.RootMetricsRead}

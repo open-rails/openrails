@@ -11,7 +11,7 @@ import (
 // credentials, and its revision.
 func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...RequestOption) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/configuration", nil, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/v1/operator/configuration", nil, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -22,7 +22,7 @@ func (c *Client) GetMerchantConfiguration(ctx context.Context, options ...Reques
 // configuration read from a file is read-only.
 func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing.UpdateMerchantConfigurationParams, options ...RequestOption) (*billing.MerchantConfigurationState, error) {
 	var out billing.MerchantConfigurationState
-	if err := c.do(ctx, http.MethodPatch, "/v1/admin/configuration", params, &out, options...); err != nil {
+	if err := c.do(ctx, http.MethodPatch, "/v1/operator/configuration", params, &out, options...); err != nil {
 		return nil, err
 	}
 	return &out, nil
