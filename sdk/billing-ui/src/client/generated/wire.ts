@@ -12,8 +12,12 @@ export type Balance = {
   billing_mode: "arrears" | "prepaid"
   balance_amount: string
   held_amount: string
+  accrued_amount: string
   available_amount: string
   owed_amount: string
+  accrual_rate_per_hour: string
+  as_of: string
+  depletes_at: string | null
 }
 
 export type BalanceTransaction = {

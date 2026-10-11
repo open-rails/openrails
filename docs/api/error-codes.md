@@ -167,6 +167,7 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `resource_not_found` | 404 | `invalid_request_error` | The addressed resource does not exist in this merchant. |
 | `revision_mismatch` | 409 | `invalid_request_error` | The object changed since the revision the edit expected; metadata.revision is the current one. |
 | `route_not_found` | 404 | `invalid_request_error` | No route matches the path. |
+| `running_charge_not_found` | 404 | `invalid_request_error` | No running charge was started under this reference. |
 | `scheduled_change_exists` | 409 | `invalid_request_error` | The subscription already has a scheduled change. |
 | `service_credential_customer_scope_denied` | 403 | `authorization_error` | The service credential may not act for this customer. |
 | `service_unavailable` | 503 | `api_error` | A dependency is temporarily unavailable; retry. |

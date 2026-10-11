@@ -162,6 +162,7 @@ export type OpenRailsErrorCode =
   | "resource_not_found"
   | "revision_mismatch"
   | "route_not_found"
+  | "running_charge_not_found"
   | "scheduled_change_exists"
   | "service_credential_customer_scope_denied"
   | "service_unavailable"
@@ -366,6 +367,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   resource_not_found: { status: 404, type: "invalid_request_error", meaning: "The addressed resource does not exist in this merchant." },
   revision_mismatch: { status: 409, type: "invalid_request_error", meaning: "The object changed since the revision the edit expected; metadata.revision is the current one." },
   route_not_found: { status: 404, type: "invalid_request_error", meaning: "No route matches the path." },
+  running_charge_not_found: { status: 404, type: "invalid_request_error", meaning: "No running charge was started under this reference." },
   scheduled_change_exists: { status: 409, type: "invalid_request_error", meaning: "The subscription already has a scheduled change." },
   service_credential_customer_scope_denied: { status: 403, type: "authorization_error", meaning: "The service credential may not act for this customer." },
   service_unavailable: { status: 503, type: "api_error", meaning: "A dependency is temporarily unavailable; retry." },

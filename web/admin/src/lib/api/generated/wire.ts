@@ -184,8 +184,12 @@ export type Balance = {
   billing_mode: "arrears" | "prepaid"
   balance_amount: string
   held_amount: string
+  accrued_amount: string
   available_amount: string
   owed_amount: string
+  accrual_rate_per_hour: string
+  as_of: string
+  depletes_at: string | null
 }
 
 export type BalanceTransaction = {
@@ -2089,6 +2093,25 @@ export type RevokeProductAccessParams = {
   reason?: string
 }
 
+export type RunningCharge = {
+  id: string
+  reference: string
+  customer_id: string
+  currency: string
+  rate_per_hour: string
+  state: "running" | "stopped"
+  started_at: string
+  stopped_at: string | null
+  charged_amount: string
+  posted_amount: string
+  as_of: string
+  overdraft_amount: string
+  low_balance_amount: string
+  resource: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type ScheduledChange = {
   price_id: string
   quantity: number | null
@@ -2161,6 +2184,22 @@ export type SolanaPaymentToken = {
   decimals: number
   preferred: boolean
   recurring_eligible: boolean
+}
+
+export type StartRunningChargeParams = {
+  reference?: string
+  customer_id?: string
+  currency?: string
+  rate_per_hour?: string
+  started_at?: string
+  minimum_amount?: string
+  overdraft_amount?: string
+  low_balance_amount?: string
+  resource?: string
+}
+
+export type StopRunningChargeParams = {
+  stopped_at?: string
 }
 
 export type StripeEngineAuthentication = {

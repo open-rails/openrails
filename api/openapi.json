@@ -5727,6 +5727,267 @@
         ]
       }
     },
+    "/v1/app/running-charges": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRunningChargeParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningCharge"
+                }
+              }
+            }
+          },
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningCharge"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
+        "x-openrails-errors": [
+          "currency_unsupported",
+          "idempotency_key_reused",
+          "insufficient_credits",
+          "invalid_param"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request",
+          "app_write"
+        ]
+      },
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "customer_id",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/RunningCharge"
+                      }
+                    },
+                    "next_cursor": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "next_cursor"
+                  ]
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
+        "x-openrails-errors": [
+          "invalid_cursor",
+          "invalid_query"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request"
+        ]
+      }
+    },
+    "/v1/app/running-charges/{reference}/stop": {
+      "post": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StopRunningChargeParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningCharge"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
+        "x-openrails-errors": [
+          "idempotency_key_reused",
+          "invalid_param",
+          "running_charge_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application",
+          "request",
+          "app_write"
+        ]
+      }
+    },
+    "/v1/app/running-charges/{reference}": {
+      "get": {
+        "tags": [
+          "app"
+        ],
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunningCharge"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "application",
+        "x-openrails-permission": "Usage",
+        "x-openrails-errors": [
+          "running_charge_not_found"
+        ],
+        "x-openrails-error-sets": [
+          "tier:application"
+        ]
+      }
+    },
     "/v1/app/provider-operations": {
       "post": {
         "tags": [
@@ -11579,6 +11840,10 @@
             "type": "string",
             "description": "A number as a decimal string."
           },
+          "accrued_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
           "available_amount": {
             "type": "string",
             "description": "A number as a decimal string."
@@ -11586,6 +11851,25 @@
           "owed_amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "accrual_rate_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "depletes_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -11594,8 +11878,12 @@
           "billing_mode",
           "balance_amount",
           "held_amount",
+          "accrued_amount",
           "available_amount",
-          "owed_amount"
+          "owed_amount",
+          "accrual_rate_per_hour",
+          "as_of",
+          "depletes_at"
         ]
       },
       "BalanceTransaction": {
@@ -20392,6 +20680,105 @@
           }
         }
       },
+      "RunningCharge": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "reference": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "rate_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "running",
+              "stopped"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "stopped_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "charged_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "posted_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "as_of": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "overdraft_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "low_balance_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "resource": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "customer_id",
+          "currency",
+          "rate_per_hour",
+          "state",
+          "started_at",
+          "stopped_at",
+          "charged_amount",
+          "posted_amount",
+          "as_of",
+          "overdraft_amount",
+          "low_balance_amount",
+          "resource",
+          "created_at",
+          "updated_at"
+        ]
+      },
       "ScheduledChange": {
         "type": "object",
         "properties": {
@@ -20646,6 +21033,52 @@
           "preferred",
           "recurring_eligible"
         ]
+      },
+      "StartRunningChargeParams": {
+        "type": "object",
+        "properties": {
+          "reference": {
+            "type": "string"
+          },
+          "customer_id": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "rate_per_hour": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "minimum_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "overdraft_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "low_balance_amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "resource": {
+            "type": "string"
+          }
+        }
+      },
+      "StopRunningChargeParams": {
+        "type": "object",
+        "properties": {
+          "stopped_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
       },
       "StripeEngineAuthentication": {
         "type": "object",
@@ -22780,6 +23213,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No route matches the path."
+    },
+    "running_charge_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "No running charge was started under this reference."
     },
     "scheduled_change_exists": {
       "status": 409,

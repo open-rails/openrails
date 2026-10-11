@@ -63,6 +63,7 @@ migration 0059_payment_authority_events.up.sql sha256:08cc0d1a8136eb105ec16ffd5f
 migration 0060_checkout_ui_mode.up.sql sha256:131f7e20e0a12d75b7fcacec2a06211b9f1b7ed0664fbad59f8e3fd087f8e393
 migration 0061_usage_orders.up.sql sha256:25aebf6b45129dec964eb9f0c148f653da7c17d0177d17929b5a21792a53414f
 migration 0062_drop_checkout_sessions.up.sql sha256:382f3a65cea76992fbe02cf0d0e17361465201a650b688a03eb8fab9c3644641
+migration 0063_running_charges.up.sql sha256:8c834227903ff7b607c51d288140b0e7787743fdc0073fe146f3f9e03dc02839
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -155,6 +156,23 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   index CREATE INDEX admission_operations_customer_id_currency_expires_at_idx ON ONLY billing.admission_operations USING btree (merchant_id, customer_id, currency, expires_at) WHERE (state = 'open'::text)
   index CREATE UNIQUE INDEX admission_operations_pkey ON ONLY billing.admission_operations USING btree (merchant_id, request_id, admitted_at)
   trigger CREATE TRIGGER immutable_admission_operation_facts BEFORE DELETE OR UPDATE ON billing.admission_operations FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('expires_at', 'state', 'capture_terms', 'captured_amount', 'captured_at', 'released_at')
+
+table billing.balance_watches
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column next_check_at timestamp with time zone NOT NULL
+  column depletes_at timestamp with time zone
+  column low_notified_at timestamp with time zone
+  column depleted_at timestamp with time zone
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint balance_watches_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint balance_watches_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
+  constraint balance_watches_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint balance_watches_pkey PRIMARY KEY (merchant_id, customer_id, currency)
+  index CREATE INDEX balance_watches_depletes_at_idx ON billing.balance_watches USING btree (merchant_id, depletes_at)
+  index CREATE INDEX balance_watches_next_check_at_idx ON billing.balance_watches USING btree (next_check_at)
+  index CREATE UNIQUE INDEX balance_watches_pkey ON billing.balance_watches USING btree (merchant_id, customer_id, currency)
 
 table billing.book_identity
   column singleton boolean NOT NULL
@@ -776,7 +794,7 @@ table billing.host_outbox
   column dedupe_key text NOT NULL
   constraint host_outbox_currency_check CHECK ((((currency IS NULL) = (event_type = ANY (ARRAY['product.entitlements_changed'::text, 'customer.network_linked'::text, 'customer.network_unlinked'::text, 'customer.payment_authority_revoked'::text]))) AND ((currency IS NULL) OR (currency ~ '^[A-Z0-9]{3,12}$'::text))))
   constraint host_outbox_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text, 'customer.payment_authority_revoked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
+  constraint host_outbox_payload_check CHECK ((((event_type = 'payment.settled'::text) AND (subject_type = 'payment'::text) AND (payment_id IS NOT NULL) AND (subject_id = payment_id) AND (amount IS NOT NULL) AND (amount > 0) AND (data = '{}'::jsonb)) OR ((event_type = ANY (ARRAY['delinquency.grace'::text, 'delinquency.entered'::text, 'delinquency.cleared'::text, 'balance.low'::text, 'balance.depleted'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = 'product.entitlements_changed'::text) AND (subject_type = 'product'::text) AND (payment_id IS NULL) AND (amount IS NULL)) OR ((event_type = ANY (ARRAY['order.completed'::text, 'order.requires_action'::text, 'order.payment_failed'::text, 'order.canceled'::text, 'order.expired'::text, 'order.voided'::text])) AND (subject_type = 'order'::text) AND (payment_id IS NULL) AND (amount IS NOT NULL) AND (amount >= 0) AND (currency IS NOT NULL)) OR ((event_type = ANY (ARRAY['customer.network_linked'::text, 'customer.network_unlinked'::text, 'customer.payment_authority_revoked'::text])) AND (subject_type = 'customer'::text) AND (payment_id IS NULL) AND (amount IS NULL))))
   constraint host_outbox_payment_id_fkey FOREIGN KEY (merchant_id, payment_id) REFERENCES billing.payments(merchant_id, id) ON DELETE CASCADE
   constraint host_outbox_pkey PRIMARY KEY (merchant_id, id)
   index CREATE UNIQUE INDEX host_outbox_dedupe_key_key ON billing.host_outbox USING btree (merchant_id, dedupe_key)
@@ -2201,6 +2219,39 @@ table billing.reconciliation_state
   constraint reconciliation_state_pkey PRIMARY KEY (merchant_id, source_domain)
   index CREATE UNIQUE INDEX reconciliation_state_pkey ON billing.reconciliation_state USING btree (merchant_id, source_domain)
 
+table billing.running_charges
+  column id uuid NOT NULL DEFAULT uuidv7()
+  column merchant_id uuid NOT NULL
+  column reference text NOT NULL
+  column customer_id uuid NOT NULL
+  column currency text NOT NULL
+  column rate_per_hour bigint NOT NULL
+  column overdraft_amount bigint NOT NULL
+  column low_balance_amount bigint NOT NULL
+  column resource text
+  column started_at timestamp with time zone NOT NULL
+  column stopped_at timestamp with time zone
+  column posted_through_at timestamp with time zone NOT NULL
+  column posted_amount bigint NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  column updated_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint running_charges_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
+  constraint running_charges_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
+  constraint running_charges_low_balance_amount_check CHECK ((low_balance_amount >= 0))
+  constraint running_charges_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint running_charges_overdraft_amount_check CHECK ((overdraft_amount >= 0))
+  constraint running_charges_pkey PRIMARY KEY (merchant_id, id)
+  constraint running_charges_posted_check CHECK (((posted_through_at >= started_at) AND (posted_amount = billing.running_charge_total(rate_per_hour, started_at, posted_through_at))))
+  constraint running_charges_rate_per_hour_check CHECK (((rate_per_hour > 0) AND (rate_per_hour <= '1000000000000'::bigint)))
+  constraint running_charges_reference_check CHECK (((reference <> ''::text) AND (reference = btrim(reference)) AND (octet_length(reference) <= 255)))
+  constraint running_charges_reference_key UNIQUE (merchant_id, reference)
+  constraint running_charges_resource_check CHECK (((resource <> ''::text) AND (octet_length(resource) <= 255)))
+  constraint running_charges_stopped_at_check CHECK (((stopped_at IS NULL) OR (stopped_at = posted_through_at)))
+  index CREATE INDEX running_charges_customer_id_currency_idx ON billing.running_charges USING btree (merchant_id, customer_id, currency) WHERE (stopped_at IS NULL)
+  index CREATE UNIQUE INDEX running_charges_pkey ON billing.running_charges USING btree (merchant_id, id)
+  index CREATE UNIQUE INDEX running_charges_reference_key ON billing.running_charges USING btree (merchant_id, reference)
+  trigger CREATE TRIGGER immutable_running_charge_facts BEFORE DELETE OR UPDATE ON billing.running_charges FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('stopped_at', 'posted_through_at', 'posted_amount', 'updated_at')
+
 table billing.scheduled_changes
   column merchant_id uuid NOT NULL
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -3068,6 +3119,7 @@ function billing.guard_billing_restore_receipt()
                     'account_updater_batches',
                     'admission_denials_hourly',
                     'admission_operations',
+                    'balance_watches',
                     'carts',
                     'catalog_applications',
                     'catalog_field_owners',
@@ -3132,6 +3184,7 @@ function billing.guard_billing_restore_receipt()
                     'rebill_cycles',
                     'reconciliation_findings',
                     'reconciliation_state',
+                    'running_charges',
                     'scheduled_changes',
                     'solana_pay_receipts',
                     'solana_pay_references',
@@ -3644,6 +3697,15 @@ function billing.require_finished_billing_restore()
       END IF;
       RETURN NULL;
   END;
+  $function$
+
+function billing.running_charge_total(bigint,timestamp with time zone,timestamp with time zone)
+  CREATE OR REPLACE FUNCTION billing.running_charge_total(p_rate_per_hour bigint, p_started_at timestamp with time zone, p_at timestamp with time zone)
+   RETURNS bigint
+   LANGUAGE sql
+   IMMUTABLE PARALLEL SAFE
+  AS $function$
+  SELECT div(p_rate_per_hour::numeric * greatest(floor(extract(epoch FROM p_at - p_started_at)), 0) * 2 + 3600, 7200)::bigint
   $function$
 
 function billing.step_access_version()

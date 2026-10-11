@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (177), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (181), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -214,6 +214,10 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/admissions/release` | application | `Usage` | `ReleaseAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/admissions/extend` | application | `Usage` | `ExtendAdmissionBatchParams` | 200 `AdmissionBatchResult` | `Idempotency-Key` |
 | POST | `/v1/app/usage-events` | application | `Usage` | `RecordUsageBatchParams` | 200 `RecordUsageBatchResult` | `Idempotency-Key` |
+| POST | `/v1/app/running-charges` | application | `Usage` | `StartRunningChargeParams` | 201 `RunningCharge`<br>200 `RunningCharge` | `Idempotency-Key` |
+| POST | `/v1/app/running-charges/{reference}/stop` | application | `Usage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
+| GET | `/v1/app/running-charges/{reference}` | application | `Usage` | — | 200 `RunningCharge` |  |
+| GET | `/v1/app/running-charges` | application | `Usage` | — | 200 `ListPage<RunningCharge>` |  |
 | POST | `/v1/app/provider-operations` | application | `Costs` | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | `Idempotency-Key` |
 | POST | `/v1/app/provider-operations/{operation_id}/increment` | application | `Costs` | `IncrementProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
 | POST | `/v1/app/provider-operations/{operation_id}/release` | application | `Costs` | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
