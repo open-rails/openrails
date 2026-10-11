@@ -16,6 +16,14 @@ export type AdminAccess = {
   merchant_config: boolean
   metrics: boolean
   scope_id: string
+  assistants: AdminAssistants
+}
+
+export type AdminAssistants = {
+  widgets: boolean
+  ask: boolean
+  catalog_copilot: boolean
+  catalog_drafting: boolean
 }
 
 export type Admission = {

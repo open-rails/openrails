@@ -10473,6 +10473,9 @@
           },
           "scope_id": {
             "type": "string"
+          },
+          "assistants": {
+            "$ref": "#/components/schemas/AdminAssistants"
           }
         },
         "required": [
@@ -10480,7 +10483,31 @@
           "catalog",
           "merchant_config",
           "metrics",
-          "scope_id"
+          "scope_id",
+          "assistants"
+        ]
+      },
+      "AdminAssistants": {
+        "type": "object",
+        "properties": {
+          "widgets": {
+            "type": "boolean"
+          },
+          "ask": {
+            "type": "boolean"
+          },
+          "catalog_copilot": {
+            "type": "boolean"
+          },
+          "catalog_drafting": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "widgets",
+          "ask",
+          "catalog_copilot",
+          "catalog_drafting"
         ]
       },
       "Admission": {

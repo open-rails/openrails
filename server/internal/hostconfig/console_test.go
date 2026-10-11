@@ -1,8 +1,9 @@
 package hostconfig
 
 import (
-	"github.com/stretchr/testify/require"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // The host's extension data reaches the console through config.json, keyed by

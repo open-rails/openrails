@@ -72,7 +72,7 @@ console() {
   }
   rm -rf "$host_build"
   # One build serves any admin_console.path (#1127).
-  bash scripts/go-test-gate.sh ./web/admin TestBuiltConsoleServesAtAnyPath
+  bash scripts/go-test-gate.sh -C server ./internal/adminconsole TestBuiltConsoleServesAtAnyPath
   git diff --quiet -- web/admin/dist || {
     echo "console: the build removed web/admin/dist/.gitkeep; go build without a console build would fail" >&2
     exit 1

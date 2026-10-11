@@ -76,6 +76,12 @@ const none: AdminAccess = {
   merchant_config: false,
   metrics: false,
   scope_id: "",
+  assistants: {
+    widgets: false,
+    ask: false,
+    catalog_copilot: false,
+    catalog_drafting: false,
+  },
 }
 
 describe("the console's areas", () => {

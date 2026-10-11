@@ -11,12 +11,17 @@
 # running the query auditor's -run pattern against nothing, and passing). This
 # wrapper reads the run's own output and fails closed on all three.
 #
-# Usage: scripts/go-test-gate.sh <package> <run-pattern> [extra go test args...]
+# Usage: scripts/go-test-gate.sh [-C module] <package> <run-pattern> [extra go test args...]
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# A nested module's package must be tested from that module, independently.
+if [ "${1:-}" = "-C" ]; then
+  cd "${2:?missing module directory after -C}"
+  shift 2
+fi
 
 if [ "$#" -lt 2 ]; then
-  echo "usage: scripts/go-test-gate.sh <package> <run-pattern> [go test args...]" >&2
+  echo "usage: scripts/go-test-gate.sh [-C module] <package> <run-pattern> [go test args...]" >&2
   exit 2
 fi
 

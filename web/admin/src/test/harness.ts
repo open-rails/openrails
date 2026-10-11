@@ -66,6 +66,12 @@ export const FULL_ACCESS: AdminAccess = {
   merchant_config: true,
   metrics: true,
   scope_id: "",
+  assistants: {
+    widgets: true,
+    ask: true,
+    catalog_copilot: true,
+    catalog_drafting: false,
+  },
 }
 
 const memoryStorage = (): Storage => {
