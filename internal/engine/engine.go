@@ -145,7 +145,7 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		return fail(err)
 	}
 	if catalogDoc != nil {
-		if err := e.applyDeclaredCatalog(ctx, *catalogDoc); err != nil {
+		if err := e.applyDeclaredCatalog(ctx, slices.Sorted(maps.Keys(e.merchant.PSPs)), *catalogDoc); err != nil {
 			return fail(err)
 		}
 	}
