@@ -976,6 +976,7 @@ Row retention:
 | `notifications` (customers') | 90 days once read, 180 days if never read |
 | `webhook_events` | 90 days after completion |
 | `host_outbox` | 30 days after delivery; an undelivered event is never deleted |
+| `customer_links` | revoked links, 24 months (731 days) after `revoked_at` |
 | `idempotency_keys`, `solana_pay_references` | at expiry, and after the 7-day watch window |
 | `failed_usage_windows` | once the window has ended, on the merchant's next failed usage |
 

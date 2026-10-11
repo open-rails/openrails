@@ -355,7 +355,9 @@ The programmatic routes your backend calls over HTTP (`/v1/app/*`,
 `RouteGroups.Programmatic`) admit the application your `Auth` says a request
 is, by its `Identity.SubjectKind`, holding the route's permission, and refuse
 a person: `Entitlements` for the content gate, `Usage` for admissions and
-usage events, `Costs` for provider operations, `Events` for host events. Each
+usage events, `Costs` for provider operations, `Events` for host events
+(`Customers` finds a customer by openrails.dev account, only where the
+[customer network](customer-network.md) runs). Each
 mounts only with its permission, so a program gets only what its task needs.
 `Routes.Scope` is where callers hold the permissions: AuthKit's
 `ak.Scope(ctx, iam.RootGroup())` for root roles, with `Auth:

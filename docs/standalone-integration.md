@@ -352,7 +352,7 @@ merchants:
   `route_groups.programmatic`, each holding its permission
   (`merchant:entitlements:read`, `merchant:catalog:read`,
   `merchant:usage:manage`, `merchant:costs:manage`, `merchant:events:read`,
-  `merchant:orders:manage`); a
+  `merchant:orders:manage`, `merchant:customers:read`); a
   person's token is refused there.
 - Refusals: `401 authentication_required` (an untrusted issuer, a bad
   signature, audience or lifetime), `401 credential_expired`,
@@ -367,6 +367,13 @@ implements. A token's `sub` is the subject (a user) and its invoker; a client
 acting for itself and an API key are an application subject. Customer routes
 take the customer only from the subject. Each merchant's scope is its AuthKit
 group, whose id is the merchant's.
+
+### The customer network
+
+With the `network-terms` agreement in `auth.agreements`, the server runs the
+openrails.dev customer network: one account per shopper, linked to merchants'
+customers, and merchants' clients signing their customers in with it
+([customer network](customer-network.md)).
 
 ### Webhooks
 
