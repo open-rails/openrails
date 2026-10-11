@@ -2,7 +2,6 @@ package config
 
 import (
 	"context"
-	"io/fs"
 	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -25,11 +24,6 @@ type Deps struct {
 	// Vault is a borrowed, authenticated client; Config.Vault still names its
 	// mounts. The host owns its renewal; OpenRails never revokes it.
 	Vault *vaultapi.Client
-
-	// ConsoleAssets is a host-built admin console (web/admin's Vite build,
-	// rooted at index.html). Nil uses the build embedded in this module, when
-	// the binary was built with one.
-	ConsoleAssets fs.FS
 
 	// Email delivers OpenRails' email: billing receipts and alerts. Nil uses
 	// Config.SMTP.

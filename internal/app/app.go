@@ -24,9 +24,6 @@ type App struct {
 	Runtime     *Runtime
 	RedisClient *redis.Client
 
-	// ConsoleAssets is the admin console SPA (#754, web/admin), served by the
-	// standalone surface when admin_console is enabled.
-	ConsoleAssets fs.FS
 	// Standalone marks the engine of a standalone server (package server),
 	// which owns merchant identity and the HTTP surface: the embedded mount
 	// refuses.

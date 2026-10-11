@@ -34,17 +34,6 @@ type Routes struct {
 	Prefix string
 	// RouteGroups turns route groups on; each is off by default.
 	RouteGroups RouteGroups
-	// AdminConsole serves the staff dashboard at Prefix's /admin, over the
-	// staff routes, signing staff in through the host's AuthKit JSON API on
-	// the same origin (AdminConsoleAuthBase). It has one area per staff
-	// group, shown to staff holding its permission. It needs at least one
-	// staff group on and Deps.ConsoleAssets.
-	AdminConsole bool
-	// AdminConsoleAuthBase is the path the host's AuthKit JSON API is served
-	// at on the console's origin, such as AuthKit's APIBase() ("/auth/v1"
-	// with APIPath "/auth"); only the console reads it. An absolute path
-	// without a trailing slash; empty is AuthKit's default, "/api/v1".
-	AdminConsoleAuthBase string
 }
 
 // RouteGroups are Routes.RouteGroups: the route groups beyond the public,
@@ -80,19 +69,4 @@ type RouteGroups struct {
 	// Deps.UserInfo, which reads the directory instead. Embedded, the Client
 	// calls the same operations in process without it.
 	Programmatic bool
-}
-
-// ConsoleMount is where a standalone server serves the admin console, and
-// what it serves it with.
-type ConsoleMount struct {
-	// Path is where the console is served: an absolute path without a
-	// trailing slash, outside the API. Empty is "/admin".
-	Path string
-	// AuthBaseURL is the AuthKit JSON API staff sign in through; empty is
-	// the server's own.
-	AuthBaseURL string
-	// Extensions is the host's data for the console extensions it builds in
-	// (scripts/build-admin-console.sh --extensions), keyed by extension id and
-	// served verbatim in config.json. OpenRails never reads it.
-	Extensions map[string]any
 }

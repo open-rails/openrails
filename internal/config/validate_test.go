@@ -89,30 +89,6 @@ func TestValidateMountPath(t *testing.T) {
 			require.ErrorContains(t, err, "invalid admin_console.path", path)
 		}
 	}
-	require.Equal(t, "/admin", AdminConsolePath(&ConsoleMount{}))
-	require.Equal(t, "/ops", AdminConsolePath(&ConsoleMount{Path: "/ops"}))
-}
-
-// The host's extension data reaches the console through config.json, keyed by
-// extension id.
-func TestValidateConsoleExtensions(t *testing.T) {
-	for _, row := range []struct {
-		extensions map[string]any
-		err        string
-	}{
-		{nil, ""},
-		{map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}, ""},
-		{map[string]any{"saas-2": true}, ""},
-		{map[string]any{"Hosted": true}, `invalid Routes.AdminConsole.Extensions key "Hosted"`},
-		{map[string]any{"-x": true}, `invalid Routes.AdminConsole.Extensions key "-x"`},
-		{map[string]any{"x": func() {}}, "invalid Routes.AdminConsole.Extensions.x"},
-	} {
-		if err := ValidateConsoleExtensions("Routes.AdminConsole.Extensions", row.extensions); row.err == "" {
-			require.NoError(t, err, row.extensions)
-		} else {
-			require.ErrorContains(t, err, row.err)
-		}
-	}
 }
 
 func TestPostureAccessorsFailClosed(t *testing.T) {
