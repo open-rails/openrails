@@ -751,15 +751,23 @@ UPDATE billing.reconciliation_findings
    AND subject_key = sqlc.arg(subject_key)::text
    AND status IN ('reconcile_required', 'requires_review');
 
+-- name: ConvergeObservedFrom :one
+-- When a merchant-wide converge begins to look, on the clock that stamps
+-- findings' last_seen_at.
+SELECT clock_timestamp()::timestamptz AS observed_from;
+
 -- name: ResolveClearedFindings :execrows
--- Open findings of the given standing types that the latest merchant-wide
--- converge no longer reports (keep = type || chr(31) || subject) have cleared.
+-- Open findings of the given standing types that a merchant-wide converge no
+-- longer reports (keep = type || chr(31) || subject) have cleared, unless
+-- another pass saw them after this one began to look: an overlapping pass
+-- that scanned earlier never closes what a later one found.
 UPDATE billing.reconciliation_findings
    SET status = 'fixed', resolution = 'auto_vanished', resolved_at = now(),
        notified_at = NULL, notified_severity = NULL, updated_at = now()
  WHERE merchant_id = sqlc.arg(merchant_id)::uuid
    AND finding_type = ANY(sqlc.arg(finding_types)::text[])
    AND status IN ('reconcile_required', 'requires_review')
+   AND last_seen_at < sqlc.arg(observed_from)::timestamptz
    AND NOT ((finding_type || chr(31) || subject_key) = ANY(sqlc.arg(keep)::text[]));
 
 -- name: SummarizeHeldEngineRenewals :one

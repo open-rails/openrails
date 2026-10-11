@@ -379,6 +379,19 @@ func (q *Queries) ClaimReconciliationFindingNotification(ctx context.Context, ar
 	return result.RowsAffected(), nil
 }
 
+const convergeObservedFrom = `-- name: ConvergeObservedFrom :one
+SELECT clock_timestamp()::timestamptz AS observed_from
+`
+
+// When a merchant-wide converge begins to look, on the clock that stamps
+// findings' last_seen_at.
+func (q *Queries) ConvergeObservedFrom(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, convergeObservedFrom)
+	var observed_from time.Time
+	err := row.Scan(&observed_from)
+	return observed_from, err
+}
+
 const countSubscriptionFunnel = `-- name: CountSubscriptionFunnel :one
 SELECT count(*) FILTER (WHERE s.status = 'active')::bigint AS active,
        count(*) FILTER (WHERE s.status = 'past_due')::bigint AS past_due,
@@ -2682,19 +2695,28 @@ UPDATE billing.reconciliation_findings
  WHERE merchant_id = $1::uuid
    AND finding_type = ANY($2::text[])
    AND status IN ('reconcile_required', 'requires_review')
-   AND NOT ((finding_type || chr(31) || subject_key) = ANY($3::text[]))
+   AND last_seen_at < $3::timestamptz
+   AND NOT ((finding_type || chr(31) || subject_key) = ANY($4::text[]))
 `
 
 type ResolveClearedFindingsParams struct {
 	MerchantID   uuid.UUID
 	FindingTypes []string
+	ObservedFrom time.Time
 	Keep         []string
 }
 
-// Open findings of the given standing types that the latest merchant-wide
-// converge no longer reports (keep = type || chr(31) || subject) have cleared.
+// Open findings of the given standing types that a merchant-wide converge no
+// longer reports (keep = type || chr(31) || subject) have cleared, unless
+// another pass saw them after this one began to look: an overlapping pass
+// that scanned earlier never closes what a later one found.
 func (q *Queries) ResolveClearedFindings(ctx context.Context, arg ResolveClearedFindingsParams) (int64, error) {
-	result, err := q.db.Exec(ctx, resolveClearedFindings, arg.MerchantID, arg.FindingTypes, arg.Keep)
+	result, err := q.db.Exec(ctx, resolveClearedFindings,
+		arg.MerchantID,
+		arg.FindingTypes,
+		arg.ObservedFrom,
+		arg.Keep,
+	)
 	if err != nil {
 		return 0, err
 	}

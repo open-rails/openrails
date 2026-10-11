@@ -209,6 +209,15 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 	}
 	scans := &scanState{truncated: map[string]bool{}}
 	ctx = context.WithValue(ctx, scanStateKey{}, scans)
+	// A merchant-wide pass closes what it no longer sees, but only what was
+	// last seen before it began to look (resolveCleared).
+	var observedFrom time.Time
+	if scope.IsGlobal() {
+		var err error
+		if observedFrom, err = e.DB.Gen(ctx).ConvergeObservedFrom(ctx); err != nil {
+			return res, fmt.Errorf("converge: read the database clock: %w", err)
+		}
+	}
 	var collected []ConvergeFinding
 	for _, p := range e.passes {
 		fs, err := p.Run(ctx, scope)
@@ -302,7 +311,7 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 	if err := apply(notifyFindings); err != nil {
 		return res, err
 	}
-	if err := e.resolveCleared(ctx, q, scope, scans, append(collected, notifyFindings...)); err != nil {
+	if err := e.resolveCleared(ctx, q, scope, scans, observedFrom, append(collected, notifyFindings...)); err != nil {
 		return res, err
 	}
 
@@ -312,8 +321,10 @@ func (e *ConvergeEngine) Converge(ctx context.Context, scope Scope) (res Converg
 
 // resolveCleared closes the open standing findings a merchant-wide pass no
 // longer reports: their subject has cleared. Subject keys do not carry the
-// customer, so a narrower scope cannot tell cleared from out of scope.
-func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, scope Scope, scans *scanState, reported []ConvergeFinding) error {
+// customer, so a narrower scope cannot tell cleared from out of scope. A
+// finding another pass saw after observedFrom stays open: this pass's scan
+// is older than that sighting.
+func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, scope Scope, scans *scanState, observedFrom time.Time, reported []ConvergeFinding) error {
 	if !scope.IsGlobal() {
 		return nil
 	}
@@ -330,7 +341,7 @@ func (e *ConvergeEngine) resolveCleared(ctx context.Context, q *gen.Queries, sco
 		keep = append(keep, f.Type+findingKeySep+f.SubjectKey)
 	}
 	if _, err := q.ResolveClearedFindings(ctx, gen.ResolveClearedFindingsParams{
-		MerchantID: scope.Merchant.UUID(), FindingTypes: types, Keep: keep,
+		MerchantID: scope.Merchant.UUID(), FindingTypes: types, ObservedFrom: observedFrom, Keep: keep,
 	}); err != nil {
 		return fmt.Errorf("converge: resolve cleared findings: %w", err)
 	}

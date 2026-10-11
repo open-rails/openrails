@@ -4,6 +4,7 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails"
 	"github.com/open-rails/openrails/billing"
+	"github.com/open-rails/openrails/internal/engine"
+	"github.com/open-rails/openrails/internal/hosttools"
 	"github.com/riverqueue/river"
 	"github.com/riverqueue/river/rivertype"
 	"github.com/stretchr/testify/require"
@@ -216,6 +219,59 @@ func TestUnverifiedAfterWebhookIsReadAtOnce(t *testing.T) {
 	require.Equal(t, billing.SubscriptionUnverified, w.subscription(embedded, l.sub).Status)
 	require.True(t, l.c.entitled(l.ent), "uncertainty never revokes access")
 	require.Zero(t, len(w.nmi.Attempts()))
+}
+
+// Two merchant-wide converge passes overlap: one scanned before an unverified
+// row had been unverified for three days, the other after it and escalated
+// the row. The earlier pass finishing last leaves the escalation open: a pass
+// closes only findings last seen before it began to look. Holding the backlog
+// finding's row stops each pass after its scan.
+func TestOverlappingConvergeKeepsTheNewerEscalation(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.armDestructive()
+	tier := w.bookTier("monthly", 999, 30)
+	l := w.mirrorBook(embedded, tier, 1)[0]
+	end := *w.subscription(embedded, l.sub).CurrentPeriodEndsAt
+	w.advance(end.Sub(w.clock.Now()) + 3*day)
+	w.converge()
+	require.Eventually(t, func() bool { return w.subscription(embedded, l.sub).Status == "unverified" }, 30*time.Second, 50*time.Millisecond)
+	w.converge()
+	require.Len(t, w.openFindings("life.unverified.backlog"), 1)
+	require.Empty(t, w.openFindings("life.unverified.unresolved"))
+
+	ctx := t.Context()
+	held, err := w.pool.Begin(ctx)
+	require.NoError(t, err)
+	defer func() { _ = held.Rollback(context.WithoutCancel(ctx)) }()
+	_, err = held.Exec(ctx, w.q(`SELECT 1 FROM billing.reconciliation_findings WHERE finding_type = 'life.unverified.backlog' FOR UPDATE`))
+	require.NoError(t, err)
+	waiting := func() int {
+		var n int
+		require.NoError(t, w.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = current_database()
+			AND wait_event_type = 'Lock' AND query ILIKE '%INSERT INTO%reconciliation_findings%'`).Scan(&n))
+		return n
+	}
+	pass := func() <-chan error {
+		done := make(chan error, 1)
+		go func() {
+			_, err := hosttools.Converge(ctx, engine.Graph(w.rt), w.client[embedded].MerchantID())
+			done <- err
+		}()
+		return done
+	}
+	before := waiting()
+	earlier := pass()
+	require.Eventually(t, func() bool { return waiting() > before }, 30*time.Second, 20*time.Millisecond, "the earlier pass scanned")
+	w.advance(4 * day)
+	later := pass()
+	require.Eventually(t, func() bool { return len(w.openFindings("life.unverified.unresolved")) == 1 }, 30*time.Second, 20*time.Millisecond, "the later pass escalated")
+	require.NoError(t, held.Rollback(ctx))
+	require.NoError(t, <-earlier)
+	require.NoError(t, <-later)
+	require.Equal(t, []string{"subscription:" + l.sub.UUID().String()}, w.openFindings("life.unverified.unresolved"), "the earlier pass's older scan closes nothing the later one saw")
+	w.converge()
+	require.Equal(t, []string{"subscription:" + l.sub.UUID().String()}, w.openFindings("life.unverified.unresolved"))
 }
 
 // readBody reads a held request's form body and leaves it readable.
