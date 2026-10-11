@@ -75,6 +75,43 @@ The last six are the programmatic routes' (`RouteGroups.Programmatic`): each
 `/v1/app` route mounts only with its permission, so a program gets only what
 its task needs. `Mount` refuses a permission for a group that is off.
 
+### Roles
+
+Permissions are held through roles. On the standalone server a merchant's team
+members and API keys hold a declared role (`server.MerchantRoles`: `viewer`,
+`support`, `owner`) or one the merchant defines: a custom role,
+`merchant:custom-<name>`, holding any of the permissions above. There are no
+preset program roles; a merchant composes what each program needs. A
+storefront's key holding `server.MerchantCatalogRead` and
+`server.MerchantEntitlementsRead` lists offers and checks entitlements, and is
+refused everything else.
+
+- Custom roles are AuthKit's (the merchant persona's `CustomRoles`), in the
+  merchant's group. Defining, changing and deleting one takes
+  `server.MerchantRolesManage`, reading what roles grant
+  `server.MerchantRolesRead`; the owner holds both. A role grants only
+  permissions its editor holds.
+- Checks read a role live: an edit applies to every holder on the next
+  request. Deleting one takes it from every teammate and revokes the API keys
+  and invitations carrying it.
+- The server's AuthKit API serves them for the merchant's group, whose id is
+  the merchant's: `GET` and `POST /groups/{group_id}/roles`, `GET`, `PATCH`
+  and `DELETE /groups/{group_id}/roles/{role}`. Its team
+  (`/groups/{group_id}/members`) and API key (`/groups/{group_id}/api-keys`)
+  routes take a custom role like a declared one. In Go: `ak.ListGroupRoles`,
+  `ak.CreateGroupRole`, `ak.UpdateGroupRole`, `ak.DeleteGroupRole`; a hosted
+  product resolves a role named on its own wire with
+  `server.MerchantRole("custom-storefront")`.
+- The admin console manages them in Settings, Roles: shown with
+  `server.MerchantRolesRead`, editable with `server.MerchantRolesManage`.
+
+Embedded, the host's AuthKit and roles are its own and OpenRails changes
+nothing. A host lets its staff define roles by opting in the persona they hold
+their permissions in: `authkit.NewRoles(authkit.CustomRoles)` for the root
+group (`Routes.Scope` above), `rbac.Persona(name, authkit.CustomRoles)` for
+another. The console then shows its Roles page to staff holding
+`root:roles:read`, where its `auth_base_url` serves AuthKit's group routes.
+
 An identity has three parts:
 
 - the **subject**: the native account acted as, a user or an application.

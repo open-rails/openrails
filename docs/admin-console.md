@@ -22,6 +22,18 @@ revision it loaded, so a product, price, meter or rate another person changed
 meanwhile is refused and reloaded, and applying a catalog document lists what
 an edit kept.
 
+Settings also has a **Roles** page, AuthKit's rather than an area's: the
+access read names the scope staff hold their permissions in (`scope_id`), and
+the console asks the AuthKit API at `auth_base_url` for the caller's
+permissions there. It shows to staff holding that persona's `roles:read`
+(`server.MerchantRolesRead` on the standalone server): the declared roles and
+the merchant's custom ones with what each grants. With `roles:manage` they
+create, edit and delete custom roles from the persona's permissions, the
+`/v1/app` ones listed with the routes they open; a permission they do not hold
+cannot be granted. A role is given to a teammate (with `members:manage`) or to
+a new API key, its secret shown once (with `credentials:manage`). See
+[roles](auth.md#roles).
+
 ### Turning it on and off
 
 Off is the default: nothing mounts the console, and no console route exists.
@@ -269,8 +281,8 @@ Every write runs through auth-ui's step-up dialog: when OpenRails answers
 operation after a stale sign-in), the console stays signed in and the dialog
 asks the user to confirm it's them and the write is retried. Who can sign in
 and what they may do: standalone, the server's merchant roles
-(`owner`/`support`/`viewer`) or a trusted issuer's token; embedded, the host's
-`Routes.Auth`.
+(`owner`/`support`/`viewer`, or the merchant's custom roles) or a trusted
+issuer's token; embedded, the host's `Routes.Auth`.
 
 **At a trusted issuer**, the console is that issuer's OAuth 2.0 client
 (auth-ui's issuer client): the login page redirects there, `/callback`
@@ -295,7 +307,7 @@ Local UI dev: `cd web/admin && pnpm run dev` (Vite proxies `/v1`, `/auth`, and
 | Payments | `/payments` | Filters, payment detail, rail-aware refund (disabled on rails without API refunds) |
 | Catalog | `/catalog` | Products/prices, price detail + change wizard, archive/restore, drift view, catalog copilot panel. Price detail also shows the price's `psp_links` (per-PSP link state, link ids, opt-in live provider verify) and a checkout-readiness dry run naming the PSP a checkout would land on and why each other candidate was skipped. Links are read-only here — the catalog declares them, the provider adapter pushes them. |
 | Ops | `/ops` | Findings queue (approve/ignore), the merchant inbox (ledger repairs and worker stalls arrive there as critical notifications) |
-| Settings | `/settings` | Tabs: Merchant profile (with MerchantConfig), Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), Customer controls, and a host extension's |
+| Settings | `/settings` | Tabs: Merchant profile (with MerchantConfig), Notifications (email and encrypted webhooks), PSPs (arm, rotate credentials, archive), Customer controls, Roles (custom roles, given to teammates and API keys), and a host extension's |
 
 **Assistants** are off without the server's `llm:` config and show only in the
 area they serve, to staff who see that area. `config.json` mirrors each gate so

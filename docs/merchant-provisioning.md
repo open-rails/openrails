@@ -306,18 +306,22 @@ alongside it: see [backup and recovery](backup-and-recovery.md).
 OpenRails serves no route that mints credentials. A merchant's API keys are
 AuthKit's, in the merchant's group: a hosted product mints one with
 `ak.CreateAPIKey(ctx, who, iam.GroupByID(merchantID), …)` holding a merchant
-role (`server.MerchantRole`), and revokes it with `ak.RevokeAPIKey`. The secret
-is in the result once and never stored; the non-secret `prefix`
+role (`server.MerchantRole`), and revokes it with `ak.RevokeAPIKey`; with local
+sign-in the server's AuthKit API serves the same as
+`POST /groups/{group_id}/api-keys`, which the console's Roles page uses. The
+secret is in the result once and never stored; the non-secret `prefix`
 (`openrails_st_<key_id>`) identifies the key afterwards. A self-hosted backend
 authenticates with a client-credentials access token from the merchant's
 trusted issuer ([standalone](standalone-integration.md#deployment)).
 
-Roles are the fixed merchant catalog (`server.MerchantRoles`): `viewer`
+A key holds one role. The declared ones (`server.MerchantRoles`) are `viewer`
 (`server.MerchantBillingRead`: read-only, the right choice for LLM agents),
 `support` (`server.MerchantBillingRead` and `server.MerchantBillingManage`:
-acts on customers), `owner` (everything, the merchant's configuration and the
-programmatic routes included). AuthKit refuses a role beyond the minting
-identity's own.
+acts on customers) and `owner` (everything, the merchant's configuration and
+the programmatic routes included). A program's key holds a custom role the
+merchant defines with only the `/v1/app` permissions its task needs
+([roles](auth.md#roles)). AuthKit refuses a role beyond the minting identity's
+own.
 
 ## Webhook routing
 
