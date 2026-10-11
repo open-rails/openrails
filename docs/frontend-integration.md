@@ -79,7 +79,7 @@ can only ever act on itself. In embedded mode, prepend the mount prefix to every
 ```
 GET  /v1/me                               balances, default cards, unread notices
 GET  /v1/me/balance/transactions?currency=USD  balance transactions, newest first
-GET  /v1/me/usage?currency=USD            metered usage, grouped by event type (or ?group_by=)
+GET  /v1/me/usage?currency=USD            metered usage by event type (or ?group_by=), largest first (cursor page)
 GET  /v1/me/orders[/{id}]                 purchases, renewals and usage orders (cursor page)
 GET  /v1/me/payments                      payment and refund history (cursor page)
 GET  /v1/me/entitlements                  active entitlements
@@ -96,6 +96,15 @@ POST /v1/me/stripe/billing-portal-sessions → {"url": ...} Stripe's portal (mer
 GET  /v1/me/config                        the merchant's payment setup and name
 GET  /v1/me/notifications                 billing notifications
 ```
+
+`GET /v1/me/usage` is a page of the customer's usage in one currency over
+`from`..`to` (RFC 3339 or a date; the month before now by default), grouped
+by `event_type`, `resource` or `invoker`: `rows` by total amount, largest
+first, then by key. `limit` is 1 to 1,000 groups (default 100), and
+`next_cursor` reads the next page, null on the last. A cursor reads only the
+report it came from: another currency, grouping or window is `400
+invalid_cursor`, and a window the request leaves out is the cursor's.
+billing-ui's `getUsage` sends it.
 
 The public catalog needs no auth and is a lookup by product key in one
 merchant's catalog:
