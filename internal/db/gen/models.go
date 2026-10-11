@@ -1397,6 +1397,14 @@ type BillingReconciliationFinding struct {
 	// Severity at last notification; a further increase while still open re-fires, re-observation at the same/lower severity does not.
 	NotifiedSeverity *string
 	SeenRunClass     *string
+	// A pull.* proposal's change: its kind, subject, from and to, effects, the basis it was computed against, when its evidence was observed, the provider evidence and what approving it executes. NULL on findings only dismissing resolves.
+	Change []byte
+	// What raised a pull.* finding: a PSP read (pull) or a by-id read of an uncertain record (verification). Set exactly on pull.* findings.
+	Source *string
+	// sha256 of the change's kind and provider evidence. A dismissed proposal is raised again only when a read yields another digest.
+	EvidenceDigest *string
+	// The approval run (maintenance_runs kind approval) that applied this proposal; undo-run reverses it. Set exactly when the resolution is approved.
+	ApprovalRunID *uuid.UUID
 }
 
 // Per-(merchant, source_domain) reconciliation watermark. fully_reconciled gates the confirmed-absence rule: a destructive EXCESS repair is HELD until its source domain (subscriptions|payments|grants) is proven fully reconciled.

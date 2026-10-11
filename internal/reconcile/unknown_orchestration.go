@@ -401,9 +401,16 @@ func recordUnlinkedReversalFinding(ctx context.Context, q *gen.Queries, sub *mod
 		Severity:          string(SeverityHigh),
 		Status:            string(FindingStatusRequiresReview),
 		RecommendedAction: &action,
+		Source:            verificationSource(),
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithField("transaction_id", t.TransactionID).Error("reconcile backfill: could not persist the unlinked reversal finding")
 	}
+}
+
+// verificationSource names the by-id planes as a pull.* finding's raiser.
+func verificationSource() *string {
+	s := string(billing.ProposalSourceVerification)
+	return &s
 }
 
 // evidenceStaleAction is the operator prose for a floored cancel.
@@ -426,6 +433,7 @@ func recordEvidenceStaleFinding(ctx context.Context, q *gen.Queries, merchantID 
 		Severity:          string(SeverityHigh),
 		Status:            string(FindingStatusRequiresReview),
 		RecommendedAction: &action,
+		Source:            verificationSource(),
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": string(provider), "subscription_id": subscriptionID,
@@ -451,6 +459,7 @@ func recordGuardFinding(ctx context.Context, q *gen.Queries, merchantID billing.
 		Severity:          string(SeverityCritical),
 		Status:            string(FindingStatusRequiresReview),
 		RecommendedAction: &reason,
+		Source:            verificationSource(),
 	}); err != nil {
 		log.WithContext(ctx).WithError(err).WithFields(log.Fields{
 			"merchant_id": merchantID.String(), "rail": string(provider), "guard": subject,

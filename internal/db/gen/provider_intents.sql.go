@@ -1140,7 +1140,7 @@ func (q *Queries) GetProviderIntentByIdempotencyKey(ctx context.Context, arg Get
 }
 
 const getReconciliationFindingByIdentity = `-- name: GetReconciliationFindingByIdentity :one
-SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class FROM billing.reconciliation_findings
+SELECT id, merchant_id, finding_type, rail, psp_id, openrails_resource_type, openrails_resource_id, external_resource_id, field, openrails_value, external_value, subject_key, severity, status, recommended_action, first_seen_run, last_seen_run, last_seen_at, resolved_at, resolution, operator_notes, created_at, updated_at, evidence, resolved_by, notified_at, notified_severity, seen_run_class, change, source, evidence_digest, approval_run_id FROM billing.reconciliation_findings
 WHERE merchant_id = $1::uuid
   AND finding_type = $2
   AND subject_key = $3
@@ -1186,6 +1186,10 @@ func (q *Queries) GetReconciliationFindingByIdentity(ctx context.Context, arg Ge
 		&i.NotifiedAt,
 		&i.NotifiedSeverity,
 		&i.SeenRunClass,
+		&i.Change,
+		&i.Source,
+		&i.EvidenceDigest,
+		&i.ApprovalRunID,
 	)
 	return i, err
 }

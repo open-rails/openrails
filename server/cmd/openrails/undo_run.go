@@ -15,8 +15,8 @@ import (
 //	openrails undo-run --merchant <slug> --run <id>                        # plan
 //	openrails undo-run --merchant <slug> --run <id> --apply --expect-rows N
 //
-// A prune reverses by clearing tombstones, a converge-enforce pass from
-// captured before-images. The kind is read from the ledger, so an operator
+// A prune reverses by clearing tombstones, an approval run from captured
+// before-images. The kind is read from the ledger, so an operator
 // cannot reverse the wrong way; a kind with no undo is refused by name.
 func newUndoRunCmd() *cobra.Command {
 	var merchantSlug, runID, format string
@@ -25,7 +25,7 @@ func newUndoRunCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "undo-run",
-		Short: "Plan or apply the reversal of one destructive run (prune or converge-enforce)",
+		Short: "Plan or apply the reversal of one destructive run (a prune or an approval run)",
 		Long: "Reverse one destructive run by id, whatever kind it is.\n\n" +
 			"DRY RUN BY DEFAULT. With no --apply the command prints what it would restore, the provider writes it\n" +
 			"would supersede, the ones that already fired and cannot be undone, and the NULL-psp rows no PSP-scoped\n" +
@@ -35,7 +35,7 @@ func newUndoRunCmd() *cobra.Command {
 			"account-bound — the PSP, and every restore predicate is keyed on the run id inside a merchant-scoped\n" +
 			"connection. There is no widening knob.\n\n" +
 			"What it will NOT do, on purpose:\n" +
-			"  * restore an entitlement — the windows a converge run closed are INVALIDATED and Converge rebuilds\n" +
+			"  * restore an entitlement — the windows an approval run closed are INVALIDATED and Converge rebuilds\n" +
 			"    them from the append-only grant log. A restored effect can silently disagree with its grant\n" +
 			"  * touch the ledger, grants, status transitions, or the intent/webhook/findings logs\n" +
 			"  * pretend a provider write that already fired was undone; those are reported as irreversible divergence\n" +
@@ -60,7 +60,7 @@ func newUndoRunCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&merchantSlug, "merchant", "", "Merchant public name or id:<uuid> (required)")
-	cmd.Flags().StringVar(&runID, "run", "", "Destructive run id to reverse (required; see `openrails prune list` / `openrails converge list`)")
+	cmd.Flags().StringVar(&runID, "run", "", "Run id to reverse, run_<uuid> or the bare UUID (required; see `openrails prune list` / `openrails proposals runs`)")
 	cmd.Flags().BoolVar(&apply, "apply", false, "Actually perform the reversal (default: plan only)")
 	cmd.Flags().Int64Var(&expectRows, "expect-rows", 0, "Typed confirmation: the number of rows the plan says would be restored. Required with --apply")
 	cmd.Flags().StringVar(&format, "format", "table", "Output format: table, json")

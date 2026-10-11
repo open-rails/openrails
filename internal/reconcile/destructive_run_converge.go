@@ -16,9 +16,10 @@ import (
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// DestructiveRunKindConvergeEnforce is the converge-enforce pass's key in
-// billing.maintenance_runs, the same ledger `--prune` writes to.
-const DestructiveRunKindConvergeEnforce = "converge_enforce"
+// DestructiveRunKindApproval is an approval run's key in
+// billing.maintenance_runs, the ledger `--prune` writes to: one approve call
+// of proposals, or an enforcing pull pass.
+const DestructiveRunKindApproval = "approval"
 
 // supersededByReverseReason is stamped on every intent the reverse neutralises.
 const supersededByReverseReason = "superseded by destructive-run reversal"
@@ -44,7 +45,7 @@ type DestructiveRunRecorder interface {
 	Finish(ctx context.Context, runID uuid.UUID, status string, affected map[string]int) error
 }
 
-// OpenDestructiveRunParams is one converge-enforce pass's run header.
+// OpenDestructiveRunParams is one approval run's header.
 type OpenDestructiveRunParams struct {
 	// PspID is set when the pass is account-bound; NULL means merchant-wide.
 	PspID *uuid.UUID
@@ -211,7 +212,7 @@ func (r ConvergeRollbackResult) Complete() bool {
 	return len(r.IntentsIrreversible) == 0 && len(r.IntentsAmbiguous) == 0
 }
 
-// RollbackConvergeEnforceRun reverses one converge-enforce run, in this order:
+// RollbackApprovalRun reverses one approval run, in this order:
 //
 //  1. Quiesce: clear the merchant's first-enforce arming and trip its
 //     destructive stop, so nothing re-cancels what is being restored and no
@@ -229,7 +230,7 @@ func (r ConvergeRollbackResult) Complete() bool {
 // the operator worse off. A rollback is not a complete operation (`rollback →
 // pull → converge` is); entitlements come back through Converge from the
 // append-only grant log, never restored here. Must run merchant-scoped.
-func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string, recompute Recomputer) (ConvergeRollbackResult, error) {
+func RollbackApprovalRun(ctx context.Context, database *db.DB, runID uuid.UUID, actor string, recompute Recomputer) (ConvergeRollbackResult, error) {
 	res := ConvergeRollbackResult{RunID: runID}
 	mid, err := requireMerchantUUID(ctx)
 	if err != nil {
@@ -246,8 +247,8 @@ func RollbackConvergeEnforceRun(ctx context.Context, database *db.DB, runID uuid
 		}
 		return res, fmt.Errorf("load destructive run %s: %w", runID, err)
 	}
-	if run.Kind != DestructiveRunKindConvergeEnforce {
-		return res, fmt.Errorf("destructive run %s is kind %q, not %q", runID, run.Kind, DestructiveRunKindConvergeEnforce)
+	if run.Kind != DestructiveRunKindApproval {
+		return res, fmt.Errorf("destructive run %s is kind %q, not %q", runID, run.Kind, DestructiveRunKindApproval)
 	}
 	if run.Status == "reversed" {
 		return res, fmt.Errorf("destructive run %s was already reversed", runID)

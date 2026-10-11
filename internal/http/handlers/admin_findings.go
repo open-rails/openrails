@@ -34,38 +34,8 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 	return store, true
 }
 
-// findingView is a finding as the admin API answers it, with its parsed
-// recommendation.
-func findingView(rec reconcile.FindingRecord) billing.Finding {
-	v := billing.Finding{
-		ID: billing.FindingID(rec.ID), Type: string(rec.Type), SubjectKey: rec.SubjectKey, Severity: string(rec.Severity),
-		Status: billing.FindingStatus(rec.Status), Evidence: rec.Evidence, LastSeenAt: rec.LastSeenAt, ResolvedAt: rec.ResolvedAt,
-		Provider: optional(string(rec.Provider)), RecommendedAction: optional(rec.RecommendedAction), Resolution: optional(rec.Resolution),
-		ResolvedBy: optional(rec.ResolvedBy), Notes: optional(rec.Notes), CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
-		ResourceType: rec.ResourceType, ResourceID: rec.ResourceID, ExternalResourceID: rec.ExternalResourceID,
-		Field: rec.Field, OpenRailsValue: rec.OpenRailsValue, ExternalValue: rec.ExternalValue,
-	}
-	if rec.PSPID != nil {
-		psp := billing.PSPID(*rec.PSPID)
-		v.PSPID = &psp
-	}
-	if v.Evidence == nil {
-		v.Evidence = map[string]any{}
-	}
-	if parsed, ok := recommend.FromEvidence(rec.Evidence); ok {
-		out := recommendationView(parsed)
-		v.Recommendation = &out
-	}
-	return v
-}
-
-func recommendationView(r recommend.Recommendation) billing.FindingRecommendation {
-	out := billing.FindingRecommendation{Action: r.Action, Params: r.Params}
-	for _, alt := range r.Alternatives {
-		out.Alternatives = append(out.Alternatives, recommendationView(alt))
-	}
-	return out
-}
+// findingView is a finding as the admin API answers it.
+func findingView(rec reconcile.FindingRecord) billing.Finding { return rec.View() }
 
 func optional(s string) *string {
 	if s == "" {
@@ -151,7 +121,8 @@ func resolveActorIdentity(r *httprequest.Request) string {
 // (params merged with override_params) and marks it fixed; ignore silences
 // the subject for good (notes required). A failed run leaves the finding open
 // with the error in its notes; the next sweep re-measures, so a fix that did
-// not take reopens by re-detection.
+// not take reopens by re-detection. A pull.* finding is a proposal, resolved
+// only through internal/proposals.
 //
 //	POST /v1/merchant/findings/{id}/resolve
 func AdminResolveFinding(r *httprequest.Request) {
@@ -182,6 +153,10 @@ func AdminResolveFinding(r *httprequest.Request) {
 	}
 	if err != nil {
 		r.InternalError("load finding failed", err)
+		return
+	}
+	if strings.HasPrefix(string(finding.Type), "pull.") {
+		r.ErrorCode(billing.CodeFindingRequiresMerchantConfig, "a pull.* finding is a proposal: approve or dismiss it as one")
 		return
 	}
 	if !findingIsOpen(finding) {

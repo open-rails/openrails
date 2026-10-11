@@ -41,8 +41,8 @@ var UnrecoverableRunKinds = map[string]string{
 // ReversibleRunKinds are the kinds an undo can reverse. A kind in neither map
 // has no undo yet and is refused rather than marked reversed.
 var ReversibleRunKinds = map[string]string{
-	DestructiveRunKindPrune:           "rows were soft-deleted with the run's stamp; the undo clears the tombstones",
-	DestructiveRunKindConvergeEnforce: "row VALUES were overwritten; the undo re-asserts them from the captured before-images and supersedes the provider writes the run queued but has not sent",
+	DestructiveRunKindPrune:    "rows were soft-deleted with the run's stamp; the undo clears the tombstones",
+	DestructiveRunKindApproval: "row VALUES were overwritten; the undo re-asserts them from the captured before-images and supersedes the provider writes the run queued but has not sent",
 }
 
 // classifyRunKind decides what an undo may do with a run, by kind.

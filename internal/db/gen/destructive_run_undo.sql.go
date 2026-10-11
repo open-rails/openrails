@@ -64,7 +64,7 @@ type CountConvergeRestorableForRunRow struct {
 	SubscriptionsTombstoned int64
 }
 
-// What `kind='converge_enforce'` would re-assert, counted through the SAME join
+// What `kind='approval'` would re-assert, counted through the SAME join
 // and the SAME `deleted_at IS NULL` guard the restore uses: an image whose row a
 // later prune has since tombstoned belongs to THAT run's reverse, so the plan
 // must not promise it either.

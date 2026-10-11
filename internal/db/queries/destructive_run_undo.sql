@@ -23,7 +23,7 @@ SELECT
         AND deleted_at IS NOT NULL)::bigint AS product_access;
 
 -- name: CountConvergeRestorableForRun :one
--- What `kind='converge_enforce'` would re-assert, counted through the SAME join
+-- What `kind='approval'` would re-assert, counted through the SAME join
 -- and the SAME `deleted_at IS NULL` guard the restore uses: an image whose row a
 -- later prune has since tombstoned belongs to THAT run's reverse, so the plan
 -- must not promise it either.

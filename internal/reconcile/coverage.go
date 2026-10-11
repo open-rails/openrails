@@ -77,7 +77,7 @@ func (r *RunResult) hasUnapplied(provider string, financialOnly bool) bool {
 		}
 		if financialOnly {
 			switch finding.Type {
-			case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingPaymentMethodMismatch, FindingEvidenceStale:
+			case FindingLocalActiveRemoteDead, FindingStatusMismatch, FindingOrphanedSchedule, FindingChargeAfterCancel, FindingPaymentMethodMismatch, FindingEvidenceStale:
 				// These remain visible for the separate lifecycle/destructive
 				// policy. An intentionally held cancellation is not a missing
 				// financial receipt and must not deadlock catching up.

@@ -138,6 +138,8 @@ func (w CCBillReconciler) Run(ctx context.Context) error {
 // row is not, and no payment fact explains it.
 const UnpaidActiveFindingType = "pull.ccbill.active_without_payment"
 
+var pullSource = string(billing.ProposalSourcePull)
+
 func (w CCBillReconciler) recordUnpaidActiveFinding(ctx context.Context, sub *models.Subscription, record ccbill.CCBillRecord) error {
 	evidence, err := json.Marshal(map[string]any{
 		"subscription_id":      billing.SubscriptionID(sub.ID).String(),
@@ -159,6 +161,7 @@ func (w CCBillReconciler) recordUnpaidActiveFinding(ctx context.Context, sub *mo
 		Status:            "requires_review",
 		RecommendedAction: &action,
 		Evidence:          evidence,
+		Source:            &pullSource,
 	})
 	return err
 }

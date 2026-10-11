@@ -82,6 +82,21 @@ func RefundChargeAfterCancel(ctx context.Context, d *db.DB, payment *models.Paym
 	return err
 }
 
+// QueueChargeAfterCancelRefund queues, in d's transaction, the full refund of a
+// charge collected after its subscription was canceled, under key: an approved
+// proposal names the key. It answers key, or "" when the rail cannot refund
+// automatically or nothing remains to refund.
+func QueueChargeAfterCancelRefund(ctx context.Context, d *db.DB, payment *models.Payment, key string, clock clockwork.Clock) (string, error) {
+	if d == nil || d.Pool() != nil || payment == nil {
+		return "", errors.New("charge-after-cancel refund requires the approving transaction")
+	}
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return "", err
+	}
+	return queueChargeAfterCancelRefund(ctx, d, mid.UUID(), payment, key, timeutil.FirstClock(clock))
+}
+
 // queueChargeAfterCancelRefund reserves and enqueues the refund; it answers the
 // intent key, or "" when the rail cannot refund automatically.
 func queueChargeAfterCancelRefund(ctx context.Context, d *db.DB, merchantID uuid.UUID, payment *models.Payment, key string, clock clockwork.Clock) (string, error) {

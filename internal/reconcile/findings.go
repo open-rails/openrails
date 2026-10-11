@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 )
 
@@ -134,6 +135,11 @@ type Finding struct {
 	// finding is advisory-only (requires_review types, intent-annotated drift).
 	// Never persisted.
 	Apply *ApplyAction `json:"-"`
+
+	// Change is the proposal approving the finding applies; nil when only
+	// dismissing resolves it. Source is what raised a pull.* finding.
+	Change *Change
+	Source billing.ProposalSource
 }
 
 // ApplyAction is one idempotent local write the enforce mode performs for a
@@ -220,9 +226,6 @@ type BackfillPaymentAction struct {
 	// Grant, when non-nil, grants the product for the current period after
 	// the backfill (charge covers a period that is still running).
 	Grant *GrantAccessAction
-	// ChargeAfterCancel queues the backfilled charge's full refund with its
-	// standing finding, in the backfill's transaction.
-	ChargeAfterCancel bool
 }
 
 // RecordRefundAction records a rail refund locally (PS-5) as a
@@ -275,6 +278,7 @@ var stateRosterFindingTypes = []FindingType{
 	FindingRemoteSubMissingLocal,
 	FindingLocalActiveRemoteDead,
 	FindingStatusMismatch,
+	FindingOrphanedSchedule,
 	FindingPaymentMethodMismatch,
 	FindingDuplicateSubscriptions,
 	FindingProviderScheduleDrift,
