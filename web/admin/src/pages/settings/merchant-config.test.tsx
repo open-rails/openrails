@@ -306,8 +306,10 @@ it("a PSP rotation at a stale revision closes, drops the secret and reloads the 
   })
   expect(document.querySelector("#rot-psp_a-secret_key")).toBeNull()
 
-  // Archiving is the same check-and-set update.
+  // Archiving is the same check-and-set update, once confirmed.
   await press("Archive")
+  expect(writes(requests).at(-1)!.body).not.toHaveProperty("archived")
+  await press("Archive PSP")
   expect(writes(requests).at(-1)).toMatchObject({
     method: "PATCH",
     path: "/admin/psps/psp_a",

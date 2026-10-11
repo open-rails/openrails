@@ -12,22 +12,12 @@ import * as React from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { toast } from "sonner"
 
-import { CursorPaginationFooter } from "@/components/cursor-pagination"
-import { useCursorPages } from "@/hooks/use-cursor-pages"
+import { CursorPager } from "@/components/cursor-pager"
+import { useConfirm } from "@/lib/confirm"
+import { useCursorPages } from "@/lib/cursor-pages"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -60,9 +50,9 @@ const PAGE_SIZE = 200
 
 export function CatalogMeteringPage() {
   const [search, setSearch] = React.useState("")
-  const pages = useCursorPages()
+  const pages = useCursorPages("", PAGE_SIZE)
   const { data, isPending, error, refetch } = useQuery(
-    adminQueries.usageMeters(PAGE_SIZE, pages.cursor)
+    adminQueries.usageMeters(pages.size, pages.cursor)
   )
   const writesAllowed = useCatalogWrites()
   const meters = data?.data ?? []
@@ -189,10 +179,12 @@ export function CatalogMeteringPage() {
               </TableBody>
             </Table>
           </div>
-          <CursorPaginationFooter
+          <CursorPager
             pages={pages}
+            rows={data?.data?.length ?? 0}
             nextCursor={data?.next_cursor}
-            loading={isPending}
+            busy={isPending}
+            sizes={[100, 200, 500]}
           />
         </>
       )}
@@ -397,17 +389,25 @@ function DefaultRateSection({
   meter: Meter
   writesAllowed: boolean
 }) {
-  const [deleteOpen, setDeleteOpen] = React.useState(false)
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   const remove = useMutation(
     adminMutations.deleteDefaultUsageRateCard(queryClient)
   )
   const card = meter.rate_card
   const handleDelete = async () => {
+    const removing = await confirm({
+      title: "Remove the default rate?",
+      description:
+        "New usage for this meter will stop being rated after removal. Billed usage orders and accrued amounts remain unchanged.",
+      confirmLabel: "Remove default",
+      cancelLabel: "Keep rate",
+      tone: "destructive",
+    })
+    if (!removing) return
     try {
       await remove.mutateAsync(meter)
       toast.success("Default rate removed")
-      setDeleteOpen(false)
     } catch (error) {
       toastApiError(error, "Remove default rate")
     }
@@ -422,35 +422,15 @@ function DefaultRateSection({
           </p>
         </div>
         {card && writesAllowed && (
-          <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
-            <AlertDialogTrigger
-              render={
-                <Button variant="outline" size="sm">
-                  <HugeiconsIcon icon={Delete02Icon} className="size-4" />
-                  Remove default
-                </Button>
-              }
-            />
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>Remove the default rate?</AlertDialogTitle>
-                <AlertDialogDescription>
-                  New usage for this meter will stop being rated after removal.
-                  Billed usage orders and accrued amounts remain unchanged.
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>Keep rate</AlertDialogCancel>
-                <AlertDialogAction
-                  variant="destructive"
-                  disabled={remove.isPending}
-                  onClick={() => void handleDelete()}
-                >
-                  {remove.isPending ? "Removing…" : "Remove default"}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={remove.isPending}
+            onClick={() => void handleDelete()}
+          >
+            <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+            {remove.isPending ? "Removing…" : "Remove default"}
+          </Button>
         )}
       </div>
       {!meter.billing_supported ? (

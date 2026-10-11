@@ -22,15 +22,12 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError } from "@/lib/api/client"
-import {
-  type MetricsRange,
-  type MetricsResult,
-  type Widget,
-} from "@/lib/api/metrics"
+import { type MetricsResult, type Widget } from "@/lib/api/metrics"
 import { adminQueries } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
 import { deepLinkFor } from "./lib"
+import { widgetQuery, type DashboardRange } from "./range"
 import { WidgetVizView } from "./widget-viz"
 
 export function WidgetTile({
@@ -41,13 +38,13 @@ export function WidgetTile({
   onDelete,
 }: {
   widget: Widget
-  range: MetricsRange
+  range: DashboardRange
   // editable shows the drag handle and the edit and remove menu.
   editable?: boolean
   onEdit: () => void
   onDelete: () => void
 }) {
-  const query = { ...widget.query, range }
+  const query = widgetQuery(widget, range)
   const {
     data,
     isPending: loading,

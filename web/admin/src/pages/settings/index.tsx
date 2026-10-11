@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Badge } from "@/components/ui/badge"
 import { TypedConfirmDialog } from "@/components/typed-confirm-dialog"
 import { FormFieldErrors } from "@/components/form-field-errors"
+import { useConfirm } from "@/lib/confirm"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -560,6 +561,7 @@ function PSPRow({
   const queryClient = useQueryClient()
   const updatePSP = useMutation(adminMutations.updatePSP(queryClient))
   const [confirmLastOpen, setConfirmLastOpen] = React.useState(false)
+  const confirm = useConfirm()
   const definition = railDefinitions.find((d) => d.rail === psp.rail)
   const railName = definition?.display_name ?? psp.rail
   const credentials = psp.credentials ?? {}
@@ -567,6 +569,16 @@ function PSPRow({
   // terminated account archives too. The rail's last active PSP needs an
   // explicit confirmation.
   const archive = async (allowLast: boolean) => {
+    if (
+      !allowLast &&
+      !(await confirm({
+        title: `Archive ${psp.key}?`,
+        description:
+          "New checkout stops routing to it. Existing subscriptions, refunds and webhooks keep using it.",
+        confirmLabel: "Archive PSP",
+      }))
+    )
+      return
     try {
       await updatePSP.mutateAsync({
         id: psp.id,

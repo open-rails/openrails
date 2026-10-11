@@ -39,7 +39,6 @@ import {
 } from "@/components/ui/table"
 import { useAdminUpdates } from "@/lib/capabilities"
 
-const PAGE = 20
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "The request failed. Try again."
 
@@ -74,19 +73,25 @@ function CreditSupport({
   const canUpdate = useAdminUpdates()
   const [currency, setCurrency] = React.useState(initialCurrency)
   const [currencyInput, setCurrencyInput] = React.useState(initialCurrency)
-  const grantPages = useCursorPages(currency)
-  const ledgerPages = useCursorPages(currency)
+  const grantPages = useCursorPages(currency, 25)
+  const ledgerPages = useCursorPages(currency, 25)
   const [granting, setGranting] = React.useState(false)
   const [revokeGrant, setRevokeGrant] = React.useState<CreditGrant | null>(null)
   const grants = useQuery(
-    creditQueries.grants(merchant, customer, currency, PAGE, grantPages.cursor)
+    creditQueries.grants(
+      merchant,
+      customer,
+      currency,
+      grantPages.size,
+      grantPages.cursor
+    )
   )
   const ledger = useQuery(
     creditQueries.transactions(
       merchant,
       customer,
       currency,
-      PAGE,
+      ledgerPages.size,
       ledgerPages.cursor
     )
   )
@@ -212,6 +217,7 @@ function CreditSupport({
           )}
           <CursorPager
             pages={grantPages}
+            rows={grants.data?.data?.length ?? 0}
             nextCursor={grants.data?.next_cursor}
             busy={grants.isFetching}
           />
@@ -260,6 +266,7 @@ function CreditSupport({
           )}
           <CursorPager
             pages={ledgerPages}
+            rows={ledger.data?.data?.length ?? 0}
             nextCursor={ledger.data?.next_cursor}
             busy={ledger.isFetching}
           />

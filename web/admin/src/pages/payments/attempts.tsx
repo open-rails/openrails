@@ -21,7 +21,7 @@ import {
   type CycleFilters,
 } from "@/lib/api/endpoints"
 import type { PaymentAttempt, Renewal } from "@/lib/api/generated/wire"
-import { useUrlCursor } from "@/hooks/use-cursor-paging"
+import { useUrlCursor } from "@/lib/cursor-pages"
 import {
   formatCard,
   formatDate,
@@ -29,8 +29,6 @@ import {
   shortId,
 } from "@/lib/format"
 import { adminQueries } from "@/lib/queries"
-
-const PAGE = 50
 
 export function Outcome({ category }: { category: string }) {
   return (
@@ -127,7 +125,7 @@ export function AttemptsPage() {
   const navigate = useNavigate()
   const filters: AttemptFilters = filtersFrom(params, ATTEMPT_FILTERS)
   const { data, isPending, isFetching } = useQuery(
-    adminQueries.attempts(filters, PAGE, paging.cursor)
+    adminQueries.attempts(filters, paging.size, paging.cursor)
   )
   return (
     <div className="flex flex-col gap-4">
@@ -144,6 +142,7 @@ export function AttemptsPage() {
       />
       <CursorPager
         pages={paging}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
         busy={isFetching}
       />
@@ -322,7 +321,7 @@ export function CyclesPage() {
   const navigate = useNavigate()
   const filters: CycleFilters = filtersFrom(params, CYCLE_FILTERS)
   const { data, isPending, isFetching } = useQuery(
-    adminQueries.cycles(filters, PAGE, paging.cursor)
+    adminQueries.cycles(filters, paging.size, paging.cursor)
   )
   return (
     <div className="flex flex-col gap-4">
@@ -337,6 +336,7 @@ export function CyclesPage() {
       />
       <CursorPager
         pages={paging}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
         busy={isFetching}
       />

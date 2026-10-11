@@ -104,7 +104,7 @@ describe("credit support requests", () => {
 describe("credit support rendering", () => {
   const seed = (queries: QueryClient, remaining = MAX_INT64) => {
     queries.setQueryData(adminQueries.access().queryKey, FULL_ACCESS)
-    queries.setQueryData(creditQueries.grants("alpha", "cus_a", "USD", 20, "").queryKey, {
+    queries.setQueryData(creditQueries.grants("alpha", "cus_a", "USD", 25, "").queryKey, {
       data: [{
         id: "grant-private-alpha", customer_id: "cus_a", currency: "USD",
         amount: "1000000", remaining_amount: remaining, spent_amount: "300000",
@@ -115,7 +115,7 @@ describe("credit support rendering", () => {
       }],
       next_cursor: "next",
     })
-    queries.setQueryData(creditQueries.transactions("alpha", "cus_a", "USD", 20, "").queryKey, {
+    queries.setQueryData(creditQueries.transactions("alpha", "cus_a", "USD", 25, "").queryKey, {
       data: [], next_cursor: null,
     })
   }
@@ -152,7 +152,7 @@ describe("credit support rendering", () => {
   it("surfaces the load failure instead of an empty ledger", () => {
     const queries = client()
     seed(queries)
-    const key = creditQueries.grants("alpha", "cus_a", "USD", 20, "").queryKey
+    const key = creditQueries.grants("alpha", "cus_a", "USD", 25, "").queryKey
     queries.getQueryCache().find({ queryKey: key })!.setState({
       data: undefined, status: "error", fetchStatus: "idle",
       error: new Error("Credit service unavailable"),

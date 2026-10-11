@@ -4,6 +4,7 @@ import type {
   MetricsCell,
   MetricsColumn,
   MetricsQuery,
+  MetricsRange,
   MetricsResult,
 } from "@/lib/api/metrics"
 import { formatNativeAmount } from "@/lib/format"
@@ -123,6 +124,16 @@ export function statDelta(
   return Number.isFinite(prev) && Number.isFinite(cur) && prev !== 0
     ? (cur - prev) / Math.abs(prev)
     : null
+}
+
+// comparedWith names the period a stat's delta compares with: a one-day
+// range compares with yesterday.
+export function comparedWith(result: MetricsResult): string {
+  const span = result.compare_range
+    ? Date.parse(result.compare_range.to) -
+      Date.parse(result.compare_range.from)
+    : 0
+  return span === 86_400_000 ? "yesterday" : "previous period"
 }
 
 // One axis (or donut total) may only combine the same measurement unit and
@@ -317,8 +328,9 @@ export function deepLinkFor(
       ? `/subscriptions?status=${encodeURIComponent(status)}`
       : "/subscriptions"
   }
-  if (has("new_subscriptions")) return "/subscriptions?status=active"
-  if (has("cancellations")) return "/subscriptions?status=canceled"
+  if (has("new_subscriptions", "net_new_subscriptions"))
+    return "/subscriptions?status=active"
+  if (has("cancellations")) return "/subscriptions?view=recently_canceled"
   if (
     has(
       "payment_count",
@@ -330,4 +342,15 @@ export function deepLinkFor(
     return "/payments"
   if (has("entitled_customers")) return "/customers"
   return null
+}
+
+// ownRange says in words what a saved query's range covers.
+export function ownRange(range: MetricsRange | undefined): string {
+  if (!range) return "its saved range"
+  if (range.from && range.to) return `${range.from} to ${range.to}`
+  const m = /^(\d+)([dwmy])$/.exec(range.last ?? "")
+  if (!m) return "its saved range"
+  if (m[1] === "1" && m[2] === "d") return "today"
+  const unit = { d: "day", w: "week", m: "month", y: "year" }[m[2]]!
+  return `the last ${m[1]} ${unit}${m[1] === "1" ? "" : "s"}`
 }

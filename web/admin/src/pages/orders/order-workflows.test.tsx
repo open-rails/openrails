@@ -82,19 +82,21 @@ it("retries collection with a card read from the customer's saved methods", asyn
 
 it("pages the payment history by cursor", async () => {
   routes["/admin/payments"] = cursorPages(
-    Array.from({ length: 21 }, (_, i) => paid(i)),
-    20
+    Array.from({ length: 26 }, (_, i) => paid(i)),
+    25
   )
   await show(<OrderDetail order={order} />)
-  await vi.waitFor(() => expect(text()).toContain("txn_19"))
+  await vi.waitFor(() => expect(text()).toContain("txn_24"))
+  expect(text()).toContain("Showing 1–25")
   const next = document.querySelector<HTMLButtonElement>(
     'button[aria-label="Next page"]'
   )!
   await act(async () => next.click())
-  await vi.waitFor(() => expect(text()).toContain("txn_20"))
+  await vi.waitFor(() => expect(text()).toContain("txn_25"))
+  expect(text()).toContain("Showing 26–26")
   expect(sent("/admin/payments").map((r) => r.query)).toEqual([
-    "order_id=ord_1&limit=20",
-    "order_id=ord_1&limit=20&cursor=20",
+    "order_id=ord_1&limit=25",
+    "order_id=ord_1&limit=25&cursor=25",
   ])
 })
 

@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { Fact } from "@/components/fact-card"
 import { Badge } from "@/components/ui/badge"
+import { useConfirm } from "@/lib/confirm"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -215,12 +216,22 @@ export function PriceDetailPage() {
 function CancelMigrationButton({ migrationId }: { migrationId: string }) {
   const queryClient = useQueryClient()
   const cancelBatch = useMutation(adminMutations.cancelPriceMigration(queryClient))
+  const confirm = useConfirm()
   return (
     <Button
       variant="destructive"
       size="sm"
       disabled={cancelBatch.isPending}
       onClick={async () => {
+        const canceling = await confirm({
+          title: "Cancel this migration?",
+          description:
+            "Subscribers not yet moved stay on their current price. Those already moved stay moved.",
+          confirmLabel: "Cancel migration",
+          cancelLabel: "Keep migrating",
+          tone: "destructive",
+        })
+        if (!canceling) return
         try {
           const result = await cancelBatch.mutateAsync(migrationId)
           toast.success(

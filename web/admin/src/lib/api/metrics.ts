@@ -67,6 +67,9 @@ export interface Widget {
   viz: WidgetViz
   query: MetricsQuery
   grid: WidgetGrid
+  // fixed_range keeps the query's own range; other widgets follow the
+  // dashboard's range picker.
+  fixed_range: boolean
 }
 
 export interface Dashboard {

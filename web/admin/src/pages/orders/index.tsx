@@ -11,10 +11,9 @@ import { Label } from "@/components/ui/label"
 import { orderQueries } from "@/lib/order-queries"
 import type { Order } from "@/lib/api/generated/wire"
 import type { OrderFilters } from "@/lib/api/order-endpoints"
-import { useUrlCursor } from "@/hooks/use-cursor-paging"
+import { useUrlCursor } from "@/lib/cursor-pages"
 import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
 
-const PAGE = 25
 // dueAt is when an order is owed: a usage order's or a renewal's due date.
 const dueAt = (order: Order) =>
   order.usage?.due_at ?? order.renewal?.due_at ?? null
@@ -71,9 +70,9 @@ export function OrdersPage() {
       params.get(key) ? [[key, params.get(key)!]] : []
     )
   )
-  const paging = useUrlCursor()
+  const paging = useUrlCursor(25)
   const { data, isPending, isFetching, error } = useQuery(
-    orderQueries.list(filters, PAGE, paging.cursor)
+    orderQueries.list(filters, paging.size, paging.cursor)
   )
 
   return (
@@ -110,6 +109,7 @@ export function OrdersPage() {
           />
           <CursorPager
             pages={paging}
+            rows={data?.data?.length ?? 0}
             nextCursor={data?.next_cursor}
             busy={isFetching}
           />

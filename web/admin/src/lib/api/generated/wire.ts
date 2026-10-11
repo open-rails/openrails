@@ -719,6 +719,7 @@ export type DashboardWidget = {
   viz: string
   query: MetricsQuery
   grid: DashboardGrid
+  fixed_range: boolean
 }
 
 export type DeclaredAdminGrant = {

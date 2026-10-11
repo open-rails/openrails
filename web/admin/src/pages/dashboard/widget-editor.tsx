@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -37,6 +38,7 @@ import {
 import { adminMutations } from "@/lib/mutations"
 import { adminQueries } from "@/lib/queries"
 
+import { ownRange } from "./lib"
 import { WidgetVizView } from "./widget-viz"
 import { cn } from "@/lib/utils"
 
@@ -54,6 +56,11 @@ const VIZ_LABELS: Record<WidgetViz, string> = {
 function vizLabel(viz: WidgetViz): string {
   return VIZ_LABELS[viz] ?? viz
 }
+
+export type WidgetDraft = Pick<
+  Widget,
+  "title" | "viz" | "query" | "fixed_range"
+>
 
 // A merchant reads this: no config keys or doc paths; say who can turn it on
 // and what still works.
@@ -74,10 +81,13 @@ export function WidgetEditor({
   // null).
   seed?: { title: string; viz: WidgetViz; query: MetricsQuery } | null
   nlEnabled: boolean
-  onSave: (data: { title: string; viz: WidgetViz; query: MetricsQuery }) => void
+  onSave: (data: WidgetDraft) => void
 }) {
   const source = initial ?? seed
   const [title, setTitle] = React.useState(source?.title ?? "")
+  const [fixedRange, setFixedRange] = React.useState(
+    initial?.fixed_range ?? false
+  )
   const [viz, setViz] = React.useState<WidgetViz>(source?.viz ?? "line")
   const [query, setQuery] = React.useState<MetricsQuery | null>(
     source?.query ?? null
@@ -227,6 +237,24 @@ export function WidgetEditor({
                   </div>
                 </div>
 
+                <div className="flex items-start gap-3">
+                  <Switch
+                    id="widget-fixed-range"
+                    checked={fixedRange}
+                    onCheckedChange={setFixedRange}
+                  />
+                  <div className="grid gap-0.5">
+                    <Label htmlFor="widget-fixed-range">
+                      Keep its own range
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      {fixedRange
+                        ? `Always shows ${ownRange(query.range)}, whatever range the dashboard shows.`
+                        : "Follows the range picked on the dashboard."}
+                    </p>
+                  </div>
+                </div>
+
                 <div className="flex min-h-56 flex-1 flex-col rounded-lg border bg-muted/30 p-3">
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs font-medium text-muted-foreground uppercase">
@@ -294,7 +322,12 @@ export function WidgetEditor({
             <Button
               onClick={() => {
                 if (!query) return
-                onSave({ title: title.trim(), viz, query })
+                onSave({
+                  title: title.trim(),
+                  viz,
+                  query,
+                  fixed_range: fixedRange,
+                })
                 onOpenChange(false)
               }}
               disabled={!canSave}

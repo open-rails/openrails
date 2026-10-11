@@ -15,6 +15,7 @@ import { vi } from "vitest"
 
 import { createAuthClient, type AuthClient } from "@openrails/auth-ui/client"
 
+import { ConfirmProvider } from "@/components/confirm"
 import {
   bindSession,
   loadBootstrap,
@@ -175,7 +176,11 @@ export const render = (node: ReactNode, queryClient = client()) =>
     createElement(
       MemoryRouter,
       null,
-      createElement(QueryClientProvider, { client: queryClient }, node)
+      createElement(
+        QueryClientProvider,
+        { client: queryClient },
+        createElement(ConfirmProvider, null, node)
+      )
     )
   )
 

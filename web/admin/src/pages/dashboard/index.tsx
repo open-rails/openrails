@@ -14,18 +14,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import "react-grid-layout/css/styles.css"
 
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
+import { useConfirm } from "@/lib/confirm"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getBootstrap } from "@/lib/api/client"
 import {
   type MetricsQuery,
-  type MetricsRange,
   type Widget,
   type WidgetViz,
 } from "@/lib/api/metrics"
@@ -35,30 +28,13 @@ import { adminQueries } from "@/lib/queries"
 
 import { AskPanel } from "./ask-panel"
 import { newWidgetId } from "./lib"
-import { WidgetEditor } from "./widget-editor"
+import { RangePicker } from "./range-picker"
+import { useDashboardRange } from "./use-range"
+import { WidgetEditor, type WidgetDraft } from "./widget-editor"
 import { WidgetTile } from "./widget-tile"
 
 const COLS = 12
 const ROW_HEIGHT = 56
-
-const RANGES = [
-  { value: "7d", label: "Last 7 days", days: 7 },
-  { value: "30d", label: "Last 30 days", days: 30 },
-  { value: "90d", label: "Last 3 months", days: 90 },
-  { value: "6m", label: "Last 6 months", days: 182 },
-  { value: "1y", label: "Last year", days: 365 },
-]
-
-// rangeSpan resolves a trailing window to concrete dates ("May 6 – Aug 4").
-function rangeSpan(last: string): string {
-  const days = RANGES.find((r) => r.value === last)?.days ?? 30
-  const to = new Date()
-  const from = new Date(to)
-  from.setDate(from.getDate() - days)
-  const fmt = (d: Date) =>
-    d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
-  return `${fmt(from)} – ${fmt(to)}`
-}
 
 // useMeasuredWidth tracks the live content width of the grid container; the
 // ResizeObserver fires on observe and on every resize, so the grid rescales
@@ -149,9 +125,9 @@ function MetricsDashboard() {
     query: MetricsQuery
   } | null>(null)
   const { width, containerRef, mounted } = useMeasuredWidth()
-  const [rangeLast, setRangeLast] = React.useState("30d")
+  const [range] = useDashboardRange()
+  const confirm = useConfirm()
   const saveTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null)
-  const range: MetricsRange = { last: rangeLast }
 
   React.useEffect(
     () => () => {
@@ -202,11 +178,7 @@ function MetricsDashboard() {
     if (changed) update(next)
   }
 
-  const addWidget = (draft: {
-    title: string
-    viz: WidgetViz
-    query: MetricsQuery
-  }) => {
+  const addWidget = (draft: WidgetDraft) => {
     if (!widgets) return
     const size = defaultSize(draft.viz)
     const y = widgets.reduce((max, w) => Math.max(max, w.grid.y + w.grid.h), 0)
@@ -218,27 +190,26 @@ function MetricsDashboard() {
         viz: draft.viz,
         query: draft.query,
         grid: { x: 0, y, ...size },
+        fixed_range: draft.fixed_range,
       },
     ])
   }
 
-  const editWidget = (
-    id: string,
-    draft: { title: string; viz: WidgetViz; query: MetricsQuery }
-  ) => {
+  const editWidget = (id: string, draft: WidgetDraft) => {
     if (!widgets) return
-    update(
-      widgets.map((w) =>
-        w.id === id
-          ? { ...w, title: draft.title, viz: draft.viz, query: draft.query }
-          : w
-      )
-    )
+    update(widgets.map((w) => (w.id === id ? { ...w, ...draft } : w)))
   }
 
-  const removeWidget = (id: string) => {
+  const removeWidget = async (widget: Widget) => {
     if (!widgets) return
-    update(widgets.filter((w) => w.id !== id))
+    const removing = await confirm({
+      title: `Remove "${widget.title}"?`,
+      description:
+        "It leaves this merchant's dashboard for everyone. You can add it again later.",
+      confirmLabel: "Remove widget",
+      tone: "destructive",
+    })
+    if (removing) update(widgets.filter((w) => w.id !== widget.id))
   }
 
   const openAdd = () => {
@@ -250,28 +221,8 @@ function MetricsDashboard() {
   const header = (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
-      <div className="flex items-center gap-3">
-        <span className="hidden text-sm text-muted-foreground tabular-nums sm:inline">
-          {rangeSpan(rangeLast)}
-        </span>
-        <Select
-          items={RANGES.map((r) => ({ value: r.value, label: r.label }))}
-          value={rangeLast}
-          onValueChange={(next) => {
-            if (next) setRangeLast(next)
-          }}
-        >
-          <SelectTrigger size="sm" className="w-[150px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {RANGES.map((r) => (
-              <SelectItem key={r.value} value={r.value}>
-                {r.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-center gap-3">
+        <RangePicker />
         {editable && (
           <Button size="sm" onClick={openAdd}>
             <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
@@ -350,7 +301,7 @@ function MetricsDashboard() {
                       setSeed(null)
                       setEditorOpen(true)
                     }}
-                    onDelete={() => removeWidget(w.id)}
+                    onDelete={() => void removeWidget(w)}
                   />
                 </div>
               ))}
@@ -379,7 +330,7 @@ function MetricsDashboard() {
                           setSeed(null)
                           setEditorOpen(true)
                         }}
-                        onDelete={() => removeWidget(w.id)}
+                        onDelete={() => void removeWidget(w)}
                       />
                     </div>
                   ))}

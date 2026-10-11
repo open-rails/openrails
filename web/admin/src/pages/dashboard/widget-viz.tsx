@@ -41,6 +41,7 @@ import type {
 import { cn } from "@/lib/utils"
 
 import {
+  comparedWith,
   donutSlices,
   chartColor,
   exactKey,
@@ -107,6 +108,7 @@ function StatViz({
   }
   // One rendered value per row (rows differ by dims — usually currency).
   const rows = result.rows.slice(0, 3)
+  const against = comparedWith(result)
   return (
     <div className="flex h-full flex-col justify-center gap-1">
       {rows.map((row, i) => {
@@ -147,7 +149,7 @@ function StatViz({
                 ) : (
                   <HugeiconsIcon icon={AnalyticsDownIcon} className="size-3" />
                 )}
-                {`${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}% vs previous period`}
+                {`${delta >= 0 ? "+" : ""}${(delta * 100).toFixed(1)}% vs ${against}`}
               </span>
             ) : null}
           </div>

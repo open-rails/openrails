@@ -1,11 +1,14 @@
 // jsdom scaffolding for workflow tests: the browser APIs Base UI expects, an
-// act-wrapped mount and label-addressed controls. Apart from harness.ts so
+// act-wrapped mount (inside the console's ConfirmProvider) and label-addressed
+// controls. Apart from harness.ts so
 // node-environment tests never load react-dom/client.
-import { act } from "react"
+import { act, createElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { notifyManager } from "@tanstack/react-query"
 import { expect, vi } from "vitest"
 import type { ReactNode } from "react"
+
+import { ConfirmProvider } from "@/components/confirm"
 
 let root: Root | undefined
 
@@ -32,7 +35,9 @@ export async function mount(node: ReactNode) {
   const container = document.createElement("div")
   document.body.append(container)
   root = createRoot(container)
-  await act(async () => root!.render(node))
+  await act(async () =>
+    root!.render(createElement(ConfirmProvider, null, node))
+  )
 }
 
 export async function unmount() {

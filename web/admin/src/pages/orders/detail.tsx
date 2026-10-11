@@ -78,8 +78,10 @@ export function OrderDetailPage() {
   return <OrderDetail key={order.id} order={order} />
 }
 export function OrderDetail({ order }: { order: Order }) {
-  const paging = useCursorPages(order.id)
-  const history = useQuery(orderQueries.payments(order.id, 20, paging.cursor))
+  const paging = useCursorPages(order.id, 25)
+  const history = useQuery(
+    orderQueries.payments(order.id, paging.size, paging.cursor)
+  )
   const failure = order.payment.last_payment_error
   return (
     <div className="flex flex-col gap-5">
@@ -208,6 +210,7 @@ export function OrderDetail({ order }: { order: Order }) {
               />
               <CursorPager
                 pages={paging}
+                rows={history.data?.data?.length ?? 0}
                 nextCursor={history.data?.next_cursor}
                 busy={history.isFetching}
               />

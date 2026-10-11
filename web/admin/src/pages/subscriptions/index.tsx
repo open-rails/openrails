@@ -10,7 +10,6 @@ import { useMutation, useQuery } from "@tanstack/react-query"
 import type { ColumnDef } from "@tanstack/react-table"
 
 import { CursorPager } from "@/components/cursor-pager"
-import { useCursorPages } from "@/lib/cursor-pages"
 import { DataTable } from "@/components/data-table"
 import { StatusBadge } from "@/components/status-badge"
 import { Button } from "@/components/ui/button"
@@ -23,7 +22,10 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import type { SubscriptionFilters } from "@/lib/api/endpoints"
 import type { AdminSubscription } from "@/lib/api/types"
+import { downloadCsv } from "@/lib/csv"
+import { useCursorPages } from "@/lib/cursor-pages"
 import { customerName, formatDate, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toast } from "sonner"
@@ -31,8 +33,8 @@ import { toast } from "sonner"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
 import { dunningSummary } from "./dunning"
+import { isView, subscriptionViews, viewFilters } from "./views"
 
-const PAGE = 50
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 
 // Dunning is past_due and awaiting_method: parked, not canceled.
@@ -45,6 +47,15 @@ const statusTabs = [
   { value: "awaiting_method", label: "Needs card" },
   { value: "unverified", label: "Unverified" },
 ]
+
+const canceledColumn: ColumnDef<AdminSubscription, unknown> = {
+  header: "Canceled",
+  cell: ({ row }) => (
+    <span className="text-muted-foreground tabular-nums">
+      {formatDate(row.original.canceled_at)}
+    </span>
+  ),
+}
 
 const columns: ColumnDef<AdminSubscription, unknown>[] = [
   {
@@ -95,13 +106,9 @@ const columns: ColumnDef<AdminSubscription, unknown>[] = [
   },
 ]
 
-function csvEscape(v: unknown): string {
-  const s = v == null ? "" : String(v)
-  return /[",\n]/.test(s) ? '"' + s.replaceAll('"', '""') + '"' : s
-}
-
 export function SubscriptionsPage() {
   const [params, setParams] = useSearchParams()
+  const view = params.get("view") ?? ""
   const status = params.get("status") ?? ""
   const dunning = params.get("dunning") === "true"
   const rail = params.get("rail") ?? ""
@@ -112,9 +119,12 @@ export function SubscriptionsPage() {
   const customerLookup = useMutation(adminMutations.findCustomer())
   const exportSubscriptions = useMutation(adminMutations.exportSubscriptions())
 
-  const filters = {
-    ...(status ? { status } : {}),
-    ...(dunning ? { dunning: "true" } : {}),
+  const viewed = isView(view) ? viewFilters(view) : null
+  const filters: SubscriptionFilters = {
+    ...(viewed ?? {
+      ...(status ? { status } : {}),
+      ...(dunning ? { dunning: "true" } : {}),
+    }),
     ...(rail ? { rail } : {}),
     ...(userId ? { customer_id: userId } : {}),
   }
@@ -123,7 +133,11 @@ export function SubscriptionsPage() {
     data,
     isPending: loading,
     isFetching,
-  } = useQuery(adminQueries.subscriptions(filters, PAGE, pages.cursor))
+  } = useQuery(adminQueries.subscriptions(filters, pages.size, pages.cursor))
+  const shownColumns =
+    view === "recently_canceled" || status === "canceled"
+      ? [...columns.slice(0, -2), canceledColumn, columns.at(-1)!]
+      : columns
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
@@ -163,7 +177,8 @@ export function SubscriptionsPage() {
   const exportCsv = async () => {
     try {
       const rows = await exportSubscriptions.mutateAsync(filters)
-      const csv = [
+      downloadCsv(
+        `subscriptions-${view || status || "all"}-${new Date().toISOString().slice(0, 10)}.csv`,
         [
           "id",
           "status",
@@ -172,29 +187,17 @@ export function SubscriptionsPage() {
           "started_at",
           "current_period_ends_at",
           "canceled_at",
-        ].join(","),
-        ...rows.map((r) =>
-          [
-            r.id,
-            r.status,
-            r.rail,
-            r.customer_id,
-            r.started_at,
-            r.current_period_ends_at,
-            r.canceled_at,
-          ]
-            .map(csvEscape)
-            .join(",")
-        ),
-      ].join("\n")
-      const url = URL.createObjectURL(
-        new Blob([csv], { type: "text/csv;charset=utf-8" })
+        ],
+        rows.map((r) => [
+          r.id,
+          r.status,
+          r.rail,
+          r.customer_id,
+          r.started_at,
+          r.current_period_ends_at,
+          r.canceled_at,
+        ])
       )
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `subscriptions-${new Date().toISOString().slice(0, 10)}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export subscriptions")
     }
@@ -261,21 +264,29 @@ export function SubscriptionsPage() {
       </div>
 
       <Tabs
-        value={dunning ? "dunning" : status}
+        value={isView(view) ? view : dunning ? "dunning" : status}
         onValueChange={(v) => {
           const p = new URLSearchParams(params)
           p.delete("status")
           p.delete("dunning")
+          p.delete("view")
           if (v === "dunning") p.set("dunning", "true")
+          else if (isView(v)) p.set("view", v)
           else if (v) p.set("status", v)
           setParams(p)
         }}
       >
         <TabsList
           variant="line"
-          className="w-full justify-start gap-6 rounded-none p-0"
+          className="w-full justify-start gap-6 overflow-x-auto rounded-none p-0"
         >
-          {statusTabs.map((t) => (
+          {[
+            ...statusTabs,
+            ...Object.entries(subscriptionViews).map(([value, v]) => ({
+              value,
+              label: v.label,
+            })),
+          ].map((t) => (
             <TabsTrigger
               key={t.value}
               value={t.value}
@@ -306,7 +317,7 @@ export function SubscriptionsPage() {
       ) : null}
 
       <DataTable
-        columns={columns}
+        columns={shownColumns}
         data={data?.data ?? []}
         loading={loading}
         onRowClick={(row) => navigate(`/subscriptions/${row.id}`)}
@@ -314,6 +325,7 @@ export function SubscriptionsPage() {
       />
       <CursorPager
         pages={pages}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
         busy={isFetching}
       />

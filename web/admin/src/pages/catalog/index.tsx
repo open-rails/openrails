@@ -7,8 +7,8 @@ import { useForm } from "@tanstack/react-form"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { FormFieldErrors } from "@/components/form-field-errors"
-import { CursorPaginationFooter } from "@/components/cursor-pagination"
-import { useCursorPages } from "@/hooks/use-cursor-pages"
+import { CursorPager } from "@/components/cursor-pager"
+import { useCursorPages } from "@/lib/cursor-pages"
 import { LinkedTableRow } from "@/components/linked-table-row"
 import { StatusBadge } from "@/components/status-badge"
 import { Badge } from "@/components/ui/badge"
@@ -141,14 +141,14 @@ const CATALOG_PAGE_SIZE = 100
 
 function ProductsTab() {
   const writesAllowed = React.useContext(CatalogWritesContext)
-  const pages = useCursorPages()
+  const pages = useCursorPages("", CATALOG_PAGE_SIZE)
   const {
     data,
     isPending: loading,
     isFetching,
   } = useQuery(
     adminQueries.products({
-      limit: CATALOG_PAGE_SIZE,
+      limit: pages.size,
       cursor: pages.cursor,
       errorAction: "Load products",
     })
@@ -203,10 +203,12 @@ function ProductsTab() {
           </Table>
         </div>
       )}
-      <CursorPaginationFooter
+      <CursorPager
         pages={pages}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
-        loading={isFetching}
+        busy={isFetching}
+        sizes={[50, 100, 200]}
       />
     </div>
   )
@@ -534,7 +536,7 @@ function ProductDialog({ product }: { product?: Product }) {
 
 function PricesTab() {
   const writesAllowed = React.useContext(CatalogWritesContext)
-  const pages = useCursorPages()
+  const pages = useCursorPages("", CATALOG_PAGE_SIZE)
   const { data: products } = useQuery(
     adminQueries.allProducts({ errorAction: "Load products" })
   )
@@ -544,7 +546,7 @@ function PricesTab() {
     isFetching,
   } = useQuery(
     adminQueries.prices({
-      limit: CATALOG_PAGE_SIZE,
+      limit: pages.size,
       cursor: pages.cursor,
       errorAction: "Load prices",
     })
@@ -598,10 +600,12 @@ function PricesTab() {
           </Table>
         </div>
       )}
-      <CursorPaginationFooter
+      <CursorPager
         pages={pages}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
-        loading={isFetching}
+        busy={isFetching}
+        sizes={[50, 100, 200]}
       />
     </div>
   )

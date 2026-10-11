@@ -142,6 +142,12 @@ export interface SubscriptionFilters {
   rail?: string
   customer_id?: string
   price_id?: string
+  // UTC dates (YYYY-MM-DD).
+  expires_before?: string
+  canceled_after?: string
+  // created_at (newest first), current_period_ends_at (soonest first) or
+  // canceled_at (latest first).
+  sort?: string
 }
 
 export const listSubscriptions = (

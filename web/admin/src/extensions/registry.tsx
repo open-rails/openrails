@@ -36,6 +36,10 @@ export const coreNav: ConsoleNavItem[] = [
     icon: DashboardCircleIcon,
     order: 0,
     useVisible: useMetrics,
+    items: [
+      { title: "Overview", path: "/" },
+      { title: "Reports", path: "/reports" },
+    ],
   },
   {
     title: "Customers",
@@ -257,12 +261,16 @@ const isWithin = (pathname: string, path: string) =>
     ? pathname === "/"
     : pathname === path || pathname.startsWith(`${path}/`)
 
-// The entry for the page being looked at: the longest path that covers it.
+// The entry for the page being looked at: the one whose path, or one of
+// whose sub-pages' paths, covers it most closely.
 export function activeNavPath(pathname: string, items: ConsoleNavItem[]) {
   return items
-    .map((item) => item.path)
-    .filter((path) => isWithin(pathname, path))
-    .sort((a, b) => b.length - a.length)[0]
+    .flatMap((item) =>
+      [item.path, ...(item.items ?? []).map((sub) => sub.path)]
+        .filter((path) => isWithin(pathname, path))
+        .map((path) => ({ item: item.path, length: path.length }))
+    )
+    .sort((a, b) => b.length - a.length)[0]?.item
 }
 
 export function userMenuItems(

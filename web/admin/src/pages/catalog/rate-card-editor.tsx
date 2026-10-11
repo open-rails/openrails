@@ -16,16 +16,7 @@ import * as React from "react"
 import { Link } from "react-router-dom"
 import { toast } from "sonner"
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
+import { useConfirm } from "@/lib/confirm"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -84,8 +75,7 @@ export function RateCardEditor({
 }) {
   const [open, setOpen] = React.useState(false)
   const [submitError, setSubmitError] = React.useState<FormIssue | null>(null)
-  const [pendingRequest, setPendingRequest] =
-    React.useState<DefaultUsageRateCardRequest | null>(null)
+  const confirm = useConfirm()
   const queryClient = useQueryClient()
   const saveDefault = useMutation(
     adminMutations.putDefaultUsageRateCard(queryClient)
@@ -99,10 +89,17 @@ export function RateCardEditor({
       setSubmitError(null)
       try {
         const rateCard = buildRateCardRequest(value)
-        if (existing) {
-          setPendingRequest(rateCard)
+        if (
+          existing &&
+          !(await confirm({
+            title: "Replace the default rate?",
+            description:
+              "Billed usage orders and amounts already accrued do not change. The new rate can only affect the remaining positive delta in the current unfinalized period and future periods.",
+            confirmLabel: "Replace rate",
+            cancelLabel: "Keep current rate",
+          }))
+        )
           return
-        }
         await persist(rateCard)
       } catch (error) {
         if (error instanceof RateCardFormError) {
@@ -124,10 +121,8 @@ export function RateCardEditor({
     try {
       await saveDefault.mutateAsync({ meter, rateCard })
       toast.success(existing ? "Default rate replaced" : "Default rate added")
-      setPendingRequest(null)
       setOpen(false)
     } catch (error) {
-      setPendingRequest(null)
       toastApiError(error, "Save default rate")
     }
   }
@@ -143,10 +138,7 @@ export function RateCardEditor({
         onOpenChange={(next) => {
           setOpen(next)
           setSubmitError(null)
-          if (!next) {
-            setPendingRequest(null)
-            form.reset()
-          }
+          if (!next) form.reset()
         }}
       >
         <DialogTrigger
@@ -315,33 +307,6 @@ export function RateCardEditor({
           </form>
         </DialogContent>
       </Dialog>
-
-      <AlertDialog
-        open={Boolean(pendingRequest)}
-        onOpenChange={(next) => {
-          if (!next) setPendingRequest(null)
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Replace the default rate?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Billed usage orders and amounts already accrued do not change. The
-              new rate can only affect the remaining positive delta in the
-              current unfinalized period and future periods.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Keep current rate</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={savePending}
-              onClick={() => pendingRequest && void persist(pendingRequest)}
-            >
-              {savePending ? "Replacing…" : "Replace rate"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </RateCardIssueContext.Provider>
   )
 }

@@ -25,7 +25,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { PaymentFilters } from "@/lib/api/endpoints"
 import type { Payment } from "@/lib/api/generated/wire"
-import { useUrlCursor } from "@/hooks/use-cursor-paging"
+import { downloadCsv } from "@/lib/csv"
+import { useUrlCursor } from "@/lib/cursor-pages"
 import {
   currencyScale,
   formatNativeAmount,
@@ -38,7 +39,6 @@ import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
 
-const PAGE = 50
 const RAILS = ["nmi", "ccbill", "stripe", "solana"]
 const KINDS = [
   ["", "All"],
@@ -108,11 +108,6 @@ function csvAmount(amount: string, currency: string): string {
   return decimal
 }
 
-function csvEscape(v: unknown): string {
-  const s = v == null ? "" : String(v)
-  return /[",\n]/.test(s) ? '"' + s.replaceAll('"', '""') + '"' : s
-}
-
 export function PaymentsPage() {
   const [params, setParams] = useSearchParams()
   const rail = params.get("rail") ?? ""
@@ -134,7 +129,7 @@ export function PaymentsPage() {
     data,
     isPending: loading,
     isFetching,
-  } = useQuery(adminQueries.payments(filters, PAGE, paging.cursor))
+  } = useQuery(adminQueries.payments(filters, paging.size, paging.cursor))
 
   const setParam = (key: string, value: string) => {
     const p = new URLSearchParams(params)
@@ -177,7 +172,8 @@ export function PaymentsPage() {
   const exportCsv = async () => {
     try {
       const rows = await exportPayments.mutateAsync(filters)
-      const csv = [
+      downloadCsv(
+        `payments-${new Date().toISOString().slice(0, 10)}.csv`,
         [
           "id",
           "kind",
@@ -190,33 +186,21 @@ export function PaymentsPage() {
           "customer_id",
           "transaction_id",
           "created_at",
-        ].join(","),
-        ...rows.map((r) =>
-          [
-            r.id,
-            r.kind,
-            r.status,
-            r.channel,
-            csvAmount(r.amount, r.currency),
-            csvAmount(r.amount_refunded, r.currency),
-            r.currency,
-            r.rail,
-            r.customer_id,
-            r.transaction_id,
-            r.created_at,
-          ]
-            .map(csvEscape)
-            .join(",")
-        ),
-      ].join("\n")
-      const url = URL.createObjectURL(
-        new Blob([csv], { type: "text/csv;charset=utf-8" })
+        ],
+        rows.map((r) => [
+          r.id,
+          r.kind,
+          r.status,
+          r.channel,
+          csvAmount(r.amount, r.currency),
+          csvAmount(r.amount_refunded, r.currency),
+          r.currency,
+          r.rail,
+          r.customer_id,
+          r.transaction_id,
+          r.created_at,
+        ])
       )
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `payments-${new Date().toISOString().slice(0, 10)}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export payments")
     }
@@ -322,6 +306,7 @@ export function PaymentsPage() {
       />
       <CursorPager
         pages={paging}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
         busy={isFetching}
       />

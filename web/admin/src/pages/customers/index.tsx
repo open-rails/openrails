@@ -11,12 +11,11 @@ import { DataTable } from "@/components/data-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { Customer } from "@/lib/api/generated/wire"
+import { downloadCsv } from "@/lib/csv"
 import { formatDate, formatNativeAmount, shortId } from "@/lib/format"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
-
-const PAGE = 50
 
 const columns: ColumnDef<Customer, unknown>[] = [
   {
@@ -94,11 +93,6 @@ const columns: ColumnDef<Customer, unknown>[] = [
   },
 ]
 
-function csvEscape(v: unknown): string {
-  const s = v == null ? "" : String(v)
-  return /[",\n]/.test(s) ? '"' + s.replaceAll('"', '""') + '"' : s
-}
-
 export function CustomersPage() {
   const [params, setParams] = useSearchParams()
   const search = params.get("search") ?? ""
@@ -111,37 +105,24 @@ export function CustomersPage() {
     data,
     isPending: loading,
     isFetching,
-  } = useQuery(adminQueries.customers(search, PAGE, pages.cursor))
+  } = useQuery(adminQueries.customers(search, pages.size, pages.cursor))
 
   // Export walks every page of the current filter, not just the visible one.
   const exportCsv = async () => {
     try {
       const rows = await exportCustomers.mutateAsync(search)
-      const csv = [
-        ["id", "email", "name", "username", "created_at", "last_seen_at"].join(
-          ","
-        ),
-        ...rows.map((r) =>
-          [
-            r.id,
-            r.contact?.email,
-            r.contact?.name,
-            r.contact?.username,
-            r.created_at,
-            r.last_seen_at,
-          ]
-            .map(csvEscape)
-            .join(",")
-        ),
-      ].join("\n")
-      const url = URL.createObjectURL(
-        new Blob([csv], { type: "text/csv;charset=utf-8" })
+      downloadCsv(
+        `customers-${new Date().toISOString().slice(0, 10)}.csv`,
+        ["id", "email", "name", "username", "created_at", "last_seen_at"],
+        rows.map((r) => [
+          r.id,
+          r.contact?.email,
+          r.contact?.name,
+          r.contact?.username,
+          r.created_at,
+          r.last_seen_at,
+        ])
       )
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `customers-${new Date().toISOString().slice(0, 10)}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
     } catch (err) {
       toastApiError(err, "Export customers")
     }
@@ -191,6 +172,7 @@ export function CustomersPage() {
       />
       <CursorPager
         pages={pages}
+        rows={data?.data?.length ?? 0}
         nextCursor={data?.next_cursor}
         busy={isFetching}
       />

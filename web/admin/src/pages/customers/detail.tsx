@@ -52,7 +52,6 @@ import {
 import type { CustomerContact } from "@/lib/api/generated/wire"
 import { adminMutations } from "@/lib/mutations"
 import { DIALOG_FORM } from "@/lib/dialog-width"
-import { parseHours } from "@/lib/duration"
 import { adminQueries, queryKeys } from "@/lib/queries"
 import { toastApiError } from "@/lib/toast"
 import { CustomerInvoiceProfileSection } from "./invoice-profile"
@@ -60,10 +59,14 @@ import { DefaultCardBadges } from "./default-card-badges"
 import { CustomerCreditSupportSection } from "./credits"
 import { CursorPager } from "@/components/cursor-pager"
 import { useCursorPages } from "@/lib/cursor-pages"
+import {
+  DEFAULT_GRANT_DURATION,
+  GRANT_DURATIONS,
+  grantTerm,
+  type GrantDuration,
+} from "./grant-duration"
 import { dunningSummary } from "@/pages/subscriptions/dunning"
 import { useAdminUpdates } from "@/lib/capabilities"
-
-const LIST_PAGE = 20
 
 export function CustomerDetailPage() {
   const canUpdate = useAdminUpdates()
@@ -162,9 +165,9 @@ export function CustomerDetailPage() {
 }
 
 function CustomerSubscriptions({ customerId }: { customerId: string }) {
-  const pages = useCursorPages(customerId)
+  const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
-    adminQueries.customerSubscriptions(customerId, LIST_PAGE, pages.cursor)
+    adminQueries.customerSubscriptions(customerId, pages.size, pages.cursor)
   )
   const subscriptions = data?.data ?? []
   return (
@@ -218,6 +221,7 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
         )}
         <CursorPager
           pages={pages}
+          rows={data?.data?.length ?? 0}
           nextCursor={data?.next_cursor}
           busy={isFetching}
         />
@@ -227,9 +231,9 @@ function CustomerSubscriptions({ customerId }: { customerId: string }) {
 }
 
 function CustomerPayments({ customerId }: { customerId: string }) {
-  const pages = useCursorPages(customerId)
+  const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
-    adminQueries.customerPayments(customerId, LIST_PAGE, pages.cursor)
+    adminQueries.customerPayments(customerId, pages.size, pages.cursor)
   )
   const payments = data?.data ?? []
   return (
@@ -283,6 +287,7 @@ function CustomerPayments({ customerId }: { customerId: string }) {
         )}
         <CursorPager
           pages={pages}
+          rows={data?.data?.length ?? 0}
           nextCursor={data?.next_cursor}
           busy={isFetching}
         />
@@ -293,9 +298,13 @@ function CustomerPayments({ customerId }: { customerId: string }) {
 
 function CustomerPaymentMethods({ customerId }: { customerId: string }) {
   const queryClient = useQueryClient()
-  const pages = useCursorPages(customerId)
+  const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
-    adminQueries.customerPaymentMethodsPage(customerId, LIST_PAGE, pages.cursor)
+    adminQueries.customerPaymentMethodsPage(
+      customerId,
+      pages.size,
+      pages.cursor
+    )
   )
   const methods = data?.data ?? []
   return (
@@ -343,6 +352,7 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
         )}
         <CursorPager
           pages={pages}
+          rows={data?.data?.length ?? 0}
           nextCursor={data?.next_cursor}
           busy={isFetching}
         />
@@ -352,9 +362,9 @@ function CustomerPaymentMethods({ customerId }: { customerId: string }) {
 }
 
 function CustomerEntitlements({ customerId }: { customerId: string }) {
-  const pages = useCursorPages(customerId)
+  const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
-    adminQueries.customerEntitlements(customerId, LIST_PAGE, pages.cursor)
+    adminQueries.customerEntitlements(customerId, pages.size, pages.cursor)
   )
   const keys = data?.data ?? []
   return (
@@ -379,6 +389,7 @@ function CustomerEntitlements({ customerId }: { customerId: string }) {
         )}
         <CursorPager
           pages={pages}
+          rows={data?.data?.length ?? 0}
           nextCursor={data?.next_cursor}
           busy={isFetching}
         />
@@ -389,9 +400,9 @@ function CustomerEntitlements({ customerId }: { customerId: string }) {
 
 function CustomerProductAccess({ customerId }: { customerId: string }) {
   const canUpdate = useAdminUpdates()
-  const pages = useCursorPages(customerId)
+  const pages = useCursorPages(customerId, 25)
   const { data, isFetching } = useQuery(
-    adminQueries.customerProductAccess(customerId, LIST_PAGE, pages.cursor)
+    adminQueries.customerProductAccess(customerId, pages.size, pages.cursor)
   )
   const grants = data?.data ?? []
   return (
@@ -435,6 +446,7 @@ function CustomerProductAccess({ customerId }: { customerId: string }) {
         )}
         <CursorPager
           pages={pages}
+          rows={data?.data?.length ?? 0}
           nextCursor={data?.next_cursor}
           busy={isFetching}
         />
@@ -513,7 +525,11 @@ function RevokeProductAccessButton({
   )
 }
 
-function GrantProductAccessDialog({ customerId }: { customerId: string }) {
+export function GrantProductAccessDialog({
+  customerId,
+}: {
+  customerId: string
+}) {
   const [open, setOpen] = React.useState(false)
   const queryClient = useQueryClient()
   const grant = useMutation(
@@ -524,14 +540,19 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
     enabled: open,
   })
   const form = useForm({
-    defaultValues: { productId: "", duration: "", note: "" },
+    defaultValues: {
+      productId: "",
+      duration: DEFAULT_GRANT_DURATION as GrantDuration,
+      until: "",
+      note: "",
+    },
     onSubmit: async ({ value }) => {
-      const hours = parseHours(value.duration)
-      if (value.duration && !hours) return
+      const term = grantTerm(value.duration, value.until)
+      if (!term) return
       try {
         await grant.mutateAsync({
           productId: value.productId,
-          hours: hours ?? undefined,
+          ...term,
           note: value.note.trim() || undefined,
         })
         toast.success("Product access granted")
@@ -609,34 +630,70 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                 </div>
               )}
             </form.Field>
-            <form.Field
-              name="duration"
-              validators={{
-                onChange: ({ value }) =>
-                  !value || parseHours(value)
-                    ? undefined
-                    : "Use hours, days or weeks, such as 30 days",
-              }}
-            >
+            <form.Field name="duration">
               {(field) => (
                 <div className="grid gap-1.5">
                   <Label htmlFor="pa-duration">How long it lasts</Label>
                   <p className="text-[13px] text-muted-foreground">
-                    Such as 30 days or 1 week, after any access they already
-                    have. Leave it empty and the access never expires.
+                    Days are added after any access they already have.
                   </p>
-                  <Input
-                    id="pa-duration"
-                    placeholder="Never expires"
+                  <Select
+                    items={GRANT_DURATIONS.map((d) => ({
+                      value: d.value,
+                      label: d.label,
+                    }))}
                     value={field.state.value}
-                    onBlur={field.handleBlur}
-                    onChange={(event) => field.handleChange(event.target.value)}
-                    aria-invalid={field.state.meta.errors.length > 0}
-                  />
-                  <FormFieldErrors errors={field.state.meta.errors} />
+                    onValueChange={(value) => {
+                      if (value) field.handleChange(value as GrantDuration)
+                    }}
+                  >
+                    <SelectTrigger className="w-full" id="pa-duration">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GRANT_DURATIONS.map((d) => (
+                        <SelectItem key={d.value} value={d.value}>
+                          {d.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
             </form.Field>
+            <form.Subscribe selector={(state) => state.values.duration}>
+              {(duration) =>
+                duration === "until" ? (
+                  <form.Field
+                    name="until"
+                    validators={{
+                      onChange: ({ value }) =>
+                        grantTerm("until", value)
+                          ? undefined
+                          : "Pick today or a later date",
+                    }}
+                  >
+                    {(field) => (
+                      <div className="grid gap-1.5">
+                        <Label htmlFor="pa-until">Last day (UTC)</Label>
+                        <Input
+                          id="pa-until"
+                          type="date"
+                          min={new Date().toISOString().slice(0, 10)}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(event) =>
+                            field.handleChange(event.target.value)
+                          }
+                          aria-invalid={field.state.meta.errors.length > 0}
+                        />
+                        <FormFieldErrors errors={field.state.meta.errors} />
+                      </div>
+                    )}
+                  </form.Field>
+                ) : null
+              }
+            </form.Subscribe>
             <form.Field name="note">
               {(field) => (
                 <div className="grid gap-1.5">
@@ -659,10 +716,11 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                   state.values.productId,
                   state.canSubmit,
                   state.isSubmitting,
+                  grantTerm(state.values.duration, state.values.until) !== null,
                 ] as const
               }
             >
-              {([productId, canSubmit, isSubmitting]) => (
+              {([productId, canSubmit, isSubmitting, termValid]) => (
                 <>
                   <Button
                     type="button"
@@ -674,7 +732,9 @@ function GrantProductAccessDialog({ customerId }: { customerId: string }) {
                   </Button>
                   <Button
                     type="submit"
-                    disabled={!productId || !canSubmit || isSubmitting}
+                    disabled={
+                      !productId || !canSubmit || isSubmitting || !termValid
+                    }
                   >
                     {isSubmitting ? "Granting…" : "Grant access"}
                   </Button>

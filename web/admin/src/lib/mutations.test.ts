@@ -436,6 +436,7 @@ it("stores a saved dashboard on the merchant that saved it", async () => {
       viz: "stat" as const,
       query: { measures: ["revenue"], range: { last: "30d" } },
       grid: { x: 0, y: 0, w: 3, h: 2 },
+      fixed_range: false,
     },
   ]
   const saved = { widgets, is_default: false }
