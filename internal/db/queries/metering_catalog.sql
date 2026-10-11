@@ -46,7 +46,7 @@ VALUES (
            AND product_id = sqlc.arg(product_id)::uuid),
         1
     ),
-    sqlc.arg(meter_key)::text, 'in_arrears', sqlc.arg(filter)::jsonb,
+    sqlc.arg(meter_key)::text, NULL, sqlc.arg(filter)::jsonb,
     sqlc.narg(allowance)::jsonb, sqlc.arg(price)::jsonb
 )
 ON CONFLICT (merchant_id, meter_key)

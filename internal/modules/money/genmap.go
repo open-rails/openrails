@@ -154,5 +154,9 @@ func usageEventFromGen(r gen.BillingUsageEvent) (*models.UsageEvent, error) {
 	if err := fromJSONBC(r.Metadata, &m.Metadata, "usage_events.metadata"); err != nil {
 		return nil, err
 	}
+	m.Charges = []models.UsageCharge{}
+	if err := fromJSONBC(r.Charges, &m.Charges, "usage_events.charges"); err != nil {
+		return nil, err
+	}
 	return m, nil
 }

@@ -516,7 +516,7 @@ VALUES (
            AND product_id = $2::uuid),
         1
     ),
-    $3::text, 'in_arrears', $4::jsonb,
+    $3::text, NULL, $4::jsonb,
     $5::jsonb, $6::jsonb
 )
 ON CONFLICT (merchant_id, meter_key)

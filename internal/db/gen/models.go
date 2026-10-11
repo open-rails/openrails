@@ -155,12 +155,13 @@ type BillingCatalogMeter struct {
 
 // Rate cards: product usage and flat prices expressed as charge-model JSON. The only metered-pricing engine.
 type BillingCatalogRateCard struct {
-	ID          uuid.UUID
-	MerchantID  uuid.UUID
-	ProductID   uuid.UUID
-	Ordinal     int32
-	MeterKey    *string
-	PaymentTerm string
+	ID         uuid.UUID
+	MerchantID uuid.UUID
+	ProductID  uuid.UUID
+	Ordinal    int32
+	MeterKey   *string
+	// When a flat fee is collected; null for a metered card, whose charges are posted when usage is recorded.
+	PaymentTerm *string
 	Filter      []byte
 	Allowance   []byte
 	Price       []byte
@@ -645,19 +646,19 @@ type BillingMerchantWritePosture struct {
 	SetAt      time.Time
 }
 
-// Per-period metered-rating watermark: cumulative accrued amount + rated-through cutoff per (payer, currency, meter source, period start), so overlapping invoice closes bill each unit of usage exactly once. Retention: permanent, never pruned.
-type BillingMeteredRatingWatermark struct {
+// A customer's quantity of one meter (and matrix cell) in one billing period, as priced so far: an event is charged price(quantity + its own) - price(quantity), then added. Retention: rows are deleted 100 days after period_starts_at.
+type BillingMeterPeriodQuantity struct {
 	MerchantID uuid.UUID
 	CustomerID uuid.UUID
 	Currency   string
-	// Meter accrual source key (metered:<meter>[:rate_card:<id>][:dim:<value>]).
-	Source         string
+	MeterKey   string
+	// The matrix cell (the event's value of the matrix dimension) the quantity is priced in; empty for a card without a matrix.
+	Cell string
+	// Start of the billing period the usage occurred in, under the merchant's billing_period_boundary.
 	PeriodStartsAt time.Time
-	RatedThroughAt time.Time
-	// Micros already accrued for [period_starts_at, rated_through_at); the sweep accrues only the delta above this.
-	AccruedAmount int64
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	Quantity       int64
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Per-(merchant, customer, currency) spend policy and money-in config. Amount values use the row currency internal precision. Admission reads billing_mode + credit_limit_amount + the ledger balance; arrears owed exposure is derived from open invoices.
@@ -1561,7 +1562,7 @@ type BillingUsageCollectionCadence struct {
 	CompletedAt            time.Time
 }
 
-// Append-only multi-dimensional metered usage. Source of truth for usage reporting and usage order lines. Host-priced (amount sent by the host); event + ledger debit commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was billed.
+// Append-only multi-dimensional metered usage. Source of truth for usage reporting and usage order lines. Priced when recorded, by the host (amount) or the rate cards (charges); event and ledger postings commit in one tx. The hot admission path never reads this table. Retention: monthly partitions on occurred_at, dropped 24 months after the month's usage was billed.
 type BillingUsageEvent struct {
 	ID         uuid.UUID
 	MerchantID uuid.UUID
@@ -1578,7 +1579,7 @@ type BillingUsageEvent struct {
 	Source           string
 	SourceID         string
 	LedgerTransferID *uuid.UUID
-	// host = amount is final host-priced settlement and must not be catalog-rated; catalog = amount is a metered input for catalog rating. Capture writes host, including zero-cost captures; RecordUsage writes host for positive amounts and catalog for zero-cost meter inputs.
+	// host = amount is the host's final price; catalog = the meters' rate cards priced the event when it was recorded (charges). Capture and failed usage write host.
 	PricingAuthority string
 	Metadata         []byte
 	// When the usage happened; the partition key. Accepted only within the ingest window, so every read and the idempotency lookup name a time range.
@@ -1588,6 +1589,8 @@ type BillingUsageEvent struct {
 	Outcome string
 	// The part of a failed event's reported cost its grace absorbed; amount + forgiven_amount is what the host reported. Zero for a succeeded event.
 	ForgivenAmount int64
+	// What each meter charged the event when it was recorded: [{meter_key, cell, quantity, amount}]; empty for an event no priced meter consumes and for a host-priced event.
+	Charges []byte
 }
 
 // webhook dedup truth: one row per applied event of a source (a PSP, or a custodian). Event ids are unique within the account that sent them. Pending/lease state is the claim in idempotency_keys; a row here means effects are durably applied. Retention: completed events are deleted 90 days after completed_at.

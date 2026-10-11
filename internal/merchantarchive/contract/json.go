@@ -323,6 +323,7 @@ var jsonRules = map[string]jsonRule{
 	"customer_invoice_profiles.tax": emptyObject, "customer_invoice_profiles.billing_contacts": contactsJSON,
 	"grants.spec_snapshot":          nullable(object(map[string]jsonRule{"entitlements": array(textValue), "deposit": object(map[string]jsonRule{"source": textValue, "invoker": textValue, "paid_amount": moneyStringValue})})),
 	"usage_events.dimensions":       dictionary(integerValue),
+	"usage_events.charges":          array(object(map[string]jsonRule{"meter_key": textValue, "cell": textValue, "quantity": integerValue, "amount": moneyStringValue})),
 	"checkout_attempts.metadata":    metadataJSON,
 	"checkout_attempts.rail_fields": nullable(object(map[string]jsonRule{"rail": textValue, "psp": textValue, "payment_method_id": textValue, "token_symbol": textValue, "flow": textValue, "wallet": textValue, "email": textValue, "name_on_card": textValue, "first_name": textValue, "last_name": textValue, "address1": textValue, "city": textValue, "state": textValue, "zip": textValue, "country": textValue})),
 	"checkout_attempts.rail_state": nullable(object(map[string]jsonRule{"initial_membership_quote": func(v any) bool {

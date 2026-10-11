@@ -10,22 +10,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
 )
 
-// Enterprise arrears seams (#798): host-driven sweep, past-due marking,
-// pending-charge visibility and host-owned usage meters / rate cards.
-
-// SweepUsage rates a payer's reported usage over [from, to) through the
-// catalog rate cards into pending owed items — the same watermarked sweep
-// FinalizeUsage runs, without billing. Hosts call it to keep
-// arrears exposure (GetOutstandingOwed) fresh mid-period.
-func (s *MoneyService) SweepUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
-	return s.sweepCatalogRateCardUsage(ctx, payer, currency, from, to)
-}
+// Enterprise arrears seams: past-due marking and host-owned usage meters /
+// rate cards.
 
 // NotifyOverdueUsageOrders queues one overdue notice per usage order still
 // owed past its due date. Returns the number of new notices.

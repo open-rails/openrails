@@ -40,6 +40,8 @@ const (
 	CodeIdempotencyKeyInUse    = "idempotency_key_in_use"
 	CodeInsufficientCredits    = "insufficient_credits"
 	CodeInsufficientFunds      = "insufficient_funds"
+	// CodeUsageNotPriced: a priced meter cannot price a usage event.
+	CodeUsageNotPriced = "usage_not_priced"
 	// Orders.
 	CodeAlreadyOwned             = "already_owned"
 	CodeOrderLineUnavailable     = "order_line_unavailable"
@@ -318,6 +320,7 @@ var errorCodes = []ErrorCode{
 	{"allowance_meter_not_found", 404, invalid, "The rate card's allowance meter does not exist."},
 	{"usage_rate_card_invalid", 400, invalid, "The usage rate card is invalid."},
 	{"usage_meter_invalid", 400, invalid, "The meter definition is invalid."},
+	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
 	{"allowance_source_invalid", 409, invalid, "The allowance source cannot back this rate card."},

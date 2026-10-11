@@ -64,23 +64,6 @@ func TestPendingOwedItemGuards(t *testing.T) {
 		"owed item timestamp required")
 }
 
-func TestRateCardFilterRules(t *testing.T) {
-	rules, err := rateCardFilterRules(catalogRateCardRow{
-		ID:      uuid.New(),
-		GroupBy: map[string]string{"region": "metadata.region", "plan": "$.plan", "tier": "dimensions.tier"},
-		Filter:  map[string][]string{"region": {"eu"}, "plan": {"pro", "team"}, "tier": {"gold"}},
-	})
-	require.NoError(t, err)
-	require.ElementsMatch(t, []usageFilterRule{
-		{PropertyKey: "region", AllowedValues: []string{"eu"}},
-		{PropertyKey: "plan", AllowedValues: []string{"pro", "team"}},
-		{PropertyKey: "tier", AllowedValues: []string{"gold"}},
-	}, rules)
-
-	_, err = rateCardFilterRules(catalogRateCardRow{ID: uuid.New(), Filter: map[string][]string{"region": {"eu"}}})
-	require.ErrorContains(t, err, `filter dimension "region" has no meter property`)
-}
-
 func TestAllowanceSourcePrice(t *testing.T) {
 	meter := catalogrules.Meter{
 		Key: "runtime", Aggregation: catalog.AggregationSum,

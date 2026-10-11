@@ -34,10 +34,11 @@ var (
 	ErrPaymentExceedsDue     = errors.New("payment amount exceeds what the usage order has due")
 )
 
-// FinalizeUsage closes [from, to) for one payer and currency: catalog-priced
-// usage is rated, and the window's pending owed charges are billed as one
-// usage order, due after the payer's net terms. A second close of the same
-// window answers the first order. Nil when the window billed nothing.
+// FinalizeUsage closes [from, to) for one payer and currency: the window's
+// pending owed charges, usage priced when it was recorded included, are
+// billed as one usage order, due after the payer's net terms. A second close
+// of the same window answers the first order. Nil when the window billed
+// nothing.
 func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) (*gen.BillingOrder, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("money service not initialized")
@@ -59,11 +60,6 @@ func (s *MoneyService) FinalizeUsage(ctx context.Context, payer identity.Custome
 	if err := s.db.RunInMerchantConn(ctx, func(ctx context.Context) error {
 		return ensureCustomer(ctx, s.db.Gen(ctx), mid.UUID(), payer.UUID())
 	}); err != nil {
-		return nil, err
-	}
-	// Rated usage accrues in its own transactions; the rating watermark makes
-	// a second close accrue nothing new.
-	if err := s.sweepCatalogRateCardUsage(ctx, payer, cur, from.UTC(), to.UTC()); err != nil {
 		return nil, err
 	}
 	var out *gen.BillingOrder
@@ -173,8 +169,7 @@ func (s *MoneyService) FinalizeDueUsageForBoundary(ctx context.Context, boundary
 		return 0, err
 	}
 	// The previous period starts at most two periods back, so three months of
-	// activity names every payer it could still have to bill. A usage-only
-	// payer has no ledger row until its close rates it, once.
+	// activity names every payer it could still have to bill.
 	activeSince := retention.MonthStart(now).AddDate(0, -3, 0)
 	payers, err := s.db.Gen(ctx).ListUsagePayers(ctx, gen.ListUsagePayersParams{MerchantID: mid.UUID(), ActiveSince: activeSince.UTC()})
 	if err != nil {

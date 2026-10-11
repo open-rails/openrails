@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/open-rails/openrails/catalog"
-	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/catalogrules"
 	"github.com/open-rails/openrails/internal/modules/money"
 )
@@ -107,27 +105,4 @@ func (s *Service) deleteDefaultUsageRateCard(ctx context.Context, meterKey strin
 		return fmt.Errorf("service not initialized")
 	}
 	return money.NewMoneyService(s.catalogDatabase()).DeleteDefaultUsageRateCard(ctx, meterKey)
-}
-
-// SweepUsage rates a payer's reported usage over [from, to) into pending owed
-// items (watermarked; safe to repeat) so arrears exposure stays fresh
-// mid-period without finalizing an invoice.
-func (s *Service) SweepUsage(ctx context.Context, payer identity.CustomerID, currency string, from, to time.Time) error {
-	ctx, release, pinErr := s.pin(ctx)
-	if pinErr != nil {
-		return pinErr
-	}
-	defer release()
-
-	if s == nil || s.rt == nil {
-		return fmt.Errorf("service not initialized")
-	}
-	if payer.IsZero() {
-		return fmt.Errorf("payer required")
-	}
-	cur, err := requireCurrency(currency)
-	if err != nil {
-		return err
-	}
-	return s.moneyService().SweepUsage(ctx, payer, cur, from, to)
 }

@@ -57,6 +57,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 	// An archive from before usage orders (migration 61) names invoices,
 	// skipped and refused with rows, and the tables usage orders renamed.
 	invoices, preUsage := false, false
+	// An archive from before rating at ingest (migration 66) carries the
+	// period sweep's watermarks in place of the meter quantities: skipped.
+	watermarks := false
 	info, err := archivewire.Read(src, onHeader, func(r archivewire.Record) error {
 		legacy := version == 1
 		if r.Kind == "table" {
@@ -70,6 +73,9 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 					table++
 				}
 				return nil
+			}
+			if watermarks = r.Table == "metered_rating_watermarks"; watermarks {
+				r.Table = "meter_period_quantities"
 			}
 			if renamed, ok := usageRenames[r.Table]; ok {
 				r.Table, preUsage = renamed, true
@@ -96,15 +102,25 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if invoices {
 			return errArchivedInvoices
 		}
+		if watermarks {
+			return nil
+		}
 		p := profiles[table]
 		if preUsage {
 			if err := normalizePreUsage(p, &r.Values); err != nil {
 				return err
 			}
 		}
-		// Usage events before failed usage all succeeded and forgave nothing.
-		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-2 {
+		// Usage events before failed usage all succeeded and forgave nothing;
+		// before rating at ingest none recorded charges.
+		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-3 {
 			r.Values = append(r.Values, new("succeeded"), new("0"))
+		}
+		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, new("[]"))
+		}
+		if p.Name == "catalog_rate_cards" {
+			ClearMeteredPaymentTerm(p, r.Values)
 		}
 		// Payment methods before card saves awaited the customer had no setup.
 		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
@@ -443,4 +459,17 @@ func splitOrderStatus(p Profile, values []*string) []*string {
 		}
 	}
 	return append(values, &payment)
+}
+
+// ClearMeteredPaymentTerm drops the payment term a metered rate card carried
+// before rating at ingest: only a flat fee states one since migration 66.
+func ClearMeteredPaymentTerm(p Profile, values []*string) {
+	if len(values) != len(p.Columns) || value(p, values, "meter_key") == nil {
+		return
+	}
+	for i, c := range p.Columns {
+		if c.Name == "payment_term" {
+			values[i] = nil
+		}
+	}
 }

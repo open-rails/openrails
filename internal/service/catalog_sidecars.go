@@ -296,7 +296,7 @@ func readCatalogBillingQueries(ctx context.Context, q *gen.Queries, merchantID u
 		return out, err
 	}
 	for _, c := range cards {
-		card := CatalogRateCardSpec{id: c.ID, createdAt: c.CreatedAt, ProductKey: c.ProductKey, Ordinal: int(c.Ordinal), MeterKey: c.MeterKey, PaymentTerm: c.PaymentTerm, Allowance: c.Allowance, Price: c.Price}
+		card := CatalogRateCardSpec{id: c.ID, createdAt: c.CreatedAt, ProductKey: c.ProductKey, Ordinal: int(c.Ordinal), MeterKey: c.MeterKey, PaymentTerm: derefString(c.PaymentTerm), Allowance: c.Allowance, Price: c.Price}
 		if err := json.Unmarshal(c.Filter, &card.Filter); err != nil {
 			return out, err
 		}
@@ -321,7 +321,8 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 	slices.SortFunc(state.Meters, func(a, b CatalogMeterSpec) int { return strings.Compare(a.Key, b.Key) })
 	for i := range state.RateCards {
 		c := &state.RateCards[i]
-		if c.PaymentTerm == "" {
+		// Only a flat fee states when it is collected.
+		if c.PaymentTerm == "" && c.MeterKey == "" {
 			c.PaymentTerm = "in_arrears"
 		}
 		if len(c.Filter) == 0 {

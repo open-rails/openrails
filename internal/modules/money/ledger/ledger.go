@@ -90,7 +90,7 @@ const (
 	OpCreditReinstate Operation = "credit_reinstate"
 
 	OpArrearsAccrual Operation = "arrears_accrual" // MoneyService.AccrueOwed
-	OpMeteredRating  Operation = "metered_rating"  // rate-card sweep accrual
+	OpMeteredRating  Operation = "metered_rating"  // a meter's charge for one usage event
 	// A usage order's owed payment and write-off. The stored names predate
 	// usage orders; the ledger is append-only, so history keeps them.
 	OpOrderPayment       Operation = "invoice_payment" // arrears settled by a rail charge
