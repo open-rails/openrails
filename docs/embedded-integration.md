@@ -401,6 +401,7 @@ if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `Permissions.Metrics` |
 | `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each mounts only with its permission, `Permissions.Entitlements`, `Offers`, `Usage`, `Costs` or `Events` (SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
 | `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |
+| `AdminConsoleAuthBase` | Where your AuthKit's JSON API is mounted on the same origin, AuthKit's `APIBase()`; the console signs staff in there. Empty is `/api/v1` |
 
 The customer surface, `/v1/me`, serves `Config.Merchant`. Every customer route
 acts only on the admitted subject: no path, query or body names a customer, and
@@ -415,7 +416,9 @@ rate limits.
 
 **Admin console** (optional): `Routes.AdminConsole` mounts the staff
 dashboard at `Routes.Prefix`'s `/admin`, beside the routes it drives, and signs
-staff in through your AuthKit's JSON API at `/api/v1` on the same origin. It
+staff in through your AuthKit's JSON API on the same origin: at
+`Routes.AdminConsoleAuthBase` (pass AuthKit's `APIBase()` when its `APIPath` is
+not the default), else `/api/v1`. It
 needs a staff group on and a console build (`Deps.ConsoleAssets`); `Mount` fails
 without either. Each area appears only to staff holding its group's permission
 (`GET /v1/admin/access`): customer support, read-only without `AdminUpdate`;

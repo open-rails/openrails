@@ -385,6 +385,7 @@ pkg openrails, type RouteGroups struct, Programmatic bool
 pkg openrails, type Routes = config.Routes
 pkg openrails, type Routes struct
 pkg openrails, type Routes struct, AdminConsole bool
+pkg openrails, type Routes struct, AdminConsoleAuthBase string
 pkg openrails, type Routes struct, Auth billingauth.Authenticator
 pkg openrails, type Routes struct, Permissions config.Permissions
 pkg openrails, type Routes struct, Prefix string

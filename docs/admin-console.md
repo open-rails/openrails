@@ -41,19 +41,21 @@ On is one switch, where the HTTP surface is chosen:
 
 - **Embedded:** `AdminConsole: true` in the `openrails.Routes` given to the
   adapter's `Mount` (or `Client.Routes`). The console is served at the
-  prefix's `/admin`.
+  prefix's `/admin`; `AdminConsoleAuthBase` says where your AuthKit's JSON
+  API is.
 - **Standalone server:** `admin_console.enabled: true` in `config.yaml`
   (`ADMIN_CONSOLE_ENABLED`), with `admin_console.path`, and the staff route
   groups it drives turned on in `route_groups`.
 
 ```go
 err := openrailsgin.Mount(r, client, openrails.Routes{
-    Auth:         ak.Authenticator(),
-    Scope:        staff,      // ak.Scope(ctx, iam.RootGroup()): where staff hold the permissions
-    Prefix:       "/billing", // the API at /billing/v1/*, the console at /billing/admin
-    RouteGroups:  openrails.RouteGroups{Admin: true},
-    Permissions:  openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage}, // root:billing:read, root:billing:manage
-    AdminConsole: true,
+    Auth:                 ak.Authenticator(),
+    Scope:                staff,      // ak.Scope(ctx, iam.RootGroup()): where staff hold the permissions
+    Prefix:               "/billing", // the API at /billing/v1/*, the console at /billing/admin
+    RouteGroups:          openrails.RouteGroups{Admin: true},
+    Permissions:          openrails.Permissions{AdminRead: billingRead, AdminUpdate: billingManage}, // root:billing:read, root:billing:manage
+    AdminConsole:         true,
+    AdminConsoleAuthBase: ak.APIBase(), // where AuthKit's JSON API is mounted; empty is /api/v1
 })
 ```
 
@@ -69,6 +71,8 @@ Mounting the console fails loudly, before anything registers, when:
 
 - no staff route group is on: the console has no API to drive;
 - there is no console build (see below);
+- embedded, `Routes.AdminConsoleAuthBase` is not an absolute path (no scheme
+  or host, no trailing slash);
 - standalone, `admin_console.path` is invalid or overlaps an OpenRails route.
 
 **Path.** Embedded, `Routes.Prefix` + `/admin`. Standalone, an absolute URL
@@ -89,8 +93,10 @@ offers "New merchant". Any link may open the console on a merchant with
 `#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the console selects it and
 drops the fragment.
 
-**Where staff sign in.** Embedded, at the host's AuthKit JSON API, `/api/v1`
-on the console's origin. Standalone, at a trusted issuer when
+**Where staff sign in.** Embedded, at the host's AuthKit JSON API on the
+console's origin: `Routes.AdminConsoleAuthBase`, AuthKit's `APIBase()` (such as
+`/auth/v1` when AuthKit's `APIPath` is `/auth`), or AuthKit's default `/api/v1`
+when empty. Standalone, at a trusted issuer when
 `server.Config.ConsoleIssuer` (`admin_console.issuer`) names it and the
 console's client there, for `auth.resource.id`; otherwise at the server's own
 AuthKit. A standalone console needs one of the two: without `local_sign_in` the
@@ -102,8 +108,9 @@ application's role in the merchant's group, decide what each person may do.
 
 **Where it finds the API.** The console reads `config.json` beneath its path:
 `api_base_url` is `Routes.Prefix` + `/v1` (`/v1` standalone), and
-`auth_base_url` is the AuthKit JSON API staff sign in through: `/api/v1`
-embedded, the control plane's standalone. Both are paths on the console's own origin. The
+`auth_base_url` is the AuthKit JSON API staff sign in through:
+`Routes.AdminConsoleAuthBase` (`/api/v1` by default) embedded, the control
+plane's standalone. Both are paths on the console's own origin. The
 admin API answers no cross-origin requests, so the console, the API and
 AuthKit share one origin. A separate host such as `billing.example.com` works by
 sending that host to the same server, or to a router (for example a Gin engine

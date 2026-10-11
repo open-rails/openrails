@@ -1100,7 +1100,7 @@
       "type RateLimitsConfig map[string]*RateLimit",
       "type RedisConfig struct {\n\tAddr string\n\n\tURL string\n\n\tUsername string\n\tPassword string\n\tDB       int\n\n\tTLS bool\n\n\tCACert string\n}",
       "type RouteGroups struct {\n\tAdmin bool\n\n\tCatalog bool\n\n\tMerchantConfig bool\n\n\tMetrics bool\n\n\tProgrammatic bool\n}",
-      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tScope billingauth.Scope\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n\n\tPermissions Permissions\n\n\tAdminConsole bool\n}",
+      "type Routes struct {\n\tAuth billingauth.Authenticator\n\n\tScope billingauth.Scope\n\n\tPrefix string\n\n\tRouteGroups RouteGroups\n\n\tPermissions Permissions\n\n\tAdminConsole bool\n\n\tAdminConsoleAuthBase string\n}",
       "type SMTPConfig struct {\n\tHost     string\n\tPort     int\n\tUsername string\n\tPassword string\n\tFrom     EmailAddress\n}",
       "type UserInfo = userinfo.Lookup",
       "type VaultConfig struct {\n\tNamespace   string\n\tScopePrefix string\n\n\tAddress string\n\n\tAuthMethod string\n\n\tToken    string\n\tRoleID   string\n\tSecretID string\n\tK8sRole  string\n\n\tAuthMount string\n\n\tKVMount string\n\n\tTransitMount string\n}"

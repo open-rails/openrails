@@ -32,11 +32,16 @@ type Routes struct {
 	// is off.
 	Permissions Permissions
 	// AdminConsole serves the staff dashboard at Prefix's /admin, over the
-	// staff routes, signing staff in through AuthKit's /api/v1 on the same
-	// origin. It has one area per staff group, shown to staff holding its
-	// permission. It needs at least one staff group on and
-	// Deps.ConsoleAssets.
+	// staff routes, signing staff in through the host's AuthKit JSON API on
+	// the same origin (AdminConsoleAuthBase). It has one area per staff
+	// group, shown to staff holding its permission. It needs at least one
+	// staff group on and Deps.ConsoleAssets.
 	AdminConsole bool
+	// AdminConsoleAuthBase is the path the host's AuthKit JSON API is served
+	// at on the console's origin, such as AuthKit's APIBase() ("/auth/v1"
+	// with APIPath "/auth"); only the console reads it. An absolute path
+	// without a trailing slash; empty is AuthKit's default, "/api/v1".
+	AdminConsoleAuthBase string
 }
 
 // RouteGroups are Routes.RouteGroups: the route groups beyond the public,

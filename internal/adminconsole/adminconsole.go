@@ -23,7 +23,7 @@ type Config struct {
 	// AuthBaseURL is the base under which the AuthKit authhttp routes live
 	// (capabilities, password/login, token, me, OIDC). Standalone default:
 	// "/auth/v1" (the control plane mount). Embedded: the host's AuthKit JSON
-	// API, "/api/v1" by default, possibly on another origin.
+	// API, Routes.AdminConsoleAuthBase, "/api/v1" by default.
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base. Standalone default "/v1";
 	// embedded hosts typically "/billing/v1".

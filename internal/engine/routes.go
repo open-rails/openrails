@@ -64,6 +64,11 @@ func (e *Engine) buildRoutes(sel config.Routes) (routes []routebundle.Route, err
 			return nil, fmt.Errorf("openrails: %w", err)
 		}
 	}
+	if sel.AdminConsoleAuthBase != "" {
+		if config.ValidateMountPath("Routes.AdminConsoleAuthBase", sel.AdminConsoleAuthBase) != nil {
+			return nil, fmt.Errorf("openrails: invalid Routes.AdminConsoleAuthBase %q: want the path your AuthKit's JSON API is served at on this origin, its APIBase() such as /auth/v1: absolute, no scheme or host, no trailing slash", sel.AdminConsoleAuthBase)
+		}
+	}
 	table, err := embedhttp.ConfiguredRoutes(a, sel)
 	if err != nil {
 		return nil, err
@@ -110,7 +115,8 @@ func logMount(sel config.Routes, perms httproutes.Permissions, routes int) {
 }
 
 // adminConsoleRoutes serves the console at sel.Prefix's /admin, against the
-// admin API there and the host's AuthKit (/api/v1) on the same origin.
+// admin API there and the host's AuthKit (sel.AdminConsoleAuthBase) on the
+// same origin.
 func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 	a := e.App
 	if b := sel.RouteGroups; !b.Admin && !b.Catalog && !b.MerchantConfig && !b.Metrics {
@@ -120,7 +126,11 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 		return nil, fmt.Errorf("openrails: Routes.AdminConsole needs a console build: supply Deps.ConsoleAssets (scripts/build-admin-console.sh)")
 	}
 	path := sel.Prefix + "/admin"
-	console := adminconsole.Config{AuthBaseURL: ConsoleAuthBaseURL, APIBaseURL: sel.Prefix + "/v1"}
+	authBase := sel.AdminConsoleAuthBase
+	if authBase == "" {
+		authBase = authKitAPIBase
+	}
+	console := adminconsole.Config{AuthBaseURL: authBase, APIBaseURL: sel.Prefix + "/v1"}
 	console.Assistants(a.Config.LLM, sel.RouteGroups.Catalog, sel.RouteGroups.Metrics)
 	// The console acts for the merchant the engine serves.
 	if mid := a.Runtime.ConfiguredMerchant(); !mid.IsZero() && a.Config.Merchant.Slug != "" {
@@ -136,9 +146,9 @@ func (e *Engine) adminConsoleRoutes(sel config.Routes) ([]router.Entry, error) {
 	}, nil
 }
 
-// ConsoleAuthBaseURL is where an embedded console signs staff in: AuthKit's
-// JSON API on the host's origin.
-const ConsoleAuthBaseURL = "/api/v1"
+// authKitAPIBase is AuthKit's default APIBase: where an embedded console
+// signs staff in without Routes.AdminConsoleAuthBase.
+const authKitAPIBase = "/api/v1"
 
 // SCIMHandler is the SCIM service provider for mid, rooted at the SCIM root
 // (/Users, /Bulk): a directory in the same process pushes to it, and holding

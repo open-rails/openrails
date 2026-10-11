@@ -5,11 +5,13 @@ package ci_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"testing/fstest"
 
+	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -134,8 +136,9 @@ func TestStandaloneAdminConsolePath(t *testing.T) {
 
 // An embedded host mounts the console with a staff route group, from its own
 // build, at Routes.Prefix's /admin; the console finds the API there and
-// AuthKit at /api/v1 on the same origin. A missing or broken build, or no
-// staff group, fails the mount; without AdminConsole no console route exists.
+// AuthKit at its default /api/v1 on the same origin. A missing or broken
+// build, or no staff group, fails the mount; without AdminConsole no console
+// route exists.
 func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	f := newFixture(t)
 	cfg := f.config()
@@ -178,4 +181,59 @@ func TestEmbeddedHostMountsAdminConsole(t *testing.T) {
 	off := http.NewServeMux()
 	require.NoError(t, openrailshttp.Mount(off, client, openrails.Routes{Auth: deny, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions}))
 	require.Equal(t, http.StatusNotFound, get(off, "/billing/admin/").Code, "not selected, not mounted")
+}
+
+// An embedded console signs staff in at the host's AuthKit wherever the host
+// mounts it: config.json names Routes.AdminConsoleAuthBase, AuthKit's
+// APIBase(), and AuthKit answers there; left empty, AuthKit's default
+// /api/v1. A base that is not a path on the console's origin fails the mount.
+func TestEmbeddedConsoleFindsHostAuthKit(t *testing.T) {
+	f := newFixture(t)
+	cfg := f.config()
+	cfg.Merchant = openrails.MerchantDeclaration{Slug: uniqueName("console")}
+	client, err := openrails.New(t.Context(), cfg, openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool, ConsoleAssets: consoleBuild("host")})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = client.Close(context.Background()) })
+	routes := openrails.Routes{Auth: authtest.Deny{}, Scope: staffScope, Prefix: "/billing", RouteGroups: adminGroups, Permissions: adminPermissions, AdminConsole: true}
+
+	for _, c := range []struct{ apiPath, base, want string }{
+		{"", "", "/api/v1"},
+		{"/auth", "/auth/v1", "/auth/v1"},
+	} {
+		ak, err := authkit.New(t.Context(), authkit.Config{
+			Token:        authkit.TokenConfig{Issuer: "http://127.0.0.1", IssuedAudiences: []string{"e2e"}},
+			Keys:         authkit.KeysConfig{Path: t.TempDir(), AllowEphemeralDevKeys: true},
+			Registration: authkit.RegistrationConfig{AllowMissingSenders: true},
+			HTTP:         &authkit.HTTPConfig{APIPath: c.apiPath, DirectPeerIP: true},
+			Database:     authkit.DatabaseConfig{Schema: f.authSchema()},
+		}, authkit.Deps{Postgres: f.pool})
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = ak.Close(context.Background()) })
+		require.Equal(t, c.want, ak.APIBase())
+
+		host := http.NewServeMux()
+		require.NoError(t, ak.Mount(host))
+		mount := routes
+		mount.AdminConsoleAuthBase = c.base
+		require.NoError(t, openrailshttp.Mount(host, client, mount))
+		w := get(host, "/billing/admin/config.json")
+		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+		var boot struct {
+			AuthBaseURL string `json:"auth_base_url"`
+		}
+		require.NoError(t, json.NewDecoder(w.Body).Decode(&boot))
+		require.Equal(t, c.want, boot.AuthBaseURL)
+		w = get(host, boot.AuthBaseURL+"/capabilities")
+		require.Equal(t, http.StatusOK, w.Code, "%s: %s", boot.AuthBaseURL, w.Body.String())
+		if c.base != "" {
+			require.Equal(t, http.StatusNotFound, get(host, "/api/v1/capabilities").Code, "nothing at AuthKit's default")
+		}
+	}
+
+	for _, bad := range []string{"api/v1", "/api/v1/", "/", "https://billing.example.com/api/v1", "//billing.example.com/api/v1", "/api/../v1", "/api v1"} {
+		mount := routes
+		mount.AdminConsoleAuthBase = bad
+		err := openrailshttp.Mount(http.NewServeMux(), client, mount)
+		require.ErrorContains(t, err, fmt.Sprintf("invalid Routes.AdminConsoleAuthBase %q", bad))
+	}
 }
