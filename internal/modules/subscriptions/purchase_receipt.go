@@ -12,6 +12,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
+	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
 // NotificationEmailKind is the job that emails one queued notification.
@@ -45,6 +46,13 @@ type PurchaseReceipt struct {
 // that took no money has none.
 func QueuePurchaseReceipt(ctx context.Context, d *db.DB, r PurchaseReceipt) error {
 	if r.Amount <= 0 {
+		return nil
+	}
+	enabled, err := merchantconfig.NewStore(d).ChargeReceiptsEnabled(ctx)
+	if err != nil {
+		return fmt.Errorf("load purchase receipt policy: %w", err)
+	}
+	if !enabled {
 		return nil
 	}
 	if r.PaymentID == uuid.Nil || r.Items == "" {

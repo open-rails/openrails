@@ -66,6 +66,8 @@ func TestReplicasEmailAReceiptOnce(t *testing.T) {
 	srv := smtptest.Start(t, smtptest.Options{Username: "apikey", Password: "SG.e2e-key", RefuseRecipient: gate.hold})
 	directory := &openrailstest.UserInfo{}
 	f := startFleet(t, 3, false, nil, func(w *world) {
+		enabled := true
+		w.settings.ChargeReceipts = &enabled
 		w.cfg = func(c *openrails.Config) {
 			c.SMTP = &openrails.SMTPConfig{Host: srv.Host, Port: srv.Port, Username: "apikey", Password: "SG.e2e-key",
 				From: openrails.EmailAddress{Name: "Merchant Billing", Address: "noreply@deploy.test"}}

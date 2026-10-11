@@ -7,7 +7,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/open-rails/authkit v1.24.0
-	github.com/open-rails/helpers v1.9.0
+	github.com/open-rails/helpers v1.10.1-0.20261011234644-fa076c81f396
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
 	golang.org/x/oauth2 v0.37.0

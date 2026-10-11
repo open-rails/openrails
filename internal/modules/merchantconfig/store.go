@@ -45,3 +45,10 @@ func (s *Store) Get(ctx context.Context) (models.MerchantConfiguration, bool, er
 	settings, err := s.Settings(ctx)
 	return settings.Config, err == nil, err
 }
+
+// ChargeReceiptsEnabled reports the explicit opt-in for successful-charge
+// notices. An unset preference leaves these optional notices disabled.
+func (s *Store) ChargeReceiptsEnabled(ctx context.Context) (bool, error) {
+	cfg, _, err := s.Get(ctx)
+	return err == nil && cfg.ChargeReceipts != nil && *cfg.ChargeReceipts, err
+}

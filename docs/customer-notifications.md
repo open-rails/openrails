@@ -19,7 +19,11 @@ The response is the usual `{"data": [...], "next_cursor": null|string}` page.
 `limit` bounds the page; `cursor` continues it; optional `seen` filters read
 state. Notices are newest first, ordered by creation time and ID. Each notice
 includes its `merchant_id`, `customer_id`, stable `id`, extensible `event_type`,
-typed `data`, `created_at`, `seen`, and `read_at`. Money in `data` remains a
+typed `data`, `created_at`, `seen`, and `read_at`. `action_requested: true`
+identifies what the notice asked when it was emitted. It does not claim the
+underlying account or order still needs action: later billing changes can have
+resolved it. The application reads the current resource before offering a
+remedy. Money in `data` remains a
 decimal string. Unknown event types must remain usable: retain the payload and
 let the application supply a generic presentation.
 
@@ -62,3 +66,22 @@ finding. General notice history and actionable work can share an inbox model
 without creating duplicate copies of authoritative findings or weakening
 audience-specific access checks. Financial/lifecycle host events retain their
 own processing acknowledgments.
+
+`Notification.InboxItem(system)` and `Finding.InboxItem(system)` project both
+records into `github.com/open-rails/helpers/notify.Item`. The source installation
+is explicit, the merchant is `origin.scope`, and the original prefixed ID is
+`origin.id`. Customer subjects and merchant operator queues use different
+audiences. Finding evidence appears only in the operator projection. The
+projection preserves exact read and resolution timestamps and has revision zero:
+it is not another stored record and cannot be updated through a generic store.
+An application with native notices can use the shared library's durable store
+and compose these source projections alongside them.
+When composing an embedded projection with ContentKit's HTTP importer, pass
+the same producer identity to `InboxItem` as the importer's configured `Name`.
+
+Billing failures, required authentication, payment-method repairs and unpaid
+orders carry the historical action-requested classification. Customer notices
+project as general event history, with no asserted live workflow status;
+unknown future kinds remain visible. Findings preserve their actual
+open/resolved/dismissed workflow state. A destination must not present a local
+read or dismissal as having paid an invoice or repaired a payment method.

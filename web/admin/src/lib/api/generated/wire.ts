@@ -860,6 +860,7 @@ export type ExtendAdmissionParams = {
 
 export type Finding = {
   id: string
+  merchant_id: string
   finding_type: string
   provider: string | null
   psp_id: string | null
@@ -1011,6 +1012,7 @@ export type MerchantSettings = {
   billing_period_boundary?: string
   alert_email?: string
   reprice_notice_window_days?: number
+  charge_receipts?: boolean
   renewal_receipt_min_interval_hours?: number
   provider_refund_access?: string
   arrears_grace_days?: number
@@ -1188,6 +1190,7 @@ export type Notification = {
   data: NotificationData
   seen: boolean
   read_at: string | null
+  action_requested?: boolean
   created_at: string
 }
 

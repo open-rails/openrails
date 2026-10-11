@@ -38,7 +38,7 @@ func findingsStore(r *httprequest.Request) (*reconcile.PGStore, bool) {
 // recommendation.
 func findingView(rec reconcile.FindingRecord) billing.Finding {
 	v := billing.Finding{
-		ID: billing.FindingID(rec.ID), Type: string(rec.Type), SubjectKey: rec.SubjectKey, Severity: string(rec.Severity),
+		ID: billing.FindingID(rec.ID), MerchantID: billing.MerchantID(rec.MerchantID), Type: string(rec.Type), SubjectKey: rec.SubjectKey, Severity: string(rec.Severity),
 		Status: billing.FindingStatus(rec.Status), Evidence: rec.Evidence, LastSeenAt: rec.LastSeenAt, ResolvedAt: rec.ResolvedAt,
 		Provider: optional(string(rec.Provider)), RecommendedAction: optional(rec.RecommendedAction), Resolution: optional(rec.Resolution),
 		ResolvedBy: optional(rec.ResolvedBy), Notes: optional(rec.Notes), CreatedAt: rec.CreatedAt, UpdatedAt: rec.UpdatedAt,
