@@ -344,6 +344,16 @@ export const orderSchema = z.object({
     )
     .nullish()
     .transform((v) => v ?? []),
+  /** The order's hosted checkout; `url` only on the answer that made it. */
+  checkout: z
+    .object({
+      url: z.string().nullish(),
+      expires_at: time,
+      success_url: z.string(),
+      cancel_url: z.string().nullish(),
+      saved_payment_methods: z.boolean(),
+    })
+    .nullish(),
   expires_at: time,
   completed_at: time.nullish(),
   canceled_at: time.nullish(),
@@ -671,6 +681,14 @@ export type CaptchaConfig = z.infer<typeof captchaConfigSchema>
  * merchant's payment setup (null when the request resolves no merchant) and
  * the captcha (null when the deployment challenges nobody).
  */
+/** The merchant as its customers see it; logo and support are https. */
+export const publicMerchantSchema = z.object({
+  display_name: z.string(),
+  logo_url: z.string().nullish(),
+  support_url: z.string().nullish(),
+})
+export type PublicMerchant = z.infer<typeof publicMerchantSchema>
+
 export const publicConfigSchema = z.object({
   capabilities: z.object({
     route_groups: z.record(z.string(), z.boolean()),
@@ -681,6 +699,7 @@ export const publicConfigSchema = z.object({
     .nullish()
     .transform((v) => v ?? []),
   payment: paymentConfigSchema.nullish(),
+  merchant: publicMerchantSchema.nullish(),
   captcha: captchaConfigSchema.nullish(),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>

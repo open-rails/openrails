@@ -56,6 +56,11 @@ tasks:
     cmds:
       - bash scripts/build-admin-console.sh
 
+  checkout-build:
+    desc: Build the hosted checkout page into web/checkout/dist (gitignored), which the binary go:embeds
+    cmds:
+      - bash scripts/build-checkout-page.sh
+
   build-console-binary:
     desc: Build the standalone binary WITH the admin console embedded (admin-build + build)
     cmds:

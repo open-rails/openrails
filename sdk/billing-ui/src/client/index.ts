@@ -36,6 +36,7 @@ export type {
   PaymentConfig,
   PaymentFailure,
   PublicConfig,
+  PublicMerchant,
   CheckoutSessionLink,
   Invoice,
   ListPage,

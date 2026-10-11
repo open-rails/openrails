@@ -1,5 +1,14 @@
 # Changelog
 
+## Hosted checkout
+
+- `getConfig()` returns `merchant` (`PublicMerchant`: `display_name`, and
+  `logo_url` and `support_url` when they are https), null when the request
+  resolves no merchant.
+- `Order` carries `checkout` (its hosted checkout: `expires_at`,
+  `success_url`, `cancel_url`, `saved_payment_methods`; `url` only on the
+  answer that made it), null without one.
+
 ## Orders take Solana and hosted pages
 
 - `<OrderCheckout>` offers an order's Solana option: one button per token,
