@@ -156,9 +156,8 @@ type RevokeProductAccessParams struct {
 // CreateProductAccessParams grants a customer a product free. At most one of
 // Hours and EndsAt: Hours extends the customer's access to the product, from
 // the end of their latest live window of it (or now); EndsAt ends this grant
-// at a fixed instant from now; neither grants it indefinitely (it needs
-// merchant:access:grant-permanent). Reason defaults to staff; Note is kept
-// with the grant.
+// at a fixed instant from now; neither grants it indefinitely, with no extra
+// permission. Reason defaults to staff; Note is kept with the grant.
 type CreateProductAccessParams struct {
 	CustomerID CustomerID  `json:"customer_id"`
 	ProductID  ProductID   `json:"product_id"`
