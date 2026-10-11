@@ -66,6 +66,7 @@ migration 0062_drop_checkout_sessions.up.sql sha256:382f3a65cea76992fbe02cf0d0e1
 migration 0063_running_charges.up.sql sha256:8c834227903ff7b607c51d288140b0e7787743fdc0073fe146f3f9e03dc02839
 migration 0064_orders_id_index.up.sql sha256:81f306bb5a9112ac65feb459a4c518102c71de7a4b1b1a8c48e97558cad736b2
 migration 0065_drop_merchant_api_hosts.up.sql sha256:517658ca10c3079ecc62657147ae1da8711de44aced2eed7796c41822fcff4ec
+migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346d017fbe2c11260dad37f6b729f397f139d0f424c7bf21d0249ee26
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -263,7 +264,7 @@ table billing.catalog_meters
 table billing.catalog_rate_cards
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
-  column product_id uuid
+  column product_id uuid NOT NULL
   column ordinal integer NOT NULL
   column meter_key text
   column payment_term text NOT NULL
@@ -272,24 +273,16 @@ table billing.catalog_rate_cards
   column price jsonb NOT NULL
   column created_at timestamp with time zone NOT NULL DEFAULT now()
   column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  column customer_id uuid
-  column revision bigint NOT NULL
-  constraint catalog_rate_cards_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE CASCADE
   constraint catalog_rate_cards_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
   constraint catalog_rate_cards_meter_key_fkey FOREIGN KEY (merchant_id, meter_key) REFERENCES billing.catalog_meters(merchant_id, key) ON DELETE RESTRICT
   constraint catalog_rate_cards_ordinal_positive_check CHECK ((ordinal >= 1))
   constraint catalog_rate_cards_payment_term_check CHECK ((payment_term = ANY (ARRAY['in_advance'::text, 'in_arrears'::text])))
   constraint catalog_rate_cards_pkey PRIMARY KEY (merchant_id, id)
   constraint catalog_rate_cards_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE CASCADE
-  constraint catalog_rate_cards_product_scope_check CHECK (((customer_id IS NOT NULL) OR (product_id IS NOT NULL)))
-  constraint catalog_rate_cards_revision_check CHECK ((revision >= 1))
-  index CREATE UNIQUE INDEX catalog_rate_cards_customer_id_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, customer_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NOT NULL))
-  index CREATE INDEX catalog_rate_cards_meter_key_customer_id_idx ON billing.catalog_rate_cards USING btree (merchant_id, meter_key, customer_id) WHERE (customer_id IS NOT NULL)
-  index CREATE UNIQUE INDEX catalog_rate_cards_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE ((meter_key IS NOT NULL) AND (customer_id IS NULL))
+  index CREATE UNIQUE INDEX catalog_rate_cards_meter_key_key ON billing.catalog_rate_cards USING btree (merchant_id, meter_key) WHERE (meter_key IS NOT NULL)
   index CREATE UNIQUE INDEX catalog_rate_cards_pkey ON billing.catalog_rate_cards USING btree (merchant_id, id)
   index CREATE UNIQUE INDEX catalog_rate_cards_product_id_ordinal_key ON billing.catalog_rate_cards USING btree (merchant_id, product_id, ordinal)
   trigger CREATE TRIGGER catalog_authored_rate_card BEFORE INSERT OR DELETE OR UPDATE ON billing.catalog_rate_cards FOR EACH ROW EXECUTE FUNCTION billing.catalog_authored_write()
-  trigger CREATE TRIGGER catalog_rate_card_revision BEFORE INSERT OR UPDATE ON billing.catalog_rate_cards FOR EACH ROW EXECUTE FUNCTION billing.assign_object_revision()
 
 table billing.catalog_restore_receipts
   column merchant_id uuid NOT NULL
@@ -1866,30 +1859,6 @@ table billing.product_access
   trigger CREATE TRIGGER product_access_step_version_insert AFTER INSERT ON billing.product_access REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_access_version()
   trigger CREATE TRIGGER product_access_step_version_update AFTER UPDATE ON billing.product_access REFERENCING NEW TABLE AS changed FOR EACH STATEMENT EXECUTE FUNCTION billing.step_access_version()
 
-table billing.product_archive_operations
-  column merchant_id uuid NOT NULL
-  column id uuid NOT NULL DEFAULT uuidv7()
-  column idempotency_key text NOT NULL
-  column request_sha256 bytea NOT NULL
-  column product_id uuid NOT NULL
-  column purchase_action text NOT NULL
-  column purchase_window_starts_at timestamp with time zone
-  column reason text
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint product_archive_operations_idempotency_key_check CHECK (((length(idempotency_key) >= 1) AND (length(idempotency_key) <= 255)))
-  constraint product_archive_operations_idempotency_key_key UNIQUE (merchant_id, idempotency_key)
-  constraint product_archive_operations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint product_archive_operations_pkey PRIMARY KEY (merchant_id, id)
-  constraint product_archive_operations_product_id_fkey FOREIGN KEY (merchant_id, product_id) REFERENCES billing.products(merchant_id, id) ON DELETE RESTRICT
-  constraint product_archive_operations_purchase_action_check CHECK ((purchase_action = ANY (ARRAY['none'::text, 'refund'::text, 'review'::text])))
-  constraint product_archive_operations_purchase_window_check CHECK (((purchase_action = 'none'::text) = (purchase_window_starts_at IS NULL)))
-  constraint product_archive_operations_reason_check CHECK (((length(reason) >= 1) AND (length(reason) <= 500)))
-  constraint product_archive_operations_request_sha256_check CHECK ((octet_length(request_sha256) = 32))
-  index CREATE UNIQUE INDEX product_archive_operations_idempotency_key_key ON billing.product_archive_operations USING btree (merchant_id, idempotency_key)
-  index CREATE UNIQUE INDEX product_archive_operations_pkey ON billing.product_archive_operations USING btree (merchant_id, id)
-  index CREATE INDEX product_archive_operations_product_id_idx ON billing.product_archive_operations USING btree (merchant_id, product_id)
-  trigger CREATE TRIGGER immutable_product_archive_operation BEFORE DELETE OR UPDATE ON billing.product_archive_operations FOR EACH ROW EXECUTE FUNCTION billing.guard_product_archive_operation()
-
 table billing.product_entitlements
   column id uuid NOT NULL DEFAULT uuidv7()
   column merchant_id uuid NOT NULL
@@ -3165,7 +3134,6 @@ function billing.guard_billing_restore_receipt()
                     'price_psp_bindings',
                     'prices',
                     'product_access',
-                    'product_archive_operations',
                     'product_entitlements',
                     'products',
                     'provider_intents',
@@ -3365,15 +3333,6 @@ function billing.guard_payment_method_version_update()
       RAISE EXCEPTION 'card version % is append-only', OLD.id USING ERRCODE = '23514';
   END;
   $function$
-
-function billing.guard_product_archive_operation()
-  CREATE OR REPLACE FUNCTION billing.guard_product_archive_operation()
-   RETURNS trigger
-   LANGUAGE plpgsql
-  AS $function$
-  BEGIN
-   RAISE EXCEPTION 'product archive operations are immutable' USING ERRCODE='23514';
-  END $function$
 
 function billing.guard_product_entitlement_history()
   CREATE OR REPLACE FUNCTION billing.guard_product_entitlement_history()

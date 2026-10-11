@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (180), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (175), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -126,15 +126,10 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/admin/catalog/revision` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `CatalogRevision` |  |
-| POST | `/v1/admin/catalog/applications` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
+| POST | `/v1/admin/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
 | GET | `/v1/admin/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
 | GET | `/v1/admin/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
 | PUT | `/v1/admin/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
-| GET | `/v1/admin/catalog/rate-overrides` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<RateOverride>` |  |
-| PUT | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetRateOverrideParams` | 200 `RateOverride` | sensitive; catalog update; limit `grant` |
-| DELETE | `/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 204 — | sensitive; catalog update; limit `destructive` |
-| POST | `/v1/admin/catalog/product-archives` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `ArchiveProductParams` | 200 `ProductArchive` | sensitive; catalog update; `Idempotency-Key` |
 | POST | `/v1/admin/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
 | POST | `/v1/admin/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
 | GET | `/v1/admin/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |

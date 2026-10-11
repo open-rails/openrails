@@ -53,7 +53,6 @@ export type OpenRailsErrorCode =
   | "default_payment_method_invalid"
   | "default_payment_method_required"
   | "default_rate_card_not_found"
-  | "default_rate_card_required"
   | "finding_action_failed"
   | "finding_not_actionable"
   | "hold_not_found"
@@ -145,8 +144,6 @@ export type OpenRailsErrorCode =
   | "psp_not_found"
   | "purchase_review_resolved"
   | "quantity_not_allowed"
-  | "rate_card_currency_mismatch"
-  | "rate_card_has_overrides"
   | "rate_card_product_not_found"
   | "rate_limit_exceeded"
   | "rebill_terms_committed"
@@ -255,7 +252,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   default_payment_method_invalid: { status: 400, type: "invalid_request_error", meaning: "The card cannot be the customer's default for the currency." },
   default_payment_method_required: { status: 400, type: "invalid_request_error", meaning: "The customer has no default card for the currency." },
   default_rate_card_not_found: { status: 404, type: "invalid_request_error", meaning: "The meter has no default rate card." },
-  default_rate_card_required: { status: 409, type: "invalid_request_error", meaning: "The meter needs a default rate card." },
   finding_action_failed: { status: 502, type: "api_error", meaning: "Running the finding's recommendation failed; the finding stays open with the error in its notes." },
   finding_not_actionable: { status: 422, type: "invalid_request_error", meaning: "The finding carries no recommendation to approve; ignore it or fix it out of band." },
   hold_not_found: { status: 404, type: "invalid_request_error", meaning: "The admission holds nothing open: it was captured, released or lapsed." },
@@ -347,8 +343,6 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   psp_not_found: { status: 404, type: "invalid_request_error", meaning: "The PSP does not exist." },
   purchase_review_resolved: { status: 409, type: "invalid_request_error", meaning: "The purchase review was already resolved." },
   quantity_not_allowed: { status: 422, type: "invalid_request_error", meaning: "A quantity was sent for a price that is not sold per seat." },
-  rate_card_currency_mismatch: { status: 409, type: "invalid_request_error", meaning: "The rate card's currency does not match." },
-  rate_card_has_overrides: { status: 409, type: "invalid_request_error", meaning: "The rate card still has customer overrides." },
   rate_card_product_not_found: { status: 404, type: "invalid_request_error", meaning: "The rate card names a product that does not exist." },
   rate_limit_exceeded: { status: 429, type: "rate_limit_error", meaning: "Too many requests; Retry-After says when to try again." },
   rebill_terms_committed: { status: 409, type: "invalid_request_error", meaning: "An accepted recurring payment owns the pending price terms." },

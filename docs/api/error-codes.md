@@ -58,7 +58,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `default_payment_method_invalid` | 400 | `invalid_request_error` | The card cannot be the customer's default for the currency. |
 | `default_payment_method_required` | 400 | `invalid_request_error` | The customer has no default card for the currency. |
 | `default_rate_card_not_found` | 404 | `invalid_request_error` | The meter has no default rate card. |
-| `default_rate_card_required` | 409 | `invalid_request_error` | The meter needs a default rate card. |
 | `finding_action_failed` | 502 | `api_error` | Running the finding's recommendation failed; the finding stays open with the error in its notes. |
 | `finding_not_actionable` | 422 | `invalid_request_error` | The finding carries no recommendation to approve; ignore it or fix it out of band. |
 | `hold_not_found` | 404 | `invalid_request_error` | The admission holds nothing open: it was captured, released or lapsed. |
@@ -150,8 +149,6 @@ Every `error.code` the API answers, with the HTTP status and `error.type` that a
 | `psp_not_found` | 404 | `invalid_request_error` | The PSP does not exist. |
 | `purchase_review_resolved` | 409 | `invalid_request_error` | The purchase review was already resolved. |
 | `quantity_not_allowed` | 422 | `invalid_request_error` | A quantity was sent for a price that is not sold per seat. |
-| `rate_card_currency_mismatch` | 409 | `invalid_request_error` | The rate card's currency does not match. |
-| `rate_card_has_overrides` | 409 | `invalid_request_error` | The rate card still has customer overrides. |
 | `rate_card_product_not_found` | 404 | `invalid_request_error` | The rate card names a product that does not exist. |
 | `rate_limit_exceeded` | 429 | `rate_limit_error` | Too many requests; Retry-After says when to try again. |
 | `rebill_terms_committed` | 409 | `invalid_request_error` | An accepted recurring payment owns the pending price terms. |

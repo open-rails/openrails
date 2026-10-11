@@ -137,27 +137,6 @@ export type ApplyProduct = {
   rate_cards?: RateCard[] | null
 }
 
-export type ArchiveProductParams = {
-  product_id?: string
-  product_key?: string
-  purchase_action?: "refund" | "review"
-  purchase_window_starts_at?: string
-  window_seconds?: number
-  reason?: string
-}
-
-export type ArchivedPurchase = {
-  payment_id: string
-  customer_id: string
-  amount: string
-  currency: string
-  purchased_at: string
-  outcome: "already_refunded" | "not_started" | "refund_pending" | "refunded" | "review_dismissed" | "review_open" | "review_refunded"
-  refund_id: string | null
-  finding_id: string | null
-  detail: string | null
-}
-
 export type AskCatalogParams = {
   question?: string
 }
@@ -391,10 +370,6 @@ export type CatalogFieldConflict = {
   live_value: unknown | null
   set_by: string
   set_at: string
-}
-
-export type CatalogRevision = {
-  revision: number
 }
 
 export type ChangeSubscriptionParams = {
@@ -1051,7 +1026,6 @@ export type Meter = {
   billing_supported: boolean
   rate_card: MeterRateCard | null
   revision: number
-  override_count: number
   has_activity: boolean
   last_event_at: string | null
   created_at: string
@@ -1797,18 +1771,6 @@ export type ProductAccessGrant = {
   updated_at: string
 }
 
-export type ProductArchive = {
-  id: string
-  product_id: string
-  product_key: string
-  purchase_action: "refund" | "review"
-  purchase_window_starts_at: string | null
-  reason: string | null
-  created_at: string
-  complete: boolean
-  purchases: ArchivedPurchase[]
-}
-
 export type ProductEntitlementsChangedEvent = {
   product_id: string
   product_key: string
@@ -1963,17 +1925,6 @@ export type RateCard = {
   allowance?: Allowance
   payment_term?: "in_advance" | "in_arrears"
   price?: RatePrice
-}
-
-export type RateOverride = {
-  customer_id: string
-  customer_email: string | null
-  meter_key: string
-  price: RatePrice
-  allowance: Allowance | null
-  revision: number
-  created_at: string
-  updated_at: string
 }
 
 export type RatePrice = {
@@ -2133,12 +2084,6 @@ export type SetMeterParams = {
   unit?: string
   group_by?: Record<string, string>
   rate_card?: MeterRateCardParams | null
-  expected_revision?: number
-}
-
-export type SetRateOverrideParams = {
-  price?: RatePrice
-  allowance?: Allowance
   expected_revision?: number
 }
 

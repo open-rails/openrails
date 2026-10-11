@@ -1510,43 +1510,7 @@
         ]
       }
     },
-    "/v1/admin/catalog/revision": {
-      "get": {
-        "tags": [
-          "catalog"
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CatalogRevision"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
-        },
-        "x-openrails-errors": null,
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/catalog/applications": {
+    "/v1/admin/catalog/apply": {
       "post": {
         "tags": [
           "catalog"
@@ -1728,11 +1692,8 @@
           "allowance_source_in_use",
           "allowance_source_invalid",
           "default_rate_card_not_found",
-          "default_rate_card_required",
           "meter_in_use",
           "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
           "rate_card_product_not_found",
           "revision_mismatch",
           "usage_meter_invalid",
@@ -1798,319 +1759,13 @@
           "allowance_source_in_use",
           "allowance_source_invalid",
           "default_rate_card_not_found",
-          "default_rate_card_required",
           "meter_in_use",
           "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
           "rate_card_product_not_found",
           "revision_mismatch",
           "usage_meter_invalid",
           "usage_meter_not_found",
           "usage_rate_card_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/catalog/rate-overrides": {
-      "get": {
-        "tags": [
-          "catalog"
-        ],
-        "parameters": [
-          {
-            "name": "cursor",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "customer_id",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "meter_key",
-            "in": "query",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "array",
-                      "items": {
-                        "$ref": "#/components/schemas/RateOverride"
-                      }
-                    },
-                    "next_cursor": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "data",
-                    "next_cursor"
-                  ]
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
-        },
-        "x-openrails-errors": [
-          "invalid_cursor",
-          "invalid_query"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/admin/catalog/rate-overrides/{customer_id}/{meter_key}": {
-      "put": {
-        "tags": [
-          "catalog"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "meter_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetRateOverrideParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RateOverride"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
-        },
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-update": true,
-        "x-openrails-operation-limit": "grant",
-        "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
-          "default_rate_card_not_found",
-          "default_rate_card_required",
-          "meter_in_use",
-          "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
-          "rate_card_product_not_found",
-          "revision_mismatch",
-          "usage_meter_invalid",
-          "usage_meter_not_found",
-          "usage_rate_card_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      },
-      "delete": {
-        "tags": [
-          "catalog"
-        ],
-        "parameters": [
-          {
-            "name": "customer_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "meter_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "No Content"
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
-        },
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-update": true,
-        "x-openrails-operation-limit": "destructive",
-        "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
-          "default_rate_card_not_found",
-          "default_rate_card_required",
-          "meter_in_use",
-          "meter_rate_card_conflict",
-          "rate_card_currency_mismatch",
-          "rate_card_has_overrides",
-          "rate_card_product_not_found",
-          "revision_mismatch",
-          "usage_meter_invalid",
-          "usage_meter_not_found",
-          "usage_rate_card_invalid"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant"
-        ]
-      }
-    },
-    "/v1/admin/catalog/product-archives": {
-      "post": {
-        "tags": [
-          "catalog"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ArchiveProductParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProductArchive"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:catalog:manage",
-          "root": "root:catalog:manage"
-        },
-        "x-openrails-sensitive": true,
-        "x-openrails-catalog-update": true,
-        "x-openrails-errors": [
-          "catalog_benefit_overlap",
-          "idempotency_key_required",
-          "idempotency_key_reused",
-          "invalid_param",
-          "product_not_found",
-          "product_tier_group_conflict",
-          "product_tier_group_in_use",
-          "provider_cancel_held",
-          "rebill_terms_committed",
-          "resource_conflict",
-          "revision_mismatch",
-          "service_unavailable"
         ],
         "x-openrails-error-sets": [
           "tier:merchant",
@@ -11959,109 +11614,6 @@
           }
         }
       },
-      "ArchiveProductParams": {
-        "type": "object",
-        "properties": {
-          "product_id": {
-            "type": "string"
-          },
-          "product_key": {
-            "type": "string"
-          },
-          "purchase_action": {
-            "type": "string",
-            "enum": [
-              "refund",
-              "review"
-            ]
-          },
-          "purchase_window_starts_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "window_seconds": {
-            "type": "integer"
-          },
-          "reason": {
-            "type": "string"
-          }
-        }
-      },
-      "ArchivedPurchase": {
-        "type": "object",
-        "properties": {
-          "payment_id": {
-            "type": "string"
-          },
-          "customer_id": {
-            "type": "string"
-          },
-          "amount": {
-            "type": "string",
-            "description": "A number as a decimal string."
-          },
-          "currency": {
-            "type": "string"
-          },
-          "purchased_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "outcome": {
-            "type": "string",
-            "enum": [
-              "already_refunded",
-              "not_started",
-              "refund_pending",
-              "refunded",
-              "review_dismissed",
-              "review_open",
-              "review_refunded"
-            ]
-          },
-          "refund_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "finding_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "detail": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "required": [
-          "payment_id",
-          "customer_id",
-          "amount",
-          "currency",
-          "purchased_at",
-          "outcome",
-          "refund_id",
-          "finding_id",
-          "detail"
-        ]
-      },
       "AskCatalogParams": {
         "type": "object",
         "properties": {
@@ -13137,17 +12689,6 @@
           "live_value",
           "set_by",
           "set_at"
-        ]
-      },
-      "CatalogRevision": {
-        "type": "object",
-        "properties": {
-          "revision": {
-            "type": "integer"
-          }
-        },
-        "required": [
-          "revision"
         ]
       },
       "ChangeSubscriptionParams": {
@@ -15955,9 +15496,6 @@
           "revision": {
             "type": "integer"
           },
-          "override_count": {
-            "type": "integer"
-          },
           "has_activity": {
             "type": "boolean"
           },
@@ -15991,7 +15529,6 @@
           "billing_supported",
           "rate_card",
           "revision",
-          "override_count",
           "has_activity",
           "last_event_at",
           "created_at",
@@ -19664,72 +19201,6 @@
           "updated_at"
         ]
       },
-      "ProductArchive": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "product_id": {
-            "type": "string"
-          },
-          "product_key": {
-            "type": "string"
-          },
-          "purchase_action": {
-            "type": "string",
-            "enum": [
-              "refund",
-              "review"
-            ]
-          },
-          "purchase_window_starts_at": {
-            "oneOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "reason": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "complete": {
-            "type": "boolean"
-          },
-          "purchases": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ArchivedPurchase"
-            }
-          }
-        },
-        "required": [
-          "id",
-          "product_id",
-          "product_key",
-          "purchase_action",
-          "purchase_window_starts_at",
-          "reason",
-          "created_at",
-          "complete",
-          "purchases"
-        ]
-      },
       "ProductEntitlementsChangedEvent": {
         "type": "object",
         "properties": {
@@ -20511,61 +19982,6 @@
           }
         }
       },
-      "RateOverride": {
-        "type": "object",
-        "properties": {
-          "customer_id": {
-            "type": "string"
-          },
-          "customer_email": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "meter_key": {
-            "type": "string"
-          },
-          "price": {
-            "$ref": "#/components/schemas/RatePrice"
-          },
-          "allowance": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/Allowance"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "revision": {
-            "type": "integer"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        },
-        "required": [
-          "customer_id",
-          "customer_email",
-          "meter_key",
-          "price",
-          "allowance",
-          "revision",
-          "created_at",
-          "updated_at"
-        ]
-      },
       "RatePrice": {
         "type": "object",
         "properties": {
@@ -21162,20 +20578,6 @@
                 "type": "null"
               }
             ]
-          },
-          "expected_revision": {
-            "type": "integer"
-          }
-        }
-      },
-      "SetRateOverrideParams": {
-        "type": "object",
-        "properties": {
-          "price": {
-            "$ref": "#/components/schemas/RatePrice"
-          },
-          "allowance": {
-            "$ref": "#/components/schemas/Allowance"
           },
           "expected_revision": {
             "type": "integer"
@@ -22891,11 +22293,6 @@
       "type": "invalid_request_error",
       "meaning": "The meter has no default rate card."
     },
-    "default_rate_card_required": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The meter needs a default rate card."
-    },
     "finding_action_failed": {
       "status": 502,
       "type": "api_error",
@@ -23350,16 +22747,6 @@
       "status": 422,
       "type": "invalid_request_error",
       "meaning": "A quantity was sent for a price that is not sold per seat."
-    },
-    "rate_card_currency_mismatch": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The rate card's currency does not match."
-    },
-    "rate_card_has_overrides": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The rate card still has customer overrides."
     },
     "rate_card_product_not_found": {
       "status": 404,
