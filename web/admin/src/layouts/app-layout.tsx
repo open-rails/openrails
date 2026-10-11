@@ -46,9 +46,7 @@ function areaOf(
   if (under("/payments/health"))
     return { name: "payment health", allowed: access.metrics }
   if (
-    ["/customers", "/subscriptions", "/payments", "/orders", "/ops"].some(
-      under
-    )
+    ["/customers", "/subscriptions", "/payments", "/orders", "/ops"].some(under)
   )
     return { name: "customer support", allowed: access.admin !== "none" }
   if (under("/catalog")) return { name: "the catalog", allowed: access.catalog }
@@ -56,7 +54,14 @@ function areaOf(
 }
 
 export function AppLayout() {
-  const { ready, signedIn, merchants, merchantsFailed } = useAuth()
+  const {
+    ready,
+    signedIn,
+    merchants,
+    merchantsFailed,
+    activeMerchant,
+    refusedMerchant,
+  } = useAuth()
   const { pathname } = useLocation()
   const access = useAccess()
   // Someone who manages roles alone still reaches Settings' Roles tab.
@@ -107,8 +112,19 @@ export function AppLayout() {
         <AppSidebar />
         <SidebarInset>
           <SiteHeader trail={trail} />
-          <main className="flex min-w-0 flex-1 flex-col p-4 md:p-8">
+          {/* A switch remounts the merchant's pages: nothing of the
+              previous merchant's survives it. */}
+          <main
+            key={activeMerchant?.slug ?? ""}
+            className="flex min-w-0 flex-1 flex-col p-4 md:p-8"
+          >
             <div className="mx-auto w-full max-w-7xl min-w-0">
+              {refusedMerchant && (
+                <p role="alert" className="mb-4 text-sm text-destructive">
+                  You hold no role at merchant {refusedMerchant}: choose one of
+                  yours.
+                </p>
+              )}
               {noMerchants && scope === "merchant" ? (
                 <NoMerchants inShell />
               ) : scope === "merchant" &&

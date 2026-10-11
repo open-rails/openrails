@@ -30,7 +30,8 @@ import { queryClient } from "@/lib/query-client"
 
 const StepUpHost = React.lazy(() => import("@/lib/step-up-host"))
 
-// The refresh token lives in sessionStorage: it stays with the tab.
+// The refresh token lives in sessionStorage: it stays with the tab. A
+// merchant's token never leaves memory.
 const REFRESH_KEY = "openrails.admin.refresh"
 
 export type ConsoleClient =
@@ -57,8 +58,18 @@ export function createConsoleSession(config: BootstrapConfig): ConsoleClient {
     bindSession(client)
     return { kind: "issuer", client, name: config.issuer.name }
   }
+  // A merchant's token is exchanged through the console's own client, bound
+  // to this browser's key (a public client proves one), and kept in memory.
+  const exchange = config.exchange
   const client = createAuthClient({
     baseUrl: config.auth_base_url,
+    resourceTokens: exchange
+      ? {
+          clientId: exchange.client_id,
+          tokenEndpoint: exchange.token_endpoint,
+          dpop: true,
+        }
+      : undefined,
     storage: {
       get: () => sessionStorage.getItem(REFRESH_KEY),
       set: (token) =>

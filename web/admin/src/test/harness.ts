@@ -72,7 +72,9 @@ export const FULL_ACCESS: AdminAccess = {
 const memoryStorage = (): Storage => {
   const values = new Map<string, string>()
   return {
-    get length() { return values.size },
+    get length() {
+      return values.size
+    },
     clear: () => values.clear(),
     getItem: (key) => values.get(key) ?? null,
     key: (index) => [...values.keys()][index] ?? null,
@@ -87,6 +89,7 @@ const memoryStorage = (): Storage => {
 // out only what it asserts.
 export async function server(routes: Record<string, Reply> = {}) {
   const requests: Recorded[] = []
+  setSelectedMerchant(undefined)
   vi.stubGlobal("localStorage", memoryStorage())
   vi.stubGlobal("sessionStorage", memoryStorage())
   vi.stubGlobal(
@@ -112,7 +115,10 @@ export async function server(routes: Record<string, Reply> = {}) {
     })
   )
   await loadBootstrap("/admin/config.json")
-  session = createAuthClient({ baseUrl: BOOTSTRAP.auth_base_url, sessionHint: false })
+  session = createAuthClient({
+    baseUrl: BOOTSTRAP.auth_base_url,
+    sessionHint: false,
+  })
   bindSession(session)
   await signIn("console-test")
   return requests
@@ -123,20 +129,32 @@ export let session: AuthClient
 
 // accessToken is an unsigned access token for sub: auth-ui reads its claims,
 // the stubbed server reads nothing.
-export const accessToken = (sub: string, authTime = Math.floor(Date.now() / 1000)) => {
-  const part = (value: object) => btoa(JSON.stringify(value)).replaceAll("=", "").replaceAll("+", "-").replaceAll("/", "_")
+export const accessToken = (
+  sub: string,
+  authTime = Math.floor(Date.now() / 1000)
+) => {
+  const part = (value: object) =>
+    btoa(JSON.stringify(value))
+      .replaceAll("=", "")
+      .replaceAll("+", "-")
+      .replaceAll("/", "_")
   return `${part({ alg: "none", typ: "access+jwt" })}.${part({ sub, auth_time: authTime, exp: authTime + 3600 })}.`
 }
 
 export const signIn = (sub: string) =>
   session.completeSignIn(async () => ({
     status: "complete",
-    token_set: { access_token: accessToken(sub), token_type: "Bearer", expires_in: 3600 },
+    token_set: {
+      access_token: accessToken(sub),
+      token_type: "Bearer",
+      expires_in: 3600,
+    },
   }))
 
 export const calls = (requests: Recorded[]) =>
   requests.map((request) => `${request.method} ${request.path}`)
-export const selectMerchant = (merchant: string) => setSelectedMerchant(merchant)
+export const selectMerchant = (merchant: string) =>
+  setSelectedMerchant(merchant)
 export const client = (queries: DefaultOptions["queries"] = {}) =>
   new QueryClient({
     defaultOptions: {
@@ -145,7 +163,9 @@ export const client = (queries: DefaultOptions["queries"] = {}) =>
     },
   })
 export const exec = <TData, TError, TInput, TContext>(
-  queryClient: QueryClient, options: MutationOptions<TData, TError, TInput, TContext>, input: TInput
+  queryClient: QueryClient,
+  options: MutationOptions<TData, TError, TInput, TContext>,
+  input: TInput
 ) => queryClient.getMutationCache().build(queryClient, options).execute(input)
 
 // Static markup is enough for what these tests assert (amounts, permissions,
@@ -160,70 +180,190 @@ export const render = (node: ReactNode, queryClient = client()) =>
   )
 
 const WHEN = "2026-09-18T00:00:00Z"
-export const aProduct = (id: string, tierRank = 0, overrides: Partial<Product> = {}): Product => ({
-  id, key: id, revision: 1, display_name: id, description: "", entitlements: [], tier_group: "plans", ownership: null,
-  tier_rank: tierRank, archived: false, prices: [], created_at: WHEN, updated_at: WHEN,
+export const aProduct = (
+  id: string,
+  tierRank = 0,
+  overrides: Partial<Product> = {}
+): Product => ({
+  id,
+  key: id,
+  revision: 1,
+  display_name: id,
+  description: "",
+  entitlements: [],
+  tier_group: "plans",
+  ownership: null,
+  tier_rank: tierRank,
+  archived: false,
+  prices: [],
+  created_at: WHEN,
+  updated_at: WHEN,
   ...overrides,
 })
-export const aPrice = (id: string, productId: string, overrides: Partial<Price> = {}): Price => ({
-  id, key: id, revision: 1, version: 0, product_id: productId, archived: false, currency: "USD",
-  unit_amount: "20000000", access_duration_hours: 720, billing_interval_hours: 720, trial_unit_amount: null, trial_duration_hours: null,
-  quantity: null, psps: {}, pending_manual_actions: [], created_at: WHEN, updated_at: WHEN,
+export const aPrice = (
+  id: string,
+  productId: string,
+  overrides: Partial<Price> = {}
+): Price => ({
+  id,
+  key: id,
+  revision: 1,
+  version: 0,
+  product_id: productId,
+  archived: false,
+  currency: "USD",
+  unit_amount: "20000000",
+  access_duration_hours: 720,
+  billing_interval_hours: 720,
+  trial_unit_amount: null,
+  trial_duration_hours: null,
+  quantity: null,
+  psps: {},
+  pending_manual_actions: [],
+  created_at: WHEN,
+  updated_at: WHEN,
   ...overrides,
 })
 
-export const aPayment = (id: string, overrides: Partial<Payment> = {}): Payment => ({
-  id, kind: "charge", status: "succeeded", amount: "20000000", amount_refunded: "0",
-  currency: "USD", customer_id: "cus_1", subscription_id: null, order_id: null, price_id: "price_1",
-  price: null, product: null, channel: "rail", rail: "nmi", psp_id: "psp_1",
-  transaction_id: `txn_${id}`, card: null, failure: null, refunded_payment_id: null,
-  reason: null, refunds: [], quantity: null, created_at: WHEN,
+export const aPayment = (
+  id: string,
+  overrides: Partial<Payment> = {}
+): Payment => ({
+  id,
+  kind: "charge",
+  status: "succeeded",
+  amount: "20000000",
+  amount_refunded: "0",
+  currency: "USD",
+  customer_id: "cus_1",
+  subscription_id: null,
+  order_id: null,
+  price_id: "price_1",
+  price: null,
+  product: null,
+  channel: "rail",
+  rail: "nmi",
+  psp_id: "psp_1",
+  transaction_id: `txn_${id}`,
+  card: null,
+  failure: null,
+  refunded_payment_id: null,
+  reason: null,
+  refunds: [],
+  quantity: null,
+  created_at: WHEN,
   ...overrides,
 })
-export const aPaymentMethod = (id: string, overrides: Partial<PaymentMethod> = {}): PaymentMethod => ({
-  id, customer_id: "cus_1", rail: "nmi", psp_id: "psp_1", status: "active", next_action: null, replaced_by: null,
+export const aPaymentMethod = (
+  id: string,
+  overrides: Partial<PaymentMethod> = {}
+): PaymentMethod => ({
+  id,
+  customer_id: "cus_1",
+  rail: "nmi",
+  psp_id: "psp_1",
+  status: "active",
+  next_action: null,
+  replaced_by: null,
   card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 },
-  billing_details: null, contact_cardholder_at: null, reusable: true, mandates: [],
-  subscriptions: [], default_currencies: [], created_at: WHEN,
-  health: { expiry_status: "valid", last_charged_at: null, last_charge_outcome: null, active: true },
+  billing_details: null,
+  contact_cardholder_at: null,
+  reusable: true,
+  mandates: [],
+  subscriptions: [],
+  default_currencies: [],
+  created_at: WHEN,
+  health: {
+    expiry_status: "valid",
+    last_charged_at: null,
+    last_charge_outcome: null,
+    active: true,
+  },
   ...overrides,
 })
-export const aUsageOrder = (id: string, overrides: Partial<Order> = {}): Order => ({
-  id, customer_id: "cus_1", origin: "usage", status: "open", number: null, currency: "USD", total: "0",
-  lines: [], payment: { status: "requires_payment_method", next_action: null, last_payment_error: null, payment_method_id: null, payment_id: null },
-  payment_options: [], checkout: null, renewal: null,
-  usage: {
-    period_starts_at: "2026-09-01T00:00:00Z", period_ends_at: "2026-10-01T00:00:00Z", due_at: "2026-10-01T00:00:00Z",
-    amount_paid: "0", amount_due: "0", collection_method: "charge_automatically", next_collection_attempt_at: null,
-    po_number: null, memo: null, tax: {}, billing_contacts: [], delinquent: false,
+export const aUsageOrder = (
+  id: string,
+  overrides: Partial<Order> = {}
+): Order => ({
+  id,
+  customer_id: "cus_1",
+  origin: "usage",
+  status: "open",
+  number: null,
+  currency: "USD",
+  total: "0",
+  lines: [],
+  payment: {
+    status: "requires_payment_method",
+    next_action: null,
+    last_payment_error: null,
+    payment_method_id: null,
+    payment_id: null,
   },
-  expires_at: null, completed_at: null, canceled_at: null, expired_at: null, voided_at: null, uncollectible_at: null, created_at: WHEN,
+  payment_options: [],
+  checkout: null,
+  renewal: null,
+  usage: {
+    period_starts_at: "2026-09-01T00:00:00Z",
+    period_ends_at: "2026-10-01T00:00:00Z",
+    due_at: "2026-10-01T00:00:00Z",
+    amount_paid: "0",
+    amount_due: "0",
+    collection_method: "charge_automatically",
+    next_collection_attempt_at: null,
+    po_number: null,
+    memo: null,
+    tax: {},
+    billing_contacts: [],
+    delinquent: false,
+  },
+  expires_at: null,
+  completed_at: null,
+  canceled_at: null,
+  expired_at: null,
+  voided_at: null,
+  uncollectible_at: null,
+  created_at: WHEN,
   ...overrides,
 })
 
 // cursorPages serves rows as a cursor list of `size`-row pages; the cursor is
 // the next row's index.
-export const cursorPages = <T>(rows: T[], size: number) => (request: Recorded) => {
-  const start = Number(new URLSearchParams(request.query).get("cursor") ?? 0)
-  const next = start + size
-  return { data: rows.slice(start, next), next_cursor: next < rows.length ? String(next) : null }
-}
+export const cursorPages =
+  <T>(rows: T[], size: number) =>
+  (request: Recorded) => {
+    const start = Number(new URLSearchParams(request.query).get("cursor") ?? 0)
+    const next = start + size
+    return {
+      data: rows.slice(start, next),
+      next_cursor: next < rows.length ? String(next) : null,
+    }
+  }
 
 // The cache keys a console screen can hold at once. Seeding all of them and
 // reading back which ones a mutation invalidated asserts the whole blast
 // radius — what it refreshed and what it left alone — in one comparison.
 const CACHE_KEYS = (): Record<string, QueryKey> => ({
-  customers: queryKeys.customers(), customer: queryKeys.customer("cus_1"),
+  customers: queryKeys.customers(),
+  customer: queryKeys.customer("cus_1"),
   "customer.rates": queryKeys.customerUsageRates("cus_1"),
-  subscriptions: queryKeys.subscriptions(), subscription: queryKeys.subscription("sub_1"),
-  payments: queryKeys.payments(), payment: queryKeys.payment("pay_1"),
-  attempts: queryKeys.attempts(), cycles: queryKeys.cycles(),
-  catalog: queryKeys.catalog(), drift: queryKeys.catalogDrift(),
-  meters: queryKeys.usageMeters(), meter: queryKeys.usageMeter("tokens"),
-  settings: queryKeys.settings(), psps: [...queryKeys.settings(), "psps"],
-  alerts: queryKeys.alerts(), webhooks: [...queryKeys.alerts(), "webhooks"],
+  subscriptions: queryKeys.subscriptions(),
+  subscription: queryKeys.subscription("sub_1"),
+  payments: queryKeys.payments(),
+  payment: queryKeys.payment("pay_1"),
+  attempts: queryKeys.attempts(),
+  cycles: queryKeys.cycles(),
+  catalog: queryKeys.catalog(),
+  drift: queryKeys.catalogDrift(),
+  meters: queryKeys.usageMeters(),
+  meter: queryKeys.usageMeter("tokens"),
+  settings: queryKeys.settings(),
+  psps: [...queryKeys.settings(), "psps"],
+  alerts: queryKeys.alerts(),
+  webhooks: [...queryKeys.alerts(), "webhooks"],
   ops: queryKeys.ops(),
-  dashboard: queryKeys.dashboard(), notifications: queryKeys.notifications(),
+  dashboard: queryKeys.dashboard(),
+  notifications: queryKeys.notifications(),
 })
 
 export function seedCache(queryClient: QueryClient, merchant: string) {
@@ -234,7 +374,10 @@ export function seedCache(queryClient: QueryClient, merchant: string) {
   })
 }
 
-export const invalidated = (queryClient: QueryClient, seeded: [string, QueryKey][]) =>
+export const invalidated = (
+  queryClient: QueryClient,
+  seeded: [string, QueryKey][]
+) =>
   seeded
     .filter(([, key]) => queryClient.getQueryState(key)?.isInvalidated === true)
     .map(([name]) => name)

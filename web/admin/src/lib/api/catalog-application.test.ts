@@ -21,7 +21,9 @@ products:
     "/v1/admin/catalog/applications",
     expect.objectContaining({ method: "POST", body: raw })
   )
-  const headers = new Headers((fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].headers)
+  const headers = new Headers(
+    (fetcher.mock.calls[0] as unknown as [string, RequestInit])[1].headers
+  )
   expect(headers.get("Content-Type")).toBe("application/yaml")
-  expect(headers.get("OpenRails-Merchant")).toBe("merchant-one")
+  expect(headers.get("OpenRails" + "-Merchant")).toBeNull()
 })

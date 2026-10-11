@@ -28,7 +28,12 @@ vi.mock("@/lib/auth", () => ({ useAuth: () => auth.value }))
 beforeEach(async () => {
   browserEnvironment()
   await server()
-  auth.value = { ...auth.value, merchants: [], merchantsFailed: false, opensByName: false } as typeof auth.value
+  auth.value = {
+    ...auth.value,
+    merchants: [],
+    merchantsFailed: false,
+    opensByName: false,
+  } as typeof auth.value
 })
 
 const page = () => Promise.resolve({ Component: () => null })
@@ -86,8 +91,19 @@ describe("a user with no merchants", () => {
     auth.value = { ...auth.value, opensByName: true } as typeof auth.value
     const html = render(<NoMerchants />)
     expect(html).toContain("Open a merchant")
-    expect(html).toContain("Merchant name")
+    expect(html).toContain("Merchant id")
     expect(html).not.toContain("You don&#x27;t have access")
+  })
+
+  it("names a merchant asked for that the person holds no role at", () => {
+    auth.value = {
+      ...auth.value,
+      refusedMerchant: "33333333-3333-4333-8333-333333333333",
+    } as typeof auth.value
+    const html = render(<NoMerchants />)
+    expect(html).toContain(
+      "You hold no role at merchant 33333333-3333-4333-8333-333333333333."
+    )
   })
 
   it("renders a host's empty state below its own", () => {

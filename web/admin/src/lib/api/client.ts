@@ -5,7 +5,9 @@
 import {
   AuthKitError,
   isAuthKitError,
+  isOAuthError,
   readAuthKitError,
+  type ResourceRequest,
 } from "@openrails/auth-ui/client"
 import type { Guard } from "@openrails/auth-ui/react"
 
@@ -38,6 +40,17 @@ export interface BootstrapConfig {
   // The merchant the mount serves (an embedded host's); null when staff pick
   // one.
   merchant?: ConsoleMerchant | null
+  // Where the session's token is traded for one bound to the merchant staff
+  // choose (RFC 8693, the merchant's id as group_id); null where the
+  // session's token is bound already.
+  exchange?: ExchangeBootstrap | null
+}
+
+export interface ExchangeBootstrap {
+  token_endpoint: string
+  client_id: string
+  resource: string
+  scope: string
 }
 
 export interface IssuerBootstrap {
@@ -73,22 +86,44 @@ export function mountMerchant(): ConsoleMerchant | undefined {
   return bootstrapConfig?.merchant ?? undefined
 }
 
-// The merchant every request is made as (OpenRails-Merchant), kept for the
-// tab like the session.
-const MERCHANT_KEY = "openrails.admin.merchant"
+// The merchant the console acts on, in memory for the tab: its key (the
+// slug staff see) and its id, which a token is exchanged for. Nothing names
+// the merchant in a request; the token is bound to it.
+let chosen: { key: string; id?: string } | undefined
+const listeners = new Set<() => void>()
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export const isMerchantID = (s: string) => UUID.test(s)
 
 export function selectedMerchant(): string | undefined {
-  return sessionStorage.getItem(MERCHANT_KEY) ?? undefined
+  return chosen?.key
 }
 
-export function setSelectedMerchant(slug: string | undefined) {
-  if (slug) sessionStorage.setItem(MERCHANT_KEY, slug)
-  else sessionStorage.removeItem(MERCHANT_KEY)
+export function selectedMerchantID(): string | undefined {
+  return chosen?.id
 }
 
-// takeMerchantFromHash consumes #merchant=<slug>, the link a host opens the
+// setSelectedMerchant chooses the merchant requests act on; an id names the
+// merchant a token is exchanged for (a key that is an id is one).
+export function setSelectedMerchant(key: string | undefined, id?: string) {
+  const next = key
+    ? { key, id: id || (isMerchantID(key) ? key : undefined) }
+    : undefined
+  if (next?.key === chosen?.key && next?.id === chosen?.id) return
+  chosen = next
+  listeners.forEach((l) => l())
+}
+
+export function subscribeMerchant(listener: () => void) {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+// takeMerchantFromHash consumes #merchant=<id>, the link a host opens the
 // console with (e.g. right after creating that merchant), and drops it from
-// the address bar. Membership is checked by the caller.
+// the address bar: a request to act on that merchant, which the token
+// exchange grants or refuses.
 export function takeMerchantFromHash(
   location: Location = window.location,
   history: History = window.history
@@ -107,10 +142,54 @@ export function takeMerchantFromHash(
 }
 
 // ConsoleTransport is what requests need of a session: auth-ui's AuthKit
-// client or its issuer client.
+// client or its issuer client. resourceFetch sends a token exchanged for the
+// merchant chosen (auth-ui keeps it in memory and exchanges again before it
+// expires); getResourceToken asks for one.
 export interface ConsoleTransport {
   authFetch: (input: string, init?: RequestInit) => Promise<Response>
   signOut: () => Promise<void>
+  resourceFetch?: (
+    input: string,
+    init: RequestInit & ResourceRequest
+  ) => Promise<Response>
+  getResourceToken?: (r: ResourceRequest) => Promise<unknown>
+}
+
+// merchantRefused is the answer for a merchant the person holds no role at:
+// the exchange is refused (invalid_target).
+const merchantRefused = () =>
+  new ApiError(
+    403,
+    {
+      error: {
+        code: "merchant_unresolved",
+        message: "You hold no role at this merchant.",
+      },
+    },
+    "merchant refused"
+  )
+
+// exchangeFor is the exchange request for merchant id, when the mount
+// exchanges.
+function exchangeFor(id: string | undefined): ResourceRequest | undefined {
+  const exchange = bootstrapConfig?.exchange
+  if (!exchange) return undefined
+  if (!id) throw merchantRefused()
+  return { resource: exchange.resource, scope: exchange.scope, group: id }
+}
+
+// canActAt reports whether the session can get a token bound to merchant id:
+// false when the exchange refuses it. Mounts that do not exchange can.
+export async function canActAt(id: string): Promise<boolean> {
+  const request = exchangeFor(id)
+  if (!request || !session?.getResourceToken) return true
+  try {
+    await session.getResourceToken(request)
+    return true
+  } catch (error) {
+    if (isOAuthError(error) && error.error === "invalid_target") return false
+    throw error
+  }
 }
 
 const unguarded: Guard = (action) => action()
@@ -219,19 +298,28 @@ async function send<T>(
   if (!session) throw new Error("console session not bound")
   const headers: Record<string, string> = { ...opts.headers }
   if (opts.body !== undefined) headers["Content-Type"] = "application/json"
-  const merchant = selectedMerchant()
-  if (merchant) headers["OpenRails-Merchant"] = merchant
-  const res = await session.authFetch(
-    buildURL(getBootstrap().api_base_url, path, opts.query),
-    {
-      method: opts.method ?? "GET",
-      headers,
-      body:
-        opts.rawBody ??
-        (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
-      signal: opts.signal,
+  const url = buildURL(getBootstrap().api_base_url, path, opts.query)
+  const init: RequestInit = {
+    method: opts.method ?? "GET",
+    headers,
+    body:
+      opts.rawBody ??
+      (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
+    signal: opts.signal,
+  }
+  const exchange = exchangeFor(selectedMerchantID())
+  let res: Response
+  if (exchange && session.resourceFetch) {
+    try {
+      res = await session.resourceFetch(url, { ...init, ...exchange })
+    } catch (error) {
+      if (isOAuthError(error) && error.error === "invalid_target")
+        throw merchantRefused()
+      throw error
     }
-  )
+  } else {
+    res = await session.authFetch(url, init)
+  }
   // auth-ui already refreshed a stale bearer; this one is refused for good,
   // unless it asks for a fresher sign-in, which the step-up dialog answers.
   if (res.status === 401) {

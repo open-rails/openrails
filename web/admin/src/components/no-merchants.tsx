@@ -11,11 +11,13 @@ import { newMerchantPath, useExtensions } from "@/extensions/registry"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
-// NoMerchants is the console with no merchant selected: staff open one by name
-// (no host directory or mount merchant; the admin API decides access), else a
-// host's newMerchantPath is offered. inShell renders it inside a host shell.
+// NoMerchants is the console with no merchant selected: staff open one by its
+// id (no host directory or mount merchant; the token exchange decides
+// access), else a host's newMerchantPath is offered. A merchant asked for
+// that the person holds no role at is named. inShell renders it inside a
+// host shell.
 export function NoMerchants({ inShell = false }: { inShell?: boolean }) {
-  const { me, logout, opensByName, selectMerchant } = useAuth()
+  const { me, logout, opensByName, selectMerchant, refusedMerchant } = useAuth()
   const navigate = useNavigate()
   const { extensions } = useExtensions()
   const newMerchant = newMerchantPath(extensions)
@@ -40,9 +42,14 @@ export function NoMerchants({ inShell = false }: { inShell?: boolean }) {
             ? "Open a merchant"
             : "You don't have access to any merchants yet"}
         </h1>
+        {refusedMerchant && (
+          <p role="alert" className="mt-2 text-sm text-pretty text-destructive">
+            You hold no role at merchant {refusedMerchant}.
+          </p>
+        )}
         <p className="mt-2 text-sm text-pretty text-muted-foreground">
           {opensByName
-            ? "Enter the name of the merchant you work on. An operator of this OpenRails deployment grants the access."
+            ? "Enter the id of the merchant you work on. An operator of this OpenRails deployment grants the access."
             : newMerchant
               ? "Create a merchant to start accepting payments, or ask a teammate to add you to theirs."
               : "Ask an operator of this OpenRails deployment to add you to a merchant."}
@@ -56,7 +63,7 @@ export function NoMerchants({ inShell = false }: { inShell?: boolean }) {
               if (slug) selectMerchant(slug)
             }}
           >
-            <Label htmlFor="merchant-name">Merchant name</Label>
+            <Label htmlFor="merchant-name">Merchant id</Label>
             <div className="flex gap-2">
               <Input
                 id="merchant-name"
