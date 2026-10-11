@@ -22,6 +22,8 @@ import (
 )
 
 type Catalog struct {
+	// MerchantID names the merchant in public catalog reads.
+	MerchantID          string `json:"merchant_id"`
 	SubscriptionProduct string `json:"subscription_product_id"`
 	SubscriptionPrice   string `json:"subscription_price_id"`
 	OneTimeProduct      string `json:"one_time_product_id"`

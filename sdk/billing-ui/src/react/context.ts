@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react"
 
 import type { BillingClient } from "../client/client"
-import type { SubscriptionChange } from "../client/types"
+import type { CustomerConfig, SubscriptionChange } from "../client/types"
 import type { ConfigStore } from "./config"
 
 export type BillingChange =
@@ -38,6 +38,8 @@ export interface BillingContextValue {
   refresh(): void
   /** The shared `GET /config`; read it with `useConfig()`. */
   config: ConfigStore
+  /** The shared `GET /me/config`; read it with `useCustomerConfig()`. */
+  customerConfig: ConfigStore<CustomerConfig>
 }
 
 export const BillingContext = createContext<BillingContextValue | null>(null)

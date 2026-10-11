@@ -7,6 +7,7 @@ import type { Product } from "./client/types"
 import { Offers } from "./offers"
 import { BillingProvider } from "./react/provider"
 import {
+  MERCHANT,
   apiError,
   fakeBilling,
   price,
@@ -83,6 +84,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-101", "course-bundle"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
@@ -103,7 +105,7 @@ describe("Offers", () => {
     expect(screen.queryByText("Membership")).toBeNull()
     const urls = server.fetch.mock.calls.map(([url]) => String(url))
     expect(urls).toContain(
-      "/billing/v1/catalog/products?keys=course-101&keys=course-bundle"
+      `/billing/v1/catalog/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle`
     )
   })
 
@@ -111,6 +113,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-101", "course-bundle", "channel-membership"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
@@ -125,7 +128,7 @@ describe("Offers", () => {
       .map(([url]) => String(url))
       .filter((url) => url.includes("/catalog/products"))
     expect(reads).toEqual([
-      "/billing/v1/catalog/products?keys=course-101&keys=course-bundle&keys=channel-membership",
+      `/billing/v1/catalog/products?merchant=${MERCHANT}&keys=course-101&keys=course-bundle&keys=channel-membership`,
     ])
   })
 
@@ -133,6 +136,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["channel-membership"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
@@ -150,6 +154,7 @@ describe("Offers", () => {
     const onPaid = vi.fn()
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-101"]}
         onPaid={onPaid}
         onSignInRequired={vi.fn()}
@@ -180,6 +185,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-101"]}
         signedIn={false}
         onPaid={vi.fn()}
@@ -199,6 +205,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-101"]}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
@@ -221,6 +228,7 @@ describe("Offers", () => {
     const onSignInRequired = vi.fn()
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-101"]}
         onPaid={vi.fn()}
         onSignInRequired={onSignInRequired}
@@ -255,6 +263,7 @@ describe("Offers", () => {
     const server = fakeBilling({ products: catalog() })
     mount(
       <Offers
+        merchant={MERCHANT}
         keys={["course-999"]}
         onPaid={vi.fn()}
         onSignInRequired={vi.fn()}
@@ -269,7 +278,7 @@ describe("Offers", () => {
   it("asks nothing for no keys", async () => {
     const server = fakeBilling({ products: catalog() })
     mount(
-      <Offers keys={[]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />,
+      <Offers merchant={MERCHANT} keys={[]} onPaid={vi.fn()} onSignInRequired={vi.fn()} />,
       server
     )
     expect(

@@ -2,7 +2,15 @@ import { describe, expect, it, vi } from "vitest"
 
 import errorFixture from "../../../../testdata/wire/error_envelope.json"
 import subscriptionFixture from "../../../../testdata/wire/subscription.json"
-import { fakeBilling, json, price, product, subscription } from "../test/billing-server"
+import {
+  apiError,
+  fakeBilling,
+  json,
+  MERCHANT,
+  price,
+  product,
+  subscription,
+} from "../test/billing-server"
 import {
   createBillingClient,
   RETRY_BUDGET_MS,
@@ -10,6 +18,7 @@ import {
   WalletRejectedError,
 } from "./client"
 import { BillingError, isServerError } from "./errors"
+import { tokenSource } from "./token-source"
 import { priceSchema, productSchema, subscriptionSchema } from "./types"
 
 describe("wire fixtures", () => {
@@ -251,16 +260,92 @@ describe("listProducts", () => {
       ],
     })
     const client = createBillingClient({ fetch: server.fetch })
-    const page = await client.listProducts({ keys: ["a", "c"] })
+    const page = await client.listProducts({ merchant: MERCHANT, keys: ["a", "c"] })
     expect(page.data.map((p) => p.key)).toEqual(["a"])
     const [url] = server.fetch.mock.calls[0]!
-    expect(String(url)).toBe("/billing/v1/catalog/products?keys=a&keys=c")
+    expect(String(url)).toBe(`/billing/v1/catalog/products?merchant=${MERCHANT}&keys=a&keys=c`)
+  })
+
+  it("answers another merchant's catalog as the server does", async () => {
+    const server = fakeBilling({ products: [product({ id: "prod_a", key: "a" })] })
+    const client = createBillingClient({ fetch: server.fetch })
+    await expect(
+      client.listProducts({ merchant: "0190a000-0000-7000-8000-00000000000b", keys: ["a"] })
+    ).rejects.toMatchObject({ status: 404, code: "resource_not_found" })
   })
 
   it("asks nothing for no keys", async () => {
     const server = fakeBilling()
     const client = createBillingClient({ fetch: server.fetch })
-    expect(await client.listProducts({ keys: [] })).toEqual({ data: [], next_cursor: null })
+    expect(await client.listProducts({ merchant: MERCHANT, keys: [] })).toEqual({ data: [], next_cursor: null })
     expect(server.fetch).not.toHaveBeenCalled()
+  })
+})
+
+describe("an expired token", () => {
+  const expired = () => apiError(401, "credential_expired")
+  // tokens hands out t1, t2, ... and counts what the host was asked for.
+  const tokens = () => {
+    let n = 0
+    const fetchToken = vi.fn(async () => ({ access_token: `t${++n}`, expires_in: 900 }))
+    return { fetchToken, getToken: tokenSource({ fetchToken }) }
+  }
+  // answering serves each request the next answer and records what it carried.
+  const answering = (...answers: (() => Response)[]) => {
+    const sent: { method?: string; bearer: string | null }[] = []
+    const fetch = async (_input: string, init: RequestInit) => {
+      sent.push({ method: init.method, bearer: new Headers(init.headers).get("Authorization") })
+      return (answers.shift() ?? expired)()
+    }
+    return { fetch, sent }
+  }
+
+  it("is replaced once and the call sent again, a write too", async () => {
+    const { fetchToken, getToken } = tokens()
+    const { fetch, sent } = answering(expired, () => json(200, { ...subscription(), id: "sub_1" }))
+    const client = createBillingClient({ fetch, getToken })
+    await client.resumeSubscription("sub_1")
+    expect(sent).toEqual([
+      { method: "POST", bearer: "Bearer t1" },
+      { method: "POST", bearer: "Bearer t2" },
+    ])
+    expect(fetchToken).toHaveBeenCalledTimes(2)
+  })
+
+  it("is not replaced a second time", async () => {
+    const { fetchToken, getToken } = tokens()
+    const { fetch, sent } = answering(expired, expired, expired)
+    const client = createBillingClient({ fetch, getToken })
+    await expect(client.getAccount()).rejects.toMatchObject({ status: 401, code: "credential_expired" })
+    expect(sent.map((request) => request.bearer)).toEqual(["Bearer t1", "Bearer t2"])
+    expect(fetchToken).toHaveBeenCalledTimes(2)
+  })
+
+  it("is left to the host without a token source, and so is any other 401", async () => {
+    const plain = vi.fn(async () => expired())
+    await expect(
+      createBillingClient({ fetch: plain, getToken: () => "host-token" }).getAccount()
+    ).rejects.toMatchObject({ code: "credential_expired" })
+    expect(plain).toHaveBeenCalledTimes(1)
+
+    const { fetchToken, getToken } = tokens()
+    const refused = vi.fn(async () => apiError(401, "authentication_required"))
+    await expect(createBillingClient({ fetch: refused, getToken }).getAccount()).rejects.toMatchObject({
+      code: "authentication_required",
+    })
+    expect(refused).toHaveBeenCalledTimes(1)
+    expect(fetchToken).toHaveBeenCalledTimes(1)
+  })
+
+  it("is never asked for by the public reads", async () => {
+    const { fetchToken, getToken } = tokens()
+    const server = fakeBilling({ products: [product({ id: "prod_a", key: "a" })] })
+    const client = createBillingClient({ fetch: server.fetch, getToken })
+    await client.getConfig()
+    await client.listProducts({ merchant: MERCHANT, keys: ["a"] })
+    expect(fetchToken).not.toHaveBeenCalled()
+    expect(
+      server.fetch.mock.calls.map(([, init]) => new Headers(init?.headers).get("Authorization"))
+    ).toEqual([null, null])
   })
 })

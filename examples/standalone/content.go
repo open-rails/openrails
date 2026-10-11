@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -75,9 +76,34 @@ func held(c *gin.Context, bill *openrails.Client, entitlements ...string) (map[s
 	return check.Entitlements, nil
 }
 
+// seller answers the id of the merchant bill acts on, which the browser's
+// public catalog reads name. A client in the app's own process knows it; a
+// remote one asks the server once: its access read answers the merchant's
+// own scope, whose id is the merchant's.
+func seller(bill *openrails.Client) func(*gin.Context) (string, error) {
+	var mu sync.Mutex
+	var id string
+	return func(c *gin.Context) (string, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if id == "" && !bill.MerchantID().IsZero() {
+			id = bill.MerchantID().String()
+		}
+		if id == "" {
+			access, err := bill.GetAdminAccess(c)
+			if err != nil {
+				return "", err
+			}
+			id = access.ScopeID
+		}
+		return id, nil
+	}
+}
+
 // courseRoutes are the app's API: the course list, with prices and what the
 // user owns; each video, gated; and the media its signed URLs play.
 func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, media mediaKey) {
+	merchant := seller(bill)
 	// GET /api/courses?cursor=&limit= pages over the host's courses. Each page
 	// costs one product read and one entitlement read, never one per course.
 	r.GET("/api/courses", authkitgin.Optional(ak), func(c *gin.Context) {
@@ -105,6 +131,11 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
+		mid, err := merchant(c)
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
 		prices := map[string][]gin.H{} // by product key
 		for _, product := range offers.Items {
 			for _, p := range product.Prices {
@@ -120,7 +151,8 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 		if from+limit < len(courses) {
 			next = strconv.Itoa(from + limit)
 		}
-		c.JSON(http.StatusOK, gin.H{"data": data, "next_cursor": next})
+		// merchant_id: who sells them, for the page's BuyButtons.
+		c.JSON(http.StatusOK, gin.H{"merchant_id": mid, "data": data, "next_cursor": next})
 	})
 
 	// A video: its signed URL to whoever holds any key that unlocks it, 402
@@ -149,12 +181,17 @@ func courseRoutes(r *gin.Engine, ak *authkit.Client, bill *openrails.Client, med
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
 		}
+		mid, err := merchant(c)
+		if err != nil {
+			c.AbortWithStatus(http.StatusServiceUnavailable)
+			return
+		}
 		products := []string{}
 		for _, product := range offers.Items {
 			products = append(products, product.Key)
 		}
 		slices.Sort(products)
-		c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "products": products, "buy": "/courses/" + course.Slug + "/buy"})
+		c.JSON(http.StatusPaymentRequired, gin.H{"error": "access_required", "merchant_id": mid, "products": products, "buy": "/courses/" + course.Slug + "/buy"})
 	})
 
 	// GET /media/*path serves a file under media/ to a signed, unexpired URL;

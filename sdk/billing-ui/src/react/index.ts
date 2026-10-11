@@ -10,6 +10,7 @@ export {
 export {
   useConfig,
   useCurrencyScales,
+  useCustomerConfig,
   type ConfigState,
   type ConfigStore,
 } from "./config"

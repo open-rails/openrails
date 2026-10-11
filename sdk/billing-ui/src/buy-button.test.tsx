@@ -8,6 +8,7 @@ import type { Order } from "./client/types"
 import type { OrderModalProps } from "./modal"
 import { BillingProvider } from "./react/provider"
 import {
+  MERCHANT,
   apiError,
   fakeBilling,
   json,
@@ -65,6 +66,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="course-101"
           price="rent"
           onPaid={vi.fn()}
@@ -85,6 +87,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="course-101"
           price="rent"
           label="Rent"
@@ -107,6 +110,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="course-101"
           price="rent"
           label="Rent"
@@ -128,6 +132,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="course-101"
           price="rent"
           label="Rent"
@@ -175,6 +180,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="api-credits"
           price="deposit"
           amount="100000000"
@@ -209,6 +215,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="course-101"
           price="purchase"
           label="Buy"
@@ -228,6 +235,7 @@ describe("BuyButton", () => {
     rerender(
       tree(
         <BuyButton
+          merchant={MERCHANT}
           product="course-101"
           price="rent"
           label="Rent"

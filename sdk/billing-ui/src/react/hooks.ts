@@ -243,17 +243,20 @@ export interface ProductsState {
   refetch: () => void
 }
 
-/** The product keys to look up: `ProductListOptions`. */
-export type ProductsOptions = Pick<ProductListOptions, "keys">
+/** The merchant and its product keys to look up: `ProductListOptions`. */
+export type ProductsOptions = Pick<ProductListOptions, "merchant" | "keys">
 
 /**
- * The products on sale named by `keys`, each with its active prices: a
- * public catalog lookup.
+ * The products `merchant` has on sale named by `keys`, each with its active
+ * prices: a public catalog lookup.
  */
-export function useProducts({ keys }: ProductsOptions): ProductsState {
+export function useProducts({
+  merchant,
+  keys,
+}: ProductsOptions): ProductsState {
   const { client } = useBillingContext()
-  const remote = useRemote(JSON.stringify(keys), (signal) =>
-    client.listProducts({ keys, signal })
+  const remote = useRemote(JSON.stringify([merchant, keys]), (signal) =>
+    client.listProducts({ merchant, keys, signal })
   )
   return {
     products: remote.data?.data ?? null,

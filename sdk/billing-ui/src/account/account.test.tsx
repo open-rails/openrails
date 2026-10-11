@@ -424,7 +424,7 @@ describe("PaymentMethodsPanel", () => {
     expect(await screen.findByTestId("payment-method-row")).toHaveTextContent(
       "Mastercard •••• 5454"
     )
-    expect(server.calls.filter((call) => call === "GET /config")).toHaveLength(
+    expect(server.calls.filter((call) => call === "GET /me/config")).toHaveLength(
       1
     )
     expect(server.calls).toContain("POST /me/payment-methods")
@@ -432,7 +432,7 @@ describe("PaymentMethodsPanel", () => {
 
   it("offers no card entry while the configuration fails, and retries", async () => {
     const server = fakeBilling({ psps: [cardPsp] })
-    server.fail["GET /config"] = apiError(500, "internal_error")
+    server.fail["GET /me/config"] = apiError(500, "internal_error")
     mount(<PaymentMethodsPanel />, server)
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Adding a card is temporarily unavailable."
@@ -464,7 +464,7 @@ describe("PaymentMethodsPanel", () => {
       ).toBeInTheDocument()
       expect(screen.queryByText(note)).toBeNull()
       expect(
-        server.calls.filter((call) => call === "GET /config")
+        server.calls.filter((call) => call === "GET /me/config")
       ).toHaveLength(2)
     } finally {
       vi.useRealTimers()

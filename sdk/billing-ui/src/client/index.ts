@@ -18,6 +18,14 @@ export {
   type SubscriptionChangeInput,
 } from "./client"
 export {
+  redeemAssertion,
+  tokenSource,
+  type RedeemAssertionOptions,
+  type TokenResponse,
+  type TokenSource,
+  type TokenSourceOptions,
+} from "./token-source"
+export {
   BillingError,
   isBillingError,
   isServerError,
@@ -33,6 +41,7 @@ export type {
   Cart,
   Currency,
   CurrencyScales,
+  CustomerConfig,
   CustomerLink,
   PaymentConfig,
   PaymentFailure,

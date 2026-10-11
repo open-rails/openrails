@@ -339,7 +339,12 @@ func (a *app) buy(t *testing.T, token, product, price string) {
 			} `json:"prices"`
 		} `json:"data"`
 	}
-	a.call(t, "", http.MethodGet, "/billing/v1/catalog/products?keys="+product, nil, &catalog)
+	// As the page does: the app says which merchant sells its courses.
+	var store struct {
+		MerchantID string `json:"merchant_id"`
+	}
+	a.call(t, "", http.MethodGet, "/api/courses?limit=1", nil, &store)
+	a.call(t, "", http.MethodGet, "/billing/v1/catalog/products?merchant="+store.MerchantID+"&keys="+product, nil, &catalog)
 	var line map[string]string
 	var total string
 	for _, p := range catalog.Data {

@@ -69,8 +69,12 @@ const order = (payment: Record<string, unknown>, status = "open") => ({
   created_at: "2026-10-10T00:00:00Z",
 })
 
-const config = {
+// The deployment's configuration, and the customer's merchant's.
+const deployment = {
   capabilities: { route_groups: {}, features: {} },
+  currencies: [{ code: "USD", decimals: 6 }],
+}
+const config = {
   payment: {
     psps: [
       {
@@ -84,7 +88,7 @@ const config = {
       },
     ],
   },
-  currencies: [{ code: "USD", decimals: 6 }],
+  merchant: { display_name: "Shop" },
 }
 
 describe("OrderCheckout", () => {
@@ -105,7 +109,8 @@ describe("OrderCheckout", () => {
     })
     fakeStripe.handleNextAction.mockClear()
     const fetch = vi.fn(async (input: string) => {
-      if (input.endsWith("/config")) return Response.json(config)
+      if (input.endsWith("/me/config")) return Response.json(config)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (input.includes("/me/payment-methods"))
         return Response.json({ data: [], next_cursor: null })
       if (input.endsWith("/me/orders/ord_1"))
@@ -147,7 +152,8 @@ describe("OrderCheckout", () => {
   it("pays an order with a new card: a decline, a challenge, then complete", async () => {
     const pays: { body: unknown; key: string | null }[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {
-      if (input.endsWith("/config")) return Response.json(config)
+      if (input.endsWith("/me/config")) return Response.json(config)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (
         input.endsWith("/me/payment-methods?limit=100") ||
         input.includes("/me/payment-methods")
@@ -242,7 +248,8 @@ describe("OrderCheckout", () => {
       reusable,
     })
     const fetch = vi.fn(async (input: string) => {
-      if (input.endsWith("/config")) return Response.json(config)
+      if (input.endsWith("/me/config")) return Response.json(config)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (input.includes("/me/payment-methods"))
         return Response.json({
           data: [
@@ -287,7 +294,8 @@ describe("OrderCheckout", () => {
     }
     const paid: Record<string, unknown>[] = []
     const fetch = vi.fn(async (input: string, init?: RequestInit) => {
-      if (input.endsWith("/config")) return Response.json(config)
+      if (input.endsWith("/me/config")) return Response.json(config)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (input.includes("/me/payment-methods"))
         return Response.json({
           data: [
@@ -345,7 +353,8 @@ describe("OrderCheckout", () => {
     })
     const paid: Record<string, unknown>[] = []
     const fetch = vi.fn(async (input: string, init?: RequestInit) => {
-      if (input.endsWith("/config")) return Response.json(config)
+      if (input.endsWith("/me/config")) return Response.json(config)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (input.includes("/me/payment-methods"))
         return Response.json({
           data: [
@@ -413,7 +422,8 @@ describe("OrderCheckout", () => {
     })
     const pays: unknown[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {
-      if (input.endsWith("/config")) return Response.json(solanaConfig)
+      if (input.endsWith("/me/config")) return Response.json(solanaConfig)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (input.includes("/me/payment-methods"))
         return Response.json({ data: [], next_cursor: null })
       if (input.endsWith("/me/orders/ord_1"))
@@ -489,7 +499,8 @@ describe("OrderCheckout", () => {
     })
     const pays: unknown[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {
-      if (input.endsWith("/config")) return Response.json(hostedConfig)
+      if (input.endsWith("/me/config")) return Response.json(hostedConfig)
+      if (input.endsWith("/config")) return Response.json(deployment)
       if (input.includes("/me/payment-methods"))
         return Response.json({ data: [], next_cursor: null })
       if (input.endsWith("/me/orders/ord_1"))

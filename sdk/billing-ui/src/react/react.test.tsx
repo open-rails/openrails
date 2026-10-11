@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest"
 import { createBillingClient } from "../client/client"
 import { isBillingError } from "../client/errors"
 import {
+  MERCHANT,
   apiError,
   fakeBilling,
   payment,
@@ -13,7 +14,12 @@ import {
   subscription,
   type FakeBilling,
 } from "../test/billing-server"
-import { useConfig, useCurrencyScales } from "./config"
+import {
+  createConfigStore,
+  useConfig,
+  useCurrencyScales,
+  useCustomerConfig,
+} from "./config"
 import { useBillingRefresh } from "./context"
 import {
   usePaymentMethods,
@@ -60,6 +66,39 @@ describe("useConfig", () => {
     act(() => result.current.a.refetch())
     await waitFor(() => expect(result.current.b.error?.status).toBe(404))
     expect(result.current.b.config).not.toBeNull()
+  })
+})
+
+describe("useCustomerConfig", () => {
+  it("fetches GET /me/config once for every reader", async () => {
+    const server = fakeBilling({ psps: [{ psp_id: "psp_1", key: "nmi", rail: "nmi", custodian: "psp", display_name: "Card", flow: "tokenize" }] })
+    const { result } = setup(
+      () => ({ a: useCustomerConfig(), b: useCustomerConfig() }),
+      server
+    )
+    await waitFor(() => expect(result.current.a.config).not.toBeNull())
+    expect(result.current.b.config).toBe(result.current.a.config)
+    expect(result.current.a.config).toMatchObject({
+      payment: { psps: [{ psp_id: "psp_1" }], solana: null },
+      merchant: { display_name: "Test Shop" },
+    })
+    expect(server.calls).toEqual(["GET /me/config"])
+  })
+
+  it("asks again for the next reader after a read that failed", async () => {
+    const read = vi
+      .fn<() => Promise<{ loaded: true }>>()
+      .mockRejectedValueOnce(new Error("signed out"))
+      .mockResolvedValueOnce({ loaded: true })
+    const store = createConfigStore(read)
+    store.ensure()
+    await waitFor(() => expect(store.snapshot().error).not.toBeNull())
+    // Signed in since: the next component to mount reads it.
+    store.ensure()
+    await waitFor(() => expect(store.snapshot().config).toEqual({ loaded: true }))
+    expect(store.snapshot().error).toBeNull()
+    store.ensure()
+    expect(read).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -174,7 +213,10 @@ describe("plan change", () => {
         product({ id: "prod_other", key: "other" }),
       ],
     })
-    const { result } = setup(() => useProducts({ keys: ["plus", "pro"] }), server)
+    const { result } = setup(
+      () => useProducts({ merchant: MERCHANT, keys: ["plus", "pro"] }),
+      server
+    )
     await waitFor(() => expect(result.current.products).toHaveLength(2))
     expect(result.current.products![0].prices[0]).toMatchObject({
       id: "price_plus",

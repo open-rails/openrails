@@ -23,11 +23,13 @@ import { useProducts, type ProductsState } from "#orck/react/hooks"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
 
 export interface OffersProps {
+  /** The id of the merchant whose catalog `keys` are looked up in. */
+  merchant?: string
   /**
-   * What to sell: these product keys, such as a course, its bundle and the
-   * membership that also unlocks it, looked up in OpenRails' public catalog.
-   * The host's server names them (the Go Client's ListOffers finds the
-   * products granting an entitlement).
+   * What to sell: these product keys of `merchant`, such as a course, its
+   * bundle and the membership that also unlocks it, looked up in OpenRails'
+   * public catalog. The host's server names them (the Go Client's
+   * ListOffers finds the products granting an entitlement).
    */
   keys?: string[]
   /**
@@ -63,7 +65,10 @@ export function Offers({ products, ...props }: OffersProps) {
 }
 
 function FetchedOffers(props: OffersProps) {
-  const state = useProducts({ keys: props.keys ?? [] })
+  const state = useProducts({
+    merchant: props.merchant ?? "",
+    keys: props.keys ?? [],
+  })
   return <OfferList {...props} state={state} />
 }
 

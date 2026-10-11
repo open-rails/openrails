@@ -4,7 +4,7 @@
 import { describe, expect, it, vi } from "vitest"
 
 import currenciesFixture from "../../../../testdata/wire/currencies.json"
-import { apiError, json, product } from "../test/billing-server"
+import { apiError, json, MERCHANT, product } from "../test/billing-server"
 import { createBillingClient } from "./client"
 
 const MAX = "9223372036854775807"
@@ -26,7 +26,8 @@ function served(...responses: Response[]) {
       headers: new Headers(init.headers),
     }
   }
-  return { client: createBillingClient({ fetch }), fetch, request }
+  const client = createBillingClient({ fetch, getToken: () => "customer-token" })
+  return { client, fetch, request }
 }
 
 const list = (data: unknown[], next: string | null = null) => ({
@@ -61,11 +62,15 @@ describe("catalog", () => {
         ])
       )
     )
-    const page = await client.listProducts({ keys: ["plus", "bare"] })
+    const page = await client.listProducts({
+      merchant: MERCHANT,
+      keys: ["plus", "bare"],
+    })
     expect(request()).toMatchObject({
-      url: "/billing/v1/catalog/products?keys=plus&keys=bare",
+      url: `/billing/v1/catalog/products?merchant=${MERCHANT}&keys=plus&keys=bare`,
       method: "GET",
     })
+    expect(request().headers.get("Authorization")).toBeNull()
     expect(page.next_cursor).toBeNull()
     expect(page.data[0]).toMatchObject({
       id: "prod_1",
@@ -90,22 +95,24 @@ describe("catalog", () => {
     const { client } = served(
       json(200, list([product({ prices: [{ ...price, unit_amount: 999 }] })]))
     )
-    await expect(client.listProducts({ keys: ["plus"] })).rejects.toMatchObject({
+    await expect(
+      client.listProducts({ merchant: MERCHANT, keys: ["plus"] })
+    ).rejects.toMatchObject({
       code: "invalid_response",
     })
   })
 
-  it("reads the public configuration", async () => {
+  it("reads the deployment's configuration with no credential", async () => {
     const capabilities = {
       route_groups: { admin: true, catalog_write: false, merchant_config: false },
-      features: { api_host: false },
+      features: { merchant_config_edits: false },
     }
     const { client, request } = served(
-      json(200, { capabilities, currencies: currenciesFixture, payment: null }),
+      json(200, { capabilities, currencies: currenciesFixture, captcha: null, network: null }),
       json(200, { currencies: currenciesFixture })
     )
     const config = await client.getConfig()
-    expect(config).toEqual({ capabilities, currencies: currenciesFixture, payment: null })
+    expect(config).toEqual({ capabilities, currencies: currenciesFixture, captcha: null, network: null })
     expect(config.currencies).toContainEqual({ code: "JPY", decimals: 4, minor_decimals: 0 })
     expect(request().url).toBe("/billing/v1/config")
     expect(request().headers.get("Authorization")).toBeNull()
@@ -275,11 +282,9 @@ describe("Solana", () => {
     recurring_eligible: true,
   }
 
-  it("reads the network and tokens from the payment setup", async () => {
+  it("reads the network and tokens from the customer's merchant's payment setup", async () => {
     const { client, request } = served(
       json(200, {
-        capabilities: { route_groups: {}, features: {} },
-        currencies: currenciesFixture,
         payment: {
           psps: [],
           solana: {
@@ -289,6 +294,7 @@ describe("Solana", () => {
             tokens: [token],
           },
         },
+        merchant: { display_name: "Shop", logo_url: null, support_url: null, embed_origins: null },
       }),
       json(500, {
         error: {
@@ -298,7 +304,8 @@ describe("Solana", () => {
         },
       })
     )
-    expect((await client.getConfig()).payment).toMatchObject({
+    const config = await client.getCustomerConfig()
+    expect(config.payment).toMatchObject({
       psps: [],
       solana: {
         network: "devnet",
@@ -307,8 +314,10 @@ describe("Solana", () => {
         tokens: [{ symbol: "USDC", decimals: 6, recurring_eligible: true }],
       },
     })
-    expect(request().url).toBe("/billing/v1/config")
-    await expect(client.getConfig()).rejects.toMatchObject({
+    expect(config.merchant).toEqual({ display_name: "Shop", logo_url: null, support_url: null, embed_origins: [] })
+    expect(request().url).toBe("/billing/v1/me/config")
+    expect(request().headers.get("Authorization")).toBe("Bearer customer-token")
+    await expect(client.getCustomerConfig()).rejects.toMatchObject({
       status: 500,
       code: "internal_error",
     })

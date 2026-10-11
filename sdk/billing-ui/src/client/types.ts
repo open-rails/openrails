@@ -639,12 +639,6 @@ export const captchaConfigSchema = z.object({
 })
 export type CaptchaConfig = z.infer<typeof captchaConfigSchema>
 
-/**
- * What a browser needs to know about the deployment and its merchant
- * (`GET /config`): the mount's capabilities, the currency registry, the
- * merchant's payment setup (null when the request resolves no merchant) and
- * the captcha (null when the deployment challenges nobody).
- */
 /** The merchant as its customers see it; logo and support are https. */
 export const publicMerchantSchema = z.object({
   display_name: z.string(),
@@ -658,6 +652,11 @@ export const publicMerchantSchema = z.object({
 })
 export type PublicMerchant = z.infer<typeof publicMerchantSchema>
 
+/**
+ * What any browser needs to know about the deployment (`GET /config`, no
+ * credential): the mount's capabilities, the currency registry and the
+ * captcha (null when the deployment challenges nobody).
+ */
 export const publicConfigSchema = z.object({
   capabilities: z.object({
     route_groups: z.record(z.string(), z.boolean()),
@@ -667,8 +666,6 @@ export const publicConfigSchema = z.object({
     .array(currencySchema)
     .nullish()
     .transform((v) => v ?? []),
-  payment: paymentConfigSchema.nullish(),
-  merchant: publicMerchantSchema.nullish(),
   captcha: captchaConfigSchema.nullish(),
   /**
    * The checkout page's sign-in to the customer network (OpenID Connect,
@@ -677,6 +674,16 @@ export const publicConfigSchema = z.object({
   network: z.object({ issuer: z.string(), client_id: z.string() }).nullish(),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>
+
+/**
+ * What a customer's browser needs to know about the merchant it pays
+ * (`GET /me/config`): its payment setup and how it presents itself.
+ */
+export const customerConfigSchema = z.object({
+  payment: paymentConfigSchema,
+  merchant: publicMerchantSchema,
+})
+export type CustomerConfig = z.infer<typeof customerConfigSchema>
 
 export const networkLinkChallengeSchema = z.object({
   id: z.string(),

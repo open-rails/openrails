@@ -16,6 +16,8 @@ import { useProducts } from "#orck/react/hooks"
 import { useScopeProps, useUiSettings } from "#orck/scope-context"
 
 export interface BuyButtonProps {
+  /** The id of the merchant that sells the product. */
+  merchant: string
   /** The product's catalog key. */
   product: string
   /** The price's key within the product. */
@@ -45,14 +47,19 @@ export interface BuyButtonProps {
   className?: string
 }
 
-export function BuyButton(props: BuyButtonProps) {
+export function BuyButton({
+  merchant,
+  product,
+  price: priceKey,
+  ...props
+}: BuyButtonProps) {
   const m = useMessages()
   const { locale } = useUiSettings()
   const scales = useCurrencyScales()
-  const { products } = useProducts({ keys: [props.product] })
+  const { products } = useProducts({ merchant, keys: [product] })
   const price = products
-    ?.find((p) => p.key === props.product)
-    ?.prices.find((p) => p.key === props.price)
+    ?.find((p) => p.key === product)
+    ?.prices.find((p) => p.key === priceKey)
   return (
     <Purchase
       {...props}
@@ -62,7 +69,10 @@ export function BuyButton(props: BuyButtonProps) {
   )
 }
 
-export type PurchaseProps = Omit<BuyButtonProps, "product" | "price"> & {
+export type PurchaseProps = Omit<
+  BuyButtonProps,
+  "merchant" | "product" | "price"
+> & {
   /** The price to buy; the button waits while it is unknown. */
   priceId?: string
   label: string

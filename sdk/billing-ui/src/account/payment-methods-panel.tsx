@@ -26,7 +26,7 @@ import {
 import { Spinner } from "#orck/components/ui/spinner"
 import { useMessages } from "#orck/i18n/context"
 import type { Translator } from "#orck/i18n/messages"
-import { useConfig } from "#orck/react/config"
+import { useCustomerConfig } from "#orck/react/config"
 import { usePaymentMethods } from "#orck/react/hooks"
 import { useScopeProps } from "#orck/scope-context"
 import { canSavePaymentMethod, cardRetryAfter, checkoutPsps } from "#orck/psp"
@@ -60,7 +60,7 @@ function removeMessage(error: BillingError, m: Translator): string {
 
 /**
  * The customer's saved cards. "Add card" offers each PSP of the merchant's
- * payment setup (`GET /config`) that saves a card in the page.
+ * payment setup (`GET /me/config`) that saves a card in the page.
  */
 export function PaymentMethodsPanel({
   defaultCurrency,
@@ -79,8 +79,8 @@ export function PaymentMethodsPanel({
     message: string
   } | null>(null)
   const [adding, setAdding] = React.useState(false)
-  const config = useConfig()
-  const psps = checkoutPsps(config.config?.payment?.psps ?? [])
+  const config = useCustomerConfig()
+  const psps = checkoutPsps(config.config?.payment.psps ?? [])
   const savable = psps.filter(canSavePaymentMethod)
   const retryAfter = savable.length > 0 ? null : cardRetryAfter(psps)
   const { refetch: refetchConfig } = config

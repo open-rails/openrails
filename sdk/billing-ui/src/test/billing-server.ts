@@ -195,12 +195,15 @@ const cursorPage = (rows: Row[], limit: number, cursor: string | null) => {
   }
 }
 
+/** The fake's one merchant: the id its public catalog answers to. */
+export const MERCHANT = "0190a000-0000-7000-8000-00000000000a"
+
 export interface FakeBilling {
   subscriptions: Row[]
   methods: Row[]
   payments: Row[]
   products: Row[]
-  /** The payment setup's PSPs in `GET /config`. */
+  /** The payment setup's PSPs in `GET /me/config`. */
   psps: Record<string, unknown>[]
   /** The registry in `GET /config`. */
   currencies: Record<string, unknown>[]
@@ -391,13 +394,32 @@ export function fakeBilling(
         return json(200, {
           capabilities: { route_groups: {}, features: {} },
           currencies: state.currencies,
+          rails: [],
+          captcha: null,
+          network: null,
+        })
+      if (key === "GET /me/config")
+        return json(200, {
           payment: { psps: state.psps, solana: null },
+          merchant: {
+            display_name: "Test Shop",
+            logo_url: null,
+            support_url: null,
+            embed_origins: [],
+          },
         })
       if (key === "GET /catalog/products") {
-        // A lookup by product key: keys alone, 1 to 100 of them.
-        const other = [...url.searchParams.keys()].find((n) => n !== "keys")
+        // A lookup by product key: one merchant, and 1 to 100 keys.
+        const other = [...url.searchParams.keys()].find(
+          (n) => n !== "keys" && n !== "merchant"
+        )
         if (other)
-          return apiError(400, "invalid_query", `the public catalog takes only keys, not ${other}`)
+          return apiError(400, "invalid_query", `the public catalog takes only merchant and keys, not ${other}`)
+        const merchants = url.searchParams.getAll("merchant")
+        if (merchants.length !== 1 || !merchants[0])
+          return apiError(400, "invalid_query", "merchant is one merchant id")
+        if (merchants[0] !== MERCHANT)
+          return apiError(404, "resource_not_found", "merchant not found")
         const keys = url.searchParams.getAll("keys")
         if (!keys.length || keys.length > 100 || keys.includes(""))
           return apiError(400, "invalid_query", "keys names 1 to 100 products")

@@ -8,8 +8,10 @@ import {
 } from "./errors"
 import { OPENRAILS_CURRENCY_SCALES } from "./generated/currencies"
 import type * as wire from "./generated/wire"
+import { isTokenSource } from "./token-source"
 import {
   accountSchema,
+  customerConfigSchema,
   customerLinkSchema,
   networkLinkChallengeSchema,
   publicConfigSchema,
@@ -24,6 +26,7 @@ import {
   subscriptionChangePreviewSchema,
   subscriptionChangeSchema,
   type Account,
+  type CustomerConfig,
   type CustomerLink,
   type NetworkLinkChallenge,
   type PublicConfig,
@@ -51,7 +54,12 @@ export interface BillingClientOptions {
    * or combine the default with `getToken`.
    */
   fetch?: (input: string, init: RequestInit) => Promise<Response>
-  /** Bearer for each request; omit when `fetch` authenticates. */
+  /**
+   * The customer's access token, sent as the bearer of every request but
+   * the two public reads (`getConfig`, `listProducts`); omit when `fetch`
+   * authenticates. A `tokenSource` keeps it fresh: a call answered 401
+   * `credential_expired` is then retried once with a new token.
+   */
   getToken?: () =>
     string | null | undefined | Promise<string | null | undefined>
   /** Sent as Accept-Language. */
@@ -64,10 +72,11 @@ export interface BillingClientOptions {
 }
 
 /**
- * A public catalog lookup: the products named by `keys` (at most 100 product
- * keys), in one page.
+ * A public catalog lookup: the products of `merchant` (its id) named by
+ * `keys` (at most 100 product keys), in one page.
  */
 export interface ProductListOptions {
+  merchant: string
   keys: string[]
   signal?: AbortSignal
 }
@@ -155,8 +164,8 @@ interface RequestOptions {
   body?: unknown
   signal?: AbortSignal
   headers?: Record<string, string>
-  /** Sends no bearer: a public route. */
-  anonymous?: boolean
+  /** A public route: it reads no credential, so none is sent. */
+  public?: boolean
 }
 
 /** Total wait a GET may spend on its one retry. */
@@ -234,7 +243,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
   ): Promise<Response> {
     const headers = new Headers({ Accept: "application/json", ...opts.headers })
     if (opts.body !== undefined) headers.set("Content-Type", "application/json")
-    const token = opts.anonymous ? undefined : await options.getToken?.()
+    let token = opts.public ? undefined : await options.getToken?.()
     if (token) headers.set("Authorization", `Bearer ${token}`)
     const lang = options.language?.()
     if (lang) headers.set("Accept-Language", lang)
@@ -249,6 +258,7 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     // 429 that names its wait), within RETRY_BUDGET_MS. Writes never are.
     const retries = method === "GET" ? 1 : 0
     let waited = 0
+    let renewed = false
     for (let attempt = 0; ; attempt++) {
       let res: Response
       try {
@@ -266,6 +276,23 @@ export function createBillingClient(options: BillingClientOptions = {}) {
         continue
       }
       if (res.ok) return res
+      // The gate refused an expired token before the route ran: any call,
+      // a write too, is sent once more with the source's next token.
+      if (
+        res.status === 401 &&
+        token &&
+        !renewed &&
+        isTokenSource(options.getToken)
+      ) {
+        const refusal = await readBillingError(res)
+        if (refusal.code !== "credential_expired") throw refusal
+        options.getToken.invalidate(token)
+        token = await options.getToken()
+        headers.set("Authorization", `Bearer ${token}`)
+        renewed = true
+        attempt--
+        continue
+      }
       const delay = retryDelay(res)
       if (
         attempt >= retries ||
@@ -665,14 +692,16 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * The products on sale named by `keys`, each with its current prices.
-     * No keys name no products: nothing is fetched.
+     * The products `merchant` has on sale named by `keys`, each with its
+     * current prices: a public read, the same signed in or out. No keys
+     * name no products: nothing is fetched.
      */
     async listProducts(opts: ProductListOptions): Promise<Page<Product>> {
       if (opts.keys.length === 0) return { data: [], next_cursor: null }
       return json(productPage, "/catalog/products", {
-        query: { keys: opts.keys },
+        query: { merchant: opts.merchant, keys: opts.keys },
         signal: opts.signal,
+        public: true,
       })
     },
 
@@ -702,12 +731,21 @@ export function createBillingClient(options: BillingClientOptions = {}) {
     },
 
     /**
-     * The deployment's public configuration: what the mount serves, the
-     * currency registry and the merchant's payment setup. React components
-     * share one copy through `useConfig()`.
+     * The deployment's configuration, a public read: what the mount serves,
+     * the currency registry and the captcha. React components share one
+     * copy through `useConfig()`.
      */
     getConfig(signal?: AbortSignal): Promise<PublicConfig> {
-      return json(publicConfigSchema, "/config", { signal, anonymous: true })
+      return json(publicConfigSchema, "/config", { signal, public: true })
+    },
+
+    /**
+     * The customer's merchant: its payment setup (PSPs, Solana network and
+     * tokens) and how it presents itself. React components share one copy
+     * through `useCustomerConfig()`.
+     */
+    getCustomerConfig(signal?: AbortSignal): Promise<CustomerConfig> {
+      return json(customerConfigSchema, "/me/config", { signal })
     },
 
     /** Currency code (upper case) to native-unit decimals. */

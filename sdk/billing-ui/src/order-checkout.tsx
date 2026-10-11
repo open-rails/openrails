@@ -2,8 +2,8 @@
 // in the PSP's own fields (charged and saved in one call), Apple Pay or Google
 // Pay through a Stripe PSP (when asked), or a Solana wallet through a Solana
 // Pay QR. A bank challenge runs in the page, then confirm.
-// Driven only by the order API (GET, pay, confirm) and GET /config; never
-// cancels.
+// Driven only by the order API (GET, pay, confirm), GET /config and GET
+// /me/config; never cancels.
 import * as React from "react"
 
 import {
@@ -28,7 +28,7 @@ import { billingDetailsOf } from "./lib/billing"
 import { amountToMinorUnits, formatAmount } from "./lib/money"
 import { loadStripeFor } from "./lib/stripe"
 import { cardSetupDriver, type PspConfig } from "./psp"
-import { useConfig, useCurrencyScales } from "./react/config"
+import { useConfig, useCurrencyScales, useCustomerConfig } from "./react/config"
 import { useBillingContext } from "./react/context"
 import {
   TokenizedCardForm,
@@ -84,6 +84,7 @@ export function OrderCheckout({
   const context = useBillingContext()
   const client = given ?? context.client
   const { config } = useConfig()
+  const { config: merchant } = useCustomerConfig()
   const scales = useCurrencyScales()
   const [order, setOrder] = React.useState<Order>()
   const [methods, setMethods] = React.useState<PaymentMethod[]>([])
@@ -142,10 +143,10 @@ export function OrderCheckout({
   const options = React.useMemo(() => order?.payment_options ?? [], [order])
   const psps = React.useMemo(
     () =>
-      (config?.payment?.psps ?? []).filter((psp) =>
+      (merchant?.payment.psps ?? []).filter((psp) =>
         options.some((option) => option.psp_id === psp.psp_id)
       ),
-    [config, options]
+    [merchant, options]
   )
   // New cards: PSPs whose own fields make a token, where the order takes
   // one (a renewal takes saved cards only).
@@ -188,7 +189,7 @@ export function OrderCheckout({
           option.psp_id === item.psp_id && option.accepts.includes("redirect")
       )
   )
-  const tokens = solana ? (config?.payment?.solana?.tokens ?? []) : []
+  const tokens = solana ? (merchant?.payment.solana?.tokens ?? []) : []
   const walletPsp = wallets
     ? cardPsps.find(
         (item) =>
@@ -241,7 +242,7 @@ export function OrderCheckout({
       return true
     }
     const secret = next.payload?.client_secret
-    const challenger = config?.payment?.psps.find(
+    const challenger = merchant?.payment.psps.find(
       (item) => item.psp_id === next.psp_id
     )
     const publishable = challenger?.config?.publishable_key

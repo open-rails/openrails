@@ -25,7 +25,8 @@ export function StorePage() {
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
   const [cursor, setCursor] = useState("0")
-  const [pages, setPages] = useState<{ data: Course[]; next_cursor: string | null }[]>([])
+  // A page of courses, and the merchant that sells them: BuyButton names it.
+  const [pages, setPages] = useState<{ merchant_id: string; data: Course[]; next_cursor: string | null }[]>([])
   useEffect(() => {
     let current = true
     auth
@@ -39,7 +40,7 @@ export function StorePage() {
   const next = pages.at(-1)?.next_cursor
   return (
     <>
-      {pages.flatMap((page) => page.data).map((course) => (
+      {pages.flatMap((page) => page.data.map((course) => ({ course, merchant: page.merchant_id }))).map(({ course, merchant }) => (
         <section key={course.slug}>
           <h2>{course.title}</h2>
           {course.members_only && <p>Members only</p>}
@@ -49,6 +50,7 @@ export function StorePage() {
             course.prices.map((price) => (
               <BuyButton
                 key={price.key}
+                merchant={merchant}
                 product={course.product_key}
                 price={price.key}
                 label={`${formatAmount(price.amount, price.currency, billing.currencies[price.currency])} ${price.terms}`}
@@ -91,15 +93,15 @@ export function CoursePage() {
   return <video src={videoURL} controls />
 }
 
-// CourseBuyPage asks the server which products on sale unlock the course (the
-// course, the bundle, the membership) and offers them. Paid, the buyer goes
-// back to the course, which now lets them in.
+// CourseBuyPage asks the server which of its merchant's products on sale
+// unlock the course (the course, the bundle, the membership) and offers them.
+// Paid, the buyer goes back to the course, which now lets them in.
 export function CourseBuyPage() {
   const { course = "" } = useParams()
   const navigate = useNavigate()
   const { signedIn } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
-  const [products, setProducts] = useState<string[]>()
+  const [offer, setOffer] = useState<{ merchant_id: string; products: string[] }>()
   const [failed, setFailed] = useState(false)
   useEffect(() => {
     auth.authFetch(`/api/courses/${course}`).then(async (res) => {
@@ -108,7 +110,7 @@ export function CourseBuyPage() {
           navigate(`/courses/${course}`, { replace: true })
           break
         case 402: // not theirs yet: the server names the products that unlock it
-          setProducts((await res.json()).products)
+          setOffer(await res.json())
           break
         default: // unknown course, or the server is unavailable
           setFailed(true)
@@ -116,11 +118,12 @@ export function CourseBuyPage() {
     })
   }, [course, navigate])
   if (failed) return <p>Couldn't load this course.</p>
-  if (!products) return <p>Loading…</p>
+  if (!offer) return <p>Loading…</p>
   return (
     <>
       <Offers
-        keys={products}
+        merchant={offer.merchant_id}
+        keys={offer.products}
         signedIn={signedIn}
         onSignInRequired={() => setSigningIn(true)}
         onPaid={() => navigate(`/courses/${course}`)}

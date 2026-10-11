@@ -1,38 +1,41 @@
 import { useEffect, useMemo, useSyncExternalStore } from "react"
 
-import type { BillingClient } from "../client/client"
 import { toBillingError, type BillingError } from "../client/errors"
-import type { CurrencyScales, PublicConfig } from "../client/types"
+import type {
+  CurrencyScales,
+  CustomerConfig,
+  PublicConfig,
+} from "../client/types"
 import { useBillingContext } from "./context"
 
-export interface ConfigState {
-  config: PublicConfig | null
+export interface ConfigState<T = PublicConfig> {
+  config: T | null
   loading: boolean
   error: BillingError | null
   refetch: () => void
 }
 
-interface Snapshot {
-  config: PublicConfig | null
+interface Snapshot<T> {
+  config: T | null
   loading: boolean
   error: BillingError | null
 }
 
-/** One shared copy of `GET /config` per client, fetched on first use. */
-export interface ConfigStore {
+/** One shared copy of a configuration read per client, fetched on first use. */
+export interface ConfigStore<T = PublicConfig> {
   subscribe(listener: () => void): () => void
-  snapshot(): Snapshot
-  /** Fetches the document unless it was already requested. */
+  snapshot(): Snapshot<T>
+  /** Fetches the document unless it is loaded or loading. */
   ensure(): void
   refetch(): void
 }
 
-export function createConfigStore(client: BillingClient): ConfigStore {
-  let snapshot: Snapshot = { config: null, loading: true, error: null }
+export function createConfigStore<T>(read: () => Promise<T>): ConfigStore<T> {
+  let snapshot: Snapshot<T> = { config: null, loading: true, error: null }
   let started = false
   let latest = 0
   const listeners = new Set<() => void>()
-  const set = (next: Snapshot) => {
+  const set = (next: Snapshot<T>) => {
     snapshot = next
     for (const listener of listeners) listener()
   }
@@ -40,7 +43,7 @@ export function createConfigStore(client: BillingClient): ConfigStore {
     started = true
     const request = ++latest
     if (!snapshot.loading) set({ ...snapshot, loading: true })
-    client.getConfig().then(
+    read().then(
       (config) => {
         if (request === latest) set({ config, loading: false, error: null })
       },
@@ -60,19 +63,17 @@ export function createConfigStore(client: BillingClient): ConfigStore {
       return () => listeners.delete(listener)
     },
     snapshot: () => snapshot,
+    // A read that failed with nothing loaded is tried again by the next
+    // component: the customer may have signed in since.
     ensure() {
-      if (!started) load()
+      if (!started || (snapshot.error && !snapshot.config && !snapshot.loading))
+        load()
     },
     refetch: load,
   }
 }
 
-/**
- * The deployment's public configuration (`GET /config`), fetched once per
- * `BillingProvider` and shared by every component that reads it.
- */
-export function useConfig(): ConfigState {
-  const { config: store } = useBillingContext()
+function useStore<T>(store: ConfigStore<T>): ConfigState<T> {
   const snapshot = useSyncExternalStore(
     store.subscribe,
     store.snapshot,
@@ -80,6 +81,23 @@ export function useConfig(): ConfigState {
   )
   useEffect(() => store.ensure(), [store])
   return { ...snapshot, refetch: store.refetch }
+}
+
+/**
+ * The deployment's configuration (`GET /config`), fetched once per
+ * `BillingProvider` and shared by every component that reads it.
+ */
+export function useConfig(): ConfigState {
+  return useStore(useBillingContext().config)
+}
+
+/**
+ * The customer's merchant (`GET /me/config`): its payment setup and how it
+ * presents itself, fetched once per `BillingProvider` for the signed-in
+ * customer and shared by every component that reads it.
+ */
+export function useCustomerConfig(): ConfigState<CustomerConfig> {
+  return useStore(useBillingContext().customerConfig)
 }
 
 /**

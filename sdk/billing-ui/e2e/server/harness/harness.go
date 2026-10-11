@@ -134,6 +134,7 @@ func New(ctx context.Context, baseURL, dsn string, pool *pgxpool.Pool, workers b
 	if err != nil {
 		return nil, fmt.Errorf("seed catalog: %w", err)
 	}
+	catalog.MerchantID = client.MerchantID().String()
 	if err := armDestructive(ctx, pool); err != nil {
 		return nil, fmt.Errorf("arm destructive actions: %w", err)
 	}

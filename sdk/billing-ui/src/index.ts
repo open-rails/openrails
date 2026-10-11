@@ -12,6 +12,14 @@ export {
   type BillingClientOptions,
   type ProductListOptions,
 } from "./client/client"
+export {
+  redeemAssertion,
+  tokenSource,
+  type RedeemAssertionOptions,
+  type TokenResponse,
+  type TokenSource,
+  type TokenSourceOptions,
+} from "./client/token-source"
 export { BillingProvider, type BillingProviderProps } from "./react/provider"
 export { BillingUiRoot } from "./scope"
 export type { Navigate } from "./scope-context"

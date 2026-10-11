@@ -98,10 +98,17 @@ function ClientProvider({
     onChangeRef.current?.(change)
   }, [])
   const refresh = useCallback(() => setVersion((v) => v + 1), [])
-  const config = useMemo(() => createConfigStore(client), [client])
+  const config = useMemo(
+    () => createConfigStore(() => client.getConfig()),
+    [client]
+  )
+  const customerConfig = useMemo(
+    () => createConfigStore(() => client.getCustomerConfig()),
+    [client]
+  )
   const value = useMemo(
-    () => ({ client, version, notify, refresh, config }),
-    [client, version, notify, refresh, config]
+    () => ({ client, version, notify, refresh, config, customerConfig }),
+    [client, version, notify, refresh, config, customerConfig]
   )
   return (
     <BillingContext.Provider value={value}>{children}</BillingContext.Provider>
