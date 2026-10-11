@@ -44,7 +44,7 @@ type Dependencies struct {
 	// RouteGroups turns the merchant route groups on.
 	RouteGroups config.RouteGroups
 	// AdminConsole serves the merchant admin console; nil serves none.
-	AdminConsole *config.ConsoleMount
+	AdminConsole *hostconfig.ConsoleMount
 	// CheckoutOrigin serves the hosted checkout there (by Host), from
 	// CheckoutAssets; empty serves none.
 	CheckoutOrigin string
@@ -66,7 +66,7 @@ type Server struct {
 	adminLimiter  *middleware.AdminOperationLimiter
 	// consoleAssets is the host/binary-supplied admin console build (#754).
 	consoleAssets fs.FS
-	adminConsole  *config.ConsoleMount
+	adminConsole  *hostconfig.ConsoleMount
 	// groups are the route groups the server mounts.
 	groups config.RouteGroups
 

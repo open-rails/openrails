@@ -471,6 +471,10 @@ embedded host mounts them, and each merchant's group as its scope.
 | `Addr` | Where `Run` listens; default `:3053`. |
 | `PrivateAddr` | Where `Run` also serves `PrivateHandler`, the operator's `/metrics`; empty serves none (`private_port`). |
 
+The console build is a server dependency: `server.Deps.ConsoleAssets` accepts
+a filesystem rooted at `index.html`; nil uses the build embedded in the binary.
+The embedded `openrails.New` engine does not serve the console.
+
 `server.Deps` holds the engine's `openrails.Deps` (`Engine`), AuthKit's own
 (`Auth`, an `authkit.Deps`: its senders, key source and the rest; nil Postgres
 is a pool of the engine's database, nil Redis the engine's, nil Email renders

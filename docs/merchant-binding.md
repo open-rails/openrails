@@ -54,9 +54,8 @@ bound to it.
   billing-ui's `tokenSource` keeps the token in memory and fetches the next
   before it expires.
 
-**The admin console.** On a single-merchant embedded mount, the host's
-sign-in, bound by its issuer; there is no switcher. On the standalone server,
-choosing a merchant exchanges the person's token for one bound to it (RFC
+**The admin console.** The standalone server owns the prebuilt console.
+Choosing a merchant exchanges the person's token for one bound to it (RFC
 8693 with `group_id`, through the server's `openrails-console` client), held
 in memory for the tab. The exchange is refused where the person holds no
 role. See [admin console](admin-console.md).

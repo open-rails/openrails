@@ -14,7 +14,8 @@ import (
 // engine's routes and the control plane's.
 type Surface struct {
 	RouteGroups   config.RouteGroups
-	AdminConsole  *config.ConsoleMount
+	AdminConsole  *hostconfig.ConsoleMount
+	ConsoleAssets fs.FS
 	ConsoleIssuer *hostconfig.ConsoleIssuer
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
@@ -35,7 +36,7 @@ func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*se
 		ControlPlane:   cp,
 		Resource:       s.Resource,
 		ConsoleIssuer:  s.ConsoleIssuer,
-		ConsoleAssets:  a.ConsoleAssets,
+		ConsoleAssets:  s.ConsoleAssets,
 		RouteGroups:    s.RouteGroups,
 		AdminConsole:   s.AdminConsole,
 		CheckoutOrigin: s.CheckoutOrigin,

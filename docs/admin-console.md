@@ -2,7 +2,7 @@
 
 ### What it is
 
-A React SPA (`web/admin`, Vite), the staff dashboard, driving the
+The standalone server's React SPA (`web/admin`, Vite), driving the
 `/v1/admin/*`, `/v1/catalog/*`, `/v1/merchant/*` and `/v1/metrics/*` APIs. It is the browser UI for the **merchant operator**, the
 people running a merchant: customers, subscriptions, payments, catalog, ops
 findings, settings. It holds no state and no privileges of its own; every
@@ -14,6 +14,8 @@ It has four areas, one per staff route group: customer support
 (`Metrics`: the dashboard's charts, the Ops gauges). On load it asks
 `GET /v1/admin/access`, which any signed-in staff member may call, and shows an
 area only when its group is on and the staff member holds its permission.
+The response also includes `assistants` (`catalog_copilot`, `catalog_drafting`), each true only
+with its provider configuration and consent and access to the catalog area.
 Customer support is read-only without `merchant:customer:manage` (or
 `root:customer:manage`), and the dashboard's layout is editable only to
 someone holding both the metrics and the merchant-config permission. Someone
@@ -38,26 +40,13 @@ a new API key, its secret shown once (with `credentials:manage`). See
 
 ### Turning it on and off
 
-Off is the default: nothing mounts the console, and no console route exists.
-On is one switch, where the HTTP surface is chosen:
+The console belongs to the standalone server. An embedded engine serves the
+billing API; its host owns its admin UI.
 
-- **Embedded:** `AdminConsole: true` in the `openrails.Routes` given to the
-  adapter's `Mount` (or the engine's `Routes`). The console is served at the
-  prefix's `/admin`; `AdminConsoleAuthBase` says where your AuthKit's JSON
-  API is.
-- **Standalone server:** `admin_console.enabled: true` in `config.yaml`
-  (`ADMIN_CONSOLE_ENABLED`), with `admin_console.path`, and the staff route
-  groups it drives turned on in `route_groups`.
-
-```go
-err := openrailsgin.Mount(r, client, openrails.Routes{
-    Auth:                 ak.Authenticator(), // staff hold root:customer:read and root:customer:manage in its root group
-    Prefix:               "/billing",         // the API at /billing/v1/*, the console at /billing/admin
-    RouteGroups:          openrails.RouteGroups{Admin: true},
-    AdminConsole:         true,
-    AdminConsoleAuthBase: ak.APIBase(), // where AuthKit's JSON API is mounted; empty is /api/v1
-})
-```
+Off is the default. Set `admin_console.enabled: true` in `config.yaml`
+(`ADMIN_CONSOLE_ENABLED`), with the staff route groups it drives turned on
+in `route_groups`. Go hosts of the standalone server set
+`server.Config.AdminConsole`.
 
 ```yaml
 admin_console:
@@ -71,11 +60,9 @@ Mounting the console fails loudly, before anything registers, when:
 
 - no staff route group is on: the console has no API to drive;
 - there is no console build (see below);
-- embedded, `Routes.AdminConsoleAuthBase` is not an absolute path (no scheme
-  or host, no trailing slash);
-- standalone, `admin_console.path` is invalid or overlaps an OpenRails route.
+- `admin_console.path` is invalid or overlaps an OpenRails route.
 
-**Path.** Embedded, `Routes.Prefix` + `/admin`. Standalone, an absolute URL
+**Path.** An absolute URL
 path without a trailing slash, made of letters, digits and `. _ ~ -` segments;
 `/admin` by default. One build serves any path:
 its URLs are relative to the `<base href="/admin/">` in `index.html`, which the
@@ -84,10 +71,7 @@ URL from `document.baseURI`.
 
 **Which merchant.** Every admin request acts on the merchant its credential
 is bound to; nothing in the request names one
-([merchant binding](merchant-binding.md)). Embedded, the console serves
-the single merchant its engine declares with an `Issuer` (`config.json`'s
-`merchant`); a console over several merchants refuses to mount. Standalone
-with a trusted issuer (`admin_console.issuer`), the issuer's tokens are bound
+([merchant binding](merchant-binding.md)). With a trusted issuer (`admin_console.issuer`), the issuer's tokens are bound
 to the merchant that issuer belongs to. Standalone with local sign-in, the
 console exchanges the person's session for a token bound to the chosen
 merchant (RFC 8693, `group_id` = the merchant id, through the server's
@@ -101,10 +85,7 @@ none sees an empty state that points at an operator or, with a creation page
 merchant with `#merchant=<id>`: the console asks for an exchange, drops the
 fragment, and says so when it is refused.
 
-**Where staff sign in.** Embedded, at the host's AuthKit JSON API on the
-console's origin: `Routes.AdminConsoleAuthBase`, AuthKit's `APIBase()` (such as
-`/auth/v1` when AuthKit's `APIPath` is `/auth`), or AuthKit's default `/api/v1`
-when empty. Standalone, at a trusted issuer when
+**Where staff sign in.** At a trusted issuer when
 `server.Config.ConsoleIssuer` (`admin_console.issuer`) names it and the
 console's client there, for `auth.resource.id`; otherwise at the server's own
 AuthKit. A standalone console needs one of the two: without `local_sign_in` the
@@ -115,22 +96,17 @@ OpenRails' resource identifier; its tokens' permissions, within its
 application's role in the merchant's group, decide what each person may do.
 
 **Where it finds the API.** The console reads `config.json` beneath its path:
-`api_base_url` is `Routes.Prefix` + `/v1` (`/v1` standalone), and
-`auth_base_url` is the AuthKit JSON API staff sign in through:
-`Routes.AdminConsoleAuthBase` (`/api/v1` by default) embedded, the control
-plane's standalone. Both are paths on the console's own origin. The
-admin API answers no cross-origin requests, so the console, the API and
-AuthKit share one origin. A separate host such as `billing.example.com` works by
-sending that host to the same server, or to a router (for example a Gin engine
-chosen by `Host`) that mounts AuthKit and OpenRails, with `AdminConsole`, for
-it. No CORS or cookie setting is involved: the console sends bearer tokens.
+`api_base_url` is `/v1`, and `auth_base_url` is the server's AuthKit JSON API.
+Both are paths on the console's own origin. The admin API answers no
+cross-origin requests, so the console, API and AuthKit share one origin.
+The console sends bearer tokens.
 
 ### Console build
 
 `web/admin` go:embeds its `dist` build, which is never committed: a binary
 built from an OpenRails checkout carries a console only when `web/admin/dist`
-was built before `go build`; an embedding host supplies its own build as
-`Deps.ConsoleAssets`. Node/pnpm is a build-time dependency only.
+was built before `go build`. A host of the standalone server supplies its own
+build as `server.Deps.ConsoleAssets`. Node/pnpm is a build-time dependency only.
 
 **Standalone binary.** Only `dist/.gitkeep` is committed, so building
 `server/cmd/openrails` needs no Node and yields a console-less binary:
@@ -143,40 +119,9 @@ task build-console-binary  # admin-build + go build ./cmd/openrails in server/
 Release archives and Docker images always carry the console (still off until
 `admin_console.enabled`): goreleaser and the Dockerfile build `web/admin` first.
 
-**Embedded hosts.** A module fetched into the Go module cache carries only
-`web/admin/dist/.gitkeep`, so the host builds the console and hands it over.
-The host repo owns a tiny embed package over a **gitignored** dist its build
-pipeline produces:
-
-```go
-// internal/consoleassets/assets.go
-package consoleassets
-
-import "embed"
-
-//go:embed all:dist
-var FS embed.FS
-```
-
-Build the dist straight from the openrails module cache (invoke via `bash`:
-module-cache files are not executable, and the script copies the read-only
-source to a temp dir before `pnpm install`):
-
-```sh
-bash "$(go list -m -f '{{.Dir}}' github.com/open-rails/openrails)/scripts/build-admin-console.sh" internal/consoleassets/dist
-```
-
-Then pass it as `Deps.ConsoleAssets`:
-
-```go
-assets, _ := fs.Sub(consoleassets.FS, "dist")
-client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool, AuthKit: auth, AuthorityFor: staffAuthority, ConsoleAssets: assets})
-```
-
-Without `Deps.ConsoleAssets` the engine uses the build embedded in the
-OpenRails module (the standalone binary's). The console handler answers a
-request outside its path with 500 and a log line rather than serving a page
-whose assets cannot load.
+A host constructing `server.New` may supply another built filesystem rooted
+at `index.html` as `server.Deps.ConsoleAssets`. Nil uses the build embedded
+in `web/admin`. The embedded `openrails.New` engine has no console dependency.
 
 ### Extending the console
 
@@ -246,7 +191,7 @@ type-checked in OpenRails; the host type-checks its extension against the three
 self-contained files `web/admin/src/extensions/{public,types,runtime}.ts`.
 
 **Embedding contract.** Extensions are a standalone server's: supply the
-combined build as `Deps.ConsoleAssets`, and pass extension data as
+combined build as `server.Deps.ConsoleAssets`, and pass extension data as
 `server.Config.AdminConsole.Extensions`, served verbatim in `config.json` under
 `extensions`. OpenRails never reads it.
 
@@ -266,14 +211,10 @@ What the engine enforces:
 - Core OpenRails imposes **no environment restriction**: a mounted console
   is served in any env.
 
-Recommendation (not engine-enforced): treat exposing the console like exposing
-any login page. If your deployment doesn't want the console reachable at all in
-production, gate it at boot — e.g. an embedded host may leave `Routes.AdminConsole` out in
-a production-like env precisely because the SPA is
-unauthenticated at the transport layer, making it dev-only by convention.
-Standalone SaaS deployments that do serve it in production should front it with
-their normal edge protections (TLS, rate limits — OpenRails' own rate limiting
-covers the auth endpoints).
+Treat exposing the console like exposing any login page. Deployments serving
+it publicly should use their normal edge protections, including TLS and
+rate limits. Disable `admin_console.enabled` when the console should not be
+served.
 
 Who may sign in is decided by the admin API, not the console: each route asks
 the mount's `Auth` for its permission, at the merchant or in the root scope
@@ -297,7 +238,7 @@ API-key creation and role grants retain auth-ui's step-up dialog: after
 retries that AuthKit operation. Who can sign in
 and what they may do: standalone, the server's merchant roles
 (`owner`/`support`/`viewer`, or the merchant's custom roles) or a trusted
-issuer's token; embedded, the host's `Routes.Auth`.
+issuer's token.
 
 **At a trusted issuer**, the console is that issuer's OAuth 2.0 client
 (auth-ui's issuer client): the login page redirects there, `/callback`

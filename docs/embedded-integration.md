@@ -117,7 +117,6 @@ explicit:
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
 | `Redis` | Rate limits, admin lockouts, captcha challenges and card-testing declines shared by every instance, and abuse statistics. Without it they live in each process's memory: one instance only. |
 | `Vault` | A borrowed Vault client. PSP secrets come from a declared merchant's PSPs or the secret store. |
-| `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
 | `StripeTransport`, `NMITransport`, `FXTransport`, `Clock` | Test seams, refused with `TestMode` live. |
@@ -432,8 +431,6 @@ if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 | `RouteGroups.MerchantConfig` (`/v1/merchant`) | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), reading and resolving findings, settings, billing import and export, the dashboard layout; needs `root:config:manage` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
 | `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, running charges, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
-| `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`, for the one merchant whose `Issuer` you declare; needs a staff group on. Over several merchants bound by group, `Mount` refuses it |
-| `AdminConsoleAuthBase` | Where your AuthKit's JSON API is mounted on the same origin, AuthKit's `APIBase()`; the console signs staff in there. Empty is `/api/v1` |
 
 The customer surface, `/v1/me`, serves each customer at its merchant. Every customer route
 acts only on the admitted subject: no path, query or body names a customer, and
@@ -446,17 +443,11 @@ Original request URLs and bodies reach authentication and webhook verification
 unchanged. One selection is materialized once, so remounting it never resets
 rate limits.
 
-**Admin console** (optional): `Routes.AdminConsole` mounts the staff
-dashboard at `Routes.Prefix`'s `/admin`, beside the routes it drives, and signs
-staff in through your AuthKit's JSON API on the same origin: at
-`Routes.AdminConsoleAuthBase` (pass AuthKit's `APIBase()` when its `APIPath` is
-not the default), else `/api/v1`. It
-needs a staff group on and a console build (`Deps.ConsoleAssets`); `Mount` fails
-without either. Each area appears only to staff holding its group's permission
-(`GET /v1/admin/access`): customer support, read-only without `root:customer:manage`;
-the catalog; the PSP, findings, settings and notification pages; and the metrics
-dashboard, whose layout editing also needs `MerchantConfig`.
-See [admin-console.md](admin-console.md).
+**Staff UI:** the host owns its admin pages. Mount the staff route groups
+those pages use and send the host's authenticated credential on each call.
+`GET /v1/admin/access` reports the areas the caller can use and their enabled
+assistants. The prebuilt [admin console](admin-console.md) belongs to the
+standalone server; the embedded engine serves no static console.
 
 ### 7. Calling the engine
 

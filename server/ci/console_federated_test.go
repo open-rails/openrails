@@ -58,7 +58,7 @@ func TestConsoleSignsInAtATrustedIssuer(t *testing.T) {
 				cfg.Auth.Resource.PublicURL = rsOrigin
 			}
 			cfg.AdminConsole, cfg.ConsoleIssuer = &server.AdminConsole{}, issuer
-			deps.Engine.ConsoleAssets = consoleBuild("federated")
+			deps.ConsoleAssets = consoleBuild("federated")
 		}
 	}
 	srv := f.newServer(t, federated(resourceID, &server.ConsoleIssuer{URL: as.URL, ClientID: console, Name: "Example ID"}))

@@ -48,7 +48,7 @@ type Config struct {
 	// AdminConsole serves the merchant admin console; nil, the default,
 	// serves none. ConsoleIssuer (admin_console.issuer) signs staff in to it
 	// at a trusted issuer.
-	AdminConsole  *billing.ConsoleMount
+	AdminConsole  *ConsoleMount
 	ConsoleIssuer *ConsoleIssuer
 	// HostedCheckoutURL is the hosted checkout host's origin
 	// (hosted_checkout.url); empty serves none.
@@ -218,11 +218,11 @@ type adminConsoleFile struct {
 	Issuer  *ConsoleIssuer `koanf:"issuer"`
 }
 
-func (a *adminConsoleFile) mount() *billing.ConsoleMount {
+func (a *adminConsoleFile) mount() *ConsoleMount {
 	if a == nil || !a.Enabled {
 		return nil
 	}
-	return &billing.ConsoleMount{Path: a.Path}
+	return &ConsoleMount{Path: a.Path}
 }
 
 func (a *adminConsoleFile) issuer() *ConsoleIssuer {
@@ -354,7 +354,7 @@ func Validate(cfg *Config) error {
 		return err
 	}
 	if cfg.AdminConsole != nil {
-		if err := billing.ValidateMountPath("admin_console.path", billing.AdminConsolePath(cfg.AdminConsole)); err != nil {
+		if err := billing.ValidateMountPath("admin_console.path", AdminConsolePath(cfg.AdminConsole)); err != nil {
 			return err
 		}
 	}

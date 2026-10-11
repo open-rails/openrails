@@ -307,9 +307,9 @@ is the caller's reproducible idempotency key: retrying it can never double-credi
 
 A React SPA served at its path (`/admin/` by default), driving the same `/v1/admin/*` API — off by
 default. It mounts only when console assets are built into the binary **and** it is
-switched on: `Routes.AdminConsole` embedded, `admin_console.enabled: true` (env
-`ADMIN_CONSOLE_ENABLED`) standalone. Login is a real AuthKit
-login (password standalone; OIDC when the embedded host configures it). Build and
+switched on in the standalone server: `admin_console.enabled: true` (env
+`ADMIN_CONSOLE_ENABLED`). Staff sign in through the server's AuthKit or a
+trusted issuer. Build and
 mount details: `docs/admin-console.md`.
 
 Pages: **Customers** (search → profile with grant/revoke),

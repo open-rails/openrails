@@ -712,8 +712,8 @@ func TestGateAsksThePair(t *testing.T) {
 		merchant, root billing.Permission
 		route          string
 	}{
-		{"merchant:billing:read", "root:billing:read", payments},
-		{"merchant:billing:manage", "root:billing:manage", refund},
+		{"merchant:customer:read", "root:customer:read", payments},
+		{"merchant:customer:manage", "root:customer:manage", refund},
 	} {
 		got := runRoute(t, rt, holding(held(old.root), held(old.merchant)), old.route, nil)
 		require.Equal(t, http.StatusForbidden, got.status, "retired permissions %s and %s", old.merchant, old.root)
@@ -918,6 +918,17 @@ func TestAccessAnswersWhatTheCallerHolds(t *testing.T) {
 	require.Equal(t, none, read(config.RouteGroups{MerchantConfig: true}, root(billing.RootCustomerRead, billing.RootMetricsRead)), "a group that is off is no one's")
 	require.Equal(t, none, read(config.RouteGroups{Admin: true}, root(billing.RootCustomerManage)), "an update without the read is nothing")
 	require.Equal(t, none, read(staff, root(billing.MerchantCustomerRead)), "a merchant: name held in the root scope")
+
+	// Assistants require an enabled provider, consent, a mounted area, and its permission.
+	rt.Config.LLM = &config.LLMConfig{APIKey: "test-key", CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
+	catalog := root(billing.RootCatalogManage)
+	require.Equal(t, billing.AdminAssistants{CatalogCopilot: true, CatalogDrafting: true}, read(staff, catalog).Assistants)
+	require.Equal(t, billing.AdminAssistants{}, read(staff, root()).Assistants, "no access to catalog")
+	require.Equal(t, billing.AdminAssistants{}, read(config.RouteGroups{Admin: true}, catalog).Assistants, "catalog not mounted")
+	rt.Config.LLM = &config.LLMConfig{APIKey: "test-key", CatalogDraftingEnabled: true}
+	require.Equal(t, billing.AdminAssistants{}, read(staff, catalog).Assistants, "drafting requires copilot consent too")
+	rt.Config.LLM = &config.LLMConfig{CatalogCopilotEnabled: true, CatalogDraftingEnabled: true}
+	require.Equal(t, billing.AdminAssistants{}, read(staff, catalog).Assistants, "provider key missing")
 }
 
 const (

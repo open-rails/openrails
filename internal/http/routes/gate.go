@@ -18,6 +18,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
+	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/customernetwork"
 	"github.com/open-rails/openrails/internal/customerscope"
 	"github.com/open-rails/openrails/internal/db"
@@ -977,6 +978,11 @@ func adminAccess(e *Env) router.Handler {
 			MerchantConfig: has(g.MerchantConfig, needMerchantConfig),
 			Metrics:        has(g.Metrics, needMetrics),
 			ScopeID:        merchantScope(root, staff.Merchant).ID,
+		}
+		llm := e.Runtime.Config.LLM
+		access.Assistants = billing.AdminAssistants{
+			CatalogCopilot:  access.Catalog && config.LLMCatalogCopilotConfigured(llm),
+			CatalogDrafting: access.Catalog && config.LLMCatalogDraftingConfigured(llm),
 		}
 		if failed != nil {
 			refuse(r, route, e.Auth, stepCan, failed)

@@ -2,19 +2,17 @@ package engine
 
 import (
 	"encoding/json"
-	pkgcatalog "github.com/open-rails/openrails/catalog"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
-	"testing/fstest"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
+	pkgcatalog "github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
@@ -292,71 +290,11 @@ func TestAmbientCookiesNeverAuthenticate(t *testing.T) {
 	require.Equal(t, 1, calls)
 }
 
-// The admin console mounts with the admin API it drives, at the prefix's
-// /admin, pointed at the API and the host's AuthKit on the same origin;
-// otherwise Mount fails.
-// consoleRuntime is httpRuntime declaring acme, whose issuer staff sign in at.
-func consoleRuntime() *Engine {
-	rt := httpRuntime()
-	rt.App.Config.Merchants = map[string]config.MerchantDeclaration{"acme": {DisplayName: "Acme", Issuer: "https://shop.example"}}
-	rt.declared = map[string]billing.MerchantID{"acme": billing.MerchantID(uuid.MustParse("11111111-1111-4111-8111-111111111111"))}
-	return rt
-}
-
-func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
-	rt := consoleRuntime()
-	fake := &authtest.Fake{}
-	_, err := rt.Routes(config.Routes{Prefix: "/billing", AdminConsole: true, Auth: fake})
-	require.ErrorContains(t, err, "turn on at least one of RouteGroups.Admin")
-	sel := config.Routes{Prefix: "/billing", RouteGroups: authtest.AdminGroups(), AdminConsole: true, Auth: fake}
-	_, err = rt.Routes(sel)
-	require.ErrorContains(t, err, "needs a console build")
-	rt.App.ConsoleAssets = fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><base href="/admin/">host build`)}}
-	_, err = rt.Routes(config.Routes{Prefix: "billing", Auth: fake, RouteGroups: authtest.AdminGroups(), AdminConsole: true})
-	require.Error(t, err)
-
-	mux := mountAt(t, rt, sel, "")
-	rec := serve(mux, http.MethodGet, "/billing/admin/", "")
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Contains(t, rec.Body.String(), `<base href="/billing/admin/">host build`)
-	rec = serve(mux, http.MethodGet, "/billing/admin/config.json", "")
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null,"exchange":null,
-		"merchant":{"id":"11111111-1111-4111-8111-111111111111","slug":"acme","display_name":"Acme"}}`, rec.Body.String(), "the console acts for the merchant its sign-in binds, and exchanges nothing")
-
-	// An assistant shows where the deployment has an LLM and its group is mounted.
-	for _, tc := range []struct {
-		sel  config.Routes
-		want string
-	}{
-		{sel, `"catalog_copilot_enabled":false`},
-		{config.Routes{Prefix: "/billing", RouteGroups: authtest.Groups(), AdminConsole: true, Auth: fake}, `"catalog_copilot_enabled":true`},
-	} {
-		assisted := consoleRuntime()
-		assisted.App.ConsoleAssets = rt.App.ConsoleAssets
-		assisted.App.Config.LLM = &config.LLMConfig{APIKey: "k", CatalogCopilotEnabled: true}
-		require.Contains(t, serve(mountAt(t, assisted, tc.sel, ""), http.MethodGet, "/billing/admin/config.json", "").Body.String(), tc.want)
-	}
-
-	// A console over merchants bound by group would answer every call 403:
-	// it refuses to mount instead.
-	for name, declare := range map[string]map[string]config.MerchantDeclaration{
-		"no merchant":                 nil,
-		"one merchant bound by group": {"acme": {}},
-		"several bound by group":      {"acme": {}, "beta": {}},
-		"two issuers":                 {"acme": {Issuer: "https://shop.example"}, "beta": {Issuer: "https://other.example"}},
-	} {
-		several := httpRuntime()
-		several.App.ConsoleAssets = rt.App.ConsoleAssets
-		several.App.Config.Merchants = declare
-		several.declared = map[string]billing.MerchantID{}
-		for slug := range declare {
-			several.declared[slug] = billing.MerchantID(uuid.New())
-		}
-		_, err := several.Routes(sel)
-		require.ErrorContains(t, err, "a console over several merchants is not supported yet", name)
-	}
+// Embedded mounts own only the billing API; the host owns its admin pages.
+func TestEmbeddedEngineServesNoConsole(t *testing.T) {
+	mux := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Auth: &authtest.Fake{}, RouteGroups: authtest.Groups()}, "")
 	require.Equal(t, http.StatusOK, serve(mux, http.MethodGet, "/billing/v1/config", "").Code)
-
-	off := mountAt(t, httpRuntime(), config.Routes{Prefix: "/billing", Auth: fake, RouteGroups: authtest.AdminGroups()}, "")
-	require.Equal(t, http.StatusNotFound, serve(off, http.MethodGet, "/billing/admin/", "").Code, "no console unless selected")
+	for _, path := range []string{"/billing/admin", "/billing/admin/", "/billing/admin/config.json"} {
+		require.Equal(t, http.StatusNotFound, serve(mux, http.MethodGet, path, "").Code, path)
+	}
 }

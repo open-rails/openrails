@@ -33,6 +33,7 @@ import (
 	httpserver "github.com/open-rails/openrails/server/internal/http"
 	"github.com/open-rails/openrails/server/internal/network"
 	"github.com/open-rails/openrails/server/internal/operator"
+	admin "github.com/open-rails/openrails/web/admin"
 )
 
 // The configuration family of a standalone server, defined in internal/config
@@ -43,7 +44,7 @@ type (
 	MerchantCreationConfig = hostconfig.MerchantCreationConfig
 	// AdminConsole is Config.AdminConsole: where the merchant admin console
 	// is served, how staff sign in, and the console extensions' data.
-	AdminConsole = config.ConsoleMount
+	AdminConsole = hostconfig.ConsoleMount
 	// ConsoleIssuer is Config.ConsoleIssuer: the trusted issuer staff sign in
 	// to the admin console at.
 	ConsoleIssuer = hostconfig.ConsoleIssuer
@@ -150,6 +151,9 @@ type Deps struct {
 	// Vite build, rooted at index.html). Nil uses the build embedded in this
 	// module, when the binary was built with one.
 	CheckoutAssets fs.FS
+	// ConsoleAssets is a built admin console rooted at index.html. Nil uses
+	// the console build embedded in the binary.
+	ConsoleAssets fs.FS
 }
 
 // Server is a standalone OpenRails server.
@@ -271,9 +275,13 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if err := operator.Join(s.graph, s.cp); err != nil {
 		return fail(err)
 	}
+	consoleAssets := deps.ConsoleAssets
+	if consoleAssets == nil {
+		consoleAssets = admin.FS()
+	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{
 		RouteGroups: cfg.RouteGroups, AdminConsole: cfg.AdminConsole, ConsoleIssuer: cfg.ConsoleIssuer, Resource: akCfg.Resource.ID,
-		CheckoutOrigin: origin, CheckoutAssets: checkoutAssets(deps.CheckoutAssets),
+		CheckoutOrigin: origin, CheckoutAssets: checkoutAssets(deps.CheckoutAssets), ConsoleAssets: consoleAssets,
 	}); err != nil {
 		return fail(fmt.Errorf("server: HTTP surface: %w", err))
 	}

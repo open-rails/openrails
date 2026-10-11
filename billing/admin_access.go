@@ -14,12 +14,19 @@ const (
 // permission, at the merchant or in the root scope: what the admin console
 // shows them. Admin is customer support, read-only without
 // MerchantCustomerManage or RootCustomerManage. ScopeID is the merchant's own
-// scope's id, the merchant's: its AuthKit group, whose roles the console's
-// Roles page manages.
+// scope's id. Assistants reports the enabled assistants in areas the caller
+// can use.
 type AdminAccess struct {
-	Admin          AccessLevel `json:"admin"`
-	Catalog        bool        `json:"catalog"`
-	MerchantConfig bool        `json:"merchant_config"`
-	Metrics        bool        `json:"metrics"`
-	ScopeID        string      `json:"scope_id"`
+	Admin          AccessLevel     `json:"admin"`
+	Catalog        bool            `json:"catalog"`
+	MerchantConfig bool            `json:"merchant_config"`
+	Metrics        bool            `json:"metrics"`
+	ScopeID        string          `json:"scope_id"`
+	Assistants     AdminAssistants `json:"assistants"`
+}
+
+// AdminAssistants reports assistant availability for the caller's staff areas.
+type AdminAssistants struct {
+	CatalogCopilot  bool `json:"catalog_copilot"`
+	CatalogDrafting bool `json:"catalog_drafting"`
 }

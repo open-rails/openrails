@@ -1,6 +1,4 @@
-// Package adminconsole serves the merchant admin console SPA (#740) from
-// web/admin's build (#754): web/admin/dist when it was built before go build
-// (scripts/build-admin-console.sh, in-repo `task admin-build`), else nothing.
+// Package adminconsole serves the standalone server's admin console SPA.
 package adminconsole
 
 import (
@@ -21,12 +19,9 @@ import (
 // Config is the SPA bootstrap document served at <path>/config.json.
 type Config struct {
 	// AuthBaseURL is the base under which the AuthKit authhttp routes live
-	// (capabilities, password/login, token, me, OIDC). Standalone default:
-	// "/auth/v1" (the control plane mount). Embedded: the host's AuthKit JSON
-	// API, Routes.AdminConsoleAuthBase, "/api/v1" by default.
+	// (capabilities, password/login, token, me, OIDC). Default: "/auth/v1".
 	AuthBaseURL string `json:"auth_base_url"`
-	// APIBaseURL is the admin API base. Standalone default "/v1";
-	// embedded hosts typically "/billing/v1".
+	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
 	// CatalogCopilotEnabled mirrors the #779 catalog copilot Q&A gate
 	// (llm.catalog_copilot_enabled AND an LLM key): false renders the catalog
@@ -162,7 +157,7 @@ func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 
 		if !present {
 			writeError(w, http.StatusServiceUnavailable,
-				"admin console assets missing: build the SPA (scripts/build-admin-console.sh) before go build, or pass the build as Deps.ConsoleAssets")
+				"admin console assets missing: build the SPA (scripts/build-admin-console.sh) before go build, or pass the build as server.Deps.ConsoleAssets")
 			return
 		}
 

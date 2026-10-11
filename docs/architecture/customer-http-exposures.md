@@ -23,8 +23,8 @@ conflicting method/path patterns fail before router mutation.
 
 Every adapter mounts on the application's root router: Gin's root Engine,
 Fiber's root App, a root ServeMux or Chi Mux. `Routes.Prefix` places the
-embedded API (`/billing` serves `/billing/v1/*`) and the admin console beside it
-(`/billing/admin`); a standalone server's routes, with their issuer-anchored
+embedded API (`/billing` serves `/billing/v1/*`); the host owns its admin UI.
+A standalone server's routes, with their issuer-anchored
 AuthKit and console URLs, sit at the root.
 
 An order is read and paid only by its own customer at `/v1/me/orders/{id}`

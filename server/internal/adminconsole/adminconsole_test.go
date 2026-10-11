@@ -1,4 +1,4 @@
-package admin_test
+package adminconsole_test
 
 import (
 	"io/fs"
@@ -11,7 +11,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/open-rails/openrails/internal/adminconsole"
+	"github.com/open-rails/openrails/server/internal/adminconsole"
 	admin "github.com/open-rails/openrails/web/admin"
 )
 

@@ -6,9 +6,9 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/adminconsole"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/http/router"
+	"github.com/open-rails/openrails/server/internal/adminconsole"
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 )
@@ -28,11 +28,11 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		return fmt.Errorf("admin_console.enabled is set but web/admin holds no console build: " +
 			"build it (`task admin-build`) before go build — or unset admin_console.enabled")
 	}
-	path := config.AdminConsolePath(s.adminConsole)
+	path := hostconfig.AdminConsolePath(s.adminConsole)
 	if err := config.ValidateMountPath("admin_console.path", path); err != nil {
 		return err
 	}
-	if err := config.ValidateConsoleExtensions("Routes.AdminConsole.Extensions", s.adminConsole.Extensions); err != nil {
+	if err := hostconfig.ValidateConsoleExtensions("AdminConsole.Extensions", s.adminConsole.Extensions); err != nil {
 		return err
 	}
 	for _, entry := range mux.Entries {
