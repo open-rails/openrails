@@ -10,6 +10,8 @@ merchants:
       issuer: http://localhost:8080
       jwks_uri: http://localhost:8080/.well-known/jwks.json
     settings:
+      # This example demonstrates purchase-receipt emails; they are otherwise off.
+      charge_receipts: true
       profile:
         from_email: billing@onlydemo.example # receipts come from this address
     psps:
