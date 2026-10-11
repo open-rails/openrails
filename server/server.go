@@ -245,7 +245,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		return fail(err)
 	}
 	if network.Enabled(akCfg) {
-		if err := network.Configure(&akCfg); err != nil {
+		if err := network.Configure(&akCfg, origin); err != nil {
 			return fail(err)
 		}
 		s.networkHooks(&akDeps)

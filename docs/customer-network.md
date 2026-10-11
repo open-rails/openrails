@@ -80,10 +80,11 @@ signing in this way is refused `409 network_account_linked`.
 On the hosted checkout host, the order's checkout URL is the merchant's side:
 its backend created the order for its customer. The URL's secret asks for the
 challenge and redeems it (the same two routes), and the shopper signs in with
-the checkout page's own client, `openrails-checkout`, which the operator
-declares in `auth.authorization_server.clients` with the checkout host's
-redirect URI. Only that client answers a checkout URL, and a merchant's client
-never does.
+the checkout page's own client, `openrails-checkout`. The server declares it
+when the network runs with a hosted checkout: its redirect URI is the checkout
+host's `/c/sign-in`, its sign-in asks for the network terms, and the page may
+call the server's AuthKit. Only that client answers a checkout URL, and a
+merchant's client never does; an operator declaring it is refused at boot.
 
 ## Refusals
 

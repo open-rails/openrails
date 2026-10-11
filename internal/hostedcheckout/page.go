@@ -55,11 +55,15 @@ const frameAncestors = "'none'"
 
 // ContentSecurityPolicy is the page's: its own scripts, the rails' field
 // origins, the captcha provider's when the deployment challenges (captcha,
-// "" for none), any https logo, and the framing decision.
-func ContentSecurityPolicy(captcha string) string {
+// "" for none), the issuers it signs shoppers in at (their token endpoints),
+// any https logo, and the framing decision.
+func ContentSecurityPolicy(captcha string, issuers ...string) string {
 	all := railOrigins
 	if o, ok := captchaOrigins[captcha]; ok {
 		all = append(append([]origins{}, all...), o)
+	}
+	if len(issuers) > 0 {
+		all = append(append([]origins{}, all...), origins{connect: issuers})
 	}
 	var script, frame, connect, style, font []string
 	for _, o := range all {
@@ -108,8 +112,12 @@ func HeadersHTTP(policy string) func(http.Handler) http.Handler {
 	}
 }
 
+// SignInPath is where the page's openrails.dev sign-in returns: the
+// redirect URI of its client, served the page like an order.
+const SignInPath = "/c/sign-in"
+
 // Page serves the checkout page from a build of web/checkout: index.html at
-// /c/{order_id}, its files under /assets/, and nothing else.
+// /c/{order_id} and SignInPath, its files under /assets/, and nothing else.
 func Page(assets fs.FS) (http.Handler, error) {
 	if assets == nil {
 		return nil, errors.New("hostedcheckout: no checkout page build (web/checkout)")
@@ -124,7 +132,7 @@ func Page(assets fs.FS) (http.Handler, error) {
 			return
 		}
 		if rest, ok := strings.CutPrefix(r.URL.Path, "/c/"); ok {
-			if _, err := billing.ParseOrderID(rest); err != nil || !strings.HasPrefix(rest, billing.OrderIDPrefix) {
+			if _, err := billing.ParseOrderID(rest); r.URL.Path != SignInPath && (err != nil || !strings.HasPrefix(rest, billing.OrderIDPrefix)) {
 				http.NotFound(w, r)
 				return
 			}

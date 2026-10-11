@@ -40,8 +40,9 @@ const (
 	// ScopeLink is the consent a merchant's client needs to link the
 	// merchant's own customer to the account (the connect path).
 	ScopeLink = "openrails:link"
-	// CheckoutClientID is the checkout page's first-party client: its ID
-	// tokens prove the network side of a checkout link.
+	// CheckoutClientID is the checkout page's first-party client, which the
+	// server declares: its ID tokens prove the network side of a checkout
+	// link.
 	CheckoutClientID = "openrails-checkout"
 	// ChallengeTTL is how long a link challenge can be redeemed.
 	ChallengeTTL = 5 * time.Minute

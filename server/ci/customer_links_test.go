@@ -16,6 +16,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -36,6 +37,7 @@ import (
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/customernetwork"
+	"github.com/open-rails/openrails/internal/hostedcheckout"
 	riverjobs "github.com/open-rails/openrails/internal/river"
 	"github.com/open-rails/openrails/internal/vaultfake"
 	"github.com/open-rails/openrails/openrailstest/nmimock"
@@ -47,14 +49,15 @@ import (
 
 const (
 	networkTerms   = "2026-10"
-	checkoutReturn = "https://checkout.e2e.test/c/return"
+	checkoutReturn = "https://" + checkoutHost + hostedcheckout.SignInPath
 	merchantReturn = "https://shop.e2e.test/openrails/callback"
 )
 
 // world is openrails.dev: a standalone server running the customer network,
 // its AuthKit the OpenID provider merchants' clients sign accounts in at,
-// served over HTTPS at its issuer. The shop has its own login (a trusted
-// issuer) and an NMI PSP; the rival has its own login.
+// served over HTTPS at its issuer, with a hosted checkout host whose page's
+// client the server declares. The shop has its own login (a trusted issuer)
+// and an NMI PSP; the rival has its own login.
 type world struct {
 	t       *testing.T
 	srv     *server.Server
@@ -68,7 +71,7 @@ type world struct {
 	shopKey, rivalKey       iam.APIKeyCreated
 }
 
-func newWorld(t *testing.T, edits ...func(*server.Config, *server.Deps)) *world {
+func newWorld(t *testing.T) *world {
 	t.Helper()
 	f := newFixture(t)
 	ctx := t.Context()
@@ -86,16 +89,15 @@ func newWorld(t *testing.T, edits ...func(*server.Config, *server.Deps)) *world 
 	}))
 	t.Cleanup(ts.Close)
 	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
+		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.HostedCheckoutURL = "https://" + checkoutHost
+		deps.CheckoutAssets = checkoutPage
 		cfg.Auth.Token.Issuer = ts.URL
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
-		cfg.Auth.AuthorizationServer.Clients = []authkit.OAuthClientConfig{{ID: network.CheckoutClientID, Name: "Checkout", RedirectURIs: []string{checkoutReturn}}}
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.Vault = &openrails.VaultConfig{Address: vault.URL(), Token: vault.Token}
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
-		for _, edit := range edits {
-			edit(cfg, deps)
-		}
 	})
 	shop := uniqueName("network-shop")
 	manifest := filepath.Join(t.TempDir(), "merchants.yaml")
@@ -365,11 +367,7 @@ func TestCustomerLinkBySigningIn(t *testing.T) {
 // redeems it, answered only by the checkout page's client; the account must
 // have accepted the network terms.
 func TestCustomerLinkAtCheckout(t *testing.T) {
-	w := newWorld(t, func(cfg *server.Config, deps *server.Deps) {
-		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
-		cfg.HostedCheckoutURL = "https://" + checkoutHost
-		deps.CheckoutAssets = checkoutPage
-	})
+	w := newWorld(t)
 	at := openrails.ForMerchantID(w.shop)
 	key := "linked-" + uuid.NewString()[:8]
 	product, err := w.srv.Client().CreateProduct(t.Context(), billing.CreateProductParams{Key: key, DisplayName: "Course " + key}, at)
@@ -441,10 +439,19 @@ func TestCustomerLinkAtCheckout(t *testing.T) {
 	ch = w.challenge(token)
 	w.refused(w.redeem(token, ch.ID, w.checkoutSignIn(w.account(true), ch.Nonce).IDToken),
 		http.StatusBadRequest, billing.CodeNetworkLinkChallengeInvalid, "the checkout page's client answers only a checkout URL")
-	_, secret = checkout()
-	ch = challenge(secret)
-	w.refused(redeem(secret, ch.ID, w.checkoutSignIn(w.account(false), ch.Nonce).IDToken),
-		http.StatusForbidden, billing.CodeNetworkTermsRequired, "an account that never accepted the network terms")
+	// The page's sign-in itself asks for the network terms.
+	gus := w.account(false)
+	dpop := authtest.NewDPoPKey(t)
+	id := w.as.BeginAuthorization(t, authtest.CodeFlow{ClientID: network.CheckoutClientID, RedirectURI: checkoutReturn, Scopes: []string{"openid"},
+		Nonce: "n-" + uuid.NewString(), DPoP: dpop}, "verifier-"+uuid.NewString(), "state")
+	r = serve(w.handler, rsRequest{method: http.MethodPost, path: w.srv.AuthKit().APIBase() + "/oauth2/authorizations/" + url.PathEscape(id) + "/approve",
+		authorization: "Bearer " + authtest.SignIn(t, w.srv.AuthKit(), gus).AccessToken})
+	require.Equal(t, http.StatusConflict, r.Code, r.Body.String())
+	require.Contains(t, r.Body.String(), "agreement_required", "an account that never accepted the network terms")
+	r = host(checkoutHost, http.MethodGet, hostedcheckout.SignInPath+"?code=c&state=s", "", nil)
+	require.Equal(t, http.StatusOK, r.Code, "the page answers its sign-in's return")
+	require.Contains(t, r.Header().Get("Content-Security-Policy"), "connect-src 'self' ")
+	require.Regexp(t, `connect-src [^;]*`+regexp.QuoteMeta(w.as.URL), r.Header().Get("Content-Security-Policy"), "the page redeems its code at the server's AuthKit")
 	r = host(apiHost, http.MethodPost, "/v1/me/network-link/challenges", secret, nil)
 	require.Equal(t, http.StatusUnauthorized, r.Code, "a checkout URL opens nothing on the API host: %s", r.Body.String())
 }
@@ -776,4 +783,19 @@ func TestNativeCustomersLinkWhenTheyAcceptNewTerms(t *testing.T) {
 	require.NoError(t, after.AuthKit().AcceptAgreements(ctx, sam.ID, []iam.AgreementRef{{Key: network.TermsAgreement, Version: "2026-11"}}))
 	require.Eventually(t, func() bool { n := linked(); return n != nil && n.Method == billing.CustomerLinkSignIn }, 30*time.Second, 100*time.Millisecond,
 		"user.agreement_accepted links the merchants whose client the account let act as itself")
+}
+
+// The checkout page's client is the server's: an operator declaring it is
+// refused at boot.
+func TestTheServerDeclaresTheCheckoutClient(t *testing.T) {
+	f := newFixture(t)
+	_, err := f.buildServer(t, func(cfg *server.Config, deps *server.Deps) {
+		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
+		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
+		cfg.Auth.AuthorizationServer.Clients = []authkit.OAuthClientConfig{{ID: network.CheckoutClientID, RedirectURIs: []string{checkoutReturn}}}
+		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.HostedCheckoutURL = "https://" + checkoutHost
+		deps.CheckoutAssets = checkoutPage
+	})
+	require.ErrorContains(t, err, "declares "+network.CheckoutClientID)
 }

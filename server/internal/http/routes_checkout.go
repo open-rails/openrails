@@ -39,13 +39,22 @@ func (s *Server) buildCheckout(origin string, assets fs.FS) error {
 	if config.CaptchaEnabled(s.cfg.Captcha) {
 		captcha = config.CaptchaProvider(s.cfg.Captcha)
 	}
+	// With the customer network the page signs shoppers in at the server's
+	// own AuthKit.
+	var issuers []string
+	if s.runtime.Network != nil {
+		if iss, err := url.Parse(s.controlPlane.Issuer()); err == nil && iss.Host != "" {
+			issuers = append(issuers, iss.Scheme+"://"+iss.Host)
+		}
+	}
 	mux.Handle("GET /c/{order_id}", page)
+	mux.Handle("GET "+hostedcheckout.SignInPath, page)
 	mux.Handle("GET /assets/{file...}", page)
 	s.checkoutHost = strings.ToLower(u.Host)
 	s.checkoutHandler = middleware.ChainHTTP(mux.Handler(),
 		middleware.RecoverHTTP(),
 		middleware.RequestLogHTTP(),
-		hostedcheckout.HeadersHTTP(hostedcheckout.ContentSecurityPolicy(captcha)),
+		hostedcheckout.HeadersHTTP(hostedcheckout.ContentSecurityPolicy(captcha, issuers...)),
 		middleware.RequestLimitsHTTP(middleware.DefaultMaxBodyBytes),
 		billingauth.ExplicitCredentials,
 		hostedcheckout.ResolveHTTP(hostedcheckout.NewStore(s.runtime.DB), s.runtime.Clock.Now),
