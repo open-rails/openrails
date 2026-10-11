@@ -99,7 +99,8 @@ type Config struct {
 	// mounts: a KV mount makes Vault hold merchant configuration.
 	Vault *VaultConfig
 
-	// LLM is the model behind the console's metrics and catalog questions. Without an API key those features are off.
+	// LLM is the model behind the console's metrics and catalog questions.
+	// Without an API key those features are off.
 	LLM *LLMConfig
 
 	// CatalogReconciliationInterval schedules the alert-only catalog

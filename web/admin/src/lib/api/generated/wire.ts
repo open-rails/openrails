@@ -903,17 +903,6 @@ export type FlatPrice = {
   amount?: string
 }
 
-export type GenerateDashboardWidgetParams = {
-  prompt?: string
-  base_query?: MetricsQuery | null
-}
-
-export type GeneratedWidget = {
-  query: MetricsQuery
-  title: string
-  viz: string
-}
-
 export type Health = {
   status: "ok" | "ready"
 }

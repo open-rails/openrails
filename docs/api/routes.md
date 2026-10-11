@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (171), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (170), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -181,7 +181,6 @@ Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`.
 | GET | `/v1/admin/metrics/schema` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `MetricsSchema` |  |
 | GET | `/v1/admin/dashboard` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `Dashboard` |  |
 | POST | `/v1/admin/metrics/ask` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
-| POST | `/v1/admin/dashboard/widgets/generate` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
 
 ## Access
 
