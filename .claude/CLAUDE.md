@@ -113,7 +113,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 
 ## Catalog
 - One document model, `catalog.Application` (`catalog.ParseApplicationYAML`); a host
-  with a catalog file sets `Config.Catalog`, and `New` applies it on every start. Files
+  with a catalog file sets `MerchantDeclaration.Catalog` in `Config.Merchants`, and `New` applies it on every start. Files
   and console edits share fields by ownership: a field an edit changed last is not
   overwritten by the file, and the conflict is reported.
 - The **pull** reconciliation job (`internal/river/jobs_catalog_reconciliation.go`) is
