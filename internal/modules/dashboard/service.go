@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
 // Service persists per-merchant dashboards. Every read and write uses the

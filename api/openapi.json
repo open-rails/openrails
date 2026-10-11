@@ -1333,7 +1333,7 @@
         ]
       }
     },
-    "/v1/catalog/products": {
+    "/v1/products": {
       "get": {
         "tags": [
           "checkout"
@@ -1507,7 +1507,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/apply": {
+    "/v1/catalog/apply": {
       "post": {
         "tags": [
           "catalog"
@@ -1572,7 +1572,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/meters": {
+    "/v1/catalog/meters": {
       "get": {
         "tags": [
           "catalog"
@@ -1643,7 +1643,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/meters/{key}": {
+    "/v1/catalog/meters/{key}": {
       "get": {
         "tags": [
           "catalog"
@@ -1768,7 +1768,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/ask": {
+    "/v1/catalog/ask": {
       "post": {
         "tags": [
           "catalog"
@@ -1820,7 +1820,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/products": {
+    "/v1/catalog/products": {
       "post": {
         "tags": [
           "catalog"
@@ -2011,7 +2011,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/products/{id}": {
+    "/v1/catalog/products/{id}": {
       "get": {
         "tags": [
           "catalog"
@@ -2126,7 +2126,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/prices": {
+    "/v1/catalog/prices": {
       "post": {
         "tags": [
           "catalog"
@@ -2316,7 +2316,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/prices/{id}": {
+    "/v1/catalog/prices/{id}": {
       "get": {
         "tags": [
           "catalog"
@@ -2443,7 +2443,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/prices/{id}/history": {
+    "/v1/catalog/prices/{id}/history": {
       "get": {
         "tags": [
           "catalog"
@@ -3124,7 +3124,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations": {
+    "/v1/catalog/price-migrations": {
       "post": {
         "tags": [
           "catalog"
@@ -3279,7 +3279,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations/preview": {
+    "/v1/catalog/price-migrations/preview": {
       "post": {
         "tags": [
           "catalog"
@@ -3332,7 +3332,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations/{id}": {
+    "/v1/catalog/price-migrations/{id}": {
       "get": {
         "tags": [
           "catalog"
@@ -3381,7 +3381,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations/{id}/cancel": {
+    "/v1/catalog/price-migrations/{id}/cancel": {
       "post": {
         "tags": [
           "catalog"
@@ -7442,7 +7442,7 @@
         ]
       }
     },
-    "/v1/operator/psps": {
+    "/v1/merchant/psps": {
       "get": {
         "tags": [
           "merchant_config"
@@ -7599,7 +7599,7 @@
         ]
       }
     },
-    "/v1/operator/psps/{id}": {
+    "/v1/merchant/psps/{id}": {
       "get": {
         "tags": [
           "merchant_config"
@@ -7711,7 +7711,7 @@
         ]
       }
     },
-    "/v1/operator/psps/routing-preview": {
+    "/v1/merchant/psps/routing-preview": {
       "post": {
         "tags": [
           "merchant_config"
@@ -7759,7 +7759,7 @@
         ]
       }
     },
-    "/v1/operator/psps/refresh": {
+    "/v1/merchant/psps/refresh": {
       "post": {
         "tags": [
           "merchant_config"
@@ -7866,7 +7866,7 @@
         ]
       }
     },
-    "/v1/operator/configuration": {
+    "/v1/merchant/configuration": {
       "get": {
         "tags": [
           "merchant_config"
@@ -7951,7 +7951,7 @@
         ]
       }
     },
-    "/v1/operator/alert-webhooks": {
+    "/v1/merchant/alert-webhooks": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8072,7 +8072,7 @@
         ]
       }
     },
-    "/v1/operator/alert-webhooks/{id}": {
+    "/v1/merchant/alert-webhooks/{id}": {
       "delete": {
         "tags": [
           "merchant_config"
@@ -8176,7 +8176,7 @@
         ]
       }
     },
-    "/v1/operator/billing-archive": {
+    "/v1/merchant/billing-archive": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8267,7 +8267,7 @@
         ]
       }
     },
-    "/v1/operator/billing-import": {
+    "/v1/merchant/billing-import": {
       "post": {
         "tags": [
           "merchant_config"
@@ -8517,7 +8517,7 @@
         ]
       }
     },
-    "/v1/admin/metrics/query": {
+    "/v1/metrics/query": {
       "post": {
         "tags": [
           "metrics"
@@ -8566,7 +8566,7 @@
         ]
       }
     },
-    "/v1/admin/metrics/schema": {
+    "/v1/metrics/schema": {
       "get": {
         "tags": [
           "metrics"
@@ -8602,7 +8602,7 @@
         ]
       }
     },
-    "/v1/admin/dashboard": {
+    "/v1/metrics/dashboard": {
       "get": {
         "tags": [
           "metrics"
@@ -8640,59 +8640,7 @@
         ]
       }
     },
-    "/v1/admin/metrics/ask": {
-      "post": {
-        "tags": [
-          "metrics"
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AskMetricsParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MetricsAnswer"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "merchant",
-        "x-openrails-permission": {
-          "merchant": "merchant:metrics:read",
-          "root": "root:metrics:read"
-        },
-        "x-openrails-mounted-when": "metrics_ask",
-        "x-openrails-errors": [
-          "invalid_param",
-          "model_unavailable",
-          "rate_limit_exceeded",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:merchant",
-          "request"
-        ]
-      }
-    },
-    "/v1/operator/dashboard": {
+    "/v1/merchant/dashboard": {
       "put": {
         "tags": [
           "merchant_config"
@@ -8741,7 +8689,7 @@
         ]
       }
     },
-    "/v1/operator/findings": {
+    "/v1/merchant/findings": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8850,7 +8798,7 @@
         ]
       }
     },
-    "/v1/operator/findings/{id}": {
+    "/v1/merchant/findings/{id}": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8900,7 +8848,7 @@
         ]
       }
     },
-    "/v1/operator/findings/{id}/resolve": {
+    "/v1/merchant/findings/{id}/resolve": {
       "post": {
         "tags": [
           "merchant_config"
@@ -9091,7 +9039,7 @@
         ]
       }
     },
-    "/v1/operator/provisioning-tokens": {
+    "/v1/merchant/provisioning-tokens": {
       "get": {
         "tags": [
           "merchant_config"
@@ -9208,7 +9156,7 @@
         ]
       }
     },
-    "/v1/operator/provisioning-tokens/{id}": {
+    "/v1/merchant/provisioning-tokens/{id}": {
       "delete": {
         "tags": [
           "merchant_config"
@@ -11425,14 +11373,6 @@
         }
       },
       "AskCatalogParams": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string"
-          }
-        }
-      },
-      "AskMetricsParams": {
         "type": "object",
         "properties": {
           "question": {
@@ -15387,24 +15327,6 @@
           }
         }
       },
-      "MetricsAnswer": {
-        "type": "object",
-        "properties": {
-          "answer": {
-            "type": "string"
-          },
-          "evidence": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsEvidence"
-            }
-          }
-        },
-        "required": [
-          "answer",
-          "evidence"
-        ]
-      },
       "MetricsColumn": {
         "type": "object",
         "properties": {
@@ -15442,49 +15364,6 @@
         "required": [
           "name",
           "description"
-        ]
-      },
-      "MetricsEvidence": {
-        "type": "object",
-        "properties": {
-          "query": {
-            "$ref": "#/components/schemas/MetricsQuery"
-          },
-          "grain": {
-            "type": "string"
-          },
-          "range": {
-            "$ref": "#/components/schemas/MetricsResultRange"
-          },
-          "columns": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MetricsColumn"
-            }
-          },
-          "rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          },
-          "compare_range": {
-            "$ref": "#/components/schemas/MetricsResultRange"
-          },
-          "compare_rows": {
-            "type": "array",
-            "items": {
-              "type": "array",
-              "items": {}
-            }
-          }
-        },
-        "required": [
-          "query",
-          "range",
-          "columns",
-          "rows"
         ]
       },
       "MetricsExample": {
