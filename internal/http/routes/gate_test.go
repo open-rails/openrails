@@ -712,8 +712,8 @@ func TestGateAsksThePair(t *testing.T) {
 		merchant, root billing.Permission
 		route          string
 	}{
-		{"merchant:customer:read", "root:customer:read", payments},
-		{"merchant:customer:manage", "root:customer:manage", refund},
+		{"merchant:billing:read", "root:billing:read", payments},
+		{"merchant:billing:manage", "root:billing:manage", refund},
 	} {
 		got := runRoute(t, rt, holding(held(old.root), held(old.merchant)), old.route, nil)
 		require.Equal(t, http.StatusForbidden, got.status, "retired permissions %s and %s", old.merchant, old.root)
