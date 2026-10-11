@@ -13,7 +13,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/config"
 )
 
@@ -46,7 +45,7 @@ func TestFeatureRateLimitsWithOptionalRedis(t *testing.T) {
 				"checkout":           {RequestsPerMinute: 2},
 			}
 			calls := 0
-			h := RateLimitHTTP(&limits, captchaOn, abusestate.New(rdb), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			h := RateLimitHTTP(&limits, captchaOn, stillState(rdb), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				calls++
 				w.WriteHeader(http.StatusOK)
 			}))

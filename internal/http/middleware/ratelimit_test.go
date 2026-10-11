@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -88,8 +89,17 @@ func engine(deps RateLimitDeps, next http.Handler) http.Handler {
 	})
 }
 
+// stillState is abuse state whose clock stands mid-window, so a test's
+// requests never straddle a clock-aligned window's end.
+func stillState(rdb *redis.Client) *abusestate.Store {
+	s := abusestate.New(rdb)
+	at := time.Date(2026, 1, 1, 12, 0, 30, 0, time.UTC)
+	s.SetClock(func() time.Time { return at })
+	return s
+}
+
 func newDeps(limits config.RateLimitsConfig, cfg *config.CaptchaConfig, v captcha.Verifier) RateLimitDeps {
-	state := abusestate.New(nil)
+	state := stillState(nil)
 	return RateLimitDeps{Limits: &limits, Captcha: cfg, State: state, ChallengeStore: captcha.NewChallengeStore(state), Verifier: v}
 }
 
@@ -286,7 +296,7 @@ func TestCaptchaChallenges(t *testing.T) {
 
 func TestFixedWindowLimit(t *testing.T) {
 	ctx := context.Background()
-	state := abusestate.New(nil)
+	state := stillState(nil)
 	limit := &config.RateLimit{RequestsPerMinute: 10}
 	for i := 1; i <= 11; i++ {
 		res := allow(ctx, state, "ip:a", "checkout", effectiveLimit(limit))
@@ -334,7 +344,7 @@ func TestRoutePathSelectsPolicyWithoutRewritingTheRequest(t *testing.T) {
 // never reaches a log line.
 func TestCheckoutAttemptRateLimit(t *testing.T) {
 	limits := config.RateLimitsConfig{"checkout": {RequestsPerMinute: 1000}}
-	rt := &app.Runtime{Config: &config.Config{RateLimits: &limits}, AbuseState: abusestate.New(nil)}
+	rt := &app.Runtime{Config: &config.Config{RateLimits: &limits}, AbuseState: stillState(nil)}
 	table := &router.Table{}
 	router.NewMux(table, "", rt).Handle(http.MethodGet, "/v1/checkout-sessions/:id", func(r *request.Request) { r.SuccessJSON(map[string]string{}) },
 		CheckoutSessionRateLimit(rt, "checkout-session-read", 2))

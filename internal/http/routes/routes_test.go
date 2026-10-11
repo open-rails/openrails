@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -207,7 +208,10 @@ func TestCatalogWritePolicy(t *testing.T) {
 func TestAdminOperationLimits(t *testing.T) {
 	rt := gatedRuntime(t)
 	table := &router.Table{}
-	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(abusestate.New(nil)), Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
+	state := abusestate.New(nil)
+	at := time.Date(2026, 1, 1, 12, 0, 30, 0, time.UTC) // mid-window: no window ends during the test
+	state.SetClock(func() time.Time { return at })
+	RegisterStaffRoutes(router.NewMux(table, "/m", rt), rt, Options{Auth: &recordingAuth{who: authtest.User(userB)}, AdminLimiter: middleware.NewAdminOperationLimiter(state), Scope: testScope, Permissions: Permissions{AdminRead: "root:billing:read", AdminUpdate: "root:billing:manage"}})
 	h := table.Handler()
 	preview := "/m/admin/subscriptions/" + userA + "/change/preview"
 	// A malformed body answers from the handler without a runtime.
