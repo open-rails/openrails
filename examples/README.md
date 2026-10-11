@@ -12,7 +12,7 @@ with their browser tests (`web/e2e`).
 |---|---|---|---|
 | **OpenRails runs** | in the app's process | as the `openrails` server you run | on the hosted platform |
 | **You operate** | the app and PostgreSQL | the app, the server, PostgreSQL 18, Redis and SMTP | the app |
-| **Billing client** | `openrails.New(ctx, cfg, deps)` | `openrails.NewRemote(url, WithTokenProvider(…), WithDefaultMerchant(…))` | `openrails.NewRemote(apiHost, WithAPIKey(…), WithDefaultMerchant(…))` |
+| **Billing client** | `openrails.New(ctx, cfg, deps)`, then the merchant's handle (`MerchantBySlug`) | `openrails.NewRemoteMerchant(url, RemoteCredential{Token: …})` | `openrails.NewRemoteMerchant(apiHost, RemoteCredential{APIKey: …})` |
 | **Backend credential** | none: in process | client credentials from the app's AuthKit (`courses-backend`) | the console's service token |
 | **Browser's billing calls** | same origin, `/billing/v1`, with the AuthKit session token | the server, with a DPoP-bound `openrails:self` token from AuthKit token exchange (`courses-web`) | the merchant's API host, the same way |
 | **Who trusts the app's AuthKit** | nothing to trust: `Mount` takes `ak.Authenticator()` | the merchant's `remote_application` in `merchant.yaml`, a trusted issuer of the server's AuthKit | the merchant's registered signing application |

@@ -27,7 +27,7 @@ fingerprint: any change is a fresh verification.
 Only a `simulated` verdict arms. `live`, `mismatched`, `unknown` (unavailable or
 malformed) and `unsupported` disarm: mutations fail locally before any bytes
 are sent; reads work. The engine still starts and stays ready, and the
-`openrails_psp_posture` probe (`Client.Probes`) fails while a loaded PSP is
+`openrails_psp_posture` probe (the engine's `Probes`) fails while a loaded PSP is
 unverified or disarmed. `unknown` is verified again in the background and on
 the next mutation with capped backoff (at most 30 seconds), so a provider
 outage never needs a restart. `live` and `mismatched` hold until the

@@ -1,7 +1,8 @@
 # Products and prices through one client
 
-The same `*openrails.Client` comes from `openrails.New` (in process) and
-`openrails.NewRemote`. Catalog operations are flat methods on it with typed IDs
+The same `*openrails.Client`, a handle on one merchant, comes from an
+`openrails.New` engine (in process) and from `openrails.NewRemote` or
+`openrails.NewRemoteMerchant`. Catalog operations are flat methods on it with typed IDs
 (`billing.ProductID`, `billing.PriceID`); each noun has one
 shape (`billing.Product`, `billing.Price`, `billing.Meter`) in Go and on the wire.
 

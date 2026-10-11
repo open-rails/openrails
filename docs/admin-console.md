@@ -42,7 +42,7 @@ Off is the default: nothing mounts the console, and no console route exists.
 On is one switch, where the HTTP surface is chosen:
 
 - **Embedded:** `AdminConsole: true` in the `openrails.Routes` given to the
-  adapter's `Mount` (or `Client.Routes`). The console is served at the
+  adapter's `Mount` (or the engine's `Routes`). The console is served at the
   prefix's `/admin`; `AdminConsoleAuthBase` says where your AuthKit's JSON
   API is.
 - **Standalone server:** `admin_console.enabled: true` in `config.yaml`

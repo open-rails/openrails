@@ -1,43 +1,52 @@
-# Choosing the merchant a Client call acts on
+# The merchant a call acts on
 
-A Client call acts on one merchant. Which one is decided in this order, and
-none of it grants authority: the credential must hold the operation's
-permission on that merchant.
+A call acts on one merchant. Nothing here grants authority: the credential
+must hold the operation's permission on that merchant.
 
-1. **A per-call selector**, the last argument of every merchant method:
+## The Go client
 
-   ```go
-   product, err := client.CreateProduct(ctx, params, openrails.WithMerchant("alpha"))
-   price, err := client.GetPrice(ctx, priceID, billing.GetPriceParams{}, openrails.ForMerchantID(id))
-   ```
+An `*openrails.Client` is a handle on one merchant, and no call names one.
 
-   `WithMerchant` always means a slug, even a UUID-shaped one; `ForMerchantID`
-   always means the stable UUID. Neither falls back to the other. A call takes
-   one selector.
-2. **The Client's default**: `openrails.WithDefaultMerchant("alpha")` or
-   `openrails.WithMerchantID(id)` at construction, or on a client derived with
-   `client.With(...)`. A per-call selector overrides it without changing the
-   Client.
-3. **The engine's declared merchant** (`Config.Merchant`), for a Client from
-   `openrails.New`. Such an engine refuses any other merchant.
+- **In process**, the `*openrails.Engine` that `openrails.New` returns hands
+  out handles: `Merchant(id)` for any live merchant in its directory,
+  `MerchantBySlug` for the one `Config.Merchant` declares. Holding the engine
+  is the authority; the handle carries no credential. Each call reads the
+  merchant from the directory: an unknown, deleted or archived one answers
+  `403 merchant_unresolved`.
+- **Over HTTP**, a handle is its credential. `openrails.NewRemote` takes one
+  credential per merchant, by merchant ID, and its `Merchant(id)` is that
+  merchant's handle; a merchant with no credential has none.
+  `openrails.NewRemoteMerchant` is the handle of the one merchant a credential
+  is bound to.
 
-A call with no selector, no default and no declared merchant is an
-invalid-request error before any credential is minted. An empty selector does
-not fall back to a default.
+```go
+remote, err := openrails.NewRemote(baseURL, openrails.RemoteOptions{
+    Credentials: map[billing.MerchantID]openrails.RemoteCredential{
+        alphaID: {APIKey: alphaKey},
+        bravoID: {Token: bravoToken}, // func(context.Context) (string, error)
+    },
+})
+alpha, err := remote.Merchant(alphaID)
+product, err := alpha.CreateProduct(ctx, params)
+```
 
-Slugs are lookup names: the server resolves them before authorization and
-never stores them as identities in tokens, jobs or foreign keys. A SaaS host
-that keeps merchant UUIDs uses `ForMerchantID`, or one client per merchant
-(`client.With(openrails.WithMerchantID(id))`).
+The server binds each credential to its merchant: a key for alpha filed under
+bravo's ID still acts on alpha. When a response names the merchant it acted on
+(the `OpenRails-Bound-Merchant` response header) and it is not the handle's,
+the handle discards the response and fails the call with an
+`*openrails.BoundMerchantError` naming both. The call has run by then, so file
+each credential under its own merchant.
 
-## On the wire
+The Go client sends no `OpenRails-Merchant` header.
 
-Both transports send exactly one `OpenRails-Merchant` header: a slug
-(`OpenRails-Merchant: alpha`) or a stable id (`OpenRails-Merchant: id:<uuid>`).
-Every merchant-scoped route (`/v1/admin`, `/v1/app`, `/v1/me`) honors
-it the same way: the server resolves the selector, authorizes
-the credential for that merchant, and only then pins it, before acquiring a
-merchant database connection or running business logic.
+## The `OpenRails-Merchant` request header
+
+Another HTTP client may name the merchant with one `OpenRails-Merchant`
+header: a slug (`OpenRails-Merchant: alpha`) or a stable id
+(`OpenRails-Merchant: id:<uuid>`). Every merchant-scoped route (`/v1/admin`,
+`/v1/app`, `/v1/me`) honors it the same way: the server resolves the selector,
+authorizes the credential for that merchant, and only then pins it, before
+acquiring a merchant database connection or running business logic.
 
 | Refusal | When |
 |---|---|
@@ -48,20 +57,8 @@ merchant database connection or running business logic.
 A request without the header is served as its credential resolves it. The
 request path never depends on the selector.
 
-## Credentials are independent
-
-`WithAPIKey` and `WithTokenProvider` use one credential: a key or token for
-alpha cannot reach bravo because a call selects bravo. Use `WithCredentialProvider` when a bearer token must be
-minted for the requested merchant. The callback receives the
-`CredentialTarget` and must be safe for concurrent calls; a failed mint returns
-an error without falling back to another token:
-
-```go
-client, err := openrails.NewRemote(baseURL,
-    openrails.WithCredentialProvider(func(ctx context.Context, target openrails.CredentialTarget) (string, error) {
-        return credentials.TokenFor(ctx, target)
-    }))
-```
+Slugs are lookup names: the server resolves them before authorization and
+never stores them as identities in tokens, jobs or foreign keys.
 
 Customer selection is independent of merchant selection. In hosted platform billing the hosted merchant may be the
 customer while the platform is the selling merchant; never substitute one for

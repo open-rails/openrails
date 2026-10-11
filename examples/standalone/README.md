@@ -9,7 +9,7 @@ OAuth issuer the server trusts. The walkthrough is the root README's
 
 | File | What it is |
 |---|---|
-| `main.go` | the app's AuthKit (users verify their email; it mints the browser's and the backend's tokens for the server and pushes users to the server's AuthKit over SCIM) and the billing client, `NewRemote` |
+| `main.go` | the app's AuthKit (users verify their email; it mints the browser's and the backend's tokens for the server and pushes users to the server's AuthKit over SCIM) and the billing client, `NewRemoteMerchant` |
 | `content.go`, `web/src/pages.tsx`, `catalog.yaml`, `media/` | the embedded example's, unchanged |
 | `web/src/clients.ts` | the browser's clients: AuthKit's, which trades the session for a DPoP-bound token to the server, and billing-ui's, which calls the server directly with it |
 | `openrails/config.yaml` | the server's configuration: database, Redis, its own AuthKit (a resource server), route groups, SMTP |

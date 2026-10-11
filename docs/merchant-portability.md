@@ -9,11 +9,10 @@ err := client.ExportBillingArchive(ctx, archiveWriter)
 result, err := client.ImportBillingArchive(ctx, archiveReader)
 ```
 
-For HTTP, construct the client with `openrails.NewRemote`; in process, use the
-client `openrails.New` returned. Bind either client with
-`openrails.WithMerchantID(sourceMerchantID)`. Archive operations can take longer
-than the SDK's default request deadline: use `openrails.WithTimeout(0)` with a
-caller-controlled context, or choose an explicit deadline. The CLI defaults to
+`client` is the source merchant's handle: over HTTP,
+`openrails.NewRemoteMerchant` with a credential of that merchant; in process,
+`Merchant(sourceMerchantID)` on the engine `openrails.New` returned. An
+archive can take long: bound the call with its context. The CLI defaults to
 caller cancellation and also accepts `--timeout`.
 
 Local export/import and `prepare-target --unbound-merchants` load only the `db`
@@ -169,13 +168,15 @@ never provisions or rebinds the target implicitly.
    blocking ordinary mutation routes and stopping every worker:
 
    ```sh
-   openrails billing export --source-stopped --merchant "$MERCHANT_UUID" \
+   openrails billing export --source-stopped \
      --url https://source.example --token-file source-bearer.txt \
      --out merchant-billing.jsonl
    ```
 
    `--token-file` holds a bearer credential authorized for the archive operation.
-   It must accompany `--url`; no local database is opened in remote mode.
+   It must accompany `--url`; no local database is opened in remote mode. The
+   credential's merchant is the one exported: `--merchant` names a local
+   merchant and is refused with `--url`.
 3. Transfer the completed file securely to the destination operator. The export
    writes a mode `0600` temporary file in the destination directory, checks the
    complete response, then publishes it atomically. Existing paths are refused
@@ -194,7 +195,7 @@ never provisions or rebinds the target implicitly.
    Or use its protected remote maintenance endpoint:
 
    ```sh
-   openrails billing import --target-stopped --merchant "$MERCHANT_UUID" \
+   openrails billing import --target-stopped \
      --url https://destination.example --token-file destination-bearer.txt \
      --in merchant-billing.jsonl
    ```

@@ -138,18 +138,18 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
-func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Client, error) {
+func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Engine, *openrails.Client, error) {
 	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	// What you sell. New applies each distinct catalog once, even across restarts.
 	// Later edits through the Go client remain available and are not undone by a replay.
 	products, err := catalog.ReadFile("catalog.yaml")
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	cfg := openrails.Config{
@@ -162,10 +162,20 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
 	// of its own: your auth guards its routes when you mount them.
-	return openrails.New(ctx, cfg, openrails.Deps{
+	bill, err := openrails.New(ctx, cfg, openrails.Deps{
 		Postgres: db,            // the same pool your app uses
 		UserInfo: ak.UserInfo(), // AuthKit's user lookup: each answer is the user's current email, name and username
 	})
+	if err != nil {
+		return nil, nil, err
+	}
+	// Your merchant's handle: the Go client your own code calls, in process.
+	shop, err := bill.MerchantBySlug(merchant.Slug)
+	if err != nil {
+		_ = bill.Close(context.WithoutCancel(ctx))
+		return nil, nil, err
+	}
+	return bill, shop, nil
 }
 ```
 
@@ -428,7 +438,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	defer func() { _ = ak.Close(context.WithoutCancel(ctx)) }()
-	bill, err := newBilling(ctx, db, ak)
+	bill, shop, err := newBilling(ctx, db, ak) // the engine, and your merchant's handle
 	if err != nil {
 		return err
 	}
@@ -477,7 +487,7 @@ func run(ctx context.Context) error {
 			c.AbortWithStatus(http.StatusUnauthorized)
 			return
 		}
-		held, err := bill.ListEntitlements(c, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customer}, Entitlements: []string{entitlement}})
+		held, err := shop.ListEntitlements(c, billing.EntitlementListParams{CustomerIDs: []billing.CustomerID{customer}, Entitlements: []string{entitlement}})
 		if err != nil {
 			c.AbortWithStatus(http.StatusServiceUnavailable)
 			return
@@ -545,8 +555,13 @@ until `RouteGroups` turns it on:
 - `AdminConsole`: `true` serves the staff dashboard at `/billing/admin` (below);
   off by default.
 
-The Go `Client` has every admin, catalog, merchant-config, metrics and programmatic route as a method, and
-checks no permission: code that holds the client is trusted.
+`bill` is the engine: it starts the workers, mounts the routes and reports
+readiness. `shop` is your merchant's handle, the Go `Client`: every admin,
+catalog, merchant-config, metrics and programmatic route is a method on it,
+and it checks no permission, since code that holds the engine is trusted. An
+engine that serves several merchants hands out a handle for each,
+`bill.Merchant(id)`; over HTTP the same `Client` comes from
+`openrails.NewRemoteMerchant` with the merchant's credential.
 
 That is the whole server integration, and it is the program in
 [`examples/embedded`](examples/embedded). Your server never touches a card
@@ -812,7 +827,7 @@ What you will set next:
 | Serve the admin console | `Routes.AdminConsole` ([admin dashboard](#admin-dashboard)) |
 | Share one billing schema between two apps | Connect both as one role, or `SET ROLE` to a shared one on every connection: the role `New` runs as owns every object |
 | Change or switch off the built-in limits on checkout and card writes | `Config.RateLimits`, `Config.RateLimitsDisabled` ([rate limiting](docs/rate-limiting.md)) |
-| Report readiness | `client.Ready(ctx)` and `client.Probes()` in your own health handler |
+| Report readiness | `bill.Ready(ctx)` and `bill.Probes()` in your own health handler |
 
 ### How access and billing work
 

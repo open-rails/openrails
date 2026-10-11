@@ -114,7 +114,7 @@ local job consumer. It still binds its request-side River producers before HTTP
 starts; a separate `run-worker` process contributes both billing and AuthKit
 lifecycle workers using the same database, issuer and manifest configuration.
 Embedded hosts wire the dependency checks into their own
-handler with `client.Ready(ctx)` and register `client.Probes()` as optional
+handler with the engine's `Ready(ctx)` and register its `Probes()` as optional
 dependencies with their supervisor; a host fleet passed to `Start` with
 `WithRiverClient` is watched by the `openrails_job_progress` probe because its
 process state is outside OpenRails.

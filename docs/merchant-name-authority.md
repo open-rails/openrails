@@ -23,6 +23,7 @@ that can change.
   over another owner's row by name.
 
 On the command line a bare `--merchant` value is a name, even a UUID-shaped
-one; `--merchant id:<uuid>` addresses the merchant directly. In Go,
-`openrails.WithMerchant` takes a name and `openrails.ForMerchantID` the UUID
-([choosing the merchant](client-merchant-selection.md)).
+one; `--merchant id:<uuid>` addresses the merchant directly. In Go a handle
+is made for the UUID (`Merchant(id)`), or with `MerchantBySlug` for the name
+`Config.Merchant` declares
+([the merchant a call acts on](client-merchant-selection.md)).

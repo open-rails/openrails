@@ -1,7 +1,7 @@
 # Standalone Integration Guide
 
 How to deploy OpenRails as its own self-hosted HTTP service and integrate your
-application against it ([Backend integration](#backend-integration) shows the Go client, `NewRemote`).
+application against it ([Backend integration](#backend-integration) shows the Go client, `NewRemoteMerchant`).
 [`examples/standalone`](../examples/standalone) runs all of it: the server from
 its image, a merchant from a file, an app whose AuthKit is the trusted issuer,
 SCIM contacts, receipts and webhooks. Money
@@ -180,28 +180,26 @@ curl -s https://issuer.example/oauth/token -d grant_type=client_credentials \
   -d scope=openrails:merchant -d resource=https://openrails.example.com \
   | jq -r .access_token > /run/openrails/token
 openrails get-merchant-config --server-url https://openrails.example \
-  --token-file /run/openrails/token --merchant your-merchant
+  --token-file /run/openrails/token
 ```
 
 ### Backend integration
 
-**Go SDK** — the root module's `openrails.Client`, identical interface to
-embedded mode:
+**Go SDK** — the root module's `openrails.Client`, a handle on the merchant
+its credential is bound to, with the same operations as in embedded mode:
 
 ```go
 tokens := (&clientcredentials.Config{ // golang.org/x/oauth2/clientcredentials
     ClientID: "billing-backend", ClientSecret: secret, TokenURL: "https://issuer.example/oauth/token",
     Scopes: []string{"openrails:merchant"}, EndpointParams: url.Values{"resource": {"https://openrails.example.com"}},
 }).TokenSource(ctx) // caches the token until it expires
-client, err := openrails.NewRemote("https://openrails.example",
-    openrails.WithTokenProvider(func(context.Context) (string, error) {
+client, err := openrails.NewRemoteMerchant("https://openrails.example", openrails.RemoteCredential{
+    Token: func(context.Context) (string, error) { // or APIKey: a static key
         t, err := tokens.Token()
         if err != nil { return "", err }
         return t.AccessToken, nil
-    }),
-    openrails.WithMerchantID(merchantID), // the merchant its calls act on
-    openrails.WithTimeout(2*time.Second), // per-call deadline; default 2s
-)
+    },
+})
 if err != nil { log.Fatal(err) }         // static config: bad URL, no credential
 if _, err := client.GetMerchantConfiguration(ctx); err != nil { // authenticated boot probe
     log.Fatal(err) // unreachable, bad credential — fail fast
@@ -222,12 +220,25 @@ receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmission
 // or client.ReleaseAdmissions(ctx, []string{requestID}) if the work failed
 ```
 
-Options: `WithTokenProvider` (per-call minted bearer), `WithAPIKey` (a
-static key, such as a hosted product's),
-`WithMerchantID` ([choosing the merchant](client-merchant-selection.md)),
-`WithTimeout`, `WithHTTPClient`. Every request carries its own currency. The
-constructor validates static configuration without I/O; `Ready` checks
-reachability, and any authenticated call proves the credential.
+A `RemoteCredential` is exactly one of `Token` (a bearer minted per call) and
+`APIKey` (a static key, such as a hosted product's); the credential's merchant
+is the one every call acts on ([the merchant a call acts on](client-merchant-selection.md)).
+A backend acting for several merchants, or one that sets a transport or a
+per-call timeout, uses `openrails.NewRemote` with `openrails.RemoteOptions`
+(`Credentials` by merchant ID, `HTTPClient`, `Timeout`) and takes each
+merchant's handle from `Merchant(id)`. Every request carries its own
+currency. The constructors validate static configuration without I/O; the
+`Remote`'s `Ready` checks reachability, and any authenticated call proves the
+credential. With `NewRemoteMerchant` the caller's context bounds each call.
+
+**Customer tokens.** A backend whose signing key is registered as its
+merchant's remote application mints its customers' tokens with the same
+handle: set `RemoteCredential.Assertion` (an `openrails.AssertionKey`: the
+issuer, the key's `kid`, a `crypto.Signer` and the token endpoint), and
+`CustomerToken` signs an RFC 7523 assertion for one customer and redeems it
+for a short access token the frontend sends to `/v1/me`. `CustomerAssertion`
+returns the assertion alone, for a frontend that redeems it itself with a DPoP
+proof.
 
 **Errors** are canonical sentinels (`errors.Is` works identically against a
 remote or embedded engine): `ErrUnauthorized`, `ErrInvalid`, `ErrDenied`,
@@ -247,8 +258,8 @@ remote callers observe one error.
 is a real verdict — always honor it. `ErrUnreachable` means OpenRails could
 not answer: fail-open (serve the request, reconcile later) keeps your product
 up when billing is down, fail-closed protects against unmetered spend — choose
-per endpoint cost. Keep `WithTimeout` short so a slow OpenRails cannot stall
-your hot path.
+per endpoint cost. Keep the call's deadline short (the context's, or
+`RemoteOptions.Timeout`) so a slow OpenRails cannot stall your hot path.
 
 **Any other stack** calls the same HTTP surface with its application's
 access token (a person's is refused on `/v1/app`), and an `Idempotency-Key` on

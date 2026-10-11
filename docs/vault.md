@@ -156,7 +156,7 @@ OpenRails authenticates once, as itself; merchant isolation is the path, built
 by one function in code. The token is held in memory only. A background
 supervisor logs in, renews, and re-authenticates when renewal is no longer
 possible. Embedded hosts register the `openrails_vault` probe from
-`Client.Probes()`.
+the engine's `Probes()`.
 
 ## Minimal policies
 

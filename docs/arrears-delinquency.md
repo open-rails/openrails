@@ -120,8 +120,7 @@ Payload: `from_state`, `to_state`, `overdue_amount`, `overdue_started_at`,
 Embedded hosts:
 
 ```go
-// client is returned by runtime.Client(openrails.WithMerchantID(mid))
-// or openrails.NewRemote(...); both use the same operations.
+// client is the merchant's handle, from an Engine or a Remote; both have the same operations.
 for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyGrace,
     billing.HostEventDelinquencyEntered,

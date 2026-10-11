@@ -7,7 +7,7 @@ app code they share is [Sell Your Content](../../README.md#sell-your-content).
 
 | File | What it is |
 |---|---|
-| `main.go` | the app's AuthKit (users verify their email; it mints the browser's tokens for the platform and pushes users to it over SCIM with the service token) and the billing client, `NewRemote` with the service token, which applies `catalog.yaml` at boot |
+| `main.go` | the app's AuthKit (users verify their email; it mints the browser's tokens for the platform and pushes users to it over SCIM with the service token) and the billing client, `NewRemoteMerchant` with the service token, which applies `catalog.yaml` at boot |
 | `content.go`, `web/src/pages.tsx`, `catalog.yaml`, `media/` | the embedded example's, unchanged |
 | `web/src/clients.ts` | the browser's clients: AuthKit's, which trades the session for a DPoP-bound token to the platform, and billing-ui's, which calls the merchant's API host directly with it |
 

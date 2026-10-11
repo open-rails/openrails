@@ -28,14 +28,14 @@ Before the code:
 | Programmatic routes (`/v1/app`) admitting any application | Each admits an application holding its permission: `root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:costs:manage`, `root:events:read`, `root:orders:manage`, or the `merchant:` twin at the merchant ([auth](auth.md#permissions)) |
 | `server.MerchantRead`, `server.MerchantWrite`, `server.MerchantAdmin`, `server.MerchantMetrics` | `billing.MerchantBillingRead`, `billing.MerchantBillingManage`, `billing.MerchantCatalogManage` and `billing.MerchantConfigManage` (the one admin permission split), `billing.MerchantMetricsRead`; a program on `/v1/app` holds `billing.MerchantEntitlementsRead`, `billing.MerchantCatalogRead`, `billing.MerchantUsageManage`, `billing.MerchantCostsManage`, `billing.MerchantEventsRead` or `billing.MerchantOrdersManage` |
 | `openrails.Permissions()`, `openrails.MachinePermissions()`, the `billing.Merchant…` permission names; `authkit.Config.Merchant` with `Root` | `billing.Permission` constants in two personas (`billing.MerchantBillingRead`, `billing.RootBillingRead`, …), listed by `billing.Permissions()`: declare them in your auth and grant them in its roles. `Routes` names no permission and no scope; a `root:` permission is checked in the Authenticator's `RootScope`, a `merchant:` one in the merchant's own scope |
-| `Config.HTTP` (`HTTPConfig` with `Checkout`, the customer routes, `Merchant`, the cookie origin); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to `Client.Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `RouteGroups`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New` |
+| `Config.HTTP` (`HTTPConfig` with `Checkout`, the customer routes, `Merchant`, the cookie origin); `Config.AllowCatalogUpdates`; `Config.AdminConsole` and `Client.AdminConsole`; mounting under a router group | An `openrails.Routes` given to the engine's `Routes` and each adapter's `Mount` on the root router: `Auth`, `Prefix`, `RouteGroups`, `AdminConsole`. The public, customer and webhook routes are always mounted. A missing hook fails the mount, not `New` |
 | `Routes.Guards`, the `openrails.RouteSet` constants (level, resource and route groups); `Routes.Storefront`, `Routes.Customers` and the customer scopes (`CustomerSelfService`, …); `Routes.Merchant`, `Routes.MerchantConfig` | `Routes.RouteGroups` turns each group on; OpenRails decides each admin route's level (read or update) and the permission it checks |
 | `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
 | `VaultConfig.Enabled`; `vault.enabled` (env `VAULT_ENABLED`) on the standalone server | Removed: a non-nil `Config.Vault` (or `Deps.Vault`) connects to Vault; on the standalone server a `vault:` section or any `VAULT_*` setting declares it, and `vault.enabled` refuses boot |
 | `catalog_edits` (env `CATALOG_EDITS`) on the standalone server | Removed: catalog edits over HTTP are always on, documents skip what an edit set, and `catalog_edits` refuses boot |
 | `Config.SecretBackend`, `Config.Encryption`, `CredentialSnapshotID`, `CredentialReadOnly`, `AlertSecretBackend`; `secret_backend`, `encryption` (env `SECRET_BACKEND`, `ENCRYPTION_MASTER_KEY`) | Removed, and refused at boot: merchant configuration lives in `Config.Merchant` (the manifest) or, with `Config.Vault.KVMount`, in Vault; Postgres stores no credential. Export a database-held configuration with the previous release's `dump-merchant-config` before upgrading ([vault.md](vault.md)) |
 | `Config.Schema`, `Config.RiverSchema` | `Config.Database` (`openrails.DatabaseConfig`) with `Schema` and `RiverSchema`; in `config.yaml`, `database.schema` and `database.river_schema` (env `DATABASE_SCHEMA`, `DATABASE_RIVER_SCHEMA`) |
-| `Config.River` (`RiverManaged`, `RiverHostOwned`) | `New` always creates River's tables in `Config.Database.RiverSchema` (default: the schema plus `_river`). `client.Start(ctx)` runs OpenRails' own River there; `client.Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with `client.RiverJobs()` in that schema. `New` starts nothing |
+| `Config.River` (`RiverManaged`, `RiverHostOwned`) | `New` always creates River's tables in `Config.Database.RiverSchema` (default: the schema plus `_river`). The engine's `Start(ctx)` runs OpenRails' own River there; `Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with the engine's `RiverJobs()` in that schema. `New` starts nothing |
 | `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `Config.Catalog` is a `*catalog.Application` from `catalog.ReadFile`, `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
 | `PSPConfig` as a one-entry map keyed by rail; `CustodianConfig` keyed by kind | `openrails.PSPConfig` with `Rail`, `AccountID`, `Archived`, `Custodian`, `Signer`, `Secrets`, `Settings`; `openrails.CustodianConfig` with `Kind` |
 | `openrails.PSPFromEnv` | Removed: build each PSP from your own configuration with the rail's typed struct (`openrails.NMIPSP`, `StripePSP`, `CCBillPSP`, `SolanaPSP`) and its `PSPConfig()`, or keep the merchant in a file read by `openrails.ReadMerchantFile` |
@@ -57,8 +57,8 @@ Before the code:
 | Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.TestMode == openrails.Live`) |
 | `Config.Port`, `Config.Host`, `Config.MerchantManifestOverlays`; `koanf` struct tags | Removed: they are the standalone server's own settings. A host that decoded a file into an OpenRails type declares its own struct |
 | `AuthConfig.Naming merchant.NamingConfig` | `server.NamingConfig`, `server.FormerNamesConfig`, `server.FormerNamesMode` |
-| `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` returns an error for them; they belong to `openrails.NewRemote` |
-| `Close` on a client from `With` closed the engine | It returns an error; close the client `openrails.New` returned |
+| `openrails.New` ignored `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient` | `openrails.New` takes no options; a credential is an `openrails.RemoteCredential` given to `openrails.NewRemote` |
+| `Close` on a client from `With` closed the engine | There is no derived client: `Close` is the engine's, and a handle owns no lifecycle |
 | `openrails.WithCurrency`; `client.Balance` | Removed: every request names its currency |
 
 ### Rate limits and health
@@ -148,6 +148,24 @@ is `billing.CreateCheckoutSessionParams`, `CaptureParams` is
 `billing.CaptureAdmissionParams`, `ListHostEventsRequest` is
 `billing.HostEventListParams`. Settings nouns lose their `Input` suffix
 (`billing.BillingPolicy`, `billing.MerchantProfile`).
+
+### The engine and merchant handles
+
+`New` returns the engine and `NewRemote` the remote; a `*Client` is a handle
+on one merchant from either, and no call names its merchant.
+
+| Before | After |
+|---|---|
+| `openrails.New(ctx, cfg, deps, opts...)` returned the `*Client` | `openrails.New(ctx, cfg, deps)` returns the `*openrails.Engine`. A merchant's operations are on its handle: `MerchantBySlug` for the one `Config.Merchant` declares, `Merchant(id)` for any live merchant |
+| `client.Start`, `Close`, `Ready`, `Probes`, `Routes`, `RiverJobs` | The same methods on the `*openrails.Engine`; each adapter's `Mount` takes the engine |
+| `openrails.NewRemote(url, opts...)` returned the `*Client` | `openrails.NewRemote` takes `openrails.RemoteOptions` and returns the `*openrails.Remote`: `Merchant(id)` is a merchant's handle, `Ready` and `Close` are the remote's. `openrails.NewRemoteMerchant` is one merchant's handle directly |
+| `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `CredentialTarget` | An `openrails.RemoteCredential` (`APIKey` or `Token`) per merchant, in `RemoteOptions.Credentials` by merchant ID. A response naming another merchant fails the call with an `openrails.BoundMerchantError` |
+| `WithHTTPClient`, `WithTimeout` | `RemoteOptions.HTTPClient` and `RemoteOptions.Timeout`; in process, and with `openrails.NewRemoteMerchant`, the call's context is its bound |
+| `WithMerchant`, `ForMerchantID` on a call; `WithDefaultMerchant`, `WithMerchantID`; `client.With` | Removed: a handle acts on its own merchant. Take the other merchant's handle |
+| `openrails.RequestMerchant` | Removed: OpenRails binds the merchant; a host's `Authenticate` says who the request is |
+| `client.DeclarePSP(ctx, merchantID, declaration)` | `client.DeclarePSP(` on the merchant's handle takes the declaration alone |
+| `server.Server.Client` | `server.Server.Engine`, whose `Merchant(id)` is any live merchant's handle |
+| `openrails billing export` and `import` with `--url`, `get-merchant-config` and `apply-merchant-config` with `--server-url`, took `--merchant` | They act on the token's merchant and refuse `--merchant`, which names a local merchant |
 
 ### Customers
 
@@ -252,7 +270,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 |---|---|
 | `client.PaymentProviders.List`, `Retrieve`, `Upsert`, `Archive`; `RefreshProviders` | `client.ListPSPs(`, `client.GetPSP(`, `client.CreatePSP(`, `client.UpdatePSP(` (which also archives), `client.PreviewPSPRouting(`, `client.RefreshPSPs(`; the rail registry is `rails` in the public `GET /v1/config` |
 | `psp_id` as a UUID string; `DeclarePSP` returned a `uuid.UUID` | `billing.PSPID` (`psp_…` on the wire); `client.DeclarePSP(` returns the `billing.PSP` |
-| `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.UpdateMerchantConfiguration(`. `client.Ready(` checks reachability; any authenticated call proves the credential |
+| `GetMerchantSettings`, `SetMerchantSettings`, `Verify`, `client.MerchantConfiguration` | `client.GetMerchantConfiguration(`, `client.UpdateMerchantConfiguration(`. A `Remote`'s `Ready` checks reachability; any authenticated call proves the credential |
 | `ListHostEvents(ctx, HostEventListOptions)` returned a slice; `AcknowledgeHostEvent(ctx, uuid.UUID)` | `client.ListHostEvents(` with `billing.HostEventListParams`, a page; `client.AcknowledgeHostEvents(` takes up to 100 `billing.HostEventID`s and answers each event |
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.UpdateAlertWebhook(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |

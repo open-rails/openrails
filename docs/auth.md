@@ -28,8 +28,8 @@ client brings its own host authority.
 | application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
 OpenRails binds the merchant a customer route serves before it asks
-`Authenticate`; the host reads it with `openrails.RequestMerchant` rather than
-resolving `OpenRails-Merchant` itself.
+`Authenticate`; the host says who the request is and never resolves
+`OpenRails-Merchant` itself.
 
 OpenRails answers every refusal itself, the same for every host, with the
 status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`

@@ -43,17 +43,18 @@ YAML and JSON use the same typed contract. Documents are limited to 1 MiB.
 Unknown or duplicate fields, multiple documents, YAML aliases, anchors, merge
 keys and tags are rejected.
 
-Remote execution constructs only a Client. The credential must authorize the
-selected merchant and operation:
+Remote execution constructs only a Client. It acts on the merchant its
+credential is bound to, which must authorize the operation:
 
 ```sh
-openrails get-merchant-config --server-url https://billing.example --token-file token.txt --merchant shop
-openrails apply-merchant-config --server-url https://billing.example --token-file token.txt --merchant shop --file update.yaml
+openrails get-merchant-config --server-url https://billing.example --token-file token.txt
+openrails apply-merchant-config --server-url https://billing.example --token-file token.txt --file update.yaml
 ```
 
 Remote mode does not read local infrastructure configuration and rejects
-explicit `--config`, `--provider-write-mode` and `--test-mode` flags. Merchant
-slugs select scope; they do not grant authority.
+explicit `--config`, `--provider-write-mode`, `--test-mode` and `--merchant`
+flags. In a local run `--merchant` names the merchant; a slug selects scope
+and grants no authority.
 
 `push-merchant-config --seed` provisions the merchants a manifest names (create
 only). `dump-merchant-config` prints a Vault-held merchant's configuration in

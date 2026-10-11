@@ -15,16 +15,17 @@ network hop, no second credential. Concretely:
 - The engine owns a configurable schema, defaulting to `billing`, inside **your** Postgres database.
 - Its HTTP routes mount on **your** router under a prefix you choose; your users call
   them with their normal session credential.
-- `openrails.New` returns the **same** `*openrails.Client` a standalone consumer
-  gets from `openrails.NewRemote`. Parity is structural: one client
-  implementation, one handler surface, joined by an in-process
-  `http.RoundTripper` instead of a socket. The embedded Client adds the hosting
-  operations: `Start`, `Close`, `Routes`, `RiverJobs`, `Ready` and `Probes`.
-- An engine with `Config.Merchant` serves that merchant. One without a declared
-  merchant serves many: `WithDefaultMerchant`
-  supplies an immutable default, and each operation can select a slug with
-  `WithMerchant` or a stable ID with `ForMerchantID`. Selection never grants
-  authority or overrides the declared merchant.
+- `openrails.New` returns the `*openrails.Engine`: the pool, the workers, the
+  routes and every merchant in its directory. It has `Start`, `Close`,
+  `Routes`, `RiverJobs`, `Ready` and `Probes`.
+- A merchant's operations are on its handle, an `*openrails.Client`:
+  `MerchantBySlug` for the merchant `Config.Merchant` declares, `Merchant(id)`
+  for any live merchant in the engine's directory. It is the **same** type a
+  standalone consumer gets from `openrails.NewRemote`. Parity is structural:
+  one client implementation, one handler surface, joined by an in-process
+  `http.RoundTripper` instead of a socket.
+- A handle acts on its own merchant and no call names one. Holding the engine
+  is the authority: an in-process handle carries no credential.
 
 ```mermaid
 flowchart LR
@@ -48,7 +49,7 @@ imports four kinds of package; everything else is `internal/`:
 
 | Package | Holds |
 |---|---|
-| `openrails` | `New`, `NewRemote`, the `*Client`, `Config`, `Deps` |
+| `openrails` | `New` and its `*Engine`, `NewRemote`, the `*Client` handle, `Config`, `Deps` |
 | `billing` | request/response types, IDs (`billing.MerchantID`, `billing.ParseMerchantID`), errors and codes |
 | `catalog` | the catalog document (`catalog.Application`) and its charge models (rate cards, meters, prices) |
 | `adapters/http`, `adapters/gin`, `adapters/fiber` | mount the routes an `openrails.Routes` selects on your router |
@@ -125,9 +126,11 @@ or set `RateLimitsDisabled` if your own gateway fronts billing. See
 ### 4. Boot, lifecycle and River
 
 ```go
-client, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
+bill, err := openrails.New(ctx, cfg, openrails.Deps{Postgres: pool})
 if err != nil { return err }
-defer client.Close(ctx)
+defer bill.Close(ctx)
+client, err := bill.MerchantBySlug(cfg.Merchant.Slug) // your merchant's handle: every billing operation
+if err != nil { return err }
 ```
 
 Only Postgres (including the migrations `New` applies first) and a refused
@@ -138,7 +141,7 @@ declared catalog, River). Register `Probes` with the host's
 `github.com/open-rails/helpers/deps` supervisor:
 
 ```go
-for _, p := range client.Probes() { // openrails_vault, openrails_psp_posture, openrails_job_progress, ...
+for _, p := range bill.Probes() { // openrails_vault, openrails_psp_posture, openrails_job_progress, ...
     sup.Add(p.Name, deps.Optional, p.Check, nil)
 }
 ```
@@ -149,7 +152,7 @@ on and wait there; `Start` runs them, and `Ready` fails until it does. Without
 options `Start` builds and runs OpenRails' own River client there:
 
 ```go
-if err := client.Start(ctx); err != nil { return err }
+if err := bill.Start(ctx); err != nil { return err }
 ```
 
 A host that already runs a River fleet adds OpenRails' jobs to it, beside its
@@ -160,19 +163,19 @@ own and AuthKit's, and passes the fleet to `Start`. The fleet must use
 workers, err := riverhelpers.New(ctx, pool, &river.Config{
     Schema: "billing_river", // Config.Database.RiverSchema
     Queues: map[string]river.QueueConfig{openrails.QueueBilling: {MaxWorkers: 10}},
-}, auth.RiverJobs(), client.RiverJobs())
+}, auth.RiverJobs(), bill.RiverJobs())
 if err != nil { return err }
 if err := workers.Start(ctx); err != nil { return err }
 defer workers.StopAndCancel(context.WithoutCancel(ctx))
-if err := client.Start(ctx, openrails.WithRiverClient(workers)); err != nil { return err }
+if err := bill.Start(ctx, openrails.WithRiverClient(workers)); err != nil { return err }
 ```
 
 OpenRails enqueues through the host's fleet and never starts or stops it.
 Composing `RiverJobs` into a fleet in another schema is refused. Once
 `RiverJobs` went to a fleet, `Start` without `WithRiverClient` is refused, and
-`WithRiverClient` refuses a fleet built without this client's `RiverJobs`; a
+`WithRiverClient` refuses a fleet built without this engine's `RiverJobs`; a
 second `Start` is refused too. Cancelling `Start`'s context stops nothing:
-`Close` stops what `Start` started; close the client before the pool. OpenRails
+`Close` stops what `Start` started; close the engine before the pool. OpenRails
 also watches the fleet from outside River: `openrails_job_progress` fails while
 it is stalled.
 
@@ -214,7 +217,8 @@ cfg.Merchant = openrails.MerchantDeclaration{
 }
 ```
 
-`client.MerchantID()` is the declared merchant's ID. A host builds the
+`client.MerchantID()` is the declared merchant's ID (`client` is its handle,
+`bill.MerchantBySlug`). A host builds the
 declaration from its own configuration (koanf, kong, flags), or keeps it in a
 YAML file: `openrails.ReadMerchantFile(path)` reads one merchant strictly
 (unknown fields refused; `openrails.ParseMerchantDeclaration` takes the bytes).
@@ -251,7 +255,7 @@ and the alert-webhook methods edit it at the revision they read
 ([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
 with the rest of the merchant's configuration; the edits mount only with
 Vault. Imported billing facts attributed to a PSP without credentials need its
-identity first: `client.DeclarePSP(ctx, merchantID, billing.PSPDeclaration{...})`
+identity first: `client.DeclarePSP(ctx, billing.PSPDeclaration{...})`
 during setup.
 
 **Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
@@ -279,7 +283,7 @@ reference. `Config.Catalog` can finish a temporarily unavailable provider check 
 the background, with `Ready` failing until that startup batch succeeds.
 
 **Catalog authoring**: storage is always the database.
-The in-process Client is the process owner and writes its catalog directly
+An engine's handle is the process owner and writes its catalog directly
 (`ApplyCatalog`, or `CreateProduct`, `CreatePrice`, `UpdatePrice`);
 `RouteGroups.Catalog` publishes catalog changes to HTTP and delegated
 callers. YAML is decoded into the same `catalog.Application` as JSON
@@ -379,7 +383,7 @@ application, each of the route groups' `root:` permissions in exactly your
 `RootScope`, and staff signed out last; it fails on any acceptance or mix-up,
 and on a person whose subject is not a canonical UUID.
 
-An `openrails.Routes` selects the routes `client.Routes` returns; mount them
+An `openrails.Routes` selects the routes the engine's `Routes` returns; mount them
 on your root router with the adapter for it. Validation happens here: a mount
 without `Auth` fails before anything is registered, so nothing is ever served
 open.
@@ -387,11 +391,11 @@ open.
 ```go
 routes := openrails.Routes{Auth: ak.Authenticator(), Prefix: "/billing"}
 // net/http or Chi: github.com/open-rails/openrails/adapters/http
-if err := openrailshttp.Mount(mux, client, routes); err != nil { return err }
+if err := openrailshttp.Mount(mux, bill, routes); err != nil { return err }
 // Gin: github.com/open-rails/openrails/adapters/gin
-if err := openrailsgin.Mount(r, client, routes); err != nil { return err }
+if err := openrailsgin.Mount(r, bill, routes); err != nil { return err }
 // Fiber v3: github.com/open-rails/openrails/adapters/fiber
-if err := openrailsfiber.Mount(app, client, routes); err != nil { return err }
+if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 ```
 
 | `Routes` | Exposed surface |
@@ -433,10 +437,10 @@ See [admin-console.md](admin-console.md).
 ### 7. Calling the engine
 
 ```go
-if err := client.Ready(ctx); err != nil { return err } // fail fast at boot
+if err := bill.Ready(ctx); err != nil { return err } // fail fast at boot
 ```
 
-The shared concrete `*openrails.Client`, grouped by job:
+The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 
 | Group | Methods |
 |---|---|
@@ -474,34 +478,30 @@ Entitlement checks address customers by the ids your auth system already holds;
 a customer who never touched billing holds no keys, never an error. Deny verdicts are `(Allowed=false, nil
 error)`.
 
-`openrails.WithTimeout` configures the same call behavior as the remote
-constructor; the credential and transport options (`WithAPIKey`,
-`WithTokenProvider`, `WithCredentialProvider`, `WithHTTPClient`) belong to
-`NewRemote` and `New` refuses them. Both modes default to a two-second call deadline;
-`openrails.WithTimeout(0)` explicitly delegates the deadline to the caller.
+`New` takes no options. An in-process call runs as long as its context
+allows: bound it with the context's deadline.
 
 Orders and their previews use the shared client too. See
 [checkout](api/commerce.md).
 
 A host that must commit its own provider obligation atomically with the OpenRails
-authorization, release or settlement uses the embedded Client's `Tx` operations
+authorization, release or settlement uses its engine handle's `Tx` operations
 (`OpenProviderOperationTx` and siblings) with a transaction from its pool.
 See [provider obligations](architecture/provider-obligation-contract.md).
 
-The in-process transport resolves and pins the selected immutable merchant for
-each operation. An engine without a declared merchant serves many through one
-Client:
+One engine serves every live merchant in its directory, each through its own
+handle. `Merchant` reads nothing and refuses only the zero ID; each call reads
+the merchant from the directory, so one provisioned while the engine runs is
+served at once, and an unknown, deleted or archived one answers
+`403 merchant_unresolved` (`billing.ErrMerchantUnresolved`):
 
 ```go
-client, err := openrails.New(ctx, cfg, deps, openrails.WithDefaultMerchant("store-a"))
+storeB, err := bill.Merchant(storeBID) // a billing.MerchantID your host keeps
 if err != nil { return err }
-products, err := client.ListProducts(ctx, billing.ProductListParams{}, openrails.WithMerchant("store-b"))
-// For stored UUIDs use openrails.ForMerchantID(id) instead of a slug selector.
+products, err := storeB.ListProducts(ctx, billing.ProductListParams{})
 ```
 
-The default does not restrict an engine, and the per-operation option does not
-mutate it. An engine with a declared merchant refuses a different one. Both
-selectors require the same operation permission; neither acts as authorization.
+Handles share the engine's pool and workers; make one per call or keep it.
 
 ### 8. Hosted products
 
@@ -520,7 +520,7 @@ your app can shut off what your app runs. Transitions land on a durable,
 acknowledged feed you drain:
 
 ```go
-// client is openrails.New(...) or openrails.NewRemote(...); both use the same operations.
+// client is a merchant's handle, from an Engine or a Remote; both have the same operations.
 for _, kind := range []billing.HostEventType{
     billing.HostEventDelinquencyGrace,
     billing.HostEventDelinquencyEntered,
@@ -577,7 +577,7 @@ dunning, the intents ledger), [billing-policies.md](billing-policies.md)
 
 
 OpenRails serves no team or API-key routes: the host owns its identity and
-team UI. Worker health is the host's `Client.Probes` (`openrails_job_progress`).
+team UI. Worker health is the engine's `Probes` (`openrails_job_progress`).
 
 ### Merchant checkout authority
 

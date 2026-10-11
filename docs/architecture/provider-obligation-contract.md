@@ -178,7 +178,7 @@ The embedded Client's `Tx` operations (`OpenProviderOperationTx`,
 `CloseProviderOperationTx`) are
 for a host that must commit its own provider obligation, absence fact or
 billing fact atomically with OpenRails. They take a `pgx.Tx` from the host's
-pool on the engine's database and bind the declared merchant to that
+pool on the engine's database and bind the handle's merchant to that
 transaction; a transaction bound to another merchant is refused. OpenRails
 never commits or rolls back. Tx reads observe the transaction's uncommitted
 work. After any error the host rolls back.

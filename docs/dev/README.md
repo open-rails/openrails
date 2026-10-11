@@ -114,10 +114,10 @@ Three Go modules, each checked on its own (`GOWORK=off`):
 
 In the root module:
 
-- `client.go`, `remote.go`, … — root package `openrails`: the SDK surface, one concrete `*Client` (`NewRemote`, or `New` over the in-process transport); `Config`/`Deps` named from `internal/config`
+- `embedded.go`, `remote.go`, … — root package `openrails`: the SDK surface, the `*Engine` (`New`), the `*Remote` (`NewRemote`) and one concrete `*Client`, a merchant's handle from either; `Config`/`Deps` named from `internal/config`
 - `billing/` — the API vocabulary: request/response types, IDs, errors and codes, permission names
 - `catalog/` — the catalog document (`catalog.Application`) and its charge-model types
-- `adapters/{http,gin,fiber}/` — router adapters for `client.Routes`
+- `adapters/{http,gin,fiber}/` — router adapters for the engine's `Routes`
 - `internal/engine/` — the in-process engine behind `openrails.New` (lifecycle, routes, River, the opt-in control plane)
 - `internal/` — everything else: `modules/` (domain), `db/` (queries/gen/models), `river/` (jobs), `integrations/` (nmi, stripeapi, solana, …), `http/` (the route catalog in `http/routes`)
 - `internal/migrate/postgres/` — the authored PostgreSQL migration baseline

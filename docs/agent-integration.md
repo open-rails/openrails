@@ -79,7 +79,7 @@ Follow [standalone-integration.md](standalone-integration.md). Milestones:
    Register your backend as a client at the merchant's trusted issuer. Verify: its
    client-credentials token works via `client.GetMerchantConfiguration(ctx)` (Go) or an
    authenticated `GET /v1/admin/configuration` call.
-3. **Backend.** Go hosts: root SDK `openrails.NewRemote` + `WithTokenProvider`. Other stacks:
+3. **Backend.** Go hosts: root SDK `openrails.NewRemoteMerchant` with a `RemoteCredential`. Other stacks:
    plain HTTP per [api/endpoints.md](api/endpoints.md) and [api/routes.md](api/routes.md).
 4. **Frontend.** Access tokens: your identity provider mints
    `openrails:self` tokens for OpenRails (code flow or token exchange) per

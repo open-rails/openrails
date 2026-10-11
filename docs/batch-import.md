@@ -42,9 +42,9 @@ What import does **not** do:
 ### The import surface
 
 **Client**: `client.ImportBilling(ctx, billing.DeclaredBilling{...})` on the
-merchant-bound Client, in every deployment (`openrails.New` in process, or
-`openrails.NewRemote`). Resolve a public name once and bind the Client to
-the captured UUID. **HTTP**: `POST /v1/admin/billing-import`
+merchant's handle, in every deployment (an `openrails.New` engine's
+`Merchant(id)` in process, or `openrails.NewRemoteMerchant`). Resolve a public
+name once and keep the merchant's UUID. **HTTP**: `POST /v1/admin/billing-import`
 with the identical JSON body — merchant from the authenticated credential,
 mounted with `RouteGroups.MerchantConfig` and checked like the merchant's
 other configuration. The HTTP body cap (1 MiB) forces large books to

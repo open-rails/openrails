@@ -215,7 +215,7 @@ Global flags on every command: `--config/-c` (default `config.yaml`),
 | `access-cutover preflight [--approve NAME] [--json]` | list every customer and key the cutover to product access changes; `--approve` records them so the cutover migration applies exactly that list — see "Cutover to product access" |
 | `push-auth-bootstrap [--file] [--dry-run] [--startup-only --name]` | push AuthKit root authority from a bootstrap manifest |
 | `push-merchant-config [--file] --insert` | initialize missing merchant identities and snapshot metadata; existing metadata is preserved |
-| `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local or `--server-url` remote Client |
+| `get-merchant-config` / `apply-merchant-config --merchant NAME --file PATH` | read or apply metadata using stable application ID and revision; local, or a `--server-url` remote Client acting on its token's merchant (no `--merchant`) |
 | `apply-catalog --merchant NAME --file PATH [--force-conflicts]` | apply a catalog document: each product, price and meter applies whole unless an edit set a field it names differently, which is skipped, listed, and exits non-zero (`--force-conflicts` overwrites it). A document that applied whole replays by content hash; omission is preserved unless `prune: true` ([catalog ownership](catalog-ownership.md)) |
 | `catalog export --merchant UUID --out PATH` / `catalog import --merchant UUID --in PATH` | [full catalog YAML snapshot](catalog-export.md), preserving archived rows, original IDs and retained history; restore requires an empty catalog |
 | `dump-merchant-config --slug [--out]` / `dump-merchant-catalog --slug` | export a merchant's config / [active catalog YAML](catalog-export.md); full billing history uses `billing export` |
@@ -1136,7 +1136,7 @@ locally managed River worker consumer; Redis, Vault and PSP posture are
 reported as degraded and never fail it; `run-server --no-workers` is therefore live but not ready. An
 embedded host's own River fleet (`WithRiverClient`) is outside that
 local-process check and is observed through the `openrails_job_progress` probe
-(`Client.Probes`).
+(the engine's `Probes`).
 
 On SIGTERM or SIGINT the server drains: readiness answers 503 at once, while
 the listener keeps serving for `drain_delay` (default 5s), so load balancers
