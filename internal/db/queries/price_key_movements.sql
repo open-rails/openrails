@@ -15,6 +15,7 @@ WHERE owned_price.merchant_id=sqlc.arg(merchant_id)::uuid AND owned_price.id=sql
 SELECT movement.* FROM billing.price_key_movements movement
 JOIN billing.prices price ON price.merchant_id = movement.merchant_id AND price.id = movement.price_id
 WHERE movement.merchant_id = sqlc.arg(merchant_id)::uuid AND price.product_id = sqlc.arg(product_id)::uuid AND movement.key = sqlc.arg(key)::text
+ AND price.deleted_at IS NULL
  AND (sqlc.narg(after_at)::timestamptz IS NULL OR (movement.effective_at, movement.id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY movement.effective_at DESC, movement.id DESC
 LIMIT sqlc.arg(fetch_limit)::int;

@@ -141,6 +141,10 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 			r.Values = r.Values[:len(p.Columns)]
 		}
 		if !legacy {
+			// Products and prices before migration 68 were never deleted.
+			if (p.Name == "products" || p.Name == "prices") && len(r.Values) == len(p.Columns)-1 {
+				r.Values = append(r.Values, nil)
+			}
 			return emit(p, r.Values)
 		}
 		// Version 1: rows of every earlier shape, normalized as the
@@ -155,7 +159,11 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "prices" && len(r.Values) > 1 && r.Values[1] != nil && uuidPattern.MatchString(*r.Values[1]) {
 			r.Values = insertRevision(r.Values)
 		}
-		if (p.Name == "prices" || p.Name == "payments") && len(r.Values) == len(p.Columns)-1 {
+		if p.Name == "payments" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
+		}
+		// Prices before seats and before deletion: both trailing columns null.
+		for p.Name == "prices" && len(r.Values) < len(p.Columns) && len(r.Values) >= len(p.Columns)-2 {
 			r.Values = append(r.Values, nil)
 		}
 		if p.Name == "payments" && len(r.Values) == len(p.Columns)-2 {
@@ -262,8 +270,9 @@ func flushProducts(rows [][]*string, current bool, emit func(Profile, []*string)
 	products := namedProfile("products")
 	if current {
 		for _, values := range rows {
-			if len(values) == len(products.Columns)-1 {
-				values = append(values, nil) // Before ownership: derived.
+			// Before ownership (derived) and before deletion.
+			for len(values) < len(products.Columns) && len(values) >= len(products.Columns)-2 {
+				values = append(values, nil)
 			}
 			if err := emit(products, values); err != nil {
 				return err
@@ -301,7 +310,7 @@ func flushProducts(rows [][]*string, current bool, emit func(Profile, []*string)
 				current = append(current, values[i])
 			}
 		}
-		current = append(current, nil) // Before ownership: derived.
+		current = append(current, nil, nil) // Before ownership (derived) and before deletion.
 		if err := emit(products, current); err != nil {
 			return err
 		}

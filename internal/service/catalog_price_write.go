@@ -60,6 +60,10 @@ func (s *Service) writeCatalogPrice(ctx context.Context, req billing.CreatePrice
 			}
 		}
 
+		// The id is the terms': a deleted price of these terms revives.
+		if _, err := gen.New(tx).RevivePrice(ctx, gen.RevivePriceParams{MerchantID: tid.UUID(), ID: priceID, Archived: req.Archived}); err != nil {
+			return fmt.Errorf("revive price %s: %w", priceID, err)
+		}
 		existing, existErr := prices.GetByID(ctx, priceID)
 		if existErr != nil && !errors.Is(existErr, pgx.ErrNoRows) {
 			return existErr

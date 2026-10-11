@@ -1058,6 +1058,8 @@ type BillingPrice struct {
 	BillingIntervalHours *int32
 	// Seat bounds {min, max} of a recurring price sold per seat; amount is per seat. NULL: the price has no quantity.
 	Quantity []byte
+	// When the price was deleted, with its product or its key: nothing referenced it. Reads leave it out; declaring the same terms again revives it.
+	DeletedAt *time.Time
 }
 
 // One row per price key of a product: its revision advances on every change to any of its versions or their PSP links. Written only by the prices and price_psp_bindings triggers, which rebuild it on restore.
@@ -1132,6 +1134,8 @@ type BillingProduct struct {
 	CreditGrant []byte
 	// unique (one live holding per customer, per tier group when set), consumable (units stack, quantity counts them) or extend (a later purchase starts when the current window ends). NULL derives it: consumable for a credit product, extend when every price is one-time with an access duration, unique otherwise.
 	Ownership *string
+	// When the product was deleted: nothing referenced it. Reads leave it out; declaring its key again revives it.
+	DeletedAt *time.Time
 }
 
 // Product access windows projected from access grants: a purchase, a subscription period, a grace allowance or a free grant of one product for [starts_at, ends_at). A customer holds the keys the product grants while a window is live; windows may overlap and reads take their union. Rebuildable from the grant ledger.

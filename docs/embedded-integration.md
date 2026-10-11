@@ -300,8 +300,8 @@ operation rather than replaying an already-applied document.
 
 Omitted products, prices and fields keep their stored values. Use `archived: true`
 to retire an entry and `archived: false` to restore it. `prune: true` explicitly
-opts into archiving omitted products/prices that only documents set; no catalog
-operation deletes them.
+opts into removing omitted products/prices that only documents set: deleted
+when nothing ever referred to them, archived otherwise.
 The apply makes no provider writes. It may read a provider to verify an explicit
 reference. `MerchantDeclaration.Catalog` can finish a temporarily unavailable provider check in
 the background, with `Ready` failing until that startup batch succeeds.
@@ -313,8 +313,8 @@ An engine's handle is the process owner and writes its catalog directly
 callers. YAML is decoded into the same `catalog.Application` as JSON
 (`catalog.ReadFile`, `catalog.ParseApplicationYAML`).
 Omitted records survive by default; explicit `archived: true` retires a known
-record, and `prune: true` archives omitted products and prices that only
-documents set. Price keys are unique within their product. Key lookups and checkout selections
+record, and `prune: true` removes omitted products and prices that only
+documents set (deleted when never referenced, archived otherwise). Price keys are unique within their product. Key lookups and checkout selections
 therefore carry both `product_key` and `price_key`; price IDs select one immutable
 record directly. Each product/key chain has automatic price revisions starting at
 zero. New financial terms create a new revision; repeating or reactivating old

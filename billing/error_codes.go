@@ -84,6 +84,11 @@ const CodeCatalogBenefitOverlap = "catalog_benefit_overlap"
 // current revision; metadata.revision is the current one.
 const CodeRevisionMismatch = "revision_mismatch"
 
+// CodeProductInUse: a record refers to the product or one of its prices (a
+// purchase, subscription, grant, access, checkout, migration, provider write,
+// PSP link or rate card), so it is never deleted; archive it instead.
+const CodeProductInUse = "product_in_use"
+
 // Request-shape codes: the request never reached its operation.
 const (
 	// CodeUnknownField: the JSON body names a field the route does not
@@ -297,6 +302,7 @@ var errorCodes = []ErrorCode{
 
 	// Catalog and metering.
 	{"product_not_found", 404, invalid, "The product does not exist."},
+	{CodeProductInUse, 409, invalid, "Records refer to the product; archive it instead."},
 	{"price_not_found", 404, invalid, "The price does not exist."},
 	{"price_key_not_found", 404, invalid, "No price holds this key."},
 	{"price_key_cadence_conflict", 409, invalid, "The product's default price key is held by a price on another cadence."},

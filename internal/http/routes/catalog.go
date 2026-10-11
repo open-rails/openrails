@@ -4,6 +4,7 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/catalog"
 	"github.com/open-rails/openrails/internal/http/handlers"
+	"github.com/open-rails/openrails/internal/http/middleware"
 )
 
 // page is a list route's paging parameters.
@@ -55,6 +56,8 @@ var catalogRoutes = []Route{
 		Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.GetProduct)},
 	{Method: PATCH, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "UpdateProduct", Level: LevelUpdate,
 		Request: billing.UpdateProductParams{}, Responses: []Reply{{200, billing.Product{}}}, Errors: codes(productErrors...), Handler: h(handlers.UpdateProduct)},
+	{Method: DELETE, Path: "/v1/catalog/products/{id}", Group: CatalogAdmin, Auth: AuthMerchant, Name: "DeleteProduct", Level: LevelUpdate, Limit: middleware.AdminOperationDestructive,
+		Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeProductInUse, "product_not_found"), Handler: h(handlers.DeleteProduct)},
 	{Method: POST, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "CreatePrice", Level: LevelUpdate,
 		Request: billing.CreatePriceParams{}, Responses: []Reply{{201, billing.Price{}}}, Errors: codes(priceErrors...), Handler: h(handlers.CreatePrice)},
 	{Method: GET, Path: "/v1/catalog/prices", Group: CatalogAdmin, Auth: AuthMerchant, Name: "ListPrices", Level: LevelRead,

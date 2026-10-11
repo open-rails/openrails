@@ -1099,8 +1099,9 @@ apply with `ApplyCatalogParams{Force: true}`, `?force=true` or
 the field. `MerchantDeclaration.Catalog` never forces, and a conflict never fails `New`.
 
 All these examples preserve omitted entries. `prune: true` makes a document the
-whole catalog: an omitted product or price is archived only when no edit set any
-of its fields; otherwise the file lets it go. Nothing is deleted.
+whole catalog: an omitted product or price that no edit set is deleted when
+nothing ever referred to it and archived otherwise; one an edit set, the file
+lets go. A purchased product is never deleted.
 Changing existing subscribers' accepted prices requires an explicit scheduled
 reprice operation. A product's keys are not part of the accepted terms:
 editing a product's `entitlements` changes what every buyer and subscriber of

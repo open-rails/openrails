@@ -44,6 +44,19 @@ func (c *Client) GetProduct(ctx context.Context, id billing.ProductID, requestOp
 	return &out, nil
 }
 
+// DeleteProduct deletes a product nothing ever referred to, with its prices:
+// reads leave it out, and creating its key again revives it. A product a
+// purchase, subscription, grant, access, checkout, migration, provider write,
+// PSP link or rate card refers to is refused (billing.ErrConflict, code
+// product_in_use): archive it with UpdateProduct instead.
+func (c *Client) DeleteProduct(ctx context.Context, id billing.ProductID, requestOptions ...RequestOption) error {
+	path, err := requireTypedID("product_id", id)
+	if err != nil {
+		return err
+	}
+	return c.do(ctx, http.MethodDelete, "/v1/catalog/products/"+path, nil, nil, requestOptions...)
+}
+
 // ListOffers lists what a customer may buy: the products on sale granting
 // any of params.Entitlements and named by params.Keys (either may be empty,
 // not both), each with its live prices as a buyer sees them. A host's server
