@@ -227,7 +227,7 @@ jobs:
           docker run -d --pull never --name e2e-postgres -p 5432:5432 \
             --tmpfs /var/lib/postgresql:rw,size=2g \
             -e POSTGRES_DB=openrails_test -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
-            "$image" -c max_connections=500
+            "$image" -c max_connections=500 -c max_locks_per_transaction=256
       - name: Start Redis
         run: |
           image="$(scripts/ci-pull-image.sh redis:7-alpine)"
