@@ -6,7 +6,7 @@ require (
 	github.com/gagliardetto/solana-go v1.20.0
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.19.0
+	github.com/open-rails/authkit v1.20.0
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 )
 
@@ -67,6 +67,7 @@ require (
 	github.com/mostynb/zstdpool-freelist v0.0.0-20201229113212-927304c0c3b1 // indirect
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
+	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
 	github.com/open-rails/helpers v1.7.0 // indirect
 	github.com/open-rails/migratekit v1.10.0 // indirect
@@ -106,6 +107,7 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
+	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 

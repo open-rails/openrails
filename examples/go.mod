@@ -5,7 +5,7 @@ go 1.26.9
 require (
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/open-rails/authkit v1.19.0
+	github.com/open-rails/authkit v1.20.0
 	github.com/open-rails/helpers v1.7.0
 	github.com/open-rails/openrails v0.0.0-00010101000000-000000000000
 	github.com/stretchr/testify v1.12.1
@@ -80,6 +80,7 @@ require (
 	github.com/mostynb/zstdpool-freelist v0.0.0-20201229113212-927304c0c3b1 // indirect
 	github.com/mr-tron/base58 v1.3.0 // indirect
 	github.com/muhlemmer/gu v0.3.1 // indirect
+	github.com/nyaruka/phonenumbers v1.8.1 // indirect
 	github.com/oasisprotocol/curve25519-voi v0.0.0-20251114093237-2ab5a27a1729 // indirect
 	github.com/open-rails/migratekit v1.10.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4 // indirect
