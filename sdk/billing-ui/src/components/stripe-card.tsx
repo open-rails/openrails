@@ -1,6 +1,7 @@
-// Stripe Payment Element on an OpenRails card setup (SetupIntent). The card
-// lives only in Stripe's frames; save() confirms the setup in the page (3-D
-// Secure included) and returns the saved OpenRails payment method id.
+// Stripe Payment Element that saves a card in one call: Stripe's frames make
+// a payment method, and OpenRails saves it to the customer
+// (POST /v1/me/payment-methods). A bank that asks for 3-D Secure is answered
+// in the page (handleNextAction), then the save is confirmed.
 import * as React from "react"
 import type {
   Stripe,
@@ -9,20 +10,13 @@ import type {
 } from "@stripe/stripe-js"
 
 import type { BillingClient } from "#orck/client/client"
-import type { CardSetup } from "#orck/client/types"
 import { loadStripeFor } from "#orck/lib/stripe"
 import { stripeAppearance } from "#orck/lib/stripe-appearance"
 import type { PspConfig } from "#orck/psp"
 
 export interface StripeCardHandle {
-  /** Confirms the setup and returns the saved payment method id. */
+  /** Saves the entered card and returns its payment method id. */
   save(): Promise<string>
-}
-
-const defaultReturnURL = (setupId: string) => {
-  const url = new URL(window.location.href)
-  url.searchParams.set("setup_id", setupId)
-  return url.href
 }
 
 export const StripeCardEntry = React.forwardRef<
@@ -30,7 +24,6 @@ export const StripeCardEntry = React.forwardRef<
   {
     psp: PspConfig
     client: BillingClient
-    returnURL?: (setupId: string) => string
     defaultCountry?: string
     /** Completeness of the entered card, from the element's change events. */
     onCompleteChange?: (complete: boolean) => void
@@ -41,7 +34,6 @@ export const StripeCardEntry = React.forwardRef<
   {
     psp,
     client,
-    returnURL = defaultReturnURL,
     defaultCountry,
     onCompleteChange,
     unavailableMessage,
@@ -49,8 +41,6 @@ export const StripeCardEntry = React.forwardRef<
   },
   ref
 ) {
-  const [idempotencyKey] = React.useState(() => crypto.randomUUID())
-  const [setup, setSetup] = React.useState<CardSetup>()
   const [error, setError] = React.useState<string>()
   const host = React.useRef<HTMLDivElement>(null)
   const mounted = React.useRef<{ stripe: Stripe; elements: StripeElements }>(
@@ -61,37 +51,18 @@ export const StripeCardEntry = React.forwardRef<
     completeRef.current = onCompleteChange
   })
 
-  React.useEffect(() => {
-    let canceled = false
-    client
-      .createCardSetup({ pspId: psp.psp_id, idempotencyKey })
-      .then((created) => {
-        if (canceled) return
-        if (!created.client_secret && !created.payment_method_id)
-          throw new Error(unavailableMessage)
-        setSetup(created)
-        if (created.payment_method_id) completeRef.current?.(true)
-      })
-      .catch((cause: unknown) => {
-        if (!canceled)
-          setError(cause instanceof Error ? cause.message : unavailableMessage)
-      })
-    return () => {
-      canceled = true
-    }
-  }, [client, psp.psp_id, idempotencyKey, unavailableMessage])
-
-  const secret = setup?.client_secret
   const publishable = psp.config?.publishable_key
   React.useEffect(() => {
-    if (!secret || !publishable || !host.current) return
+    if (!publishable || !host.current) return
     let canceled = false
     let unmount: (() => void) | undefined
     void loadStripeFor(publishable).then(
       (stripe) => {
         if (canceled || !host.current) return
         const elements = stripe.elements({
-          clientSecret: secret,
+          mode: "setup",
+          paymentMethodTypes: ["card"],
+          paymentMethodCreation: "manual",
           appearance: stripeAppearance(host.current),
         })
         // Cards only: the panel saves a card, so no Link bank or wallets.
@@ -122,33 +93,42 @@ export const StripeCardEntry = React.forwardRef<
       mounted.current = null
       unmount?.()
     }
-  }, [secret, publishable, defaultCountry, unavailableMessage])
+  }, [publishable, defaultCountry, unavailableMessage])
 
   React.useImperativeHandle(
     ref,
     () => ({
       async save() {
-        if (setup?.payment_method_id) return setup.payment_method_id
         const current = mounted.current
-        if (!setup || !current) throw new Error(unavailableMessage)
+        if (!current) throw new Error(unavailableMessage)
         setError(undefined)
         const validation = await current.elements.submit()
         if (validation.error)
           throw new Error(validation.error.message ?? unavailableMessage)
-        const result = await current.stripe.confirmSetup({
+        const created = await current.stripe.createPaymentMethod({
           elements: current.elements,
-          confirmParams: { return_url: returnURL(setup.id) },
-          redirect: "if_required",
         })
-        if (result.error)
-          throw new Error(result.error.message ?? unavailableMessage)
-        const verified = await client.confirmCardSetup(setup.id)
-        if (!verified.payment_method_id)
+        if (created.error || !created.paymentMethod)
+          throw new Error(created.error?.message ?? unavailableMessage)
+        let method = await client.addPaymentMethod({
+          psp_id: psp.psp_id,
+          token: created.paymentMethod.id,
+        })
+        const secret = method.next_action?.payload?.client_secret
+        if (method.status === "requires_action" && secret) {
+          const answered = await current.stripe.handleNextAction({
+            clientSecret: secret,
+          })
+          if (answered.error)
+            throw new Error(answered.error.message ?? unavailableMessage)
+          method = await client.confirmPaymentMethod(method.id)
+        }
+        if (method.status === "requires_action")
           throw new Error(verificationPendingMessage)
-        return verified.payment_method_id
+        return method.id
       },
     }),
-    [setup, client, returnURL, unavailableMessage, verificationPendingMessage]
+    [client, psp.psp_id, unavailableMessage, verificationPendingMessage]
   )
 
   return (

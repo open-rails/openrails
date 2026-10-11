@@ -66,19 +66,30 @@ func orderID(r *httprequest.Request) (billing.OrderID, bool) {
 	return id, true
 }
 
-// answerOrder writes an order: 201 when created, 200 otherwise, and the
-// replay header when a key's earlier request made it.
-func answerOrder(r *httprequest.Request, order *billing.Order, created, replayed bool) {
+// answerOrder writes an order request's answer: the order (201 created, 200
+// otherwise), or, when its payment failed, 402 card_error carrying the order,
+// as Stripe's carries its PaymentIntent. A replay says so.
+func answerOrder(r *httprequest.Request, answer billingservice.OrderAnswer) {
 	r.SetHeader("Cache-Control", "no-store")
-	if replayed {
+	if answer.Replayed {
 		r.SetHeader("Idempotent-Replayed", "true")
-		r.JSON(http.StatusOK, order)
+	}
+	if answer.Status != http.StatusPaymentRequired {
+		r.JSON(answer.Status, answer.Order)
 		return
 	}
-	if created {
-		r.JSON(http.StatusCreated, order)
-		return
+	out := api.Coded(answer.Code, "")
+	if failure := answer.Order.Payment.LastPaymentError; failure != nil {
+		out.Message = failure.Message
+		out.Metadata = map[string]any{"failure": failure}
 	}
+	out.Order = answer.Order
+	r.APIError(out)
+}
+
+// writeOrder writes an order read or changed without a payment.
+func writeOrder(r *httprequest.Request, order *billing.Order) {
+	r.SetHeader("Cache-Control", "no-store")
 	r.JSON(http.StatusOK, order)
 }
 
@@ -102,7 +113,7 @@ func PreviewMyOrder(r *httprequest.Request) {
 }
 
 // CreateMyOrder handles POST /v1/me/orders: the one-call buy when a payment
-// is named.
+// is named, an open order to pay later otherwise.
 func CreateMyOrder(r *httprequest.Request) {
 	var body billing.CreateOrderParams
 	if !r.BindJSON(&body) {
@@ -117,12 +128,12 @@ func CreateMyOrder(r *httprequest.Request) {
 	if key == "" || svc == nil {
 		return
 	}
-	order, replayed, err := svc.CreateOrder(r.Request.Context(), *actor, body, key)
+	answer, err := svc.CreateOrder(r.Request.Context(), *actor, body, key)
 	if err != nil {
 		writeOrderError(r, err)
 		return
 	}
-	answerOrder(r, order, true, replayed)
+	answerOrder(r, answer)
 }
 
 // PayMyOrder handles POST /v1/me/orders/{id}/pay.
@@ -144,12 +155,12 @@ func PayMyOrder(r *httprequest.Request) {
 	if key == "" || svc == nil {
 		return
 	}
-	order, replayed, err := svc.PayOrder(r.Request.Context(), *actor, id, body, key)
+	answer, err := svc.PayOrder(r.Request.Context(), *actor, id, body, key)
 	if err != nil {
 		writeOrderError(r, err)
 		return
 	}
-	answerOrder(r, order, false, replayed)
+	answerOrder(r, answer)
 }
 
 // ConfirmMyOrder handles POST /v1/me/orders/{id}/confirm: a nudge after the
@@ -164,12 +175,12 @@ func ConfirmMyOrder(r *httprequest.Request) {
 	if !ok || svc == nil {
 		return
 	}
-	order, err := svc.ConfirmOrder(r.Request.Context(), *actor, id)
+	answer, err := svc.ConfirmOrder(r.Request.Context(), *actor, id)
 	if err != nil {
 		writeOrderError(r, err)
 		return
 	}
-	answerOrder(r, order, false, false)
+	answerOrder(r, answer)
 }
 
 // CancelMyOrder handles POST /v1/me/orders/{id}/cancel.
@@ -188,7 +199,7 @@ func CancelMyOrder(r *httprequest.Request) {
 		writeOrderError(r, err)
 		return
 	}
-	answerOrder(r, order, false, false)
+	writeOrder(r, order)
 }
 
 // GetMyOrder handles GET /v1/me/orders/{id}: the resumable handle.
@@ -207,7 +218,7 @@ func GetMyOrder(r *httprequest.Request) {
 		writeOrderError(r, err)
 		return
 	}
-	answerOrder(r, order, false, false)
+	writeOrder(r, order)
 }
 
 // ListMyOrders handles GET /v1/me/orders.
@@ -238,7 +249,7 @@ func ListOrders(r *httprequest.Request) {
 	}
 	params := billing.OrderListParams{PageRequest: page, Status: billing.OrderStatus(strings.TrimSpace(r.Query("status")))}
 	switch params.Status {
-	case "", billing.OrderOpen, billing.OrderRequiresAction, billing.OrderProcessing, billing.OrderPaid, billing.OrderCanceled, billing.OrderExpired:
+	case "", billing.OrderOpen, billing.OrderProcessing, billing.OrderComplete, billing.OrderCanceled, billing.OrderExpired:
 	default:
 		r.APIError(api.Coded(billing.CodeInvalidQuery, "status is invalid").WithParam("status"))
 		return
@@ -280,7 +291,7 @@ func GetOrder(r *httprequest.Request) {
 		writeOrderError(r, err)
 		return
 	}
-	answerOrder(r, order, false, false)
+	writeOrder(r, order)
 }
 
 // writeOrderError answers an order refusal by its code.
@@ -303,7 +314,7 @@ func writeOrderError(r *httprequest.Request, err error) {
 	case errors.As(err, &blocked):
 		writeCardAttemptsBlocked(r, blocked.RetryAfter)
 	case errors.Is(err, checkout.ErrPaymentMethodStale):
-		r.ErrorCode(billing.CodePaymentMethodStale, "")
+		writePaymentMethodStale(r)
 	case errors.Is(err, billing.ErrIdempotencyKeyReused):
 		r.ErrorCode(billing.CodeIdempotencyKeyReused, "")
 	case errors.Is(err, checkout.ErrCheckoutAttemptValidation):

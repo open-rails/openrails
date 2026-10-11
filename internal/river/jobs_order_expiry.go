@@ -10,6 +10,8 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db"
+	"github.com/open-rails/openrails/internal/db/gen"
+	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/shared/progress"
 )
@@ -22,7 +24,8 @@ func (OrderExpiryArgs) Kind() string { return KindOrderExpiry }
 
 // OrderExpiryWorker expires orders past their expiry, releasing their claims,
 // and purges unpaid closed orders past retention. It never touches an order
-// whose payment is processing: only the provider's answer ends that.
+// whose payment is processing: only the provider's answer ends that. It also
+// removes card saves left waiting for the bank's authentication.
 type OrderExpiryWorker struct {
 	river.WorkerDefaults[OrderExpiryArgs]
 	DB     *db.DB
@@ -49,6 +52,20 @@ func (w OrderExpiryWorker) Work(ctx context.Context, _ *river.Job[OrderExpiryArg
 			return err
 		}); err != nil {
 			log.WithContext(ctx).WithError(err).WithField("merchant_id", id).Error("order expiry: merchant pass failed; continuing")
+		}
+	}
+	now := workerNow(w.Clock)
+	before := now.Add(-checkout.SetupAbandonAfter)
+	stale, err := w.DB.GenDirectory().ListStaleSetupMerchants(ctx, gen.ListStaleSetupMerchantsParams{Before: before, MerchantLimit: orderExpiryBatch})
+	if err != nil {
+		return fmt.Errorf("card save expiry: list merchants: %w", err)
+	}
+	for _, id := range stale {
+		if err := w.DB.RunInMerchantScope(ctx, billing.MerchantID(id), "card save expiry", func(ctx context.Context) error {
+			_, err := w.DB.Gen(ctx).AbandonStalePaymentMethodSetups(ctx, gen.AbandonStalePaymentMethodSetupsParams{MerchantID: id, Before: before, Now: now})
+			return err
+		}); err != nil {
+			log.WithContext(ctx).WithError(err).WithField("merchant_id", id).Error("card save expiry: merchant pass failed; continuing")
 		}
 	}
 	return nil

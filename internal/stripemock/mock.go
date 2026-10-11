@@ -320,6 +320,9 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 			switch decline := m.declines[pm]; decline {
 			case "":
 				s["status"] = "succeeded"
+				if method, ok := m.methods[pm]; ok && method["customer"] == nil {
+					method["customer"] = form.Get("customer")
+				}
 			case "auth":
 				s["status"] = "requires_action"
 			default:
@@ -555,8 +558,12 @@ func (m *Mock) createIntent(form url.Values) (int, any) {
 	}
 }
 
-// chargeLocked settles a payment intent with one succeeded charge.
+// chargeLocked settles a payment intent with one succeeded charge; one that
+// saves its card attaches it to the intent's customer.
 func (m *Mock) chargeLocked(pi Object) Object {
+	if pm, ok := m.methods[fmt.Sprint(pi["payment_method"])]; ok && pi["setup_future_usage"] != nil && pi["setup_future_usage"] != "" && pm["customer"] == nil {
+		pm["customer"] = pi["customer"]
+	}
 	amount := pi["amount"].(int64)
 	ch := Object{"object": "charge", "id": m.id("ch"), "amount": amount, "amount_captured": amount, "currency": pi["currency"], "customer": pi["customer"], "payment_method": pi["payment_method"],
 		"payment_intent": pi["id"], "status": "succeeded", "paid": true, "captured": true, "refunded": false, "amount_refunded": int64(0), "disputed": false, "livemode": false}

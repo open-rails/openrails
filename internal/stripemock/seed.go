@@ -24,6 +24,19 @@ func (m *Mock) CompleteSetup(setupIntent string, c Card) string {
 	return pm
 }
 
+// NewPaymentMethod is Stripe Elements creating a payment method from a card
+// the browser entered: it belongs to no customer until a PaymentIntent that
+// saves it (setup_future_usage) succeeds.
+func (m *Mock) NewPaymentMethod(c Card) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	pm := m.id("pm")
+	m.methods[pm] = Object{"object": "payment_method", "id": pm, "type": "card", "customer": nil, "livemode": false,
+		"card": Object{"brand": c.Brand, "last4": c.Last4, "exp_month": 12, "exp_year": 2035, "fingerprint": "fp_" + c.Brand + c.Last4}}
+	m.declines[pm] = c.Decline
+	return pm
+}
+
 // Authenticate completes the issuer challenge on a PaymentIntent awaiting
 // it, as the customer's browser does with its client secret.
 func (m *Mock) Authenticate(paymentIntent string) bool {
@@ -34,6 +47,22 @@ func (m *Mock) Authenticate(paymentIntent string) bool {
 		return false
 	}
 	m.chargeLocked(pi)
+	return true
+}
+
+// AuthenticateSetup completes the bank's challenge on a SetupIntent awaiting
+// it: the card is saved to the intent's customer.
+func (m *Mock) AuthenticateSetup(setupIntent string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	s, ok := m.setups[setupIntent]
+	if !ok || s["status"] != "requires_action" {
+		return false
+	}
+	s["status"] = "succeeded"
+	if method, ok := m.methods[fmt.Sprint(s["payment_method"])]; ok && method["customer"] == nil {
+		method["customer"] = s["customer"]
+	}
 	return true
 }
 

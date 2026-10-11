@@ -210,7 +210,7 @@ func TestSecurityCardTestingIsThrottled(t *testing.T) {
 	}
 	for i := range 60 {
 		token := w.nmi.Tokenize(card{Brand: "visa", Last4: fmt.Sprintf("%04d", i)})
-		status, err := c.raw(w.server.URL, http.MethodPost, "/payment-methods", map[string]any{"psp_id": w.psp["nmi"], "payment_token": token, "billing_details": map[string]any{"name": "Card Tester"}})
+		status, err := c.raw(w.server.URL, http.MethodPost, "/payment-methods", map[string]any{"psp_id": w.psp["nmi"], "token": token, "billing_details": map[string]any{"name": "Card Tester"}})
 		require.NoError(t, err)
 		if status == http.StatusTooManyRequests {
 			limited++

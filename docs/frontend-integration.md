@@ -114,10 +114,10 @@ take their PSPs from it.
 - Only **armed** PSPs appear — a rail the merchant has no live account on is simply
   absent. Switch on `flow`, not on a hard-coded list of rails:
   - `tokenize` — load `config.tokenization_url`, tokenize with `config.tokenization_key`,
-    POST the resulting `payment_token`.
-  - `elements` — Stripe with a declared `publishable_key`: save the card in the page
-    (`POST /v1/me/payment-method-setups`, Stripe.js `confirmSetup`, then
-    `.../confirm`), then pay the checkout session with its `payment_method_id`.
+    POST the resulting token.
+  - `elements` — Stripe with a declared `publishable_key`: Stripe Elements makes a
+    `pm_` (`createPaymentMethod`), which an order's `payment.token` charges and saves
+    in one call, or `POST /v1/me/payment-methods` saves without buying.
   - `redirect` — nothing needed in the browser; paying answers a `redirect_to_url`
     `next_action` (Stripe without a publishable key, one-off prices only).
 - `checkout` is true for PSPs that take new purchases and new cards under the
@@ -261,12 +261,52 @@ disable or make its Address Fields optional separately in CCBill FlexForms
 Admin when that is the desired customer experience. Stripe hosted Checkout
 collects its own customer and billing fields.
 
+### Orders
+
+An order is one purchase of priced lines, read and paid by its own customer
+(`/v1/me/orders`). `POST /v1/me/orders/preview` prices lines and lists the
+`payment_options`. `POST /v1/me/orders` creates the order and, with a `payment`
+and `expected_total`, pays it in the same call; without one the order is `open`
+for `POST /v1/me/orders/{id}/pay`. Both take an `Idempotency-Key`; a retry with
+it answers exactly what the first request answered.
+
+`payment` is a saved card, `{payment_method_id}`, or a card just entered,
+`{token, psp_id?, billing_details?}`: the single-use output of the PSP's own
+fields (a Stripe `pm_` from Elements, an NMI Collect.js `payment_token`).
+`psp_id` may be left out while one payment option takes new cards. One provider
+request charges and saves a new card: a Stripe PaymentIntent with
+`setup_future_usage: off_session`, an NMI sale with `customer_vault=add_customer`.
+Nothing is vaulted or verified first; a declined card is not saved. Outside the
+EEA and the UK a new card is kept for one-click buys; there it needs
+`reusable: true`, the customer's unticked opt-in. A one-time order's card kept
+for that purchase only is charged without stored-credential fields. Saving a
+card without buying (`POST /v1/me/payment-methods`, a Stripe SetupIntent) is the
+one two-step flow.
+
+An order has two statuses, as Stripe's Order and PaymentIntent do: `status` is
+`open`, `processing` (the provider has the payment), `complete` (paid and
+fulfilled), `canceled` or `expired`; `payment.status` is
+`requires_payment_method`, `requires_action`, `processing` or `succeeded`, beside
+`payment.next_action`, `payment.last_payment_error` and `payment.payment_method_id`.
+`requires_action` carries `next_action` (`authenticate` runs the PSP's own script,
+such as Stripe.js `handleNextAction` with `payload.client_secret`); then
+`POST /v1/me/orders/{id}/confirm` makes OpenRails read the provider. A failed
+payment answers `402` (`type: card_error`, code `card_declined` or
+`payment_failed`) with the order in `error.order`, open again with
+`payment.last_payment_error`. Fulfil on the `order.completed` host event or a
+read of the order, never on the browser's word.
+
 ### Payment methods
 
-`POST /v1/me/payment-methods` takes the PSP's `psp_id`, a Collect.js `payment_token`
-(or, for a PSP whose card entry is server, the `card`) and optional `billing_details`
-(`name`, `email`, `phone`, `address` with `line1`, `line2`, `city`, `state`,
-`postal_code`, `country`) and creates an NMI vault record. `PUT` on the method replaces an NMI
+`POST /v1/me/payment-methods` saves a card in one call: the PSP's `psp_id`, the `token`
+of its own fields (a Collect.js token, a Stripe `pm_`; or, for a PSP whose card entry
+is server, the `card`) and optional `billing_details` (`name`, `email`, `phone`,
+`address` with `line1`, `line2`, `city`, `state`, `postal_code`, `country`). A Stripe
+card the bank wants to authenticate answers `status: requires_action` with a
+`next_action` (Stripe.js `handleNextAction` with `payload.client_secret`), then
+`POST /v1/me/payment-methods/{id}/confirm` saves it. The token may come from the PSP's
+fields on any page of yours, an iframe on another domain of yours included; OpenRails
+offers no page of its own for it. `PUT` on the method replaces an NMI
 card with a new `payment_token` or `card`. OpenRails reads the saved card's brand, last
 four and expiry from the PSP; the browser never states them. `PATCH` edits the card in
 place: `exp_month` with `exp_year`, `billing_details`, and `reusable` (kept for one-click

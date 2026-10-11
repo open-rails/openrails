@@ -108,7 +108,13 @@ type Order struct {
 
 // Live reports an order that may still take payment.
 func (o *Order) Live() bool {
-	return o.Status == string(billing.OrderOpen) || o.Status == string(billing.OrderRequiresAction) || o.Status == string(billing.OrderProcessing)
+	return o.Status == string(billing.OrderOpen) || o.Status == string(billing.OrderProcessing)
+}
+
+// AwaitsCustomer reports an open order whose payment waits for the customer's
+// action.
+func (o *Order) AwaitsCustomer() bool {
+	return o.Status == string(billing.OrderOpen) && o.PaymentStatus == string(billing.OrderPaymentRequiresAction)
 }
 
 // HasRecurring reports a line that renews.
@@ -152,10 +158,11 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 		ID: billing.OrderID(o.ID), CustomerID: billing.CustomerID(o.CustomerID), Origin: billing.OrderOrigin(o.Origin),
 		Status: billing.OrderStatus(o.Status), Number: o.Number, Currency: o.Currency, Total: o.Total,
 		Lines: make([]billing.OrderLine, 0, len(o.Lines)), PaymentOptions: []billing.OrderPaymentOption{},
-		ExpiresAt: o.ExpiresAt, PaidAt: o.PaidAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, CreatedAt: o.CreatedAt,
+		Payment:   billing.OrderPayment{Status: billing.OrderPaymentStatus(o.PaymentStatus)},
+		ExpiresAt: o.ExpiresAt, CompletedAt: o.CompletedAt, CanceledAt: o.CanceledAt, ExpiredAt: o.ExpiredAt, CreatedAt: o.CreatedAt,
 	}
-	if o.Status == string(billing.OrderRequiresAction) {
-		out.NextAction = nextAction
+	if o.AwaitsCustomer() {
+		out.Payment.NextAction = nextAction
 	}
 	if o.Status == string(billing.OrderOpen) && options != nil {
 		out.PaymentOptions = options
@@ -163,16 +170,16 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	if len(o.LastPaymentError) > 0 {
 		var failure billing.PaymentFailure
 		if json.Unmarshal(o.LastPaymentError, &failure) == nil {
-			out.LastPaymentError = &failure
+			out.Payment.LastPaymentError = &failure
 		}
 	}
 	if o.PaymentMethodID != nil {
 		id := billing.PaymentMethodID(*o.PaymentMethodID)
-		out.PaymentMethodID = &id
+		out.Payment.PaymentMethodID = &id
 	}
 	if o.PaymentID != nil {
 		id := billing.PaymentID(*o.PaymentID)
-		out.PaymentID = &id
+		out.Payment.PaymentID = &id
 	}
 	for _, l := range o.Lines {
 		line := billing.OrderLine{ID: billing.OrderLineID(l.ID), PriceID: billing.PriceID(l.PriceID), ProductID: billing.ProductID(l.ProductID),

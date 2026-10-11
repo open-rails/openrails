@@ -249,7 +249,7 @@ describe("usePaymentMethods", () => {
     await act(async () => {
       await result.current.add({
         psp_id: "psp_nmi",
-        payment_token: "tok",
+        token: "tok",
         billing_details: { name: "A" },
       })
     })

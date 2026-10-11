@@ -130,6 +130,14 @@ func (s *Mock) CompleteSetup(setupIntent string, card Card) string {
 // PaymentIntent that requires it.
 func (s *Mock) Authenticate(paymentIntent string) bool { return s.m.Authenticate(paymentIntent) }
 
+// NewPaymentMethod is Stripe Elements turning a card the customer entered into
+// a payment method: the token an order's payment takes.
+func (s *Mock) NewPaymentMethod(card Card) string { return s.m.NewPaymentMethod(card) }
+
+// AuthenticateSetup is the customer completing the bank's challenge on a
+// card being saved.
+func (s *Mock) AuthenticateSetup(setupIntent string) bool { return s.m.AuthenticateSetup(setupIntent) }
+
 // SetDecline sets how the issuer answers future charges of every saved card
 // ending in last4 (see Card.Decline).
 func (s *Mock) SetDecline(last4, decline string) { s.m.SetDecline(last4, decline) }

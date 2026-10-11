@@ -86,6 +86,14 @@ func Read(src io.Reader, header func(archivewire.Header) error, row func(Profile
 		if p.Name == "usage_events" && len(r.Values) == len(p.Columns)-2 {
 			r.Values = append(r.Values, new("succeeded"), new("0"))
 		}
+		// Payment methods before card saves awaited the customer had no setup.
+		if p.Name == "payment_methods" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = append(r.Values, nil)
+		}
+		// Orders before the payment axis had one status.
+		if p.Name == "orders" && len(r.Values) == len(p.Columns)-1 {
+			r.Values = splitOrderStatus(p, r.Values)
+		}
 		if !legacy {
 			return emit(p, r.Values)
 		}
@@ -290,4 +298,27 @@ func renamePaymentStatus(p Profile, values []*string) {
 			values[i] = new("succeeded")
 		}
 	}
+}
+
+// splitOrderStatus is an order of one status as migration 49 split it: the
+// order's own status and its payment's.
+func splitOrderStatus(p Profile, values []*string) []*string {
+	status, payment := "", "requires_payment_method"
+	for i, c := range p.Columns[:len(values)] {
+		if c.Name == "status" && values[i] != nil {
+			status = *values[i]
+			switch status {
+			case "requires_action":
+				values[i], payment = new("open"), "requires_action"
+			case "processing":
+				payment = "processing"
+			case "paid":
+				values[i], payment = new("complete"), "succeeded"
+			}
+		}
+		if c.Name == "payment_id" && values[i] != nil && status != "requires_action" && status != "processing" {
+			payment = "succeeded"
+		}
+	}
+	return append(values, &payment)
 }

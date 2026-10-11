@@ -4,6 +4,7 @@
   "rail": "nmi",
   "psp_id": "psp_55555555-5555-5555-5555-555555555555",
   "status": "active",
+  "next_action": null,
   "replaced_by": null,
   "card": {
     "brand": "visa",

@@ -1607,8 +1607,8 @@ WHERE merchant_id=$1::uuid AND status='succeeded'
         SELECT 1 FROM billing.order_lines l
         JOIN billing.orders o ON o.merchant_id = l.merchant_id AND o.id = l.order_id
         WHERE l.merchant_id = provider_intents.merchant_id AND l.subscription_id = $2::uuid
-          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'paid'
-          AND o.paid_at + make_interval(hours => l.billing_interval_hours) = $3::timestamptz)))
+          AND o.id::text = provider_intents.payload->>'order_id' AND o.status = 'complete'
+          AND o.completed_at + make_interval(hours => l.billing_interval_hours) = $3::timestamptz)))
 ORDER BY id LIMIT 2
 `
 

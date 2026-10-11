@@ -98,7 +98,7 @@ func TestPaymentActionKeyRefusesCardData(t *testing.T) {
 // round trip into the stored metadata and back out as one shape.
 func TestPaymentMethodRequestMapping(t *testing.T) {
 	for _, field := range []string{"card_number", "number", "pan", "cvv", "cvc", "provider", "last_four", "card_type", "expiry_date", "name_on_card", "zip"} {
-		err := httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+field+`":"4111111111111111"}`), &billing.CreatePaymentMethodParams{})
+		err := httprequest.DecodeStrict([]byte(`{"token":"tok","`+field+`":"4111111111111111"}`), &billing.CreatePaymentMethodParams{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, field)
 		err = httprequest.DecodeStrict([]byte(`{"payment_token":"tok","`+field+`":"x"}`), &billing.ReplacePaymentMethodCardParams{})
 		require.Equal(t, billing.CodeUnknownField, httprequest.BindError(err).Code, field)

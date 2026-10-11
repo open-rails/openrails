@@ -2,11 +2,11 @@
 
 -- name: CreateOrder :exec
 INSERT INTO billing.orders (
-    merchant_id, id, customer_id, origin, status, currency, total,
+    merchant_id, id, customer_id, origin, status, payment_status, currency, total,
     idempotency_key, request_digest, expires_at, created_at, updated_at
 ) VALUES (
     sqlc.arg(merchant_id)::uuid, sqlc.arg(id)::uuid, sqlc.arg(customer_id)::uuid, sqlc.arg(origin)::text,
-    sqlc.arg(status)::text, sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
+    'open', 'requires_payment_method', sqlc.arg(currency)::text, sqlc.arg(total)::bigint,
     sqlc.narg(idempotency_key)::text, sqlc.narg(request_digest)::bytea, sqlc.arg(expires_at)::timestamptz,
     sqlc.arg(now)::timestamptz, sqlc.arg(now)::timestamptz
 );
@@ -82,57 +82,67 @@ SET subscription_id = COALESCE(sqlc.narg(subscription_id)::uuid, subscription_id
     product_access_id = COALESCE(sqlc.narg(product_access_id)::uuid, product_access_id)
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
 
--- An attempt starts on an order that takes payment: open, or awaiting the
+-- An attempt starts on an open order: one that takes payment, or awaits the
 -- customer's action on an attempt that has since ended.
 -- name: StartOrderAttempt :execrows
 UPDATE billing.orders
-SET status = 'open', attempt_id = sqlc.arg(attempt_id)::uuid, payment_method_id = sqlc.narg(payment_method_id)::uuid,
+SET payment_status = 'requires_payment_method', attempt_id = sqlc.arg(attempt_id)::uuid, payment_method_id = sqlc.narg(payment_method_id)::uuid,
     psp_id = sqlc.arg(psp_id)::uuid, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status IN ('open', 'requires_action');
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status = 'open';
 
 -- name: SetOrderPending :execrows
--- The live attempt awaits the customer or the provider.
+-- The live attempt awaits the customer (the order stays open) or the
+-- provider (the order is processing).
 UPDATE billing.orders
-SET status = sqlc.arg(status)::text, updated_at = sqlc.arg(now)::timestamptz
+SET payment_status = sqlc.arg(payment_status)::text,
+    status = CASE sqlc.arg(payment_status)::text WHEN 'processing' THEN 'processing' ELSE 'open' END,
+    updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND attempt_id = sqlc.arg(attempt_id)::uuid AND status IN ('open', 'requires_action', 'processing')
-  AND sqlc.arg(status)::text IN ('requires_action', 'processing');
+  AND attempt_id = sqlc.arg(attempt_id)::uuid AND status IN ('open', 'processing')
+  AND sqlc.arg(payment_status)::text IN ('requires_action', 'processing');
 
 -- name: SetOrderDeclined :execrows
 UPDATE billing.orders
-SET status = 'open', last_payment_error = sqlc.arg(last_payment_error)::jsonb, updated_at = sqlc.arg(now)::timestamptz
+SET status = 'open', payment_status = 'requires_payment_method', last_payment_error = sqlc.arg(last_payment_error)::jsonb,
+    updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND attempt_id = sqlc.arg(attempt_id)::uuid AND status IN ('open', 'requires_action', 'processing');
+  AND attempt_id = sqlc.arg(attempt_id)::uuid AND status IN ('open', 'processing');
 
--- name: SetOrderPaid :execrows
+-- name: SetOrderPaymentMethod :execrows
+-- The card a new card's charge saved, once it exists.
 UPDATE billing.orders
-SET status = 'paid', number = sqlc.arg(number)::text, payment_id = sqlc.narg(payment_id)::uuid,
-    paid_at = sqlc.arg(now)::timestamptz, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status <> 'paid';
+SET payment_method_id = sqlc.arg(payment_method_id)::uuid, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: SetOrderComplete :execrows
+UPDATE billing.orders
+SET status = 'complete', payment_status = 'succeeded', number = sqlc.arg(number)::text, payment_id = sqlc.narg(payment_id)::uuid,
+    completed_at = sqlc.arg(now)::timestamptz, last_payment_error = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND status <> 'complete';
 
 -- name: SetOrderLatePayment :execrows
 -- Money moved on a closed order whose claims were taken meanwhile: the
 -- payment is recorded, the order stays closed and the payment is refunded.
 UPDATE billing.orders
-SET payment_id = sqlc.arg(payment_id)::uuid, updated_at = sqlc.arg(now)::timestamptz
+SET payment_id = sqlc.arg(payment_id)::uuid, payment_status = 'succeeded', updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
   AND status IN ('canceled', 'expired') AND payment_id IS NULL;
 
 -- name: CloseOrder :execrows
 UPDATE billing.orders
-SET status = sqlc.arg(status)::text,
+SET status = sqlc.arg(status)::text, payment_status = 'requires_payment_method',
     canceled_at = CASE WHEN sqlc.arg(status)::text = 'canceled' THEN sqlc.arg(now)::timestamptz ELSE canceled_at END,
     expired_at = CASE WHEN sqlc.arg(status)::text = 'expired' THEN sqlc.arg(now)::timestamptz ELSE expired_at END,
     updated_at = sqlc.arg(now)::timestamptz
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid
-  AND status IN ('open', 'requires_action') AND sqlc.arg(status)::text IN ('canceled', 'expired');
+  AND status = 'open' AND sqlc.arg(status)::text IN ('canceled', 'expired');
 
 -- name: ListOrderSweepMerchants :many
 -- The sweep's work queue: merchants with a live order past its expiry, or an
 -- unpaid closed order past retention.
 SELECT merchant_id FROM (
     SELECT merchant_id FROM billing.orders
-    WHERE status IN ('open', 'requires_action') AND expires_at <= sqlc.arg(now)::timestamptz
+    WHERE status = 'open' AND expires_at <= sqlc.arg(now)::timestamptz
     UNION
     SELECT merchant_id FROM billing.orders
     WHERE status IN ('canceled', 'expired') AND payment_id IS NULL AND attempt_id IS NULL
@@ -142,7 +152,7 @@ LIMIT sqlc.arg(merchant_limit)::int;
 
 -- name: ListExpiredOrders :many
 SELECT id FROM billing.orders
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status IN ('open', 'requires_action')
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND status = 'open'
   AND expires_at <= sqlc.arg(now)::timestamptz
 ORDER BY expires_at
 LIMIT sqlc.arg(row_limit)::int;

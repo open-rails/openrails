@@ -17,7 +17,10 @@ type PaymentMethodListParams struct {
 type PaymentMethodStatus string
 
 const (
-	PaymentMethodActive PaymentMethodStatus = "active"
+	// PaymentMethodRequiresAction is a card being saved: the customer
+	// completes the bank's authentication (NextAction), then confirms.
+	PaymentMethodRequiresAction PaymentMethodStatus = "requires_action"
+	PaymentMethodActive         PaymentMethodStatus = "active"
 	// PaymentMethodClosed: the bank closed the account. Subscriptions it paid
 	// wait for another card; none is canceled because of it.
 	PaymentMethodClosed PaymentMethodStatus = "closed"
@@ -37,6 +40,9 @@ type PaymentMethod struct {
 	Rail       string              `json:"rail"`
 	PSPID      *PSPID              `json:"psp_id"`
 	Status     PaymentMethodStatus `json:"status"`
+	// NextAction is the bank's authentication of a card being saved, while
+	// Status is requires_action; read it from the save or its confirm.
+	NextAction *NextAction `json:"next_action"`
 	// ReplacedBy is the payment method that replaced this one.
 	ReplacedBy *PaymentMethodID `json:"replaced_by"`
 	// Card is the card as its issuer last reported it.
@@ -127,13 +133,16 @@ type CardDetails struct {
 	ExpYear  *int    `json:"exp_year"`
 }
 
-// CreatePaymentMethodParams saves a card with the PSP PSPID: a token from the
-// PSP's own card fields (PaymentToken), or, for a PSP whose card_entry is
-// server, the card itself (Card). OpenRails reads the saved card's display
-// facts from the provider.
+// CreatePaymentMethodParams saves a card with the PSP PSPID in one call: the
+// single-use token of the PSP's own card fields (an NMI Collect.js token, a
+// Stripe pm_ from Elements), or, for a PSP whose card_entry is server, the
+// card itself (Card). OpenRails reads the saved card's display facts from the
+// provider. When the bank asks for 3-D Secure the method answers
+// requires_action with a next_action; POST
+// /v1/me/payment-methods/{id}/confirm finishes it.
 type CreatePaymentMethodParams struct {
 	PSPID          PSPID           `json:"psp_id"`
-	PaymentToken   string          `json:"payment_token,omitempty"`
+	Token          string          `json:"token,omitempty"`
 	Card           *Card           `json:"card,omitempty"`
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 }

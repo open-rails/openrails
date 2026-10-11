@@ -22,6 +22,7 @@ import (
 	"github.com/open-rails/openrails/internal/modules/idempotency"
 	"github.com/open-rails/openrails/internal/modules/money"
 	"github.com/open-rails/openrails/internal/modules/orders"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/shared/apperr"
 )
 
@@ -51,9 +52,26 @@ const (
 	orderPayOperation    = "order_pay"
 )
 
+// orderKeyResult is what a key's request answered: the order, and the
+// answer replayed verbatim (its next action read again, since no client
+// secret is stored).
 type orderKeyResult struct {
-	OrderID uuid.UUID `json:"order_id"`
-	Digest  []byte    `json:"digest"`
+	OrderID uuid.UUID      `json:"order_id"`
+	Digest  []byte         `json:"digest"`
+	Status  int            `json:"status,omitempty"`
+	Code    string         `json:"code,omitempty"`
+	Order   *billing.Order `json:"order,omitempty"`
+}
+
+// OrderAnswer is an order request's answer: the order, and Status 201
+// (created), 200, or 402 when its payment failed (Code card_declined or
+// payment_failed; payment.last_payment_error says why). Replayed: the
+// Idempotency-Key's first request gave this answer.
+type OrderAnswer struct {
+	Order    *billing.Order
+	Status   int
+	Code     string
+	Replayed bool
 }
 
 // PreviewOrder prices lines for the customer without writing.
@@ -79,224 +97,281 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 	return &out, nil
 }
 
+// orderPayment is a request's payment: a saved card or a card just entered.
+type orderPayment struct {
+	method uuid.UUID
+	card   *checkout.OrderCard
+}
+
+func readOrderPayment(p *billing.OrderPaymentParams, reusable *bool) (orderPayment, error) {
+	if p == nil {
+		if reusable != nil {
+			return orderPayment{}, apperr.Invalidf("reusable applies to a new card").WithParam("reusable")
+		}
+		return orderPayment{}, nil
+	}
+	saved, token := p.PaymentMethodID != nil && !p.PaymentMethodID.IsZero(), strings.TrimSpace(p.Token) != ""
+	switch {
+	case saved == token:
+		return orderPayment{}, apperr.Invalidf("payment names exactly one of payment_method_id or token").WithParam("payment")
+	case saved && (reusable != nil || p.PSPID != nil || p.BillingDetails != nil):
+		return orderPayment{}, apperr.Invalidf("psp_id, billing_details and reusable describe a new card").WithParam("payment")
+	case saved:
+		return orderPayment{method: p.PaymentMethodID.UUID()}, nil
+	}
+	card := &checkout.OrderCard{Token: p.Token, Billing: p.BillingDetails, Reusable: reusable}
+	if p.PSPID != nil {
+		card.PSPID = p.PSPID.UUID()
+	}
+	return orderPayment{card: card}, nil
+}
+
 // CreateOrder freezes lines into an order and, with a payment, pays it in the
-// same call. key is the request's Idempotency-Key; replayed reports an answer
-// to an earlier request with the key, which reads the order's current state.
-func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateOrderParams, key string) (out *billing.Order, replayed bool, err error) {
+// same call. key is the request's Idempotency-Key: a later request with it
+// answers what the first did.
+func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params billing.CreateOrderParams, key string) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	defer release()
 	rt, err := s.orderRuntime()
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	if err := orders.CheckLines(params.Lines); err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
+	}
+	pay, err := readOrderPayment(params.Payment, params.Reusable)
+	if err != nil {
+		return OrderAnswer{}, err
 	}
 	if params.Payment != nil && params.ExpectedTotal == nil {
-		return nil, false, apperr.Invalidf("expected_total is required with a payment").WithParam("expected_total")
-	}
-	if params.Payment != nil && params.Payment.PaymentMethodID.IsZero() {
-		return nil, false, apperr.Invalidf("payment_method_id required").WithParam("payment.payment_method_id")
+		return OrderAnswer{}, apperr.Invalidf("expected_total is required with a payment").WithParam("expected_total")
 	}
 	if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	digest := orderDigest(params)
 	customer := actor.Customer.UUID()
 	scoped := customer.String() + ":" + key
 	claim, rec, err := rt.Idempotency.Begin(ctx, orderCreateOperation, scoped)
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	if claim == nil {
-		if rec.Status != idempotency.StatusSucceeded {
-			return nil, false, ErrIdempotencyKeyInUse
-		}
-		var result orderKeyResult
-		if err := json.Unmarshal(rec.Result, &result); err != nil {
-			return nil, false, err
-		}
-		if string(result.Digest) != string(digest) {
-			return nil, false, errOrderKeyReused
-		}
-		order, err := s.resumeCreate(ctx, rt, actor, result.OrderID, params, key)
-		return order, true, err
+		return s.replayOrderAnswer(ctx, rt, actor, rec, digest, func(id uuid.UUID) (OrderAnswer, error) {
+			charged, err := s.resumePayment(ctx, rt, actor, id, pay, "create:"+key)
+			return s.orderAnswer(ctx, rt, actor, id, http.StatusOK, charged, true, err)
+		})
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)
-	id, replayed, err := s.createClaimed(work, rt, actor, params, key, digest)
+	id, replayed, charged, err := s.createClaimed(work, rt, actor, params, pay, key, digest)
 	stop() // before settling: a renewal never races the final state
 	if errors.Is(context.Cause(work), idempotency.ErrClaimLost) || errors.Is(err, idempotency.ErrClaimLost) {
-		return nil, false, ErrIdempotencyKeyInUse
+		return OrderAnswer{}, ErrIdempotencyKeyInUse
 	}
-	s.settleOrderClaim(ctx, claim, id, digest, err)
-	if err != nil {
-		return nil, false, err
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
 	}
-	view, err := s.orderView(ctx, rt, actor, id)
-	return view, replayed, err
+	answer, err := s.orderAnswer(ctx, rt, actor, id, status, charged, replayed, err)
+	s.settleOrderClaim(ctx, claim, id, digest, answer, err)
+	return answer, err
 }
 
 // createClaimed runs a create under its key's claim: a key the order table
 // already maps (its claim long gone) answers that order.
-func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateOrderParams, key string, digest []byte) (uuid.UUID, bool, error) {
+func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor OrderActor, params billing.CreateOrderParams, pay orderPayment, key string, digest []byte) (uuid.UUID, bool, checkout.OrderCharge, error) {
 	customer := actor.Customer.UUID()
 	existing, err := rt.Orders.ByIdempotencyKey(ctx, customer, key)
 	if err != nil {
-		return uuid.Nil, false, err
+		return uuid.Nil, false, checkout.OrderCharge{}, err
 	}
 	if existing != nil {
 		if string(existing.RequestDigest) != string(digest) {
-			return uuid.Nil, false, errOrderKeyReused
+			return uuid.Nil, false, checkout.OrderCharge{}, errOrderKeyReused
 		}
-		return existing.ID, true, s.resumePayment(ctx, rt, actor, existing.ID, params, key)
+		charged, err := s.resumePayment(ctx, rt, actor, existing.ID, pay, "create:"+key)
+		return existing.ID, true, charged, err
 	}
 	if params.Payment != nil {
 		// A payment that cannot be made refuses the order before it exists.
 		quote, err := rt.Orders.Preview(ctx, customer, params.Lines)
 		if err == nil {
-			err = s.orderPaymentUsable(ctx, quote, params.Payment.PaymentMethodID, actor.Customer)
+			err = s.orderPaymentUsable(ctx, quote, pay, actor.Customer)
 		}
 		if err != nil {
-			return uuid.Nil, false, err
+			return uuid.Nil, false, checkout.OrderCharge{}, err
 		}
 	}
 	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: customer, Origin: billing.OrderOriginCustomer, Lines: params.Lines,
 		ExpectedTotal: params.ExpectedTotal, IdempotencyKey: key, RequestDigest: digest, TTL: orders.CustomerTTL})
 	if err != nil {
-		return uuid.Nil, false, err
+		return uuid.Nil, false, checkout.OrderCharge{}, err
 	}
+	var charged checkout.OrderCharge
 	if params.Payment != nil && order.Status == string(billing.OrderOpen) {
-		err = s.payOrder(ctx, rt, actor, order, params.Payment.PaymentMethodID.UUID(), "create:"+key)
+		charged, err = s.payOrder(ctx, rt, actor, order, pay, "create:"+key)
 	}
-	return order.ID, false, err
-}
-
-// resumeCreate answers a replayed create: the order now, its payment
-// resumed under the same key while the order is open.
-func (s *Service) resumeCreate(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, params billing.CreateOrderParams, key string) (*billing.Order, error) {
-	if err := s.resumePayment(ctx, rt, actor, id, params, key); err != nil {
-		return nil, err
-	}
-	return s.orderView(ctx, rt, actor, id)
+	return order.ID, false, charged, err
 }
 
 // resumePayment runs a one-call buy's payment again under its key: the same
 // attempt, which never charges twice.
-func (s *Service) resumePayment(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, params billing.CreateOrderParams, key string) error {
+func (s *Service) resumePayment(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, pay orderPayment, key string) (checkout.OrderCharge, error) {
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id)
-	if err != nil || params.Payment == nil || order.Status != string(billing.OrderOpen) {
-		return err
+	if err != nil || (pay.method == uuid.Nil && pay.card == nil) || order.Status != string(billing.OrderOpen) {
+		return checkout.OrderCharge{}, err
 	}
-	return s.payOrder(ctx, rt, actor, order, params.Payment.PaymentMethodID.UUID(), "create:"+key)
+	return s.payOrder(ctx, rt, actor, order, pay, key)
 }
 
-func (s *Service) settleOrderClaim(ctx context.Context, claim *idempotency.Claim, order uuid.UUID, digest []byte, err error) {
+// orderAnswer reads the order a request acted on into its answer: 402 when
+// its payment failed. err passes through.
+func (s *Service) orderAnswer(ctx context.Context, rt *orderRuntime, actor OrderActor, id uuid.UUID, status int, charged checkout.OrderCharge, replayed bool, err error) (OrderAnswer, error) {
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	view, err := s.orderView(ctx, rt, actor, id)
+	if err != nil {
+		return OrderAnswer{}, err
+	}
+	out := OrderAnswer{Order: view, Status: status, Replayed: replayed}
+	if charged.Failed && view.Payment.Status == billing.OrderPaymentRequiresPaymentMethod {
+		out.Status, out.Code = http.StatusPaymentRequired, billing.CodePaymentFailed
+		if charged.Declined {
+			out.Code = billing.CodeCardDeclined
+		}
+	}
+	return out, nil
+}
+
+// replayOrderAnswer answers a key whose request finished: the answer it gave,
+// or, for a record without one, legacy(order).
+func (s *Service) replayOrderAnswer(ctx context.Context, rt *orderRuntime, actor OrderActor, rec *idempotency.Record, digest []byte, legacy func(uuid.UUID) (OrderAnswer, error)) (OrderAnswer, error) {
+	if rec.Status != idempotency.StatusSucceeded {
+		return OrderAnswer{}, ErrIdempotencyKeyInUse
+	}
+	var result orderKeyResult
+	if err := json.Unmarshal(rec.Result, &result); err != nil {
+		return OrderAnswer{}, err
+	}
+	if string(result.Digest) != string(digest) {
+		return OrderAnswer{}, errOrderKeyReused
+	}
+	if result.Order == nil {
+		return legacy(result.OrderID)
+	}
+	if result.Order.Payment.Status == billing.OrderPaymentRequiresAction {
+		order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), result.OrderID)
+		if err != nil {
+			return OrderAnswer{}, err
+		}
+		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
+		if result.Order.Payment.NextAction, err = rt.Checkout.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
+			return OrderAnswer{}, err
+		}
+	}
+	return OrderAnswer{Order: result.Order, Status: result.Status, Code: result.Code, Replayed: true}, nil
+}
+
+// settleOrderClaim records a key's answer, its next action left out.
+func (s *Service) settleOrderClaim(ctx context.Context, claim *idempotency.Claim, order uuid.UUID, digest []byte, answer OrderAnswer, err error) {
 	if err != nil {
 		_ = claim.Fail(ctx, err)
 		return
 	}
-	raw, _ := json.Marshal(orderKeyResult{OrderID: order, Digest: digest})
+	stored := *answer.Order
+	stored.Payment.NextAction = nil
+	raw, _ := json.Marshal(orderKeyResult{OrderID: order, Digest: digest, Status: answer.Status, Code: answer.Code, Order: &stored})
 	_ = claim.Complete(ctx, raw)
 }
 
 // PayOrder pays the customer's open order. One key is one attempt.
-func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.OrderID, params billing.PayOrderParams, key string) (out *billing.Order, replayed bool, err error) {
+func (s *Service) PayOrder(ctx context.Context, actor OrderActor, id billing.OrderID, params billing.PayOrderParams, key string) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	defer release()
 	rt, err := s.orderRuntime()
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
-	if params.Payment.PaymentMethodID.IsZero() {
-		return nil, false, apperr.Invalidf("payment_method_id required").WithParam("payment.payment_method_id")
+	pay, err := readOrderPayment(&params.Payment, params.Reusable)
+	if err != nil {
+		return OrderAnswer{}, err
 	}
 	if err := s.orderCustomerAllowed(ctx, actor.Customer); err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id.UUID())
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	mid, err := merchant.Require(ctx)
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	digest := orderDigest(params)
 	scoped := order.ID.String() + ":" + key
 	claim, rec, err := rt.Idempotency.Begin(ctx, orderPayOperation, scoped)
 	if err != nil {
-		return nil, false, err
+		return OrderAnswer{}, err
 	}
 	if claim == nil {
-		if rec.Status != idempotency.StatusSucceeded {
-			return nil, false, ErrIdempotencyKeyInUse
-		}
-		var result orderKeyResult
-		if err := json.Unmarshal(rec.Result, &result); err != nil {
-			return nil, false, err
-		}
-		if string(result.Digest) != string(digest) {
-			return nil, false, errOrderKeyReused
-		}
-		view, err := s.orderView(ctx, rt, actor, order.ID)
-		return view, true, err
+		return s.replayOrderAnswer(ctx, rt, actor, rec, digest, func(id uuid.UUID) (OrderAnswer, error) {
+			return s.orderAnswer(ctx, rt, actor, id, http.StatusOK, checkout.OrderCharge{}, true, nil)
+		})
 	}
 	work, stop := claim.Hold(ctx)
 	work = db.WithCommitGuard(work, claim.InTx)
 	_, attemptErr := rt.DB.Gen(work).GetOrderAttempt(work, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: checkout.OrderAttemptID(mid.UUID(), order.ID, "pay:"+key)})
-	replayed = attemptErr == nil
+	replayed := attemptErr == nil
+	var charged checkout.OrderCharge
 	if !replayed && params.ExpectedTotal != order.Total {
 		err = orders.ErrTotalChanged
 	} else {
-		err = s.payOrder(work, rt, actor, order, params.Payment.PaymentMethodID.UUID(), "pay:"+key)
+		charged, err = s.payOrder(work, rt, actor, order, pay, "pay:"+key)
 	}
 	stop() // before settling: a renewal never races the final state
 	if errors.Is(context.Cause(work), idempotency.ErrClaimLost) || errors.Is(err, idempotency.ErrClaimLost) {
-		return nil, false, ErrIdempotencyKeyInUse
+		return OrderAnswer{}, ErrIdempotencyKeyInUse
 	}
-	s.settleOrderClaim(ctx, claim, order.ID, digest, err)
-	if err != nil {
-		return nil, false, err
-	}
-	view, err := s.orderView(ctx, rt, actor, order.ID)
-	return view, replayed, err
+	answer, err := s.orderAnswer(ctx, rt, actor, order.ID, http.StatusOK, charged, replayed, err)
+	s.settleOrderClaim(ctx, claim, order.ID, digest, answer, err)
+	return answer, err
 }
 
-func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order, method uuid.UUID, key string) error {
+func (s *Service) payOrder(ctx context.Context, rt *orderRuntime, actor OrderActor, order *orders.Order, pay orderPayment, key string) (checkout.OrderCharge, error) {
 	quote, err := s.frozenQuote(ctx, order)
 	if err != nil {
-		return err
+		return checkout.OrderCharge{}, err
 	}
 	user := &checkout.UserIdentity{ID: actor.Customer.String(), ClientIP: actor.ClientIP}
-	return rt.Checkout.PayOrder(ctx, checkout.OrderPayInput{Order: order, PaymentMethodID: method, Key: key, User: user, Prices: quote.prices, Products: quote.products})
+	return rt.Checkout.PayOrder(ctx, checkout.OrderPayInput{Order: order, PaymentMethodID: pay.method, Card: pay.card, Key: key, User: user, Prices: quote.prices, Products: quote.products})
 }
 
-// ConfirmOrder reads the provider after the customer completed next_action.
-func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing.OrderID) (*billing.Order, error) {
+// ConfirmOrder reads the provider after the customer completed next_action;
+// an attempt that failed answers 402.
+func (s *Service) ConfirmOrder(ctx context.Context, actor OrderActor, id billing.OrderID) (OrderAnswer, error) {
 	ctx, release, err := s.pin(ctx)
 	if err != nil {
-		return nil, err
+		return OrderAnswer{}, err
 	}
 	defer release()
 	rt, err := s.orderRuntime()
 	if err != nil {
-		return nil, err
+		return OrderAnswer{}, err
 	}
 	order, err := rt.Orders.GetForCustomer(ctx, actor.Customer.UUID(), id.UUID())
 	if err != nil {
-		return nil, err
+		return OrderAnswer{}, err
 	}
-	if err := rt.Checkout.ConfirmOrder(ctx, order, actor.Principal); err != nil {
-		return nil, err
-	}
-	return s.orderView(ctx, rt, actor, order.ID)
+	charged, err := rt.Checkout.ConfirmOrder(ctx, order, actor.Principal)
+	return s.orderAnswer(ctx, rt, actor, order.ID, http.StatusOK, charged, false, err)
 }
 
 // CancelOrder cancels the customer's open order.
@@ -421,7 +496,7 @@ func (s *Service) orderView(ctx context.Context, rt *orderRuntime, actor OrderAc
 		return nil, err
 	}
 	var next *billing.NextAction
-	if order.Status == string(billing.OrderRequiresAction) {
+	if order.AwaitsCustomer() {
 		resolver, _ := s.rt.CollectionResolver.(intents.StripeEngineServiceResolver)
 		if next, err = rt.Checkout.OrderNextAction(ctx, order, actor.Principal, resolver); err != nil {
 			return nil, err
@@ -476,18 +551,25 @@ func (s *Service) orderOptions(ctx context.Context, prices []*models.Price, prod
 }
 
 // orderPaymentUsable refuses, before an order exists, a saved card no PSP
-// that sells its lines can charge.
-func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, method billing.PaymentMethodID, customer billing.CustomerID) error {
+// that sells its lines can charge, or a new card's PSP that takes none.
+func (s *Service) orderPaymentUsable(ctx context.Context, quote *orders.Quote, pay orderPayment, customer billing.CustomerID) error {
 	if i := quote.Refused(); i >= 0 {
 		return &orders.LineError{Index: i, Refusal: *quote.Lines[i].Refusal}
-	}
-	pm, err := s.rt.PaymentMethodService.ValidatePaymentMethodOperation(ctx, method.UUID(), customer.String())
-	if err != nil {
-		return fmt.Errorf("%w: %w", checkout.ErrPaymentMethodStale, err)
 	}
 	options, err := s.rt.CheckoutAttemptService.OrderOptions(ctx, quote.Prices(), quote.Products())
 	if err != nil {
 		return err
+	}
+	if pay.card != nil {
+		_, err := checkout.NewCardOption(options, pay.card.PSPID)
+		return err
+	}
+	pm, err := s.rt.PaymentMethodService.ValidatePaymentMethodOperation(ctx, pay.method, customer.String())
+	if err != nil {
+		return fmt.Errorf("%w: %w", checkout.ErrPaymentMethodStale, err)
+	}
+	if pm.Status != paymentmethods.StatusActive {
+		return fmt.Errorf("%w: the card is %s", checkout.ErrPaymentMethodStale, pm.Status)
 	}
 	for _, o := range options {
 		if strings.EqualFold(string(pm.Rail), o.Rail) && pm.ChargeableOn(o.PSPID) {

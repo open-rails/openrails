@@ -860,6 +860,7 @@
         "x-openrails-errors": [
           "already_owned",
           "card_attempts_blocked",
+          "card_declined",
           "customer_action_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
@@ -869,6 +870,7 @@
           "order_not_payable",
           "order_payment_in_progress",
           "order_total_changed",
+          "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
           "quantity_not_allowed",
@@ -1049,6 +1051,7 @@
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
           "card_attempts_blocked",
+          "card_declined",
           "customer_action_required",
           "idempotency_key_in_use",
           "idempotency_key_required",
@@ -1057,6 +1060,7 @@
           "order_not_payable",
           "order_payment_in_progress",
           "order_total_changed",
+          "payment_failed",
           "payment_method_stale",
           "payment_option_unavailable",
           "resource_conflict",
@@ -1106,8 +1110,10 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
+          "card_declined",
           "customer_action_required",
           "customer_session_required",
+          "payment_failed",
           "resource_conflict",
           "resource_not_found",
           "service_unavailable"
@@ -8068,6 +8074,7 @@
           "card_requires_https",
           "invalid_param",
           "payment_duplicate_refused",
+          "payment_method_stale",
           "payment_provider_rejected",
           "provider_outcome_unknown",
           "service_unavailable"
@@ -8315,132 +8322,7 @@
         ]
       }
     },
-    "/v1/me/payment-method-setups": {
-      "post": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "Idempotency-Key",
-            "in": "header",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PaymentMethodSetupParams"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethodSetup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer",
-          "request"
-        ]
-      }
-    },
-    "/v1/me/payment-method-setups/{id}": {
-      "get": {
-        "tags": [
-          "customer"
-        ],
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "OK",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PaymentMethodSetup"
-                }
-              }
-            }
-          },
-          "default": {
-            "$ref": "#/components/responses/Error"
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "x-openrails-auth": "customer",
-        "x-openrails-errors": [
-          "card_attempts_blocked",
-          "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
-          "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
-          "resource_not_found",
-          "service_unavailable"
-        ],
-        "x-openrails-error-sets": [
-          "tier:customer"
-        ]
-      }
-    },
-    "/v1/me/payment-method-setups/{id}/confirm": {
+    "/v1/me/payment-methods/{id}/confirm": {
       "post": {
         "tags": [
           "customer"
@@ -8461,7 +8343,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaymentMethodSetup"
+                  "$ref": "#/components/schemas/PaymentMethod"
                 }
               }
             }
@@ -8477,19 +8359,8 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
-          "card_attempts_blocked",
           "card_declined",
-          "card_not_saved",
-          "custodian_capture_unavailable",
-          "customer_session_required",
-          "idempotency_key_reused",
-          "insufficient_funds",
-          "invalid_param",
-          "payment_method_required",
-          "payment_method_stale",
           "payment_provider_rejected",
-          "resource_access_denied",
-          "resource_conflict",
           "resource_not_found",
           "service_unavailable"
         ],
@@ -13018,7 +12889,10 @@
             "description": "A number as a decimal string."
           },
           "payment": {
-            "$ref": "#/components/schemas/OrderPayment"
+            "$ref": "#/components/schemas/OrderPaymentParams"
+          },
+          "reusable": {
+            "type": "boolean"
           }
         }
       },
@@ -13072,7 +12946,7 @@
           "psp_id": {
             "type": "string"
           },
-          "payment_token": {
+          "token": {
             "type": "string"
           },
           "card": {
@@ -14398,6 +14272,9 @@
           "metadata": {
             "type": "object",
             "additionalProperties": {}
+          },
+          "order": {
+            "$ref": "#/components/schemas/Order"
           }
         },
         "required": [
@@ -14786,8 +14663,8 @@
               "delinquency.entered",
               "delinquency.grace",
               "order.canceled",
+              "order.completed",
               "order.expired",
-              "order.paid",
               "order.payment_failed",
               "order.requires_action",
               "payment.settled",
@@ -16639,11 +16516,10 @@
             "type": "string",
             "enum": [
               "canceled",
+              "complete",
               "expired",
               "open",
-              "paid",
-              "processing",
-              "requires_action"
+              "processing"
             ]
           },
           "number": {
@@ -16669,25 +16545,8 @@
               "$ref": "#/components/schemas/OrderLine"
             }
           },
-          "next_action": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/NextAction"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_payment_error": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PaymentFailure"
-              },
-              {
-                "type": "null"
-              }
-            ]
+          "payment": {
+            "$ref": "#/components/schemas/OrderPayment"
           },
           "payment_options": {
             "type": "array",
@@ -16695,31 +16554,11 @@
               "$ref": "#/components/schemas/OrderPaymentOption"
             }
           },
-          "payment_method_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "payment_id": {
-            "oneOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "expires_at": {
             "type": "string",
             "format": "date-time"
           },
-          "paid_at": {
+          "completed_at": {
             "oneOf": [
               {
                 "type": "string",
@@ -16766,13 +16605,10 @@
           "currency",
           "total",
           "lines",
-          "next_action",
-          "last_payment_error",
+          "payment",
           "payment_options",
-          "payment_method_id",
-          "payment_id",
           "expires_at",
-          "paid_at",
+          "completed_at",
           "canceled_at",
           "expired_at",
           "created_at"
@@ -16791,11 +16627,19 @@
             "type": "string",
             "enum": [
               "canceled",
+              "complete",
               "expired",
               "open",
-              "paid",
+              "processing"
+            ]
+          },
+          "payment_status": {
+            "type": "string",
+            "enum": [
               "processing",
-              "requires_action"
+              "requires_action",
+              "requires_payment_method",
+              "succeeded"
             ]
           },
           "total": {
@@ -16830,6 +16674,7 @@
           "order_id",
           "customer_id",
           "status",
+          "payment_status",
           "total",
           "currency",
           "number",
@@ -16984,10 +16829,63 @@
       "OrderPayment": {
         "type": "object",
         "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "processing",
+              "requires_action",
+              "requires_payment_method",
+              "succeeded"
+            ]
+          },
+          "next_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_payment_error": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PaymentFailure"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "payment_method_id": {
-            "type": "string"
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "payment_id": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
-        }
+        },
+        "required": [
+          "status",
+          "next_action",
+          "last_payment_error",
+          "payment_method_id",
+          "payment_id"
+        ]
       },
       "OrderPaymentOption": {
         "type": "object",
@@ -17010,6 +16908,23 @@
           "rail",
           "accepts"
         ]
+      },
+      "OrderPaymentParams": {
+        "type": "object",
+        "properties": {
+          "payment_method_id": {
+            "type": "string"
+          },
+          "token": {
+            "type": "string"
+          },
+          "psp_id": {
+            "type": "string"
+          },
+          "billing_details": {
+            "$ref": "#/components/schemas/BillingDetails"
+          }
+        }
       },
       "OrderPreview": {
         "type": "object",
@@ -17509,11 +17424,14 @@
         "type": "object",
         "properties": {
           "payment": {
-            "$ref": "#/components/schemas/OrderPayment"
+            "$ref": "#/components/schemas/OrderPaymentParams"
           },
           "expected_total": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "reusable": {
+            "type": "boolean"
           }
         }
       },
@@ -18053,7 +17971,18 @@
               "active",
               "closed",
               "removed",
-              "replaced"
+              "replaced",
+              "requires_action"
+            ]
+          },
+          "next_action": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/NextAction"
+              },
+              {
+                "type": "null"
+              }
             ]
           },
           "replaced_by": {
@@ -18132,6 +18061,7 @@
           "rail",
           "psp_id",
           "status",
+          "next_action",
           "replaced_by",
           "card",
           "billing_details",
@@ -18209,41 +18139,6 @@
           },
           "rail_method_ref": {
             "type": "string"
-          }
-        }
-      },
-      "PaymentMethodSetup": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "setup_intent_id": {
-            "type": "string"
-          },
-          "client_secret": {
-            "type": "string"
-          },
-          "payment_method_id": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "status"
-        ]
-      },
-      "PaymentMethodSetupParams": {
-        "type": "object",
-        "properties": {
-          "psp_id": {
-            "type": "string"
-          },
-          "consent": {
-            "type": "boolean"
           }
         }
       },
@@ -21891,6 +21786,10 @@
           },
           "metadata": {
             "type": "object"
+          },
+          "order": {
+            "$ref": "#/components/schemas/Order",
+            "description": "The order a failed payment left open (402 card_error)."
           }
         },
         "required": [

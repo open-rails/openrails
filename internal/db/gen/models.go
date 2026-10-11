@@ -908,19 +908,20 @@ type BillingOperationAuthorizationExtension struct {
 	CreatedAt        time.Time
 }
 
-// One purchase (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time. A decline leaves it open with last_payment_error; it is numbered from document_sequences when paid. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
+// One purchase (ord_ id): frozen lines and total in one currency, paid by at most one live checkout attempt at a time. A decline leaves it open with last_payment_error; it is numbered from document_sequences when complete. idempotency_key is the scoped Idempotency-Key of the request that created it, kept as long as the order. Retention: unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent.
 type BillingOrder struct {
-	MerchantID     uuid.UUID
-	ID             uuid.UUID
-	CustomerID     uuid.UUID
-	Origin         string
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	Origin     string
+	// open (takes payment, or awaits the customer's action on it), processing (the provider has its payment), complete (paid and fulfilled), canceled or expired.
 	Status         string
 	Currency       string
 	Total          int64
 	Number         *string
 	IdempotencyKey *string
 	RequestDigest  []byte
-	// The saved card the latest attempt charged; a retry may name it again.
+	// The card the latest attempt charged; a card the attempt saved from the customer's token stays as evidence after it is removed.
 	PaymentMethodID *uuid.UUID
 	PspID           *uuid.UUID
 	// The checkout attempt last started for the order.
@@ -928,11 +929,13 @@ type BillingOrder struct {
 	PaymentID        *uuid.UUID
 	LastPaymentError []byte
 	ExpiresAt        time.Time
-	PaidAt           *time.Time
+	CompletedAt      *time.Time
 	CanceledAt       *time.Time
 	ExpiredAt        *time.Time
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
+	PaymentStatus string
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.
@@ -1120,12 +1123,14 @@ type BillingPaymentMethod struct {
 	AccountUpdaterCheckedAt *time.Time
 	CreatedAt               time.Time
 	UpdatedAt               time.Time
-	// active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
+	// requires_action (being saved: the customer completes the bank's authentication, setup_ref); active; closed (the bank closed the account); replaced (another method took its place, replaced_by_id); removed. The last three are final.
 	Status string
 	// The method that replaced this one, when status is replaced.
 	ReplacedByID *uuid.UUID
 	// When the issuer last asked for the cardholder to be contacted; cleared by the next change to the card.
 	ContactCardholderAt *time.Time
+	// The provider's setup awaiting the customer (a Stripe SetupIntent) while status is requires_action.
+	SetupRef *string
 }
 
 // Append-only history of the card behind a payment method: one row per save, customer edit, updater or network change, closure or contact advice, with the card as its holder reported it at that version. Replays of one source event are one row. Retention: permanent, never pruned.

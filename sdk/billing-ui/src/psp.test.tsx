@@ -2,6 +2,23 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest"
 
 import { createBillingClient } from "./client/client"
+
+// Stripe.js in the page: its element reports a complete card, and
+// createPaymentMethod tokenizes it.
+const fakeStripe = vi.hoisted(() => ({
+  elements: () => ({
+    create: () => ({
+      on: (_: string, handler: (event: { complete: boolean }) => void) =>
+        handler({ complete: true }),
+      mount: () => undefined,
+      destroy: () => undefined,
+    }),
+    submit: async () => ({}),
+  }),
+  createPaymentMethod: async () => ({ paymentMethod: { id: "pm_entered" } }),
+  handleNextAction: vi.fn(async () => ({})),
+}))
+vi.mock("#orck/lib/stripe", () => ({ loadStripeFor: async () => fakeStripe }))
 import {
   canAuthenticatePayment,
   cardRetryAfter,
@@ -138,19 +155,14 @@ describe("PSP flows", () => {
     ).toEqual(["nmi"])
   })
 
-  it("always saves the card through the PSP's setup and reports the method", async () => {
-    const calls: { path: string; key: string | null; body: unknown }[] = []
+  it("saves a Stripe card in one call and reports the method", async () => {
+    const calls: { path: string; body: unknown }[] = []
     const fetch = vi.fn(async (input: string, init: RequestInit) => {
       calls.push({
         path: input,
-        key: new Headers(init.headers).get("Idempotency-Key"),
         body: init.body ? JSON.parse(String(init.body)) : undefined,
       })
-      return Response.json({
-        id: "seti_1",
-        status: "succeeded",
-        payment_method_id: "pm_9",
-      })
+      return Response.json({ id: "pm_9", status: "active" })
     })
     const onSaved = vi.fn()
     render(
@@ -168,10 +180,47 @@ describe("PSP flows", () => {
     await waitFor(() => expect(onSaved).toHaveBeenCalledWith("pm_9"))
     expect(calls).toEqual([
       {
-        path: "/billing/v1/me/payment-method-setups",
-        key: expect.any(String),
-        body: { psp_id: "psp_stripe", consent: true },
+        path: "/billing/v1/me/payment-methods",
+        body: { psp_id: "psp_stripe", token: "pm_entered" },
       },
+    ])
+    expect(fakeStripe.handleNextAction).not.toHaveBeenCalled()
+  })
+
+  // The bank asks for 3-D Secure before saving: Stripe.js answers it in the
+  // page and OpenRails confirms the save.
+  it("authenticates a Stripe card the bank challenges, then confirms it", async () => {
+    const paths: string[] = []
+    const fetch = vi.fn(async (input: string) => {
+      paths.push(input)
+      return input.endsWith("/confirm")
+        ? Response.json({ id: "pm_9", status: "active" })
+        : Response.json({
+            id: "pm_9",
+            status: "requires_action",
+            next_action: {
+              type: "authenticate",
+              psp_id: "psp_stripe",
+              payload: { client_secret: "seti_1_secret_x", setup_intent_id: "seti_1" },
+            },
+          })
+    })
+    const onSaved = vi.fn()
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <SavePaymentMethod psp={stripe} onSaved={onSaved} />
+      </BillingProvider>
+    )
+    const save = await screen.findByRole("button", { name: "Save card" })
+    await waitFor(() => expect(save).toBeEnabled())
+    fireEvent.click(save)
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith("pm_9"))
+    expect(fakeStripe.handleNextAction).toHaveBeenCalledWith({
+      clientSecret: "seti_1_secret_x",
+    })
+    expect(paths).toEqual([
+      "/billing/v1/me/payment-methods",
+      "/billing/v1/me/payment-methods/pm_9/confirm",
     ])
   })
 
