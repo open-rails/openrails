@@ -1,4 +1,5 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { createHash } from "node:crypto"
+import { expect, test, type BrowserContext, type FrameLocator, type Page, type Route } from "@playwright/test"
 
 const api = () => process.env.E2E_API!
 
@@ -8,7 +9,9 @@ interface Created {
   url: string
 }
 
-async function newOrder(body: { saved_payment_methods?: boolean; cancel_url?: string; customer_id?: string } = {}): Promise<Created> {
+async function newOrder(
+  body: { saved_payment_methods?: boolean; cancel_url?: string; customer_id?: string; ui_mode?: string } = {}
+): Promise<Created> {
   const res = await fetch(`${api()}/__test/orders`, { method: "POST", body: JSON.stringify(body) })
   expect(res.status, await res.clone().text()).toBe(201)
   return (await res.json()) as Created
@@ -153,7 +156,7 @@ async function watchCSP(page: Page): Promise<() => Promise<string[]>> {
   return () => page.evaluate(() => (window as unknown as { __csp: string[] }).__csp)
 }
 
-async function payWithCollect(page: Page) {
+async function payWithCollect(page: Page | FrameLocator) {
   await page.getByLabel("Name on card").fill("Card Holder")
   await page.getByLabel("Country").selectOption("US")
   await page.getByLabel(/ZIP/).fill("10001")
@@ -287,18 +290,155 @@ test("a wrong secret opens nothing", async ({ page }) => {
   await expect(page.getByRole("button", { name: /^Pay/ })).toHaveCount(0)
 })
 
-test("an expired checkout says so", async ({ page }) => {
-  const order = await newOrder()
-  const res = await fetch(`${api()}/__test/clock`, { method: "POST", body: JSON.stringify({ seconds: 3601 }) })
-  expect(res.status).toBe(200)
-  await page.goto(order.url)
-  await expect(page.getByRole("status")).toHaveText(/This checkout has expired/)
-})
-
 test("the page refuses to be framed", async ({ page }) => {
   const order = await newOrder()
   await page.goto(`${api()}/__test/frame?src=${encodeURIComponent(order.url)}`)
   const frame = page.frameLocator("iframe")
   await page.waitForTimeout(500)
   await expect(frame.getByRole("heading", { name: "Checkout Shop" })).toHaveCount(0)
+})
+
+async function health(): Promise<{ api: string; checkout: string; other: string }> {
+  return (await (await fetch(`${api()}/__test/health`)).json()) as { api: string; checkout: string; other: string }
+}
+
+type Message = { type?: string; order_id?: string; success_url?: string; height?: number }
+
+test("an embedded checkout pays in the shop's frame and tells only the shop", async ({ page }) => {
+  const order = await newOrder({ ui_mode: "embedded" })
+  await page.goto(`${api()}/__test/embed?src=${encodeURIComponent(order.url)}`)
+  const frame = page.frameLocator("iframe")
+  await expect(frame.getByRole("heading", { name: "Checkout Shop" })).toBeVisible()
+  await expect(frame.getByRole("link", { name: "← Back" })).toHaveCount(0)
+  await payWithCollect(frame)
+  await expect(frame.getByText("Payment complete.")).toBeVisible()
+  const messages = await page.evaluate(() => (window as unknown as { __messages: Message[] }).__messages)
+  expect(messages).toContainEqual({
+    type: "openrails.checkout.complete",
+    order_id: order.order_id,
+    success_url: `${api()}/__test/thanks?order=${order.order_id}`,
+  })
+  expect(messages.some((m) => m.type === "openrails.checkout.resize" && (m.height ?? 0) > 0)).toBe(true)
+  expect(new URL(page.url()).pathname).toBe("/__test/embed")
+  await expect.poll(() => completed(order.order_id)).toBe(true)
+})
+
+test("a site the shop did not register cannot frame its embedded checkout", async ({ page }) => {
+  const order = await newOrder({ ui_mode: "embedded" })
+  const { other } = await health()
+  await page.goto(`${other}/__test/embed?src=${encodeURIComponent(order.url)}`)
+  await page.waitForTimeout(500)
+  await expect(page.frameLocator("iframe").getByRole("heading", { name: "Checkout Shop" })).toHaveCount(0)
+})
+
+// The network's issuer stands in at the checkout origin's /__issuer, and the
+// server's link routes answer as the network would (their server side is
+// server/ci's): what is checked is the page's sign-in.
+async function stubNetwork(context: BrowserContext, order: Created) {
+  const checkout = new URL(order.url).origin
+  const issuer = `${checkout}/__issuer`
+  const seen = {
+    authorize: [] as URL[],
+    token: [] as { body: URLSearchParams; dpop: string | undefined }[],
+    link: [] as { body: unknown; authorization: string | undefined }[],
+  }
+  await context.route(`${checkout}/v1/config`, async (route) => {
+    const res = await route.fetch()
+    const json = (await res.json()) as Record<string, unknown>
+    await route.fulfill({ response: res, json: { ...json, network: { issuer, client_id: "openrails-checkout" } } })
+  })
+  await context.route(`${checkout}/v1/me/network-link/challenges`, (route) =>
+    route.fulfill({ status: 201, json: { id: "lnc_e2e", nonce: "nonce-e2e", expires_at: new Date(Date.now() + 300_000).toISOString() } })
+  )
+  await context.route(`${issuer}/.well-known/openid-configuration`, (route) =>
+    route.fulfill({ json: { issuer, authorization_endpoint: `${issuer}/authorize`, token_endpoint: `${issuer}/token` } })
+  )
+  await context.route(`${issuer}/authorize?**`, (route) => {
+    const url = new URL(route.request().url())
+    seen.authorize.push(url)
+    return route.fulfill({
+      status: 302,
+      headers: { location: `${checkout}/c/sign-in?code=code-e2e&state=${encodeURIComponent(url.searchParams.get("state") ?? "")}` },
+    })
+  })
+  await context.route(`${issuer}/token`, (route) => {
+    seen.token.push({ body: new URLSearchParams(route.request().postData() ?? ""), dpop: route.request().headers()["dpop"] })
+    return route.fulfill({ json: { access_token: "access-e2e", token_type: "DPoP", expires_in: 300, id_token: "id-token-e2e" } })
+  })
+  await context.route(`${checkout}/v1/me/network-link`, (route) => {
+    seen.link.push({ body: route.request().postDataJSON(), authorization: route.request().headers()["authorization"] })
+    return route.fulfill({
+      status: 201,
+      json: {
+        id: "lnk_e2e",
+        merchant_id: "mer_e2e",
+        customer_id: order.customer_id,
+        account_id: "acc_e2e",
+        method: "checkout",
+        status: "active",
+        linked_at: new Date().toISOString(),
+        revoked_at: null,
+        revoked_by: null,
+      },
+    })
+  })
+  return { checkout, seen }
+}
+
+test("Save with the network signs the shopper in and links the order's customer", async ({ page, context }) => {
+  const order = await newOrder()
+  const { checkout, seen } = await stubNetwork(context, order)
+  await page.goto(order.url)
+  await page.getByRole("button", { name: /^Save with / }).click()
+  await expect(page.getByText(/^Saved to your .* account\.$/)).toBeVisible()
+  expect(page.url()).toBe(order.url.split("#")[0])
+
+  expect(seen.authorize).toHaveLength(1)
+  const asked = seen.authorize[0].searchParams
+  expect(Object.fromEntries(asked)).toMatchObject({
+    response_type: "code",
+    client_id: "openrails-checkout",
+    redirect_uri: `${checkout}/c/sign-in`,
+    scope: "openid",
+    nonce: "nonce-e2e",
+    prompt: "login",
+    code_challenge_method: "S256",
+  })
+  expect(asked.get("state")).toMatch(new RegExp(`^${order.order_id}\\.`))
+  expect(seen.token).toHaveLength(1)
+  const { body, dpop } = seen.token[0]
+  expect(body.get("grant_type")).toBe("authorization_code")
+  expect(body.get("code")).toBe("code-e2e")
+  expect(createHash("sha256").update(body.get("code_verifier") ?? "").digest("base64url")).toBe(asked.get("code_challenge"))
+  expect(dpop).toBeTruthy()
+  expect(seen.link).toEqual([{ body: { challenge_id: "lnc_e2e", id_token: "id-token-e2e" }, authorization: expect.stringMatching(/^Bearer cks_/) }])
+
+  // A reload in the tab remembers it.
+  await page.reload()
+  await expect(page.getByText(/^Saved to your .* account\.$/)).toBeVisible()
+  await context.unrouteAll({ behavior: "ignoreErrors" })
+})
+
+test("framed, the sign-in runs in a popup that hands its code back to the frame", async ({ page, context }) => {
+  const order = await newOrder({ ui_mode: "embedded" })
+  const { seen } = await stubNetwork(context, order)
+  await page.goto(`${api()}/__test/embed?src=${encodeURIComponent(order.url)}`)
+  const frame = page.frameLocator("iframe")
+  const popup = page.waitForEvent("popup")
+  await frame.getByRole("button", { name: /^Save with / }).click()
+  await (await popup).waitForEvent("close")
+  await expect(frame.getByText(/^Saved to your .* account\.$/)).toBeVisible()
+  expect(seen.authorize[0].searchParams.get("state")).toMatch(/\.popup$/)
+  expect(seen.link).toHaveLength(1)
+  await context.unrouteAll({ behavior: "ignoreErrors" })
+})
+
+// Last: it moves the server's clock an hour on, past what the payments above
+// rely on.
+test("an expired checkout says so", async ({ page }) => {
+  const order = await newOrder()
+  const res = await fetch(`${api()}/__test/clock`, { method: "POST", body: JSON.stringify({ seconds: 3601 }) })
+  expect(res.status).toBe(200)
+  await page.goto(order.url)
+  await expect(page.getByRole("status")).toHaveText(/This checkout has expired/)
 })

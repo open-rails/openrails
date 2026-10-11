@@ -77,3 +77,24 @@ body {
   border: 1px solid var(--line);
   border-radius: 8px;
 }
+.network {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.network button {
+  height: 36px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--fg);
+  color: var(--bg);
+  font: inherit;
+  cursor: pointer;
+}
+.network .error {
+  color: #c62828;
+  font-size: 0.875rem;
+}

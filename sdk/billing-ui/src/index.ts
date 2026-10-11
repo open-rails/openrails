@@ -36,6 +36,13 @@ export {
   type SavePaymentMethodProps,
 } from "./save-payment-method"
 export { OrderCheckout, type OrderCheckoutProps } from "./order-checkout"
+export {
+  CHECKOUT_COMPLETE_MESSAGE,
+  CHECKOUT_RESIZE_MESSAGE,
+  EmbeddedCheckout,
+  type EmbeddedCheckoutCompletion,
+  type EmbeddedCheckoutProps,
+} from "./embedded-checkout"
 export { Cart, type CartProps } from "./cart"
 export { authenticatePayment } from "./authenticate"
 export {

@@ -67,6 +67,7 @@ const configured = (features: Record<string, boolean> | null) => {
       payment: null,
       merchant: null,
       captcha: null,
+      network: null,
     })
   return render(<EditsProbe />, queries)
 }

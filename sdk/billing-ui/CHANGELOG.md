@@ -1,5 +1,16 @@
 # Changelog
 
+## Embedded checkout
+
+- `<EmbeddedCheckout url onComplete?>` frames a merchant order's embedded
+  checkout (`checkout.ui_mode: embedded`): it follows the page's height and
+  hears its completion only from its own frame on the checkout host's origin;
+  without `onComplete` it goes to the checkout's `success_url`.
+- `Order.checkout.ui_mode`; `PublicMerchant.embed_origins`;
+  `PublicConfig.network` (the checkout page's sign-in to the customer network).
+- `createNetworkLinkChallenge()` and `createNetworkLink({challengeId, idToken})`
+  link the customer to a customer-network account.
+
 ## No Solana token list
 
 - `listSolanaTokens` and `SolanaToken` are gone with `GET /v1/solana/tokens`:

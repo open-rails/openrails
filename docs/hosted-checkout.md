@@ -98,8 +98,57 @@ Apple Pay domain-association file at
 
 NMI's wallets are not offered.
 
+## Embedded checkout
+
+`checkout.ui_mode: embedded` makes a checkout the merchant's own page frames,
+like Stripe's embedded Checkout (`hosted` is the default). The merchant first
+registers the sites that may frame it, in its settings:
+
+```yaml
+settings:
+  checkout:
+    embed_origins: [https://shop.example, https://www.shop.example]
+```
+
+They are exact origins: https (http on loopback), no path or wildcard, at most
+10. An embedded order without any is refused `400
+checkout_embed_origins_required`. The order's page answers `frame-ancestors`
+with those origins and no `X-Frame-Options` (it cannot list origins); a hosted
+order's page is never framed. Withdrawing an origin stops its frames at once.
+
+billing-ui frames the order's `checkout.url`:
+
+```tsx
+<EmbeddedCheckout url={order.checkout.url} onComplete={({ orderId }) => showThanks(orderId)} />
+```
+
+The iframe allows payment and passkeys. The page follows its height, and once
+the order completes it posts `openrails.checkout.complete` (`order_id`,
+`success_url`) to the registered origins only, never `*`; the component hears
+only its own frame on the checkout host's origin. Without `onComplete` it goes
+to `success_url`. Fulfil on `order.completed`, as always.
+
+The registered https sites are also registered as payment-method domains on
+the merchant's Stripe accounts (as the checkout host is): Stripe shows Apple
+Pay and Google Pay in a frame only when the framing page's domain is
+registered. Apple Pay there also needs the site itself to serve Stripe's
+domain-association file at the same path.
+
+## Save with the customer network
+
+On a server running the customer network ([Customer
+network](customer-network.md)), the page offers before the card to save the
+purchase to the shopper's network account. It signs the shopper in at the
+server's issuer with its own client (`openrails-checkout`: code, PKCE, DPoP,
+`prompt=login`, the link challenge's nonce) and links the order's customer
+with the checkout URL. At the top level the page goes to the sign-in and back
+to `/c/sign-in`; framed, the sign-in opens in a popup, whose return hands the
+code back to the frame. `GET /v1/config`'s `network` names the issuer and
+client.
+
 ## The page
 
 Merchant name, logo and support link come from the merchant's settings
-(`settings.profile`): the logo and support link only when they are https. The
-page is never framed (`frame-ancestors 'none'`) and sends no referrer.
+(`settings.profile`): the logo and support link only when they are https. A
+hosted checkout's page is never framed (`frame-ancestors 'none'`); an embedded
+one only by its merchant's registered origins. It sends no referrer.

@@ -35,6 +35,8 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.addPaymentMethod({ psp_id: "psp_1", token: "tok" }),
     () => client.confirmPaymentMethod("pm_1"),
     () => client.getConfig(),
+    () => client.createNetworkLinkChallenge(),
+    () => client.createNetworkLink({ challengeId: "lnc_1", idToken: "t" }),
     () => client.getPaymentAuthentication("op_1"),
     () => client.confirmPaymentAuthentication("op_1"),
     () => client.removePaymentMethod("pm_1"),
@@ -46,7 +48,11 @@ it("calls only routes OpenRails mounts for customers", async () => {
     () => client.listPayments(),
     () => client.listInvoices(),
     () => client.getInvoice("inv_1"),
-    () => checkoutOf(client).createCheckoutSession({ productKey: "premium", priceKey: "monthly" }),
+    () =>
+      checkoutOf(client).createCheckoutSession({
+        productKey: "premium",
+        priceKey: "monthly",
+      }),
   ]
   for (const call of calls) await call().catch(() => undefined)
 

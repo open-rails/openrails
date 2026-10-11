@@ -19,6 +19,8 @@ import type * as wire from "./generated/wire"
 import {
   accountSchema,
   checkoutSessionLinkSchema,
+  customerLinkSchema,
+  networkLinkChallengeSchema,
   publicConfigSchema,
   paymentAuthenticationSchema,
   invoiceSchema,
@@ -34,6 +36,8 @@ import {
   subscriptionChangeSchema,
   type Account,
   type CheckoutSessionLink,
+  type CustomerLink,
+  type NetworkLinkChallenge,
   type PublicConfig,
   type PaymentAuthentication,
   type CurrencyScales,
@@ -673,6 +677,31 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(productPage, "/catalog/products", {
         query: { keys: opts.keys },
         signal: opts.signal,
+      })
+    },
+
+    /**
+     * A challenge to link the customer to an openrails.dev account: its
+     * `nonce` goes in the network sign-in's authorization request.
+     */
+    createNetworkLinkChallenge(): Promise<NetworkLinkChallenge> {
+      return json(networkLinkChallengeSchema, "/me/network-link/challenges", {
+        method: "POST",
+        body: {},
+      })
+    },
+
+    /**
+     * Links the customer to the openrails.dev account whose fresh sign-in
+     * answered the challenge (its ID token).
+     */
+    createNetworkLink(params: {
+      challengeId: string
+      idToken: string
+    }): Promise<CustomerLink> {
+      return json(customerLinkSchema, "/me/network-link", {
+        method: "POST",
+        body: { challenge_id: params.challengeId, id_token: params.idToken },
       })
     },
 

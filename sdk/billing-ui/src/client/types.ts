@@ -351,7 +351,10 @@ export const orderSchema = z.object({
   checkout: z
     .object({
       url: z.string().nullish(),
-          success_url: z.string(),
+      /** `hosted`, or `embedded` in the merchant's registered origins. */
+      ui_mode: z.enum(["hosted", "embedded"]).catch("hosted"),
+      expires_at: time,
+      success_url: z.string(),
       cancel_url: z.string().nullish(),
       saved_payment_methods: z.boolean(),
     })
@@ -651,6 +654,11 @@ export const publicMerchantSchema = z.object({
   display_name: z.string(),
   logo_url: z.string().nullish(),
   support_url: z.string().nullish(),
+  /** The origins that may frame its embedded checkouts. */
+  embed_origins: z
+    .array(z.string())
+    .nullish()
+    .transform((v) => v ?? []),
 })
 export type PublicMerchant = z.infer<typeof publicMerchantSchema>
 
@@ -666,8 +674,33 @@ export const publicConfigSchema = z.object({
   payment: paymentConfigSchema.nullish(),
   merchant: publicMerchantSchema.nullish(),
   captcha: captchaConfigSchema.nullish(),
+  /**
+   * The checkout page's sign-in to the customer network (OpenID Connect,
+   * code and PKCE); null without the network or a hosted checkout.
+   */
+  network: z.object({ issuer: z.string(), client_id: z.string() }).nullish(),
 })
 export type PublicConfig = z.infer<typeof publicConfigSchema>
+
+export const networkLinkChallengeSchema = z.object({
+  id: z.string(),
+  nonce: z.string(),
+  expires_at: time,
+})
+export type NetworkLinkChallenge = z.infer<typeof networkLinkChallengeSchema>
+
+export const customerLinkSchema = z.object({
+  id: z.string(),
+  merchant_id: z.string(),
+  customer_id: z.string(),
+  account_id: z.string(),
+  method: z.string(),
+  status: z.string(),
+  linked_at: time,
+  revoked_at: time.nullish(),
+  revoked_by: z.string().nullish(),
+})
+export type CustomerLink = z.infer<typeof customerLinkSchema>
 
 export const paymentAuthenticationSchema = z.object({
   client_secret: z.string().nullish(),

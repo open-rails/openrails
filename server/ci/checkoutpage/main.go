@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -64,6 +65,9 @@ type harness struct {
 	api    string
 	// domain is the checkout host's name.
 	domain string
+	// checkout is the checkout host's origin; other is a site the merchant
+	// did not register for its embedded checkouts.
+	checkout, other string
 }
 
 func run(addr, assets, dsn string, lifetime time.Duration) error {
@@ -89,7 +93,7 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 	}
 	defer os.RemoveAll(keys)
 
-	h := &harness{clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), api: api, domain: "127.0.0.1"}
+	h := &harness{clock: clockwork.NewFakeClockAt(time.Now().UTC().Truncate(time.Second)), api: api, checkout: checkout, domain: "127.0.0.1"}
 	h.nmi = nmimock.New(nmimock.Options{Clock: h.clock.Now})
 	defer h.nmi.Close()
 	h.stripe = stripemock.New(stripemock.Options{Clock: h.clock.Now})
@@ -102,10 +106,13 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 			// Cloudflare's always-passes test keys: the page loads the widget,
 			// which the browser suite stands in for.
 			Captcha: &openrails.CaptchaConfig{Provider: "turnstile", SiteKey: "1x00000000000000000000AA", SecretKey: "1x0000000000000000000000000000000AA"},
-			Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Checkout Shop", PSPs: map[string]openrails.PSPConfig{
-				"nmi":    openrails.NMIPSP{AccountID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
-				"stripe": openrails.StripePSP{AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
-			}},
+			Merchant: openrails.MerchantDeclaration{Slug: "shop", DisplayName: "Checkout Shop",
+				// The shop's own site, the API origin, frames its embedded checkouts.
+				Settings: billing.MerchantSettings{Checkout: &billing.MerchantCheckoutSettings{EmbedOrigins: []string{api}}},
+				PSPs: map[string]openrails.PSPConfig{
+					"nmi":    openrails.NMIPSP{AccountID: "e2e", SecurityKey: "e2e", WebhookSigningSecret: "e2e", TokenizationKey: "e2e-tokenization"}.PSPConfig(),
+					"stripe": openrails.StripePSP{AccountID: "acct_e2e", SecretKey: "sk_test_acct_e2e", WebhookSigningSecret: "whsec_e2e", PublishableKey: "pk_test_e2e"}.PSPConfig(),
+				}},
 		},
 		Auth: authkit.Config{
 			Token:        authkit.TokenConfig{Issuer: api},
@@ -134,9 +141,21 @@ func run(addr, assets, dsn string, lifetime time.Duration) error {
 
 	mux := http.NewServeMux()
 	mux.Handle("/", srv.Handler())
+	// Another site, which the shop did not register.
+	other, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return err
+	}
+	h.other = "http://localhost:" + strconv.Itoa(other.Addr().(*net.TCPAddr).Port)
+	otherMux := http.NewServeMux()
+	otherMux.HandleFunc("GET /__test/embed", h.embed)
+	otherServer := &http.Server{Handler: otherMux, ReadHeaderTimeout: 5 * time.Second}
+	go func() { _ = otherServer.Serve(other) }()
+	defer otherServer.Close()
 	mux.HandleFunc("GET /__test/health", func(w http.ResponseWriter, r *http.Request) {
-		reply(w, http.StatusOK, map[string]string{"api": api, "checkout": checkout})
+		reply(w, http.StatusOK, map[string]string{"api": api, "checkout": checkout, "other": h.other})
 	})
+	mux.HandleFunc("GET /__test/embed", h.embed)
 	mux.HandleFunc("POST /__test/orders", h.newOrder)
 	mux.HandleFunc("POST /__test/clock", h.advance)
 	mux.HandleFunc("GET /__test/host-events", h.hostEvents)
@@ -170,6 +189,7 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 		CustomerID          string `json:"customer_id"`
 		SavedPaymentMethods bool   `json:"saved_payment_methods"`
 		CancelURL           string `json:"cancel_url"`
+		UIMode              string `json:"ui_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
 		reply(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
@@ -194,7 +214,8 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	checkout := &billing.OrderCheckoutParams{SuccessURL: h.api + "/__test/thanks?order={ORDER_ID}", SavedPaymentMethods: in.SavedPaymentMethods}
+	checkout := &billing.OrderCheckoutParams{SuccessURL: h.api + "/__test/thanks?order={ORDER_ID}", SavedPaymentMethods: in.SavedPaymentMethods,
+		UIMode: billing.CheckoutUIMode(in.UIMode)}
 	if in.CancelURL != "" {
 		checkout.CancelURL = &in.CancelURL
 	}
@@ -205,6 +226,14 @@ func (h *harness) newOrder(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusCreated, map[string]string{"order_id": order.ID.String(), "customer_id": customer.String(), "url": *order.Checkout.URL})
+}
+
+// embed is a merchant's page framing a checkout URL (src), as billing-ui's
+// EmbeddedCheckout does; it keeps what the checkout's origin tells it.
+func (h *harness) embed(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, `<!doctype html><title>Shop</title><script>window.__messages = []; addEventListener("message", (e) => { if (e.origin === %q) window.__messages.push(e.data) })</script>`+
+		`<iframe src=%q allow="payment *" style="width:100%%;height:900px;border:0"></iframe>`, h.checkout, r.URL.Query().Get("src"))
 }
 
 // stripeMethod is Stripe making a PaymentMethod of the card the customer
