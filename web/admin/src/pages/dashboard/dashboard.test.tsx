@@ -156,7 +156,7 @@ it("reads and writes the range in the URL", () => {
 })
 
 it("keeps existing widget presentation editable without AI authoring", async () => {
-  routes["POST /admin/metrics/query"] = {
+  routes["POST /metrics/query"] = {
     range: today.query.range,
     columns: [],
     rows: [],
