@@ -277,8 +277,9 @@ Metrics reads stay independently grantable. The old operator URLs under
 `/v1/admin/` and the old `billing` permission names are not aliases; update
 custom roles and trusted-issuer grants when upgrading.
 
-Routes marked `sensitive` in the [route reference](docs/api/routes.md) also ask
-a person for a recent sign-in; findings resolutions do not.
+Admin changes do not require a recent sign-in. Applications can require 2FA
+and DPoP for their admin credentials; destructive-operation ceilings provide
+an additional limit on destructive actions.
 
 #### Customer contact info
 
@@ -538,12 +539,10 @@ until `RouteGroups` turns it on:
 
 - `Auth`: your auth, which only says who a request is (`Authenticate`). Customer
   routes take a person acting for themself; staff routes ask the answer's
-  `Can` for the route's permission and, for a person on a write that
-  is marked `sensitive`, its recent sign-in (helpers/auth
-  `RecentSignInChecker`). OpenRails answers
-  every refusal: 401 with a `WWW-Authenticate` challenge (a stale sign-in is
-  RFC 9470's `insufficient_user_authentication`, code `step_up_required`), 403,
-  or 503 when your auth cannot answer.
+  `Can` for the route's permission, without a recent-sign-in check. OpenRails
+  answers every refusal: 401 with a `WWW-Authenticate` challenge, 403, or
+  503 when your auth cannot answer. Customer-network operations marked
+  `sensitive` retain their recent-sign-in check.
 - Permissions are OpenRails' own (`billing.Permissions()`), each named
   `persona:resource:action` in two personas. A route acting on a merchant
   admits a caller holding its `root:` name in your auth's root scope

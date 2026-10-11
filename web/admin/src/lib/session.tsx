@@ -1,8 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
 // The console's session is auth-ui's: its AuthKit client against the
 // deployment's own accounts, or its issuer client against a trusted issuer.
-// Either holds the bearer and refreshes it; a write OpenRails refuses with
-// step_up_required re-authenticates (lib/api/client api()).
+// Either holds the bearer and refreshes it. AuthKit credential and role
+// grants retain their recent-sign-in dialog (lib/api/client authKit()).
 import * as React from "react"
 import {
   createAuthClient,

@@ -48,9 +48,9 @@ var provisioningRoutes = []Route{
 	// The merchant's provisioning tokens.
 	{Method: GET, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListProvisioningTokens",
 		Query: params(idsParam), Responses: []Reply{{200, billing.ListPage[billing.ProvisioningToken]{}}}, Handler: h(handlers.ListProvisioningTokens)},
-	{Method: POST, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreateProvisioningToken", Sensitive: true,
+	{Method: POST, Path: "/v1/merchant/provisioning-tokens", Group: MerchantConfig, Auth: AuthMerchant, Name: "CreateProvisioningToken",
 		Request: billing.CreateProvisioningTokenParams{}, Responses: []Reply{{201, billing.CreatedProvisioningToken{}}}, Errors: codes("invalid_param"), Handler: h(handlers.CreateProvisioningToken)},
-	{Method: DELETE, Path: "/v1/merchant/provisioning-tokens/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "DeleteProvisioningToken", Sensitive: true,
+	{Method: DELETE, Path: "/v1/merchant/provisioning-tokens/{id}", Group: MerchantConfig, Auth: AuthMerchant, Name: "DeleteProvisioningToken",
 		Responses: []Reply{{204, nil}}, Errors: codes("invalid_param", "resource_not_found"), Handler: h(handlers.DeleteProvisioningToken)},
 }
 

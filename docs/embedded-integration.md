@@ -334,14 +334,14 @@ OpenRails asks it once per request and builds every gate from its answer, a
 | `Verified.Identity()` | who it is: a person or an application, acting itself or for someone |
 | `RootScope(ctx)` (`auth.Root`) | where your staff hold `root:` permissions; needed with any route group on |
 | `Verified.Can(scope, permission)` (`auth.PermissionChecker`) | on every staff and programmatic route, with the route's permission: its `merchant:` name in the merchant's own scope (`{Authority: RootScope's, ID: the merchant's id}`), else its `root:` name in `RootScope`, checked live; without it the request holds nothing |
-| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | then, when a person calls a staff route that moves money, removes access or exports data (marked `sensitive` in [routes](api/routes.md)): a recent sign-in, by your policy. An application has no sign-in to renew; a person whose credential has none (a personal API key) is refused 403 `step_up_unavailable` |
+| `Verified.CheckRecentSignIn()` (`auth.RecentSignInChecker`) | on customer-network routes marked `sensitive` in [routes](api/routes.md). Staff routes do not request a recent sign-in, including when called with a personal API key |
 
 OpenRails answers every refusal itself, with the status and challenge
 `auth.Refuse` gives every consumer: 401 with `WWW-Authenticate` for a missing,
 invalid, expired or revoked credential (your `auth.Challenge` headers win), 403
 for a permission not held, 503 `authentication_unavailable` or
-`authorization_unavailable` when your auth cannot answer, and RFC 9470's step-up
-for a stale sign-in: 401 `step_up_required` with `WWW-Authenticate: Bearer
+`authorization_unavailable` when your auth cannot answer. A sensitive
+customer-network route answers a stale sign-in with RFC 9470's step-up: 401 `step_up_required` with `WWW-Authenticate: Bearer
 error="insufficient_user_authentication", max_age=...` and your challenge's
 metadata. An identity without a subject or invoker is refused, so an
 Authenticator that checks nothing admits no one. Each handler checks the

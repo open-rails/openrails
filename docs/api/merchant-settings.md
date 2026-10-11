@@ -45,10 +45,9 @@ automatically.
   is `404 customer_not_found` (settings never create one), and an undeclared
   policy is `404 billing_policy_not_found`.
 - The read needs `billing.MerchantCustomerRead` and the write
-  `billing.MerchantCustomerManage`, or their `root:` twins. Every
-  field can change the customer's spending authority, so the write is
-  sensitive: a person needs a recent sign-in for it (`step_up_required`). Writes count against the
-  per-administrator grant limit, one per item.
+  `billing.MerchantCustomerManage`, or their `root:` twins. No recent sign-in
+  is required. Writes count against the per-administrator grant limit, one
+  per item.
 
 ```json
 {"items": [{"customer_id": "…", "credit_limits": [{"currency": "USD", "amount": "50000000"}], "billing_policy": "cloud_monthly"}]}
