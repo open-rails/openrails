@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
 	"github.com/open-rails/openrails/internal/app"
@@ -29,7 +29,7 @@ import (
 // Options is what an assembly supplies to mount catalog routes.
 type Options struct {
 	// Auth is the mount's Authenticator: who a request on a staff or
-	// programmatic route is. With a group on it is a helpers/auth Root: its
+	// programmatic route is. With a group on it is a authkit/auth Root: its
 	// RootScope is where root: permissions are held, and its authority the
 	// one a bound credential's scope is a merchant's in.
 	Auth billingauth.Authenticator
@@ -494,7 +494,7 @@ func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) 
 }
 
 // NetworkMount is the network portal's surface (/v1/network): the
-// Authenticator that says who the account is, a helpers/auth Root whose
+// Authenticator that says who the account is, a authkit/auth Root whose
 // authority the deployment's own accounts are of.
 type NetworkMount struct {
 	Auth billingauth.Authenticator

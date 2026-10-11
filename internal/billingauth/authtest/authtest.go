@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -37,7 +37,7 @@ type Grant struct {
 	Permissions []billing.Permission
 	// Scope is where Permissions are held; zero is Root.
 	Scope billingauth.Scope
-	// Bound is the scope the credential is bound to (helpers/auth Bound),
+	// Bound is the scope the credential is bound to (authkit/auth Bound),
 	// such as a merchant's group; zero binds none. Bound, it holds nothing
 	// elsewhere but a person's root permissions in Root.
 	Bound billingauth.Scope
@@ -57,7 +57,7 @@ var (
 	_ auth.Root                 = (*Fake)(nil)
 )
 
-// RootScope is Root (helpers/auth Root).
+// RootScope is Root (authkit/auth Root).
 func (*Fake) RootScope(context.Context) (billingauth.Scope, error) { return Root, nil }
 
 // Issue returns a token for g.
@@ -120,7 +120,7 @@ type Verified struct{ Grant Grant }
 
 func (v Verified) Identity() billingauth.Identity { return v.Grant.Identity }
 
-// BoundScope is Grant.Bound (helpers/auth Bound).
+// BoundScope is Grant.Bound (authkit/auth Bound).
 func (v Verified) BoundScope() billingauth.Scope { return v.Grant.Bound }
 
 func (v Verified) Can(_ context.Context, scope billingauth.Scope, permission string) (bool, error) {

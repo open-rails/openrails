@@ -85,16 +85,16 @@ type (
 	// EmailAddress is a mailbox and its display name.
 	EmailAddress = config.EmailAddress
 
-	// UserInfo is Deps.UserInfo: helpers/userinfo's Lookup, the host's
+	// UserInfo is Deps.UserInfo: authkit/userinfo's Lookup, the host's
 	// directory read in process (AuthKit's Client.UserInfo()). Email notices,
 	// the admin customer read, lists and search ask it.
 	UserInfo = config.UserInfo
 
-	// Authenticator is Routes.Auth: helpers/auth's Authenticator, which says
+	// Authenticator is Routes.Auth: authkit/auth's Authenticator, which says
 	// who a request is (AuthKit's ak.Authenticator()). OpenRails builds its
 	// gates from the Verified it returns.
 	Authenticator = billingauth.Authenticator
-	// Identity is who the Authenticator says a request is (helpers/auth):
+	// Identity is who the Authenticator says a request is (authkit/auth):
 	// the Subject whose authority and money is used, the Invoker acting for
 	// it when that is someone else, and the Credential it was proven with.
 	Identity = billingauth.Identity
@@ -142,7 +142,7 @@ const (
 )
 
 // ErrUnauthenticated refuses a request without a valid credential: the
-// helpers/auth sentinel.
+// authkit/auth sentinel.
 var ErrUnauthenticated = billingauth.ErrUnauthenticated
 
 // ParseMerchantDeclaration reads an entry of Config.Merchants from one YAML

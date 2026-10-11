@@ -1,5 +1,5 @@
 // Command own-auth is a shop at https://shop.example selling for two
-// merchants on one OpenRails engine, with no AuthKit: its own users,
+// merchants on one OpenRails engine, with its own authentication: its own users,
 // sessions and roles (schema.sql) answer OpenRails through the
 // Authenticator in auth.go. It is a backend only; its tests drive it.
 //

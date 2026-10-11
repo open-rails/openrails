@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	helpersauth "github.com/open-rails/authkit/auth"
 	"github.com/open-rails/authkit/authtest"
-	helpersauth "github.com/open-rails/helpers/auth"
 	"github.com/open-rails/openrails/billing"
 	"github.com/stretchr/testify/require"
 )

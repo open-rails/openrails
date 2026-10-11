@@ -4,7 +4,7 @@ import (
 	"errors"
 	"net/http"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -18,7 +18,7 @@ type GateError struct {
 	Message  string
 	Code     string
 	Metadata map[string]any
-	// Err is the helpers/auth class the refusal answers as, so a refusal of
+	// Err is the authkit/auth class the refusal answers as, so a refusal of
 	// OpenRails' own Authenticators classifies like a host's (auth.Refuse).
 	Err error
 }
@@ -46,7 +46,7 @@ func Refusal(code string, message ...string) GateError {
 	return out
 }
 
-// classOf is the helpers/auth class of a registered refusal.
+// classOf is the authkit/auth class of a registered refusal.
 func classOf(code string, status int) error {
 	switch code {
 	case billing.CodeCredentialExpired:

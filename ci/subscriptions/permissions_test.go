@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -84,7 +84,7 @@ func TestStaffHoldMerchantOrRootPermission(t *testing.T) {
 }
 
 // rootless is the harness verifier without its root scope: an Authenticator
-// that is no helpers/auth Root.
+// that is no authkit/auth Root.
 type rootless struct{ v *verifier }
 
 func (r rootless) Authenticate(req *http.Request) (auth.Verified, error) {
@@ -92,7 +92,7 @@ func (r rootless) Authenticate(req *http.Request) (auth.Verified, error) {
 }
 
 // knowing is the harness verifier knowing only these permissions
-// (helpers/auth PermissionCatalog).
+// (authkit/auth PermissionCatalog).
 type knowing struct {
 	*verifier
 	known []billing.Permission
@@ -116,7 +116,7 @@ func TestMountNeedsARootAuthenticator(t *testing.T) {
 	admin := openrails.RouteGroups{Admin: true}
 	require.NoError(t, mount(openrails.Routes{Auth: rootless{w.auth}}), "public, customer and webhook routes ask no permission")
 	for name, groups := range map[string]openrails.RouteGroups{"a staff group": admin, "the programmatic routes": {Programmatic: true}} {
-		require.ErrorContains(t, mount(openrails.Routes{Auth: rootless{w.auth}, RouteGroups: groups}), "helpers/auth Root", name)
+		require.ErrorContains(t, mount(openrails.Routes{Auth: rootless{w.auth}, RouteGroups: groups}), "authkit/auth Root", name)
 	}
 
 	err := mount(openrails.Routes{Auth: knowing{w.auth, []billing.Permission{billing.RootCustomerRead}}, RouteGroups: admin})

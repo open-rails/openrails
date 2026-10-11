@@ -1,9 +1,9 @@
 # Your own auth
 
 A shop at `https://shop.example` selling for two merchants, `acme` and
-`globex`, on one OpenRails engine, with no AuthKit: its own `shop.users`,
+`globex`, on one OpenRails engine, using AuthKit's contract packages and its own `shop.users`,
 `shop.sessions` and `shop.roles` tables (`schema.sql`) answer OpenRails
-through helpers/auth's interfaces (`auth.go`). A backend only.
+through authkit/auth's interfaces (`auth.go`). A backend only.
 
 ## What the host implements
 
@@ -39,7 +39,8 @@ zero `BoundScope`. Every session then acts at that merchant.
 
 ## Tests
 
-`go test ./own-auth/` checks the example imports no AuthKit. The end-to-end
+`go test ./own-auth/` checks the example imports only AuthKit's contract packages,
+with no AuthKit server or database implementation. The end-to-end
 tests need a PostgreSQL 18 server:
 
 ```sh

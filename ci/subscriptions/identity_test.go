@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	helpersauthtest "github.com/open-rails/helpers/auth/authtest"
+	helpersauthtest "github.com/open-rails/authkit/auth/authtest"
 	"github.com/riverqueue/river"
 	"github.com/stretchr/testify/require"
 

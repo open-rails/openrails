@@ -8,8 +8,11 @@ files (code, trackers, this file). Neutral examples in this repository use `host
 through `host-four`; these are placeholders, not customer or repository names.
 
 ## Modules
-- Root `github.com/open-rails/openrails`: the embedded library. Its go.mod requires NO
-  AuthKit (`scripts/check-embedded-auth-boundary.sh`); never add an AuthKit import to it.
+- Root `github.com/open-rails/openrails`: the embedded library. It imports AuthKit's
+  standard-library-only `auth` and `userinfo` contract packages, versioned in the
+  same AuthKit module. `scripts/check-embedded-auth-boundary.sh` forbids AuthKit's
+  runtime implementation from the embedded package graph; hosts opt into that
+  implementation themselves. There is no separate contract module or version.
 - `server/` is its own module, `github.com/open-rails/openrails/server`: package `server`,
   the binary `server/cmd/openrails`, everything AuthKit-backed under `server/internal/`
   (controlplane, operator, hostconfig, …) and the server's e2e suite `server/ci`. It may

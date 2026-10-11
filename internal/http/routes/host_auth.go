@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	auth "github.com/open-rails/helpers/auth"
+	auth "github.com/open-rails/authkit/auth"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -27,7 +27,7 @@ var (
 // hostRoot is where the host holds its root: permissions.
 var hostRoot = billingauth.Scope{Authority: billingauth.HostIssuer, ID: "root"}
 
-// RootScope is the host's own root scope (helpers/auth Root).
+// RootScope is the host's own root scope (authkit/auth Root).
 func (HostAuth) RootScope(context.Context) (billingauth.Scope, error) { return hostRoot, nil }
 
 // Authenticate admits the in-process host principal.

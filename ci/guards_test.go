@@ -6,7 +6,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/open-rails/helpers/auth"
+	"github.com/open-rails/authkit/auth"
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 
 	"github.com/open-rails/openrails"
