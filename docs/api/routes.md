@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (178), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (171), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -106,9 +106,6 @@ Staff work on customers, with `RouteGroups.Admin`: staff, machines and the Go cl
 | POST | `/v1/admin/credit-grants/{id}/revoke` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `RevokeCreditGrantParams` | 200 `CreditGrant` | sensitive; limit `destructive` |
 | GET | `/v1/admin/customers/{customer_id}/balance/transactions` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<BalanceTransaction>` |  |
 | GET | `/v1/admin/customers/{customer_id}/balance` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Balance` |  |
-| GET | `/v1/admin/provider-operations` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<ProviderOperation>` |  |
-| GET | `/v1/admin/provider-operations/{operation_id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ProviderOperation` |  |
-| POST | `/v1/admin/provider-operations/{operation_id}/close` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `CloseProviderOperationParams` | 200 `ProviderOperation` | sensitive |
 | POST | `/v1/admin/payments` | merchant | `merchant:billing:manage`<br>`root:billing:manage` | `CreatePaymentParams` | 200 `Payment`<br>201 `Payment` | sensitive; limit `off_channel` |
 | GET | `/v1/admin/payments` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `ListPage<Payment>` |  |
 | GET | `/v1/admin/payments/{id}` | merchant | `merchant:billing:read`<br>`root:billing:read` | — | 200 `Payment` |  |
@@ -214,10 +211,6 @@ The host backend's own calls, with `RouteGroups.Programmatic`: an application th
 | POST | `/v1/app/running-charges/{reference}/stop` | application | `merchant:usage:manage`<br>`root:usage:manage` | `StopRunningChargeParams` | 200 `RunningCharge` | `Idempotency-Key` |
 | GET | `/v1/app/running-charges/{reference}` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `RunningCharge` |  |
 | GET | `/v1/app/running-charges` | application | `merchant:usage:manage`<br>`root:usage:manage` | — | 200 `ListPage<RunningCharge>` |  |
-| POST | `/v1/app/provider-operations` | application | `merchant:costs:manage`<br>`root:costs:manage` | `OpenProviderOperationParams` | 201 `ProviderOperation`<br>200 `ProviderOperation` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations/{operation_id}/increment` | application | `merchant:costs:manage`<br>`root:costs:manage` | `IncrementProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations/{operation_id}/release` | application | `merchant:costs:manage`<br>`root:costs:manage` | `ReleaseProviderOperationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
-| POST | `/v1/app/provider-operations/{operation_id}/observations` | application | `merchant:costs:manage`<br>`root:costs:manage` | `RecordProviderBillingObservationParams` | 200 `ProviderOperation` | `Idempotency-Key` |
 | GET | `/v1/app/host-events` | application | `merchant:events:read`<br>`root:events:read` | — | 200 `ListPage<HostEvent>` |  |
 | POST | `/v1/app/host-events/acknowledge` | application | `merchant:events:read`<br>`root:events:read` | `AcknowledgeHostEventsParams` | 200 `HostEventLookup` | `Idempotency-Key` |
 | GET | `/v1/app/scim/v2/ServiceProviderConfig` | provisioning | — | — | 200 `application/scim+json` |  |

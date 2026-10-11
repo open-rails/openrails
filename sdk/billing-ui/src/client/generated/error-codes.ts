@@ -127,14 +127,7 @@ export type OpenRailsErrorCode =
   | "product_not_found"
   | "product_tier_group_conflict"
   | "product_tier_group_in_use"
-  | "provider_billing_observation_conflict"
   | "provider_cancel_held"
-  | "provider_operation_conflict"
-  | "provider_operation_has_billing_evidence"
-  | "provider_operation_not_found"
-  | "provider_operation_not_open"
-  | "provider_operation_not_refused"
-  | "provider_operation_refused"
   | "provider_outcome_unknown"
   | "psp_claim_requires_proof"
   | "psp_credentials_rejected"
@@ -326,14 +319,7 @@ export const OPENRAILS_ERROR_CODES: Readonly<
   product_not_found: { status: 404, type: "invalid_request_error", meaning: "The product does not exist." },
   product_tier_group_conflict: { status: 409, type: "invalid_request_error", meaning: "A customer holds live subscriptions to more than one product of the tier group." },
   product_tier_group_in_use: { status: 409, type: "invalid_request_error", meaning: "The tier group cannot change while a subscription has a plan change in flight." },
-  provider_billing_observation_conflict: { status: 409, type: "invalid_request_error", meaning: "The observation conflicts with a recorded one; param names the term." },
   provider_cancel_held: { status: 409, type: "invalid_request_error", meaning: "Cancelling needs a destructive provider action that is not armed for this merchant." },
-  provider_operation_conflict: { status: 409, type: "invalid_request_error", meaning: "The provider operation call repeats a committed one with a changed term; param names it." },
-  provider_operation_has_billing_evidence: { status: 409, type: "invalid_request_error", meaning: "The provider operation already carries provider billing evidence, so it cannot be released." },
-  provider_operation_not_found: { status: 404, type: "invalid_request_error", meaning: "The provider operation does not exist." },
-  provider_operation_not_open: { status: 409, type: "invalid_request_error", meaning: "The provider operation's hold is no longer open." },
-  provider_operation_not_refused: { status: 409, type: "invalid_request_error", meaning: "Only a refused provider operation can be closed by an operator." },
-  provider_operation_refused: { status: 409, type: "invalid_request_error", meaning: "The provider operation's cost was refused automatic qualification; only an operator's close ends its hold." },
   provider_outcome_unknown: { status: 409, type: "api_error", meaning: "The provider did not confirm the outcome; read the resource before retrying." },
   psp_claim_requires_proof: { status: 403, type: "authorization_error", meaning: "Claiming a provider account needs credentials that prove control of it." },
   psp_credentials_rejected: { status: 400, type: "invalid_request_error", meaning: "The provider rejected the credentials." },

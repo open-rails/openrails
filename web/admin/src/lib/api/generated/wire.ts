@@ -425,14 +425,6 @@ export type CheckoutRoutingRule = {
   prefer: string[]
 }
 
-export type CloseProviderOperationParams = {
-  kind?: "settled" | "written_off"
-  cost_amount?: string | null
-  attested_by?: string
-  reference?: string
-  note?: string
-}
-
 export type CreateAlertWebhookParams = {
   name?: string
   url?: string
@@ -949,13 +941,6 @@ export type HostEventLookup = {
   host_events: Record<string, HostEvent | null> | null
 }
 
-export type IncrementProviderOperationParams = {
-  ordinal?: number
-  amount?: string
-  minimum_amount?: string
-  overdraft_amount?: string
-}
-
 export type InvoiceContact = {
   name: string
   email: string
@@ -1267,18 +1252,6 @@ export type NotificationData = {
   payment_id?: string
   order_id?: string
   order_number?: string
-}
-
-export type OpenProviderOperationParams = {
-  operation_id?: string
-  customer_id?: string
-  record_owner?: string
-  currency?: string
-  amount?: string
-  claim_reference?: string
-  authorization_body?: string | null
-  authorization_body_sha256?: string
-  overdraft_amount?: string
 }
 
 export type Order = {
@@ -1813,95 +1786,6 @@ export type ProductSummary = {
   archived: boolean
 }
 
-export type ProviderBillingLifecycleEvidence = {
-  provider: string
-  provider_resource_id: string
-  provider_lifetime_starts_at: string
-  provider_lifetime_ends_at: string
-  provider_absent_at: string
-  provider_absence_reference: string
-  billing_stop_reference: string
-  windows_closed_at: string
-  windows_closed_reference: string
-  lifecycle_evidence_body: string | null
-}
-
-export type ProviderBillingObservationRefusal = {
-  kind?: "amount_overflow" | "lifecycle_unprovable" | "observation_rejected" | "provider_billing_unavailable" | "response_too_large" | "schema_ambiguity" | "submicro_amount"
-  detail?: string
-}
-
-export type ProviderBillingQualification = {
-  lifecycle: ProviderBillingLifecycleEvidence
-  lifecycle_evidence_sha256: string
-  quiescence_seconds: number
-  state: "eligible" | "pending" | "refused"
-  reason: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "lifecycle_unprovable" | "negative_or_corrective_record" | "observation_changed" | "observation_rejected" | "provider_billing_unavailable" | "provider_evidence_refused"
-  baseline_observation_id: string
-  qualified_observation_id: string
-  qualified_cost_amount: string | null
-  qualified_at: string | null
-  created_at: string
-  updated_at: string
-}
-
-export type ProviderBillingRecord = {
-  provider_resource_id?: string
-  bucket_start?: string
-  amount?: string
-  time_billed_ms?: string
-}
-
-export type ProviderBillingRefusal = {
-  reason: "awaiting_equal_observation" | "awaiting_quiescence" | "coverage_incomplete" | "decreasing_provider_cost" | "eligible" | "lifecycle_unprovable" | "negative_or_corrective_record" | "observation_changed" | "observation_rejected" | "provider_billing_unavailable" | "provider_evidence_refused"
-  detail: string
-  refused_at: string
-}
-
-export type ProviderBillingResolution = {
-  kind: "settled" | "written_off"
-  cost_amount: string | null
-  attested_by: string
-  reference: string
-  note: string
-  resolved_at: string
-}
-
-export type ProviderOperation = {
-  operation_id: string
-  merchant_id: string
-  customer_id: string
-  record_owner: string
-  currency: string
-  amount: string
-  authorized_amount: string
-  last_increment: ProviderOperationIncrement | null
-  claim_reference: string
-  authorization_body: string | null
-  authorization_body_sha256: string
-  state: "open" | "released" | "settled"
-  terminal_reference: string
-  qualification: ProviderBillingQualification | null
-  settlement_cost_amount: string | null
-  settlement_amount: string | null
-  settlement_body: string | null
-  settlement_body_sha256: string | null
-  refusal: ProviderBillingRefusal | null
-  resolution: ProviderBillingResolution | null
-  created_at: string
-  released_at: string | null
-  settled_at: string | null
-  replayed: boolean
-}
-
-export type ProviderOperationIncrement = {
-  ordinal: number
-  amount: string
-  minimum_amount: string
-  granted_amount: string
-  created_at: string
-}
-
 export type ProvisioningToken = {
   id: string
   name: string
@@ -1966,17 +1850,6 @@ export type RateTier = {
   flat_amount?: string
 }
 
-export type RecordProviderBillingObservationParams = {
-  observation_id?: string
-  lifecycle?: ProviderBillingLifecycleEvidence
-  normalized_query?: string
-  query_starts_at?: string
-  query_ends_at?: string
-  raw_body?: string | null
-  records?: ProviderBillingRecord[]
-  refusal?: ProviderBillingObservationRefusal | null
-}
-
 export type RecordUsageBatchParams = {
   items?: RecordUsageParams[]
 }
@@ -2010,10 +1883,6 @@ export type RefundPaymentParams = {
 
 export type ReleaseAdmissionBatchParams = {
   request_ids?: string[]
-}
-
-export type ReleaseProviderOperationParams = {
-  release_reference?: string
 }
 
 export type Renewal = {

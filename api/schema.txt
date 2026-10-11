@@ -68,6 +68,7 @@ migration 0064_orders_id_index.up.sql sha256:81f306bb5a9112ac65feb459a4c518102c7
 migration 0065_drop_merchant_api_hosts.up.sql sha256:517658ca10c3079ecc62657147ae1da8711de44aced2eed7796c41822fcff4ec
 migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346d017fbe2c11260dad37f6b729f397f139d0f424c7bf21d0249ee26
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
+migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -351,106 +352,6 @@ table billing.checkout_attempts
   index CREATE UNIQUE INDEX checkout_attempts_psp_id_transaction_id_key ON billing.checkout_attempts USING btree (merchant_id, psp_id, transaction_id) WHERE ((transaction_id IS NOT NULL) AND (deleted_at IS NULL))
   index CREATE INDEX checkout_attempts_subscription_id_idx ON billing.checkout_attempts USING btree (merchant_id, subscription_id) WHERE (subscription_id IS NOT NULL)
   index CREATE UNIQUE INDEX checkout_attempts_transaction_id_key ON billing.checkout_attempts USING btree (transaction_id) WHERE ((rail = 'solana'::text) AND (transaction_id IS NOT NULL) AND (deleted_at IS NULL))
-
-table billing.cost_observations
-  column merchant_id uuid NOT NULL
-  column operation_id text NOT NULL
-  column observation_id text NOT NULL
-  column normalized_query text NOT NULL
-  column query_starts_at timestamp with time zone NOT NULL
-  column query_ends_at timestamp with time zone NOT NULL
-  column raw_body_available boolean NOT NULL
-  column raw_body_bytes bytea NOT NULL
-  column raw_body_digest bytea NOT NULL
-  column normalized_records_bytes bytea
-  column normalized_records_digest bytea
-  column cost_amount bigint
-  column has_negative_record boolean NOT NULL
-  column refusal_kind text
-  column covers_lifetime boolean NOT NULL
-  column qualification_reason text NOT NULL
-  column observed_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint cost_observations_id_check CHECK (((observation_id <> ''::text) AND (observation_id = btrim(observation_id)) AND (octet_length(observation_id) <= 255)))
-  constraint cost_observations_normalized_check CHECK ((((refusal_kind IS NULL) AND raw_body_available AND (octet_length(raw_body_bytes) > 0) AND (normalized_records_bytes IS NOT NULL) AND (octet_length(normalized_records_bytes) > 0) AND (octet_length(normalized_records_bytes) <= 786432) AND (normalized_records_digest IS NOT NULL) AND (octet_length(normalized_records_digest) = 32) AND (normalized_records_digest = sha256(normalized_records_bytes)) AND (cost_amount IS NOT NULL)) OR ((refusal_kind IS NOT NULL) AND (refusal_kind <> ''::text) AND (refusal_kind = btrim(refusal_kind)) AND (octet_length(refusal_kind) <= 255) AND (normalized_records_bytes IS NULL) AND (normalized_records_digest IS NULL) AND (cost_amount IS NULL) AND (NOT has_negative_record) AND (NOT covers_lifetime) AND (qualification_reason = 'provider_evidence_refused'::text) AND (((refusal_kind = ANY (ARRAY['schema_ambiguity'::text, 'submicro_amount'::text, 'amount_overflow'::text])) AND raw_body_available AND (octet_length(raw_body_bytes) > 0)) OR ((refusal_kind = 'response_too_large'::text) AND (NOT raw_body_available) AND (octet_length(raw_body_bytes) = 0))))))
-  constraint cost_observations_operation_id_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.cost_qualifications(merchant_id, operation_id) ON DELETE RESTRICT
-  constraint cost_observations_pkey PRIMARY KEY (merchant_id, operation_id, observation_id)
-  constraint cost_observations_query_check CHECK (((normalized_query <> ''::text) AND (normalized_query = btrim(normalized_query)) AND (octet_length(normalized_query) <= 8192) AND (query_ends_at > query_starts_at)))
-  constraint cost_observations_raw_check CHECK (((octet_length(raw_body_bytes) <= 786432) AND (octet_length(raw_body_digest) = 32) AND (raw_body_digest = sha256(raw_body_bytes)) AND (raw_body_available OR (octet_length(raw_body_bytes) = 0))))
-  constraint cost_observations_reason_check CHECK ((qualification_reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])))
-  index CREATE INDEX cost_observations_observed_at_idx ON billing.cost_observations USING btree (merchant_id, observed_at)
-  index CREATE INDEX cost_observations_operation_id_observed_at_idx ON billing.cost_observations USING btree (merchant_id, operation_id, observed_at DESC)
-  index CREATE UNIQUE INDEX cost_observations_pkey ON billing.cost_observations USING btree (merchant_id, operation_id, observation_id)
-  trigger CREATE TRIGGER immutable_cost_observations BEFORE UPDATE ON billing.cost_observations FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
-  trigger CREATE TRIGGER retained_cost_observations BEFORE DELETE ON billing.cost_observations FOR EACH ROW EXECUTE FUNCTION billing.guard_retention_delete('observed_at', '90 days')
-
-table billing.cost_qualifications
-  column merchant_id uuid NOT NULL
-  column operation_id text NOT NULL
-  column provider text NOT NULL
-  column provider_resource_id text NOT NULL
-  column provider_lifetime_starts_at timestamp with time zone NOT NULL
-  column provider_lifetime_ends_at timestamp with time zone NOT NULL
-  column provider_absent_at timestamp with time zone NOT NULL
-  column provider_absence_reference text NOT NULL
-  column billing_stop_reference text NOT NULL
-  column windows_closed_at timestamp with time zone NOT NULL
-  column windows_closed_reference text NOT NULL
-  column lifecycle_evidence_bytes bytea NOT NULL
-  column lifecycle_evidence_digest bytea NOT NULL
-  column quiescence_seconds bigint NOT NULL
-  column state text NOT NULL DEFAULT 'pending'::text
-  column reason text NOT NULL DEFAULT 'awaiting_equal_observation'::text
-  column baseline_observation_id text
-  column qualified_observation_id text
-  column qualified_cost_amount bigint
-  column qualified_at timestamp with time zone
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column updated_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint cost_qualifications_evidence_check CHECK (((octet_length(lifecycle_evidence_bytes) >= 1) AND (octet_length(lifecycle_evidence_bytes) <= 65536) AND (octet_length(lifecycle_evidence_digest) = 32) AND (lifecycle_evidence_digest = sha256(lifecycle_evidence_bytes))))
-  constraint cost_qualifications_lifetime_check CHECK (((provider_lifetime_ends_at > provider_lifetime_starts_at) AND (provider_absent_at >= provider_lifetime_ends_at) AND (windows_closed_at >= provider_lifetime_ends_at)))
-  constraint cost_qualifications_operation_id_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT
-  constraint cost_qualifications_pkey PRIMARY KEY (merchant_id, operation_id)
-  constraint cost_qualifications_policy_check CHECK ((quiescence_seconds > 0))
-  constraint cost_qualifications_provider_check CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (octet_length(provider) <= 255) AND (provider_resource_id <> ''::text) AND (provider_resource_id = btrim(provider_resource_id)) AND (octet_length(provider_resource_id) <= 255)))
-  constraint cost_qualifications_reference_check CHECK (((provider_absence_reference <> ''::text) AND (provider_absence_reference = btrim(provider_absence_reference)) AND (octet_length(provider_absence_reference) <= 1024) AND (billing_stop_reference <> ''::text) AND (billing_stop_reference = btrim(billing_stop_reference)) AND (octet_length(billing_stop_reference) <= 1024) AND (windows_closed_reference <> ''::text) AND (windows_closed_reference = btrim(windows_closed_reference)) AND (octet_length(windows_closed_reference) <= 1024)))
-  constraint cost_qualifications_state_check CHECK (((state = ANY (ARRAY['pending'::text, 'refused'::text, 'eligible'::text])) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text, 'provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'eligible'::text])) AND ((baseline_observation_id IS NULL) OR ((baseline_observation_id <> ''::text) AND (baseline_observation_id = btrim(baseline_observation_id)) AND (octet_length(baseline_observation_id) <= 255))) AND ((qualified_observation_id IS NULL) OR ((qualified_observation_id <> ''::text) AND (qualified_observation_id = btrim(qualified_observation_id)) AND (octet_length(qualified_observation_id) <= 255))) AND (((state = 'pending'::text) AND (reason = ANY (ARRAY['awaiting_equal_observation'::text, 'awaiting_quiescence'::text, 'coverage_incomplete'::text, 'observation_changed'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'refused'::text) AND (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) AND (qualified_observation_id IS NULL) AND (qualified_cost_amount IS NULL) AND (qualified_at IS NULL)) OR ((state = 'eligible'::text) AND (reason = 'eligible'::text) AND (baseline_observation_id IS NOT NULL) AND (qualified_observation_id IS NOT NULL) AND (qualified_cost_amount IS NOT NULL) AND (qualified_cost_amount >= 0) AND (qualified_at IS NOT NULL)))))
-  constraint cost_qualifications_state_key UNIQUE (merchant_id, operation_id, state)
-  index CREATE UNIQUE INDEX cost_qualifications_pkey ON billing.cost_qualifications USING btree (merchant_id, operation_id)
-  index CREATE INDEX cost_qualifications_state_created_at_idx ON billing.cost_qualifications USING btree (merchant_id, state, created_at DESC, operation_id DESC)
-  index CREATE UNIQUE INDEX cost_qualifications_state_key ON billing.cost_qualifications USING btree (merchant_id, operation_id, state)
-  trigger CREATE TRIGGER immutable_cost_qualification_facts BEFORE DELETE OR UPDATE ON billing.cost_qualifications FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'reason', 'baseline_observation_id', 'qualified_observation_id', 'qualified_cost_amount', 'qualified_at', 'updated_at')
-
-table billing.cost_refusals
-  column merchant_id uuid NOT NULL
-  column operation_id text NOT NULL
-  column reason text NOT NULL
-  column qualification_state text GENERATED ALWAYS AS ( CASE WHEN (reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text])) THEN 'refused'::text ELSE NULL::text END) STORED
-  column detail text
-  column refused_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint cost_refusals_authorization_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT
-  constraint cost_refusals_detail_check CHECK (((detail IS NULL) OR ((detail <> ''::text) AND (detail = btrim(detail)) AND (octet_length(detail) <= 4096))))
-  constraint cost_refusals_pkey PRIMARY KEY (merchant_id, operation_id)
-  constraint cost_refusals_qualification_fkey FOREIGN KEY (merchant_id, operation_id, qualification_state) REFERENCES billing.cost_qualifications(merchant_id, operation_id, state) ON UPDATE RESTRICT ON DELETE RESTRICT
-  constraint cost_refusals_reason_check CHECK ((reason = ANY (ARRAY['provider_evidence_refused'::text, 'negative_or_corrective_record'::text, 'decreasing_provider_cost'::text, 'lifecycle_unprovable'::text, 'provider_billing_unavailable'::text, 'observation_rejected'::text])))
-  index CREATE UNIQUE INDEX cost_refusals_pkey ON billing.cost_refusals USING btree (merchant_id, operation_id)
-  trigger CREATE TRIGGER immutable_cost_refusals BEFORE DELETE OR UPDATE ON billing.cost_refusals FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
-
-table billing.cost_resolutions
-  column merchant_id uuid NOT NULL
-  column operation_id text NOT NULL
-  column qualification_state text NOT NULL GENERATED ALWAYS AS ('refused'::text) STORED
-  column kind text NOT NULL
-  column cost_amount bigint
-  column attested_by text NOT NULL
-  column reference text NOT NULL
-  column note text
-  column resolved_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint cost_resolutions_attestation_check CHECK (((attested_by <> ''::text) AND (attested_by = btrim(attested_by)) AND (octet_length(attested_by) <= 255) AND (reference <> ''::text) AND (reference = btrim(reference)) AND (octet_length(reference) <= 1024) AND ((note IS NULL) OR ((note <> ''::text) AND (note = btrim(note)) AND (octet_length(note) <= 4096)))))
-  constraint cost_resolutions_kind_check CHECK ((((kind = 'settled'::text) AND (cost_amount IS NOT NULL) AND (cost_amount >= 0)) OR ((kind = 'written_off'::text) AND (cost_amount IS NULL))))
-  constraint cost_resolutions_pkey PRIMARY KEY (merchant_id, operation_id)
-  constraint cost_resolutions_refusal_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.cost_refusals(merchant_id, operation_id) ON DELETE RESTRICT
-  index CREATE UNIQUE INDEX cost_resolutions_pkey ON billing.cost_resolutions USING btree (merchant_id, operation_id)
-  trigger CREATE TRIGGER immutable_cost_resolutions BEFORE DELETE OR UPDATE ON billing.cost_resolutions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
 
 table billing.custodians
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1147,72 +1048,6 @@ table billing.notifications
   index CREATE INDEX notifications_event_type_idx ON billing.notifications USING btree (event_type)
   index CREATE UNIQUE INDEX notifications_pkey ON billing.notifications USING btree (merchant_id, id)
   index CREATE INDEX notifications_recipient_kind_customer_id_read_at_created_at_idx ON billing.notifications USING btree (merchant_id, recipient_kind, customer_id, read_at, created_at DESC)
-
-table billing.operation_authorization_extensions
-  column merchant_id uuid NOT NULL
-  column operation_id text NOT NULL
-  column ordinal bigint NOT NULL
-  column requested_amount bigint NOT NULL
-  column minimum_amount bigint NOT NULL
-  column granted_amount bigint NOT NULL
-  column authorized_amount bigint NOT NULL
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  constraint operation_authorization_extensions_amounts_check CHECK (((minimum_amount > 0) AND (minimum_amount <= granted_amount) AND (granted_amount <= requested_amount)))
-  constraint operation_authorization_extensions_authorization_fkey FOREIGN KEY (merchant_id, operation_id) REFERENCES billing.operation_authorizations(merchant_id, operation_id) ON DELETE RESTRICT
-  constraint operation_authorization_extensions_authorized_check CHECK ((authorized_amount > granted_amount))
-  constraint operation_authorization_extensions_ordinal_check CHECK ((ordinal >= 1))
-  constraint operation_authorization_extensions_pkey PRIMARY KEY (merchant_id, operation_id, ordinal)
-  index CREATE UNIQUE INDEX operation_authorization_extensions_pkey ON billing.operation_authorization_extensions USING btree (merchant_id, operation_id, ordinal)
-  trigger CREATE TRIGGER immutable_operation_authorization_extensions BEFORE DELETE OR UPDATE ON billing.operation_authorization_extensions FOR EACH ROW EXECUTE FUNCTION billing.reject_immutable_billing_fact()
-
-table billing.operation_authorizations
-  column operation_id text NOT NULL
-  column merchant_id uuid NOT NULL
-  column customer_id uuid NOT NULL
-  column record_owner text NOT NULL
-  column ledger_account_id uuid NOT NULL
-  column currency text NOT NULL
-  column amount bigint NOT NULL
-  column claim_reference text NOT NULL
-  column authorization_body_bytes bytea NOT NULL
-  column authorization_body_digest bytea NOT NULL
-  column state text NOT NULL DEFAULT 'open'::text
-  column terminal_reference text
-  column created_at timestamp with time zone NOT NULL DEFAULT now()
-  column released_at timestamp with time zone
-  column settled_at timestamp with time zone
-  column settlement_cost_amount bigint
-  column settlement_amount bigint
-  column settlement_body_bytes bytea
-  column settlement_body_digest bytea
-  column extended_amount bigint NOT NULL DEFAULT 0
-  column authorized_amount bigint NOT NULL GENERATED ALWAYS AS ((amount + extended_amount)) STORED
-  constraint operation_authorizations_amount_positive_check CHECK ((amount > 0))
-  constraint operation_authorizations_body_present_check CHECK ((octet_length(authorization_body_bytes) > 0))
-  constraint operation_authorizations_body_size_check CHECK ((octet_length(authorization_body_bytes) <= 65536))
-  constraint operation_authorizations_claim_reference_present_check CHECK (((claim_reference <> ''::text) AND (claim_reference = btrim(claim_reference))))
-  constraint operation_authorizations_claim_reference_size_check CHECK ((octet_length(claim_reference) <= 1024))
-  constraint operation_authorizations_currency_check CHECK ((currency = 'USD'::text))
-  constraint operation_authorizations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id) ON DELETE RESTRICT
-  constraint operation_authorizations_digest_check CHECK ((octet_length(authorization_body_digest) = 32))
-  constraint operation_authorizations_digest_matches_body_check CHECK ((authorization_body_digest = sha256(authorization_body_bytes)))
-  constraint operation_authorizations_extended_amount_check CHECK ((extended_amount >= 0))
-  constraint operation_authorizations_ledger_account_fkey FOREIGN KEY (merchant_id, customer_id, currency, ledger_account_id) REFERENCES billing.ledger_accounts(merchant_id, customer_id, currency, id) ON DELETE RESTRICT
-  constraint operation_authorizations_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
-  constraint operation_authorizations_operation_id_present_check CHECK (((operation_id <> ''::text) AND (operation_id = btrim(operation_id))))
-  constraint operation_authorizations_operation_id_size_check CHECK ((octet_length(operation_id) <= 255))
-  constraint operation_authorizations_pkey PRIMARY KEY (merchant_id, operation_id)
-  constraint operation_authorizations_record_owner_present_check CHECK (((record_owner <> ''::text) AND (record_owner = btrim(record_owner))))
-  constraint operation_authorizations_record_owner_size_check CHECK ((octet_length(record_owner) <= 255))
-  constraint operation_authorizations_settlement_check CHECK ((((state <> 'settled'::text) AND (settlement_cost_amount IS NULL) AND (settlement_amount IS NULL) AND (settlement_body_bytes IS NULL) AND (settlement_body_digest IS NULL)) OR ((state = 'settled'::text) AND (settlement_cost_amount IS NOT NULL) AND (settlement_cost_amount >= 0) AND (settlement_amount IS NOT NULL) AND (settlement_amount >= 0) AND (settlement_amount = settlement_cost_amount) AND (settlement_body_bytes IS NOT NULL) AND ((octet_length(settlement_body_bytes) >= 1) AND (octet_length(settlement_body_bytes) <= 65536)) AND (settlement_body_digest IS NOT NULL) AND (octet_length(settlement_body_digest) = 32) AND (settlement_body_digest = sha256(settlement_body_bytes)) AND (terminal_reference = ('sha256:'::text || encode(settlement_body_digest, 'hex'::text))))))
-  constraint operation_authorizations_state_check CHECK ((state = ANY (ARRAY['open'::text, 'released'::text, 'settled'::text])))
-  constraint operation_authorizations_terminal_check CHECK ((((state = 'open'::text) AND (terminal_reference IS NULL) AND (released_at IS NULL) AND (settled_at IS NULL)) OR ((state = 'released'::text) AND (terminal_reference <> ''::text) AND (released_at IS NOT NULL) AND (settled_at IS NULL)) OR ((state = 'settled'::text) AND (terminal_reference <> ''::text) AND (released_at IS NULL) AND (settled_at IS NOT NULL))))
-  constraint operation_authorizations_terminal_reference_size_check CHECK (((terminal_reference IS NULL) OR (octet_length(terminal_reference) <= 1024)))
-  index CREATE INDEX operation_authorizations_customer_id_created_at_idx ON billing.operation_authorizations USING btree (merchant_id, customer_id, created_at DESC)
-  index CREATE INDEX operation_authorizations_customer_id_currency_idx ON billing.operation_authorizations USING btree (merchant_id, customer_id, currency) WHERE (state = 'open'::text)
-  index CREATE UNIQUE INDEX operation_authorizations_pkey ON billing.operation_authorizations USING btree (merchant_id, operation_id)
-  index CREATE INDEX operation_authorizations_state_created_at_idx ON billing.operation_authorizations USING btree (merchant_id, state, created_at DESC, operation_id DESC)
-  trigger CREATE TRIGGER immutable_operation_authorization_facts BEFORE DELETE OR UPDATE ON billing.operation_authorizations FOR EACH ROW EXECUTE FUNCTION billing.guard_billing_fact_columns('state', 'terminal_reference', 'released_at', 'settled_at', 'settlement_cost_amount', 'settlement_amount', 'settlement_body_bytes', 'settlement_body_digest', 'extended_amount', 'authorized_amount')
 
 table billing.order_lines
   column merchant_id uuid NOT NULL
@@ -3090,10 +2925,6 @@ function billing.guard_billing_restore_receipt()
                     'catalog_rate_cards',
                     'catalog_restore_receipts',
                     'checkout_attempts',
-                    'cost_observations',
-                    'cost_qualifications',
-                    'cost_refusals',
-                    'cost_resolutions',
                     'custodians',
                     'custody_migrations',
                     'customer_delinquency',
@@ -3120,8 +2951,6 @@ function billing.guard_billing_restore_receipt()
                     'nmi_history_months',
                     'nmi_history_reads',
                     'notifications',
-                    'operation_authorization_extensions',
-                    'operation_authorizations',
                     'order_lines',
                     'orders',
                     'owed_items',
