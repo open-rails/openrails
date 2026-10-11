@@ -72,6 +72,7 @@ migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f218
 migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
 migration 0070_deleted_products.up.sql sha256:1e8996e65d15b55a31d53494eeacf64cfe367276e5ad5f154d43f3d2245d3f46
 migration 0071_rate_at_ingest.up.sql sha256:fb279a06160785ba4019cc13578412642b860113c699d79eb208b7aac6cc093d
+migration 0072_capture_quantities.up.sql sha256:6014d4a123ab414923c9d5f6b8a5e44bbd4daab9d6f256ac7c89c84de84df8c6
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -147,10 +148,13 @@ table billing.admission_operations PARTITION BY RANGE (admitted_at)
   column captured_amount bigint
   column captured_at timestamp with time zone
   column released_at timestamp with time zone
+  column estimate_usage jsonb
+  column rate_cards jsonb
   constraint admission_operations_available_amount_check CHECK ((available_amount >= 0))
   constraint admission_operations_capture_terms_check CHECK (((jsonb_typeof(capture_terms) = 'object'::text) AND (octet_length((capture_terms)::text) <= 65536)))
   constraint admission_operations_currency_check CHECK ((currency ~ '^[A-Z0-9]{3,12}$'::text))
   constraint admission_operations_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint admission_operations_estimate_usage_check CHECK ((((estimate_usage IS NULL) = (rate_cards IS NULL)) AND ((estimate_usage IS NULL) OR ((jsonb_typeof(estimate_usage) = 'object'::text) AND (octet_length((estimate_usage)::text) <= 65536))) AND ((rate_cards IS NULL) OR ((jsonb_typeof(rate_cards) = 'array'::text) AND (octet_length((rate_cards)::text) <= 262144)))))
   constraint admission_operations_estimated_amount_check CHECK ((estimated_amount >= 0))
   constraint admission_operations_expires_at_check CHECK (((requested_expires_at IS NULL) OR ((expires_at IS NOT NULL) AND (expires_at >= requested_expires_at))))
   constraint admission_operations_hold_lifetime_check CHECK (((expires_at IS NULL) OR (expires_at <= (admitted_at + '720:00:00'::interval))))
