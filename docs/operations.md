@@ -286,8 +286,9 @@ execute; `full` executes everything; an unrecognized origin parks.
 
 Every outbound provider mutation flows through the ledger: deferred NMI
 deletes, NMI/Stripe refunds, dunning `manual_rebill` charges, CCBill
-cancels, payment-method swaps, vault deletes, checkout NMI sales and Solana
-recurring pulls.
+cancels, payment-method swaps, vault deletes, checkout NMI sales, Solana
+recurring pulls and the hosted checkout's Stripe payment-method domain
+registrations.
 
 Execution is **effectively-once**, never assumed exactly-once. Per class:
 money-movers park ambiguous outcomes as `unknown_needs_verify` and are
@@ -990,8 +991,10 @@ What is kept on purpose:
 
 - **A provider intent that is the record of something is permanent.** Collections,
   sales, enrollments, rebills, tier changes, refunds and Solana pulls (succeeded
-  or refused) are what grants, payments and invoices are checked against, and a
-  card erasure is the proof the card is gone. Only the instruction-only types
+  or refused) are what grants, payments and invoices are checked against, a
+  card erasure is the proof the card is gone, and a Stripe payment-method
+  domain registration (one per PSP and checkout host) is the record that the
+  host is registered. Only the instruction-only types
   above age out. The list lives once in the baseline's
   `provider_intents_updated_at_idx` and once in the retention code; a test
   keeps them equal.

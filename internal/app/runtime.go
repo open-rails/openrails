@@ -173,6 +173,8 @@ type Runtime struct {
 	// HostedCheckoutOrigin is where a server serving the hosted checkout
 	// serves it; merchant orders take a checkout only when it is set.
 	HostedCheckoutOrigin string
+	// checkoutDomains are the (PSP, host) registrations known queued.
+	checkoutDomains sync.Map
 	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the

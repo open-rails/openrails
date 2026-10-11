@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -792,6 +793,17 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 				return nil, false, ErrIdempotencyKeyInUse
 			}
 			return nil, false, err
+		}
+	}
+	if params.Checkout != nil && !replayed {
+		// A Stripe PSP declared before the checkout host was served is
+		// registered as its payment-method domain now.
+		if mid, err := merchant.Require(ctx); err == nil {
+			s.rt.Go("checkout domain registration", func(ctx context.Context) {
+				if err := s.rt.RegisterCheckoutDomain(ctx, mid, nil); err != nil && ctx.Err() == nil {
+					log.WithContext(ctx).WithError(err).WithField("merchant_id", mid.String()).Warn("checkout domain: cannot queue its registration")
+				}
+			})
 		}
 	}
 	view, err := s.merchantOrderView(ctx, order)

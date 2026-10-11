@@ -65,6 +65,7 @@ func (r *Runtime) wireMerchantConfig(ctx context.Context, borrowed *vaultapi.Cli
 		set, err := r.syncMerchantConfig(ctx, id, previous, loaded)
 		if err == nil {
 			r.followPSPPosture(id, previous, set)
+			r.followCheckoutDomain(id, previous, set)
 		}
 		return set, err
 	})

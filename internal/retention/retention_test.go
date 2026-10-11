@@ -233,9 +233,10 @@ func TestOutboxIntentTypesMatchTheBaseline(t *testing.T) {
 		"subscription_collection", "initial_membership", "manual_rebill", "invoice_collection",
 		"nmi_sale", "custodian_sale", "nmi_upgrade", "stripe_tier_change", "solana_pull",
 		"nmi_refund", "stripe_refund", "ccbill_refund", "nmi_vault_delete", "hyperswitch_method_delete",
+		"stripe_payment_method_domain",
 	} {
 		if slices.Contains(listed, permanent) {
-			t.Errorf("%s is a record of money, a membership or an erasure and must not be an outbox type", permanent)
+			t.Errorf("%s is a record of money, a membership, an erasure or a registration and must not be an outbox type", permanent)
 		}
 	}
 }

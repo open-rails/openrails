@@ -190,6 +190,13 @@ and its expiry returns the order to `requires_payment_method`. Canceling or
 expiring the order expires the session. `return_url` must be on an allowed
 origin.
 
+On a server serving the hosted checkout, a declared Stripe PSP gets the
+checkout host registered as a payment-method domain on its account
+(through Stripe's payment method domains API, after reading whether the
+account holds it),
+so the page's Express Checkout Element offers Apple Pay and Google Pay; see
+[Hosted checkout](../hosted-checkout.md#apple-pay-and-google-pay).
+
 ### Card updates
 
 `payment_method.automatically_updated` (Stripe's card updater) and

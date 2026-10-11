@@ -1479,6 +1479,7 @@
       "type OperationArgs struct {\n\tMerchantID uuid.UUID `json:\"merchant_id\" river:\"unique\"`\n\tIntentID   uuid.UUID `json:\"intent_id\" river:\"unique\"`\n}",
       "type RefundPayload struct {\n\tOriginalPaymentID uuid.UUID `json:\"original_payment_id\"`\n\n\tReservationID uuid.UUID `json:\"reservation_id\"`\n\n\tAmountCents  moneyutil.Cents `json:\"amount_cents\"`\n\tCurrency     string          `json:\"currency\"`\n\tReason       string          `json:\"reason,omitempty\"`\n\tRevokeAccess bool            `json:\"revoke_access\"`\n\n\tProviderTarget string `json:\"provider_target\"`\n\n\tProviderTransactionID string `json:\"provider_transaction_id,omitempty\"`\n}",
       "type StripeCancelPayload struct {\n\tRailSubscriptionID string `json:\"rail_subscription_id\"`\n}",
+      "type StripePaymentMethodDomainPayload struct {\n\tDomainName string `json:\"domain_name\"`\n}",
       "type collectedReceipt struct {\n\tVersion      int                                    `json:\"version\"`\n\tFamily       string                                 `json:\"family\"`\n\tBinding      receiptBinding                         `json:\"binding\"`\n\tNMI          *nmi.SaleEvidence                      `json:\"nmi,omitempty\"`\n\tStripe       *subscriptions.StripeCollectionReceipt `json:\"stripe,omitempty\"`\n\tStripeEngine *subscriptions.StripeEngineReceipt     `json:\"stripe_engine,omitempty\"`\n}",
       "type collectionNonexecution struct {\n\tBinding     receiptBinding `json:\"binding\"`\n\tSubmittedAt string         `json:\"submitted_at\"`\n\tCode        string         `json:\"code\"`\n\tReason      string         `json:\"reason\"`\n}",
       "type enrollmentReceipt struct {\n\tBinding receiptBinding         `json:\"binding\"`\n\tFacts   nmi.EnrollmentEvidence `json:\"facts\"`\n}",
@@ -1488,6 +1489,7 @@
       "type rebillDecline struct {\n\tBinding           receiptBinding `json:\"binding\"`\n\tResponseCode      int            `json:\"response_code\"`\n\tProviderReference string         `json:\"provider_reference\"`\n}",
       "type rebillPreparation struct {\n\tBinding         receiptBinding `json:\"binding\"`\n\tSubscriptionID  string         `json:\"subscription_id\"`\n\tCustomerVaultID string         `json:\"customer_vault_id\"`\n\tAmount          string         `json:\"amount\"`\n\tNextBillingDate string         `json:\"next_billing_date\"`\n\tPlan            nmi.V5Plan     `json:\"plan\"`\n}",
       "type receiptBinding struct {\n\tOperationID   uuid.UUID `json:\"operation_id\"`\n\tMerchantID    uuid.UUID `json:\"merchant_id\"`\n\tPSPID         uuid.UUID `json:\"psp_id\"`\n\tKind          string    `json:\"kind\"`\n\tPayloadSHA256 string    `json:\"payload_sha256\"`\n}",
+      "type stripeDomain struct {\n\tID       string `json:\"id\"`\n\tDomain   string `json:\"domain_name\"`\n\tEnabled  bool   `json:\"enabled\"`\n\tApplePay struct {\n\t\tStatus        string `json:\"status\"`\n\t\tStatusDetails struct {\n\t\t\tErrorMessage string `json:\"error_message\"`\n\t\t} `json:\"status_details\"`\n\t} `json:\"apple_pay\"`\n\tGooglePay struct {\n\t\tStatus string `json:\"status\"`\n\t} `json:\"google_pay\"`\n}",
       "type stripeRecurringDecline struct {\n\tDeclineCode     string         `json:\"decline_code,omitempty\"`\n\tBinding         receiptBinding `json:\"binding\"`\n\tFailureCode     string         `json:\"failure_code\"`\n\tPaymentIntentID string         `json:\"payment_intent_id\"`\n}"
     ],
     "internal/merchantarchive": [
@@ -3059,6 +3061,25 @@
       "url": "net/url",
       "uuid": "github.com/google/uuid"
     },
+    "internal/intents/stripe_payment_method_domain.go": {
+      "config": "github.com/open-rails/openrails/internal/config",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "errors": "errors",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "io": "io",
+      "json": "encoding/json",
+      "providerposture": "github.com/open-rails/openrails/internal/providerposture",
+      "railresolve": "github.com/open-rails/openrails/internal/railresolve",
+      "strings": "strings",
+      "stripeapi": "github.com/open-rails/openrails/internal/integrations/stripeapi",
+      "subscriptions": "github.com/open-rails/openrails/internal/modules/subscriptions",
+      "time": "time",
+      "url": "net/url",
+      "uuid": "github.com/google/uuid"
+    },
     "internal/intents/stripe_recurring_decline.go": {
       "bytes": "bytes",
       "context": "context",
@@ -4582,6 +4603,7 @@
       "idempotency": "github.com/open-rails/openrails/internal/modules/idempotency",
       "intents": "github.com/open-rails/openrails/internal/intents",
       "json": "encoding/json",
+      "log": "github.com/sirupsen/logrus",
       "merchant": "github.com/open-rails/openrails/internal/merchant",
       "models": "github.com/open-rails/openrails/internal/db/models",
       "money": "github.com/open-rails/openrails/internal/modules/money",

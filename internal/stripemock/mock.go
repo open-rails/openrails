@@ -85,6 +85,8 @@ type Mock struct {
 	pricesDown      bool
 	// amounts are legacy prices created at Stripe at other than 9.99.
 	amounts map[string]int64
+	// domains are each account's payment method domains.
+	domains map[string][]Object
 	webhook webhookTarget
 	events  []Event
 }
@@ -104,7 +106,7 @@ func NewUnstarted(opts Options) *Mock {
 	}
 	return &Mock{now: opts.Clock, customers: map[string]Object{}, setups: map[string]Object{}, methods: map[string]Object{}, declines: map[string]string{},
 		intents: map[string]Object{}, charges: map[string]Object{}, refunds: map[string]Object{}, subs: map[string]Object{}, sessions: map[string]Object{},
-		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}}
+		idem: map[string]*idempotentRequest{}, visibleAt: map[string]time.Time{}, domains: map[string][]Object{}}
 }
 
 // URL is the loopback API root; OpenRails' provider_sandbox.stripe_api_url.
@@ -278,14 +280,11 @@ func (m *Mock) route(r *http.Request, form url.Values) (int, any) {
 	seg := strings.Split(strings.TrimPrefix(p, "/v1/"), "/")
 	switch {
 	case p == "/v1/account":
-		// A key sk_test_acct_<name> is account acct_<name>'s; any other is acct_e2e's.
-		account := "acct_e2e"
-		if name, ok := strings.CutPrefix(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), "sk_test_acct_"); ok {
-			account = "acct_" + name
-		}
-		return 200, Object{"object": "account", "id": account, "charges_enabled": true}
+		return 200, Object{"object": "account", "id": accountOf(r), "charges_enabled": true}
 	case p == "/v1/balance":
 		return 200, Object{"object": "balance", "livemode": false, "available": []any{}, "pending": []any{}}
+	case seg[0] == "payment_method_domains":
+		return m.paymentMethodDomain(r, form, seg)
 	case r.Method == http.MethodGet && p == "/v1/customers/search":
 		data := []any{}
 		for _, c := range m.customers {

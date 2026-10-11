@@ -50,6 +50,7 @@ func (s *Server) buildCheckout(origin string, assets fs.FS) error {
 	mux.Handle("GET /c/{order_id}", page)
 	mux.Handle("GET "+hostedcheckout.SignInPath, page)
 	mux.Handle("GET /assets/{file...}", page)
+	mux.Handle("GET "+hostedcheckout.ApplePayDomainAssociationPath, hostedcheckout.ApplePayDomainAssociation())
 	s.checkoutHost = strings.ToLower(u.Host)
 	s.checkoutHandler = middleware.ChainHTTP(mux.Handler(),
 		middleware.RecoverHTTP(),
