@@ -1684,9 +1684,6 @@
           "root": "root:catalog:manage"
         },
         "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
           "default_rate_card_not_found",
           "meter_in_use",
           "meter_rate_card_conflict",
@@ -1750,9 +1747,6 @@
         },
         "x-openrails-catalog-update": true,
         "x-openrails-errors": [
-          "allowance_meter_not_found",
-          "allowance_source_in_use",
-          "allowance_source_invalid",
           "default_rate_card_not_found",
           "meter_in_use",
           "meter_rate_card_conflict",
@@ -10987,12 +10981,6 @@
         "properties": {
           "included": {
             "type": "integer"
-          },
-          "accrue_from": {
-            "type": "string"
-          },
-          "cap": {
-            "type": "string"
           }
         }
       },
@@ -15068,9 +15056,6 @@
           "maximum_amount": {
             "type": "string",
             "description": "A number as a decimal string."
-          },
-          "included": {
-            "type": "integer"
           }
         },
         "required": [
@@ -20687,6 +20672,7 @@
             "enum": [
               "event_type",
               "invoker",
+              "meter",
               "resource"
             ]
           },
@@ -20715,6 +20701,37 @@
           "group_by",
           "rows",
           "next_cursor"
+        ]
+      },
+      "UsageCharge": {
+        "type": "object",
+        "properties": {
+          "meter_key": {
+            "type": "string"
+          },
+          "cell": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "quantity": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        },
+        "required": [
+          "meter_key",
+          "cell",
+          "quantity",
+          "amount"
         ]
       },
       "UsageEvent": {
@@ -20790,6 +20807,12 @@
           "source_id": {
             "type": "string"
           },
+          "charges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UsageCharge"
+            }
+          },
           "balance_transaction_id": {
             "oneOf": [
               {
@@ -20826,6 +20849,7 @@
           "metadata",
           "source",
           "source_id",
+          "charges",
           "balance_transaction_id",
           "occurred_at",
           "created_at",
@@ -20871,12 +20895,32 @@
           "key": {
             "type": "string"
           },
+          "cell": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "event_count": {
             "type": "integer"
           },
           "amount": {
             "type": "string",
             "description": "A number as a decimal string."
+          },
+          "quantity": {
+            "oneOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "dimensions": {
             "oneOf": [
@@ -20894,8 +20938,10 @@
         },
         "required": [
           "key",
+          "cell",
           "event_count",
           "amount",
+          "quantity",
           "dimensions"
         ]
       },
@@ -21106,21 +21152,6 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "No admission was made under this request id."
-    },
-    "allowance_meter_not_found": {
-      "status": 404,
-      "type": "invalid_request_error",
-      "meaning": "The rate card's allowance meter does not exist."
-    },
-    "allowance_source_in_use": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The allowance source is in use."
-    },
-    "allowance_source_invalid": {
-      "status": 409,
-      "type": "invalid_request_error",
-      "meaning": "The allowance source cannot back this rate card."
     },
     "already_owned": {
       "status": 409,
@@ -22001,6 +22032,11 @@
       "status": 404,
       "type": "invalid_request_error",
       "meaning": "The usage meter does not exist."
+    },
+    "usage_not_priced": {
+      "status": 422,
+      "type": "invalid_request_error",
+      "meaning": "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."
     },
     "usage_rate_card_invalid": {
       "status": 400,

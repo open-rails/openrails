@@ -800,14 +800,16 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "invoker" | "resource"
+  group_by: "event_type" | "invoker" | "meter" | "resource"
   rows: UsageRow[]
   next_cursor: string | null
 }
 
 export type UsageRow = {
   key: string
+  cell: string | null
   event_count: number
   amount: string
+  quantity: number | null
   dimensions: Record<string, number> | null
 }

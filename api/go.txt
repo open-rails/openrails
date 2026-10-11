@@ -545,6 +545,7 @@ pkg openrails/billing, const CodeSubscriptionPaidThrough untyped string = "subsc
 pkg openrails/billing, const CodeSubscriptionResumable untyped string = "subscription_resumable"
 pkg openrails/billing, const CodeUnknownField untyped string = "unknown_field"
 pkg openrails/billing, const CodeUnsupportedMediaType untyped string = "unsupported_media_type"
+pkg openrails/billing, const CodeUsageNotPriced untyped string = "usage_not_priced"
 pkg openrails/billing, const CollectChargeAutomatically InvoiceCollectionMethod = "charge_automatically"
 pkg openrails/billing, const CollectSendInvoice InvoiceCollectionMethod = "send_invoice"
 pkg openrails/billing, const CreditGrantActive CreditGrantState = "active"
@@ -787,6 +788,7 @@ pkg openrails/billing, const SyncStatusSyncDisabled SyncStatus = "sync_disabled"
 pkg openrails/billing, const SyncStatusUnknown SyncStatus = "unknown"
 pkg openrails/billing, const UsageByEventType UsageGroupBy = "event_type"
 pkg openrails/billing, const UsageByInvoker UsageGroupBy = "invoker"
+pkg openrails/billing, const UsageByMeter UsageGroupBy = "meter"
 pkg openrails/billing, const UsageByResource UsageGroupBy = "resource"
 pkg openrails/billing, const UsageEventIDPrefix untyped string = "uev_"
 pkg openrails/billing, const UsageFailed UsageOutcome = "failed"
@@ -2911,9 +2913,15 @@ pkg openrails/billing, type Usage struct, GroupBy UsageGroupBy `json:"group_by"`
 pkg openrails/billing, type Usage struct, NextCursor *string `json:"next_cursor"`
 pkg openrails/billing, type Usage struct, Rows []UsageRow `json:"rows"`
 pkg openrails/billing, type Usage struct, To time.Time `json:"to"`
+pkg openrails/billing, type UsageCharge struct
+pkg openrails/billing, type UsageCharge struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type UsageCharge struct, Cell *string `json:"cell"`
+pkg openrails/billing, type UsageCharge struct, MeterKey string `json:"meter_key"`
+pkg openrails/billing, type UsageCharge struct, Quantity int64 `json:"quantity"`
 pkg openrails/billing, type UsageEvent struct
 pkg openrails/billing, type UsageEvent struct, Amount int64 `json:"amount,string"`
 pkg openrails/billing, type UsageEvent struct, BalanceTransactionID *BalanceTransactionID `json:"balance_transaction_id"`
+pkg openrails/billing, type UsageEvent struct, Charges []UsageCharge `json:"charges"`
 pkg openrails/billing, type UsageEvent struct, CreatedAt time.Time `json:"created_at"`
 pkg openrails/billing, type UsageEvent struct, Currency string `json:"currency"`
 pkg openrails/billing, type UsageEvent struct, CustomerID CustomerID `json:"customer_id"`
@@ -2938,9 +2946,11 @@ pkg openrails/billing, type UsageGroupBy string
 pkg openrails/billing, type UsageOutcome string
 pkg openrails/billing, type UsageRow struct
 pkg openrails/billing, type UsageRow struct, Amount int64 `json:"amount,string"`
+pkg openrails/billing, type UsageRow struct, Cell *string `json:"cell"`
 pkg openrails/billing, type UsageRow struct, Dimensions map[string]int64 `json:"dimensions"`
 pkg openrails/billing, type UsageRow struct, EventCount int64 `json:"event_count"`
 pkg openrails/billing, type UsageRow struct, Key string `json:"key"`
+pkg openrails/billing, type UsageRow struct, Quantity *int64 `json:"quantity"`
 pkg openrails/billing, type UserMerchant struct
 pkg openrails/billing, type UserMerchant struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type UserMerchant struct, ID MerchantID `json:"id"`
@@ -2986,6 +2996,7 @@ pkg openrails/billing, var ErrRefundUnsupported error
 pkg openrails/billing, var ErrRequestBodyTooLarge error
 pkg openrails/billing, var ErrUnauthorized error
 pkg openrails/billing, var ErrUnreachable error
+pkg openrails/billing, var ErrUsageNotPriced error
 pkg openrails/billing, var ReservedMerchantSlugs []string
 pkg openrails/catalog, const AggregationCount Aggregation = "count"
 pkg openrails/catalog, const AggregationLatest Aggregation = "latest"
@@ -3038,8 +3049,6 @@ pkg openrails/catalog, method (Quantity) Allows(int) bool
 pkg openrails/catalog, method (Quantity) Validate() error
 pkg openrails/catalog, type Aggregation string
 pkg openrails/catalog, type Allowance struct
-pkg openrails/catalog, type Allowance struct, AccrueFrom string `json:"accrue_from,omitempty"`
-pkg openrails/catalog, type Allowance struct, Cap string `json:"cap,omitempty"`
 pkg openrails/catalog, type Allowance struct, Included int64 `json:"included,omitempty"`
 pkg openrails/catalog, type Application struct
 pkg openrails/catalog, type Application struct, EntitlementReplacements []EntitlementReplacement `json:"entitlement_replacements,omitempty"`
@@ -3098,7 +3107,6 @@ pkg openrails/catalog, type Matrix struct
 pkg openrails/catalog, type Matrix struct, Cells map[string]MatrixCell `json:"cells"`
 pkg openrails/catalog, type Matrix struct, Dimension string `json:"dimension"`
 pkg openrails/catalog, type MatrixCell struct
-pkg openrails/catalog, type MatrixCell struct, Included int64 `json:"included,omitempty"`
 pkg openrails/catalog, type MatrixCell struct, MaximumAmount int64 `json:"maximum_amount,omitempty,string"`
 pkg openrails/catalog, type MatrixCell struct, UnitAmount int64 `json:"unit_amount,string"`
 pkg openrails/catalog, type Model string

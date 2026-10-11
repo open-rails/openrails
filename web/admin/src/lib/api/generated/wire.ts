@@ -111,8 +111,6 @@ export type AlertWebhook = {
 
 export type Allowance = {
   included?: number
-  accrue_from?: string
-  cap?: string
 }
 
 export type Application = {
@@ -983,7 +981,6 @@ export type Matrix = {
 export type MatrixCell = {
   unit_amount: string
   maximum_amount?: string
-  included?: number
 }
 
 export type MerchantCheckoutSettings = {
@@ -2167,9 +2164,16 @@ export type Usage = {
   currency: string
   from: string
   to: string
-  group_by: "event_type" | "invoker" | "resource"
+  group_by: "event_type" | "invoker" | "meter" | "resource"
   rows: UsageRow[]
   next_cursor: string | null
+}
+
+export type UsageCharge = {
+  meter_key: string
+  cell: string | null
+  quantity: number
+  amount: string
 }
 
 export type UsageEvent = {
@@ -2186,6 +2190,7 @@ export type UsageEvent = {
   metadata: Record<string, unknown> | null
   source: string
   source_id: string
+  charges: UsageCharge[]
   balance_transaction_id: string | null
   occurred_at: string
   created_at: string
@@ -2200,8 +2205,10 @@ export type UsageEventResult = {
 
 export type UsageRow = {
   key: string
+  cell: string | null
   event_count: number
   amount: string
+  quantity: number | null
   dimensions: Record<string, number> | null
 }
 
