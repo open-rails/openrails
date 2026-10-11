@@ -176,10 +176,13 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		delete(seen, r.Key())
 	}
 	require.Empty(t, seen, "mounted outside the catalog")
-	// A bare runtime has no merchant directory, no LLM and merchant
-	// configuration in a file.
+	// A bare runtime has no merchant directory, no LLM, no customer network
+	// and merchant configuration in a file.
 	require.Equal(t, []string{
 		"catalog_copilot POST /v1/admin/catalog/ask",
+		"customer_network GET /v1/app/customers",
+		"customer_network POST /v1/me/network-link",
+		"customer_network POST /v1/me/network-link/challenges",
 		"dashboard_generation POST /v1/admin/dashboard/widgets/generate",
 		"merchant_config_edits DELETE /v1/admin/alert-webhooks/{id}",
 		"merchant_config_edits PATCH /v1/admin/alert-webhooks/{id}",

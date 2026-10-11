@@ -21,6 +21,9 @@ type Customer struct {
 	// it pays the currency's invoices and every subscription in it without
 	// its own card. A currency without one is absent.
 	DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
+	// Network is the customer's openrails.dev account, null when it is
+	// linked to none.
+	Network *CustomerNetwork `json:"network"`
 }
 
 // CustomerContact is how to reach a customer, as the merchant's directory

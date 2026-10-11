@@ -110,6 +110,9 @@ type Permissions struct {
 	// Orders is merchant orders: unpaid orders for a customer to pay on your
 	// site, previewed, created and withdrawn (POST /v1/app/orders).
 	Orders fmt.Stringer
+	// Customers is finding the merchant's customers: by openrails.dev
+	// account (GET /v1/app/customers), where the customer network runs.
+	Customers fmt.Stringer
 }
 
 // ConsoleMount is where a standalone server serves the admin console, and

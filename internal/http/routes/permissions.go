@@ -6,11 +6,11 @@ import "fmt"
 // for them: the staff groups' (the admin group's reads and updates, the
 // catalog, the merchant's configuration, its business metrics) and the
 // programmatic routes' (entitlement checks, offers, usage, provider costs,
-// host events, merchant orders). An empty one leaves its routes unmounted. Each field is
+// host events, merchant orders, customer lookups). An empty one leaves its routes unmounted. Each field is
 // named by a Need.
 type Permissions struct {
-	AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics string
-	Entitlements, Offers, Usage, Costs, Events, Orders       string
+	AdminRead, AdminUpdate, Catalog, MerchantConfig, Metrics      string
+	Entitlements, Offers, Usage, Costs, Events, Orders, Customers string
 }
 
 // Need names the Routes.Permissions field a route's caller holds.
@@ -29,6 +29,7 @@ const (
 	NeedCosts        Need = "Costs"
 	NeedEvents       Need = "Events"
 	NeedOrders       Need = "Orders"
+	NeedCustomers    Need = "Customers"
 )
 
 // StaffNeeds are the staff groups' permissions.
@@ -38,7 +39,7 @@ var StaffNeeds = []Need{NeedAdminRead, NeedAdminUpdate, NeedCatalog, NeedMerchan
 // a Need here, a field of Permissions (and of the public config.Permissions)
 // named by it, and its case in Field; TestEveryNeedIsAField names what is
 // missing.
-var AppNeeds = []Need{NeedEntitlements, NeedOffers, NeedUsage, NeedCosts, NeedEvents, NeedOrders}
+var AppNeeds = []Need{NeedEntitlements, NeedOffers, NeedUsage, NeedCosts, NeedEvents, NeedOrders, NeedCustomers}
 
 // AllNeeds is every Permissions field.
 func AllNeeds() []Need { return append(append([]Need(nil), StaffNeeds...), AppNeeds...) }
@@ -68,6 +69,8 @@ func (p *Permissions) Field(n Need) *string {
 		return &p.Events
 	case NeedOrders:
 		return &p.Orders
+	case NeedCustomers:
+		return &p.Customers
 	}
 	return nil
 }

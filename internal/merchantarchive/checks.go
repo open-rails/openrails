@@ -33,6 +33,7 @@ var excludedTables = map[string]string{
 	"idempotency_keys":            "short-lived request claims and replays, not moved: a replay at the destination reruns against the moved sessions and provider_intents; money is provider_intents and webhook_events",
 	"dashboard_configs":           "presentation",
 	"customer_contacts":           "a copy of the merchant's directory; the directory provisions the destination again",
+	"customer_links":              "openrails.dev's data, not the merchant's: revoked when the merchant leaves",
 	"provisioning_tokens":         "credentials; the destination mints its own",
 	"merchant_destructive_policy": "deployment safety policy",
 	"checkout_sessions":           "short-lived checkout capabilities, not moved: an open payment refuses the archive through its checkout attempt; a buyer mints a new one at the destination",

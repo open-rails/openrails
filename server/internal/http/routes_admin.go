@@ -13,6 +13,7 @@ var merchantPermissions = httproutes.Permissions{
 	AdminRead: staffperm.BillingRead, AdminUpdate: staffperm.BillingManage, Catalog: staffperm.CatalogManage,
 	MerchantConfig: staffperm.ConfigManage, Metrics: staffperm.MetricsRead,
 	Entitlements: staffperm.EntitlementsRead, Offers: staffperm.CatalogRead, Usage: staffperm.UsageManage, Costs: staffperm.CostsManage, Events: staffperm.EventsRead, Orders: staffperm.OrdersManage,
+	Customers: staffperm.CustomersRead,
 }
 
 // permissionsFor is merchantPermissions for the route groups that are on.
@@ -48,6 +49,7 @@ func (s *Server) routeOptions() httproutes.Options {
 		AdminLimiter:    s.adminLimiter,
 		Capabilities:    s.capabilities(),
 		Permissions:     s.permissions,
+		NativeIssuer:    s.controlPlane.Issuer(),
 	}
 }
 

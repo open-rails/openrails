@@ -76,6 +76,10 @@ auth:
   #   id: https://openrails.example.com # the tokens' aud
   # sign_in:
   #   dpop: optional # optional | required: how this instance issues tokens to its own users
+  # The customer network (openrails.dev, docs/customer-network.md): accounts
+  # accept these terms, and merchants' clients sign them in. Needs resource.
+  # agreements:
+  #   - {key: network-terms, version: "2026-10", url: https://openrails.example.com/terms}
 
 # The rename policy for merchant names (shown defaults); usernames follow
 # auth.username.

@@ -1,5 +1,5 @@
 // Package abusestate keeps abuse state: rate-limit windows, admin lockouts,
-// captcha challenges and card-testing declines. It lives in Redis when one is configured, which
+// captcha challenges, card-testing declines and one-time challenges. It lives in Redis when one is configured, which
 // every instance shares, and otherwise in this process's memory, which serves
 // one instance only. A configured Redis that stops answering is left for
 // memory until it answers again. Never PostgreSQL.
@@ -30,7 +30,7 @@ type Store struct {
 	rdb *redis.Client
 	now func() time.Time
 
-	counts, holds, marks *table
+	counts, holds, marks, values *table
 
 	mu       sync.Mutex
 	observed bool
@@ -44,7 +44,7 @@ type Store struct {
 func New(rdb *redis.Client) *Store {
 	return &Store{
 		rdb: rdb, now: time.Now,
-		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit),
+		counts: newTable(tableLimit), holds: newTable(tableLimit), marks: newTable(tableLimit), values: newTable(tableLimit),
 	}
 }
 
@@ -112,6 +112,36 @@ func (s *Store) Held(ctx context.Context, key string) time.Duration {
 // configured Redis that did not.
 func (s *Store) Release(ctx context.Context, keys ...string) error {
 	return s.release(ctx, s.holds, keys)
+}
+
+// Put keeps value under key for ttl, until Take spends it.
+func (s *Store) Put(ctx context.Context, key string, value []byte, ttl time.Duration) {
+	now := s.now()
+	if s.redis() {
+		err := s.rdb.Set(ctx, key, value, ttl).Err()
+		if err == nil {
+			return
+		}
+		s.fail(ctx, err)
+	}
+	s.values.put(key, value, now.Add(ttl), now)
+}
+
+// Take spends key's value: at most one caller gets it, before its ttl ends.
+func (s *Store) Take(ctx context.Context, key string) ([]byte, bool) {
+	if v, ok := s.values.take(key, s.now()); ok {
+		return v, true
+	}
+	if s.redis() {
+		v, err := s.rdb.GetDel(ctx, key).Bytes()
+		switch {
+		case err == nil:
+			return v, true
+		case !errors.Is(err, redis.Nil):
+			s.fail(ctx, err)
+		}
+	}
+	return nil, false
 }
 
 // A Mark puts Member in Set until TTL passes; marking it again restarts it.

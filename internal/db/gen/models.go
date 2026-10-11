@@ -417,6 +417,30 @@ type BillingCustomerInvoiceProfile struct {
 	UpdatedAt        time.Time
 }
 
+// An openrails.dev account linked to one merchant's customer: unique while active per customer and per (account, merchant). openrails.dev's data, not the merchant's: never archived, revoked when the merchant leaves. Retention: revoked links are deleted 24 months (731 days) after revoked_at; an active link is kept while it lasts.
+type BillingCustomerLink struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+	// The openrails.dev account: its AuthKit user id, the public network id (OIDC sub).
+	AccountID uuid.UUID
+	// checkout: at hosted or embedded checkout; connect: the merchant's own customer, from its site; sign_in: the merchant signs its customers in with openrails.dev, so the customer is the account itself.
+	Method string
+	// The merchant-side proof: the customer's token at the merchant, or the checkout URL secret of order_id. NULL for sign_in.
+	Credential *string
+	// The order whose checkout made the link; evidence only, kept after the order goes.
+	OrderID *uuid.UUID
+	// The network sign-in the link was proven with (OIDC auth_time, amr). NULL for sign_in.
+	AuthTime *time.Time
+	Amr      []string
+	// The network-terms version the account had accepted when linked.
+	TermsVersion string
+	Status       string
+	LinkedAt     time.Time
+	RevokedAt    *time.Time
+	RevokedBy    *string
+}
+
 // Per-merchant dashboard widget layout: [{id, title, viz(stat|line|area|bar|donut|table), query, grid{x,y,w,h}}]. Absent row = seeded default template (in code, not DB).
 type BillingDashboardConfig struct {
 	MerchantID uuid.UUID
@@ -501,7 +525,7 @@ type BillingGrant struct {
 	Quantity *int32
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes and order transitions. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions and customer links. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID

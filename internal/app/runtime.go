@@ -10,6 +10,8 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/open-rails/openrails/internal/customernetwork"
+
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/captcha"
 	"github.com/open-rails/openrails/internal/identity"
@@ -121,6 +123,9 @@ type Runtime struct {
 	// token claims fill.
 	Contacts     identity.Directory
 	HostUserInfo bool
+	// Network is the customer network (openrails.dev): the standalone
+	// server's, written before serving; nil elsewhere.
+	Network customernetwork.Network
 	// RiverProducer inserts jobs: the bound fleet, OpenRails' own or the
 	// host's, else the insert-only client New binds in the same schema.
 	RiverProducer  *river.Client[pgx.Tx]

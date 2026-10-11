@@ -32,7 +32,7 @@ import (
 // permissions (CustomRoles): least privilege for a program's API key.
 var (
 	Roles           = authkit.NewRoles()
-	merchantPersona = Roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.RemoteApplications, authkit.CustomRoles)
+	merchantPersona = Roles.Persona(billing.MerchantGroupPersona, authkit.APIKeys, authkit.RemoteApplications, authkit.CustomRoles, authkit.OAuthClients)
 	customerPersona = Roles.Persona(billing.CustomerGroupPersona)
 
 	MerchantType = merchantPersona.Persona

@@ -27,6 +27,7 @@ var ownedTables = []string{
 	"customer_entitlement_cache",
 	"customer_entitlement_cache_stamps",
 	"customer_invoice_profiles",
+	"customer_links",
 	"customers",
 	"dashboard_configs",
 	"destructive_action_switch",

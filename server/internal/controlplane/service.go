@@ -62,10 +62,12 @@ type Options struct {
 
 // ResourceScopes are the scopes of the server's resource (RFC 6749 §3.3)
 // and the permissions each grants: openrails:merchant the merchant
-// permissions, openrails:self none (a customer's own billing).
+// permissions, openrails:self none (a customer's own billing), openrails:link
+// none (consent to link the merchant's own customer to the account).
 var ResourceScopes = map[string][]string{
 	"openrails:merchant": {"merchant:*"},
 	"openrails:self":     {},
+	"openrails:link":     {},
 }
 
 // AuthKit is the server's AuthKit configuration: the host's auth, passed
@@ -184,6 +186,14 @@ func (c *ControlPlane) Pool() *db.Pool {
 		return nil
 	}
 	return c.pool
+}
+
+// Issuer is AuthKit's issuer: the authority of the server's own accounts.
+func (c *ControlPlane) Issuer() string {
+	if c == nil {
+		return ""
+	}
+	return c.issuer
 }
 
 // Registration is AuthKit's self-registration mode.

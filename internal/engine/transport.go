@@ -25,8 +25,13 @@ const InprocessBaseURL = "http://openrails.invalid"
 // the bearer that carries the engine's own merchant-owner authority over it.
 func (e *Engine) Transport() (http.RoundTripper, string) {
 	rt := e.App.Runtime
-	e.handlerOnce.Do(func() { e.handler = newServiceHandler(rt) })
-	return inprocess.NewTransportWithResolver(e.handler, rt.ConfiguredMerchant, func(ctx context.Context, request *http.Request) (billingauth.Target, error) {
+	// Mounted at the first call, so what a host adds to the runtime after
+	// New (a server's customer network) is served.
+	served := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		e.handlerOnce.Do(func() { e.handler = newServiceHandler(rt) })
+		e.handler.ServeHTTP(w, r)
+	})
+	return inprocess.NewTransportWithResolver(served, rt.ConfiguredMerchant, func(ctx context.Context, request *http.Request) (billingauth.Target, error) {
 		return merchanttarget.Resolve(ctx, request, rt.Merchants, rt.ConfiguredMerchant(), "")
 	})
 }

@@ -149,6 +149,7 @@ type CleanupResult struct {
 	ProviderIntents         int64
 	ProviderMutationLogs    int64
 	CostObservations        int64
+	CustomerLinks           int64
 	// PartitionsCreated and PartitionsDropped count whole monthly partitions.
 	PartitionsCreated int
 	PartitionsDropped int
@@ -270,6 +271,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			RunCutoff:              now.Add(-retention.ReconciliationRuns),
 			ProviderWriteCutoff:    now.Add(-retention.ProviderWrites),
 			CostObservationCutoff:  now.Add(-retention.CostObservations),
+			LinkCutoff:             now.Add(-retention.RevokedCustomerLinks),
 			After:                  after,
 			MerchantLimit:          limit,
 		})
@@ -345,6 +347,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"provider_intents":          result.ProviderIntents,
 		"provider_mutation_logs":    result.ProviderMutationLogs,
 		"cost_observations":         result.CostObservations,
+		"customer_links":            result.CustomerLinks,
 		"partitions_created":        result.PartitionsCreated,
 		"partitions_dropped":        result.PartitionsDropped,
 	})
@@ -485,7 +488,14 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// 10. Resolved findings, then the reconciliation runs nothing names any more.
+	// 10. Revoked customer links.
+	sweep("delete revoked customer links", &result.CustomerLinks, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
+		return q.DeleteRevokedCustomerLinksBefore(ctx, gen.DeleteRevokedCustomerLinksBeforeParams{
+			MerchantID: mid, Cutoff: now.Add(-retention.RevokedCustomerLinks), RowLimit: limit,
+		})
+	})
+
+	// 11. Resolved findings, then the reconciliation runs nothing names any more.
 	sweep("delete resolved findings", &result.ReconciliationFindings, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteResolvedFindingsBefore(ctx, gen.DeleteResolvedFindingsBeforeParams{
 			MerchantID: mid, Cutoff: now.Add(-retention.ResolvedFindings), RowLimit: limit,
@@ -498,7 +508,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 			})
 		}))
 
-	// 11. Finished outbox intents and the mutation log. Intents that are the
+	// 12. Finished outbox intents and the mutation log. Intents that are the
 	// record of money, a membership or an erasure are not outbox types.
 	sweep("delete finished outbox intents", &result.ProviderIntents, func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 		return q.DeleteFinishedOutboxIntentsBefore(ctx, gen.DeleteFinishedOutboxIntentsBeforeParams{
@@ -511,7 +521,7 @@ func (w CleanupExpiredDataWorker) sweepMerchant(
 		})
 	})
 
-	// 12. Cost observations of operations settled or released.
+	// 13. Cost observations of operations settled or released.
 	sweep("delete cost observations", &result.CostObservations, guarded("cost_observations",
 		func(ctx context.Context, q *gen.Queries, limit int32) (int64, error) {
 			return q.DeleteCostObservationsPastRetention(ctx, gen.DeleteCostObservationsPastRetentionParams{

@@ -25,10 +25,14 @@ func (s *Server) GetMerchant(ctx context.Context, id billing.MerchantID) (*billi
 }
 
 // DeleteMerchant soft-deletes a merchant: it leaves the default lists and its
-// credentials resolve nothing, while every record stays. Deleting a deleted
-// merchant changes nothing.
+// credentials resolve nothing. Every record stays, but its customers'
+// openrails.dev links end. Deleting a deleted merchant changes nothing.
 func (s *Server) DeleteMerchant(ctx context.Context, id billing.MerchantID) (*billing.Merchant, error) {
-	return s.graph.Runtime.Merchants.SoftDelete(ctx, id)
+	m, err := s.graph.Runtime.Merchants.SoftDelete(ctx, id)
+	if err != nil || s.network == nil {
+		return m, err
+	}
+	return m, s.network.MerchantLeft(ctx, id)
 }
 
 // RestoreMerchant undoes DeleteMerchant; restoring an active merchant changes

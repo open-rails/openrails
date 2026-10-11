@@ -120,6 +120,9 @@ const (
 	FeatureMetricsAsk Feature = "metrics_ask"
 	// FeatureDashboardGeneration: llm.api_key.
 	FeatureDashboardGeneration Feature = "dashboard_generation"
+	// FeatureCustomerNetwork: the deployment runs the customer network
+	// (openrails.dev).
+	FeatureCustomerNetwork Feature = "customer_network"
 )
 
 // Level is a customer-support or catalog route's: a read, or an update. A
@@ -155,6 +158,9 @@ const (
 	// CheckoutSavedCards: a customer route served only when the checkout
 	// offers saved cards.
 	CheckoutSavedCards CheckoutAccess = "saved_cards"
+	// CheckoutLink: a customer route the order's customer uses to link its
+	// openrails.dev account, the checkout URL proving the merchant's side.
+	CheckoutLink CheckoutAccess = "link"
 )
 
 // Reply is one success outcome of a route: its status and body. Body is a
@@ -357,7 +363,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 	for _, resource := range [][]Route{
 		metaRoutes, configRoutes, checkoutRoutes, ordersRoutes, cartsRoutes, catalogRoutes, subscriptionsRoutes, entitlementsRoutes, customersRoutes,
 		creditsRoutes, meteringRoutes, invoicesRoutes, paymentsRoutes, paymentMethodsRoutes, pspsRoutes,
-		merchantRoutes, opsRoutes, provisioningRoutes,
+		merchantRoutes, opsRoutes, provisioningRoutes, customerNetworkRoutes,
 	} {
 		all = append(all, resource...)
 	}
@@ -392,7 +398,7 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 			if r.Auth != AuthPublic {
 				panic("routes: " + r.Key() + ": a public checkout route takes no credential")
 			}
-		case CheckoutOrder, CheckoutSavedCards:
+		case CheckoutOrder, CheckoutSavedCards, CheckoutLink:
 			if r.Auth != AuthCustomer || (r.Checkout == CheckoutOrder) != strings.Contains(r.Path, "{id}") {
 				panic("routes: " + r.Key() + ": a checkout customer route is a customer route; an order route names the order as {id}")
 			}
@@ -432,7 +438,9 @@ func TierErrors(tier Tier) []string {
 	case AuthPublic, AuthSessionID:
 		own = []string{billing.CodeMerchantNotFound} // the Host names no merchant
 	case AuthCustomer:
-		own = append([]string{billing.CodeInvokerScopedPrincipal}, authenticated...)
+		// network_account_linked: an account linked to another customer of
+		// the merchant, where the customer network runs.
+		own = append([]string{billing.CodeInvokerScopedPrincipal, billing.CodeNetworkAccountLinked}, authenticated...)
 	case AuthMerchant:
 		own = append(append([]string{billing.CodeStepUpRequired, billing.CodeStepUpUnavailable}, staff...), authenticated...)
 	case AuthSignedIn:

@@ -22,6 +22,7 @@ type entry struct {
 	key     string
 	set     string
 	value   int64
+	blob    []byte
 	expires time.Time
 	index   int
 }
@@ -68,6 +69,31 @@ func (t *table) mark(set, member string, expires, now time.Time) {
 		return
 	}
 	t.insert(key, set, 1, expires)
+}
+
+// put holds value under key until expires.
+func (t *table) put(key string, value []byte, expires, now time.Time) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	if e, ok := t.entries[key]; ok {
+		t.drop(heap.Remove(&t.expiry, e.index).(*entry))
+	}
+	t.insert(key, "", 0, expires)
+	t.entries[key].blob = append([]byte(nil), value...)
+}
+
+// take removes key and returns its value.
+func (t *table) take(key string, now time.Time) ([]byte, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.sweep(now)
+	e, ok := t.entries[key]
+	if !ok {
+		return nil, false
+	}
+	t.drop(heap.Remove(&t.expiry, e.index).(*entry))
+	return e.blob, true
 }
 
 // members is how many live members set holds.

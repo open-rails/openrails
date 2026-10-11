@@ -430,6 +430,12 @@ FROM (
         AND pi.updated_at < $14::timestamptz
       ORDER BY 1 LIMIT $3::int)
     UNION
+    (SELECT DISTINCT cl.merchant_id AS mid
+       FROM billing.customer_links cl
+      WHERE ($1::uuid IS NULL OR cl.merchant_id > $1::uuid)
+        AND cl.status = 'revoked' AND cl.revoked_at < $15::timestamptz
+      ORDER BY 1 LIMIT $3::int)
+    UNION
     (SELECT DISTINCT ml.merchant_id AS mid
        FROM billing.provider_mutation_logs ml
       WHERE ($1::uuid IS NULL OR ml.merchant_id > $1::uuid)
@@ -446,10 +452,10 @@ FROM (
             SELECT 1 FROM billing.operation_authorizations oa
              WHERE oa.merchant_id = co.merchant_id AND oa.operation_id = co.operation_id
                AND oa.state <> 'open'
-               AND COALESCE(oa.settled_at, oa.released_at) < $15::timestamptz
+               AND COALESCE(oa.settled_at, oa.released_at) < $16::timestamptz
              LIMIT 1) closed
       WHERE ($1::uuid IS NULL OR co.merchant_id > $1::uuid)
-        AND co.observed_at < $15::timestamptz
+        AND co.observed_at < $16::timestamptz
       ORDER BY 1 LIMIT $3::int)
 ) q
 ORDER BY q.mid
@@ -471,6 +477,7 @@ type ListRetentionWorkMerchantsParams struct {
 	FindingCutoff          time.Time
 	RunCutoff              time.Time
 	ProviderWriteCutoff    time.Time
+	LinkCutoff             time.Time
 	CostObservationCutoff  time.Time
 }
 
@@ -495,6 +502,7 @@ func (q *Queries) ListRetentionWorkMerchants(ctx context.Context, arg ListRetent
 		arg.FindingCutoff,
 		arg.RunCutoff,
 		arg.ProviderWriteCutoff,
+		arg.LinkCutoff,
 		arg.CostObservationCutoff,
 	)
 	if err != nil {

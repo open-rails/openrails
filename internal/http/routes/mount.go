@@ -57,6 +57,12 @@ type Options struct {
 	// it; without it the public read is not mounted.
 	Capabilities *billing.Capabilities
 
+	// NativeIssuer is the issuer of the deployment's own accounts: its
+	// credential bound to a merchant (a merchant's client signed the account
+	// in) is the host's own user there, issuer NULL, and acts as a customer
+	// only when granted ScopeSelf.
+	NativeIssuer string
+
 	// SCIMMerchant serves the SCIM routes for this merchant without a
 	// credential: a directory in the same process holding the engine.
 	SCIMMerchant billing.MerchantID
@@ -163,6 +169,8 @@ func (e *Env) enabled(f Feature) bool {
 		return rt != nil && rt.DashboardService.AskConfigured()
 	case FeatureDashboardGeneration:
 		return rt != nil && rt.DashboardService.NLConfigured()
+	case FeatureCustomerNetwork:
+		return rt != nil && rt.Network != nil
 	}
 	panic("routes: unknown feature " + string(f))
 }
@@ -455,10 +463,11 @@ type CustomerMount struct {
 	Merchant         billingauth.Target
 	SelectedMerchant bool
 	Providers        routesurface.ProviderRoutes
+	NativeIssuer     string
 }
 
 func customerEnv(rt *app.Runtime, m CustomerMount) *Env {
-	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant, Scope: m.Scope})
+	env := newEnv(rt, Options{ProviderRoutes: &m.Providers, ResolveMerchant: m.ResolveMerchant, Scope: m.Scope, NativeIssuer: m.NativeIssuer})
 	env.Customers, env.CustomerMerchant, env.SelectedMerchant = m.Auth, m.Merchant, m.SelectedMerchant
 	return env
 }
@@ -470,12 +479,19 @@ func RegisterCustomerRoutes(rr router.Router, rt *app.Runtime, m CustomerMount) 
 	customerEnv(rt, m).mount(rr, "/v1/me", in(Customer))
 }
 
-// admitCustomer is the runtime's customers, each its subject's issuer's.
+// admitCustomer is the runtime's customers, each its subject's issuer's. The
+// customer network admits the deployment's own accounts.
 func admitCustomer(rt *app.Runtime) func(context.Context, billing.MerchantID, billing.CustomerID, string) error {
 	return func(ctx context.Context, mid billing.MerchantID, id billing.CustomerID, issuer string) error {
 		if rt == nil || rt.DB == nil {
 			return errors.Join(auth.ErrUnavailable, errors.New("no database admits customers"))
 		}
-		return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
+		admit := func(ctx context.Context) error {
+			return db.AdmitCustomer(ctx, rt.DB.Gen(ctx), mid.UUID(), id.UUID(), issuer)
+		}
+		if issuer == "" && rt.Network != nil {
+			return rt.Network.AdmitNative(ctx, mid, id, admit)
+		}
+		return admit(ctx)
 	}
 }

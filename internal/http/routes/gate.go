@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 
 	auth "github.com/open-rails/helpers/auth"
@@ -515,7 +516,20 @@ func (e *Env) customerCheck(route Route, a billingauth.Authenticator) router.Mid
 			if !ok || !e.boundHere(r, route, a, v, target.MerchantID, e.servesMany()) {
 				return
 			}
-			switch err := e.admit(r.Request.Context(), target.MerchantID, id, customerIssuer(v, c)); {
+			if e.checkout {
+				// A checkout URL acts as its order's customer, whose row the
+				// order holds, whatever its issuer: nothing to admit.
+				if bindCustomer(r, c, id, target) {
+					next(r)
+				}
+				return
+			}
+			issuer, ok := e.subjectIssuer(v, c)
+			if !ok {
+				refuseCode(r, route, a, billing.CodePermissionRequired, "")
+				return
+			}
+			switch err := e.admit(r.Request.Context(), target.MerchantID, id, issuer); {
 			case errors.Is(err, db.ErrCustomerIssuerMismatch):
 				refuseCode(r, route, a, billing.CodeMerchantBindingMismatch, "")
 			case err != nil:
@@ -537,6 +551,24 @@ func customerIssuer(v billingauth.Verified, c billingauth.Identity) string {
 		return c.Issuer
 	}
 	return ""
+}
+
+// subjectIssuer is customerIssuer, with the deployment's own accounts
+// (NativeIssuer) its own users: false when such a credential, a merchant's
+// client signing the account in, was not granted ScopeSelf.
+func (e *Env) subjectIssuer(v billingauth.Verified, c billingauth.Identity) (string, bool) {
+	issuer := customerIssuer(v, c)
+	if issuer == "" || issuer != e.NativeIssuer {
+		return issuer, true
+	}
+	return "", grants(v, billing.ScopeSelf)
+}
+
+// grants reports whether v's credential was granted scope; a credential that
+// says nothing of its scopes grants none.
+func grants(v billingauth.Verified, scope string) bool {
+	scoped, ok := v.(interface{ Scopes() []string })
+	return ok && slices.Contains(scoped.Scopes(), scope)
 }
 
 // bindCustomer binds the admitted customer and its scope: the only place a
@@ -583,7 +615,8 @@ func (e *Env) checkoutViewer(route Route) router.Middleware {
 				next(r)
 				return
 			}
-			if e.admit(r.Request.Context(), mid, id, customerIssuer(v, c)) != nil {
+			issuer, ok := e.subjectIssuer(v, c)
+			if !ok || e.admit(r.Request.Context(), mid, id, issuer) != nil {
 				next(r)
 				return
 			}

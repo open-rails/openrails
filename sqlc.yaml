@@ -52,6 +52,7 @@ sql:
       - "internal/migrate/postgres/0053_payment_method_requires_action.up.sql"
       - "internal/migrate/postgres/0054_carts.up.sql"
       - "internal/migrate/postgres/0055_order_checkout.up.sql"
+      - "internal/migrate/postgres/0056_customer_links.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -17,6 +17,7 @@ const (
 	CostsManage      = "merchant:costs:manage"      // Costs: provider operations
 	EventsRead       = "merchant:events:read"       // Events: host events
 	OrdersManage     = "merchant:orders:manage"     // Orders: merchant orders
+	CustomersRead    = "merchant:customers:read"    // Customers: a customer by openrails.dev account
 
 	// AuthKit's built-ins on the merchant persona: the team, the merchant's
 	// API keys and the roles it defines.
@@ -34,5 +35,5 @@ const (
 // Routes.Permissions field.
 var Declared = []string{
 	BillingRead, BillingManage, CatalogManage, ConfigManage, MetricsRead,
-	EntitlementsRead, CatalogRead, UsageManage, CostsManage, EventsRead, OrdersManage,
+	EntitlementsRead, CatalogRead, UsageManage, CostsManage, EventsRead, OrdersManage, CustomersRead,
 }

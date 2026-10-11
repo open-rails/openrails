@@ -80,6 +80,7 @@ var Tables = map[string]Table{
 	"idempotency_keys":                {Rows, "rows are deleted at expires_at."},
 	"failed_usage_windows":            {Rows, "rows are deleted once their window has ended."},
 	"solana_pay_references":           {Rows, "settled references are deleted after their 7-day watch window."},
+	"customer_links":                  {Rows, "revoked links are deleted 24 months (731 days) after revoked_at; an active link is kept while it lasts."},
 
 	"merchants":                         {Class: State},
 	"merchant_slug_aliases":             {Class: State},

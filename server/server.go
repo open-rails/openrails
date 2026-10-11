@@ -31,6 +31,7 @@ import (
 	"github.com/open-rails/openrails/server/internal/controlplane"
 	"github.com/open-rails/openrails/server/internal/hostconfig"
 	httpserver "github.com/open-rails/openrails/server/internal/http"
+	"github.com/open-rails/openrails/server/internal/network"
 	"github.com/open-rails/openrails/server/internal/operator"
 )
 
@@ -79,7 +80,9 @@ type Config struct {
 	// the merchant roles, the API key prefix, the issued audience, the
 	// resource's scopes, AuthKit's River schema (the engine's) and its HTTP
 	// mount. An empty client-IP posture takes the engine's TrustedProxies
-	// and CloudflareProxies.
+	// and CloudflareProxies. Declaring the network-terms agreement runs the
+	// customer network (docs/customer-network.md): it needs Auth.Resource,
+	// and the server adds the network's scopes and consent policy.
 	Auth authkit.Config
 	// LocalSignIn serves sign-in to the server's own accounts (password,
 	// passwordless, registration). Off, the default, people sign in at a
@@ -153,6 +156,9 @@ type Server struct {
 	pool    *pgxpool.Pool
 	cp      *controlplane.ControlPlane
 	surface *httpserver.Server
+	// network is the customer network: on when AuthKit declares the
+	// network-terms agreement.
+	network *network.Service
 
 	closeOnce sync.Once
 	closeErr  error
@@ -238,9 +244,23 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if err != nil {
 		return fail(err)
 	}
+	if network.Enabled(akCfg) {
+		if err := network.Configure(&akCfg); err != nil {
+			return fail(err)
+		}
+		s.networkHooks(&akDeps)
+	}
 	ak, err := authkit.New(ctx, akCfg, akDeps)
 	if err != nil {
 		return fail(fmt.Errorf("server: build AuthKit: %w", err))
+	}
+	if network.Enabled(akCfg) {
+		rt := s.graph.Runtime
+		if s.network, err = network.New(rt.DB, ak, rt.AbuseState, rt.Clock.Now); err != nil {
+			_ = ak.Close(context.WithoutCancel(ctx))
+			return fail(err)
+		}
+		rt.Network = s.network
 	}
 	if s.cp, err = controlplane.New(ak, s.graph.Config, akCfg, akDeps.Postgres, opts); err != nil {
 		_ = ak.Close(context.WithoutCancel(ctx))

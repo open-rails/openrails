@@ -38,6 +38,17 @@ func TestMemory(t *testing.T) {
 	now = now.Add(time.Minute)
 	require.Zero(t, s.Held(ctx, "lock"), "expired")
 
+	s.Put(ctx, "challenge", []byte("v"), time.Minute)
+	v, ok := s.Take(ctx, "challenge")
+	require.True(t, ok)
+	require.Equal(t, "v", string(v))
+	_, ok = s.Take(ctx, "challenge")
+	require.False(t, ok, "taken once")
+	s.Put(ctx, "challenge", []byte("v"), time.Minute)
+	now = now.Add(time.Minute)
+	_, ok = s.Take(ctx, "challenge")
+	require.False(t, ok, "expired")
+
 	require.Zero(t, s.Fallbacks())
 }
 

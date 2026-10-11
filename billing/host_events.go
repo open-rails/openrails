@@ -43,6 +43,9 @@ const (
 	HostEventOrderPaymentFailed  HostEventType = "order.payment_failed"
 	HostEventOrderCanceled       HostEventType = "order.canceled"
 	HostEventOrderExpired        HostEventType = "order.expired"
+	// A customer linked to, or unlinked from, an openrails.dev account.
+	HostEventCustomerNetworkLinked   HostEventType = "customer.network_linked"
+	HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"
 )
 
 // OrderHostEvent is one order transition: the order's status and its
@@ -109,6 +112,8 @@ type HostEvent struct {
 	ProductEntitlements *ProductEntitlementsChangedEvent `json:"product_entitlements"`
 	// Order is set for the order.* events.
 	Order *OrderHostEvent `json:"order"`
+	// CustomerNetwork is set for the customer.network_* events.
+	CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
 }
 
 // AcknowledgeHostEventsParams names 1 to MaxBatchItems host events to

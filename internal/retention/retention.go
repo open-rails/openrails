@@ -70,6 +70,8 @@ const (
 	NotificationsUnread = 180 * Day
 	// DeliveredHostEvents keeps an acknowledged host event 30 days.
 	DeliveredHostEvents = 30 * Day
+	// RevokedCustomerLinks keeps a revoked customer link 24 months.
+	RevokedCustomerLinks = 731 * Day
 )
 
 // Days is a period as the whole days the sweep statements take.
