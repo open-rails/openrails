@@ -461,12 +461,31 @@ func assemble(plan *Plan, groups map[string]*group) ([][]any, error) {
 	return rows, nil
 }
 
-// measureValue renders one cell. Ratios divide exactly (big.Rat): a
+// measureValue renders one cell. A difference of counts is a count. Ratios
+// divide exactly (big.Rat): a
 // money-unit ratio (an average amount) rounds half away from zero to whole
 // native units and stays a MoneyCell, checked to fit int64; every other ratio
 // is the correctly rounded float of the exact quotient. Money and counts
 // never pass through a float.
 func measureValue(m *Measure, g *group) (any, error) {
+	if m.Class == ClassDifference {
+		diff, ok := componentRat(m, g)
+		if !ok {
+			return nil, nil
+		}
+		if m.Unit == UnitMoney {
+			cell, err := moneyCellFromRat(diff)
+			if err != nil {
+				return nil, fmt.Errorf("metrics %s: %w", m.Name, err)
+			}
+			return cell, nil
+		}
+		if diff.IsInt() && diff.Num().IsInt64() {
+			return diff.Num().Int64(), nil
+		}
+		f, _ := diff.Float64()
+		return f, nil
+	}
 	if m.Class == ClassRatio {
 		quotient, ok := componentRat(measureByName[m.Num], g)
 		if !ok {
@@ -498,19 +517,25 @@ func measureValue(m *Measure, g *group) (any, error) {
 	}
 }
 
-// componentRat is a ratio component as an exact rational; a nested ratio
-// with a zero denominator is absent (false).
+// componentRat is a measure as an exact rational; a ratio with a zero
+// denominator, or a composite over one, is absent (false).
 func componentRat(m *Measure, g *group) (*big.Rat, bool) {
 	if m == nil {
 		return new(big.Rat), true
 	}
-	if m.Class == ClassRatio {
+	if m.composite() {
 		num, ok := componentRat(measureByName[m.Num], g)
 		if !ok {
 			return nil, false
 		}
 		den, ok := componentRat(measureByName[m.Den], g)
-		if !ok || den.Sign() == 0 {
+		if !ok {
+			return nil, false
+		}
+		if m.Class == ClassDifference {
+			return num.Sub(num, den), true
+		}
+		if den.Sign() == 0 {
 			return nil, false
 		}
 		return num.Quo(num, den), true

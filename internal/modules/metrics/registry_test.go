@@ -13,7 +13,7 @@ import (
 func TestRegistryIsSelfConsistent(t *testing.T) {
 	for i := range Measures {
 		m := &Measures[i]
-		if m.Class == ClassRatio {
+		if m.composite() {
 			require.NotNil(t, measureByName[m.Num], "%s: numerator %q", m.Name, m.Num)
 			require.NotNil(t, measureByName[m.Den], "%s: denominator %q", m.Name, m.Den)
 			for _, leaf := range m.components() {
@@ -56,7 +56,7 @@ func TestRegistryIsSelfConsistent(t *testing.T) {
 func TestPublicMeasureVocabulary(t *testing.T) {
 	require.ElementsMatch(t, []string{
 		"gross_revenue", "net_revenue", "refunds", "chargebacks", "credits_sold", "usage_revenue",
-		"payment_count", "new_subscriptions", "cancellations", "chargeback_count",
+		"payment_count", "new_subscriptions", "cancellations", "net_new_subscriptions", "chargeback_count",
 		"refund_count", "usage_units", "admission_denials",
 		"unique_rebilled_customers", "active_customers",
 		"churn_rate", "chargeback_rate", "credit_utilization",

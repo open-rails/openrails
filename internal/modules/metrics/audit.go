@@ -29,7 +29,7 @@ func AuditStatements() ([]AuditStatement, error) {
 		fam := Family(name)
 		var leaves []*Measure
 		for i := range Measures {
-			if Measures[i].Family == fam && Measures[i].Class != ClassRatio {
+			if Measures[i].Family == fam && !Measures[i].composite() {
 				leaves = append(leaves, &Measures[i])
 			}
 		}

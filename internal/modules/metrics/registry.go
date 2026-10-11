@@ -18,10 +18,11 @@ import (
 type Class = billing.MetricsClass
 
 const (
-	ClassAdditive Class = "additive" // SUM/COUNT over the grain
-	ClassDistinct Class = "distinct" // COUNT(DISTINCT ...) per group; non-additive across buckets
-	ClassRatio    Class = "ratio"    // numerator/denominator aggregated first, divided per row
-	ClassSnapshot Class = "snapshot" // point-in-time; never summed across buckets
+	ClassAdditive   Class = "additive"   // SUM/COUNT over the grain
+	ClassDistinct   Class = "distinct"   // COUNT(DISTINCT ...) per group; non-additive across buckets
+	ClassRatio      Class = "ratio"      // numerator/denominator aggregated first, divided per row
+	ClassDifference Class = "difference" // Num minus Den, each aggregated first
+	ClassSnapshot   Class = "snapshot"   // point-in-time; never summed across buckets
 )
 
 // Family is an internal source family: one SQL statement is issued per family
@@ -77,8 +78,8 @@ type Measure struct {
 	Dims []string
 	// Money marks currency-sensitive measures (implicit currency group-by).
 	Money bool
-	// Ratio components (ClassRatio): resolved through the registry; may be
-	// internal-only measures.
+	// Components of a ratio (Num / Den) or a difference (Num - Den):
+	// resolved through the registry; may be internal-only measures.
 	Num, Den string
 	// Internal measures are compiler components: not requestable, not in /schema.
 	Internal bool
@@ -600,6 +601,10 @@ var Measures = []Measure{
 		Formula:     "COUNT(subscriptions canceled in the bucket)",
 		Expr:        `COUNT(*)`,
 		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id", "cancel_type"}},
+	{Name: "net_new_subscriptions", Class: ClassDifference, Unit: "count", Num: "new_subscriptions", Den: "cancellations",
+		Description: "subscriptions started minus subscriptions canceled in the bucket",
+		Formula:     "new_subscriptions - cancellations",
+		Dims:        []string{"currency", "rail", "psp", "product_id", "price_id"}},
 	{Name: "ended_membership_days", Class: ClassAdditive, Family: FamSubsEnded, Unit: "days", Internal: true,
 		Expr: `COALESCE(SUM(EXTRACT(EPOCH FROM (s.ended_at - s.started_at)) / 86400.0), 0)::float8`,
 		Dims: []string{"rail", "product_id", "price_id", "cancel_type"}},
@@ -962,10 +967,15 @@ func (m *Measure) allowsDim(dim string) bool {
 	return false
 }
 
+// composite reports whether the measure is computed from two others.
+func (m *Measure) composite() bool {
+	return m.Class == ClassRatio || m.Class == ClassDifference
+}
+
 // components returns the leaf measures a measure needs computed (itself for
-// non-ratios; num+den leaves for ratios).
+// a leaf; its components' leaves for a ratio or a difference).
 func (m *Measure) components() []*Measure {
-	if m.Class != ClassRatio {
+	if !m.composite() {
 		return []*Measure{m}
 	}
 	num, den := measureByName[m.Num], measureByName[m.Den]

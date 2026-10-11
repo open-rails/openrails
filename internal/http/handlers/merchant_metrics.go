@@ -21,6 +21,7 @@ func MerchantMetricsSchema(r *httprequest.Request) {
 
 // MerchantMetricsQuery handles POST /v1/admin/metrics/query. Validation errors
 // come back all at once with corrective context (did-you-mean + valid lists).
+// A relative range ends today on the deployment's clock.
 func MerchantMetricsQuery(r *httprequest.Request) {
 	svc := r.State.MetricsService
 	if svc == nil {
@@ -30,7 +31,7 @@ func MerchantMetricsQuery(r *httprequest.Request) {
 	q, verr := metrics.DecodeQuery(r.Request.Body)
 	if verr == nil {
 		var plan *metrics.Plan
-		plan, verr = metrics.Validate(q)
+		plan, verr = metrics.ValidateAt(q, r.Clock.Now().UTC())
 		if verr == nil {
 			res, err := svc.Execute(r.Request.Context(), plan)
 			if err != nil {

@@ -70,6 +70,14 @@ func TestMoneyRatiosAreExact(t *testing.T) {
 	require.Equal(t, 1.0, cell(t, util, map[string]leaf{"usage_revenue": {n: 9007199254740993}, "credits_sold": {n: 9007199254740993}}))
 }
 
+// A difference of counts is an exact count, negative when more ended than began.
+func TestDifferenceIsAnExactCount(t *testing.T) {
+	net := measureByName["net_new_subscriptions"]
+	require.Equal(t, int64(-2), cell(t, net, map[string]leaf{"new_subscriptions": {n: 3}, "cancellations": {n: 5}}))
+	require.Equal(t, int64(0), cell(t, net, map[string]leaf{}))
+	require.Equal(t, int64(math.MaxInt64), cell(t, net, map[string]leaf{"new_subscriptions": {n: math.MaxInt64}}))
+}
+
 func TestLeafAddIsExactAndBounded(t *testing.T) {
 	for _, p := range [][2]int64{{math.MaxInt64, 1}, {math.MinInt64, -1}} {
 		_, err := leaf{n: p[0]}.add(leaf{n: p[1]})

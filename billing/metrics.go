@@ -59,8 +59,8 @@ type MetricsColumn struct {
 	Unit string `json:"unit,omitempty"`
 }
 
-// MetricsClass is how a measure aggregates: additive, distinct, ratio or
-// snapshot.
+// MetricsClass is how a measure aggregates: additive, distinct, ratio,
+// difference or snapshot.
 type MetricsClass string
 
 // MetricsSchema is every measure, dimension and grain a query may use, with
