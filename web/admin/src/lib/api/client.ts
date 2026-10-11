@@ -17,9 +17,6 @@ import type { ListPage } from "./generated/wire"
 export interface BootstrapConfig {
   auth_base_url: string
   api_base_url: string
-  // #756 metrics Q&A gate (llm.ask_enabled AND an LLM key): false renders the
-  // Ask panel as a pointed empty-state (the ask endpoint is not mounted).
-  ask_enabled: boolean
   // #779 catalog copilot Q&A gate (llm.catalog_copilot_enabled AND an LLM
   // key): false renders the catalog copilot panel as a pointed empty-state.
   catalog_copilot_enabled: boolean

@@ -12,7 +12,6 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 )
 
@@ -53,7 +52,7 @@ type Deps struct {
 	Prices   PriceReader
 	Subs     SubscriptionCounter
 	Reprices RepricePreviewer
-	LLM      dashboard.LLM
+	LLM      LLM
 	Enabled  bool
 	Drafting bool
 	Clock    clockwork.Clock
@@ -66,7 +65,7 @@ type Service struct {
 	prices   PriceReader
 	subs     SubscriptionCounter
 	reprices RepricePreviewer
-	llm      dashboard.LLM
+	llm      LLM
 	enabled  bool
 	drafting bool
 	clock    clockwork.Clock
@@ -89,7 +88,7 @@ func NewService(d Deps) *Service {
 }
 
 // SetLLM swaps the model backend (tests inject a deterministic stub).
-func (s *Service) SetLLM(l dashboard.LLM) { s.llm = l }
+func (s *Service) SetLLM(l LLM) { s.llm = l }
 
 // Configured reports whether catalog Q&A can run: an LLM AND the explicit
 // llm.catalog_copilot_enabled consent.

@@ -206,7 +206,6 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"merchant_config_edits PATCH /v1/merchant/psps/{id}",
 		"merchant_config_edits POST /v1/merchant/alert-webhooks",
 		"merchant_config_edits POST /v1/merchant/psps",
-		"metrics_ask POST /v1/metrics/ask",
 	}, sorted(unmounted))
 
 	// The archive routes are also a surface of their own (the database-only

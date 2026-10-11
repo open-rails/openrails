@@ -1381,7 +1381,7 @@ More in [products and prices through the Client](docs/catalog-client.md).
   merchants.
 - **Merchant console** — an optional admin UI for your team: customers, subscriptions,
   refunds, catalog, API keys, and a metrics dashboard you can customize with your own
-  key-metric widgets (plus an optional LLM analytics copilot).
+  key-metric widgets.
 
 ---
 
