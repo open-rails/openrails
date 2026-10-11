@@ -255,6 +255,7 @@
       "const (\n\tCustomerLinkRevokedByCustomer CustomerLinkRevokedBy = \"customer\"\n\n\tCustomerLinkRevokedByAccountDeleted CustomerLinkRevokedBy = \"account_deleted\"\n\n\tCustomerLinkRevokedByMerchantLeft CustomerLinkRevokedBy = \"merchant_left\"\n)",
       "const (\n\tDeclineGeneric           DeclineReason = \"generic_decline\"\n\tDeclineDoNotHonor        DeclineReason = \"do_not_honor\"\n\tDeclineInsufficientFunds DeclineReason = \"insufficient_funds\"\n\tDeclineOverLimit         DeclineReason = \"over_limit\"\n\tDeclineCallIssuer        DeclineReason = \"call_issuer\"\n\tDeclineRetryLater        DeclineReason = \"retry_later\"\n\tDeclineTryAgainLater     DeclineReason = \"try_again_later\"\n\tDeclineSecurityViolation DeclineReason = \"security_violation\"\n\tDeclineRestrictedCard    DeclineReason = \"restricted_card\"\n\n\tDeclineIncorrectNumber      DeclineReason = \"incorrect_number\"\n\tDeclineNoSuchIssuer         DeclineReason = \"no_such_issuer\"\n\tDeclineInvalidAccount       DeclineReason = \"invalid_account\"\n\tDeclineExpiredCard          DeclineReason = \"expired_card\"\n\tDeclineInvalidExpiry        DeclineReason = \"invalid_expiry\"\n\tDeclineIncorrectCVC         DeclineReason = \"incorrect_cvc\"\n\tDeclineIncorrectZip         DeclineReason = \"incorrect_zip\"\n\tDeclineIncorrectAddress     DeclineReason = \"incorrect_address\"\n\tDeclineInvalidPIN           DeclineReason = \"invalid_pin\"\n\tDeclineUpdateCardholderData DeclineReason = \"update_cardholder_data\"\n\n\tDeclineTransactionNotAllowed  DeclineReason = \"transaction_not_allowed\"\n\tDeclineCardNotSupported       DeclineReason = \"card_not_supported\"\n\tDeclineCurrencyNotSupported   DeclineReason = \"currency_not_supported\"\n\tDeclineAuthenticationRequired DeclineReason = \"authentication_required\"\n\tDeclinePickupCard             DeclineReason = \"pickup_card\"\n\tDeclineLostCard               DeclineReason = \"lost_card\"\n\tDeclineStolenCard             DeclineReason = \"stolen_card\"\n\tDeclineFraudulent             DeclineReason = \"fraudulent\"\n\tDeclineStopRecurring          DeclineReason = \"stop_recurring\"\n\n\tDeclineGatewayRejected DeclineReason = \"gateway_rejected\"\n\tDeclineBlockedByPSP    DeclineReason = \"blocked_by_psp\"\n\n\tDeclineProcessingError      DeclineReason = \"processing_error\"\n\tDeclineCommunicationError   DeclineReason = \"communication_error\"\n\tDeclineIssuerUnavailable    DeclineReason = \"issuer_unavailable\"\n\tDeclineInvalidRequest       DeclineReason = \"invalid_request\"\n\tDeclineMerchantConfig       DeclineReason = \"merchant_config\"\n\tDeclineDuplicateTransaction DeclineReason = \"duplicate_transaction\"\n\n\tDeclineUnknown DeclineReason = \"unknown\"\n)",
       "const (\n\tDefaultPageLimit = 50\n\tMaxPageLimit     = 500\n)",
+      "const (\n\tDefaultUsagePageLimit = 100\n\tMaxUsagePageLimit     = 1000\n)",
       "const (\n\tDunningAccessKeep    = \"keep\"\n\tDunningAccessSuspend = \"suspend\"\n)",
       "const (\n\tErrorTypeInvalidRequest = \"invalid_request_error\"\n\tErrorTypeAuthentication = \"authentication_error\"\n\tErrorTypeAuthorization  = \"authorization_error\"\n\tErrorTypeCard           = \"card_error\"\n\tErrorTypeRateLimit      = \"rate_limit_error\"\n\tErrorTypeAPI            = \"api_error\"\n)",
       "const (\n\tFindingApprove FindingOutcome = \"approve\"\n\n\tFindingIgnore FindingOutcome = \"ignore\"\n)",
@@ -686,7 +687,7 @@
       "type GenerateDashboardWidgetParams struct {\n\tPrompt    string        `json:\"prompt\"`\n\tBaseQuery *MetricsQuery `json:\"base_query\"`\n}",
       "type GeneratedWidget struct {\n\tQuery MetricsQuery `json:\"query\"`\n\tTitle string       `json:\"title\"`\n\tViz   string       `json:\"viz\"`\n}",
       "type GetPriceParams struct {\n\tVerify bool\n}",
-      "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n}",
+      "type GetUsageParams struct {\n\tCurrency string       `form:\"currency\"`\n\tFrom     time.Time    `form:\"from\"`\n\tTo       time.Time    `form:\"to\"`\n\tGroupBy  UsageGroupBy `form:\"group_by\"`\n\tPageRequest\n}",
       "type GrantReason string",
       "type HeldEntitlements struct {\n\tKeys      []string `json:\"keys\"`\n\tTruncated bool     `json:\"truncated\"`\n}",
       "type HostEvent struct {\n\tID             HostEventID           `json:\"id\"`\n\tMerchantID     MerchantID            `json:\"merchant_id\"`\n\tType           HostEventType         `json:\"type\"`\n\tOccurredAt     time.Time             `json:\"occurred_at\"`\n\tAcknowledgedAt *time.Time            `json:\"acknowledged_at\"`\n\tPayment        *PaymentSettledEvent  `json:\"payment\"`\n\tDelinquency    *DelinquencyHostEvent `json:\"delinquency\"`\n\n\tProductEntitlements *ProductEntitlementsChangedEvent `json:\"product_entitlements\"`\n\n\tOrder *OrderHostEvent `json:\"order\"`\n\n\tCustomerNetwork *CustomerNetworkHostEvent `json:\"customer_network\"`\n\n\tPaymentAuthority *PaymentAuthorityHostEvent `json:\"payment_authority\"`\n\n\tBalance *BalanceHostEvent `json:\"balance\"`\n}",
@@ -921,7 +922,7 @@
       "type UpdatePaymentMethodParams struct {\n\tExpMonth       *int            `json:\"exp_month,omitempty\"`\n\tExpYear        *int            `json:\"exp_year,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n\tReusable       *bool           `json:\"reusable,omitempty\"`\n}",
       "type UpdatePriceParams struct {\n\tArchived catalog.Field[bool]                         `json:\"archived,omitzero\"`\n\tPSPLinks map[string]catalog.Field[map[string]string] `json:\"psp_links,omitempty\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
       "type UpdateProductParams struct {\n\tDisplayName  catalog.Field[string]                  `json:\"display_name,omitzero\"`\n\tDescription  catalog.Field[string]                  `json:\"description,omitzero\"`\n\tEntitlements catalog.Field[[]string]                `json:\"entitlements,omitzero\"`\n\tCreditGrant  catalog.Field[catalog.CreditGrantSpec] `json:\"credit_grant,omitzero\"`\n\tTierGroup    catalog.Field[string]                  `json:\"tier_group,omitzero\"`\n\tTierRank     catalog.Field[int]                     `json:\"tier_rank,omitzero\"`\n\n\tOwnership catalog.Field[catalog.Ownership] `json:\"ownership,omitzero\"`\n\tArchived  catalog.Field[bool]              `json:\"archived,omitzero\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
-      "type Usage struct {\n\tCustomerID CustomerID   `json:\"customer_id\"`\n\tCurrency   string       `json:\"currency\"`\n\tFrom       time.Time    `json:\"from\"`\n\tTo         time.Time    `json:\"to\"`\n\tGroupBy    UsageGroupBy `json:\"group_by\"`\n\tRows       []UsageRow   `json:\"rows\"`\n}",
+      "type Usage struct {\n\tCustomerID CustomerID   `json:\"customer_id\"`\n\tCurrency   string       `json:\"currency\"`\n\tFrom       time.Time    `json:\"from\"`\n\tTo         time.Time    `json:\"to\"`\n\tGroupBy    UsageGroupBy `json:\"group_by\"`\n\tRows       []UsageRow   `json:\"rows\"`\n\tNextCursor *string      `json:\"next_cursor\"`\n}",
       "type UsageEvent struct {\n\tID             UsageEventID     `json:\"id\"`\n\tCustomerID     CustomerID       `json:\"customer_id\"`\n\tInvoker        string           `json:\"invoker\"`\n\tCurrency       string           `json:\"currency\"`\n\tEventType      string           `json:\"event_type\"`\n\tDimensions     map[string]int64 `json:\"dimensions\"`\n\tOutcome        UsageOutcome     `json:\"outcome\"`\n\tAmount         int64            `json:\"amount,string\"`\n\tForgivenAmount int64            `json:\"forgiven_amount,string\"`\n\tResource       *string          `json:\"resource\"`\n\tMetadata       map[string]any   `json:\"metadata\"`\n\tSource         string           `json:\"source\"`\n\tSourceID       string           `json:\"source_id\"`\n\n\tBalanceTransactionID *BalanceTransactionID `json:\"balance_transaction_id\"`\n\tOccurredAt           time.Time             `json:\"occurred_at\"`\n\tCreatedAt            time.Time             `json:\"created_at\"`\n\tReplayed             bool                  `json:\"replayed\"`\n}",
       "type UsageEventID uuid.UUID",
       "type UsageEventResult struct {\n\tStatus int           `json:\"status\"`\n\tEvent  *UsageEvent   `json:\"event\"`\n\tError  *ErrorDetails `json:\"error\"`\n}",
@@ -1551,9 +1552,6 @@
     ],
     "internal/modules/money": [
       "type CustomerInvoiceProfile struct {\n\tNetTermsDays     int                     `json:\"net_terms_days\"`\n\tCollectionMethod string                  `json:\"collection_method\"`\n\tPONumber         string                  `json:\"po_number,omitempty\"`\n\tTax              map[string]any          `json:\"tax,omitempty\"`\n\tBillingContacts  []models.InvoiceContact `json:\"billing_contacts,omitempty\"`\n\tMemo             string                  `json:\"memo,omitempty\"`\n}",
-      "type ResourceRevenueDailyRow struct {\n\tDate     string `json:\"date\"`\n\tCurrency string `json:\"currency\"`\n\tAmount   int64  `json:\"amount\"`\n}",
-      "type ServiceUsageRollupRow struct {\n\tKey         string `json:\"key\"`\n\tCurrency    string `json:\"currency\"`\n\tEventCount  int64  `json:\"event_count\"`\n\tTotalAmount int64  `json:\"total_amount\"`\n}",
-      "type UsageRollupRow struct {\n\tEventType   string           `json:\"event_type\"`\n\tCurrency    string           `json:\"currency\"`\n\tTotalAmount int64            `json:\"total_amount\"`\n\tEventCount  int64            `json:\"event_count\"`\n\tDimensions  map[string]int64 `json:\"dimensions\"`\n}",
       "type meterKeyPosition struct {\n\tKey string `json:\"k\"`\n}",
       "type normalizedProviderBillingRecord struct {\n\tProviderResourceID string `json:\"provider_resource_id\"`\n\tBucketStart        string `json:\"bucket_start\"`\n\tAmount             int64  `json:\"amount\"`\n\tTimeBilledMS       int64  `json:\"time_billed_ms\"`\n}",
       "type operationAuthorizationCursor struct {\n\tAt          time.Time `json:\"t\"`\n\tOperationID string    `json:\"o\"`\n}",
@@ -1736,7 +1734,8 @@
       "type ReconcileResult struct {\n\tProviders map[string]billing.PSPLinkState `json:\"providers,omitempty\"`\n\n\tActions map[string]string `json:\"actions,omitempty\"`\n}",
       "type SyncCatalogSidecarsRequest struct {\n\tMeters    []CatalogMeterSpec    `json:\"meters,omitempty\"`\n\tRateCards []CatalogRateCardSpec `json:\"rate_cards,omitempty\"`\n}",
       "type orderKeyResult struct {\n\tOrderID uuid.UUID      `json:\"order_id\"`\n\tDigest  []byte         `json:\"digest\"`\n\tStatus  int            `json:\"status,omitempty\"`\n\tCode    string         `json:\"code,omitempty\"`\n\tOrder   *billing.Order `json:\"order,omitempty\"`\n}",
-      "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}"
+      "type storedCatalogReceipt struct {\n\tApplicationID   string `json:\"application_id\"`\n\tBaseRevision    int64  `json:\"base_revision\"`\n\tAppliedRevision int64  `json:\"applied_revision\"`\n\tReplayed        bool   `json:\"replayed\"`\n\tProductsChanged int    `json:\"products_changed\"`\n\tPricesChanged   int    `json:\"prices_changed\"`\n}",
+      "type usageCursor struct {\n\tAmount   int64                `json:\"a\"`\n\tKey      string               `json:\"k\"`\n\tCurrency string               `json:\"c\"`\n\tGroupBy  billing.UsageGroupBy `json:\"g\"`\n\tFrom     time.Time            `json:\"f\"`\n\tTo       time.Time            `json:\"t\"`\n}"
     ],
     "server/cmd/openrails": [
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
@@ -3576,33 +3575,6 @@
       "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
-    "internal/modules/money/service_usage.go": {
-      "context": "context",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "identity": "github.com/open-rails/openrails/internal/billingidentity",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "strings": "strings",
-      "time": "time"
-    },
-    "internal/modules/money/usage.go": {
-      "context": "context",
-      "errors": "errors",
-      "fmt": "fmt",
-      "gen": "github.com/open-rails/openrails/internal/db/gen",
-      "identity": "github.com/open-rails/openrails/internal/billingidentity",
-      "ledger": "github.com/open-rails/openrails/internal/modules/money/ledger",
-      "merchant": "github.com/open-rails/openrails/internal/merchant",
-      "models": "github.com/open-rails/openrails/internal/db/models",
-      "moneyutil": "github.com/open-rails/openrails/internal/shared/moneyutil",
-      "retention": "github.com/open-rails/openrails/internal/retention",
-      "strings": "strings",
-      "time": "time",
-      "uuid": "github.com/google/uuid",
-      "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
-      "v5": "github.com/jackc/pgx/v5"
-    },
     "internal/modules/orders/cart.go": {
       "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4495,6 +4467,21 @@
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
       "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/service/spend.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
+      "cmp": "cmp",
+      "context": "context",
+      "fmt": "fmt",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "identity": "github.com/open-rails/openrails/internal/billingidentity",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "models": "github.com/open-rails/openrails/internal/db/models",
+      "money": "github.com/open-rails/openrails/internal/modules/money",
+      "pagination": "github.com/open-rails/openrails/internal/pagination",
+      "time": "time"
     },
     "internal/stripemock/inspect.go": {
       "fmt": "fmt",

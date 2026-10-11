@@ -2360,6 +2360,7 @@ export type Usage = {
   to: string
   group_by: "event_type" | "invoker" | "resource"
   rows: UsageRow[]
+  next_cursor: string | null
 }
 
 export type UsageEvent = {

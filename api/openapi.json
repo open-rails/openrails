@@ -5961,6 +5961,13 @@
             }
           },
           {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "from",
             "in": "query",
             "schema": {
@@ -5972,6 +5979,13 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer"
             }
           },
           {
@@ -6004,7 +6018,8 @@
         ],
         "x-openrails-auth": "customer",
         "x-openrails-errors": [
-          "currency_unsupported"
+          "currency_unsupported",
+          "invalid_cursor"
         ],
         "x-openrails-error-sets": [
           "tier:customer",
@@ -22212,6 +22227,16 @@
             "items": {
               "$ref": "#/components/schemas/UsageRow"
             }
+          },
+          "next_cursor": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "required": [
@@ -22220,7 +22245,8 @@
           "from",
           "to",
           "group_by",
-          "rows"
+          "rows",
+          "next_cursor"
         ]
       },
       "UsageEvent": {

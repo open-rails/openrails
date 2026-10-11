@@ -630,6 +630,7 @@ pkg openrails/billing, const DeclineUnknown DeclineReason = "unknown"
 pkg openrails/billing, const DeclineUpdateCardholderData DeclineReason = "update_cardholder_data"
 pkg openrails/billing, const DefaultHeldEntitlements untyped int = 1000
 pkg openrails/billing, const DefaultPageLimit untyped int = 50
+pkg openrails/billing, const DefaultUsagePageLimit untyped int = 100
 pkg openrails/billing, const DunningAccessKeep untyped string = "keep"
 pkg openrails/billing, const DunningAccessSuspend untyped string = "suspend"
 pkg openrails/billing, const ErrorTypeAPI untyped string = "api_error"
@@ -689,6 +690,7 @@ pkg openrails/billing, const MaxOrderLines untyped int = 100
 pkg openrails/billing, const MaxPageLimit untyped int = 500
 pkg openrails/billing, const MaxRunningChargeRatePerHour untyped int = 1000000000000
 pkg openrails/billing, const MaxUsageBatchItems untyped int = 1000
+pkg openrails/billing, const MaxUsagePageLimit untyped int = 1000
 pkg openrails/billing, const MerchantActive MerchantStatus = "active"
 pkg openrails/billing, const MerchantBillingManage Permission = "merchant:billing:manage"
 pkg openrails/billing, const MerchantBillingRead Permission = "merchant:billing:read"
@@ -1820,6 +1822,7 @@ pkg openrails/billing, type GetUsageParams struct, Currency string `form:"curren
 pkg openrails/billing, type GetUsageParams struct, From time.Time `form:"from"`
 pkg openrails/billing, type GetUsageParams struct, GroupBy UsageGroupBy `form:"group_by"`
 pkg openrails/billing, type GetUsageParams struct, To time.Time `form:"to"`
+pkg openrails/billing, type GetUsageParams struct, embedded PageRequest
 pkg openrails/billing, type GrantReason string
 pkg openrails/billing, type HeldEntitlements struct
 pkg openrails/billing, type HeldEntitlements struct, Keys []string `json:"keys"`
@@ -3139,6 +3142,7 @@ pkg openrails/billing, type Usage struct, Currency string `json:"currency"`
 pkg openrails/billing, type Usage struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type Usage struct, From time.Time `json:"from"`
 pkg openrails/billing, type Usage struct, GroupBy UsageGroupBy `json:"group_by"`
+pkg openrails/billing, type Usage struct, NextCursor *string `json:"next_cursor"`
 pkg openrails/billing, type Usage struct, Rows []UsageRow `json:"rows"`
 pkg openrails/billing, type Usage struct, To time.Time `json:"to"`
 pkg openrails/billing, type UsageEvent struct
