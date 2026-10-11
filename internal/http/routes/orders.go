@@ -33,6 +33,13 @@ var ordersRoutes = []Route{
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("card_declined", "customer_action_required", "customer_session_required", "payment_failed", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.ConfirmMyOrder)},
 	{Method: POST, Path: "/v1/me/orders/{id}/cancel", Group: Customer, Auth: AuthCustomer,
 		Responses: []Reply{{200, billing.Order{}}}, Errors: codes("order_not_cancelable", "resource_not_found", "service_unavailable"), Handler: h(handlers.CancelMyOrder)},
+	// A wallet's Solana Pay transaction request for an order awaiting it: the
+	// label, then the transaction for the wallet's account. No credential:
+	// a Solana Pay link is opened by the wallet, not the customer's session.
+	{Method: GET, Path: "/v1/orders/{id}/solana-pay", Group: Checkout, Auth: AuthPublic, When: FeatureSolana,
+		Responses: []Reply{{200, handlers.SolanaPayGetResponse{}}}, Errors: codes("order_not_payable", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetOrderSolanaPay)},
+	{Method: POST, Path: "/v1/orders/{id}/solana-pay", Group: Checkout, Auth: AuthPublic, When: FeatureSolana,
+		Request: handlers.SolanaPayPostRequest{}, Responses: []Reply{{200, handlers.SolanaPayPostResponse{}}}, Errors: codes("invalid_param", "order_not_payable", "resource_conflict", "resource_not_found", "service_unavailable"), Handler: h(handlers.PostOrderSolanaPay)},
 	{Method: POST, Path: "/v1/app/orders/preview", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "PreviewOrder", Level: LevelRead,
 		Request: billing.PreviewOrderParams{}, Responses: []Reply{{200, billing.OrderPreview{}}}, Errors: orderLineErrors, Handler: h(handlers.PreviewMerchantOrder)},
 	{Method: POST, Path: "/v1/app/orders", Group: App, Auth: AuthApplication, Permission: NeedOrders, Name: "CreateOrder", IdempotencyKey: true,

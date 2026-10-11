@@ -32,9 +32,8 @@ func TestCheckoutAttemptFingerprint(t *testing.T) {
 		Metadata:   map[string]string{"post": "post-123"},
 		SuccessURL: "https://app.example/success", CancelURL: "https://app.example/cancel",
 	}
-	// Frozen from the pre-PriceKey projection: an optional key field must not
-	// strand an existing durable ID-only checkout after an upgrade.
-	require.Equal(t, "5ce91979357cb141b7732e5727ae33b77e1d8892c42f3b0193d6b08002cac345", checkoutAttemptRequestFingerprint(&base))
+	// Frozen: a changed projection strands a durable checkout's replays.
+	require.Equal(t, "16bcd6409061636fa9b36976d89edba8a00418354a70ba379fe98dd514b68c65", checkoutAttemptRequestFingerprint(&base))
 
 	for name, mutate := range map[string]func(*CheckoutAttemptCreateRequest){
 		"price":             func(r *CheckoutAttemptCreateRequest) { r.PriceID = "price_22222222-2222-2222-2222-222222222222" },

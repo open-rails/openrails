@@ -94,10 +94,9 @@ type CheckoutPaymentOptions struct {
 	// BillingDetails go with a new card. CCBill needs the name, postal code
 	// and country; the verified email comes from CheckoutCustomerIdentity.
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
-	// TokenSymbol (USDC, SOL), Flow (transfer_request or
-	// transaction_request) and Wallet pay on Solana.
+	// TokenSymbol (USDC, SOL) and Wallet pay on Solana, by a Solana Pay
+	// transaction request.
 	TokenSymbol string `json:"token_symbol,omitempty"`
-	Flow        string `json:"flow,omitempty"`
 	Wallet      string `json:"wallet,omitempty"`
 }
 

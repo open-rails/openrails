@@ -116,13 +116,13 @@ func (q *Queries) CreateOrder(ctx context.Context, arg CreateOrderParams) error 
 
 const createOrderAttempt = `-- name: CreateOrderAttempt :exec
 INSERT INTO billing.checkout_attempts (
-    id, merchant_id, customer_id, order_id, mode, rail, status, amount, currency,
+    id, merchant_id, customer_id, order_id, mode, rail, status, reference, amount, currency,
     expires_at, rail_state, psp_id, created_at, updated_at
 ) VALUES (
     $1::uuid, $2::uuid, $3::uuid, $4::uuid,
-    'order', $5::text, 'created', $6::bigint, $7::text,
-    $8::timestamptz, $9::jsonb, $10::uuid,
-    $11::timestamptz, $11::timestamptz
+    'order', $5::text, $6::text, $7::text, $8::bigint, $9::text,
+    $10::timestamptz, $11::jsonb, $12::uuid,
+    $13::timestamptz, $13::timestamptz
 )
 `
 
@@ -132,6 +132,8 @@ type CreateOrderAttemptParams struct {
 	CustomerID uuid.UUID
 	OrderID    uuid.UUID
 	Rail       string
+	Status     string
+	Reference  *string
 	Amount     int64
 	Currency   string
 	ExpiresAt  time.Time
@@ -140,6 +142,8 @@ type CreateOrderAttemptParams struct {
 	Now        time.Time
 }
 
+// A card attempt starts created; a Solana one requires_action, with its
+// reference.
 func (q *Queries) CreateOrderAttempt(ctx context.Context, arg CreateOrderAttemptParams) error {
 	_, err := q.db.Exec(ctx, createOrderAttempt,
 		arg.ID,
@@ -147,6 +151,8 @@ func (q *Queries) CreateOrderAttempt(ctx context.Context, arg CreateOrderAttempt
 		arg.CustomerID,
 		arg.OrderID,
 		arg.Rail,
+		arg.Status,
+		arg.Reference,
 		arg.Amount,
 		arg.Currency,
 		arg.ExpiresAt,

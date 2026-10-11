@@ -392,8 +392,9 @@ export const cartSchema = z.object({
 export type Cart = z.infer<typeof cartSchema>
 
 /**
- * How to pay an order: a saved card, or a card just entered (the token of
- * the PSP's own fields, its `psp_id`).
+ * How to pay an order: a saved card, a card just entered (the token of the
+ * PSP's own fields, its `psp_id`), or a Solana wallet (`token_symbol`, the
+ * token it pays in).
  */
 export type OrderPaymentInput =
   | { payment_method_id: string }
@@ -402,6 +403,7 @@ export type OrderPaymentInput =
       psp_id?: string
       billing_details?: NewCard["billing_details"]
     }
+  | { token_symbol: string; psp_id?: string }
 
 /** A price's state on one PSP; public routes carry the status only. */
 export const productSchema = z.object({

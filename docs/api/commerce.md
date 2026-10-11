@@ -64,7 +64,8 @@ database share it, so one of them can serve the payment page for all.
 | POST | `/v1/checkout-sessions/{id}/pay` | the id (a saved card: and its customer) | Pay: `{option_id, payment_method_id?, payment_token?, card?, token_symbol?, …}` → `{status, next_action, operation, failure, …}` |
 | GET | `/v1/me/checkout-sessions/{id}` | its customer, on a customer surface | The session document with the customer's saved cards |
 | POST | `/v1/me/checkout-sessions/{id}/pay` | its customer in person, on a customer surface | Pay, as above; a saved card needs no other proof |
-| GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind an attempt's `solana_pay` link (`flow: transaction_request`) |
+| GET, POST | `/v1/checkout-attempts/{id}/solana-pay` | the attempt id | The Solana Pay transaction request behind an attempt's `solana_pay` link |
+| GET, POST | `/v1/orders/{id}/solana-pay` | none | The Solana Pay transaction request behind an order's `solana_pay` next action: the label, then the transaction for the wallet's account |
 | POST | `/v1/admin/checkout-sessions` | the merchant's credential, `AdminUpdate` | Mint for a customer (`Client.CreateCheckoutSession`) |
 
 - On the customer surface the host's `Auth` names the customer, so the

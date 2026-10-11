@@ -62,7 +62,6 @@ func TestNoFloatsInMoneyPackages(t *testing.T) {
 		"internal/integrations/fx/source.go:read":          "parses the provider's quoted RATES",
 
 		// --- Solana: token price + FX rate are rates; amounts are big.Int --
-		"internal/modules/solana/types.go:PayResult":                         "TokenPriceUSD/FXRate are RATES; the token amount is uint64 base units",
 		"internal/modules/solana/support.go:TokenQuote":                      "TokenPriceUSD/FXRate are RATES; Units (the amount) is uint64",
 		"internal/modules/solana/support.go:TokenPriceProvider":              "price-feed interface returns a RATE",
 		"internal/modules/solana/support.go:stablecoinPriceUSD":              "peg-divergence check on a RATE (math.Abs over a price, never an amount)",

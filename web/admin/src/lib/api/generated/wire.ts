@@ -1465,6 +1465,7 @@ export type OrderPaymentParams = {
   token?: string
   psp_id?: string
   billing_details?: BillingDetails
+  token_symbol?: string
 }
 
 export type OrderPreview = {

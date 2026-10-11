@@ -47,6 +47,7 @@ var openRoutes = []string{
 	"GET /v1/captcha/client.js", "GET /v1/captcha/status",
 	"GET /v1/catalog/products", "GET /v1/solana/tokens",
 	"GET /v1/checkout-attempts/{id}/solana-pay", "POST /v1/checkout-attempts/{id}/solana-pay",
+	"GET /v1/orders/{id}/solana-pay", "POST /v1/orders/{id}/solana-pay",
 	"GET /v1/checkout-sessions/{id}", "POST /v1/checkout-sessions/{id}/pay",
 	"POST /v1/webhooks/{rail}/{account_id}",
 }

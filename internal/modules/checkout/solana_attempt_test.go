@@ -60,8 +60,7 @@ func TestSolanaPlanTerms(t *testing.T) {
 	require.False(t, priceHasSolanaRecurring(partial), "an unpriced plan is not recurring")
 }
 
-// Which sessions surface a solana_pay_url, and the flow is declared, never
-// inferred.
+// Which sessions surface a solana_pay_url.
 func TestSolanaSessionFlows(t *testing.T) {
 	mk := func(rail models.Rail, mode models.CheckoutAttemptMode, flow string) *models.CheckoutAttempt {
 		return &models.CheckoutAttempt{ID: uuid.New(), Status: models.CheckoutAttemptStatusRequiresAction, Rail: rail, Mode: mode, RailState: map[string]any{"flow": flow}}
@@ -74,7 +73,6 @@ func TestSolanaSessionFlows(t *testing.T) {
 		{"recurring subscribe", mk(models.RailSolana, models.CheckoutAttemptModeSubscription, "transaction_request"), true},
 		{"one-off transaction request", mk(models.RailSolana, models.CheckoutAttemptModeOneOff, "transaction_request"), true},
 		{"wallet-connected subscribe", mk(models.RailSolana, models.CheckoutAttemptModeSubscription, "subscription"), false},
-		{"transfer request", mk(models.RailSolana, models.CheckoutAttemptModeOneOff, "transfer_request"), false},
 		{"non-solana rail", mk(models.RailStripe, models.CheckoutAttemptModeSubscription, "transaction_request"), false},
 		{"nil", nil, false},
 	} {
@@ -91,12 +89,6 @@ func TestSolanaSessionFlows(t *testing.T) {
 		url := svc.sessionToResponse(session).Payment.SolanaPayURL
 		require.Equal(t, fmt.Sprintf("%s%s/solana-pay", tc.prefix, billing.CheckoutAttemptID(session.ID)), url, tc.base)
 	}
-
-	require.True(t, isSolanaTransferRequestFlow(mk(models.RailSolana, "", " Transfer_Request ")))
-	require.False(t, isSolanaTransferRequestFlow(mk(models.RailSolana, "", "")), "a missing flow is never defaulted")
-	require.False(t, isSolanaTransferRequestFlow(mk(models.RailSolana, "", "transaction_request")))
-	require.False(t, isSolanaTransferRequestFlow(nil))
-
 }
 
 // A poller-verified (settled) payment outlives the quote window; without that

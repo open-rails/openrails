@@ -401,10 +401,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// #817: decimals come from the SPL mint on-chain, read through the same
 	// per-merchant chain reader and cached (mint decimals are immutable).
 	runtime.SolanaMintDecimals = solanamodule.NewMintDecimals(solanaRPCResolver.ChainReader())
-	if serviceInstances.SolanaPayService != nil {
-		serviceInstances.SolanaPayService.SetMintDecimals(runtime.SolanaMintDecimals)
-		serviceInstances.SolanaPayService.SetMintInfo(solanaRPCResolver.ChainReader())
-	}
 	if serviceInstances.CheckoutAttemptService != nil {
 		serviceInstances.CheckoutAttemptService.SetSolanaMintDecimals(runtime.SolanaMintDecimals)
 		serviceInstances.CheckoutAttemptService.SetSolanaMintInfo(solanaRPCResolver.ChainReader())
@@ -626,7 +622,7 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 
 	// Note: solanaPayService and SolanaPayPoller need checkoutService, which is created later
 	// We'll create solanaPayService with nil checkoutService and set it after checkoutService is created
-	solanaPayService := solanamodule.NewSolanaPayService(database, cfg, railConfigs, priceService, productService, nil, fxProvider, solanaPriceProvider, clock)
+	solanaPayService := solanamodule.NewSolanaPayService(database, clock)
 	solanaTransactionService := solanamodule.NewSolanaTransactionService(database, nil, cfg, priceService, fxProvider, clock)
 	solanaTransactionService.SetMerchantRPC(solanaRPCResolver)
 
@@ -759,7 +755,6 @@ func createServices(database, leaseDB *db.DB, cfg *config.Config, railConfigs ra
 		clock,
 	)
 	webhookDispatcher.CheckoutAttemptService = checkoutAttemptService
-	solanaPayService.SetEligibilityChecker(&solanaEligibilityAdapter{service: checkoutService})
 
 	// The poller settles through the checkout attempt service, the one
 	// crediting path for Solana Pay purchases.

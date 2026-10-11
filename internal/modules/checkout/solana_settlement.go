@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strconv"
 	"strings"
 	"time"
 
@@ -63,6 +62,13 @@ func (s *CheckoutAttemptService) SettleSolanaTransfer(ctx context.Context, refer
 			ReceivedAmount: t.Amount, Payer: t.Payer, LandedAt: t.LandedAt,
 		}
 		open := session.Status == models.CheckoutAttemptStatusCreated || session.Status == models.CheckoutAttemptStatusRequiresAction || session.Status == models.CheckoutAttemptStatusExpired
+		if open && session.Mode == models.CheckoutAttemptModeOrder {
+			// A transfer pays the order only on its current attempt while it
+			// takes payment; any other is money to review.
+			if open, err = solanaOrderLive(ctx, d, session); err != nil {
+				return err
+			}
+		}
 		receipt.Disposition, receipt.ReviewReason = solanamodule.Decide(ref, open, receipt.ExpectedAmount, t, now)
 		if receipt.Disposition == solanamodule.Credited {
 			err = s.creditSolanaTransfer(ctx, d, session, &receipt, t, now)
@@ -105,7 +111,11 @@ func (s *CheckoutAttemptService) creditSolanaTransfer(ctx context.Context, d *db
 		} else if err != nil {
 			return err
 		}
-		paymentID, err := s.creditSolanaPurchase(ctx, inner, session, receipt.Reference, t)
+		credit := s.creditSolanaPurchase
+		if session.Mode == models.CheckoutAttemptModeOrder {
+			credit = s.creditSolanaOrder
+		}
+		paymentID, err := credit(ctx, inner, session, receipt.Reference, t)
 		// Under the reference lock, the transfer's payment or checkout
 		// transaction id already taken means it settled something else.
 		var pgErr *pgconn.PgError
@@ -142,17 +152,8 @@ func (s *CheckoutAttemptService) creditSolanaPurchase(ctx context.Context, d *db
 		Currency:          *session.Currency,
 		PurchasedAt:       t.LandedAt,
 		WalletPurchase:    true,
-		Metadata: map[string]any{
-			"solana_reference":    reference,
-			"checkout_attempt_id": session.ID.String(),
-			"solana_payer_wallet": strings.TrimSpace(t.Payer),
-			"solana_token_symbol": getStringField(session.RailState, "token_symbol"),
-			"solana_token_mint":   getStringField(session.RailState, "token_mint"),
-			"solana_token_amount": strconv.FormatUint(getUint64Field(session.RailState, "token_amount"), 10),
-			"solana_received":     strconv.FormatUint(t.Amount, 10),
-			"solana_recipient":    getStringField(session.RailState, "recipient"),
-		},
-		AttemptKind: payments.AttemptInitial,
+		Metadata:          solanaPaymentMetadata(session, reference, t),
+		AttemptKind:       payments.AttemptInitial,
 	})
 	if err != nil {
 		return uuid.Nil, err

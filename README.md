@@ -751,6 +751,7 @@ Mounting gives your users these routes under `/billing`:
 | `GET /billing/v1/checkout-sessions/{id}` | read a checkout; the session id is the credential, so a payment page on another host can use it |
 | `POST /billing/v1/checkout-sessions/{id}/pay` | pay it |
 | `GET`, `POST /billing/v1/checkout-attempts/{id}/solana-pay` | the Solana Pay request a wallet signs (when a Solana PSP is declared) |
+| `GET`, `POST /billing/v1/orders/{id}/solana-pay` | the Solana Pay request a wallet signs for an order (when a Solana PSP is declared) |
 | `GET /billing/v1/solana/tokens` | supported Solana tokens with live prices (when a Solana PSP is declared) |
 | `GET /billing/v1/captcha/status`, `GET /billing/v1/captcha/client.js` | the captcha a card-testing wave is asked to solve |
 | `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, the rails a PSP can be declared on, the payment methods a buyer can use with their browser config, and the captcha to solve when asked (always mounted) |

@@ -104,9 +104,7 @@ type checkoutRailTargets interface {
 }
 
 type solanaPaymentService interface {
-	GeneratePayment(ctx context.Context, userID string, priceID uuid.UUID, tokenSymbol string, sessionID *uuid.UUID) (*solanamodule.PayResult, error)
-	// RegisterReference gives a transaction-request attempt its one reference
-	// (the transfer-request flow registers inside GeneratePayment).
+	// RegisterReference gives a transaction-request attempt its one reference.
 	RegisterReference(ctx context.Context, kind solanamodule.ReferenceKind, sessionID uuid.UUID, reference string, quoteExpiresAt time.Time) (gen.BillingSolanaPayReference, error)
 }
 
@@ -1191,7 +1189,6 @@ func rejectCheckoutAttemptPAN(req *CheckoutAttemptCreateRequest) error {
 	extraFields := map[string]string{
 		"payment.rail":         payment.Rail,
 		"payment.token_symbol": payment.TokenSymbol,
-		"payment.flow":         payment.Flow,
 		"payment.wallet":       payment.Wallet,
 		"success_url":          req.SuccessURL,
 		"cancel_url":           req.CancelURL,
@@ -1321,16 +1318,6 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: token_symbol is required", ErrCheckoutAttemptValidation)
 	}
 
-	// or#893: the flow is DECLARED, never defaulted. transfer_request (wallet
-	// builds the tx from a Solana Pay URL) and transaction_request (OpenRails
-	// builds and returns an unsigned tx) diverge in what is written, what is
-	// verified and who signs — a session whose flow was inferred is a session
-	// whose confirm path was guessed.
-	flow := strings.TrimSpace(payment.Flow)
-	if flow == "" {
-		return fmt.Errorf("%w: payment.flow is required for solana (transfer_request | transaction_request)", ErrCheckoutAttemptValidation)
-	}
-
 	if solanaProc.Solana == nil {
 		return fmt.Errorf("%w: solana rail is not configured", ErrCheckoutAttemptValidation)
 	}
@@ -1346,88 +1333,50 @@ func (s *CheckoutAttemptService) initializeSolanaSession(ctx context.Context, se
 		return fmt.Errorf("%w: non-SOL token cannot use native SOL mint", ErrCheckoutAttemptValidation)
 	}
 
-	switch flow {
-	case "transfer_request":
-		if s.solanaPayService == nil {
-			return fmt.Errorf("%w: solana pay service unavailable", ErrCheckoutAttemptValidation)
-		}
-		result, err := s.solanaPayService.GeneratePayment(ctx, session.CustomerID.String(), *session.PriceID, tokenSymbol, &session.ID)
-		if err != nil {
-			return err
-		}
-		session.Status = models.CheckoutAttemptStatusRequiresAction
-		session.Reference = &result.Reference
-		open := solanaSettleDeadline(result.QuoteExpiresAt)
-		session.ExpiresAt = &open
-		if session.RailState == nil {
-			session.RailState = map[string]any{}
-		}
-		session.RailState["transaction_url"] = result.URL
-		session.RailState["flow"] = flow
-		session.RailState["token_symbol"] = tokenSymbol
-		tokenMintValue := strings.TrimSpace(result.TokenMint)
-		if tokenMintValue == "" {
-			tokenMintValue = tokenMint
-		}
-		recipient := strings.TrimSpace(result.Recipient)
-		if recipient == "" {
-			return fmt.Errorf("%w: recipient missing from payment quote", ErrCheckoutAttemptValidation)
-		}
-		session.RailState["token_mint"] = tokenMintValue
-		session.RailState["recipient"] = recipient
-		if err := setSolanaQuoteState(session.RailState, result.TokenUnits, result.TokenPriceUSD, result.FXRate, result.FXCurrency, result.QuotedAt, result.QuoteExpiresAt); err != nil {
-			return err
-		}
-	case "transaction_request":
-		// Transaction Request flow per Solana Pay spec:
-		// - Wallet address is NOT required at session creation
-		// - Transaction is built later when wallet calls POST /v1/checkout-attempts/:id/solana-pay
-		// - Session just stores flow and token info, returns solana_pay_url for wallet
-		if s.solanaTransactionService == nil {
-			return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutAttemptValidation)
-		}
-		decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMints, tokenCfg.Mint)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-		}
-		// OpenRails builds this transfer itself and does not resolve a
-		// Token-2022 transfer hook's extra accounts: such a mint is refused
-		// here rather than offered a transaction that cannot land.
-		if !strings.EqualFold(tokenSymbol, "SOL") {
-			info, err := solanamodule.RequireMintInfo(ctx, s.solanaMintInfo, tokenMint)
-			if err != nil {
-				return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-			}
-			if !info.Hook.IsZero() {
-				return fmt.Errorf("%w: %s has a transfer hook; pay it by transfer request", ErrCheckoutAttemptValidation, tokenSymbol)
-			}
-		}
-		quotedAt := s.now().UTC()
-		quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider, quotedAt)
-		if err != nil {
-			return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutAttemptValidation, err)
-		}
-		session.Status = models.CheckoutAttemptStatusRequiresAction
-		expiresAt := quotedAt.Add(defaultCheckoutAttemptTTL)
-		open := solanaSettleDeadline(expiresAt)
-		session.ExpiresAt = &open
-		if session.RailState == nil {
-			session.RailState = map[string]any{}
-		}
-		session.RailState["flow"] = flow
-		session.RailState["token_symbol"] = tokenSymbol
-		session.RailState["token_mint"] = tokenMint
-		if err := setSolanaQuoteState(session.RailState, quote.Units, quote.TokenPriceUSD, quote.FXRate, quote.FXCurrency, quote.QuotedAt, expiresAt); err != nil {
-			return err
-		}
-		recipient, err := solanamodule.ResolveRecipientWallet(ctx, s.db, s.config)
-		if err != nil {
-			return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
-		}
-		session.RailState["recipient"] = recipient
-	default:
-		return fmt.Errorf("%w: unsupported solana flow", ErrCheckoutAttemptValidation)
+	// A Solana Pay transaction request: the wallet POSTs its account to
+	// /v1/checkout-attempts/:id/solana-pay and OpenRails builds the transfer.
+	if s.solanaTransactionService == nil {
+		return fmt.Errorf("%w: solana transaction service unavailable", ErrCheckoutAttemptValidation)
 	}
+	decimals, err := solanamodule.RequireMintDecimals(ctx, s.solanaMints, tokenCfg.Mint)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
+	}
+	// OpenRails builds this transfer itself and does not resolve a
+	// Token-2022 transfer hook's extra accounts: such a mint is refused
+	// here rather than offered a transaction that cannot land.
+	if !strings.EqualFold(tokenSymbol, "SOL") {
+		info, err := solanamodule.RequireMintInfo(ctx, s.solanaMintInfo, tokenMint)
+		if err != nil {
+			return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
+		}
+		if !info.Hook.IsZero() {
+			return fmt.Errorf("%w: %s has a transfer hook OpenRails cannot build for", ErrCheckoutAttemptValidation, tokenSymbol)
+		}
+	}
+	quotedAt := s.now().UTC()
+	quote, err := solanamodule.CalculateTokenQuote(ctx, tokenSymbol, tokenCfg.Mint, decimals, moneyutil.Micros(*session.Amount), *session.Currency, s.fxProvider, s.priceProvider, quotedAt)
+	if err != nil {
+		return fmt.Errorf("%w: failed to calculate solana token quote: %v", ErrCheckoutAttemptValidation, err)
+	}
+	session.Status = models.CheckoutAttemptStatusRequiresAction
+	expiresAt := quotedAt.Add(defaultCheckoutAttemptTTL)
+	open := solanaSettleDeadline(expiresAt)
+	session.ExpiresAt = &open
+	if session.RailState == nil {
+		session.RailState = map[string]any{}
+	}
+	session.RailState["flow"] = "transaction_request"
+	session.RailState["token_symbol"] = tokenSymbol
+	session.RailState["token_mint"] = tokenMint
+	if err := setSolanaQuoteState(session.RailState, quote.Units, quote.TokenPriceUSD, quote.FXRate, quote.FXCurrency, quote.QuotedAt, expiresAt); err != nil {
+		return err
+	}
+	recipient, err := solanamodule.ResolveRecipientWallet(ctx, s.db, s.config)
+	if err != nil {
+		return fmt.Errorf("%w: %v", ErrCheckoutAttemptValidation, err)
+	}
+	session.RailState["recipient"] = recipient
 
 	return nil
 }
@@ -1858,7 +1807,6 @@ func (s *CheckoutAttemptService) buildRailFields(rail string, payment *CheckoutA
 
 	addField(fields, "payment_method_id", payment.PaymentMethodID)
 	addField(fields, "token_symbol", payment.TokenSymbol)
-	addField(fields, "flow", payment.Flow)
 	addField(fields, "wallet", payment.Wallet)
 	addField(fields, "email", email)
 	addField(fields, "name_on_card", payment.NameOnCard)
@@ -1920,9 +1868,6 @@ func (s *CheckoutAttemptService) sessionToResponse(session *models.CheckoutAttem
 
 	payable := session.Status == models.CheckoutAttemptStatusCreated || session.Status == models.CheckoutAttemptStatusRequiresAction
 	if session.RailState != nil {
-		if val, ok := session.RailState["transaction_url"].(string); ok && strings.TrimSpace(val) != "" && payable {
-			resp.Payment.TransactionURL = val
-		}
 		// Build solana_pay_url for every Solana-Pay-capable session. The wallet POSTs
 		// its account to this URL and the matching BuildSolanaPayTransaction branch
 		// returns the right tx:
@@ -2055,11 +2000,6 @@ func (s *CheckoutAttemptService) buildNextAction(resp *CheckoutAttemptResponse) 
 			},
 		}
 	}
-	if resp.Payment.TransactionURL != "" {
-		return &CheckoutAttemptNextAction{
-			Type: "solana_qr",
-		}
-	}
 	if resp.Payment.SolanaPayURL != "" {
 		return &CheckoutAttemptNextAction{
 			Type: "solana_pay",
@@ -2156,14 +2096,9 @@ func (s *CheckoutAttemptService) confirmSolanaSession(ctx context.Context, sessi
 	}
 	referenceValue := strings.TrimSpace(*session.Reference)
 
-	// or#893: the memo policy follows WHO BUILT the transaction. In the
-	// transaction-request flow OpenRails builds and stamps it, so absence means
-	// the signature is not our transaction. In the transfer-request flow the
-	// buyer's wallet builds it from the Solana Pay URL and may drop the memo.
+	// OpenRails builds and stamps every transaction: one without its memo is
+	// not ours.
 	memoPolicy := solana.MemoRequired
-	if isSolanaTransferRequestFlow(session) {
-		memoPolicy = solana.MemoPresenceOptional
-	}
 	signature := strings.TrimSpace(req.Payment.Signature)
 	// The page waits a bounded time for finalization; past it the transfer is
 	// still being confirmed and the poller credits it, so the page is told to
@@ -2455,17 +2390,6 @@ func getUint64Field(fields map[string]any, key string) uint64 {
 	return 0
 }
 
-// or#893: no missing-flow default. Every Solana session records its flow in
-// rail_state at creation, so an absent one is not "the old kind of session" —
-// it is a session whose rail_state was not written by this code path, and
-// treating it as transfer_request would run the wrong finalize.
-func isSolanaTransferRequestFlow(session *models.CheckoutAttempt) bool {
-	if session == nil {
-		return false
-	}
-	return strings.ToLower(strings.TrimSpace(getStringField(session.RailState, "flow"))) == "transfer_request"
-}
-
 func setSolanaQuoteState(railState map[string]any, tokenAmount uint64, tokenPriceUSD, fxRate float64, fxCurrency string, quotedAt, quoteExpiresAt time.Time) error {
 	if railState == nil {
 		return fmt.Errorf("%w: rail_state unavailable", ErrCheckoutAttemptValidation)
@@ -2735,7 +2659,7 @@ func solanaBuildRequestFromSession(session *models.CheckoutAttempt, account, tok
 
 	return &solanamodule.PaymentTransactionBuildRequest{
 		UserID:      session.CustomerID.String(),
-		PriceID:     *session.PriceID,
+		PriceID:     uuidOrNil(session.PriceID),
 		TokenSymbol: tokenSymbol,
 		UserWallet:  account,
 		Reference:   session.Reference,

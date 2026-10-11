@@ -27,7 +27,6 @@ type CheckoutAttemptPaymentRequest struct {
 	PaymentMethodID string
 	PaymentToken    string
 	TokenSymbol     string
-	Flow            string
 	Wallet          string
 	Email           string
 	NameOnCard      string
@@ -101,12 +100,11 @@ type CheckoutAttemptRedirectToURL struct {
 
 // CheckoutAttemptPaymentResponse is the rail's side of an attempt.
 type CheckoutAttemptPaymentResponse struct {
-	Rail           string `json:"rail"`
-	Reference      string `json:"reference,omitempty"`
-	TransactionURL string `json:"transaction_url,omitempty"`
-	SolanaPayURL   string `json:"solana_pay_url,omitempty"`
-	RedirectURL    string `json:"redirect_url,omitempty"`
-	TransactionID  string `json:"transaction_id,omitempty"`
+	Rail          string `json:"rail"`
+	Reference     string `json:"reference,omitempty"`
+	SolanaPayURL  string `json:"solana_pay_url,omitempty"`
+	RedirectURL   string `json:"redirect_url,omitempty"`
+	TransactionID string `json:"transaction_id,omitempty"`
 }
 
 // CheckoutAttemptMembershipQuote is the immutable commercial agreement shown

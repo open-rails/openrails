@@ -10,7 +10,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/billing"
@@ -24,19 +23,15 @@ func TestConcurrentTimedPassesStack(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
 	first, second := p.checkout(buyer), p.checkout(buyer)
-	// Both wallets relay their landed signatures at once: the two
-	// settlements race, as two pollers or relays would.
+	// Both wallets pay and the customer confirms both at once: the two
+	// settlements race, as two pollers would.
 	var settled sync.WaitGroup
 	for _, req := range []transferRequest{first, second} {
-		sig := p.pay(req, req.amount)
-		settled.Go(func() {
-			confirmed, err := p.w.engineConfirm(req.id, sig)
-			if assert.NoError(t, err) {
-				assert.Equal(t, "succeeded", confirmed.Status)
-			}
-		})
+		p.pay(req, req.amount)
+		settled.Go(func() { p.confirm(req) })
 	}
 	settled.Wait()
+	p.until(func() bool { return p.payments(first)+p.payments(second) == 2 }, "both transfers are credited")
 	require.Equal(t, []int{1, 1}, []int{p.payments(first), p.payments(second)}, "both transfers are credited once")
 	rows, err := p.w.pool.Query(t.Context(), p.sql(`SELECT starts_at, ends_at FROM $schema.product_access
 		WHERE customer_id = $1 AND deleted_at IS NULL AND revoked_at IS NULL ORDER BY starts_at`), uuid.MustParse(buyer.id))

@@ -194,7 +194,7 @@ func checkoutCreateRequest(req billing.CreateCheckoutAttemptParams, card *cardgu
 func checkoutAttemptPayment(payment billing.CheckoutPaymentOptions, card *cardguard.Card) checkout.CheckoutAttemptPaymentRequest {
 	out := checkout.CheckoutAttemptPaymentRequest{
 		Rail: payment.PSP, PaymentToken: payment.PaymentToken, Card: card,
-		TokenSymbol: payment.TokenSymbol, Flow: payment.Flow, Wallet: payment.Wallet,
+		TokenSymbol: payment.TokenSymbol, Wallet: payment.Wallet,
 	}
 	if !payment.PaymentMethodID.IsZero() {
 		out.PaymentMethodID = payment.PaymentMethodID.String()
@@ -244,10 +244,8 @@ func checkoutNextAction(resp *checkout.CheckoutAttemptResponse) *billing.NextAct
 	if redirect != "" {
 		return &billing.NextAction{Type: "redirect_to_url", URL: &redirect}
 	}
-	for _, link := range []string{resp.Payment.SolanaPayURL, resp.Payment.TransactionURL} {
-		if link = strings.TrimSpace(link); strings.HasPrefix(link, "solana:") {
-			return &billing.NextAction{Type: "solana_pay", URL: &link}
-		}
+	if link := strings.TrimSpace(resp.Payment.SolanaPayURL); strings.HasPrefix(link, "solana:") {
+		return &billing.NextAction{Type: "solana_pay", URL: &link}
 	}
 	return nil
 }

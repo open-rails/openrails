@@ -7,12 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/integrations/fx"
-	solanarpc "github.com/open-rails/openrails/internal/integrations/solana"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
 
@@ -112,43 +110,6 @@ func TestFormatBaseUnits(t *testing.T) {
 			_, frac, _ := strings.Cut(got, ".")
 			require.Len(t, frac, tc.decimals, got)
 		}
-	}
-}
-
-// Wire pin for the Solana Pay transfer-request URL: fiat micros in, the exact
-// `amount=` the wallet sees out. A 10^n slip anywhere shows as a wrong dollar
-// value here.
-func TestSolanaPayTransferURLWirePin(t *testing.T) {
-	const (
-		recipient = "DzGLHdTfgHCYh8v3qNGJHn85CyX7aeFmqoUdVRBYkWMh"
-		mint      = "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
-		reference = "11111111111111111111111111111112"
-	)
-	sessionID := uuid.MustParse("0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42")
-	s := &SolanaPayService{}
-
-	for _, tc := range []struct {
-		micros   moneyutil.Micros
-		decimals int
-		symbol   string
-		memo     string
-		want     string
-	}{
-		{1_000_000, 6, "USDC", "", "?amount=1.000000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
-		{10_000, 6, "USDC", "", "?amount=0.010000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
-		{19_990_000, 9, "USDC", "", "?amount=19.990000000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
-		{19_990_000, 8, "USDC", "", "?amount=19.99000000&spl-token=" + mint + "&reference=" + reference + "&label=Purchase"},
-		// The memo precedes the label, URL-escaped.
-		{5_000_000, 6, "USDC", solanarpc.PurchaseMemo(sessionID),
-			"?amount=5.000000&spl-token=" + mint + "&reference=" + reference +
-				"&memo=openrails%3A1%3A0dae1b8f-4c6e-4f6a-9b2d-7e5c3a1f8d42&label=Purchase"},
-		// Native SOL carries no spl-token param.
-		{1_000_000, 9, "SOL", "", "?amount=1.000000000&reference=" + reference + "&label=Purchase"},
-	} {
-		units, err := FiatMicrosToBaseUnitsAtPeg(tc.micros, tc.symbol, tc.decimals)
-		require.NoError(t, err)
-		got := s.buildTransferRequestURL(context.Background(), recipient, units, tc.decimals, mint, tc.symbol, reference, tc.memo)
-		require.Equal(t, "solana:"+recipient+tc.want, got)
 	}
 }
 

@@ -102,12 +102,25 @@ Prices are defined in fiat; the token amount is quoted at checkout from live
 token pricing (quotes carry an expiry). `GET /v1/solana/tokens` (public) lists
 the accepted tokens with current pricing.
 
-1. A checkout session lists one Solana option per accepted token. Paying it
-   answers `next_action: {type: "solana_pay", url}`: a Solana Pay transfer URL with
-   a unique reference key that any wallet can pay (QR-scannable).
-2. The buyer pays from their own wallet — no card, no stored credentials.
-3. OpenRails watches the reference on chain and settles the payment; the session
-   then reads `succeeded`.
+1. An order of one-time lines lists the Solana PSP among its
+   `payment_options` (`accepts: ["solana_pay"]`). Paying it with
+   `payment: {token_symbol}` answers `payment.status: requires_action` and
+   `next_action: {type: "solana_pay", url}`: a Solana Pay transaction request,
+   `solana:<billing base>/v1/orders/{id}/solana-pay` (QR-scannable). Its
+   `payload` carries the quote: `token_symbol`, `token_amount`, `recipient`,
+   `reference`, `quote_expires_at`.
+2. The wallet reads the label (`GET`), then posts its account (`POST`) and
+   signs the transaction OpenRails built: the quote's transfer to your wallet,
+   stamped with the reference and a memo. One transaction is offered at a time;
+   once the quote expired with nothing landed, the wallet's request gets a fresh
+   quote.
+3. OpenRails watches the reference on chain and settles the order (`complete`)
+   in the transaction that records the transfer. `POST /v1/me/orders/{id}/confirm`
+   asks for an immediate read.
+
+Transfer requests (a wallet building the transfer from a URL) are not
+offered: every transaction is OpenRails', so a transfer without its memo is
+not a payment.
 
 ### Recurring subscriptions
 

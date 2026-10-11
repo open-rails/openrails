@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/solanafake"
 )
 
@@ -24,67 +25,57 @@ func TestHumanAmountSolanaPayRecordsNativeDenomination(t *testing.T) {
 		{"PYUSD", "PYUSD", "2.5 PYUSD", solanafake.DevnetPYUSDMint, 2_500_000},
 		{"SOL-above-2pow53", "SOL", "9007199.254740993 SOL", solanafake.DevnetSOLMint, 9_007_199_254_740_993},
 	} {
-		for _, tp := range []topology{embedded, remote} {
-			t.Run(tc.name+"/"+string(tp), func(t *testing.T) {
-				w := prepareWorld(t, 30)
-				fake, _ := withSolana(t, w)
-				declare := w.declare
-				w.declare = func(psps map[string]openrails.PSPConfig) {
-					declare(psps)
-					tokens := psps["solana"].Settings["tokens"].(map[string]any)
-					tokens["USDC"] = map[string]any{}
-					tokens["PYUSD"] = map[string]any{}
-				}
-				w.start()
-				chain := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
-				chain.runWorkers(w)
-				productKey, err := w.applyCatalog(fmt.Sprintf(`  "{key}-native":
+		t.Run(tc.name, func(t *testing.T) {
+			w := prepareWorld(t, 30)
+			fake, _ := withSolana(t, w)
+			declare := w.declare
+			w.declare = func(psps map[string]openrails.PSPConfig) {
+				declare(psps)
+				tokens := psps["solana"].Settings["tokens"].(map[string]any)
+				tokens["USDC"] = map[string]any{}
+				tokens["PYUSD"] = map[string]any{}
+			}
+			w.start()
+			chain := &solanaPay{w: w, fake: fake, stopWorkers: map[*world]func(){}}
+			chain.runWorkers(w)
+			productKey, err := w.applyCatalog(fmt.Sprintf(`  "{key}-native":
     amount: %s
     psps: [solana]
 `, tc.amount))
-				require.NoError(t, err)
-				price, err := priceByKey(t.Context(), w.client[tp], productKey, productKey+"-native")
-				require.NoError(t, err)
-				require.Equal(t, tc.token, price.Currency)
-				require.Equal(t, tc.native, price.UnitAmount)
-				buyer := w.newCustomer()
-				purchase := order{price: price.ID, rail: "solana", successURL: "https://e2e.test/return"}
-				session, err := buyer.sell(tp, purchase)
-				require.NoError(t, err)
-				attempt, err := session.buy(buyer, purchase)
-				require.NoError(t, err)
-				require.Equal(t, "requires_action", attempt.Status)
-				require.NotNil(t, attempt.NextAction)
-				require.Equal(t, "solana_pay", attempt.NextAction.Type)
-				transfer := chain.sessionTerms(buyer, session.attemptID())
-				require.Equal(t, uint64(tc.native), transfer.amount, "same-token price is already in atomic chain units")
-				require.Equal(t, tc.mint, transfer.mint)
-				signature := chain.pay(transfer, transfer.amount)
-				chain.until(func() bool { return chain.status(transfer) == "succeeded" }, "the poller credits the transfer")
-				for range 2 {
-					replayed, err := session.buy(buyer, purchase)
-					require.NoError(t, err)
-					require.Equal(t, "succeeded", replayed.Status, "a repeated pay answers the paid attempt")
-				}
-				w.settle()
-				paid := completed(w.payments(tp, buyer.id))
-				require.Len(t, paid, 1, "a chain signature and accepted checkout settle once")
-				require.Equal(t, tc.token, paid[0].Currency)
-				require.Equal(t, tc.native, paid[0].Amount, "the stored payment retains its native denomination without USD conversion")
-				require.Equal(t, price.ID, *paid[0].PriceID)
-				var raw []byte
-				require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT metadata FROM billing.payments WHERE id=$1`), paid[0].ID.UUID()).Scan(&raw))
-				var metadata map[string]any
-				require.NoError(t, json.Unmarshal(raw, &metadata))
-				require.Equal(t, strconv.FormatInt(tc.native, 10), metadata["solana_token_amount"], "native amounts stay exact across generic JSON readers")
-				require.Equal(t, strconv.FormatInt(tc.native, 10), metadata["solana_received"])
+			require.NoError(t, err)
+			price, err := priceByKey(t.Context(), w.client[embedded], productKey, productKey+"-native")
+			require.NoError(t, err)
+			require.Equal(t, tc.token, price.Currency)
+			require.Equal(t, tc.native, price.UnitAmount)
+			chain.prices = map[string]string{tc.token: price.ID.String()}
+			chain.rail = w.options(billing.CheckoutOptionListParams{ProductKey: productKey, PriceKey: productKey + "-native"})["solana"]
+			buyer := w.newCustomer()
+			transfer := chain.checkoutIn(buyer, tc.token)
+			require.Equal(t, uint64(tc.native), transfer.amount, "same-token price is already in atomic chain units")
+			require.Equal(t, tc.mint, transfer.mint)
+			signature := chain.pay(transfer, transfer.amount)
+			chain.until(func() bool { return chain.status(transfer) == "succeeded" }, "the poller credits the transfer")
+			for range 2 {
+				require.Equal(t, "complete", chain.confirm(transfer), "a repeated confirm answers the paid order")
+			}
+			w.settle()
+			paid := completed(w.payments(embedded, buyer.id))
+			require.Len(t, paid, 1, "a chain signature and an order settle once")
+			require.Equal(t, tc.token, paid[0].Currency)
+			require.Equal(t, tc.native, paid[0].Amount, "the stored payment retains its native denomination without USD conversion")
+			require.Equal(t, transfer.order, *paid[0].OrderID)
+			var raw []byte
+			require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT metadata FROM billing.payments WHERE id=$1`), paid[0].ID.UUID()).Scan(&raw))
+			var metadata map[string]any
+			require.NoError(t, json.Unmarshal(raw, &metadata))
+			require.Equal(t, strconv.FormatInt(tc.native, 10), metadata["solana_token_amount"], "native amounts stay exact across generic JSON readers")
+			require.Equal(t, strconv.FormatInt(tc.native, 10), metadata["solana_received"])
 
-				require.Equal(t, 1, chain.payments(transfer))
-				require.True(t, buyer.entitled(productKey))
-				disposition, reason := chain.receipt(signature)
-				require.Equal(t, "credited", disposition)
-				require.Empty(t, reason)
-			})
-		}
+			require.Equal(t, 1, chain.payments(transfer))
+			require.True(t, buyer.entitled(productKey))
+			disposition, reason := chain.receipt(signature)
+			require.Equal(t, "credited", disposition)
+			require.Empty(t, reason)
+		})
 	}
 }

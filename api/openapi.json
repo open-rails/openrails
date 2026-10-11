@@ -1169,6 +1169,103 @@
         ]
       }
     },
+    "/v1/orders/{id}/solana-pay": {
+      "get": {
+        "tags": [
+          "checkout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolanaPayGetResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "x-openrails-auth": "public",
+        "x-openrails-mounted-when": "solana",
+        "x-openrails-errors": [
+          "order_not_payable",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:public"
+        ]
+      },
+      "post": {
+        "tags": [
+          "checkout"
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SolanaPayPostRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SolanaPayPostResponse"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [],
+        "x-openrails-auth": "public",
+        "x-openrails-mounted-when": "solana",
+        "x-openrails-errors": [
+          "invalid_param",
+          "order_not_payable",
+          "resource_conflict",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:public",
+          "request"
+        ]
+      }
+    },
     "/v1/app/orders/preview": {
       "post": {
         "tags": [
@@ -17295,6 +17392,9 @@
           },
           "billing_details": {
             "$ref": "#/components/schemas/BillingDetails"
+          },
+          "token_symbol": {
+            "type": "string"
           }
         }
       },

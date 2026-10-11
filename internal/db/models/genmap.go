@@ -308,6 +308,7 @@ func CheckoutAttemptFromGen(c gen.BillingCheckoutAttempt) (*CheckoutAttempt, err
 		ID:             c.ID,
 		CustomerID:     c.CustomerID,
 		PriceID:        c.PriceID,
+		OrderID:        c.OrderID,
 		Mode:           CheckoutAttemptMode(c.Mode),
 		Rail:           Rail(c.Rail),
 		Status:         CheckoutAttemptStatus(c.Status),

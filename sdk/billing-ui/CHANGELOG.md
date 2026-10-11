@@ -1,5 +1,12 @@
 # Changelog
 
+## Orders take Solana
+
+- `<OrderCheckout>` offers an order's Solana option: one button per token,
+  then the Solana Pay QR of the order's `solana_pay` next action, confirmed
+  until the transfer lands.
+- `OrderPaymentInput` gains `{ token_symbol, psp_id? }`.
+
 ## OrderCheckout pays an order
 
 - `<OrderCheckout orderId>` shows an order and pays it with a saved card or a

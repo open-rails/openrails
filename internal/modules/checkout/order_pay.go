@@ -69,9 +69,20 @@ type OrderOption struct {
 	Rail  string
 }
 
+// Solana reports a Solana Pay option.
+func (o OrderOption) Solana() bool { return models.Rail(o.Rail) == models.RailSolana }
+
+// Accepts is how the option is paid: saved_card and new_card, or solana_pay.
+func (o OrderOption) Accepts() []string {
+	if o.Solana() {
+		return []string{"solana_pay"}
+	}
+	return []string{"saved_card", "new_card"}
+}
+
 // OrderOptions are the PSPs that sell every line on rails OpenRails charges
-// itself: a saved card on NMI or Stripe, every recurring line an
-// engine-owned subscription.
+// itself: a card on NMI or Stripe, every recurring line an engine-owned
+// subscription; or a Solana wallet, for one-time lines.
 func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*models.Price, products []*models.Product) ([]OrderOption, error) {
 	if len(prices) == 0 || len(prices) != len(products) {
 		return []OrderOption{}, nil
@@ -85,10 +96,10 @@ func (s *CheckoutAttemptService) OrderOptions(ctx context.Context, prices []*mod
 		var line []OrderOption
 		for _, c := range decision.Candidates {
 			rail := models.Rail(c.Rail)
-			if c.Skip != "" || c.PSPID == uuid.Nil || (rail != models.RailNMI && rail != models.RailStripe) {
+			if c.Skip != "" || c.PSPID == uuid.Nil || (rail != models.RailNMI && rail != models.RailStripe && rail != models.RailSolana) {
 				continue
 			}
-			if price.IsRecurring() && rails.NewSubscriptionFor(rail) != rails.NewSubscriptionEngine {
+			if price.IsRecurring() && (rail == models.RailSolana || rails.NewSubscriptionFor(rail) != rails.NewSubscriptionEngine) {
 				continue
 			}
 			if i == 0 || containsOption(out, c.PSPID) {
@@ -112,13 +123,14 @@ func containsOption(options []OrderOption, psp uuid.UUID) bool {
 	return false
 }
 
-// OrderPayInput pays an order with a saved card (PaymentMethodID) or a card
-// just entered (Card). Key is the request's scoped Idempotency-Key: one key
-// is one attempt, forever.
+// OrderPayInput pays an order with a saved card (PaymentMethodID), a card
+// just entered (Card) or a Solana wallet (Solana). Key is the request's
+// scoped Idempotency-Key: one key is one attempt, forever.
 type OrderPayInput struct {
 	Order           *orders.Order
 	PaymentMethodID uuid.UUID
 	Card            *OrderCard
+	Solana          *OrderSolana
 	Key             string
 	User            *UserIdentity
 	Prices          []*models.Price
@@ -140,7 +152,7 @@ type OrderCard struct {
 type OrderCharge struct{ Failed, Declined bool }
 
 // ErrOrderPSPRequired: more than one PSP takes new cards for the order.
-var ErrOrderPSPRequired = apperr.Invalidf("more than one PSP takes new cards for this order: name payment.psp_id").WithParam("payment.psp_id")
+var ErrOrderPSPRequired = apperr.Invalidf("more than one PSP takes this payment for the order: name payment.psp_id").WithParam("payment.psp_id")
 
 // TakesOrders refuses while the merchant's provider writes are fenced or
 // held: such a merchant takes no orders.
@@ -158,8 +170,17 @@ func OrderAttemptID(merchantID, orderID uuid.UUID, key string) uuid.UUID {
 // with last_payment_error, awaiting the customer's action, or processing. A
 // new card is charged and saved in one provider request.
 func (s *CheckoutAttemptService) PayOrder(ctx context.Context, in OrderPayInput) (OrderCharge, error) {
-	if in.Order == nil || in.User == nil || in.Key == "" || (in.PaymentMethodID == uuid.Nil) == (in.Card == nil) {
+	payments := 0
+	for _, named := range []bool{in.PaymentMethodID != uuid.Nil, in.Card != nil, in.Solana != nil} {
+		if named {
+			payments++
+		}
+	}
+	if in.Order == nil || in.User == nil || in.Key == "" || payments != 1 {
 		return OrderCharge{}, errors.New("order payment needs its order, customer, key and one payment")
+	}
+	if in.Solana != nil {
+		return s.payOrderSolana(ctx, in)
 	}
 	if err := s.guardCardAttempt(ctx, in.User); err != nil {
 		return OrderCharge{}, err
@@ -341,7 +362,7 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 			expires = current.ExpiresAt
 		}
 		if err := q.CreateOrderAttempt(ctx, gen.CreateOrderAttemptParams{ID: attemptID, MerchantID: mid.UUID(), CustomerID: order.CustomerID, OrderID: order.ID,
-			Rail: target.Rail, Amount: current.Total, Currency: current.Currency, ExpiresAt: expires, RailState: state, PspID: chosen.PSPID, Now: now}); err != nil {
+			Rail: target.Rail, Status: string(models.CheckoutAttemptStatusCreated), Amount: current.Total, Currency: current.Currency, ExpiresAt: expires, RailState: state, PspID: chosen.PSPID, Now: now}); err != nil {
 			return err
 		}
 		n, err := q.StartOrderAttempt(ctx, gen.StartOrderAttemptParams{MerchantID: mid.UUID(), ID: order.ID, AttemptID: attemptID, PaymentMethodID: charged, PspID: chosen.PSPID, Now: now})
@@ -367,19 +388,27 @@ func (s *CheckoutAttemptService) payOrder(ctx context.Context, in OrderPayInput)
 // NewCardOption is the PSP a new card's token belongs to: the one named, or
 // the only option that takes new cards.
 func NewCardOption(options []OrderOption, psp uuid.UUID) (*OrderOption, error) {
-	if psp != uuid.Nil {
-		for i := range options {
-			if options[i].PSPID == psp {
-				return &options[i], nil
-			}
+	return pickOption(options, psp, false)
+}
+
+// SolanaOption is the Solana PSP that takes the order: the one named, or the
+// only one.
+func SolanaOption(options []OrderOption, psp uuid.UUID) (*OrderOption, error) {
+	return pickOption(options, psp, true)
+}
+
+func pickOption(options []OrderOption, psp uuid.UUID, solana bool) (*OrderOption, error) {
+	var found []*OrderOption
+	for i := range options {
+		if options[i].Solana() == solana && (psp == uuid.Nil || options[i].PSPID == psp) {
+			found = append(found, &options[i])
 		}
-		return nil, orders.ErrOptionMissing
 	}
-	switch len(options) {
+	switch len(found) {
 	case 0:
 		return nil, orders.ErrOptionMissing
 	case 1:
-		return &options[0], nil
+		return found[0], nil
 	}
 	return nil, ErrOrderPSPRequired
 }
@@ -526,10 +555,17 @@ func (s *CheckoutAttemptService) OrderOperation(ctx context.Context, attemptID u
 }
 
 // OrderNextAction is what the customer completes for an order awaiting them:
-// Stripe's in-page authentication of the attempt's payment.
+// Stripe's in-page authentication of the attempt's payment, or the Solana
+// Pay transaction request their wallet opens.
 func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *orders.Order, principal billingauth.Payer, resolver intents.StripeEngineServiceResolver) (*billing.NextAction, error) {
 	if !order.AwaitsCustomer() || order.AttemptID == nil {
 		return nil, nil
+	}
+	if attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID); err != nil || solana {
+		if err != nil {
+			return nil, err
+		}
+		return s.orderSolanaAction(order, attempt), nil
 	}
 	checkout, ok := s.checkoutService.(*CheckoutService)
 	if !ok || resolver == nil {
@@ -554,6 +590,12 @@ func (s *CheckoutAttemptService) OrderNextAction(ctx context.Context, order *ord
 func (s *CheckoutAttemptService) ConfirmOrder(ctx context.Context, order *orders.Order, principal billingauth.Payer) (OrderCharge, error) {
 	if order.AttemptID == nil || (!order.AwaitsCustomer() && order.Status != string(billing.OrderProcessing)) {
 		return OrderCharge{}, nil
+	}
+	if attempt, solana, err := s.orderSolanaAttempt(ctx, *order.AttemptID); err != nil || solana {
+		if err != nil {
+			return OrderCharge{}, err
+		}
+		return OrderCharge{}, s.pollSolanaOrderNow(ctx, attempt)
 	}
 	checkout, ok := s.checkoutService.(*CheckoutService)
 	if !ok {
@@ -589,6 +631,11 @@ const orderClosedKey = "order_closed"
 // that awaited the customer: the challenged payment is canceled at the
 // provider. A payment that completed first settles the order late instead.
 func (s *CheckoutAttemptService) AbandonOrderAttempt(ctx context.Context, attemptID uuid.UUID) error {
+	// A Solana attempt has nothing to cancel: a transfer landing after the
+	// order closed is recorded for review.
+	if _, solana, err := s.orderSolanaAttempt(ctx, attemptID); err != nil || solana {
+		return err
+	}
 	operation, err := s.OrderOperation(ctx, attemptID)
 	if err != nil || operation.Status == intents.StatusSucceeded || operation.Status == intents.StatusFailedTerminal {
 		return err
@@ -606,6 +653,19 @@ func (s *CheckoutAttemptService) AbandonOrderAttempt(ctx context.Context, attemp
 		_, err = verifier.VerifyByID(ctx, operation.ID)
 	}
 	return err
+}
+
+// orderSolanaAttempt is the order attempt, and whether it is on Solana.
+func (s *CheckoutAttemptService) orderSolanaAttempt(ctx context.Context, attemptID uuid.UUID) (gen.BillingCheckoutAttempt, bool, error) {
+	mid, err := merchant.Require(ctx)
+	if err != nil {
+		return gen.BillingCheckoutAttempt{}, false, err
+	}
+	attempt, err := s.db.Gen(ctx).GetOrderAttempt(ctx, gen.GetOrderAttemptParams{MerchantID: mid.UUID(), ID: attemptID})
+	if err != nil {
+		return gen.BillingCheckoutAttempt{}, false, err
+	}
+	return attempt, attempt.Rail == string(models.RailSolana), nil
 }
 
 func uuidOrNil(id *uuid.UUID) uuid.UUID {

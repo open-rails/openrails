@@ -904,7 +904,7 @@ watermarked backfill catches their provider events.
 
 ## Solana Pay settlement
 
-Solana Pay state is in PostgreSQL. A checkout attempt has one reference in
+Solana Pay state is in PostgreSQL. An order's Solana attempt has one reference in
 `billing.solana_pay_references` (`pending` → `confirmed` | `expired`). Every
 replica's poller claims due references with `SKIP LOCKED` and walks each
 reference's whole finalized signature history, oldest first, resuming from a
@@ -922,8 +922,7 @@ across all references.
 - A Token-2022 transfer fee is priced in at quote time: the request asks for
   the gross that delivers the quoted amount, and a built transaction asserts
   the fee on-chain. A fee raised after the quote leaves the merchant short and
-  is recorded as `underpaid`. Mints with a transfer hook are refused for
-  transaction requests.
+  is recorded as `underpaid`. Mints with a transfer hook are refused.
 - The first transfer of at least the quoted amount that lands by quote expiry
   + 30 min is credited; an excess is credited and flagged `overpaid`.
 - Anything else is recorded with `disposition = 'review'` and a

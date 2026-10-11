@@ -200,4 +200,81 @@ describe("OrderCheckout", () => {
     expect((await screen.findAllByText(/4242/)).length).toBeGreaterThan(0)
     expect(screen.queryByText(/1881/)).not.toBeInTheDocument()
   })
+
+  it("pays from a Solana wallet: a Solana Pay QR for the order", async () => {
+    const solanaConfig = {
+      ...config,
+      payment: {
+        psps: [
+          {
+            psp_id: "psp_sol",
+            key: "solana",
+            rail: "solana",
+            custodian: "self",
+            display_name: "Solana",
+            flow: "wallet",
+            config: {},
+          },
+        ],
+        solana: {
+          network: "devnet",
+          chain: "solana:devnet",
+          tokens: [{ symbol: "USDC", mint: "mint_usdc", decimals: 6 }],
+        },
+      },
+    }
+    const solanaOrder = (payment: Record<string, unknown>) => ({
+      ...order(payment),
+      payment_options: [
+        { psp_id: "psp_sol", rail: "solana", accepts: ["solana_pay"] },
+      ],
+    })
+    const pays: unknown[] = []
+    const fetch = vi.fn(async (input: string, init: RequestInit) => {
+      if (input.endsWith("/config")) return Response.json(solanaConfig)
+      if (input.includes("/me/payment-methods"))
+        return Response.json({ data: [], next_cursor: null })
+      if (input.endsWith("/me/orders/ord_1"))
+        return Response.json(solanaOrder({}))
+      if (input.endsWith("/me/orders/ord_1/pay")) {
+        pays.push(JSON.parse(String(init.body)))
+        return Response.json(
+          solanaOrder({
+            status: "requires_action",
+            next_action: {
+              type: "solana_pay",
+              url: "solana:https://billing.test/v1/orders/ord_1/solana-pay",
+              psp_id: "psp_sol",
+              payload: { token_symbol: "USDC", token_amount: "15.000000" },
+            },
+          })
+        )
+      }
+      return Response.json({}, { status: 404 })
+    })
+    render(
+      <BillingProvider client={createBillingClient({ fetch })}>
+        <OrderCheckout orderId="ord_1" />
+      </BillingProvider>
+    )
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Pay with USDC on Solana" })
+    )
+    expect(
+      await screen.findByRole("img", { name: "Solana Pay QR code" })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/15.000000 USDC/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Open in wallet" })
+    ).toHaveAttribute(
+      "href",
+      "solana:https://billing.test/v1/orders/ord_1/solana-pay"
+    )
+    expect(pays).toEqual([
+      {
+        payment: { token_symbol: "USDC", psp_id: "psp_sol" },
+        expected_total: "15000000",
+      },
+    ])
+  })
 })

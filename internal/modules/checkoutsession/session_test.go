@@ -70,7 +70,6 @@ func TestPayment(t *testing.T) {
 	got, _, err = Payment(solana, PayCheckoutSessionParams{TokenSymbol: "USDC"}, "", owns)
 	require.NoError(t, err)
 	require.Equal(t, "USDC", got.TokenSymbol)
-	require.Equal(t, "transfer_request", got.Flow)
 
 	_, _, err = Payment(redirect, PayCheckoutSessionParams{BillingDetails: details("A Buyer", "US", "10001", "")}, "buyer@example.test", owns)
 	require.NoError(t, err)

@@ -365,10 +365,8 @@ func nonEmptyAll(values ...string) []string {
 // Only an error worth retrying is returned: a transaction that is foreign,
 // failed or unreadable is recorded as such.
 func (p *SolanaPayPoller) settleSignature(ctx context.Context, rpc *solanarpc.RPCClient, ref gen.BillingSolanaPayReference, session *models.CheckoutAttempt, signature string) error {
+	// OpenRails built the transaction and stamped its memo.
 	policy := solanarpc.MemoRequired
-	if stateString(session.RailState, "flow") == "transfer_request" {
-		policy = solanarpc.MemoPresenceOptional
-	}
 	octx, cancel := context.WithTimeout(ctx, observeTimeout)
 	obs, err := rpc.ObserveTransfer(octx, solanarpc.ObserveTransferRequest{
 		Signature: signature, Recipient: stateString(session.RailState, "recipient"), TokenMint: stateString(session.RailState, "token_mint"),

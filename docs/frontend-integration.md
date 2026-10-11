@@ -303,8 +303,17 @@ A merchant order is one your backend creates for a customer (`CreateOrder`,
 unless `expires_at` says otherwise, and the customer pays it on your site with
 `POST /v1/me/orders/{id}/pay`. Staff read orders and never pay them.
 
+An order of one-time lines can be paid from a Solana wallet: a payment option
+with `accepts: ["solana_pay"]` takes `payment: {token_symbol, psp_id?}`
+(the tokens are in `GET /v1/config`'s `payment.solana`). The order answers
+`requires_action` with `next_action.type: solana_pay`: render its `url` as a
+QR code or a wallet link. The wallet fetches the transaction itself; the order
+completes when the transfer lands, and `confirm` asks OpenRails to read the
+chain now.
+
 billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
-card, or a new card in the PSP's fields, then any `next_action` and `confirm`.
+card, a new card in the PSP's fields or a Solana wallet, then any
+`next_action` and `confirm`.
 It uses only the order API and `GET /v1/config`, through the provider's client
 or one passed as `client`.
 

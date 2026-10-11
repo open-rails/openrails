@@ -1387,7 +1387,6 @@ pkg openrails/billing, type CheckoutOptionListParams struct, PriceKey string
 pkg openrails/billing, type CheckoutOptionListParams struct, ProductKey string
 pkg openrails/billing, type CheckoutPaymentOptions struct
 pkg openrails/billing, type CheckoutPaymentOptions struct, BillingDetails *BillingDetails `json:"billing_details,omitempty"`
-pkg openrails/billing, type CheckoutPaymentOptions struct, Flow string `json:"flow,omitempty"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, PSP string `json:"psp,omitempty"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, PaymentMethodID PaymentMethodID `json:"payment_method_id,omitzero"`
 pkg openrails/billing, type CheckoutPaymentOptions struct, PaymentToken string `json:"payment_token,omitempty"`
@@ -2282,6 +2281,7 @@ pkg openrails/billing, type OrderPaymentParams struct, BillingDetails *BillingDe
 pkg openrails/billing, type OrderPaymentParams struct, PSPID *PSPID `json:"psp_id,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, PaymentMethodID *PaymentMethodID `json:"payment_method_id,omitempty"`
 pkg openrails/billing, type OrderPaymentParams struct, Token string `json:"token,omitempty"`
+pkg openrails/billing, type OrderPaymentParams struct, TokenSymbol string `json:"token_symbol,omitempty"`
 pkg openrails/billing, type OrderPaymentStatus string
 pkg openrails/billing, type OrderPreview struct
 pkg openrails/billing, type OrderPreview struct, Currency string `json:"currency"`

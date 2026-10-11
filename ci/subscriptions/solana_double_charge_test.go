@@ -3,31 +3,24 @@
 package subscriptions_test
 
 import (
-	"context"
+	"net/http"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
-
-	"github.com/open-rails/openrails/internal/modules/checkout"
 )
 
-// A Solana Pay attempt whose quote expired unpaid reads processing, not
-// expired, while its reference still credits a transfer: the buyer is never
-// told to pay again for money that may already be on its way.
+// An order whose Solana quote expired unpaid still awaits its wallet, and a
+// transfer landing within the grace credits it: the buyer is never told to
+// pay again for money that may already be on its way.
 func TestSolanaPayAttemptProcessingUntilReferenceCloses(t *testing.T) {
 	p := newSolanaPay(t)
 	buyer := p.w.newCustomer()
 	req := p.checkout(buyer)
 	p.w.clock.Advance(16 * time.Minute)
-	var read *checkout.CheckoutAttemptResponse
-	require.NoError(t, p.w.inMerchant(func(ctx context.Context, svc *checkout.CheckoutAttemptService) (err error) {
-		read, err = svc.GetSession(ctx, req.id.UUID(), &checkout.UserIdentity{ID: buyer.id})
-		return err
-	}))
-	require.Equal(t, "processing", read.Status, "the quote expired but its reference still credits")
-	require.Nil(t, read.NextAction, "nothing more is offered to pay")
+	read := buyer.order(http.MethodGet, "/orders/"+req.order.String(), "", nil)
+	require.Equal(t, "requires_action", paymentOf(read)["status"], "the quote expired but its reference still credits")
 	require.Equal(t, "requires_action", p.w.attemptStatus(req.id))
 	p.pay(req, req.amount)
 	p.eventually(func() bool { return p.payments(req) == 1 }, "the transfer is credited")

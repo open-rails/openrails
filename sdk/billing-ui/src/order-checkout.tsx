@@ -1,7 +1,8 @@
-// Shows an order and pays it, on the host's own page: a saved card, or a new
-// card in the PSP's own fields, which the order's payment charges and saves
-// in one call. A bank challenge runs in the page, then confirm. Driven only by
-// the order API (GET, pay, confirm) and GET /config; never cancels.
+// Shows an order and pays it, on the host's own page: a saved card, a new card
+// in the PSP's own fields (charged and saved in one call), or a Solana wallet
+// through a Solana Pay QR. A bank challenge runs in the page, then confirm.
+// Driven only by the order API (GET, pay, confirm) and GET /config; never
+// cancels.
 import * as React from "react"
 
 import {
@@ -13,6 +14,7 @@ import type { BillingClient, OrderResult } from "./client/client"
 import { isBillingError } from "./client/errors"
 import type { Order, OrderPaymentInput, PaymentMethod } from "./client/types"
 import { PayButton, TrustLine } from "./components/pay-button"
+import { SolanaBody } from "./components/qr"
 import { SavedMethods, NEW_CARD_VALUE } from "./components/saved-methods"
 import { LoadingSkeleton } from "./components/states"
 import {
@@ -54,6 +56,9 @@ export interface OrderCheckoutProps {
 
 const settled = (order: Order) =>
   order.status === "complete" || order.status === "processing"
+
+// How often a Solana order awaiting its wallet is read again.
+const SOLANA_POLL_MS = 3000
 
 /** Pays one order. Requires `BillingProvider`. */
 export function OrderCheckout({
@@ -107,6 +112,22 @@ export function OrderCheckout({
     if (order && settled(order)) settledRef.current?.(order)
   }, [order])
 
+  // A Solana order awaits its wallet: confirm asks OpenRails to read the
+  // chain, until the transfer lands.
+  const awaitingWallet =
+    order?.payment.status === "requires_action" &&
+    order.payment.next_action?.type === "solana_pay"
+  React.useEffect(() => {
+    if (!awaitingWallet || !order) return
+    const timer = window.setInterval(() => {
+      client.confirmOrder(order.id).then(
+        (result) => setOrder(result.order),
+        () => undefined
+      )
+    }, SOLANA_POLL_MS)
+    return () => window.clearInterval(timer)
+  }, [awaitingWallet, client, order])
+
   const options = React.useMemo(() => order?.payment_options ?? [], [order])
   const psps = React.useMemo(
     () =>
@@ -139,6 +160,8 @@ export function OrderCheckout({
     }))
   const psp: PspConfig | undefined =
     cardPsps.find((item) => item.psp_id === pspID) ?? cardPsps[0]
+  const solana = options.find((option) => option.accepts.includes("solana_pay"))
+  const tokens = solana ? (config?.payment?.solana?.tokens ?? []) : []
 
   if (!order)
     return error ? (
@@ -246,7 +269,13 @@ export function OrderCheckout({
         </div>
       </div>
 
-      {order.status === "complete" ? (
+      {awaitingWallet ? (
+        <SolanaBody
+          amountLabel={`${order.payment.next_action?.payload?.token_amount ?? ""} ${order.payment.next_action?.payload?.token_symbol ?? ""}`.trim()}
+          payload={order.payment.next_action?.url ?? undefined}
+          statusLine="Waiting for your wallet's payment"
+        />
+      ) : order.status === "complete" ? (
         <p role="status" className="text-sm font-semibold">
           Payment complete
         </p>
@@ -341,11 +370,31 @@ export function OrderCheckout({
                 </form>
               )}
             </>
-          ) : (
+          ) : solana ? null : (
             <p role="alert" className="text-sm text-destructive">
               {m.t("paymentMethods.unavailable")}
             </p>
           )}
+          {solana && tokens.length > 0 ? (
+            <div className="grid gap-2 border-t border-border pt-4">
+              {tokens.map((token) => (
+                <button
+                  key={token.symbol}
+                  type="button"
+                  className="h-9 rounded-md border border-border text-sm"
+                  disabled={busy || !open}
+                  onClick={() =>
+                    void pay(async () => ({
+                      token_symbol: token.symbol,
+                      psp_id: solana.psp_id,
+                    }))
+                  }
+                >
+                  Pay with {token.symbol} on Solana
+                </button>
+              ))}
+            </div>
+          ) : null}
           {error ? (
             <p role="alert" className="text-sm text-destructive">
               {error}

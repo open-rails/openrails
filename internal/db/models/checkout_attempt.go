@@ -14,6 +14,8 @@ const (
 	CheckoutAttemptModeOneOff        CheckoutAttemptMode = "one_off"
 	CheckoutAttemptModePaymentMethod CheckoutAttemptMode = "payment_method"
 	CheckoutAttemptModeSubscription  CheckoutAttemptMode = "subscription"
+	// CheckoutAttemptModeOrder pays an order (OrderID): its total, no price.
+	CheckoutAttemptModeOrder CheckoutAttemptMode = "order"
 )
 
 type CheckoutAttemptStatus string
@@ -33,6 +35,7 @@ type CheckoutAttempt struct {
 	CustomerID uuid.UUID `json:"customer_id,omitempty"`
 
 	PriceID *uuid.UUID          `json:"price_id"`
+	OrderID *uuid.UUID          `json:"order_id,omitempty"`
 	Mode    CheckoutAttemptMode `json:"mode"`
 
 	Rail   Rail                  `json:"rail"`
@@ -150,6 +153,12 @@ func (s *CheckoutAttempt) ValidateTerms() error {
 	if s.Mode == CheckoutAttemptModePaymentMethod {
 		if s.PriceID != nil || s.Amount != nil || s.Currency != nil || s.PaymentID != nil || s.SubscriptionID != nil || (s.Rail != RailNMI && s.Rail != RailStripe) {
 			return fmt.Errorf("payment-method setup cannot carry monetary terms")
+		}
+		return nil
+	}
+	if s.Mode == CheckoutAttemptModeOrder {
+		if s.OrderID == nil || *s.OrderID == uuid.Nil || s.PriceID != nil || s.Amount == nil || s.Currency == nil || strings.TrimSpace(*s.Currency) == "" {
+			return fmt.Errorf("an order's attempt requires its order, amount and currency")
 		}
 		return nil
 	}

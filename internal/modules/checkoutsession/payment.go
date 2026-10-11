@@ -84,7 +84,7 @@ func Payment(option Option, input PayCheckoutSessionParams, verifiedEmail string
 		if bound == "" || (input.TokenSymbol != "" && !strings.EqualFold(input.TokenSymbol, bound)) {
 			return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
 		}
-		out.TokenSymbol, out.Flow = bound, "transfer_request"
+		out.TokenSymbol = bound
 		in = billingInput{}
 	default:
 		return billing.CheckoutPaymentOptions{}, nil, ErrInvalid
