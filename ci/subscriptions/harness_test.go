@@ -73,7 +73,6 @@ const (
 	staffMetrics = billing.RootMetricsRead
 
 	appEntitlements = billing.RootEntitlementsRead
-	appOffers       = billing.RootCatalogRead
 	appUsage        = billing.RootUsageManage
 	appEvents       = billing.RootEventsRead
 	appOrders       = billing.RootOrdersManage

@@ -34,29 +34,12 @@ func ListPublicProducts(r *httprequest.Request) {
 		r.APIError(api.Coded(billing.CodeInvalidQuery, fmt.Sprintf("keys names 1 to %d products", billing.MaxBatchItems)).WithParam("keys"))
 		return
 	}
-	writeOffers(r, billing.ProductListParams{PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}, Keys: keys})
+	writePublicProducts(r, billing.ProductListParams{PageRequest: billing.PageRequest{Limit: billing.MaxBatchItems}, Keys: keys})
 }
 
-// AppListOffers is the host backend's read of what a customer may buy: the
-// products on sale granting any ?entitlement= and named by ?keys= (one is
-// required, each at most billing.MaxBatchItems), each with its live prices.
-func AppListOffers(r *httprequest.Request) {
-	page, ok := r.Page()
-	if !ok {
-		return
-	}
-	query := r.Request.URL.Query()
-	keys, entitlements := query["keys"], query["entitlement"]
-	if len(keys) == 0 && len(entitlements) == 0 {
-		r.APIError(api.Coded(billing.CodeInvalidQuery, "entitlement or keys is required").WithParam("entitlement"))
-		return
-	}
-	writeOffers(r, billing.ProductListParams{PageRequest: page, Keys: keys, Entitlements: entitlements})
-}
-
-// writeOffers answers the products on sale params selects, each with its
+// writePublicProducts answers the products on sale params selects, each with its
 // live prices as a buyer sees them.
-func writeOffers(r *httprequest.Request, params billing.ProductListParams) {
+func writePublicProducts(r *httprequest.Request, params billing.ProductListParams) {
 	svc, ok := newAdminBillingService(r)
 	if !ok {
 		return
