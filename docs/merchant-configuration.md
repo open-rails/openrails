@@ -37,7 +37,12 @@ display_name: Shop
 settings:
   profile:
     support_url: https://shop.example/support
+    billing_url: https://shop.example/account/billing
 ```
+
+`billing_url` is where customers manage and cancel their subscriptions and
+[charge agreements](agreements.md); receipts and confirmations link to it,
+else to `support_url`.
 
 YAML and JSON use the same typed contract. Documents are limited to 1 MiB.
 Unknown or duplicate fields, multiple documents, YAML aliases, anchors, merge

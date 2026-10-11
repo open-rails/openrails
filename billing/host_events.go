@@ -49,9 +49,9 @@ const (
 	// A customer linked to, or unlinked from, an openrails.dev account.
 	HostEventCustomerNetworkLinked   HostEventType = "customer.network_linked"
 	HostEventCustomerNetworkUnlinked HostEventType = "customer.network_unlinked"
-	// HostEventCustomerPaymentAuthorityRevoked: the customer ended the
-	// merchant's authority to charge its cards without it.
-	HostEventCustomerPaymentAuthorityRevoked HostEventType = "customer.payment_authority_revoked"
+	// HostEventMandateRevoked: the customer revoked one of its charge
+	// agreements; the merchant charges nothing more under it.
+	HostEventMandateRevoked HostEventType = "mandate.revoked"
 	// The balance of a customer with a running charge went under its low
 	// line, or its capacity reached zero: once per crossing.
 	HostEventBalanceLow      HostEventType = "balance.low"
@@ -137,8 +137,8 @@ type HostEvent struct {
 	Order *OrderHostEvent `json:"order"`
 	// CustomerNetwork is set for the customer.network_* events.
 	CustomerNetwork *CustomerNetworkHostEvent `json:"customer_network"`
-	// PaymentAuthority is set for customer.payment_authority_revoked.
-	PaymentAuthority *PaymentAuthorityHostEvent `json:"payment_authority"`
+	// Mandate is set for mandate.revoked.
+	Mandate *MandateHostEvent `json:"mandate"`
 	// Balance is set for balance.low and balance.depleted.
 	Balance *BalanceHostEvent `json:"balance"`
 }

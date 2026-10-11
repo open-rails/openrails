@@ -520,7 +520,7 @@ type BillingGrant struct {
 	Quantity *int32
 }
 
-// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links, payment authority revocations and the low and depleted balance of a customer with a running charge. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
+// Typed durable host events: successful rail payment settlements, delinquency lifecycle transitions, product key changes, order transitions, customer links, revoked charge agreements and the low and depleted balance of a customer with a running charge. Acknowledge after idempotent processing; acknowledgments are separate from notification read state. Retention: delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted.
 type BillingHostOutbox struct {
 	ID          uuid.UUID
 	MerchantID  uuid.UUID
@@ -745,6 +745,8 @@ type BillingMoneySetting struct {
 	CreditLimitAmount int64
 	// The customer's default card in this currency: it collects their invoices and pays every card subscription in the currency without a card of its own.
 	DefaultPaymentMethodID *uuid.UUID
+	// When the customer revoked its collection agreement in the currency: from then admission spends only its balance, whatever billing_mode, until a new default card gives another.
+	CollectionRevokedAt *time.Time
 }
 
 // The in-progress bulk verification read per NMI account: its transaction window and the next page to read. Deleted when the pass completes.

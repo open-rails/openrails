@@ -232,6 +232,23 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
   AND collection_method = 'charge_automatically'
   AND collection_failure_count > 0 AND next_collection_attempt_at IS NULL;
 
+-- name: EarliestPendingOwedAccrual :one
+-- When the customer's unbilled usage in the currency began; none for none.
+SELECT accrued_at FROM billing.owed_items
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND order_id IS NULL AND status = 'pending'
+ORDER BY accrued_at
+LIMIT 1;
+
+-- name: ListOpenUsageOrdersOfCurrency :many
+-- The customer's open usage orders in the currency, oldest first: at most a
+-- few, each a closed billing window.
+SELECT * FROM billing.orders
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND origin = 'usage' AND status = 'open' AND amount_paid < total
+ORDER BY created_at, id
+LIMIT sqlc.arg(row_limit)::int;
+
 -- name: NotifyOverdueUsageOrders :one
 -- Tells each payer once about each open usage order past its due date; the
 -- notice id is the order's, so a later pass adds none. Its seed is the one
@@ -239,7 +256,7 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(custo
 WITH notices AS (
     INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'order_overdue',
-           jsonb_build_object('order_id', id, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
+           jsonb_build_object('order_id', 'ord_' || id::text, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
            NULL, sqlc.arg(now)::timestamptz
     FROM billing.orders
     WHERE merchant_id = sqlc.arg(merchant_id)::uuid

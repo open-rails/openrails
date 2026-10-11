@@ -2,6 +2,7 @@ package money
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -515,11 +516,17 @@ func (h *OrderCollectionHandler) finalizeSettle(ctx context.Context, intent gen.
 			}
 		}
 		attempt := intent.ID
-		if _, err := usage.Pay(ctx, q, intent.MerchantID, p.OrderID, p.Amount, &p.PaymentID, &attempt, now); err != nil {
+		paid, err := usage.Pay(ctx, q, intent.MerchantID, p.OrderID, p.Amount, &p.PaymentID, &attempt, now)
+		if err != nil {
 			// The order changed under its own live collection (only raw
 			// surgery can do that). Fail closed: the receipt stays on the
 			// operation for an operator to repair.
 			return fmt.Errorf("order %s no longer accepts the frozen amount %d; confirmed charge %s needs repair: %w", p.OrderID, p.Amount, transactionID, err)
+		}
+		if p.Initiator == charge.InitiatorMerchant {
+			if err := queueUsageReceipt(ctx, q, intent.MerchantID, paid, p.PaymentID, chargedAmount, currency, now); err != nil {
+				return err
+			}
 		}
 		if err := usage.EndCollection(ctx, q, intent.MerchantID, p.OrderID, intent.ID, true, nil, now); err != nil {
 			return err
@@ -770,4 +777,21 @@ func derefInt32(v *int32) int32 {
 		return 0
 	}
 	return *v
+}
+
+// queueUsageReceipt queues the receipt of a usage order charged under the
+// customer's collection agreement, once per payment.
+func queueUsageReceipt(ctx context.Context, q *gen.Queries, merchantID uuid.UUID, order gen.BillingOrder, payment uuid.UUID, amount int64, currency string, now time.Time) error {
+	data := billing.NotificationData{OrderID: billing.OrderID(order.ID), PaymentID: billing.PaymentID(payment), Amount: &amount, Currency: currency}
+	if order.Number != nil {
+		data.OrderNumber = *order.Number
+	}
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	return q.CreateNotificationIfAbsent(ctx, gen.CreateNotificationIfAbsentParams{
+		ID:         uuidutil.DeterministicID(uuidutil.DeterministicNamespace, string(models.NotificationUsageCharged), merchantID.String(), payment.String()),
+		MerchantID: merchantID, CustomerID: order.CustomerID, EventType: string(models.NotificationUsageCharged), Data: raw, CreatedAt: now,
+	})
 }

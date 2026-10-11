@@ -314,6 +314,10 @@ func (s *SubscriptionLifecycleService) setDefault(ctx context.Context, tx pgx.Tx
 		Kind: charge.AgreementUnscheduled, Currency: c.Currency, Lineage: unscheduled, AcceptedAt: now}, now); err != nil {
 		return nil, nil, err
 	}
+	// A new collection agreement: the merchant's billing mode applies again.
+	if err := q.RestoreMoneyCollection(ctx, gen.RestoreMoneyCollectionParams{MerchantID: merchantID, CustomerID: c.Customer, Currency: c.Currency, Now: now}); err != nil {
+		return nil, nil, err
+	}
 	var swaps []uuid.UUID
 	for _, m := range moves {
 		if !m.swap {

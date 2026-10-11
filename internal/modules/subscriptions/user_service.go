@@ -379,7 +379,7 @@ func (s *UserSubscriptionService) CancelUserSubscription(ctx context.Context, us
 		ID:         uuidutil.NewV7(),
 		CustomerID: identity.CustomerIDFromString(userID).UUID(),
 		EventType:  models.NotificationPremiumEnded,
-		Data:       billing.NotificationData{Reason: string(PremiumEndReasonUserCancel)},
+		Data:       billing.NotificationData{Reason: string(PremiumEndReasonUserCancel), SubscriptionID: billing.SubscriptionID(subscription.ID)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{

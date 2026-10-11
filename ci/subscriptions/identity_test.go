@@ -205,6 +205,14 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	pass := w.lifetime("idor:order", 3_000_000)
 	aOrder := a.must(http.MethodPost, "/orders", "order-"+uuid.NewString(), map[string]any{"lines": []any{map[string]any{"price_id": pass.ID.String()}}})["id"].(string)
 
+	agreements := func() []any {
+		listed, _ := a.must(http.MethodGet, "/agreements", "", nil)["data"].([]any)
+		return listed
+	}
+	aAgreements := agreements()
+	require.NotEmpty(t, aAgreements, "A's membership agreement")
+	aAgreement := aAgreements[0].(map[string]any)["id"].(string)
+
 	b := w.newCustomer()
 	bCard := b.saveCard("nmi", mastercard)
 	before := w.railLedger("stripe")
@@ -230,6 +238,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		"POST /v1/me/orders/{id}/pay":                   {"/orders/" + aOrder + "/pay", map[string]any{"payment": map[string]any{"payment_method_id": bCard}, "expected_total": "3000000"}},
 		"POST /v1/me/orders/{id}/confirm":               {"/orders/" + aOrder + "/confirm", nil},
 		"POST /v1/me/orders/{id}/cancel":                {"/orders/" + aOrder + "/cancel", nil},
+		"POST /v1/me/agreements/{id}/revoke":            {"/agreements/" + aAgreement + "/revoke", nil},
 	}
 	probed := 0
 	for _, route := range routes.Catalog() {
@@ -244,6 +253,7 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 		probed++
 	}
 	require.Len(t, probes, probed, "every fixture names a mounted route")
+	require.Equal(t, aAgreements, agreements(), "A's agreements stand")
 	// A's usage order, read and paid by B.
 	for _, probe := range []struct {
 		method, path string

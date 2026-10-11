@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"strings"
 	"time"
 
@@ -117,6 +118,16 @@ func (s *EmailService) storeName(ctx context.Context) string {
 		return "OpenRails"
 	}
 	return name
+}
+
+// cancelURL is where the merchant's customers cancel: its billing page,
+// else its support page; "" for neither.
+func (s *EmailService) cancelURL(ctx context.Context) string {
+	p := s.merchantProfile(ctx)
+	if u := strings.TrimSpace(p.BillingURL); u != "" {
+		return u
+	}
+	return strings.TrimSpace(p.SupportURL)
 }
 
 // signupURL is the merchant's winback/signup page; "" when undeclared.
@@ -249,13 +260,13 @@ func (s *EmailService) SendSubscriptionChanged(ctx context.Context, userID strin
 }
 
 // SendSubscriptionConfirmed sends a subscription confirmation email
-func (s *EmailService) SendSubscriptionConfirmed(ctx context.Context, userID string) error {
+func (s *EmailService) SendSubscriptionConfirmed(ctx context.Context, userID string, subscriptionID uuid.UUID) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping subscription confirmation email")
 		return nil
 	}
 
-	emailData, err := s.getEmailData(ctx, userID)
+	emailData, err := s.getEmailDataFor(ctx, userID, subscriptionID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
 			log.WithContext(ctx).Debug("email unavailable - skipping subscription confirmation email")
@@ -268,13 +279,13 @@ func (s *EmailService) SendSubscriptionConfirmed(ctx context.Context, userID str
 }
 
 // SendSubscriptionRenewed sends a subscription renewal email
-func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID string) error {
+func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID string, subscriptionID uuid.UUID) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping subscription renewal email")
 		return nil
 	}
 
-	emailData, err := s.getEmailData(ctx, userID)
+	emailData, err := s.getEmailDataFor(ctx, userID, subscriptionID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
 			log.WithContext(ctx).Debug("email unavailable - skipping subscription renewal email")
@@ -287,7 +298,7 @@ func (s *EmailService) SendSubscriptionRenewed(ctx context.Context, userID strin
 }
 
 // SendPremiumEnded sends the appropriate email when a premium entitlement ends.
-func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reason PremiumEndReason) error {
+func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, subscriptionID uuid.UUID, reason PremiumEndReason) error {
 	if !s.IsEnabled() {
 		log.WithContext(ctx).Debug("email service not available - skipping premium-ended email")
 		return nil
@@ -299,7 +310,7 @@ func (s *EmailService) SendPremiumEnded(ctx context.Context, userID string, reas
 		return s.SendAccessEnded(ctx, userID, s.now())
 	}
 
-	emailData, err := s.getEmailData(ctx, userID)
+	emailData, err := s.getEmailDataFor(ctx, userID, subscriptionID)
 	if err != nil {
 		if errors.Is(err, errUserEmailUnavailable) {
 			log.WithContext(ctx).Debug("email unavailable - skipping premium-ended email")
@@ -386,12 +397,27 @@ func (s *EmailService) SendEntitlementExpired(ctx context.Context, userID string
 
 // getEmailData fetches subscription data for email notifications
 func (s *EmailService) getEmailData(ctx context.Context, userID string) (*SubscriptionEmailData, error) {
+	return s.getEmailDataFor(ctx, userID, uuid.Nil)
+}
+
+// getEmailDataFor is the email data of the customer's subscription
+// subscriptionID; uuid.Nil, or one that is not the customer's, falls back to
+// its active or last subscription.
+func (s *EmailService) getEmailDataFor(ctx context.Context, userID string, subscriptionID uuid.UUID) (*SubscriptionEmailData, error) {
 	if s.subscriptionService == nil {
 		return nil, fmt.Errorf("subscription service not configured")
 	}
 
-	// Get the user's active subscription or last known subscription as fallback
-	subscription, err := s.subscriptionService.GetActiveSubscription(ctx, userID)
+	var subscription *models.Subscription
+	var err error
+	if subscriptionID != uuid.Nil {
+		if named, nerr := s.subscriptionService.GetByID(ctx, subscriptionID); nerr == nil && named.CustomerID.String() == userID {
+			subscription = named
+		}
+	}
+	if subscription == nil {
+		subscription, err = s.subscriptionService.GetActiveSubscription(ctx, userID)
+	}
 	if err != nil {
 		if db.IsNotFound(err) {
 			subscription, err = s.subscriptionService.GetByUserID(ctx, userID)
@@ -441,6 +467,11 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 		}
 	}
 
+	// An immediate cancel ends access before the paid period does.
+	if subscription.EndedAt != nil && subscription.EndedAt.Before(periodEnd) {
+		periodEnd = *subscription.EndedAt
+	}
+
 	paymentMethod := describePaymentMethod(subscription)
 	if paymentMethod == "" {
 		paymentMethod = railDisplayName(subscription.Rail)
@@ -460,6 +491,7 @@ func (s *EmailService) getEmailData(ctx context.Context, userID string) (*Subscr
 		PeriodEnd:      periodEnd,
 		PaymentMethod:  paymentMethod,
 		TransactionID:  "",
+		CancelURL:      s.cancelURL(ctx),
 	}, nil
 }
 
@@ -514,4 +546,41 @@ func describePaymentMethod(subscription *models.Subscription) string {
 // to upper case.
 func railDisplayName(rail models.Rail) string {
 	return rails.DisplayName(rail)
+}
+
+// SendUsageCharged emails the receipt of a usage order charged under the
+// customer's collection agreement, with how to cancel it.
+func (s *EmailService) SendUsageCharged(ctx context.Context, n *models.NotificationQueue) error {
+	if !s.IsEnabled() {
+		return nil
+	}
+	if n.Data.Amount == nil {
+		return fmt.Errorf("usage receipt %s has no amount", n.ID)
+	}
+	username, email, err := s.getUserEmail(ctx, n.CustomerID.String())
+	if errors.Is(err, errUserEmailUnavailable) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	content := RenderUsageChargedEmail(s.storeName(ctx), username, s.cancelURL(ctx), n.Data, n.CreatedAt)
+	return s.SendEmail(ctx, email, content.Subject, content.HTML, content.Plain)
+}
+
+// SendAgreementRevoked confirms the customer's revocation of its agreement
+// to be charged for usage.
+func (s *EmailService) SendAgreementRevoked(ctx context.Context, n *models.NotificationQueue) error {
+	if !s.IsEnabled() {
+		return nil
+	}
+	username, email, err := s.getUserEmail(ctx, n.CustomerID.String())
+	if errors.Is(err, errUserEmailUnavailable) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	content := RenderAgreementRevokedEmail(s.storeName(ctx), username, s.cancelURL(ctx), n.Data, n.CreatedAt)
+	return s.SendEmail(ctx, email, content.Subject, content.HTML, content.Plain)
 }

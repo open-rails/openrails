@@ -123,6 +123,7 @@ func settingsFromGen(r gen.BillingMoneySetting) *models.MoneyAccount {
 		DefaultPaymentMethod: r.DefaultPaymentMethodID,
 		CreditLimitAmount:    r.CreditLimitAmount,
 		TrustLevel:           r.Tier,
+		CollectionRevokedAt:  r.CollectionRevokedAt,
 		CreatedAt:            r.CreatedAt,
 		UpdatedAt:            r.UpdatedAt,
 	}

@@ -282,7 +282,7 @@ func (s *MoneyService) spendBalanceThenOwedTx(
 				return 0, 0, false, serr
 			}
 			settings := settingsFromGen(settingsRow)
-			if settings.BillingMode != BillingModeArrears {
+			if !settings.ExtendsCredit() {
 				return 0, 0, false, ErrInsufficientCredits // prepay-only: credit limit 0
 			}
 			if settings.CreditLimitAmount <= 0 {

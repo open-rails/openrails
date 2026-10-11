@@ -45,8 +45,6 @@ func networkRoutes() []Route {
 			Query: pageParams, Responses: []Reply{{200, billing.ListPage[billing.NetworkOrder]{}}}, Errors: codes("invalid_cursor", "service_unavailable"), Handler: h(handlers.ListNetworkOrders)},
 		{Method: DELETE, Path: "/v1/network/links/{link_id}", Group: Network, Auth: AuthNetwork, When: FeatureCustomerNetwork, NoConn: true, Sensitive: true,
 			Responses: []Reply{{204, nil}}, Errors: codes(billing.CodeNetworkLinkInUse, "invalid_param", "service_unavailable"), Handler: h(handlers.UnlinkNetworkLink)},
-		{Method: POST, Path: "/v1/network/links/{link_id}/revoke-authority", Group: Network, Auth: AuthNetwork, When: FeatureCustomerNetwork, Sensitive: true,
-			Responses: []Reply{{200, billing.PaymentAuthorityRevocation{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.RevokePaymentAuthority)},
 	}
 	// The customer routes the account acts by through one link.
 	for _, at := range []struct {
@@ -63,6 +61,8 @@ func networkRoutes() []Route {
 		{"GET /v1/me/orders/{id}", false},
 		{"POST /v1/me/orders/{id}/pay", true},
 		{"POST /v1/me/orders/{id}/confirm", true},
+		{"GET /v1/me/agreements", false},
+		{"POST /v1/me/agreements/{id}/revoke", true},
 	} {
 		out = append(out, throughLink(at.key, at.sensitive))
 	}
@@ -72,7 +72,7 @@ func networkRoutes() []Route {
 // throughLink is the customer route key through one of the account's links:
 // the same operation under /v1/network/links/{link_id}.
 func throughLink(key string, sensitive bool) Route {
-	for _, list := range [][]Route{subscriptionsRoutes, paymentMethodsRoutes, ordersRoutes} {
+	for _, list := range [][]Route{subscriptionsRoutes, paymentMethodsRoutes, ordersRoutes, agreementsRoutes} {
 		for _, r := range list {
 			if r.Key() != key {
 				continue

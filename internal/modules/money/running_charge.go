@@ -428,7 +428,7 @@ func (s *MoneyService) capacityFloor(ctx context.Context, q *gen.Queries, mercha
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return 0, 0, err
 	}
-	if err == nil && settings.BillingMode == BillingModeArrears {
+	if err == nil && settings.BillingMode == BillingModeArrears && settings.CollectionRevokedAt == nil {
 		return -max(satSub(settings.CreditLimitAmount, owed), 0), owed, nil
 	}
 	return satSub(owed, overdraft), owed, nil

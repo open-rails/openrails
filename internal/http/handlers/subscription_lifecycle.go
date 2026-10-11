@@ -88,50 +88,22 @@ func CancelSubscription(r *httprequest.Request) {
 			r.APIError(solanaClientError(err))
 			return
 		}
+		convergeAfter(ctx, r, sub, "subscription_cancel")
 	} else {
 		if req.Signature != "" {
 			r.APIError(api.Coded(billing.CodeInvalidParam, "signature completes a wallet step; this subscription's rail has none").WithParam("signature"))
 			return
 		}
-		if err := cancelForCustomer(ctx, r, userID, sub, reason); err != nil {
+		svc, ok := billingService(r)
+		if !ok {
+			return
+		}
+		if err := svc.CancelSubscriptionForCustomer(ctx, billing.CustomerID(sub.CustomerID), sub, reason); err != nil {
 			writeRefusal(r, err, "failed to cancel subscription")
 			return
 		}
 	}
-	convergeAfter(ctx, r, sub, "subscription_cancel")
 	writeMySubscription(r, userID, sub.ID, nil)
-}
-
-// cancelForCustomer records the customer's cancel at period end: the local
-// cancel plus the provider's cancel (inline on Stripe, a durable intent
-// committed with it on NMI and CCBill).
-func cancelForCustomer(ctx context.Context, r *httprequest.Request, userID string, sub *models.Subscription, reason string) error {
-	// A provider-billed schedule that cannot be deleted (destructive actions
-	// disarmed) is refused with its operator finding.
-	if _, err := subscriptions.RequireProviderCancelArmed(ctx, r.State.SubscriptionService.Database(), sub, false); err != nil {
-		return err
-	}
-	if sub.CollectionPolicy != models.CollectionPolicyEngine && sub.Rail != models.RailStripe {
-		if r.State.UserSubscriptionService == nil {
-			return fmt.Errorf("user subscription service unavailable")
-		}
-		return r.State.UserSubscriptionService.CancelUserSubscription(ctx, userID, sub.ID, reason)
-	}
-	if r.State.SubscriptionLifecycleService == nil {
-		return fmt.Errorf("subscription lifecycle service unavailable")
-	}
-	if sub.CollectionPolicy != models.CollectionPolicyEngine {
-		stripeSvc := &subscriptions.StripeService{StripeClients: r.State.StripeClients, Config: r.State.Config, Rails: r.State.RailConfigs}
-		if err := stripeSvc.CancelSubscription(ctx, sub.RailSubscriptionID); err != nil {
-			return err
-		}
-	}
-	return r.State.SubscriptionLifecycleService.CancelMembership(ctx, &subscriptions.CancelMembershipParams{
-		SubscriptionID:     &sub.ID,
-		CancelType:         models.CancelTypeUser,
-		CancelFeedback:     &reason,
-		RefuseOwnedRenewal: true,
-	})
 }
 
 // ResumeSubscription undoes the customer's own scheduled cancel on a

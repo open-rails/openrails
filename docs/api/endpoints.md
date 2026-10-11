@@ -375,7 +375,8 @@ automatic refund is `400 refund_unsupported`; one that cannot take it now is
 
 `GET /v1/app/host-events` is the feed a host's backend drains: `payment.settled`,
 `delinquency.grace`, `delinquency.entered`, `delinquency.cleared`,
-`balance.low`, `balance.depleted` ([running charges](../running-charges.md)), oldest
+`balance.low`, `balance.depleted` ([running charges](../running-charges.md)),
+`mandate.revoked` ([charge agreements](../agreements.md)), oldest
 first, filtered by `type`. Acknowledge them, up to 100 at a time
 (`POST /v1/app/host-events/acknowledge`), after the host's own
 processing commits, then fetch again. Acknowledgment is idempotent and

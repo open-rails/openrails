@@ -227,6 +227,9 @@ type MerchantProfile struct {
 	FromEmail  string `json:"from_email,omitempty"`
 	SupportURL string `json:"support_url,omitempty"`
 	SignupURL  string `json:"signup_url,omitempty"`
+	// BillingURL is where customers manage and cancel their subscriptions
+	// and payment agreements; receipts and confirmations link to it.
+	BillingURL string `json:"billing_url,omitempty"`
 }
 
 // MerchantCheckoutSettings are the merchant's hosted checkout settings.

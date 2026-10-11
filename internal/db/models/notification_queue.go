@@ -39,6 +39,14 @@ const (
 	NotificationAccountDelinquent        NotificationEventType = "account_delinquent"
 	NotificationAccountDelinquencyClosed NotificationEventType = "account_delinquency_cleared"
 
+	// The customer revoked its agreement to be charged for usage in a
+	// currency (data.currency, effective_at; amount_due and order_id: what it
+	// still owes, which it pays itself).
+	NotificationAgreementRevoked NotificationEventType = "agreement_revoked"
+	// A usage order charged under the customer's collection agreement: its
+	// receipt (data.order_id, amount, currency, payment_id).
+	NotificationUsageCharged NotificationEventType = "usage_charged"
+
 	// A usage order with an amount due, and one past its due date.
 	NotificationOrderDue     NotificationEventType = "order_due"
 	NotificationOrderOverdue NotificationEventType = "order_overdue"

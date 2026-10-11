@@ -214,6 +214,28 @@ func (q *Queries) CreateUsageOrderLine(ctx context.Context, arg CreateUsageOrder
 	return err
 }
 
+const earliestPendingOwedAccrual = `-- name: EarliestPendingOwedAccrual :one
+SELECT accrued_at FROM billing.owed_items
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+  AND order_id IS NULL AND status = 'pending'
+ORDER BY accrued_at
+LIMIT 1
+`
+
+type EarliestPendingOwedAccrualParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// When the customer's unbilled usage in the currency began; none for none.
+func (q *Queries) EarliestPendingOwedAccrual(ctx context.Context, arg EarliestPendingOwedAccrualParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, earliestPendingOwedAccrual, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var accrued_at time.Time
+	err := row.Scan(&accrued_at)
+	return accrued_at, err
+}
+
 const endUsageCollection = `-- name: EndUsageCollection :execrows
 UPDATE billing.orders
 SET status = 'open', payment_status = 'requires_payment_method',
@@ -647,6 +669,92 @@ func (q *Queries) ListChargeableUsageOrders(ctx context.Context, arg ListChargea
 	return items, nil
 }
 
+const listOpenUsageOrdersOfCurrency = `-- name: ListOpenUsageOrdersOfCurrency :many
+SELECT merchant_id, id, customer_id, origin, status, currency, total, number, idempotency_key, request_digest, payment_method_id, psp_id, attempt_id, payment_id, last_payment_error, expires_at, completed_at, canceled_at, expired_at, created_at, updated_at, payment_status, checkout_secret_hash, checkout_expires_at, checkout_success_url, checkout_cancel_url, checkout_saved_payment_methods, subscription_id, period_starts_at, period_ends_at, due_at, voided_at, checkout_ui_mode, amount_paid, uncollectible_at, collection_method, po_number, memo, tax, billing_contacts, collection_failure_count, collection_failed_at, next_collection_attempt_at FROM billing.orders
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid AND currency = $3::text
+  AND origin = 'usage' AND status = 'open' AND amount_paid < total
+ORDER BY created_at, id
+LIMIT $4::int
+`
+
+type ListOpenUsageOrdersOfCurrencyParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+	RowLimit   int32
+}
+
+// The customer's open usage orders in the currency, oldest first: at most a
+// few, each a closed billing window.
+func (q *Queries) ListOpenUsageOrdersOfCurrency(ctx context.Context, arg ListOpenUsageOrdersOfCurrencyParams) ([]BillingOrder, error) {
+	rows, err := q.db.Query(ctx, listOpenUsageOrdersOfCurrency,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingOrder
+	for rows.Next() {
+		var i BillingOrder
+		if err := rows.Scan(
+			&i.MerchantID,
+			&i.ID,
+			&i.CustomerID,
+			&i.Origin,
+			&i.Status,
+			&i.Currency,
+			&i.Total,
+			&i.Number,
+			&i.IdempotencyKey,
+			&i.RequestDigest,
+			&i.PaymentMethodID,
+			&i.PspID,
+			&i.AttemptID,
+			&i.PaymentID,
+			&i.LastPaymentError,
+			&i.ExpiresAt,
+			&i.CompletedAt,
+			&i.CanceledAt,
+			&i.ExpiredAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PaymentStatus,
+			&i.CheckoutSecretHash,
+			&i.CheckoutExpiresAt,
+			&i.CheckoutSuccessUrl,
+			&i.CheckoutCancelUrl,
+			&i.CheckoutSavedPaymentMethods,
+			&i.SubscriptionID,
+			&i.PeriodStartsAt,
+			&i.PeriodEndsAt,
+			&i.DueAt,
+			&i.VoidedAt,
+			&i.CheckoutUiMode,
+			&i.AmountPaid,
+			&i.UncollectibleAt,
+			&i.CollectionMethod,
+			&i.PoNumber,
+			&i.Memo,
+			&i.Tax,
+			&i.BillingContacts,
+			&i.CollectionFailureCount,
+			&i.CollectionFailedAt,
+			&i.NextCollectionAttemptAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOrderCollectionsForArchive = `-- name: ListOrderCollectionsForArchive :many
 SELECT i.id, i.merchant_id, i.rail, i.intent_type, i.subscription_id, i.payment_id, i.price_id, i.payload, i.idempotency_key, i.status, i.attempts, i.next_attempt_at, i.lease_expires_at, i.origin, i.origin_reason, i.actor, i.last_failure_reason, i.expires_at, i.result_evidence, i.created_at, i.executed_at, i.updated_at, i.psp_id, i.destructive_run_id, i.destructive_run_class, i.custodian_id, i.subject, i.credential, a.id AS payment_id, a.customer_id AS payment_customer_id, a.order_id AS payment_order_id,
     a.psp_id AS payment_psp_id, a.rail AS payment_rail, a.transaction_id AS payment_transaction_id, a.amount AS payment_amount,
@@ -1034,7 +1142,7 @@ const notifyOverdueUsageOrders = `-- name: NotifyOverdueUsageOrders :one
 WITH notices AS (
     INSERT INTO billing.notifications (id, merchant_id, customer_id, event_type, data, read_at, created_at)
     SELECT md5('invoice_overdue:' || id::text)::uuid, merchant_id, customer_id, 'order_overdue',
-           jsonb_build_object('order_id', id, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
+           jsonb_build_object('order_id', 'ord_' || id::text, 'amount_due', (total - amount_paid)::text, 'currency', currency, 'due_at', due_at),
            NULL, $1::timestamptz
     FROM billing.orders
     WHERE merchant_id = $2::uuid

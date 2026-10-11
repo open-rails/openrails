@@ -104,28 +104,26 @@ func (q *Queries) EndPaymentMethodMandates(ctx context.Context, arg EndPaymentMe
 	return items, nil
 }
 
-const enqueuePaymentAuthorityRevoked = `-- name: EnqueuePaymentAuthorityRevoked :exec
+const enqueueMandateRevoked = `-- name: EnqueueMandateRevoked :exec
 INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
-VALUES ($1::uuid, 'customer.payment_authority_revoked', 'customer', $2::uuid,
-    $3::timestamptz, $4::jsonb, $5::text)
+VALUES ($1::uuid, 'mandate.revoked', 'mandate', $2::uuid,
+    $3::timestamptz, $4::jsonb, 'mandate.revoked:' || $2::uuid::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING
 `
 
-type EnqueuePaymentAuthorityRevokedParams struct {
+type EnqueueMandateRevokedParams struct {
 	MerchantID uuid.UUID
-	CustomerID uuid.UUID
+	MandateID  uuid.UUID
 	OccurredAt time.Time
 	Data       []byte
-	DedupeKey  string
 }
 
-func (q *Queries) EnqueuePaymentAuthorityRevoked(ctx context.Context, arg EnqueuePaymentAuthorityRevokedParams) error {
-	_, err := q.db.Exec(ctx, enqueuePaymentAuthorityRevoked,
+func (q *Queries) EnqueueMandateRevoked(ctx context.Context, arg EnqueueMandateRevokedParams) error {
+	_, err := q.db.Exec(ctx, enqueueMandateRevoked,
 		arg.MerchantID,
-		arg.CustomerID,
+		arg.MandateID,
 		arg.OccurredAt,
 		arg.Data,
-		arg.DedupeKey,
 	)
 	return err
 }
@@ -159,6 +157,47 @@ func (q *Queries) GetCitableMandateForShare(ctx context.Context, arg GetCitableM
 		arg.PspID,
 		arg.Kinds,
 	)
+	var i BillingMandate
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PaymentMethodID,
+		&i.PspID,
+		&i.Rail,
+		&i.Kind,
+		&i.SubscriptionID,
+		&i.Currency,
+		&i.Status,
+		&i.EndReason,
+		&i.EndedAt,
+		&i.CardBrand,
+		&i.InitialTransactionID,
+		&i.NetworkTransactionID,
+		&i.TransactionLinkID,
+		&i.StoringAttemptID,
+		&i.AcceptedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLiveAgreement = `-- name: GetLiveAgreement :one
+SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
+WHERE merchant_id = $1::uuid AND id = $2::uuid AND customer_id = $3::uuid
+  AND kind IN ('recurring', 'unscheduled') AND status IN ('active', 'requires_reconsent')
+`
+
+type GetLiveAgreementParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+	CustomerID uuid.UUID
+}
+
+// One of the customer's live charge agreements.
+func (q *Queries) GetLiveAgreement(ctx context.Context, arg GetLiveAgreementParams) (BillingMandate, error) {
+	row := q.db.QueryRow(ctx, getLiveAgreement, arg.MerchantID, arg.ID, arg.CustomerID)
 	var i BillingMandate
 	err := row.Scan(
 		&i.ID,
@@ -284,6 +323,44 @@ type GetLiveUnscheduledMandateForShareParams struct {
 // The customer's collection agreement in one currency.
 func (q *Queries) GetLiveUnscheduledMandateForShare(ctx context.Context, arg GetLiveUnscheduledMandateForShareParams) (BillingMandate, error) {
 	row := q.db.QueryRow(ctx, getLiveUnscheduledMandateForShare, arg.MerchantID, arg.CustomerID, arg.Currency)
+	var i BillingMandate
+	err := row.Scan(
+		&i.ID,
+		&i.MerchantID,
+		&i.CustomerID,
+		&i.PaymentMethodID,
+		&i.PspID,
+		&i.Rail,
+		&i.Kind,
+		&i.SubscriptionID,
+		&i.Currency,
+		&i.Status,
+		&i.EndReason,
+		&i.EndedAt,
+		&i.CardBrand,
+		&i.InitialTransactionID,
+		&i.NetworkTransactionID,
+		&i.TransactionLinkID,
+		&i.StoringAttemptID,
+		&i.AcceptedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getMandate = `-- name: GetMandate :one
+SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
+WHERE merchant_id = $1::uuid AND id = $2::uuid
+`
+
+type GetMandateParams struct {
+	MerchantID uuid.UUID
+	ID         uuid.UUID
+}
+
+func (q *Queries) GetMandate(ctx context.Context, arg GetMandateParams) (BillingMandate, error) {
+	row := q.db.QueryRow(ctx, getMandate, arg.MerchantID, arg.ID)
 	var i BillingMandate
 	err := row.Scan(
 		&i.ID,
@@ -459,6 +536,73 @@ func (q *Queries) LinkMandateStoringAttempt(ctx context.Context, arg LinkMandate
 		arg.InitialTransactionID,
 	)
 	return err
+}
+
+const listLiveAgreementsPage = `-- name: ListLiveAgreementsPage :many
+SELECT id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at FROM billing.mandates
+WHERE merchant_id = $1::uuid AND customer_id = $2::uuid
+  AND kind IN ('recurring', 'unscheduled') AND status IN ('active', 'requires_reconsent')
+  AND ($3::timestamptz IS NULL
+       OR (created_at, id) < ($3::timestamptz, $4::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $5::int
+`
+
+type ListLiveAgreementsPageParams struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	AfterAt    *time.Time
+	AfterID    *uuid.UUID
+	RowLimit   int32
+}
+
+// The customer's live charge agreements, newest first: what the merchant may
+// charge its cards for without it. card_on_file covers no such charge.
+func (q *Queries) ListLiveAgreementsPage(ctx context.Context, arg ListLiveAgreementsPageParams) ([]BillingMandate, error) {
+	rows, err := q.db.Query(ctx, listLiveAgreementsPage,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.AfterAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BillingMandate
+	for rows.Next() {
+		var i BillingMandate
+		if err := rows.Scan(
+			&i.ID,
+			&i.MerchantID,
+			&i.CustomerID,
+			&i.PaymentMethodID,
+			&i.PspID,
+			&i.Rail,
+			&i.Kind,
+			&i.SubscriptionID,
+			&i.Currency,
+			&i.Status,
+			&i.EndReason,
+			&i.EndedAt,
+			&i.CardBrand,
+			&i.InitialTransactionID,
+			&i.NetworkTransactionID,
+			&i.TransactionLinkID,
+			&i.StoringAttemptID,
+			&i.AcceptedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listLiveMandatesOfPaymentMethods = `-- name: ListLiveMandatesOfPaymentMethods :many
@@ -707,63 +851,6 @@ type RevokeCardOnFileMandatesParams struct {
 // The customer withdrew reuse of one card for one-click buys.
 func (q *Queries) RevokeCardOnFileMandates(ctx context.Context, arg RevokeCardOnFileMandatesParams) ([]BillingMandate, error) {
 	rows, err := q.db.Query(ctx, revokeCardOnFileMandates, arg.Now, arg.MerchantID, arg.PaymentMethodID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingMandate
-	for rows.Next() {
-		var i BillingMandate
-		if err := rows.Scan(
-			&i.ID,
-			&i.MerchantID,
-			&i.CustomerID,
-			&i.PaymentMethodID,
-			&i.PspID,
-			&i.Rail,
-			&i.Kind,
-			&i.SubscriptionID,
-			&i.Currency,
-			&i.Status,
-			&i.EndReason,
-			&i.EndedAt,
-			&i.CardBrand,
-			&i.InitialTransactionID,
-			&i.NetworkTransactionID,
-			&i.TransactionLinkID,
-			&i.StoringAttemptID,
-			&i.AcceptedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const revokeCustomerMandates = `-- name: RevokeCustomerMandates :many
-UPDATE billing.mandates SET status = 'revoked', end_reason = 'customer_revoked',
-    ended_at = $1::timestamptz, updated_at = $1::timestamptz
-WHERE merchant_id = $2::uuid AND customer_id = $3::uuid
-  AND status IN ('active', 'requires_reconsent')
-RETURNING id, merchant_id, customer_id, payment_method_id, psp_id, rail, kind, subscription_id, currency, status, end_reason, ended_at, card_brand, initial_transaction_id, network_transaction_id, transaction_link_id, storing_attempt_id, accepted_at, created_at, updated_at
-`
-
-type RevokeCustomerMandatesParams struct {
-	Now        time.Time
-	MerchantID uuid.UUID
-	CustomerID uuid.UUID
-}
-
-// The customer ended the merchant's authority to charge its cards without
-// it: every live agreement, of every card.
-func (q *Queries) RevokeCustomerMandates(ctx context.Context, arg RevokeCustomerMandatesParams) ([]BillingMandate, error) {
-	rows, err := q.db.Query(ctx, revokeCustomerMandates, arg.Now, arg.MerchantID, arg.CustomerID)
 	if err != nil {
 		return nil, err
 	}

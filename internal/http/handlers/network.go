@@ -242,24 +242,3 @@ func UnlinkNetworkLink(r *httprequest.Request) {
 	}
 	r.NoContent()
 }
-
-// RevokePaymentAuthority handles POST
-// /v1/network/links/{link_id}/revoke-authority: the link's merchant may no
-// longer charge the customer's cards without it.
-func RevokePaymentAuthority(r *httprequest.Request) {
-	scope, ok := r.CustomerScope()
-	if !ok {
-		r.ErrorCode(billing.CodeAuthenticationRequired, "")
-		return
-	}
-	svc, ok := billingService(r)
-	if !ok {
-		return
-	}
-	out, err := svc.RevokePaymentAuthority(r.Request.Context(), scope.Customer())
-	if err != nil {
-		writeRefusal(r, err, "revoking payment authority failed")
-		return
-	}
-	r.SuccessJSON(out)
-}

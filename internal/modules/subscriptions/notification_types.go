@@ -62,4 +62,7 @@ type SubscriptionEmailData struct {
 	PeriodEnd      time.Time
 	PaymentMethod  string
 	TransactionID  string
+	// CancelURL is where the customer cancels: the merchant's billing page,
+	// else its support page; "" for neither.
+	CancelURL string
 }

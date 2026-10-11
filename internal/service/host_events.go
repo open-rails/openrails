@@ -27,7 +27,7 @@ func (s *Service) ListHostEvents(ctx context.Context, req billing.HostEventListP
 	switch req.Type {
 	case "", billing.HostEventPaymentSettled, billing.HostEventDelinquencyGrace, billing.HostEventDelinquencyEntered, billing.HostEventDelinquencyCleared, billing.HostEventProductEntitlementsChanged,
 		billing.HostEventOrderCompleted, billing.HostEventOrderRequiresAction, billing.HostEventOrderPaymentFailed, billing.HostEventOrderCanceled, billing.HostEventOrderExpired, billing.HostEventOrderVoided,
-		billing.HostEventCustomerNetworkLinked, billing.HostEventCustomerNetworkUnlinked, billing.HostEventCustomerPaymentAuthorityRevoked,
+		billing.HostEventCustomerNetworkLinked, billing.HostEventCustomerNetworkUnlinked, billing.HostEventMandateRevoked,
 		billing.HostEventBalanceLow, billing.HostEventBalanceDepleted:
 	default:
 		return billing.ListPage[billing.HostEvent]{}, invalidHostEventRequest("unknown host event type")
@@ -167,13 +167,13 @@ func (s *Service) hostEvents(ctx context.Context, params gen.ListHostEventsParam
 			}
 			payload.CustomerID = billing.CustomerID(row.SubjectID)
 			event.CustomerNetwork = &payload
-		case billing.HostEventCustomerPaymentAuthorityRevoked:
-			var payload billing.PaymentAuthorityHostEvent
+		case billing.HostEventMandateRevoked:
+			var payload billing.MandateHostEvent
 			if err := json.Unmarshal(row.Data, &payload); err != nil {
 				return nil, fmt.Errorf("decode host event %s: %w", row.ID, err)
 			}
-			payload.CustomerID = billing.CustomerID(row.SubjectID)
-			event.PaymentAuthority = &payload
+			payload.MandateID = billing.MandateID(row.SubjectID)
+			event.Mandate = &payload
 		case billing.HostEventBalanceLow, billing.HostEventBalanceDepleted:
 			var payload billing.BalanceHostEvent
 			if err := json.Unmarshal(row.Data, &payload); err != nil {

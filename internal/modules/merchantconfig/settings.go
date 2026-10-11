@@ -52,13 +52,14 @@ func Normalize(displayName string, in billing.MerchantSettings) (Settings, error
 	cfg := &out.Config
 	cfg.Profile.DisplayName = strings.TrimSpace(displayName)
 	if p := in.Profile; p != nil {
-		for field, raw := range map[string]string{"logo_url": p.LogoURL, "support_url": p.SupportURL, "signup_url": p.SignupURL} {
+		for field, raw := range map[string]string{"logo_url": p.LogoURL, "support_url": p.SupportURL, "signup_url": p.SignupURL, "billing_url": p.BillingURL} {
 			if raw = strings.TrimSpace(raw); raw != "" && !httpURL(raw) {
 				return Settings{}, fmt.Errorf("profile.%s must be an http or https URL", field)
 			}
 		}
 		cfg.Profile.LogoURL, cfg.Profile.FromEmail = strings.TrimSpace(p.LogoURL), strings.TrimSpace(p.FromEmail)
 		cfg.Profile.SupportURL, cfg.Profile.SignupURL = strings.TrimSpace(p.SupportURL), strings.TrimSpace(p.SignupURL)
+		cfg.Profile.BillingURL = strings.TrimSpace(p.BillingURL)
 	}
 	for name, v := range map[string]*int64{"collection_threshold": in.CollectionThreshold, "monthly_floor": in.MonthlyFloor, "arrears_delinquency_floor": in.ArrearsDelinquencyFloor} {
 		if v != nil && *v < 0 {

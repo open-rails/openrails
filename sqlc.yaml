@@ -63,6 +63,7 @@ sql:
       - "internal/migrate/postgres/0064_orders_id_index.up.sql"
       - "internal/migrate/postgres/0065_drop_merchant_api_hosts.up.sql"
       - "internal/migrate/postgres/0066_drop_rate_overrides_and_product_archives.up.sql"
+      - "internal/migrate/postgres/0067_agreement_revocations.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:

@@ -171,6 +171,9 @@ func mergeMerchantSettings(current, patch billing.MerchantSettings) billing.Merc
 		if patch.Profile.SignupURL != "" {
 			p.SignupURL = patch.Profile.SignupURL
 		}
+		if patch.Profile.BillingURL != "" {
+			p.BillingURL = patch.Profile.BillingURL
+		}
 		current.Profile = &p
 	}
 	if patch.CollectionThreshold != nil {

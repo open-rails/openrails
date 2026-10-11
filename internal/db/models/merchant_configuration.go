@@ -70,4 +70,7 @@ type MerchantProfileConfiguration struct {
 	// SignupURL is the signup page access-ended and expiry emails link to.
 	// "" ⇒ no call to action.
 	SignupURL string `json:"signup_url,omitempty"`
+	// BillingURL is where customers manage and cancel their subscriptions
+	// and payment agreements; receipts and confirmations link to it.
+	BillingURL string `json:"billing_url,omitempty"`
 }

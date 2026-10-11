@@ -28,6 +28,8 @@ type EmailContent struct {
 // emailHTML holds every HTML body. html/template escapes each value by context
 // (text, attribute, URL), so customer and merchant text cannot inject markup.
 var emailHTML = template.Must(template.New("email").Option("missingkey=error").Parse(`
+{{define "how_to_cancel"}}<p>To cancel {{.CancelWhat}}, and with it your agreement to these charges, {{if .CancelURL}}visit <a href="{{.CancelURL}}">{{.CancelURL}}</a>{{else}}sign in to your account at {{.Store}}{{end}}.</p>{{end}}
+
 {{define "button"}}{{if .URL}}<p><a href="{{.URL}}" style="display:inline-block;padding:10px 18px;background:#6c4ad0;color:#ffffff;text-decoration:none;border-radius:4px;">{{.Label}}</a></p>{{end}}{{end}}
 
 {{define "confirmation"}}
@@ -42,6 +44,7 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 	<li><strong>Payment Method:</strong> {{.PaymentMethod}}</li>
 </ul>
 <p>Enjoy!</p>
+{{template "how_to_cancel" .}}
 <p>The {{.Store}} Team</p>
 {{end}}
 
@@ -57,6 +60,7 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 	<li><strong>Transaction ID:</strong> {{.TransactionID}}</li>
 </ul>
 <p>Your access continues uninterrupted.</p>
+{{template "how_to_cancel" .}}
 <p>The {{.Store}} Team</p>
 {{end}}
 
@@ -68,7 +72,7 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 	<li><strong>Subscription ID:</strong> {{.SubscriptionID}}</li>
 	<li><strong>Premium access available until:</strong> {{.PeriodEnd}}</li>
 </ul>
-<p>You'll continue to enjoy premium access until {{.PeriodEnd}}.</p>
+<p>You'll continue to enjoy premium access until {{.PeriodEnd}}. No further payments will be taken.</p>
 <p>{{.Footer}}</p>
 <p>The {{.Store}} Team</p>
 {{end}}
@@ -177,7 +181,36 @@ var emailHTML = template.Must(template.New("email").Option("missingkey=error").P
 </ul>
 <p>The {{.Store}} Team</p>
 {{end}}
+
+{{define "usage_charged"}}
+<h2>Payment received</h2>
+<p>Hi {{.Username}},</p>
+<p>We charged your card for your usage, as you agreed.</p>
+<ul>
+	<li><strong>Amount charged:</strong> {{.Amount}}</li>
+	{{if .Order}}<li><strong>Order:</strong> {{.Order}}</li>{{end}}
+	<li><strong>Date:</strong> {{.Date}}</li>
+</ul>
+{{template "how_to_cancel" .}}
+<p>The {{.Store}} Team</p>
+{{end}}
+
+{{define "agreement_revoked"}}
+<h2>Usage charges stopped</h2>
+<p>Hi {{.Username}},</p>
+<p>As you asked, {{.Store}} will no longer charge your card for usage in {{.Currency}}, from {{.Date}}.</p>
+{{if .Amount}}<p>You owe {{.Amount}} for usage before then{{if .Order}} (order {{.Order}}){{end}}. It will not be charged to your card: {{if .CancelURL}}pay it at <a href="{{.CancelURL}}">{{.CancelURL}}</a>{{else}}pay it from your account at {{.Store}}{{end}}.</p>{{end}}
+<p>The {{.Store}} Team</p>
+{{end}}
 `))
+
+// cancelPlain is the how-to-cancel line of a plain-text receipt.
+func cancelPlain(store, cancelURL, what string) string {
+	if cancelURL != "" {
+		return fmt.Sprintf("To cancel %s, and with it your agreement to these charges, visit %s.", what, cancelURL)
+	}
+	return fmt.Sprintf("To cancel %s, and with it your agreement to these charges, sign in to your account at %s.", what, store)
+}
 
 type emailFields = map[string]any
 
@@ -259,7 +292,8 @@ func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmai
 	return EmailContent{
 		Subject: fmt.Sprintf("Welcome to %s! Your subscription is confirmed", premiumName),
 		HTML: renderEmailHTML("confirmation", emailFields{"Premium": premiumName, "Username": data.Username, "SubscriptionID": data.SubscriptionID, "Amount": amountLine,
-			"PeriodStart": data.periodInstant(data.PeriodStart), "PeriodEnd": data.periodInstant(data.PeriodEnd), "PaymentMethod": data.PaymentMethod, "Store": storeName}),
+			"PeriodStart": data.periodInstant(data.PeriodStart), "PeriodEnd": data.periodInstant(data.PeriodEnd), "PaymentMethod": data.PaymentMethod, "Store": storeName,
+			"CancelURL": data.CancelURL, "CancelWhat": "this subscription"}),
 		Plain: fmt.Sprintf(`
 			Welcome to %s!
 
@@ -274,9 +308,12 @@ func RenderSubscriptionConfirmationEmail(storeName string, data SubscriptionEmai
 			- Payment Method: %s
 
 			Enjoy!
+
+			%s
+
 			The %s Team
 		`, premiumName, data.Username, data.SubscriptionID, amountLine,
-			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.PaymentMethod, storeName),
+			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.PaymentMethod, cancelPlain(storeName, data.CancelURL, "this subscription"), storeName),
 	}
 }
 
@@ -287,7 +324,8 @@ func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData
 	return EmailContent{
 		Subject: fmt.Sprintf("Your %s subscription has been renewed", premiumName),
 		HTML: renderEmailHTML("renewal", emailFields{"Premium": premiumName, "Username": data.Username, "SubscriptionID": data.SubscriptionID, "Amount": amountLine,
-			"PeriodStart": data.periodInstant(data.PeriodStart), "PeriodEnd": data.periodInstant(data.PeriodEnd), "TransactionID": data.TransactionID, "Store": storeName}),
+			"PeriodStart": data.periodInstant(data.PeriodStart), "PeriodEnd": data.periodInstant(data.PeriodEnd), "TransactionID": data.TransactionID, "Store": storeName,
+			"CancelURL": data.CancelURL, "CancelWhat": "this subscription"}),
 		Plain: fmt.Sprintf(`
 			Subscription Renewed Successfully
 
@@ -303,9 +341,11 @@ func RenderSubscriptionRenewalEmail(storeName string, data SubscriptionEmailData
 
 			Your access continues uninterrupted.
 
+			%s
+
 			The %s Team
 		`, data.Username, premiumName, data.SubscriptionID, amountLine,
-			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.TransactionID, storeName),
+			data.periodInstant(data.PeriodStart), data.periodInstant(data.PeriodEnd), data.TransactionID, cancelPlain(storeName, data.CancelURL, "this subscription"), storeName),
 	}
 }
 
@@ -344,7 +384,7 @@ func RenderSubscriptionCancellationEmail(storeName string, data SubscriptionEmai
 			Subscription ID: %s
 			Premium access available until: %s
 
-			You'll continue to enjoy premium access until %s.
+			You'll continue to enjoy premium access until %s. No further payments will be taken.
 
 			%s
 			The %s Team
@@ -556,5 +596,65 @@ func RenderSubscriptionNonRecoverableEmail(storeName, checkoutURL string, data S
 
 			The %s Team
 		`, premiumName, data.Username, premiumName, data.SubscriptionID, linkText, storeName),
+	}
+}
+
+// RenderUsageChargedEmail is the receipt of a usage order charged under the
+// customer's collection agreement, with how to cancel that agreement.
+func RenderUsageChargedEmail(storeName, username, cancelURL string, data billing.NotificationData, paidAt time.Time) EmailContent {
+	name := strings.TrimSpace(username)
+	if name == "" {
+		name = "there"
+	}
+	amount := moneyutil.FormatAmount(*data.Amount, data.Currency)
+	date := paidAt.UTC().Format("January 2, 2006")
+	what := "charges for your usage"
+	plain := fmt.Sprintf("Payment received\n\nHi %s,\n\nWe charged your card for your usage, as you agreed.\n\n- Amount charged: %s\n", name, amount)
+	if data.OrderNumber != "" {
+		plain += "- Order: " + data.OrderNumber + "\n"
+	}
+	plain += fmt.Sprintf("- Date: %s\n\n%s\n\nThe %s Team\n", date, cancelPlain(storeName, cancelURL, what), storeName)
+	return EmailContent{
+		Subject: "Your receipt from " + storeName,
+		HTML: renderEmailHTML("usage_charged", emailFields{"Username": name, "Amount": amount, "Order": data.OrderNumber, "Date": date, "Store": storeName,
+			"CancelURL": cancelURL, "CancelWhat": what}),
+		Plain: plain,
+	}
+}
+
+// RenderAgreementRevokedEmail confirms the customer's revocation of its
+// agreement to be charged for usage: from when, and what it still owes,
+// which it pays itself.
+func RenderAgreementRevokedEmail(storeName, username, payURL string, data billing.NotificationData, revokedAt time.Time) EmailContent {
+	name := strings.TrimSpace(username)
+	if name == "" {
+		name = "there"
+	}
+	effective := revokedAt.UTC()
+	if data.EffectiveAt != nil {
+		effective = data.EffectiveAt.UTC()
+	}
+	date := effective.Format("January 2, 2006")
+	amount, order := "", ""
+	if data.AmountDue != nil && *data.AmountDue > 0 {
+		amount = moneyutil.FormatAmount(*data.AmountDue, data.Currency)
+		if !data.OrderID.IsZero() {
+			order = data.OrderID.String()
+		}
+	}
+	plain := fmt.Sprintf("Usage charges stopped\n\nHi %s,\n\nAs you asked, %s will no longer charge your card for usage in %s, from %s.\n", name, storeName, data.Currency, date)
+	if amount != "" {
+		where := "pay it from your account at " + storeName
+		if payURL != "" {
+			where = "pay it at " + payURL
+		}
+		plain += fmt.Sprintf("\nYou owe %s for usage before then. It will not be charged to your card: %s.\n", amount, where)
+	}
+	plain += fmt.Sprintf("\nThe %s Team\n", storeName)
+	return EmailContent{
+		Subject: "Usage charges at " + storeName + " stopped",
+		HTML: renderEmailHTML("agreement_revoked", emailFields{"Username": name, "Store": storeName, "Currency": data.Currency, "Date": date,
+			"Amount": amount, "Order": order, "CancelURL": payURL}),
+		Plain: plain,
 	}
 }

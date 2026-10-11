@@ -45,7 +45,8 @@ SELECT
      + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, $2::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0))::bigint AS held,
-    COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
+    -- A revoked collection agreement leaves only the balance to spend.
+    CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- The customer's own arrears account, in the same point lookup. Debt is a
     -- negative arrears balance, so exposure is (debits - credits), floored at 0.
@@ -107,7 +108,7 @@ func (q *Queries) GetAdmissionCapacity(ctx context.Context, arg GetAdmissionCapa
 
 const getMoneyAccountSettings = `-- name: GetMoneyAccountSettings :one
 
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 LIMIT 1
 `
@@ -134,6 +135,7 @@ func (q *Queries) GetMoneyAccountSettings(ctx context.Context, arg GetMoneyAccou
 		&i.Currency,
 		&i.CreditLimitAmount,
 		&i.DefaultPaymentMethodID,
+		&i.CollectionRevokedAt,
 	)
 	return i, err
 }
@@ -365,7 +367,7 @@ func (q *Queries) ListCustomersMoneyAccounts(ctx context.Context, arg ListCustom
 }
 
 const listCustomersMoneySettings = `-- name: ListCustomersMoneySettings :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
 WHERE merchant_id = $1::uuid AND customer_id = ANY($2::uuid[])
 ORDER BY customer_id, currency
 LIMIT $3::int
@@ -397,6 +399,7 @@ func (q *Queries) ListCustomersMoneySettings(ctx context.Context, arg ListCustom
 			&i.Currency,
 			&i.CreditLimitAmount,
 			&i.DefaultPaymentMethodID,
+			&i.CollectionRevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -448,7 +451,7 @@ func (q *Queries) ListDefaultPaymentMethodsByCustomers(ctx context.Context, arg 
 }
 
 const listMoneyAccountSettingsByCustomer = `-- name: ListMoneyAccountSettingsByCustomer :many
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2
 ORDER BY currency
 `
@@ -477,6 +480,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 			&i.Currency,
 			&i.CreditLimitAmount,
 			&i.DefaultPaymentMethodID,
+			&i.CollectionRevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -489,7 +493,7 @@ func (q *Queries) ListMoneyAccountSettingsByCustomer(ctx context.Context, arg Li
 }
 
 const lockMoneyAccountSettings = `-- name: LockMoneyAccountSettings :one
-SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id FROM billing.money_settings
+SELECT merchant_id, customer_id, billing_mode, created_at, updated_at, tier, currency, credit_limit_amount, default_payment_method_id, collection_revoked_at FROM billing.money_settings
 WHERE merchant_id = $1 AND customer_id = $2 AND currency = $3
 FOR UPDATE
 `
@@ -513,8 +517,59 @@ func (q *Queries) LockMoneyAccountSettings(ctx context.Context, arg LockMoneyAcc
 		&i.Currency,
 		&i.CreditLimitAmount,
 		&i.DefaultPaymentMethodID,
+		&i.CollectionRevokedAt,
 	)
 	return i, err
+}
+
+const restoreMoneyCollection = `-- name: RestoreMoneyCollection :exec
+UPDATE billing.money_settings
+SET collection_revoked_at = NULL, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4::text
+  AND collection_revoked_at IS NOT NULL
+`
+
+type RestoreMoneyCollectionParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// A new collection agreement in the currency: the merchant's billing mode
+// applies again.
+func (q *Queries) RestoreMoneyCollection(ctx context.Context, arg RestoreMoneyCollectionParams) error {
+	_, err := q.db.Exec(ctx, restoreMoneyCollection,
+		arg.Now,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
+	return err
+}
+
+const revokeMoneyCollection = `-- name: RevokeMoneyCollection :exec
+UPDATE billing.money_settings
+SET collection_revoked_at = $1::timestamptz, updated_at = $1::timestamptz
+WHERE merchant_id = $2::uuid AND customer_id = $3::uuid AND currency = $4::text
+`
+
+type RevokeMoneyCollectionParams struct {
+	Now        time.Time
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	Currency   string
+}
+
+// The customer revoked its collection agreement in the currency.
+func (q *Queries) RevokeMoneyCollection(ctx context.Context, arg RevokeMoneyCollectionParams) error {
+	_, err := q.db.Exec(ctx, revokeMoneyCollection,
+		arg.Now,
+		arg.MerchantID,
+		arg.CustomerID,
+		arg.Currency,
+	)
+	return err
 }
 
 const setMoneyAccountCreditLimit = `-- name: SetMoneyAccountCreditLimit :exec

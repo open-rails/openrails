@@ -3,6 +3,7 @@ package subscriptions
 import (
 	"context"
 	"fmt"
+	"github.com/open-rails/openrails/billing"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -157,9 +158,9 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 
 	switch notification.EventType {
 	case models.NotificationPremiumStarted:
-		return s.emailService.SendSubscriptionConfirmed(ctx, notification.CustomerID.String())
+		return s.emailService.SendSubscriptionConfirmed(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID())
 	case models.NotificationPremiumRenewed:
-		return s.emailService.SendSubscriptionRenewed(ctx, notification.CustomerID.String())
+		return s.emailService.SendSubscriptionRenewed(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID())
 	case models.NotificationPremiumEnded:
 		reason := PremiumEndReasonUnknown
 		if notification.Data.Reason != "" {
@@ -173,9 +174,13 @@ func (s *NotificationService) sendEmailNotification(ctx context.Context, notific
 			}
 			return s.emailService.SendAccessEnded(ctx, notification.CustomerID.String(), endedAt)
 		}
-		return s.emailService.SendPremiumEnded(ctx, notification.CustomerID.String(), reason)
+		return s.emailService.SendPremiumEnded(ctx, notification.CustomerID.String(), notification.Data.SubscriptionID.UUID(), reason)
 	case models.NotificationPaymentMethodFailed:
 		return s.emailService.SendPaymentFailed(ctx, notification.CustomerID.String())
+	case models.NotificationUsageCharged:
+		return s.emailService.SendUsageCharged(ctx, notification)
+	case models.NotificationAgreementRevoked:
+		return s.emailService.SendAgreementRevoked(ctx, notification)
 	case models.NotificationOneOffPurchaseCompleted:
 		return s.emailService.SendPurchaseReceipt(ctx, notification)
 	case models.NotificationSubscriptionChanged:
@@ -210,7 +215,7 @@ func (s *NotificationService) cleanupObsoleteNotifications(ctx context.Context, 
 	}
 
 	if len(obsoleteEventTypes) > 0 {
-		cleanedCount, err := s.removeObsoleteNotifications(ctx, newNotification.CustomerID.String(), obsoleteEventTypes)
+		cleanedCount, err := s.removeObsoleteNotifications(ctx, newNotification.CustomerID.String(), newNotification.Data.SubscriptionID, obsoleteEventTypes)
 		if err != nil {
 			return fmt.Errorf("failed to remove obsolete notifications: %w", err)
 		}
@@ -228,7 +233,10 @@ func (s *NotificationService) cleanupObsoleteNotifications(ctx context.Context, 
 	return nil
 }
 
-func (s *NotificationService) removeObsoleteNotifications(ctx context.Context, userID string, eventTypes []models.NotificationEventType) (int, error) {
+// removeObsoleteNotifications deletes the customer's unseen notifications of
+// eventTypes; one naming another subscription than subscription stays: a
+// cancellation's confirmation is never lost to another subscription's news.
+func (s *NotificationService) removeObsoleteNotifications(ctx context.Context, userID string, subscription billing.SubscriptionID, eventTypes []models.NotificationEventType) (int, error) {
 	falseVal := false
 	notifications, _, err := s.GetNotifications(ctx, query.QueryOptions[GetNotificationsFilters]{
 		Filters: GetNotificationsFilters{
@@ -244,6 +252,9 @@ func (s *NotificationService) removeObsoleteNotifications(ctx context.Context, u
 
 	cleanedCount := 0
 	for _, notification := range notifications {
+		if other := notification.Data.SubscriptionID; !subscription.IsZero() && !other.IsZero() && other != subscription {
+			continue
+		}
 		for _, obsoleteType := range eventTypes {
 			if notification.EventType == obsoleteType {
 				if err := s.Delete(ctx, notification.ID); err != nil {

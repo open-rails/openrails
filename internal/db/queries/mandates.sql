@@ -151,17 +151,29 @@ WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND subscription_id = ANY (sqlc.
   AND kind = 'recurring' AND status IN ('active', 'requires_reconsent')
 LIMIT sqlc.arg(row_limit)::int;
 
--- name: RevokeCustomerMandates :many
--- The customer ended the merchant's authority to charge its cards without
--- it: every live agreement, of every card.
-UPDATE billing.mandates SET status = 'revoked', end_reason = 'customer_revoked',
-    ended_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
+-- name: ListLiveAgreementsPage :many
+-- The customer's live charge agreements, newest first: what the merchant may
+-- charge its cards for without it. card_on_file covers no such charge.
+SELECT * FROM billing.mandates
 WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
-  AND status IN ('active', 'requires_reconsent')
-RETURNING *;
+  AND kind IN ('recurring', 'unscheduled') AND status IN ('active', 'requires_reconsent')
+  AND (sqlc.narg(after_at)::timestamptz IS NULL
+       OR (created_at, id) < (sqlc.narg(after_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(row_limit)::int;
 
--- name: EnqueuePaymentAuthorityRevoked :exec
+-- name: GetLiveAgreement :one
+-- One of the customer's live charge agreements.
+SELECT * FROM billing.mandates
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid
+  AND kind IN ('recurring', 'unscheduled') AND status IN ('active', 'requires_reconsent');
+
+-- name: GetMandate :one
+SELECT * FROM billing.mandates
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND id = sqlc.arg(id)::uuid;
+
+-- name: EnqueueMandateRevoked :exec
 INSERT INTO billing.host_outbox (merchant_id, event_type, subject_type, subject_id, occurred_at, data, dedupe_key)
-VALUES (sqlc.arg(merchant_id)::uuid, 'customer.payment_authority_revoked', 'customer', sqlc.arg(customer_id)::uuid,
-    sqlc.arg(occurred_at)::timestamptz, sqlc.arg(data)::jsonb, sqlc.arg(dedupe_key)::text)
+VALUES (sqlc.arg(merchant_id)::uuid, 'mandate.revoked', 'mandate', sqlc.arg(mandate_id)::uuid,
+    sqlc.arg(occurred_at)::timestamptz, sqlc.arg(data)::jsonb, 'mandate.revoked:' || sqlc.arg(mandate_id)::uuid::text)
 ON CONFLICT (merchant_id, dedupe_key) DO NOTHING;

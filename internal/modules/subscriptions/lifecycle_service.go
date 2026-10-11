@@ -618,6 +618,7 @@ func (s *SubscriptionLifecycleService) createMembershipCore(ctx context.Context,
 			ID:         uuidutil.NewV7(),
 			CustomerID: subscription.CustomerID,
 			EventType:  models.NotificationPremiumStarted,
+			Data:       billing.NotificationData{SubscriptionID: billing.SubscriptionID(subscription.ID)},
 		}
 		if err := notificationRepo.Create(ctx, notification); err != nil {
 			if params.Prepared != nil {
@@ -1385,7 +1386,7 @@ func (s *SubscriptionLifecycleService) CancelMembershipTx(ctx context.Context, t
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       billing.NotificationData{Reason: string(reason)},
+		Data:       billing.NotificationData{Reason: string(reason), SubscriptionID: billing.SubscriptionID(subscription.ID)},
 	}
 	if err := notificationRepo.Create(ctx, notification); err != nil {
 		log.WithContext(ctx).WithError(err).Error("failed to create membership ended notification")

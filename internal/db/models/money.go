@@ -67,6 +67,16 @@ type MoneyAccount struct {
 
 	TrustLevel *string `json:"trust_level,omitempty"`
 
+	// CollectionRevokedAt is when the customer revoked its collection
+	// agreement in the currency: no credit from then until it gives another.
+	CollectionRevokedAt *time.Time `json:"collection_revoked_at,omitempty"`
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ExtendsCredit reports whether the account may spend past its balance: the
+// merchant bills it in arrears and the customer has not revoked collection.
+func (a *MoneyAccount) ExtendsCredit() bool {
+	return a != nil && a.BillingMode == "arrears" && a.CollectionRevokedAt == nil
 }

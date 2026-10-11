@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -116,6 +115,41 @@ func (w *world) order(mid billing.MerchantID, customer billing.CustomerID) billi
 	return o.ID
 }
 
+// waitJob waits for a River job to complete, running it now when it waits
+// for its time.
+func (w *world) waitJob(id int64) {
+	w.t.Helper()
+	ctx := w.t.Context()
+	graph, _ := operator.Of(w.srv)
+	jobs := graph.Runtime.RiverProducer
+	var last *rivertype.JobRow
+	ok := assert.Eventually(w.t, func() bool {
+		job, err := jobs.JobGet(ctx, id)
+		if err != nil {
+			return false
+		}
+		last = job
+		if job.State == rivertype.JobStateScheduled || job.State == rivertype.JobStateRetryable {
+			_, _ = jobs.JobRetry(ctx, id)
+		}
+		return job.State == rivertype.JobStateCompleted
+	}, time.Minute, 50*time.Millisecond, "job %d", id)
+	if !ok && last != nil {
+		w.t.Fatalf("job %d %s %s: %v", last.ID, last.Kind, last.State, last.Errors)
+	}
+	require.True(w.t, ok)
+}
+
+// refresh runs the merchant's provider refresh, as a healthy deployment
+// observes its PSPs.
+func (w *world) refresh(mid billing.MerchantID) {
+	w.t.Helper()
+	graph, _ := operator.Of(w.srv)
+	id, _, err := riverjobs.EnqueueMerchantRefresh(w.t.Context(), graph.Runtime.RiverProducer, mid.UUID(), openrails.QueueBilling)
+	require.NoError(w.t, err)
+	w.waitJob(id)
+}
+
 // due runs the engine's due pass at at: a provider refresh just before, as
 // a healthy deployment observes its PSPs, then the pass and the work it
 // queues. River runs jobs by the wall clock; the engine schedules them by
@@ -125,33 +159,12 @@ func (w *world) due(clock *clockwork.FakeClock, mid billing.MerchantID, at time.
 	ctx := w.t.Context()
 	graph, _ := operator.Of(w.srv)
 	jobs := graph.Runtime.RiverProducer
-	wait := func(id int64) {
-		w.t.Helper()
-		var last *rivertype.JobRow
-		ok := assert.Eventually(w.t, func() bool {
-			job, err := jobs.JobGet(ctx, id)
-			if err != nil {
-				return false
-			}
-			last = job
-			if job.State == rivertype.JobStateScheduled || job.State == rivertype.JobStateRetryable {
-				_, _ = jobs.JobRetry(ctx, id)
-			}
-			return job.State == rivertype.JobStateCompleted
-		}, time.Minute, 50*time.Millisecond, "job %d", id)
-		if !ok && last != nil {
-			w.t.Fatalf("job %d %s %s: %v", last.ID, last.Kind, last.State, last.Errors)
-		}
-		require.True(w.t, ok)
-	}
 	clock.Advance(at.Add(-time.Minute).Sub(clock.Now()))
-	refresh, _, err := riverjobs.EnqueueMerchantRefresh(ctx, jobs, mid.UUID(), openrails.QueueBilling)
-	require.NoError(w.t, err)
-	wait(refresh)
+	w.refresh(mid)
 	clock.Advance(at.Sub(clock.Now()))
 	pass, err := jobs.Insert(ctx, riverjobs.DunningArgs{}, &river.InsertOpts{Queue: openrails.QueueBilling})
 	require.NoError(w.t, err)
-	wait(pass.Job.ID)
+	w.waitJob(pass.Job.ID)
 	kinds := []string{"openrails.provider_operation", "openrails.subscription_converge", "openrails.card_refresh", "openrails.dunning", "openrails.invoice"}
 	require.Eventually(w.t, func() bool {
 		page, err := jobs.JobList(ctx, river.NewJobListParams().Kinds(kinds...).States(rivertype.JobStateScheduled).First(100))
@@ -174,8 +187,9 @@ func (w *world) due(clock *clockwork.FakeClock, mid billing.MerchantID, at time.
 // adding a card and moving one subscription to it, canceling through the
 // merchant's own operation (an NMI-run schedule while the merchant's
 // destructive actions are disarmed answers provider_cancel_held), and
-// revoking the merchant's payment authority, which parks the renewal
-// without canceling it. Neither merchant learns anything of the other.
+// revoking one charge agreement, which ends its subscription at the
+// period's end and charges nothing more under it. Neither merchant learns
+// anything of the other.
 func TestNetworkPortal(t *testing.T) {
 	// The engine's time runs in the past, so the periods it advances through
 	// stay behind the database's own clock.
@@ -316,118 +330,91 @@ func TestNetworkPortal(t *testing.T) {
 	w.refused(w.network(http.MethodPost, mart+"/subscriptions/"+held.String()+"/cancel", session, map[string]any{"reason": "moving on"}),
 		http.StatusConflict, billing.CodeProviderCancelHeld, "NMI bills the schedule and the mart's destructive actions are disarmed")
 
-	// Revoking the mart's authority to charge without the customer.
-	mandates := func() []billing.Mandate {
+	w.refresh(w.mart)
+	// Each charge agreement is revoked on its own: the subscription's ends
+	// the subscription at its period's end; a provider-billed schedule that
+	// cannot be canceled (destructive actions disarmed) keeps its agreement.
+	agreements := func() map[billing.MandateID]billing.Agreement {
 		t.Helper()
-		r := call(t, w.handler, martKey.Secret, http.MethodGet, "/v1/admin/customers/"+martSub+"/payment-methods", nil)
-		require.Equal(t, http.StatusOK, r.Code, r.Body.String())
-		var out []billing.Mandate
-		for _, pm := range decode[billing.ListPage[billing.PaymentMethod]](t, r).Items {
-			out = append(out, pm.Mandates...)
+		out := map[billing.MandateID]billing.Agreement{}
+		for _, a := range networkList[billing.Agreement](w, mart+"/agreements", session, 1) {
+			out[a.ID] = a
 		}
 		return out
 	}
-	var agreement billing.MandateID
-	live := 0
-	for _, m := range mandates() {
-		if m.Status == billing.MandateActive {
-			live++
-			if m.SubscriptionID != nil && *m.SubscriptionID == martPlan {
-				agreement = m.ID
+	byPlan := map[billing.SubscriptionID]billing.Agreement{}
+	for _, a := range agreements() {
+		require.Equal(t, billing.MandateRecurring, a.Kind, "the mart's agreements are its subscriptions'")
+		require.NotNil(t, a.Subscription)
+		byPlan[a.Subscription.ID] = a
+	}
+	planAgreement, heldAgreement := byPlan[martPlan], byPlan[held]
+	require.False(t, planAgreement.ID.IsZero(), "the plan's agreement")
+	require.False(t, heldAgreement.ID.IsZero(), "the NMI schedule's agreement")
+	require.Equal(t, "USD", planAgreement.Currency)
+	require.EqualValues(t, 9_990_000, planAgreement.Subscription.Amount)
+	require.NotNil(t, planAgreement.Subscription.NextChargeAt, "it renews")
+	require.NotNil(t, planAgreement.Card)
+	require.Equal(t, untouched.PaymentMethodID, planAgreement.PaymentMethodID)
+
+	revoke := func(id billing.MandateID, authorization string) *httptest.ResponseRecorder {
+		return w.network(http.MethodPost, mart+"/agreements/"+id.String()+"/revoke", authorization, nil)
+	}
+	w.refused(revoke(planAgreement.ID, stale), http.StatusUnauthorized, billing.CodeStepUpRequired, "revoking is sensitive")
+	w.refused(revoke(heldAgreement.ID, session), http.StatusConflict, billing.CodeProviderCancelHeld, "NMI keeps billing while the mart is disarmed")
+	require.Contains(t, agreements(), heldAgreement.ID, "nothing revoked")
+	r = revoke(planAgreement.ID, session)
+	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+	revocation := decode[billing.AgreementRevocation](t, r)
+	require.Equal(t, billing.MandateRevoked, revocation.Agreement.Status)
+	require.NotNil(t, revocation.Agreement.EndedAt)
+	require.Nil(t, revocation.UsageOrder)
+	require.NotNil(t, revocation.Subscription)
+	require.Equal(t, martPlan, revocation.Subscription.ID)
+	require.True(t, revocation.Subscription.CancelScheduled, "canceled at the period's end")
+	require.NotContains(t, agreements(), planAgreement.ID)
+	w.refused(revoke(planAgreement.ID, session), http.StatusNotFound, billing.CodeResourceNotFound, "revoked once")
+	var event *billing.MandateHostEvent
+	for _, e := range w.events(martKey, billing.HostEventMandateRevoked) {
+		event = e.Mandate
+	}
+	require.NotNil(t, event, "mandate.revoked")
+	require.Equal(t, billing.MandateHostEvent{MandateID: planAgreement.ID, Kind: billing.MandateRecurring, CustomerID: billing.CustomerID(uuid.MustParse(martSub)),
+		Currency: "USD", SubscriptionID: &martPlan, RevokedAt: event.RevokedAt}, *event)
+	require.Len(t, w.events(martKey, billing.HostEventMandateRevoked), 1, "once")
+	require.Empty(t, w.events(w.shopKey, billing.HostEventMandateRevoked), "the shop hears nothing")
+	var revokedMandate *billing.Mandate
+	r = call(t, w.handler, martKey.Secret, http.MethodGet, "/v1/admin/customers/"+martSub+"/payment-methods", nil)
+	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
+	for _, pm := range decode[billing.ListPage[billing.PaymentMethod]](t, r).Items {
+		for _, m := range pm.Mandates {
+			if m.ID == planAgreement.ID {
+				revokedMandate = &m
 			}
 		}
 	}
-	require.False(t, agreement.IsZero(), "the subscription's agreement")
-	w.refused(w.network(http.MethodPost, mart+"/revoke-authority", stale, nil), http.StatusUnauthorized, billing.CodeStepUpRequired, "revoking is sensitive")
-	r = w.network(http.MethodPost, mart+"/revoke-authority", session, nil)
-	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
-	revocation := decode[billing.PaymentAuthorityRevocation](t, r)
-	require.Equal(t, w.mart, revocation.MerchantID)
-	require.Equal(t, martSub, revocation.CustomerID.String())
-	require.Contains(t, revocation.RevokedMandates, agreement)
-	require.Len(t, revocation.RevokedMandates, live, "every live agreement")
-	for _, m := range mandates() {
-		require.NotEqual(t, billing.MandateActive, m.Status, "no agreement left to charge on")
-		if slices.Contains(revocation.RevokedMandates, m.ID) {
-			require.Equal(t, billing.MandateRevoked, m.Status)
-			require.Equal(t, billing.MandateEndCustomerRevoked, *m.EndReason)
-		}
-	}
+	require.NotNil(t, revokedMandate, "the merchant keeps the agreement as evidence")
+	require.Equal(t, billing.MandateRevoked, revokedMandate.Status)
+	require.Equal(t, billing.MandateEndCustomerRevoked, *revokedMandate.EndReason)
+	w.refused(w.network(http.MethodDelete, "/links/"+martLink.ID.String(), session, nil), http.StatusConflict, billing.CodeNetworkLinkInUse,
+		"the NMI schedule still charges")
+
+	// At the period's end nothing is charged under the revoked agreement and
+	// the subscription ends; the mart's other customer renews.
 	plan, err := handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
-	require.Equal(t, billing.SubscriptionActive, plan.Status, "revoking cancels nothing")
-	var event *billing.PaymentAuthorityHostEvent
-	for _, e := range w.events(martKey, billing.HostEventCustomerPaymentAuthorityRevoked) {
-		event = e.PaymentAuthority
-	}
-	require.NotNil(t, event, "customer.payment_authority_revoked")
-	require.Equal(t, martSub, event.CustomerID.String())
-	require.ElementsMatch(t, revocation.RevokedMandates, event.RevokedMandates)
-	r = w.network(http.MethodPost, mart+"/revoke-authority", session, nil)
-	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
-	require.Empty(t, decode[billing.PaymentAuthorityRevocation](t, r).RevokedMandates, "nothing left to revoke")
-	require.Len(t, w.events(martKey, billing.HostEventCustomerPaymentAuthorityRevoked), 1)
-	require.Empty(t, w.events(w.shopKey, billing.HostEventCustomerPaymentAuthorityRevoked), "the shop hears nothing")
-	w.refused(w.network(http.MethodDelete, "/links/"+martLink.ID.String(), session, nil), http.StatusConflict, billing.CodeNetworkLinkInUse,
-		"the mart's subscriptions are not canceled")
-
-	// The renewal waits for the customer; the mart's other customer renews.
 	require.NotNil(t, plan.CurrentPeriodEndsAt)
 	end := *plan.CurrentPeriodEndsAt
 	w.due(clock, w.mart, end.Add(time.Second))
 	require.Eventually(t, func() bool { return len(w.martGateway.Ledger(bobVault)) == 2 }, 30*time.Second, 100*time.Millisecond,
 		"the pass charges a renewal under an active agreement")
-	require.Len(t, w.martGateway.Ledger(martVault), 1, "no charge without the customer's authority")
+	require.Len(t, w.martGateway.Ledger(martVault), 1, "nothing under the revoked agreement")
 	plan, err = handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
 	require.NoError(t, err)
-	require.Equal(t, billing.SubscriptionAwaitingMethod, plan.Status, "parked for the customer, not canceled")
-	require.True(t, plan.CurrentPeriodEndsAt.Equal(end), "the unpaid period is not granted")
-	// The renewal is an open order the customer may pay, for at least seven
-	// days (Visa's minimum to pay another way after a failed
-	// merchant-initiated charge).
-	var renewal billing.Order
-	for _, o := range networkList[billing.NetworkOrder](w, "/orders", session, 50) {
-		if o.Order.Origin == billing.OrderOriginSubscription && o.Order.Renewal != nil && o.Order.Renewal.SubscriptionID == martPlan {
-			require.Equal(t, martLink.ID, o.LinkID)
-			renewal = o.Order
-		}
-	}
-	require.False(t, renewal.ID.IsZero(), "the portal lists the open renewal")
-	require.Equal(t, billing.OrderOpen, renewal.Status)
-	w.due(clock, w.mart, end.Add(7*24*time.Hour))
-	plan, err = handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
-	require.NoError(t, err)
-	require.Equal(t, billing.SubscriptionAwaitingMethod, plan.Status, "still waiting a week on")
-	r = w.network(http.MethodGet, mart+"/orders/"+renewal.ID.String(), session, nil)
-	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
-	require.Equal(t, billing.OrderOpen, decode[billing.Order](t, r).Status)
-	require.Len(t, w.martGateway.Ledger(martVault), 1)
+	require.Equal(t, billing.SubscriptionCanceled, plan.Status)
+	require.False(t, plan.CancelScheduled, "ended")
+	require.True(t, plan.CurrentPeriodEndsAt.Equal(end), "no period after it")
 
-	// The mart's cards carry no agreement any more: the customer pays the
-	// renewal in the portal with a card added afresh, present.
-	pay := func(method billing.PaymentMethodID) *httptest.ResponseRecorder {
-		t.Helper()
-		raw, err := json.Marshal(map[string]any{"payment": map[string]any{"payment_method_id": method}, "expected_total": strconv.FormatInt(renewal.Total, 10)})
-		require.NoError(t, err)
-		return serve(w.handler, rsRequest{method: http.MethodPost, path: "/v1/network" + mart + "/orders/" + renewal.ID.String() + "/pay", authorization: session,
-			idempotencyKey: uuid.NewString(), body: string(raw)})
-	}
-	w.refused(pay(*untouched.PaymentMethodID), http.StatusPaymentRequired, billing.CodePaymentMethodStale, "the revoked card")
-	psps, err = handle(w.t, w.srv, w.mart).ListPSPs(ctx, billing.PSPListParams{})
-	require.NoError(t, err)
-	fresh := map[string]any{"psp_id": psps.Items[0].ID, "token": w.martGateway.Tokenize(nmimock.Card{Brand: "visa", Last4: "4000"}),
-		"billing_details": map[string]any{"name": "Network Customer", "address": map[string]any{"postal_code": "10001", "country": "US"}}}
-	r = w.network(http.MethodPost, mart+"/payment-methods", session, fresh)
-	require.Less(t, r.Code, 300, r.Body.String())
-	r = pay(decode[billing.PaymentMethod](t, r).ID)
-	require.Equal(t, http.StatusOK, r.Code, r.Body.String())
-	paid := decode[billing.Order](t, r)
-	require.Equal(t, billing.OrderComplete, paid.Status)
-	require.Len(t, w.martGateway.Ledger(martVault), 1, "nothing on the revoked card")
-	plan, err = handle(w.t, w.srv, w.mart).GetSubscription(ctx, martPlan)
-	require.NoError(t, err)
-	require.Equal(t, billing.SubscriptionActive, plan.Status)
-	require.True(t, plan.CurrentPeriodEndsAt.Equal(paid.Renewal.PeriodEndsAt), "the paid period is granted")
 	// Neither merchant learns of the other.
 	for _, side := range []struct {
 		key           iam.APIKeyCreated

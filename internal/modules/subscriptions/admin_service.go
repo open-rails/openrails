@@ -291,7 +291,7 @@ func (s *AdminSubscriptionService) CancelSubscription(ctx context.Context, subsc
 		ID:         uuidutil.NewV7(),
 		CustomerID: subscription.CustomerID,
 		EventType:  models.NotificationPremiumEnded,
-		Data:       billing.NotificationData{Reason: string(PremiumEndReasonAdmin)},
+		Data:       billing.NotificationData{Reason: string(PremiumEndReasonAdmin), SubscriptionID: billing.SubscriptionID(subscription.ID)},
 	}
 	if err := s.NotificationService.Create(ctx, notification); err != nil {
 		log.WithFields(log.Fields{

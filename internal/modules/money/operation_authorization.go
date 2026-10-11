@@ -220,7 +220,7 @@ func (s *MoneyService) operationCapacity(ctx context.Context, q *gen.Queries, me
 	if outstanding < 0 {
 		return 0, fmt.Errorf("operation authorization: outstanding owed is negative")
 	}
-	if settings.BillingMode != BillingModeArrears {
+	if !settings.ExtendsCredit() {
 		if capacity, err = subtractOperationCapacity(capacity, outstanding, "outstanding owed"); err != nil {
 			return 0, err
 		}

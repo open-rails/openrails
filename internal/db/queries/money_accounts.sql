@@ -48,7 +48,8 @@ SELECT
      + COALESCE((SELECT SUM(GREATEST(billing.running_charge_total(rc.rate_per_hour, rc.started_at, sqlc.arg(as_of)::timestamptz) - rc.posted_amount, 0))
               FROM billing.running_charges rc
              WHERE rc.merchant_id = a.merchant_id AND rc.customer_id = a.customer_id AND rc.currency = a.currency AND rc.stopped_at IS NULL), 0))::bigint AS held,
-    COALESCE(s.billing_mode, 'prepaid')::text AS billing_mode,
+    -- A revoked collection agreement leaves only the balance to spend.
+    CASE WHEN s.collection_revoked_at IS NULL THEN COALESCE(s.billing_mode, 'prepaid') ELSE 'prepaid' END::text AS billing_mode,
     COALESCE(s.credit_limit_amount, 0)::bigint AS credit_limit_amount,
     -- The customer's own arrears account, in the same point lookup. Debt is a
     -- negative arrears balance, so exposure is (debits - credits), floored at 0.
@@ -104,6 +105,20 @@ SET default_payment_method_id = sqlc.arg(payment_method_id),
 WHERE merchant_id = $1
   AND customer_id = $2
   AND currency = sqlc.arg(currency);
+
+-- name: RevokeMoneyCollection :exec
+-- The customer revoked its collection agreement in the currency.
+UPDATE billing.money_settings
+SET collection_revoked_at = sqlc.arg(now)::timestamptz, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text;
+
+-- name: RestoreMoneyCollection :exec
+-- A new collection agreement in the currency: the merchant's billing mode
+-- applies again.
+UPDATE billing.money_settings
+SET collection_revoked_at = NULL, updated_at = sqlc.arg(now)::timestamptz
+WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND customer_id = sqlc.arg(customer_id)::uuid AND currency = sqlc.arg(currency)::text
+  AND collection_revoked_at IS NOT NULL;
 
 -- name: SetMoneyAccountTier :exec
 -- Sets the host-assigned account tier.
