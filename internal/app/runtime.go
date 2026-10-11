@@ -266,6 +266,8 @@ type Runtime struct {
 	workerConsumerRunning  atomic.Bool
 	externalRiverClient    bool
 	riverSchema            string // Config.Database.RiverSchema's, or the bound host client's
+	// periodicIDs are the River IDs of the periodic jobs composed last.
+	periodicIDs []string
 
 	// progressLifecycle owns the #895 out-of-River progress detector: a plain
 	// goroutine that answers "is the periodic fleet progressing?" without

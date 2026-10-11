@@ -454,6 +454,7 @@ func (r *Runtime) validateBillingWorkerRuntime() error {
 // buildRiverPeriodicJobs defines recurring schedules for workers using River periodic jobs.
 func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.PeriodicJob, error) {
 	var jobs []*river.PeriodicJob
+	r.periodicIDs = nil
 
 	// The due pass admits engine renewals at their paid-period boundary and
 	// runs retries whose next_retry_at has passed. Engine access is bounded by
@@ -753,7 +754,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 			return args, opts
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".collect", RunOnStart: true},
 	))
 	// Monthly sweep: collect the long tail above the merchant's floor
 	// that the hourly threshold trigger leaves behind.
@@ -770,7 +771,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 			}
 			return args, opts
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".monthly_floor", RunOnStart: true},
 	))
 
 	// Daily: bill each customer's previous period. Idempotent per
@@ -783,7 +784,7 @@ func (r *Runtime) buildRiverPeriodicJobs(ctx context.Context) ([]*river.Periodic
 				UniqueOpts: river.UniqueOpts{ByQueue: true, ByPeriod: 24 * time.Hour},
 			}
 		},
-		&river.PeriodicJobOpts{RunOnStart: true},
+		&river.PeriodicJobOpts{ID: riverjobs.KindUsageOrders + ".finalize", RunOnStart: true},
 	))
 
 	// Every 15 minutes: arrears delinquency evaluation. Tighter than hourly

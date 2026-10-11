@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -97,13 +98,27 @@ func (r *Runtime) riverTableAccess() (*pgxpool.Pool, string) {
 }
 
 // healthPeriodic wraps river.NewPeriodicJob with a fixed interval, recording
-// kind -> interval (shortest wins) for the staleness alert rule.
+// kind -> interval (shortest wins) for the staleness alert rule. A periodic's
+// River ID is its job kind unless opts names one, so a River client can turn
+// a single periodic off (PeriodicJobs().RemoveByID).
 func (r *Runtime) healthPeriodic(interval time.Duration, ctor river.PeriodicJobConstructor, opts *river.PeriodicJobOpts) *river.PeriodicJob {
+	own := river.PeriodicJobOpts{}
+	if opts != nil {
+		own = *opts
+	}
 	if args, _ := ctor(); args != nil {
 		r.workerHealthRegistrations().NotePeriod(args.Kind(), interval)
+		if own.ID == "" {
+			own.ID = args.Kind()
+		}
 	}
-	return river.NewPeriodicJob(periodBoundaries(interval), ctor, opts)
+	r.periodicIDs = append(r.periodicIDs, own.ID)
+	return river.NewPeriodicJob(periodBoundaries(interval), ctor, &own)
 }
+
+// PeriodicJobIDs are the River IDs of the periodic jobs this runtime gave its
+// River client.
+func (r *Runtime) PeriodicJobIDs() []string { return slices.Clone(r.periodicIDs) }
 
 // periodBoundaries fires at each multiple of the period on the clock, where
 // a ByPeriod uniqueness bucket starts. Only the River leader schedules, and a
