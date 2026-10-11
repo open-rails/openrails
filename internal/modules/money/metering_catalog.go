@@ -23,9 +23,6 @@ var (
 	ErrMeterInUse              = errors.New("usage meter is in use")
 	ErrDefaultRateCardNotFound = errors.New("default usage rate card not found")
 	ErrRateCardProductNotFound = errors.New("usage rate card product not found")
-	ErrAllowanceMeterNotFound  = errors.New("usage rate card allowance meter not found")
-	ErrAllowanceSourceInvalid  = errors.New("usage rate card allowance source is invalid")
-	ErrAllowanceSourceInUse    = errors.New("usage rate card is an allowance source")
 	ErrMeterRateCardConflict   = errors.New("usage meter change conflicts with its rate cards")
 	ErrUsageRateCardInvalid    = errors.New("usage rate card is invalid")
 )
@@ -307,44 +304,6 @@ func loadUsageMeterForRateCard(
 	return meter, nil
 }
 
-func ensureAllowanceSource(
-	ctx context.Context,
-	tx pgx.Tx,
-	merchantID uuid.UUID,
-	targetMeterKey string,
-	currency string,
-	allowance *catalog.Allowance,
-) error {
-	if allowance == nil || allowance.AccrueFrom == "" {
-		return nil
-	}
-	if allowance.AccrueFrom == targetMeterKey {
-		return allowanceSourceInvalid(fmt.Errorf("meter %q cannot accrue an allowance from itself", targetMeterKey))
-	}
-	sourceMeter, err := loadUsageMeterForRateCard(ctx, tx, merchantID, allowance.AccrueFrom)
-	if errors.Is(err, ErrUsageMeterNotFound) {
-		return fmt.Errorf("%w: %q", ErrAllowanceMeterNotFound, allowance.AccrueFrom)
-	}
-	if err != nil {
-		return fmt.Errorf("load allowance source meter: %w", err)
-	}
-	priceJSON, err := gen.New(tx).GetDefaultUsageRateCardPriceForUpdate(
-		ctx,
-		gen.GetDefaultUsageRateCardPriceForUpdateParams{MerchantID: merchantID, MeterKey: allowance.AccrueFrom},
-	)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return allowanceSourceInvalid(fmt.Errorf("source meter %q has no rate card", allowance.AccrueFrom))
-	}
-	if err != nil {
-		return fmt.Errorf("load allowance source rate card: %w", err)
-	}
-	var price catalog.RatePrice
-	if err := json.Unmarshal(priceJSON, &price); err != nil {
-		return fmt.Errorf("decode allowance source rate card: %w", err)
-	}
-	return validateAllowanceSourcePrice(sourceMeter, price, currency)
-}
-
 func validateUsageMeterRateCardContracts(
 	ctx context.Context,
 	queries *gen.Queries,
@@ -375,111 +334,11 @@ func validateUsageMeterRateCardContracts(
 	if err := catalogrules.ValidateDimensions("usage rate card", replacement.GroupBy, filter, &price); err != nil {
 		return meterRateCardConflict(err)
 	}
-	dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
-		ctx,
-		gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{
-			MerchantID: merchantID,
-			MeterKey:   replacement.Key,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("load allowance dependencies: %w", err)
-	}
-	if err := validateAllowanceSourceDependencies(replacement, price, dependencyCurrencies); err != nil {
-		return meterRateCardConflict(err)
-	}
 	return nil
-}
-
-func validateRateCardAsAllowanceSource(
-	ctx context.Context,
-	queries *gen.Queries,
-	merchantID uuid.UUID,
-	meter catalogrules.Meter,
-	price catalog.RatePrice,
-) error {
-	dependencyCurrencies, err := queries.GetUsageRateCardAllowanceDependencyCurrencies(
-		ctx,
-		gen.GetUsageRateCardAllowanceDependencyCurrenciesParams{
-			MerchantID: merchantID,
-			MeterKey:   meter.Key,
-		},
-	)
-	if err != nil {
-		return fmt.Errorf("load allowance dependencies: %w", err)
-	}
-	if err := validateAllowanceSourceDependencies(meter, price, dependencyCurrencies); err != nil {
-		return allowanceSourceInvalid(err)
-	}
-	return nil
-}
-
-func validateAllowanceSourceDependencies(
-	meter catalogrules.Meter,
-	price catalog.RatePrice,
-	dependencyCurrencies []string,
-) error {
-	if len(dependencyCurrencies) == 0 {
-		return nil
-	}
-	for _, currency := range dependencyCurrencies {
-		if err := validateAllowanceSourcePrice(meter, price, currency); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func validateAllowanceSourcePrice(meter catalogrules.Meter, price catalog.RatePrice, currency string) error {
-	if !catalogrules.BillingSupported(meter.Aggregation) {
-		return allowanceSourceInvalid(fmt.Errorf(
-			"source meter %q aggregation %q is not supported for billing",
-			meter.Key,
-			meter.Aggregation,
-		))
-	}
-	if price.Currency != currency {
-		return allowanceSourceInvalid(fmt.Errorf(
-			"source meter %q currency %q does not match %q",
-			meter.Key,
-			price.Currency,
-			currency,
-		))
-	}
-	if price.Model != catalog.ModelPerUnit || price.PerUnit == nil || price.PerUnit.Matrix == nil {
-		return allowanceSourceInvalid(fmt.Errorf(
-			"source meter %q must use per-unit matrix pricing",
-			meter.Key,
-		))
-	}
-	matrix := price.PerUnit.Matrix
-	if propertyKey(meter.GroupBy[matrix.Dimension]) == "" || propertyKey(meter.GroupBy["resource_id"]) == "" {
-		return allowanceSourceInvalid(fmt.Errorf(
-			"source meter %q requires group_by %q and resource_id",
-			meter.Key,
-			matrix.Dimension,
-		))
-	}
-	for _, cell := range matrix.Cells {
-		if cell.Included > 0 {
-			return nil
-		}
-	}
-	return allowanceSourceInvalid(fmt.Errorf(
-		"source meter %q matrix must include allowance units",
-		meter.Key,
-	))
 }
 
 func invalidUsageRateCard(err error) error {
 	return fmt.Errorf("%w: %v", ErrUsageRateCardInvalid, err)
-}
-
-func allowanceSourceInvalid(err error) error {
-	if errors.Is(err, ErrAllowanceSourceInvalid) {
-		return err
-	}
-	return fmt.Errorf("%w: %v", ErrAllowanceSourceInvalid, err)
 }
 
 func meterRateCardConflict(err error) error {

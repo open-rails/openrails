@@ -65,15 +65,6 @@ WHERE merchant_id = sqlc.arg(merchant_id)
   AND meter_key = sqlc.arg(meter_key)::text
 FOR UPDATE;
 
--- name: GetUsageRateCardAllowanceDependencyCurrencies :one
-SELECT COALESCE(
-    array_agg(DISTINCT upper(COALESCE(price ->> 'currency', ''))),
-    ARRAY[]::text[]
-)::text[] AS currencies
-FROM billing.catalog_rate_cards
-WHERE merchant_id = sqlc.arg(merchant_id)
-  AND allowance ->> 'accrue_from' = sqlc.arg(meter_key)::text;
-
 -- The meter row is already locked by the caller, which serializes every rate-card
 -- mutation for this meter.
 -- name: DefaultUsageRateCardExists :one

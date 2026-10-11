@@ -260,28 +260,6 @@ func (q *Queries) GetUsageMeterWithCatalog(ctx context.Context, arg GetUsageMete
 	return i, err
 }
 
-const getUsageRateCardAllowanceDependencyCurrencies = `-- name: GetUsageRateCardAllowanceDependencyCurrencies :one
-SELECT COALESCE(
-    array_agg(DISTINCT upper(COALESCE(price ->> 'currency', ''))),
-    ARRAY[]::text[]
-)::text[] AS currencies
-FROM billing.catalog_rate_cards
-WHERE merchant_id = $1
-  AND allowance ->> 'accrue_from' = $2::text
-`
-
-type GetUsageRateCardAllowanceDependencyCurrenciesParams struct {
-	MerchantID uuid.UUID
-	MeterKey   string
-}
-
-func (q *Queries) GetUsageRateCardAllowanceDependencyCurrencies(ctx context.Context, arg GetUsageRateCardAllowanceDependencyCurrenciesParams) ([]string, error) {
-	row := q.db.QueryRow(ctx, getUsageRateCardAllowanceDependencyCurrencies, arg.MerchantID, arg.MeterKey)
-	var currencies []string
-	err := row.Scan(&currencies)
-	return currencies, err
-}
-
 const insertUsageMeter = `-- name: InsertUsageMeter :exec
 INSERT INTO billing.catalog_meters
     (merchant_id, key, event_type, value_property, aggregation, unit, group_by)

@@ -228,26 +228,9 @@ func checkCatalogBillingChanges(ctx context.Context, tx pgx.Tx, merchantID uuid.
 		}
 	}
 	currentCards := make(map[string]CatalogRateCardSpec)
-	nextCards := make(map[string]CatalogRateCardSpec)
 	for _, c := range current.RateCards {
 		if c.MeterKey != "" {
 			currentCards[c.MeterKey] = c
-		}
-	}
-	for _, c := range next.RateCards {
-		if c.MeterKey != "" {
-			nextCards[c.MeterKey] = c
-		}
-	}
-	for _, currentCard := range current.RateCards {
-		key := currentCard.MeterKey
-		if key == "" {
-			continue
-		}
-		if _, keep := nextCards[key]; !keep {
-			if err := money.CheckCatalogRateCardRemoval(ctx, tx, merchantID, key); err != nil {
-				return err
-			}
 		}
 	}
 	for _, c := range next.RateCards {
@@ -358,14 +341,7 @@ func normalizeCatalogBilling(state *SyncCatalogSidecarsRequest) error {
 			if err := catalogrules.ValidateAllowance("catalog allowance", &allowance); err != nil {
 				return err
 			}
-			if allowance.Cap != "" {
-				duration, err := catalogrules.ParseDurationSpec(allowance.Cap)
-				if err != nil {
-					return err
-				}
-				allowance.Cap = duration.String()
-			}
-			if allowance.Included == 0 && allowance.AccrueFrom == "" && allowance.Cap == "" {
+			if allowance.Included == 0 {
 				c.Allowance = nil
 			} else {
 				c.Allowance, _ = json.Marshal(allowance)

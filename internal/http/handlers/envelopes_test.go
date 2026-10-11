@@ -110,12 +110,9 @@ func TestRefusalClassificationIgnoresHumanMessage(t *testing.T) {
 		{"metering", billingservice.ErrUsageMeterNotFound, want{404, "usage_meter_not_found", ""}},
 		{"metering", billingservice.ErrDefaultRateCardNotFound, want{404, "default_rate_card_not_found", ""}},
 		{"metering", billingservice.ErrRateCardProductNotFound, want{404, "rate_card_product_not_found", ""}},
-		{"metering", billingservice.ErrAllowanceMeterNotFound, want{404, "allowance_meter_not_found", ""}},
 		{"metering", billingservice.ErrUsageRateCardInvalid, want{400, "usage_rate_card_invalid", ""}},
 		{"metering", errors.Join(errors.New("context"), billingservice.ErrMeterInUse), want{409, "meter_in_use", ""}},
 		{"metering", billingservice.ErrMeterRateCardConflict, want{409, "meter_rate_card_conflict", ""}},
-		{"metering", billingservice.ErrAllowanceSourceInvalid, want{409, "allowance_source_invalid", ""}},
-		{"metering", billingservice.ErrAllowanceSourceInUse, want{409, "allowance_source_in_use", ""}},
 		{"metering", apperr.New(409, billing.CodeRevisionMismatch, "meter moved"), want{409, "revision_mismatch", ""}},
 		{"catalog", apperr.New(409, billing.CodeRevisionMismatch, "product moved"), want{409, "revision_mismatch", ""}},
 	}

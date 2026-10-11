@@ -317,14 +317,11 @@ var errorCodes = []ErrorCode{
 	{"usage_meter_not_found", 404, invalid, "The usage meter does not exist."},
 	{"default_rate_card_not_found", 404, invalid, "The meter has no default rate card."},
 	{"rate_card_product_not_found", 404, invalid, "The rate card names a product that does not exist."},
-	{"allowance_meter_not_found", 404, invalid, "The rate card's allowance meter does not exist."},
 	{"usage_rate_card_invalid", 400, invalid, "The usage rate card is invalid."},
 	{"usage_meter_invalid", 400, invalid, "The meter definition is invalid."},
 	{CodeUsageNotPriced, 422, invalid, "A priced meter cannot price the usage (no matrix cell for its value, or no rate card in its currency); param names the field."},
 	{"meter_in_use", 409, invalid, "The meter is referenced and cannot change this way."},
 	{"meter_rate_card_conflict", 409, invalid, "The meter and its rate card disagree."},
-	{"allowance_source_invalid", 409, invalid, "The allowance source cannot back this rate card."},
-	{"allowance_source_in_use", 409, invalid, "The allowance source is in use."},
 	{"purchase_review_resolved", 409, invalid, "The purchase review was already resolved."},
 
 	// Findings.

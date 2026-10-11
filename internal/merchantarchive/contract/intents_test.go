@@ -213,7 +213,7 @@ func TestRateCardPriceArchiveMatchesPersistedShape(t *testing.T) {
 	for _, price := range []catalog.RatePrice{
 		{Model: catalog.ModelFlat, Currency: "USD", Flat: &catalog.FlatPrice{Amount: math.MaxInt64}},
 		{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{UnitAmount: 9007199254740993, DivideBy: 60, MaximumAmount: math.MaxInt64}},
-		{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{DivideBy: 60, Round: catalog.RoundUp, Matrix: &catalog.Matrix{Dimension: "size", Cells: map[string]catalog.MatrixCell{"small": {}, "large": {UnitAmount: 9007199254740993, MaximumAmount: math.MaxInt64, Included: 10}}}}},
+		{Model: catalog.ModelPerUnit, Currency: "USD", PerUnit: &catalog.PerUnitPrice{DivideBy: 60, Round: catalog.RoundUp, Matrix: &catalog.Matrix{Dimension: "size", Cells: map[string]catalog.MatrixCell{"small": {}, "large": {UnitAmount: 9007199254740993, MaximumAmount: math.MaxInt64}}}}},
 		{Model: catalog.ModelTiered, Currency: "USD", Tiered: &catalog.TieredPrice{Mode: catalog.TierModeGraduated, Tiers: []catalog.RateTier{{UpTo: &ceiling, UnitAmount: 100, FlatAmount: 9007199254740993}, {UnitAmount: 50}}}},
 		{Model: catalog.ModelPackage, Currency: "USD", Package: &catalog.PackagePrice{Amount: 9007199254740993, PackageSize: 100, FreeUnits: 10}},
 	} {

@@ -162,7 +162,7 @@ var rateJSON = object(map[string]jsonRule{
 	"flat": object(map[string]jsonRule{"amount": moneyStringValue}),
 	"per_unit": object(map[string]jsonRule{
 		"unit_amount": moneyStringValue, "divide_by": integerValue, "round": textValue, "maximum_amount": moneyStringValue,
-		"matrix": object(map[string]jsonRule{"dimension": textValue, "cells": dictionary(object(map[string]jsonRule{"unit_amount": moneyStringValue, "maximum_amount": moneyStringValue, "included": integerValue}))}),
+		"matrix": object(map[string]jsonRule{"dimension": textValue, "cells": dictionary(object(map[string]jsonRule{"unit_amount": moneyStringValue, "maximum_amount": moneyStringValue}))}),
 	}),
 	"tiered":  object(map[string]jsonRule{"mode": textValue, "tiers": array(object(map[string]jsonRule{"up_to": nullable(integerValue), "unit_amount": moneyStringValue, "flat_amount": moneyStringValue}))}),
 	"package": object(map[string]jsonRule{"amount": moneyStringValue, "package_size": integerValue, "free_units": integerValue}),
@@ -315,7 +315,7 @@ var jsonRules = map[string]jsonRule{
 	"catalog_meters.group_by":           nullable(dictionary(textValue)),
 	"price_psp_bindings.configuration":  priceBindingConfigurationJSON,
 	"catalog_rate_cards.filter":         nullable(dictionary(array(textValue))),
-	"catalog_rate_cards.allowance":      nullable(object(map[string]jsonRule{"included": integerValue, "accrue_from": textValue, "cap": textValue})),
+	"catalog_rate_cards.allowance":      nullable(object(map[string]jsonRule{"included": integerValue})),
 	"catalog_rate_cards.price":          rateJSON,
 	"orders.tax":                        nullable(emptyObject), "orders.billing_contacts": nullable(contactsJSON),
 	// An order line's credit benefit per unit, frozen when the order was made.

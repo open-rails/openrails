@@ -413,3 +413,77 @@ func TestUsageReportGroupsByMeter(t *testing.T) {
 	require.EqualValues(t, 25_200, byType.Rows[0].Amount, "an event's amount is its charges")
 	require.Nil(t, byType.Rows[0].Quantity)
 }
+
+// A metered card's charges are posted when usage is recorded, so it states
+// no payment term; only a flat fee says when it is collected.
+func TestMeteredCardRefusesPaymentTerm(t *testing.T) {
+	client := newFixture(t).runtime(t, "term-"+uuid.NewString()[:8])
+	document := func(term string) *catalog.Application {
+		t.Helper()
+		params, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
+meters:
+  calls:
+    aggregation: count
+products:
+  api:
+    display_name: API
+    rate_cards:
+    - meter: calls
+` + term + `      price: {model: per_unit, currency: USD, per_unit: {unit_amount: "1000"}}
+    - payment_term: in_advance
+      price: {model: flat, currency: USD, flat: {amount: "5000000"}}
+`))
+		require.NoError(t, err)
+		return params
+	}
+	_, err := client.ApplyCatalog(t.Context(), document("      payment_term: in_arrears\n"), billing.ApplyCatalogParams{})
+	require.ErrorIs(t, err, billing.ErrInvalid)
+	require.ErrorContains(t, err, "states no payment_term")
+	_, err = client.ApplyCatalog(t.Context(), document(""), billing.ApplyCatalogParams{})
+	require.NoError(t, err, "a flat fee keeps its payment term")
+	meter, err := client.GetMeter(t.Context(), "calls")
+	require.NoError(t, err)
+	require.NotNil(t, meter.RateCard)
+}
+
+// Volume tiers would lower the price of earlier units when a later event
+// reaches a cheaper band: a metered card takes graduated tiers only.
+func TestMeteredCardRefusesVolumeTiers(t *testing.T) {
+	p := newPricing(t, newFixture(t), "volume")
+	ten := int64(10)
+	tiers := func(mode catalog.TierMode) catalog.RatePrice {
+		return catalog.RatePrice{Model: catalog.ModelTiered, Currency: "USD", Tiered: &catalog.TieredPrice{
+			Mode: mode, Tiers: []catalog.RateTier{{UpTo: &ten, UnitAmount: 1_000}, {UnitAmount: 500}}}}
+	}
+	set := func(mode catalog.TierMode) error {
+		_, err := p.client.SetMeter(p.ctx, "calls", billing.SetMeterParams{Aggregation: catalog.AggregationCount,
+			RateCard: catalog.Value(billing.MeterRateCardParams{ProductID: p.product, Price: tiers(mode)})})
+		return err
+	}
+	err := set(catalog.TierModeVolume)
+	require.ErrorIs(t, err, billing.ErrInvalid)
+	var refusal *billing.StatusError
+	require.ErrorAs(t, err, &refusal)
+	require.Equal(t, "usage_rate_card_invalid", refusal.Code)
+	require.ErrorContains(t, err, "volume tiers")
+	require.NoError(t, set(catalog.TierModeGraduated))
+
+	params, err := catalog.ParseApplicationYAML([]byte(`schema_version: 1
+meters:
+  seats:
+    aggregation: count
+products:
+  seats:
+    display_name: Seats
+    rate_cards:
+    - meter: seats
+      price:
+        model: tiered
+        currency: USD
+        tiered: {mode: volume, tiers: [{up_to: 10, unit_amount: "1000"}, {unit_amount: "500"}]}
+`))
+	require.NoError(t, err)
+	_, err = p.client.ApplyCatalog(p.ctx, params, billing.ApplyCatalogParams{})
+	require.ErrorIs(t, err, billing.ErrInvalid)
+	require.ErrorContains(t, err, "volume tiers")
+}

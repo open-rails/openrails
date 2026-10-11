@@ -1,7 +1,7 @@
 // Durations read and type as words; the wire keeps exact hours and seconds.
 import { describe, expect, it } from "vitest"
 
-import { formatCap, formatHours, formatSeconds, hoursToCap, parseHours } from "./duration"
+import { formatHours, formatSeconds, parseHours } from "./duration"
 import { priceIntervalLabel } from "@/pages/catalog/price-format"
 
 describe("readable durations", () => {
@@ -36,12 +36,6 @@ describe("readable durations", () => {
     ["720", null],
   ])("reads %j as %s hours", (text, hours) => {
     expect(parseHours(text)).toBe(hours)
-  })
-
-  it("round-trips an allowance cap through its wire spelling", () => {
-    expect([formatCap("30d"), formatCap("720h"), formatCap("36h")]).toEqual(["30 days", "30 days", "36 hours"])
-    expect([hoursToCap(720), hoursToCap(36)]).toEqual(["30d", "36h"])
-    expect(formatCap("unknown")).toBe("unknown")
   })
 
   it("reads a price as a cadence or a stretch of access", () => {
