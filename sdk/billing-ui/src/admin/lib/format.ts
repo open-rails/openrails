@@ -1,0 +1,207 @@
+import type { CardDetails } from "#orck/client/generated/wire"
+import { OPENRAILS_CURRENCY_SCALES as currencyUnits } from "#orck/client/generated/currencies"
+
+// Money is an integer count of native units. A JSON number is exact only as a
+// safe integer; exact int64 amounts arrive as decimal strings.
+export type MoneyAmount = number | string
+
+const INT64_MIN = -(1n << 63n)
+const INT64_MAX = (1n << 63n) - 1n
+
+// Intl.NumberFormat formats a decimal string exactly only since ECMA-402 2023
+// (Chrome/Edge 106, Firefox 116, Safari 15.4); older engines coerce it through
+// Number. Probed once with 2^53 + 1, which a Number cannot hold.
+export const intlFormatsDecimalStringsExactly: boolean = (() => {
+  try {
+    return (
+      new Intl.NumberFormat("en", { useGrouping: false }).format(
+        "9007199254740993" as `${number}`
+      ) === "9007199254740993"
+    )
+  } catch {
+    return false
+  }
+})()
+
+// Below 10^15 native units a Number-coerced decimal still rounds back to the
+// exact digits at every registry scale; from 10^15 the coerced value can differ
+// in the last digit, so a legacy engine refuses instead of misformatting.
+const LEGACY_EXACT_UNITS = 10n ** 15n
+
+// currencyScale is the engine registry's native decimals (generated from
+// billing.Currencies).
+export function currencyScale(currency: string): number | undefined {
+  const code = currency.trim().toUpperCase()
+  return Object.hasOwn(currencyUnits, code)
+    ? currencyUnits[code as keyof typeof currencyUnits]
+    : undefined
+}
+
+export const supportedCurrencies = Object.keys(currencyUnits)
+
+function validDecimals(decimals: number): boolean {
+  return Number.isInteger(decimals) && decimals >= 0 && decimals <= 18
+}
+
+function exactUnits(amount: MoneyAmount): bigint | null {
+  if (typeof amount === "number")
+    return Number.isSafeInteger(amount) ? BigInt(amount) : null
+  if (!/^-?\d{1,19}$/.test(amount)) return null
+  const value = BigInt(amount)
+  return value < INT64_MIN || value > INT64_MAX ? null : value
+}
+
+// unitsToDecimal renders native units as an exact major-unit decimal, or null
+// when the amount is not an exact int64.
+export function unitsToDecimal(
+  amount: MoneyAmount,
+  decimals: number
+): string | null {
+  const value = exactUnits(amount)
+  if (value === null || !validDecimals(decimals)) return null
+  return decimalFromUnits(value, decimals)
+}
+
+function decimalFromUnits(value: bigint, decimals: number): string {
+  const absolute = value < 0n ? -value : value
+  const scale = 10n ** BigInt(decimals)
+  const fraction = (absolute % scale)
+    .toString()
+    .padStart(decimals, "0")
+    .replace(/0+$/, "")
+  return `${value < 0n ? "-" : ""}${absolute / scale}${fraction ? `.${fraction}` : ""}`
+}
+
+// formatUnits formats native units at an explicit scale without passing
+// through a JS number; an engine without exact decimal-string Intl refuses
+// the amounts it cannot hold.
+export function formatUnits(
+  amount: MoneyAmount,
+  currency: string,
+  decimals: number
+): string {
+  const units = exactUnits(amount)
+  if (units === null || !validDecimals(decimals))
+    return `${currency} amount exceeds the exact display range`
+  if (
+    !intlFormatsDecimalStringsExactly &&
+    (units >= LEGACY_EXACT_UNITS || units <= -LEGACY_EXACT_UNITS)
+  )
+    return `${currency} amount exceeds this browser's exact display range`
+  const decimal = decimalFromUnits(units, decimals) as `${number}`
+  const code = currency.trim().toUpperCase()
+  if (/^[A-Z]{3}$/.test(code))
+    return new Intl.NumberFormat(undefined, {
+      style: "currency",
+      currency: code,
+      maximumFractionDigits: decimals,
+    }).format(decimal)
+  const number = new Intl.NumberFormat(undefined, {
+    maximumFractionDigits: decimals,
+  }).format(decimal)
+  return `${number} ${currency}`
+}
+
+// formatNativeAmount formats an amount at its currency's registered scale.
+export function formatNativeAmount(
+  amount: MoneyAmount,
+  currency: string
+): string {
+  const scale = currencyScale(currency)
+  return scale === undefined
+    ? `Amount in unregistered currency ${currency || "(none)"}`
+    : formatUnits(amount, currency, scale)
+}
+
+// Canonical monetary wire input: an exact signed int64 decimal string.
+export function amountFromInput(
+  major: string,
+  decimals: number
+): string | null {
+  if (!validDecimals(decimals)) return null
+  const match = /^([+-]?)(\d*)(?:\.(\d*))?$/.exec(major.trim())
+  if (!match || (!match[2] && !match[3]) || (match[3]?.length ?? 0) > decimals)
+    return null
+  const value =
+    BigInt(match[2] || "0") * 10n ** BigInt(decimals) +
+    BigInt((match[3] || "").padEnd(decimals, "0") || "0")
+  const signed = match[1] === "-" ? -value : value
+  if (signed < INT64_MIN || signed > INT64_MAX) return null
+  return signed.toString()
+}
+
+// nativeAmountFromInput converts a major-unit input to exact native units at
+// the currency's registered scale, as the int64 decimal string money wires use.
+export function nativeAmountFromInput(
+  major: string,
+  currency: string
+): string | null {
+  const scale = currencyScale(currency)
+  return scale === undefined ? null : amountFromInput(major, scale)
+}
+
+// nativeAmountToInput prefills an editable major-unit amount. A JSON number
+// beyond the safe-integer range has already lost digits, so it is refused
+// before any BigInt or string conversion and the field starts empty: an empty
+// input never passes nativeAmountFromInput, so a rounded value is never saved.
+export function nativeAmountToInput(
+  amount: MoneyAmount | undefined,
+  currency: string
+): string {
+  const scale = currencyScale(currency)
+  if (amount === undefined || scale === undefined) return ""
+  if (typeof amount === "number" && !Number.isSafeInteger(amount)) return ""
+  return unitsToDecimal(amount, scale) ?? ""
+}
+
+export function formatDate(iso?: string | null): string {
+  if (!iso) return "—"
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return "—"
+  return d.toLocaleString(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  })
+}
+
+// formatCard names a card by brand and last four digits.
+export function formatCard(card?: CardDetails | null): string {
+  return card?.last4 ? `${card.brand ?? "card"} ••••${card.last4}` : "—"
+}
+
+export function formatCardExpiry(card?: CardDetails | null): string {
+  return `${card?.exp_month ?? "??"}/${card?.exp_year ?? "????"}`
+}
+
+export function shortId(id: string, n = 8): string {
+  return id.length > n ? `${id.slice(0, n)}…` : id
+}
+
+// customerName names a customer by its directory contact, else its id.
+export function customerName(c: {
+  id: string
+  contact: { email: string | null; name: string | null } | null
+}): string {
+  return c.contact?.name || c.contact?.email || shortId(c.id, 13)
+}
+
+// timeAgo renders a compact relative time ("3m", "2h", "5d") for feeds like the
+// notification bell; falls back to a short date past a week.
+export function timeAgo(iso?: string | null): string {
+  if (!iso) return ""
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return ""
+  const secs = Math.round((Date.now() - then) / 1000)
+  if (secs < 45) return "just now"
+  if (secs < 90) return "1m"
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `${days}d`
+  return new Date(then).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  })
+}

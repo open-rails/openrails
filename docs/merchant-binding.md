@@ -58,7 +58,7 @@ bound to it.
 Choosing a merchant exchanges the person's token for one bound to it (RFC
 8693 with `group_id`, through the server's `openrails-console` client), held
 in memory for the tab. The exchange is refused where the person holds no
-role. See [admin console](admin-console.md).
+role. See [admin console](billing-admin.md).
 
 ## What it may do there
 

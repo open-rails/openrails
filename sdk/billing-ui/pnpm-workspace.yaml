@@ -12,6 +12,8 @@ minimumReleaseAge: 1440
 minimumReleaseAgeStrict: true
 minimumReleaseAgeIgnoreMissingTime: false
 minimumReleaseAgeExclude:
+  # AuthKit is published by our release CI; admin host integration tests use it.
+  - "@openrails/auth-ui"
   - "@types/node@26.2.0"
   - "eslint@10.8.1"
 trustPolicy: no-downgrade

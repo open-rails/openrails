@@ -1,5 +1,15 @@
 # Changelog
 
+## Embeddable billing administration
+
+- `@openrails/billing-ui/admin` exports `BillingAdmin`, `BillingCustomerSummary`,
+  `useBillingAdminAccess`, `billingConfirmWarnings`, and `billingPermissionHelp`.
+  The host supplies authentication, routing, merchant selection, and optional
+  settings tabs and customer panels. Instances isolate their requests and cache.
+- Import `@openrails/billing-ui/admin.css` for scoped administration styles.
+  The customer entry remains separate; the admin entry uses TanStack Query 5
+  as an optional peer.
+
 ## Usage priced when recorded
 
 - `getUsage({ groupBy: "meter" })` groups what each meter, and matrix cell,

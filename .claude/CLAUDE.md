@@ -25,7 +25,7 @@ through `host-four`; these are placeholders, not customer or repository names.
 
 ## v1 is frozen
 - From v1.0.0 three contracts change only by adding to them (`docs/compatibility.md`):
-  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `web/admin`, `server`), the
+  the Go API (`openrails`, `billing`, `catalog`, `adapters/*`, `server/web/console`, `server`), the
   HTTP API, and the database schema. `api/go.txt` lists both modules.
 - Each has a generated snapshot: `api/go.txt` (`TestGoAPISurface`), `api/openapi.json`
   (`TestGeneratedContractIsFresh`), `api/schema.txt` (`TestSchemaSnapshot` in `ci/`).

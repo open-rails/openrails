@@ -310,7 +310,7 @@ default. It mounts only when console assets are built into the binary **and** it
 switched on in the standalone server: `admin_console.enabled: true` (env
 `ADMIN_CONSOLE_ENABLED`). Staff sign in through the server's AuthKit or a
 trusted issuer. Build and
-mount details: `docs/admin-console.md`.
+mount details: `docs/billing-admin.md`.
 
 Pages: **Customers** (search → profile with grant/revoke),
 **Subscriptions** (status filters, cancel with typed confirmation, resume, payment-

@@ -25,10 +25,10 @@ go.work.sum
 .gobuildcache
 .gopath
 
-# Build artifacts (goreleaser, frontend builds). web/admin/dist and
+# Build artifacts (goreleaser, frontend builds). server/web/console/dist and
 # web/checkout/dist keep only their committed placeholders (embed.go).
 dist/
-!web/admin/dist/
+!server/web/console/dist/
 !web/checkout/dist/
 build/
 bin/

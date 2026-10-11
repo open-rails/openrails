@@ -22,12 +22,7 @@ const (
 	CodesDoc    = "docs/api/error-codes.md"
 
 	billingUIDir = "sdk/billing-ui/src/client/generated/"
-	consoleDir   = "web/admin/src/lib/api/generated/"
 )
-
-// browserGroups are the routes a browser SDK calls: billing-ui's wire types
-// cover these, the console's cover every group.
-var browserGroups = map[routes.Group]bool{routes.Checkout: true, routes.Customer: true, routes.Meta: true}
 
 // Files renders every generated file from the route catalog and the
 // error-code registry, by repository path. fsys is the repository: enum
@@ -39,20 +34,13 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 	}
 	// SCIM's messages are the standard's, described by its own discovery
 	// routes: the route table lists them, the wire contract does not.
-	var api, browser []routes.Route
+	var api []routes.Route
 	for _, r := range routes.Catalog() {
 		if r.Auth != routes.AuthProvisioning {
 			api = append(api, r)
 		}
-		if browserGroups[r.Group] {
-			browser = append(browser, r)
-		}
 	}
 	all, err := newModel(fsys, api)
-	if err != nil {
-		return nil, err
-	}
-	sdk, err := newModel(fsys, browser)
 	if err != nil {
 		return nil, err
 	}
@@ -64,14 +52,10 @@ func Files(fsys fs.FS) (map[string][]byte, error) {
 		OpenAPIFile:                     openapi,
 		RoutesDoc:                       listed.routesMD(),
 		CodesDoc:                        errorCodesMD(),
-		billingUIDir + "wire.ts":        sdk.wireTS(),
-		billingUIDir + "routes.ts":      sdk.routesTS(),
+		billingUIDir + "wire.ts":        all.wireTS(),
+		billingUIDir + "routes.ts":      all.routesTS(),
 		billingUIDir + "error-codes.ts": errorCodesTS(),
 		billingUIDir + "currencies.ts":  currenciesTS(),
-		consoleDir + "wire.ts":          all.wireTS(),
-		consoleDir + "routes.ts":        all.routesTS(),
-		consoleDir + "error-codes.ts":   errorCodesTS(),
-		consoleDir + "currencies.ts":    currenciesTS(),
 	}, nil
 }
 

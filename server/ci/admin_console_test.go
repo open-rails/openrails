@@ -17,7 +17,7 @@ import (
 	"github.com/open-rails/openrails/server"
 )
 
-// consoleBuild stands in for web/admin's build (not built for go test): the
+// consoleBuild stands in for server/web/console's build (not built for go test): the
 // <base href> placeholder plus one hashed asset.
 func consoleBuild(marker string) fstest.MapFS {
 	return fstest.MapFS{
@@ -171,13 +171,6 @@ func TestStandaloneAdminConsolePath(t *testing.T) {
 	off, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", nil)))
 	require.NoError(t, err)
 	require.Equal(t, http.StatusNotFound, get(off, "/admin/").Code, "off unless mounted")
-
-	// A hosted product's console extensions read their data from config.json.
-	hosted, err := standaloneHandler(f.newServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Extensions: map[string]any{"hosted": map[string]any{"plans": []any{"starter"}}}})))
-	require.NoError(t, err)
-	require.Contains(t, get(hosted, "/admin/config.json").Body.String(), `"extensions":{"hosted":{"plans":["starter"]}}`)
-	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Extensions: map[string]any{"Hosted": true}}))
-	require.ErrorContains(t, err, `invalid AdminConsole.Extensions key "Hosted"`)
 
 	_, err = f.buildServer(t, standaloneConsole("http://127.0.0.1", &server.AdminConsole{Path: "/v1"}))
 	require.ErrorContains(t, err, `admin_console.path "/v1" overlaps`)

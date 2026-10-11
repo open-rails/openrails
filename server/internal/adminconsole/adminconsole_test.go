@@ -12,7 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails/server/internal/adminconsole"
-	admin "github.com/open-rails/openrails/web/admin"
+	admin "github.com/open-rails/openrails/server/web/console"
 )
 
 // One console build serves any mount path: index.html references its assets
@@ -21,7 +21,7 @@ import (
 func TestBuiltConsoleServesAtAnyPath(t *testing.T) {
 	assets := admin.FS()
 	if assets == nil {
-		t.Skip("web/admin/dist holds no console build (scripts/build-admin-console.sh)")
+		t.Skip("server/web/console/dist holds no console build (scripts/build-admin-console.sh)")
 	}
 	const mount = "/billing/admin"
 	console, err := adminconsole.Handler(mount, adminconsole.Config{}, assets)

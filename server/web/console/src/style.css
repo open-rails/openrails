@@ -1,0 +1,27 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #fafafa;
+  color: #202124;
+}
+button,
+input {
+  font: inherit;
+}
+.console-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid #ddd;
+  flex-wrap: wrap;
+}
+.console-header form {
+  display: flex;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+.console-empty,
+#root > [role="alert"] {
+  padding: 2rem;
+}

@@ -446,7 +446,7 @@ rate limits.
 **Staff UI:** the host owns its admin pages. Mount the staff route groups
 those pages use and send the host's authenticated credential on each call.
 `GET /v1/admin/access` reports the areas the caller can use and their enabled
-assistants. The prebuilt [admin console](admin-console.md) belongs to the
+assistants. The prebuilt [admin console](billing-admin.md) belongs to the
 standalone server; the embedded engine serves no static console.
 
 ### 7. Calling the engine

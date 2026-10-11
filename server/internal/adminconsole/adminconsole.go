@@ -13,7 +13,6 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/open-rails/openrails/internal/api"
-	"github.com/open-rails/openrails/internal/config"
 )
 
 // Config is the SPA bootstrap document served at <path>/config.json.
@@ -23,22 +22,11 @@ type Config struct {
 	AuthBaseURL string `json:"auth_base_url"`
 	// APIBaseURL is the admin API base, default "/v1".
 	APIBaseURL string `json:"api_base_url"`
-	// CatalogCopilotEnabled mirrors the #779 catalog copilot Q&A gate
-	// (llm.catalog_copilot_enabled AND an LLM key): false renders the catalog
-	// copilot panel as a pointed empty-state.
-	CatalogCopilotEnabled bool `json:"catalog_copilot_enabled"`
-	// CatalogDraftingEnabled mirrors the #779 Phase 2 gate
-	// (llm.catalog_drafting_enabled): false hides the drafting UI entirely —
-	// the copilot panel stays Q&A-only.
-	CatalogDraftingEnabled bool `json:"catalog_drafting_enabled"`
-	// Extensions is AdminConsole.Extensions: host data for the console's
-	// extensions, by extension id. Always an object, empty when unset.
-	Extensions map[string]any `json:"extensions"`
 	// Issuer is the trusted issuer the console signs staff in at; null signs
 	// in to AuthBaseURL's own accounts.
 	Issuer *Issuer `json:"issuer"`
 	// Merchant is the merchant the mount serves; null where staff choose one
-	// (a host's console extension lists theirs, or they open one by name).
+	// (staff open one by id).
 	Merchant *Merchant `json:"merchant"`
 	// Exchange is where the console trades the session's token for one bound
 	// to the merchant staff choose (RFC 8693, the merchant's id as group_id);
@@ -54,13 +42,6 @@ type Exchange struct {
 	ClientID      string `json:"client_id"`
 	Resource      string `json:"resource"`
 	Scope         string `json:"scope"`
-}
-
-// Assistants turns on the console's assistants the deployment has an LLM
-// for, each only where its route group is mounted.
-func (c *Config) Assistants(llm *config.LLMConfig, catalog bool) {
-	c.CatalogCopilotEnabled = catalog && config.LLMCatalogCopilotConfigured(llm)
-	c.CatalogDraftingEnabled = catalog && config.LLMCatalogDraftingConfigured(llm)
 }
 
 // Merchant is the merchant a console mount serves.
@@ -111,9 +92,6 @@ func Handler(path string, cfg Config, assets fs.FS) (http.Handler, error) {
 	}
 	if cfg.APIBaseURL == "" {
 		cfg.APIBaseURL = "/v1"
-	}
-	if cfg.Extensions == nil {
-		cfg.Extensions = map[string]any{}
 	}
 	configJSON, err := json.Marshal(cfg)
 	if err != nil {

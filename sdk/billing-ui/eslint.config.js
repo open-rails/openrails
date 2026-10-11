@@ -19,4 +19,6 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  // A library entry colocates components and hooks; its host owns refresh boundaries.
+  { files: ["src/admin/**/*.tsx"], rules: { "react-refresh/only-export-components": "off" } },
 ])

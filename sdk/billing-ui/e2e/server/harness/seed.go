@@ -169,12 +169,27 @@ type User struct {
 // AuthKit's login route: OpenRails admits a user's token only while its
 // sign-in stands, and a minted one has none. Each sign-in comes from its own
 // address, so the login limit never counts the suite as one client.
-func (r *Runtime) CreateUser(ctx context.Context) (User, error) {
+func (r *Runtime) CreateUser(ctx context.Context) (User, error) { return r.createUser(ctx, iam.Role{}) }
+
+func (r *Runtime) CreateStaff(ctx context.Context, name string) (User, error) {
+	role, ok := r.StaffRoles[name]
+	if !ok {
+		return User{}, fmt.Errorf("unknown staff role %q", name)
+	}
+	return r.createUser(ctx, role)
+}
+
+func (r *Runtime) createUser(ctx context.Context, role iam.Role) (User, error) {
 	id := uuid.NewString()[:12]
 	email, password := "e2e-"+id+"@example.test", "e2e-password-"+uuid.NewString()
 	u, err := r.Auth.CreateUser(ctx, iam.NewUser{Email: email, Username: "u" + id, Password: password})
 	if err != nil {
 		return User{}, err
+	}
+	if !role.IsZero() {
+		if _, err := r.Auth.SetGroupRole(ctx, iam.SystemIdentity(), iam.RootGroup(), iam.UserSubject(u.ID), role); err != nil {
+			return User{}, err
+		}
 	}
 	body, err := json.Marshal(map[string]string{"identifier": email, "password": password})
 	if err != nil {

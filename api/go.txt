@@ -3305,7 +3305,6 @@ pkg openrails/server, method (*Server) UnlockAdminLockout(context.Context, strin
 pkg openrails/server, type AdminConsole = hostconfig.ConsoleMount
 pkg openrails/server, type AdminConsole struct
 pkg openrails/server, type AdminConsole struct, AuthBaseURL string
-pkg openrails/server, type AdminConsole struct, Extensions map[string]any
 pkg openrails/server, type AdminConsole struct, Path string
 pkg openrails/server, type Config struct
 pkg openrails/server, type Config struct, Addr string
@@ -3354,5 +3353,5 @@ pkg openrails/server, type Server struct
 pkg openrails/server, var ErrInvalidMerchantName error
 pkg openrails/server, var ErrMerchantNotFound error
 pkg openrails/server, var ErrRenamesDisabled error
-pkg openrails/web/admin, func FS() fs.FS
+pkg openrails/server/web/console, func FS() fs.FS
 pkg openrails/web/checkout, func FS() fs.FS

@@ -607,7 +607,12 @@ ends after its 3 days; a canceled membership keeps access until its paid term en
 The standalone server ships a staff dashboard covering customer support,
 the catalog, merchant configuration and business metrics. Enable it with
 `admin_console.enabled` and the staff `route_groups` it uses; see the
-[standalone admin console](docs/admin-console.md).
+[standalone admin console](docs/billing-admin.md).
+
+The browser console opens at `/admin` by default (or `admin_console.path`).
+`GET /v1/admin/dashboard` is a JSON API: it reads the saved dashboard layout
+and widget definitions. Chart data comes from `POST /v1/admin/metrics/query`.
+An embedded host renders `BillingAdmin` under its own `basePath`.
 
 An embedded engine serves the billing API. The host owns its admin pages
 and authenticates their calls through `Routes.Auth`. `GET /v1/admin/access`
@@ -1662,7 +1667,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 **Run your business** — for the merchant defining plans and managing customers:
 
 - [Merchant guide](docs/merchant-guide.md) — authoring the catalog (products, prices, rate cards, entitlements), applying it, and day-to-day customer management.
-- [Admin console](docs/admin-console.md) — the merchant portal: turning it on/off, building the assets, and using it.
+- [Admin console](docs/billing-admin.md) — the merchant portal: turning it on/off, building the assets, and using it.
 - [Entitlements](docs/entitlements_timeline.md) — the access-timeline model your app reads.
 - Usage billing — [request admission](docs/admission-operations.md), [billing policies](docs/billing-policies.md), [arrears and delinquency](docs/arrears-delinquency.md), [usage orders](docs/usage-orders.md), [running charges](docs/running-charges.md).
 

@@ -1,0 +1,46 @@
+{
+  "name": "openrails-console",
+  "private": true,
+  "version": "0.0.1",
+  "packageManager": "pnpm@11.0.0",
+  "type": "module",
+  "intent": {
+    "skills": [
+      "@tanstack/*"
+    ]
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx}\"",
+    "test": "vitest run",
+    "typecheck": "tsc -b",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@openrails/auth-ui": "1.24.0",
+    "@tanstack/react-query": "^5.101.4",
+    "react": "^19.2.6",
+    "react-dom": "^19.2.6",
+    "react-router-dom": "7.18.2",
+    "@openrails/billing-ui": "link:../../../sdk/billing-ui"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10",
+    "@types/node": "^24",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^6",
+    "eslint": "^10",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17",
+    "jsdom": "^30.1.0",
+    "prettier": "^3.8.3",
+    "typescript": "~6",
+    "typescript-eslint": "^8",
+    "vite": "^8",
+    "vitest": "^4.1.11"
+  }
+}

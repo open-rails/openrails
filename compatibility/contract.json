@@ -1129,10 +1129,10 @@
     ],
     "server/internal/hostconfig": [
       "type ConsoleIssuer struct {\n\tURL string\n\n\tClientID string\n\n\tName string\n\n\tScope string\n}",
-      "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n\n\tExtensions map[string]any\n}",
+      "type ConsoleMount struct {\n\tPath string\n\n\tAuthBaseURL string\n}",
       "type MerchantCreationConfig struct {\n\tReservedSlugs []string\n\n\tReservedEscalationRole string\n\n\tSlugPattern string\n\n\tFreeAllowance int\n}"
     ],
-    "web/admin": [
+    "server/web/console": [
       "func FS() fs.FS"
     ],
     "web/checkout": [
@@ -1650,7 +1650,7 @@
       "type ledgerAuditResult struct {\n\tMerchantID   uuid.UUID              `json:\"merchant_id\"`\n\tMerchantSlug string                 `json:\"merchant_slug\"`\n\tReport       ledger.IntegrityReport `json:\"report\"`\n\tErr          string                 `json:\"error,omitempty\"`\n}"
     ],
     "server/internal/adminconsole": [
-      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tCatalogCopilotEnabled bool `json:\"catalog_copilot_enabled\"`\n\n\tCatalogDraftingEnabled bool `json:\"catalog_drafting_enabled\"`\n\n\tExtensions map[string]any `json:\"extensions\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
+      "type Config struct {\n\tAuthBaseURL string `json:\"auth_base_url\"`\n\n\tAPIBaseURL string `json:\"api_base_url\"`\n\n\tIssuer *Issuer `json:\"issuer\"`\n\n\tMerchant *Merchant `json:\"merchant\"`\n\n\tExchange *Exchange `json:\"exchange\"`\n}",
       "type Exchange struct {\n\tTokenEndpoint string `json:\"token_endpoint\"`\n\tClientID      string `json:\"client_id\"`\n\tResource      string `json:\"resource\"`\n\tScope         string `json:\"scope\"`\n}",
       "type Issuer struct {\n\tURL      string `json:\"url\"`\n\tClientID string `json:\"client_id\"`\n\tName     string `json:\"name\"`\n\n\tResource string `json:\"resource\"`\n\tScope    string `json:\"scope\"`\n}",
       "type Merchant struct {\n\tID          string `json:\"id\"`\n\tSlug        string `json:\"slug\"`\n\tDisplayName string `json:\"display_name,omitempty\"`\n}"
@@ -4544,7 +4544,6 @@
     },
     "server/internal/adminconsole/adminconsole.go": {
       "api": "github.com/open-rails/openrails/internal/api",
-      "config": "github.com/open-rails/openrails/internal/config",
       "fmt": "fmt",
       "fs": "io/fs",
       "html": "html",
@@ -4563,11 +4562,6 @@
       "strconv": "strconv",
       "strings": "strings",
       "time": "time"
-    },
-    "server/internal/hostconfig/console.go": {
-      "fmt": "fmt",
-      "json": "encoding/json",
-      "regexp": "regexp"
     },
     "server/internal/hostconfig/server.go": {
       "fmt": "fmt",
@@ -4616,7 +4610,7 @@
       "riverjobs": "github.com/open-rails/openrails/internal/river"
     },
     "server/server.go": {
-      "admin": "github.com/open-rails/openrails/web/admin",
+      "admin": "github.com/open-rails/openrails/server/web/console",
       "app": "github.com/open-rails/openrails/internal/app",
       "authkit": "github.com/open-rails/authkit",
       "billing": "github.com/open-rails/openrails/billing",
@@ -4643,7 +4637,7 @@
       "time": "time",
       "userinfo": "github.com/open-rails/authkit/userinfo"
     },
-    "web/admin/embed.go": {
+    "server/web/console/embed.go": {
       "embed": "embed",
       "fs": "io/fs"
     },

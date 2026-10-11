@@ -1,0 +1,352 @@
+// Result-shaping helpers for dashboard widgets: unit-aware formatting,
+// time-series pivoting, and deep links (every count tile links to its list).
+import type {
+  MetricsCell,
+  MetricsColumn,
+  MetricsQuery,
+  MetricsRange,
+  MetricsResult,
+} from "#orck/admin/lib/api/metrics"
+import { formatNativeAmount } from "#orck/admin/lib/format"
+
+// formatMeasure renders one measure cell by its column unit.
+export function formatMeasure(
+  value: MetricsCell,
+  unit: string | undefined,
+  currency?: string
+): string {
+  if (value === null || value === undefined) return "—"
+  // "money" cells are exact decimal strings of native units at the
+  // currency's registered scale (a money-unit ratio arrives already rounded).
+  if (unit === "money") return formatNativeAmount(value, currency ?? "")
+  const n = typeof value === "number" ? value : Number(value)
+  if (!Number.isFinite(n)) return String(value)
+  switch (unit) {
+    case "ratio":
+      return `${(n * 100).toLocaleString(undefined, { maximumFractionDigits: 2 })}%`
+    case "days":
+      return `${n.toLocaleString(undefined, { maximumFractionDigits: 1 })} d`
+    default:
+      return n.toLocaleString(undefined, { maximumFractionDigits: 2 })
+  }
+}
+
+// formatBucket renders a time-bucket label for the query grain.
+export function formatBucket(iso: string, grain?: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  switch (grain) {
+    case "month":
+    case "quarter":
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    case "year":
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        timeZone: "UTC",
+      })
+    default:
+      return d.toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      })
+  }
+}
+
+export interface ColumnIndex {
+  time: number
+  dims: { name: string; index: number }[]
+  measures: { name: string; unit?: string; index: number }[]
+  currency: number
+}
+
+export function indexColumns(columns: MetricsColumn[]): ColumnIndex {
+  const idx: ColumnIndex = { time: -1, dims: [], measures: [], currency: -1 }
+  columns.forEach((c, i) => {
+    if (c.kind === "time") idx.time = i
+    else if (c.kind === "dimension") {
+      idx.dims.push({ name: c.name, index: i })
+      if (c.name === "currency") idx.currency = i
+    } else idx.measures.push({ name: c.name, unit: c.unit, index: i })
+  })
+  return idx
+}
+
+export interface PivotSeries {
+  key: string
+  label: string
+  measure: string
+  dimensions: MetricsCell[]
+  unit?: string
+  currency?: string
+}
+
+export function filteredCurrency(query?: MetricsQuery): string | undefined {
+  const currencies = query?.filters?.currency
+  return currencies?.length === 1 ? currencies[0].trim() : undefined
+}
+
+export function rowCurrency(
+  row: MetricsCell[],
+  idx: ColumnIndex,
+  fallback?: string
+): string | undefined {
+  return idx.currency >= 0
+    ? String(row[idx.currency] ?? "") || undefined
+    : fallback
+}
+
+// Absolute bucket dates differ between periods; stat deltas are defined only
+// for a single value per dimension tuple. Never sum ratios or unlike monies.
+export function statDelta(
+  result: MetricsResult,
+  row: MetricsCell[],
+  measureIndex: number
+): number | null {
+  if (!result.compare_rows || row[measureIndex] === null) return null
+  const idx = indexColumns(result.columns)
+  const key = (r: MetricsCell[]) =>
+    JSON.stringify(idx.dims.map((d) => r[d.index]))
+  const currentKey = key(row)
+  if (result.rows.filter((r) => key(r) === currentKey).length !== 1) return null
+  const previous = result.compare_rows.filter((r) => key(r) === currentKey)
+  if (previous.length !== 1 || previous[0][measureIndex] === null) return null
+  const prev = Number(previous[0][measureIndex])
+  const cur = Number(row[measureIndex])
+  return Number.isFinite(prev) && Number.isFinite(cur) && prev !== 0
+    ? (cur - prev) / Math.abs(prev)
+    : null
+}
+
+// comparedWith names the period a stat's delta compares with: a one-day
+// range compares with yesterday.
+export function comparedWith(result: MetricsResult): string {
+  const span = result.compare_range
+    ? Date.parse(result.compare_range.to) -
+      Date.parse(result.compare_range.from)
+    : 0
+  return span === 86_400_000 ? "yesterday" : "previous period"
+}
+
+// One axis (or donut total) may only combine the same measurement unit and
+// currency. Counts do not become money just because a currency dimension exists.
+export function groupSeries<T extends PivotSeries>(
+  series: T[]
+): { key: string; label: string; series: T[] }[] {
+  const groups = new Map<string, { key: string; label: string; series: T[] }>()
+  for (const item of series) {
+    const currency = item.unit === "money" ? item.currency : undefined
+    const key = JSON.stringify([item.unit ?? "number", currency ?? null])
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        label:
+          item.unit === "money"
+            ? currency || "Amount (currency not supplied)"
+            : item.unit || "Values",
+        series: [],
+      }
+      groups.set(key, group)
+    }
+    group.series.push(item)
+  }
+  return [...groups.values()]
+}
+
+export interface Pivoted {
+  data: Record<string, number | string | null>[]
+  series: PivotSeries[]
+}
+
+// exactKey names the pivoted row field that keeps a series' exact wire cell
+// (a money decimal string) beside the Number recharts plots, so tooltips
+// format the exact value rather than a Number-coerced one.
+export function exactKey(seriesKey: string): string {
+  return `${seriesKey}:exact`
+}
+
+// pivotTimeSeries turns tabular rows into recharts rows keyed by bucket, one
+// series per measure × dimension-value combination. Server-zero-filled
+// buckets render as-is; combos absent for a bucket fill 0 so stacks align.
+// A ratio with nothing to divide by is no data, not 0%: it stays null.
+export function pivotTimeSeries(
+  result: MetricsResult,
+  currency?: string
+): Pivoted {
+  const idx = indexColumns(result.columns)
+  if (idx.time < 0) return { data: [], series: [] }
+  const buckets = new Map<string, Record<string, number | string | null>>()
+  const series = new Map<string, PivotSeries>()
+  for (const row of result.rows) {
+    const t = String(row[idx.time])
+    let entry = buckets.get(t)
+    if (!entry) {
+      entry = { bucket: formatBucket(t, result.grain), bucketISO: t }
+      buckets.set(t, entry)
+    }
+    const dimensions = idx.dims.map((d) => row[d.index])
+    const dimLabel = dimensions
+      .map((value) => String(value ?? ""))
+      .filter(Boolean)
+      .join(" · ")
+    for (const m of idx.measures) {
+      const identity = JSON.stringify([m.name, ...dimensions])
+      let item = series.get(identity)
+      if (!item) {
+        item = {
+          key: `series-${series.size}`,
+          label:
+            dimLabel && idx.measures.length > 1
+              ? `${m.name} · ${dimLabel}`
+              : dimLabel || m.name,
+          measure: m.name,
+          dimensions,
+          unit: m.unit,
+          currency:
+            m.unit === "money" ? rowCurrency(row, idx, currency) : undefined,
+        }
+        series.set(identity, item)
+      }
+      const cell = row[m.index]
+      const empty = m.unit === "ratio" ? null : 0
+      entry[item.key] = cell === null ? empty : Number(cell)
+      entry[exactKey(item.key)] = cell ?? empty
+    }
+  }
+  const data = [...buckets.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : 1))
+    .map(([, entry]) => entry)
+  const keys = [...series.values()]
+  for (const entry of data) {
+    for (const s of keys)
+      if (!(s.key in entry)) {
+        const empty = s.unit === "ratio" ? null : 0
+        entry[s.key] = empty
+        entry[exactKey(s.key)] = empty
+      }
+  }
+  return { data, series: keys }
+}
+
+// DonutSlice is one pie slice: the plotted Number beside the exact wire cell
+// (under exactKey) the tooltip formats, as the time-series rows do.
+export type DonutSlice = PivotSeries & {
+  value: number
+  [exact: string]: unknown
+}
+
+// donutSlices turns the result's rows into slices for the primary measure,
+// dropping zero slices.
+export function donutSlices(
+  result: MetricsResult,
+  currency?: string
+): DonutSlice[] {
+  const idx = indexColumns(result.columns)
+  const primary = idx.measures[0]
+  if (!primary) return []
+  return result.rows
+    .map((row, i) => {
+      const key = `slice-${i}`
+      const cell = row[primary.index]
+      return {
+        key,
+        label:
+          idx.dims
+            .map((d) => String(row[d.index] ?? ""))
+            .filter(Boolean)
+            .join(" · ") || primary.name,
+        measure: primary.name,
+        dimensions: idx.dims.map((d) => row[d.index]),
+        unit: primary.unit,
+        currency:
+          primary.unit === "money"
+            ? rowCurrency(row, idx, currency)
+            : undefined,
+        value: Number(cell ?? 0),
+        [exactKey(key)]: cell ?? 0,
+      }
+    })
+    .filter((slice) => slice.value !== 0)
+}
+
+// chartColor cycles the shadcn --chart-N tokens.
+export function chartColor(i: number): string {
+  return `var(--chart-${(i % 5) + 1})`
+}
+
+// Decline, rebill-failure and NMI history measures open Payments → Health.
+const HEALTH_MEASURES = new Set([
+  "attempts",
+  "approved_attempts",
+  "failed_attempts",
+  "attempt_failure_rate",
+  "checkouts",
+  "failed_checkouts",
+  "checkout_failure_rate",
+  "attempts_per_checkout",
+  "checkout_recovery_rate",
+  "rebills_due",
+  "rebills_open",
+  "rebills_attempted",
+  "rebill_first_failures",
+  "rebill_first_failure_rate",
+  "rebills_missed",
+  "rebill_missed_rate",
+  "dunning_recovered",
+  "dunning_recovery_rate",
+  "rebill_collection_rate",
+  "rebill_loss_rate",
+  "nmi_history_authorizations",
+  "nmi_history_approved",
+  "nmi_history_refused",
+  "nmi_history_refusal_rate",
+])
+
+// deepLinkFor maps a widget to the admin page carrying the same filter: health
+// measures in any viz open the health page, count stats open their list. Null
+// = no sensible link.
+export function deepLinkFor(
+  query: MetricsQuery,
+  viz: string = "stat"
+): string | null {
+  const measures = query.measures ?? []
+  if (measures.some((m) => HEALTH_MEASURES.has(m))) return "/payments/health"
+  if (viz !== "stat") return null
+  const status = query.filters?.status?.[0]
+  const has = (...names: string[]) => names.some((n) => measures.includes(n))
+  if (has("subscriptions", "billable_subscriptions")) {
+    return status
+      ? `/subscriptions?status=${encodeURIComponent(status)}`
+      : "/subscriptions"
+  }
+  if (has("new_subscriptions", "net_new_subscriptions"))
+    return "/subscriptions?status=active"
+  if (has("cancellations")) return "/subscriptions?view=recently_canceled"
+  if (
+    has(
+      "payment_count",
+      "refund_count",
+      "chargeback_count",
+      "unique_rebilled_customers"
+    )
+  )
+    return "/payments"
+  if (has("entitled_customers")) return "/customers"
+  return null
+}
+
+// ownRange says in words what a saved query's range covers.
+export function ownRange(range: MetricsRange | undefined): string {
+  if (!range) return "its saved range"
+  if (range.from && range.to) return `${range.from} to ${range.to}`
+  const m = /^(\d+)([dwmy])$/.exec(range.last ?? "")
+  if (!m) return "its saved range"
+  if (m[1] === "1" && m[2] === "d") return "today"
+  const unit = { d: "day", w: "week", m: "month", y: "year" }[m[2]]!
+  return `the last ${m[1]} ${unit}${m[1] === "1" ? "" : "s"}`
+}

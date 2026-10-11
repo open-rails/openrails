@@ -13,6 +13,7 @@ export default defineConfig({
       "#orck": path.resolve(root, "src"),
     },
   },
+  server: { fs: { allow: [root, path.resolve(root, "../../testdata/wire")] } },
   test: {
     environment: "jsdom",
     exclude: [...configDefaults.exclude, "e2e/**"],

@@ -45,14 +45,14 @@ tasks:
       - bash scripts/check.sh e2e
 
   build:
-    desc: Build the binary locally (embeds web/admin/dist when `task admin-build` has run; Go stamps the version from git)
+    desc: Build the binary locally (embeds server/web/console/dist when `task admin-build` has run; Go stamps the version from git)
     cmds:
       - echo "Building {{.BINARY_NAME}}..."
       - mkdir -p {{.BIN_DIR}}
       - cd server && go build -o ../{{.BIN_DIR}}/{{.BINARY_NAME}} ./cmd/openrails
 
   admin-build:
-    desc: Build the admin console SPA into web/admin/dist (gitignored, #754), which the binary go:embeds
+    desc: Build the admin console SPA into server/web/console/dist (gitignored, #754), which the binary go:embeds
     cmds:
       - bash scripts/build-admin-console.sh
 

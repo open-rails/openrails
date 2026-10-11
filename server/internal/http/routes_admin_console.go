@@ -25,14 +25,11 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 		return fmt.Errorf("admin_console.enabled drives the staff routes; turn on at least one of route_groups.admin, catalog, merchant_config or metrics")
 	}
 	if !adminconsole.Present(s.consoleAssets) {
-		return fmt.Errorf("admin_console.enabled is set but web/admin holds no console build: " +
+		return fmt.Errorf("admin_console.enabled is set but server/web/console holds no console build: " +
 			"build it (`task admin-build`) before go build — or unset admin_console.enabled")
 	}
 	path := hostconfig.AdminConsolePath(s.adminConsole)
 	if err := config.ValidateMountPath("admin_console.path", path); err != nil {
-		return err
-	}
-	if err := hostconfig.ValidateConsoleExtensions("AdminConsole.Extensions", s.adminConsole.Extensions); err != nil {
 		return err
 	}
 	for _, entry := range mux.Entries {
@@ -43,9 +40,7 @@ func (s *Server) registerAdminConsoleRoutes(mux *router.Table) error {
 	cfg := adminconsole.Config{
 		AuthBaseURL: s.adminConsole.AuthBaseURL,
 		APIBaseURL:  StandaloneV1Prefix,
-		Extensions:  s.adminConsole.Extensions,
 	}
-	cfg.Assistants(s.cfg.LLM, s.groups.Catalog)
 	issuer, err := consoleIssuer(s.consoleIssuer, s.resource)
 	if err != nil {
 		return err

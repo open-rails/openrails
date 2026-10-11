@@ -76,10 +76,11 @@ async function buildHostApp() {
       rollupOptions: {
         input: {
           account: path.join(root, "e2e/openrails/app/main.tsx"),
+          admin: path.join(root, "e2e/openrails/app/admin.tsx"),
           checkout: path.join(root, "e2e/openrails/app/checkout.tsx"),
           offers: path.join(root, "e2e/openrails/app/offers.tsx"),
         },
-        output: { entryFileNames: "[name].js" },
+        output: { entryFileNames: "[name].js", assetFileNames: "[name][extname]" },
       },
     },
   })

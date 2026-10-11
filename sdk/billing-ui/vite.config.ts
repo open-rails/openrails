@@ -33,7 +33,7 @@ export default defineConfig({
     dts({
       include: ["src"],
       entryRoot: "src",
-      exclude: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"],
+      exclude: ["src/**/*.test.ts", "src/**/*.test.tsx", "src/**/test/**"],
       tsconfigPath: path.resolve(root, "tsconfig.json"),
       // These paths make pnpm's inferred types portable; consumers still
       // resolve the normal peer/dependency package names.

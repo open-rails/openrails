@@ -194,7 +194,7 @@ route_groups:
 
 # Merchant admin console (staff dashboard), served at path. Off by default:
 # while enabled is false no console route exists. Needs console assets in the
-# binary: `task build` embeds web/admin/dist after `task admin-build`; enabled
+# binary: `task build` embeds server/web/console/dist after `task admin-build`; enabled
 # without them refuses boot. It signs in through the control plane's AuthKit.
 admin_console:
   enabled: false

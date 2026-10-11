@@ -33,7 +33,7 @@ import (
 	httpserver "github.com/open-rails/openrails/server/internal/http"
 	"github.com/open-rails/openrails/server/internal/network"
 	"github.com/open-rails/openrails/server/internal/operator"
-	admin "github.com/open-rails/openrails/web/admin"
+	admin "github.com/open-rails/openrails/server/web/console"
 )
 
 // The configuration family of a standalone server, defined in internal/config
@@ -43,7 +43,7 @@ type (
 	// merchants and names users claim.
 	MerchantCreationConfig = hostconfig.MerchantCreationConfig
 	// AdminConsole is Config.AdminConsole: where the merchant admin console
-	// is served, how staff sign in, and the console extensions' data.
+	// is served and how staff sign in.
 	AdminConsole = hostconfig.ConsoleMount
 	// ConsoleIssuer is Config.ConsoleIssuer: the trusted issuer staff sign in
 	// to the admin console at.

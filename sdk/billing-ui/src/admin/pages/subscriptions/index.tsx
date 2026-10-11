@@ -1,0 +1,343 @@
+import { AdminMessage, useAdminUI } from "#orck/admin/ui-context"
+import { useAdminServices } from "#orck/admin/context"
+import { HugeiconsIcon } from "@hugeicons/react"
+import {
+  Cancel01Icon,
+  Download01Icon,
+  Search01Icon,
+} from "@hugeicons/core-free-icons"
+import * as React from "react"
+import { useNavigate, useSearchParams } from "#orck/admin/router"
+import { useMutation, useQuery } from "@tanstack/react-query"
+import type { ColumnDef } from "@tanstack/react-table"
+
+import { CursorPager } from "#orck/admin/components/cursor-pager"
+import { DataTable } from "#orck/admin/components/data-table"
+import { StatusBadge } from "#orck/admin/components/status-badge"
+import { Button } from "#orck/admin/components/ui/button"
+import { Input } from "#orck/admin/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "#orck/admin/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "#orck/admin/components/ui/tabs"
+import type { SubscriptionFilters } from "#orck/admin/lib/api/endpoints"
+import type { AdminSubscription } from "#orck/admin/lib/api/types"
+import { downloadCsv } from "#orck/admin/lib/csv"
+import { useCursorPages } from "#orck/admin/lib/cursor-pages"
+import { customerName, formatDate, shortId } from "#orck/admin/lib/format"
+
+import { dunningSummary } from "./dunning"
+import { isView, subscriptionViews, viewFilters } from "./views"
+
+const RAILS = ["nmi", "ccbill", "stripe", "solana"]
+
+// Dunning is past_due and awaiting_method: parked, not canceled.
+const statusTabs = [
+  { value: "", label: "All" },
+  { value: "active", label: "Active" },
+  { value: "dunning", label: "Dunning" },
+  { value: "pending", label: "Pending" },
+  { value: "canceled", label: "Canceled" },
+  { value: "awaiting_method", label: "Needs card" },
+  { value: "unverified", label: "Unverified" },
+]
+
+const canceledColumn: ColumnDef<AdminSubscription, unknown> = {
+  header: "Canceled",
+  cell: ({ row }) => (
+    <span className="text-muted-foreground tabular-nums">
+      {formatDate(row.original.canceled_at)}
+    </span>
+  ),
+}
+
+const columns: ColumnDef<AdminSubscription, unknown>[] = [
+  {
+    header: "Customer",
+    cell: ({ row }) => (
+      <span className="font-mono text-xs">
+        {shortId(row.original.customer_id, 13)}
+      </span>
+    ),
+  },
+  {
+    header: "Status",
+    cell: ({ row }) => <StatusBadge status={row.original.status} />,
+  },
+  { header: "Rail", cell: ({ row }) => row.original.rail },
+  {
+    header: "Subscription",
+    cell: ({ row }) => (
+      <span className="text-xs text-muted-foreground">
+        {shortId(row.original.id, 13)}
+      </span>
+    ),
+  },
+  {
+    header: "Started",
+    cell: ({ row }) => (
+      <span className="text-muted-foreground tabular-nums">
+        {formatDate(row.original.started_at)}
+      </span>
+    ),
+  },
+  {
+    header: "Period ends",
+    cell: ({ row }) => (
+      <span className="text-muted-foreground tabular-nums">
+        {formatDate(row.original.current_period_ends_at)}
+      </span>
+    ),
+  },
+  {
+    header: "Dunning",
+    cell: ({ row }) =>
+      row.original.dunning ? (
+        dunningSummary(row.original.dunning)
+      ) : (
+        <span className="text-muted-foreground">—</span>
+      ),
+  },
+]
+
+export function SubscriptionsPage() {
+  const { toast, toastApiError, adminMutations, adminQueries } =
+    useAdminServices()
+
+  const { text: adminText } = useAdminUI()
+
+  const [params, setParams] = useSearchParams()
+  const view = params.get("view") ?? ""
+  const status = params.get("status") ?? ""
+  const dunning = params.get("dunning") === "true"
+  const rail = params.get("rail") ?? ""
+  const userId = params.get("customer_id") ?? ""
+  const customerLabel = params.get("customer") ?? ""
+  const [input, setInput] = React.useState("")
+  const navigate = useNavigate()
+  const customerLookup = useMutation(adminMutations.findCustomer())
+  const exportSubscriptions = useMutation(adminMutations.exportSubscriptions())
+
+  const viewed = isView(view) ? viewFilters(view) : null
+  const filters: SubscriptionFilters = {
+    ...(viewed ?? {
+      ...(status ? { status } : {}),
+      ...(dunning ? { dunning: "true" } : {}),
+    }),
+    ...(rail ? { rail } : {}),
+    ...(userId ? { customer_id: userId } : {}),
+  }
+  const pages = useCursorPages(JSON.stringify(filters))
+  const {
+    data,
+    isPending: loading,
+    isFetching,
+  } = useQuery(adminQueries.subscriptions(filters, pages.size, pages.cursor))
+  const shownColumns =
+    view === "recently_canceled" || status === "canceled"
+      ? [...columns.slice(0, -2), canceledColumn, columns.at(-1)!]
+      : columns
+
+  const setParam = (key: string, value: string) => {
+    const p = new URLSearchParams(params)
+    if (value) p.set(key, value)
+    else p.delete(key)
+    setParams(p)
+  }
+
+  // The subscriptions API has no free-text search: resolve the term to a
+  // customer, then filter by its id.
+  const searchCustomer = async () => {
+    const term = input.trim()
+    if (!term) return
+    try {
+      const c = await customerLookup.mutateAsync(term)
+      if (!c) {
+        toast.info("No customer matches")
+        return
+      }
+      const p = new URLSearchParams(params)
+      p.set("customer_id", c.id)
+      p.set("customer", customerName(c))
+      setParams(p)
+      setInput("")
+    } catch (err) {
+      toastApiError(err, "Search customers")
+    }
+  }
+
+  const clearCustomer = () => {
+    const p = new URLSearchParams(params)
+    p.delete("customer_id")
+    p.delete("customer")
+    setParams(p)
+  }
+
+  const exportCsv = async () => {
+    try {
+      const rows = await exportSubscriptions.mutateAsync(filters)
+      downloadCsv(
+        `subscriptions-${view || status || "all"}-${new Date().toISOString().slice(0, 10)}.csv`,
+        [
+          "id",
+          "status",
+          "rail",
+          "customer_id",
+          "started_at",
+          "current_period_ends_at",
+          "canceled_at",
+        ],
+        rows.map((r) => [
+          r.id,
+          r.status,
+          r.rail,
+          r.customer_id,
+          r.started_at,
+          r.current_period_ends_at,
+          r.canceled_at,
+        ])
+      )
+    } catch (err) {
+      toastApiError(err, "Export subscriptions")
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          <AdminMessage id={"Subscriptions"} />
+        </h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <form
+            className="relative"
+            aria-busy={customerLookup.isPending}
+            onSubmit={(e) => {
+              e.preventDefault()
+              void searchCustomer()
+            }}
+          >
+            <HugeiconsIcon
+              icon={Search01Icon}
+              className="absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              className="w-64 pl-8"
+              placeholder={adminText("Search customer email, ref, or id…")}
+              value={input}
+              disabled={customerLookup.isPending}
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </form>
+          <Select
+            items={[
+              { value: "all", label: "All rails" },
+              ...RAILS.map((r) => ({ value: r, label: r })),
+            ]}
+            value={rail || "all"}
+            onValueChange={(v) => setParam("rail", !v || v === "all" ? "" : v)}
+          >
+            <SelectTrigger className="w-36">
+              <SelectValue placeholder={adminText("Rail")} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">
+                <AdminMessage id={"All rails"} />
+              </SelectItem>
+              {RAILS.map((r) => (
+                <SelectItem key={r} value={r}>
+                  {r}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            size="sm"
+            onClick={exportCsv}
+            disabled={
+              exportSubscriptions.isPending ||
+              loading ||
+              (data?.data.length ?? 0) === 0
+            }
+          >
+            <HugeiconsIcon icon={Download01Icon} className="size-4" />
+            {exportSubscriptions.isPending ? "Exporting…" : "Export CSV"}
+          </Button>
+        </div>
+      </div>
+
+      <Tabs
+        value={isView(view) ? view : dunning ? "dunning" : status}
+        onValueChange={(v) => {
+          const p = new URLSearchParams(params)
+          p.delete("status")
+          p.delete("dunning")
+          p.delete("view")
+          if (v === "dunning") p.set("dunning", "true")
+          else if (isView(v)) p.set("view", v)
+          else if (v) p.set("status", v)
+          setParams(p)
+        }}
+      >
+        <TabsList
+          variant="line"
+          className="w-full justify-start gap-6 overflow-x-auto rounded-none p-0"
+        >
+          {[
+            ...statusTabs,
+            ...Object.entries(subscriptionViews).map(([value, v]) => ({
+              value,
+              label: v.label,
+            })),
+          ].map((t) => (
+            <TabsTrigger
+              key={t.value}
+              value={t.value}
+              className="flex-none px-0 after:bg-primary group-data-horizontal/tabs:after:bottom-[-1px]"
+            >
+              {t.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+
+      {userId ? (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground">
+            <AdminMessage id={"Customer"} />
+          </span>
+          <span className="inline-flex items-center gap-1 rounded-md bg-muted py-0.5 pr-1 pl-2 font-medium">
+            {customerLabel || shortId(userId, 13)}
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-5"
+              aria-label={adminText("Clear customer filter")}
+              onClick={clearCustomer}
+            >
+              <HugeiconsIcon icon={Cancel01Icon} className="size-3" />
+            </Button>
+          </span>
+        </div>
+      ) : null}
+
+      <DataTable
+        columns={shownColumns}
+        data={data?.data ?? []}
+        loading={loading}
+        onRowClick={(row) => navigate(`/subscriptions/${row.id}`)}
+        emptyMessage="No subscriptions match."
+      />
+      <CursorPager
+        pages={pages}
+        rows={data?.data?.length ?? 0}
+        nextCursor={data?.next_cursor}
+        busy={isFetching}
+      />
+    </div>
+  )
+}

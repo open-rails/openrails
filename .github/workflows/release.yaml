@@ -24,8 +24,8 @@ on:
       - scripts/build-admin-console.sh
       - scripts/pack-billing-ui.sh
       - internal/buildinfo/**
-      - web/admin/embed.go
-      - web/admin/vite.config.ts
+      - server/web/console/embed.go
+      - server/web/console/vite.config.ts
 
 permissions:
   contents: read

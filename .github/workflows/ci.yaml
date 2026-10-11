@@ -107,13 +107,13 @@ jobs:
           family: plain
       - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.4.0
         with:
-          package_json_file: web/admin/package.json
+          package_json_file: server/web/console/package.json
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 24
           cache: pnpm
           cache-dependency-path: |
-            web/admin/pnpm-lock.yaml
+            server/web/console/pnpm-lock.yaml
             web/checkout/pnpm-lock.yaml
             sdk/billing-ui/pnpm-lock.yaml
       - run: bash scripts/check.sh console

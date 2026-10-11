@@ -36,7 +36,7 @@ guards() {
   bash scripts/check-embedded-auth-boundary.sh
 }
 
-# These builds embed only web/admin/dist/.gitkeep: Go must build without a
+# These builds embed only server/web/console/dist/.gitkeep: Go must build without a
 # console build.
 build() {
   in_modules go build -o /dev/null ./...
@@ -50,31 +50,16 @@ go_tests() {
 
 console() {
   bash scripts/build-admin-console.sh
-  pnpm --dir web/admin run lint
-  pnpm --dir web/admin exec vitest run --maxWorkers=2
-  test -f web/admin/dist/index.html || {
-    echo "console: web/admin/dist/index.html missing — the embed gate would prove nothing" >&2
+  pnpm --dir server/web/console run lint
+  pnpm --dir server/web/console exec vitest run --maxWorkers=2
+  test -f server/web/console/dist/index.html || {
+    echo "console: server/web/console/dist/index.html missing — the embed gate would prove nothing" >&2
     exit 1
   }
-  # A host build: the console plus a host's extension, its "@/" imports and
-  # Tailwind classes resolved against the host's own tree.
-  host_build="$(mktemp -d)"
-  bash scripts/build-admin-console.sh \
-    --extensions scripts/testdata/console-host/console/index.ts \
-    --extensions-src scripts/testdata/console-host/src "$host_build"
-  grep -qs 'Console host fixture' "$host_build"/assets/*.js || {
-    echo "console: the host build is missing the extension's page" >&2
-    exit 1
-  }
-  grep -qs '0a1b2c' "$host_build"/assets/*.css || {
-    echo "console: the host build is missing the extension's Tailwind classes" >&2
-    exit 1
-  }
-  rm -rf "$host_build"
   # One build serves any admin_console.path (#1127).
   bash scripts/go-test-gate.sh -C server ./internal/adminconsole TestBuiltConsoleServesAtAnyPath
-  git diff --quiet -- web/admin/dist || {
-    echo "console: the build removed web/admin/dist/.gitkeep; go build without a console build would fail" >&2
+  git diff --quiet -- server/web/console/dist || {
+    echo "console: the build removed server/web/console/dist/.gitkeep; go build without a console build would fail" >&2
     exit 1
   }
   (cd server && go build -o /dev/null ./cmd/openrails)

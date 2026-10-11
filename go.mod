@@ -2,11 +2,9 @@ module github.com/open-rails/openrails
 
 go 1.26.9
 
-// Keep the npm tree (which ships stray .go files) out of ./... package
-// patterns WITHOUT a nested go.mod — a nested module would prune web/admin
-// from the module zip, and hosts build the console SPA from the module cache
-// (#754, scripts/build-admin-console.sh).
-ignore ./web/admin/node_modules
+// Frontend dependencies can contain Go files; they are not Go packages.
+ignore ./sdk/billing-ui/node_modules
+ignore ./web/checkout/node_modules
 
 require (
 	github.com/ccoveille/go-safecast/v2 v2.0.1
