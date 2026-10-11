@@ -99,10 +99,10 @@ products:
 	require.NoError(t, err)
 	_, err = w.client[remote].UpdatePrice(t.Context(), first.ID, billing.UpdatePriceParams{Archived: catalog.Value(false)})
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), w.sql(`UPDATE billing.prices SET customer_amount='{"min_amount":"2000000","max_amount":"100000000"}'::jsonb WHERE id=$1`), first.ID.UUID())
+	err = w.catalogExec(t.Context(), w.sql(`UPDATE billing.prices SET customer_amount='{"min_amount":"2000000","max_amount":"100000000"}'::jsonb WHERE id=$1`), first.ID.UUID())
 	require.Error(t, err, "deposit bounds are immutable in the database")
 	for _, bounds := range []string{`{"min_amount":null,"max_amount":"100000000"}`, `{"min_amount":"1000000","max_amount":null}`} {
-		_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,billing_interval_hours,customer_amount)
+		err = w.catalogExec(t.Context(), w.sql(`INSERT INTO billing.prices(id,merchant_id,product_id,key,amount,currency,billing_interval_hours,customer_amount)
    SELECT gen_random_uuid(),merchant_id,product_id,'invalid',0,currency,NULL,$2::jsonb FROM billing.prices WHERE id=$1`), first.ID.UUID(), bounds)
 		require.Error(t, err, "null bounds must fail a database check")
 	}

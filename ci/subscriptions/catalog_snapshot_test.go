@@ -67,10 +67,10 @@ products:
 	require.NoError(t, err)
 	_, err = c.ApplyCatalog(t.Context(), rates, billing.ApplyCatalogParams{})
 	require.NoError(t, err)
-	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.catalog_rate_cards(merchant_id,customer_id,ordinal,meter_key,payment_term,filter,price) VALUES($1,$2,1,'requests','in_arrears','null','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"500"}}')`), mid.UUID(), uuid.MustParse(buyer.id))
+	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.catalog_rate_cards(merchant_id,customer_id,ordinal,meter_key,payment_term,filter,price) VALUES($1,$2,1,'requests','in_arrears','null','{"model":"per_unit","currency":"USD","per_unit":{"unit_amount":"500"}}')`), mid.UUID(), uuid.MustParse(buyer.id))
 	require.NoError(t, err)
 	// A retained binding references an already provisioned account; no secret is copied.
-	_, err = w.pool.Exec(t.Context(), w.q(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,configuration) VALUES($1,$2,$3,'{"provider":"nmi"}')`), mid.UUID(), first.ID.UUID(), w.psp["nmi"].UUID())
+	err = w.catalogExec(t.Context(), w.q(`INSERT INTO billing.price_psp_bindings(merchant_id,price_id,psp_id,configuration) VALUES($1,$2,$3,'{"provider":"nmi"}')`), mid.UUID(), first.ID.UUID(), w.psp["nmi"].UUID())
 	require.NoError(t, err)
 	w.settle()
 	w.stop()

@@ -78,7 +78,7 @@ func TestCatalogProductScopedPriceVersions(t *testing.T) {
 			// Existing catalogs and imports can carry pre-revision UUIDs. The
 			// natural-key lookup must preserve them rather than mint a duplicate.
 			legacyID := uuid.New()
-			_, err = w.pool.Exec(t.Context(), w.sql(`INSERT INTO billing.prices
+			err = w.catalogExec(t.Context(), w.sql(`INSERT INTO billing.prices
 				(id, merchant_id, product_id, key, amount, currency, archived, billing_interval_hours)
 				SELECT $1, merchant_id, id, 'imported', 4000000, 'USD', false, NULL
 				FROM billing.products WHERE id=$2`), legacyID, products[0].ID.UUID())
@@ -297,7 +297,7 @@ func TestCatalogImmutableDatabaseRows(t *testing.T) {
 		"product delete":   fmt.Sprintf("DELETE FROM billing.products WHERE id='%s' AND $1::uuid IS NOT NULL", other.ID.UUID()),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := w.pool.Exec(t.Context(), w.sql(statement), price.ID.UUID())
+			err := w.catalogExec(t.Context(), w.sql(statement), price.ID.UUID())
 			var pgerr *pgconn.PgError
 			require.ErrorAs(t, err, &pgerr)
 			require.Equal(t, "23514", pgerr.Code, "immutable row must be rejected before referential checks")

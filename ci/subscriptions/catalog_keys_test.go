@@ -91,9 +91,9 @@ func TestProductKeysKeepValidTimeHistory(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, dropped.Items, "only live keys select a product")
 
-	_, err = w.pool.Exec(t.Context(), w.sql(`UPDATE billing.product_entitlements SET entitlement = 'z' WHERE product_id = $1`), product.ID.UUID())
+	err = w.catalogExec(t.Context(), w.sql(`UPDATE billing.product_entitlements SET entitlement = 'z' WHERE product_id = $1`), product.ID.UUID())
 	require.ErrorContains(t, err, "only closes", "history rows are immutable")
-	_, err = w.pool.Exec(t.Context(), w.sql(`DELETE FROM billing.product_entitlements WHERE product_id = $1`), product.ID.UUID())
+	err = w.catalogExec(t.Context(), w.sql(`DELETE FROM billing.product_entitlements WHERE product_id = $1`), product.ID.UUID())
 	require.ErrorContains(t, err, "immutable")
 }
 

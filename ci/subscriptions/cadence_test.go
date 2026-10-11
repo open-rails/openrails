@@ -4,9 +4,11 @@ package subscriptions_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"net/http"
 	"strings"
@@ -41,6 +43,22 @@ func (w *world) cadencePrice(tp topology, productKey, entitlement string, amount
 
 func (w *world) sql(query string) string {
 	return inSchema(w.schema, query)
+}
+
+// catalogExec runs a raw write to a catalog table. The catalog trigger
+// refuses it with a retryable 40001 while a background catalog write holds
+// the merchant; it is retried a few times, as the trigger asks.
+func (w *world) catalogExec(ctx context.Context, query string, args ...any) error {
+	var err error
+	for range 5 {
+		_, err = w.pool.Exec(ctx, query, args...)
+		var pgerr *pgconn.PgError
+		if !errors.As(err, &pgerr) || pgerr.Code != "40001" {
+			return err
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return err
 }
 
 // Default price keys are exact per cadence: neighbouring cadences never share
