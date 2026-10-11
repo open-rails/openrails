@@ -776,6 +776,9 @@ pkg openrails/billing, const SubscriptionCanceled SubscriptionStatus = "canceled
 pkg openrails/billing, const SubscriptionIDPrefix untyped string = "sub_"
 pkg openrails/billing, const SubscriptionPastDue SubscriptionStatus = "past_due"
 pkg openrails/billing, const SubscriptionPending SubscriptionStatus = "pending"
+pkg openrails/billing, const SubscriptionSortCanceledAt SubscriptionSort = "canceled_at"
+pkg openrails/billing, const SubscriptionSortCreatedAt SubscriptionSort = "created_at"
+pkg openrails/billing, const SubscriptionSortCurrentPeriodEndsAt SubscriptionSort = "current_period_ends_at"
 pkg openrails/billing, const SubscriptionUnverified SubscriptionStatus = "unverified"
 pkg openrails/billing, const SyncStatusDrifted SyncStatus = "drifted"
 pkg openrails/billing, const SyncStatusInSync SyncStatus = "in_sync"
@@ -828,6 +831,7 @@ pkg openrails/billing, func ParseUsageEventID(string) (UsageEventID, error)
 pkg openrails/billing, func PaymentFailureFrom(error) (*PaymentFailure, bool)
 pkg openrails/billing, func Permissions() []Permission
 pkg openrails/billing, func SourceRef(string, string) string
+pkg openrails/billing, func SubscriptionSorts() []SubscriptionSort
 pkg openrails/billing, func ValidateMerchantSlug(string) error
 pkg openrails/billing, method (*Admission) Active() bool
 pkg openrails/billing, method (*AlertWebhookID) UnmarshalText([]byte) error
@@ -1533,6 +1537,7 @@ pkg openrails/billing, type DashboardGrid struct, W int `json:"w"`
 pkg openrails/billing, type DashboardGrid struct, X int `json:"x"`
 pkg openrails/billing, type DashboardGrid struct, Y int `json:"y"`
 pkg openrails/billing, type DashboardWidget struct
+pkg openrails/billing, type DashboardWidget struct, FixedRange bool `json:"fixed_range"`
 pkg openrails/billing, type DashboardWidget struct, Grid DashboardGrid `json:"grid"`
 pkg openrails/billing, type DashboardWidget struct, ID string `json:"id"`
 pkg openrails/billing, type DashboardWidget struct, Query MetricsQuery `json:"query"`
@@ -2859,12 +2864,14 @@ pkg openrails/billing, type SubscriptionListParams struct, Dunning bool
 pkg openrails/billing, type SubscriptionListParams struct, IDs []SubscriptionID
 pkg openrails/billing, type SubscriptionListParams struct, PriceID PriceID
 pkg openrails/billing, type SubscriptionListParams struct, Rail string
+pkg openrails/billing, type SubscriptionListParams struct, Sort SubscriptionSort
 pkg openrails/billing, type SubscriptionListParams struct, Status SubscriptionStatus
 pkg openrails/billing, type SubscriptionListParams struct, embedded PageRequest
 pkg openrails/billing, type SubscriptionRetryNowResult struct
 pkg openrails/billing, type SubscriptionRetryNowResult struct, Replayed bool `json:"replayed"`
 pkg openrails/billing, type SubscriptionRetryNowResult struct, Status string `json:"status"`
 pkg openrails/billing, type SubscriptionRetryNowResult struct, Subscription Subscription `json:"subscription"`
+pkg openrails/billing, type SubscriptionSort string
 pkg openrails/billing, type SubscriptionStatus string
 pkg openrails/billing, type SyncStatus string
 pkg openrails/billing, type TrustLevel struct

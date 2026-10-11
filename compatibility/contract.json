@@ -269,6 +269,7 @@
       "const (\n\tScheduledChangeChange ScheduledChangeSource = \"change\"\n\n\tScheduledChangeMigration ScheduledChangeSource = \"migration\"\n)",
       "const (\n\tScopeMerchant = \"openrails:merchant\"\n\tScopeSelf     = \"openrails:self\"\n)",
       "const (\n\tSubscriptionPending        SubscriptionStatus = \"pending\"\n\tSubscriptionActive         SubscriptionStatus = \"active\"\n\tSubscriptionPastDue        SubscriptionStatus = \"past_due\"\n\tSubscriptionAwaitingMethod SubscriptionStatus = \"awaiting_method\"\n\tSubscriptionCanceled       SubscriptionStatus = \"canceled\"\n\n\tSubscriptionUnverified SubscriptionStatus = \"unverified\"\n)",
+      "const (\n\tSubscriptionSortCreatedAt SubscriptionSort = \"created_at\"\n\n\tSubscriptionSortCurrentPeriodEndsAt SubscriptionSort = \"current_period_ends_at\"\n\n\tSubscriptionSortCanceledAt SubscriptionSort = \"canceled_at\"\n)",
       "const (\n\tSyncStatusUnknown      SyncStatus = \"unknown\"\n\tSyncStatusInSync       SyncStatus = \"in_sync\"\n\tSyncStatusDrifted      SyncStatus = \"drifted\"\n\tSyncStatusMissing      SyncStatus = \"missing\"\n\tSyncStatusNeverSynced  SyncStatus = \"never_synced\"\n\tSyncStatusSyncDisabled SyncStatus = \"sync_disabled\"\n)",
       "const (\n\tUsageByEventType UsageGroupBy = \"event_type\"\n\tUsageByResource  UsageGroupBy = \"resource\"\n\tUsageByInvoker   UsageGroupBy = \"invoker\"\n)",
       "const (\n\tUsageSucceeded UsageOutcome = \"succeeded\"\n\n\tUsageFailed UsageOutcome = \"failed\"\n)",
@@ -489,6 +490,7 @@
       "func PaymentFailureFrom(err error) (*PaymentFailure, bool)",
       "func Permissions() []Permission",
       "func SourceRef(sourceType, id string) string",
+      "func SubscriptionSorts() []SubscriptionSort",
       "func ValidateMerchantSlug(s string) error",
       "type AccessChange struct {\n\tMerchantID  MerchantID       `json:\"merchant_id\"`\n\tCustomerID  CustomerID       `json:\"customer_id\"`\n\tEntitlement string           `json:\"entitlement\"`\n\tChange      AccessChangeKind `json:\"change\"`\n\tApproved    bool             `json:\"approved\"`\n}",
       "type AccessChangeKind string",
@@ -606,7 +608,7 @@
       "type CustomerTokenParams struct {\n\tCustomerID CustomerID\n\n\tEmail string\n\n\tEmailVerified bool\n}",
       "type Dashboard struct {\n\tWidgets []DashboardWidget `json:\"widgets\"`\n\n\tIsDefault bool       `json:\"is_default\"`\n\tUpdatedAt *time.Time `json:\"updated_at\"`\n\tUpdatedBy *string    `json:\"updated_by\"`\n}",
       "type DashboardGrid struct {\n\tX int `json:\"x\"`\n\tY int `json:\"y\"`\n\tW int `json:\"w\"`\n\tH int `json:\"h\"`\n}",
-      "type DashboardWidget struct {\n\tID    string        `json:\"id\"`\n\tTitle string        `json:\"title\"`\n\tViz   string        `json:\"viz\"`\n\tQuery MetricsQuery  `json:\"query\"`\n\tGrid  DashboardGrid `json:\"grid\"`\n}",
+      "type DashboardWidget struct {\n\tID         string        `json:\"id\"`\n\tTitle      string        `json:\"title\"`\n\tViz        string        `json:\"viz\"`\n\tQuery      MetricsQuery  `json:\"query\"`\n\tGrid       DashboardGrid `json:\"grid\"`\n\tFixedRange bool          `json:\"fixed_range\"`\n}",
       "type DeclaredAdminGrant struct {\n\tCustomer CustomerID `json:\"customer\"`\n\tProduct  ProductID  `json:\"product\"`\n\tSourceID string     `json:\"source_id\"`\n\tStartsAt time.Time  `json:\"starts_at\"`\n\tEndsAt   *time.Time `json:\"ends_at,omitempty\"`\n}",
       "type DeclaredBilling struct {\n\tAsOf time.Time `json:\"as_of\"`\n\n\tSubscriptionsExhaustive bool `json:\"subscriptions_exhaustive,omitempty\"`\n\n\tExpectedSubscriptions *int `json:\"expected_subscriptions,omitempty\"`\n\n\tDefaultPSP     PSPRef                  `json:\"default_psp,omitzero\"`\n\tCustomers      []DeclaredCustomer      `json:\"customers,omitempty\"`\n\tPaymentMethods []DeclaredPaymentMethod `json:\"payment_methods,omitempty\"`\n\tSubscriptions  []DeclaredSubscription  `json:\"subscriptions,omitempty\"`\n\tTransactions   []DeclaredTransaction   `json:\"transactions,omitempty\"`\n\n\tAdminGrants []DeclaredAdminGrant `json:\"admin_grants,omitempty\"`\n}",
       "type DeclaredCustomer struct {\n\tCustomer CustomerID `json:\"customer\"`\n}",
@@ -839,8 +841,9 @@
       "type SubscriptionChangePreview struct {\n\tEffective        string     `json:\"effective\"`\n\tPriceID          PriceID    `json:\"price_id\"`\n\tQuantity         *int       `json:\"quantity\"`\n\tRail             string     `json:\"rail\"`\n\tCurrency         string     `json:\"currency\"`\n\tAmountDueNow     int64      `json:\"amount_due_now,string\"`\n\tNextChargeAmount int64      `json:\"next_charge_amount,string\"`\n\tNextChargeDate   *time.Time `json:\"next_charge_date,omitempty\"`\n\tIsEstimate       bool       `json:\"is_estimate\"`\n\tMessage          string     `json:\"message,omitempty\"`\n}",
       "type SubscriptionDunning struct {\n\tAttempts          int            `json:\"attempts\"`\n\tRetriesLeft       *int           `json:\"retries_left\"`\n\tNextRetryAt       *time.Time     `json:\"next_retry_at\"`\n\tFinalRetryAt      *time.Time     `json:\"final_retry_at\"`\n\tWaitingForNewCard bool           `json:\"waiting_for_new_card\"`\n\tLastFailureReason *DeclineReason `json:\"last_failure_reason\"`\n}",
       "type SubscriptionID uuid.UUID",
-      "type SubscriptionListParams struct {\n\tPageRequest\n\n\tIDs        []SubscriptionID\n\tCustomerID CustomerID\n\tStatus     SubscriptionStatus\n\n\tDunning bool\n\tRail    string\n\tPriceID PriceID\n}",
+      "type SubscriptionListParams struct {\n\tPageRequest\n\n\tIDs        []SubscriptionID\n\tCustomerID CustomerID\n\tStatus     SubscriptionStatus\n\n\tDunning bool\n\tRail    string\n\tPriceID PriceID\n\tSort    SubscriptionSort\n}",
       "type SubscriptionRetryNowResult struct {\n\tSubscription Subscription `json:\"subscription\"`\n\tStatus       string       `json:\"status\"`\n\tReplayed     bool         `json:\"replayed\"`\n}",
+      "type SubscriptionSort string",
       "type SubscriptionStatus string",
       "type SyncStatus string",
       "type TrustLevel struct {\n\tCurrency   string `json:\"currency\"`\n\tTrustLevel string `json:\"trust_level\"`\n}",
@@ -1574,6 +1577,7 @@
       "type paymentDetails struct {\n\tPaymentDetails struct {\n\t\tPaymentToken string `json:\"payment_token\"`\n\t\tCardExp      string `json:\"card_exp\"`\n\t} `json:\"payment_details\"`\n}"
     ],
     "internal/pagination": [
+      "type SortedTimeID struct {\n\tSort string    `json:\"s\"`\n\tAt   time.Time `json:\"t\"`\n\tID   uuid.UUID `json:\"i\"`\n}",
       "type TimeID struct {\n\tAt time.Time `json:\"t\"`\n\tID uuid.UUID `json:\"i\"`\n}"
     ],
     "internal/query": [

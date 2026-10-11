@@ -69,6 +69,7 @@ migration 0065_drop_merchant_api_hosts.up.sql sha256:517658ca10c3079ecc62657147a
 migration 0066_drop_rate_overrides_and_product_archives.up.sql sha256:89a6522346d017fbe2c11260dad37f6b729f397f139d0f424c7bf21d0249ee26
 migration 0067_agreement_revocations.up.sql sha256:ed622cd579a25d00066634583b53c776b34098a0aeccfb32349cb6403a9d58d3
 migration 0068_drop_provider_operations.up.sql sha256:8ae721aa107e14123937a1f21862adc2521034e7894b6d0ab7de8502755ec89b
+migration 0069_subscriptions_sort_indexes.up.sql sha256:a87a25e3ca4c15766b5e2615e5484d96481a5c6d26259f98f6af38c512fa1c1b
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -2278,9 +2279,11 @@ table billing.subscriptions
   constraint subscriptions_transient_retries_check CHECK ((transient_retries >= 0))
   constraint subscriptions_valid_period_check CHECK (((current_period_starts_at IS NULL) OR (current_period_ends_at IS NULL) OR (current_period_starts_at < current_period_ends_at)))
   constraint trg_subscriptions_track_unverified TRIGGER DEFERRABLE INITIALLY DEFERRED
+  index CREATE INDEX subscriptions_canceled_at_id_idx ON billing.subscriptions USING btree (merchant_id, canceled_at DESC, id DESC) WHERE ((deleted_at IS NULL) AND (canceled_at IS NOT NULL))
   index CREATE INDEX subscriptions_canceled_at_idx ON billing.subscriptions USING btree (merchant_id, canceled_at) WHERE (canceled_at IS NOT NULL)
   index CREATE INDEX subscriptions_created_at_id_idx ON billing.subscriptions USING btree (merchant_id, created_at DESC, id DESC) WHERE (deleted_at IS NULL)
   index CREATE INDEX subscriptions_current_period_ends_at_engine_due_global_idx ON billing.subscriptions USING btree (current_period_ends_at, merchant_id) WHERE ((collection_policy = 'engine'::text) AND (status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
+  index CREATE INDEX subscriptions_current_period_ends_at_id_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, id) WHERE ((deleted_at IS NULL) AND (current_period_ends_at IS NOT NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_next_retry_at_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at, next_retry_at) WHERE ((collection_policy = 'engine'::text) AND (status = ANY (ARRAY['active'::text, 'past_due'::text])) AND (deleted_at IS NULL))
   index CREATE INDEX subscriptions_current_period_ends_at_period_overdue_idx ON billing.subscriptions USING btree (current_period_ends_at) WHERE (status = 'active'::text)
   index CREATE INDEX subscriptions_current_period_ends_at_rebill_watch_idx ON billing.subscriptions USING btree (merchant_id, current_period_ends_at) WHERE ((status = ANY (ARRAY['active'::text, 'unverified'::text, 'awaiting_method'::text])) AND (collection_policy = ANY (ARRAY['engine'::text, 'nmi_schedule'::text])) AND (deleted_at IS NULL))

@@ -2643,6 +2643,13 @@
             }
           },
           {
+            "name": "sort",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "status",
             "in": "query",
             "schema": {
@@ -13898,6 +13905,9 @@
           },
           "grid": {
             "$ref": "#/components/schemas/DashboardGrid"
+          },
+          "fixed_range": {
+            "type": "boolean"
           }
         },
         "required": [
@@ -13905,7 +13915,8 @@
           "title",
           "viz",
           "query",
-          "grid"
+          "grid",
+          "fixed_range"
         ]
       },
       "DeclaredAdminGrant": {
