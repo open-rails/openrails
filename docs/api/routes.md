@@ -28,7 +28,7 @@ What a checkout page needs: the catalog a buyer may see, checkout, checkout sess
 |---|---|---|---|---|---|---|
 | GET | `/v1/orders/{id}/solana-pay` | public | — | — | 200 `SolanaPayGetResponse` | when `solana` |
 | POST | `/v1/orders/{id}/solana-pay` | public | — | `SolanaPayPostRequest` | 200 `SolanaPayPostResponse` | when `solana` |
-| GET | `/v1/catalog/products` | public | — | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/products` | public | — | — | 200 `ListPage<Product>` |  |
 
 ## Customer (`/v1/me`)
 
@@ -122,25 +122,25 @@ The catalog, with `RouteGroups.Catalog`: its reads and edits and price migration
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/operator/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
-| GET | `/v1/operator/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
-| GET | `/v1/operator/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
-| PUT | `/v1/operator/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
-| POST | `/v1/operator/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
-| POST | `/v1/operator/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
-| GET | `/v1/operator/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |
-| GET | `/v1/operator/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Product` |  |
-| PATCH | `/v1/operator/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | sensitive; catalog update |
-| POST | `/v1/operator/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | sensitive; catalog update |
-| GET | `/v1/operator/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Price>` |  |
-| GET | `/v1/operator/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Price` |  |
-| GET | `/v1/operator/catalog/prices/{id}/history` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceKeyMovement>` |  |
-| PATCH | `/v1/operator/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog update |
-| POST | `/v1/operator/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive; catalog update |
-| POST | `/v1/operator/price-migrations/preview` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
-| GET | `/v1/operator/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceMigration>` |  |
-| GET | `/v1/operator/price-migrations/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigration` |  |
-| POST | `/v1/operator/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | sensitive; catalog update |
+| POST | `/v1/catalog/apply` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `Application` | 200 `CatalogApplicationReceipt` | sensitive; catalog update |
+| GET | `/v1/catalog/meters` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Meter>` |  |
+| GET | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Meter` |  |
+| PUT | `/v1/catalog/meters/{key}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `SetMeterParams` | 200 `Meter` | sensitive; catalog update |
+| POST | `/v1/catalog/ask` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `AskCatalogParams` | 200 `CatalogAnswer` | when `catalog_copilot` |
+| POST | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreateProductParams` | 201 `Product` | sensitive; catalog update |
+| GET | `/v1/catalog/products` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Product>` |  |
+| GET | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Product` |  |
+| PATCH | `/v1/catalog/products/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdateProductParams` | 200 `Product` | sensitive; catalog update |
+| POST | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceParams` | 201 `Price` | sensitive; catalog update |
+| GET | `/v1/catalog/prices` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<Price>` |  |
+| GET | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `Price` |  |
+| GET | `/v1/catalog/prices/{id}/history` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceKeyMovement>` |  |
+| PATCH | `/v1/catalog/prices/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `UpdatePriceParams` | 200 `Price` | sensitive; catalog update |
+| POST | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 201 `PriceMigration` | sensitive; catalog update |
+| POST | `/v1/catalog/price-migrations/preview` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | `CreatePriceMigrationParams` | 200 `PriceMigrationPreview` |  |
+| GET | `/v1/catalog/price-migrations` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `ListPage<PriceMigration>` |  |
+| GET | `/v1/catalog/price-migrations/{id}` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigration` |  |
+| POST | `/v1/catalog/price-migrations/{id}/cancel` | merchant | `merchant:catalog:manage`<br>`root:catalog:manage` | — | 200 `PriceMigrationCancel` | sensitive; catalog update |
 
 ## Merchant configuration
 
@@ -148,28 +148,28 @@ The merchant's own configuration, with `RouteGroups.MerchantConfig`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| GET | `/v1/operator/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<PSP>` |  |
-| POST | `/v1/operator/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/operator/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `PSP` |  |
-| PATCH | `/v1/operator/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
-| POST | `/v1/operator/psps/routing-preview` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
-| POST | `/v1/operator/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` | sensitive |
-| GET | `/v1/operator/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `MerchantConfigurationState` |  |
-| PATCH | `/v1/operator/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/operator/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<AlertWebhook>` |  |
-| POST | `/v1/operator/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits`; sensitive |
-| DELETE | `/v1/operator/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits`; sensitive |
-| PATCH | `/v1/operator/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits`; sensitive |
-| GET | `/v1/operator/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `application/x-ndjson` | sensitive |
-| POST | `/v1/operator/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
-| POST | `/v1/operator/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
-| PUT | `/v1/operator/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
-| GET | `/v1/operator/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
-| GET | `/v1/operator/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
-| POST | `/v1/operator/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
-| GET | `/v1/operator/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
-| POST | `/v1/operator/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
-| DELETE | `/v1/operator/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | sensitive |
+| GET | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<PSP>` |  |
+| POST | `/v1/merchant/psps` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreatePSPParams` | 201 `PSP` | when `merchant_config_edits`; sensitive |
+| GET | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `PSP` |  |
+| PATCH | `/v1/merchant/psps/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdatePSPParams` | 200 `PSP` | when `merchant_config_edits`; sensitive |
+| POST | `/v1/merchant/psps/routing-preview` | merchant | `merchant:config:manage`<br>`root:config:manage` | `PreviewPSPRoutingParams` | 200 `PSPRoutingPreview` |  |
+| POST | `/v1/merchant/psps/refresh` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 202 `PSPRefresh` | sensitive |
+| GET | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `MerchantConfigurationState` |  |
+| PATCH | `/v1/merchant/configuration` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateMerchantConfigurationParams` | 200 `MerchantConfigurationState` | when `merchant_config_edits`; sensitive |
+| GET | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<AlertWebhook>` |  |
+| POST | `/v1/merchant/alert-webhooks` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateAlertWebhookParams` | 201 `AlertWebhook` | when `merchant_config_edits`; sensitive |
+| DELETE | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | when `merchant_config_edits`; sensitive |
+| PATCH | `/v1/merchant/alert-webhooks/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | `UpdateAlertWebhookParams` | 200 `AlertWebhook` | when `merchant_config_edits`; sensitive |
+| GET | `/v1/merchant/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `application/x-ndjson` | sensitive |
+| POST | `/v1/merchant/billing-archive` | merchant | `merchant:config:manage`<br>`root:config:manage` | `application/x-ndjson` | 200 `BillingArchiveImport` | sensitive |
+| POST | `/v1/merchant/billing-import` | merchant | `merchant:config:manage`<br>`root:config:manage` | `DeclaredBilling` | 200 `BillingImportResult` | sensitive |
+| PUT | `/v1/merchant/dashboard` | merchant | `merchant:config:manage`<br>`root:config:manage` | `SetDashboardParams` | 200 `Dashboard` |  |
+| GET | `/v1/merchant/findings` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<Finding>` |  |
+| GET | `/v1/merchant/findings/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `Finding` |  |
+| POST | `/v1/merchant/findings/{id}/resolve` | merchant | `merchant:config:manage`<br>`root:config:manage` | `ResolveFindingParams` | 200 `FindingResolution` |  |
+| GET | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 200 `ListPage<ProvisioningToken>` |  |
+| POST | `/v1/merchant/provisioning-tokens` | merchant | `merchant:config:manage`<br>`root:config:manage` | `CreateProvisioningTokenParams` | 201 `CreatedProvisioningToken` | sensitive |
+| DELETE | `/v1/merchant/provisioning-tokens/{id}` | merchant | `merchant:config:manage`<br>`root:config:manage` | — | 204 — | sensitive |
 
 ## Business metrics
 
@@ -177,11 +177,11 @@ Revenue, sales and the dashboard, read-only, with `RouteGroups.Metrics`.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
-| POST | `/v1/admin/metrics/query` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `MetricsQuery` | 200 `MetricsResult` |  |
-| GET | `/v1/admin/metrics/schema` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `MetricsSchema` |  |
-| GET | `/v1/admin/dashboard` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `Dashboard` |  |
-| POST | `/v1/admin/metrics/ask` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
-| POST | `/v1/admin/dashboard/widgets/generate` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
+| POST | `/v1/metrics/query` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `MetricsQuery` | 200 `MetricsResult` |  |
+| GET | `/v1/metrics/schema` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `MetricsSchema` |  |
+| GET | `/v1/metrics/dashboard` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | — | 200 `Dashboard` |  |
+| POST | `/v1/metrics/ask` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `AskMetricsParams` | 200 `MetricsAnswer` | when `metrics_ask` |
+| POST | `/v1/metrics/dashboard/widgets/generate` | merchant | `merchant:metrics:read`<br>`root:metrics:read` | `GenerateDashboardWidgetParams` | 200 `GeneratedWidget` | when `dashboard_generation` |
 
 ## Access
 

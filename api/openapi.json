@@ -1336,7 +1336,7 @@
         ]
       }
     },
-    "/v1/catalog/products": {
+    "/v1/products": {
       "get": {
         "tags": [
           "checkout"
@@ -1510,7 +1510,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/apply": {
+    "/v1/catalog/apply": {
       "post": {
         "tags": [
           "catalog"
@@ -1576,7 +1576,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/meters": {
+    "/v1/catalog/meters": {
       "get": {
         "tags": [
           "catalog"
@@ -1647,7 +1647,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/meters/{key}": {
+    "/v1/catalog/meters/{key}": {
       "get": {
         "tags": [
           "catalog"
@@ -1773,7 +1773,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/ask": {
+    "/v1/catalog/ask": {
       "post": {
         "tags": [
           "catalog"
@@ -1825,7 +1825,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/products": {
+    "/v1/catalog/products": {
       "post": {
         "tags": [
           "catalog"
@@ -2017,7 +2017,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/products/{id}": {
+    "/v1/catalog/products/{id}": {
       "get": {
         "tags": [
           "catalog"
@@ -2133,7 +2133,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/prices": {
+    "/v1/catalog/prices": {
       "post": {
         "tags": [
           "catalog"
@@ -2324,7 +2324,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/prices/{id}": {
+    "/v1/catalog/prices/{id}": {
       "get": {
         "tags": [
           "catalog"
@@ -2452,7 +2452,7 @@
         ]
       }
     },
-    "/v1/operator/catalog/prices/{id}/history": {
+    "/v1/catalog/prices/{id}/history": {
       "get": {
         "tags": [
           "catalog"
@@ -3137,7 +3137,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations": {
+    "/v1/catalog/price-migrations": {
       "post": {
         "tags": [
           "catalog"
@@ -3293,7 +3293,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations/preview": {
+    "/v1/catalog/price-migrations/preview": {
       "post": {
         "tags": [
           "catalog"
@@ -3346,7 +3346,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations/{id}": {
+    "/v1/catalog/price-migrations/{id}": {
       "get": {
         "tags": [
           "catalog"
@@ -3395,7 +3395,7 @@
         ]
       }
     },
-    "/v1/operator/price-migrations/{id}/cancel": {
+    "/v1/catalog/price-migrations/{id}/cancel": {
       "post": {
         "tags": [
           "catalog"
@@ -7464,7 +7464,7 @@
         ]
       }
     },
-    "/v1/operator/psps": {
+    "/v1/merchant/psps": {
       "get": {
         "tags": [
           "merchant_config"
@@ -7622,7 +7622,7 @@
         ]
       }
     },
-    "/v1/operator/psps/{id}": {
+    "/v1/merchant/psps/{id}": {
       "get": {
         "tags": [
           "merchant_config"
@@ -7735,7 +7735,7 @@
         ]
       }
     },
-    "/v1/operator/psps/routing-preview": {
+    "/v1/merchant/psps/routing-preview": {
       "post": {
         "tags": [
           "merchant_config"
@@ -7783,7 +7783,7 @@
         ]
       }
     },
-    "/v1/operator/psps/refresh": {
+    "/v1/merchant/psps/refresh": {
       "post": {
         "tags": [
           "merchant_config"
@@ -7891,7 +7891,7 @@
         ]
       }
     },
-    "/v1/operator/configuration": {
+    "/v1/merchant/configuration": {
       "get": {
         "tags": [
           "merchant_config"
@@ -7977,7 +7977,7 @@
         ]
       }
     },
-    "/v1/operator/alert-webhooks": {
+    "/v1/merchant/alert-webhooks": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8099,7 +8099,7 @@
         ]
       }
     },
-    "/v1/operator/alert-webhooks/{id}": {
+    "/v1/merchant/alert-webhooks/{id}": {
       "delete": {
         "tags": [
           "merchant_config"
@@ -8205,7 +8205,7 @@
         ]
       }
     },
-    "/v1/operator/billing-archive": {
+    "/v1/merchant/billing-archive": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8298,7 +8298,7 @@
         ]
       }
     },
-    "/v1/operator/billing-import": {
+    "/v1/merchant/billing-import": {
       "post": {
         "tags": [
           "merchant_config"
@@ -8549,7 +8549,7 @@
         ]
       }
     },
-    "/v1/admin/metrics/query": {
+    "/v1/metrics/query": {
       "post": {
         "tags": [
           "metrics"
@@ -8598,7 +8598,7 @@
         ]
       }
     },
-    "/v1/admin/metrics/schema": {
+    "/v1/metrics/schema": {
       "get": {
         "tags": [
           "metrics"
@@ -8634,7 +8634,7 @@
         ]
       }
     },
-    "/v1/admin/dashboard": {
+    "/v1/metrics/dashboard": {
       "get": {
         "tags": [
           "metrics"
@@ -8672,7 +8672,7 @@
         ]
       }
     },
-    "/v1/admin/metrics/ask": {
+    "/v1/metrics/ask": {
       "post": {
         "tags": [
           "metrics"
@@ -8724,7 +8724,7 @@
         ]
       }
     },
-    "/v1/admin/dashboard/widgets/generate": {
+    "/v1/metrics/dashboard/widgets/generate": {
       "post": {
         "tags": [
           "metrics"
@@ -8778,7 +8778,7 @@
         ]
       }
     },
-    "/v1/operator/dashboard": {
+    "/v1/merchant/dashboard": {
       "put": {
         "tags": [
           "merchant_config"
@@ -8827,7 +8827,7 @@
         ]
       }
     },
-    "/v1/operator/findings": {
+    "/v1/merchant/findings": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8936,7 +8936,7 @@
         ]
       }
     },
-    "/v1/operator/findings/{id}": {
+    "/v1/merchant/findings/{id}": {
       "get": {
         "tags": [
           "merchant_config"
@@ -8986,7 +8986,7 @@
         ]
       }
     },
-    "/v1/operator/findings/{id}/resolve": {
+    "/v1/merchant/findings/{id}/resolve": {
       "post": {
         "tags": [
           "merchant_config"
@@ -9177,7 +9177,7 @@
         ]
       }
     },
-    "/v1/operator/provisioning-tokens": {
+    "/v1/merchant/provisioning-tokens": {
       "get": {
         "tags": [
           "merchant_config"
@@ -9295,7 +9295,7 @@
         ]
       }
     },
-    "/v1/operator/provisioning-tokens/{id}": {
+    "/v1/merchant/provisioning-tokens/{id}": {
       "delete": {
         "tags": [
           "merchant_config"
