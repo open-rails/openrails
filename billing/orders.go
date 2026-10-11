@@ -70,9 +70,10 @@ type OrderPaymentParams struct {
 }
 
 // PreviewMyOrderParams prices lines for the signed-in customer without
-// creating an order.
+// creating an order: Lines, or the customer's cart (Cart true).
 type PreviewMyOrderParams struct {
-	Lines []OrderLineParams `json:"lines"`
+	Lines []OrderLineParams `json:"lines,omitempty"`
+	Cart  bool              `json:"cart,omitempty"`
 }
 
 // CreateMyOrderParams creates the signed-in customer's order and, with
@@ -81,8 +82,11 @@ type PreviewMyOrderParams struct {
 // keeps a new card for one-click buys where that needs the customer's opt-in
 // (billing or card country in the EEA or the UK); elsewhere every new card is
 // kept. Without Payment the order is open for POST /v1/me/orders/{id}/pay.
+// Cart true buys the customer's cart instead of Lines: the order takes the
+// cart's lines in the transaction that creates it.
 type CreateMyOrderParams struct {
-	Lines         []OrderLineParams   `json:"lines"`
+	Lines         []OrderLineParams   `json:"lines,omitempty"`
+	Cart          bool                `json:"cart,omitempty"`
 	ExpectedTotal *int64              `json:"expected_total,omitempty,string"`
 	Payment       *OrderPaymentParams `json:"payment,omitempty"`
 	Reusable      *bool               `json:"reusable,omitempty"`

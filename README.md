@@ -760,6 +760,8 @@ Mounting gives your users these routes under `/billing`:
 | Route | What it does |
 |---|---|
 | `POST /billing/v1/me/checkout-sessions` | start a checkout for a price |
+| `GET`, `DELETE /billing/v1/me/cart` | their cart, priced now with the ways it can be paid; empty it |
+| `PUT /billing/v1/me/cart/lines/{price_id}` | add a price or change its line (quantity 0 removes it); the cart is shared by every site of the merchant |
 | `GET /billing/v1/me/entitlements` | everything they currently have access to |
 | `GET /billing/v1/me/subscriptions` | their subscriptions |
 | `GET /billing/v1/me/subscriptions/{id}` | one subscription |

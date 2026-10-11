@@ -81,6 +81,15 @@ export type CardEntry = {
   cvc?: string
 }
 
+export type Cart = {
+  currency: string
+  total: string
+  lines: OrderPreviewLine[]
+  payment_options: OrderPaymentOption[]
+  last_changed_at: string | null
+  expires_at: string | null
+}
+
 export type CheckoutSession = {
   id: string
   status: string
@@ -156,6 +165,7 @@ export type CheckoutSessionSavedMethod = {
 
 export type CreateMyOrderParams = {
   lines?: OrderLineParams[]
+  cart?: boolean
   expected_total?: string
   payment?: OrderPaymentParams
   reusable?: boolean
@@ -604,6 +614,7 @@ export type PendingAction = {
 
 export type PreviewMyOrderParams = {
   lines?: OrderLineParams[]
+  cart?: boolean
 }
 
 export type PreviewSubscriptionChangeParams = {
@@ -698,6 +709,11 @@ export type ScheduledChange = {
   created_at: string
   price?: Price
   product?: ProductSummary
+}
+
+export type SetCartLineParams = {
+  quantity?: number
+  amount?: string
 }
 
 export type SetDefaultPaymentMethodParams = {

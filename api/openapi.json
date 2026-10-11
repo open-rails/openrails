@@ -1500,6 +1500,121 @@
         ]
       }
     },
+    "/v1/me/cart": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      },
+      "delete": {
+        "tags": [
+          "customer"
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
+    "/v1/me/cart/lines/{price_id}": {
+      "put": {
+        "tags": [
+          "customer"
+        ],
+        "parameters": [
+          {
+            "name": "price_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetCartLineParams"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Cart"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "invalid_param",
+          "resource_not_found",
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer",
+          "request"
+        ]
+      }
+    },
     "/v1/catalog/products": {
       "get": {
         "tags": [
@@ -12042,6 +12157,60 @@
           }
         }
       },
+      "Cart": {
+        "type": "object",
+        "properties": {
+          "currency": {
+            "type": "string"
+          },
+          "total": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderPreviewLine"
+            }
+          },
+          "payment_options": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/OrderPaymentOption"
+            }
+          },
+          "last_changed_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "currency",
+          "total",
+          "lines",
+          "payment_options",
+          "last_changed_at",
+          "expires_at"
+        ]
+      },
       "CatalogAnswer": {
         "type": "object",
         "properties": {
@@ -13061,6 +13230,9 @@
             "items": {
               "$ref": "#/components/schemas/OrderLineParams"
             }
+          },
+          "cart": {
+            "type": "boolean"
           },
           "expected_total": {
             "type": "string",
@@ -18504,6 +18676,9 @@
             "items": {
               "$ref": "#/components/schemas/OrderLineParams"
             }
+          },
+          "cart": {
+            "type": "boolean"
           }
         }
       },
@@ -20541,6 +20716,18 @@
           "price_migration_id",
           "created_at"
         ]
+      },
+      "SetCartLineParams": {
+        "type": "object",
+        "properties": {
+          "quantity": {
+            "type": "integer"
+          },
+          "amount": {
+            "type": "string",
+            "description": "A number as a decimal string."
+          }
+        }
       },
       "SetDashboardParams": {
         "type": "object",

@@ -57,6 +57,8 @@ const (
 	// CostObservations keeps a provider cost observation 90 days past the
 	// settlement or release of the operation it was read for.
 	CostObservations = 90 * Day
+	// Carts keeps a cart 30 days past its last change.
+	Carts = 30 * Day
 	// ResolvedFindings keeps a resolved reconciliation finding 12 months past
 	// its resolution and its last sighting.
 	ResolvedFindings = 366 * Day

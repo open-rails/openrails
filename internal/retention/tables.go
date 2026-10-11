@@ -70,6 +70,7 @@ var Tables = map[string]Table{
 	"checkout_sessions":               {Rows, "rows are deleted at purge_at, 24 hours after the session expired."},
 	"orders":                          {Rows, "unpaid canceled and expired orders that never started a payment attempt are deleted 90 days after they closed; every other order is permanent."},
 	"order_lines":                     {Rows, "deleted with their order."},
+	"carts":                           {Rows, "carts are deleted 30 days after last_changed_at."},
 	"notifications":                   {Rows, "rows are deleted 90 days after created_at once read, 180 days if never read."},
 	"webhook_events":                  {Rows, "completed events are deleted 90 days after completed_at."},
 	"host_outbox":                     {Rows, "delivered events are deleted 30 days after delivered_at; an undelivered event is never deleted."},

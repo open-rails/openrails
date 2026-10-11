@@ -308,6 +308,20 @@ card, or a new card in the PSP's fields, then any `next_action` and `confirm`.
 It uses only the order API and `GET /v1/config`, through the provider's client
 or one passed as `client`.
 
+### Cart
+
+Each customer has one cart per merchant, so every site of the merchant shares
+it. `GET /v1/me/cart` answers its lines priced as a preview (refusals included)
+with `last_changed_at` and `expires_at`. `PUT /v1/me/cart/lines/{price_id}`
+with `{quantity?, amount?}` adds or changes a line: quantity 0 removes it, and
+a price of a product already in the cart replaces that product's line.
+`DELETE /v1/me/cart` empties it. A cart holds at most 100 lines, reserves
+nothing, and expires 30 days after its last change. `cart: true` in place of
+`lines` previews it (`POST /v1/me/orders/preview`) or buys it
+(`POST /v1/me/orders`, with `expected_total` as always); the order takes the
+cart's lines in the transaction that creates it. billing-ui's `<Cart>` shows the
+cart and checks it out.
+
 ### Payment methods
 
 `POST /v1/me/payment-methods` saves a card in one call: the PSP's `psp_id`, the `token`

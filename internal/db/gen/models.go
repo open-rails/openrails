@@ -82,6 +82,16 @@ type BillingBookIdentity struct {
 	ArmedAt          time.Time
 }
 
+// A customer's cart: up to 100 lines ({price_id, quantity, amount}, in the order added), priced live as an order preview. Every change goes through one function in one transaction and sets last_changed_at; an order made from the cart takes its lines. Retention: carts are deleted 30 days after last_changed_at.
+type BillingCart struct {
+	MerchantID uuid.UUID
+	CustomerID uuid.UUID
+	// JSON array of {price_id, quantity, amount}: quantity and amount as on an order line, absent when not given.
+	Lines         []byte
+	LastChangedAt time.Time
+	CreatedAt     time.Time
+}
+
 // Permanent compact replay receipts, retained and restored with the merchant billing book; never expire by HTTP idempotency TTL. Retention: permanent, never pruned.
 type BillingCatalogApplication struct {
 	MerchantID      uuid.UUID

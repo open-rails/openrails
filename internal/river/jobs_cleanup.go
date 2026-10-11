@@ -15,6 +15,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/modules/checkoutsession"
+	"github.com/open-rails/openrails/internal/modules/orders"
 	"github.com/open-rails/openrails/internal/modules/webhooks"
 	"github.com/open-rails/openrails/internal/retention"
 	"github.com/open-rails/openrails/internal/shared/opsmetric"
@@ -33,9 +34,10 @@ const (
 	// cleanupDeleteBatch bounds ONE delete statement, and so one transaction.
 	cleanupDeleteBatch = 1000
 
-	// cleanupCheckoutSessionMaxBatches bounds one pass's checkout
-	// session deletes; a larger backlog drains over the following passes.
-	cleanupCheckoutSessionMaxBatches = 50
+	// cleanupIndexedMaxBatches bounds one pass's deletes of one indexed
+	// table across merchants (checkout sessions, carts); a larger backlog
+	// drains over the following passes.
+	cleanupIndexedMaxBatches = 50
 
 	// cleanupMerchantRowBudget bounds one merchant's share of one pass across
 	// all its sweeps. A merchant with years of unswept rows drains over
@@ -131,6 +133,7 @@ func (CleanupExpiredDataWorker) Kind() string { return KindCleanupExpiredData }
 type CleanupResult struct {
 	CheckoutAttemptsExpired int64
 	CheckoutSessions        int64
+	Carts                   int64
 	NotificationsSeen       int64
 	NotificationsAll        int64
 	WebhookEvents           int64
@@ -220,7 +223,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 
 	// Checkout sessions past their reconciliation window: one indexed, bounded
 	// delete across merchants, so it needs no due-work walk.
-	for range cleanupCheckoutSessionMaxBatches {
+	for range cleanupIndexedMaxBatches {
 		n, err := checkoutsession.DeleteExpired(ctx, w.DB, now, cleanupDeleteBatch)
 		if err != nil {
 			logger.WithError(err).Error("Cleanup: delete checkout sessions failed")
@@ -228,6 +231,19 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 			break
 		}
 		result.CheckoutSessions += n
+		if n < cleanupDeleteBatch {
+			break
+		}
+	}
+	// Carts unchanged for their retention: the same indexed, bounded delete.
+	for range cleanupIndexedMaxBatches {
+		n, err := orders.DeleteExpiredCarts(ctx, w.DB, now, cleanupDeleteBatch)
+		if err != nil {
+			logger.WithError(err).Error("Cleanup: delete carts failed")
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete carts: %w", err))
+			break
+		}
+		result.Carts += n
 		if n < cleanupDeleteBatch {
 			break
 		}
@@ -313,6 +329,7 @@ func (w CleanupExpiredDataWorker) sweepPass(ctx context.Context) ([]uuid.UUID, C
 		"duration_ms":               clock.Now().Sub(started).Milliseconds(),
 		"checkout_attempts_expired": result.CheckoutAttemptsExpired,
 		"checkout_sessions":         result.CheckoutSessions,
+		"carts":                     result.Carts,
 		"notifications_seen":        result.NotificationsSeen,
 		"notifications_unseen":      result.NotificationsAll,
 		"webhook_events":            result.WebhookEvents,

@@ -352,6 +352,45 @@ export const orderSchema = z.object({
 })
 export type Order = z.infer<typeof orderSchema>
 
+/** Why a line cannot be bought: `already_owned`, `unavailable`, ... */
+export const orderLineRefusalSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  owned_by: z.string().nullish(),
+  hint: z.string().nullish(),
+})
+export type OrderLineRefusal = z.infer<typeof orderLineRefusalSchema>
+
+/** One line priced as an order would freeze it, or why it cannot be bought. */
+export const orderPreviewLineSchema = z.object({
+  price_id: z.string(),
+  product_id: z.string(),
+  description: z.string(),
+  quantity: z.number().nullish(),
+  unit_amount: amount,
+  amount: amount,
+  ownership: z.string(),
+  billing_interval_hours: z.number().nullish(),
+  access_duration_hours: z.number().nullish(),
+  refusal: orderLineRefusalSchema.nullish(),
+})
+export type OrderPreviewLine = z.infer<typeof orderPreviewLineSchema>
+
+/**
+ * The customer's cart, priced live: one per customer of a merchant, shared by
+ * the merchant's sites. `last_changed_at` and `expires_at` are null while it
+ * is empty.
+ */
+export const cartSchema = z.object({
+  currency: z.string(),
+  total: amount,
+  lines: z.array(orderPreviewLineSchema),
+  payment_options: orderSchema.shape.payment_options,
+  last_changed_at: time.nullish(),
+  expires_at: time.nullish(),
+})
+export type Cart = z.infer<typeof cartSchema>
+
 /**
  * How to pay an order: a saved card, or a card just entered (the token of
  * the PSP's own fields, its `psp_id`).

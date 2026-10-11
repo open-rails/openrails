@@ -306,6 +306,7 @@
       "const InvoiceIDPrefix = \"inv_\"",
       "const MaxAdmissionBatchItems = 1000",
       "const MaxBatchItems = 100",
+      "const MaxCartLines = MaxOrderLines",
       "const MaxEntitlementChecks = 100",
       "const MaxMerchantConfigurationBytes = 1 \u003c\u003c 20",
       "const MaxOrderLines = 100",
@@ -576,6 +577,7 @@
       "type Card = cardguard.Card",
       "type CardDetails struct {\n\tBrand    *string `json:\"brand\"`\n\tLast4    *string `json:\"last4\"`\n\tExpMonth *int    `json:\"exp_month\"`\n\tExpYear  *int    `json:\"exp_year\"`\n}",
       "type CardExpiryStatus string",
+      "type Cart struct {\n\tCurrency       string               `json:\"currency\"`\n\tTotal          int64                `json:\"total,string\"`\n\tLines          []OrderPreviewLine   `json:\"lines\"`\n\tPaymentOptions []OrderPaymentOption `json:\"payment_options\"`\n\n\tLastChangedAt *time.Time `json:\"last_changed_at\"`\n\tExpiresAt     *time.Time `json:\"expires_at\"`\n}",
       "type CatalogAnswer struct {\n\tAnswer   string            `json:\"answer\"`\n\tEvidence []CatalogEvidence `json:\"evidence\"`\n\tDrafts   []CatalogDraft    `json:\"drafts\"`\n}",
       "type CatalogApplicationReceipt struct {\n\tApplicationID      string              `json:\"application_id\"`\n\tBaseRevision       int64               `json:\"base_revision\"`\n\tAppliedRevision    int64               `json:\"applied_revision\"`\n\tReplayed           bool                `json:\"replayed\"`\n\tProductsChanged    int                 `json:\"products_changed\"`\n\tPricesChanged      int                 `json:\"prices_changed\"`\n\tEntitlementChanges []EntitlementChange `json:\"entitlement_changes\"`\n\tChanges            []CatalogChange     `json:\"changes\"`\n\tConflicts          []CatalogConflict   `json:\"conflicts\"`\n}",
       "type CatalogChange struct {\n\tObject     CatalogObjectKind `json:\"object\"`\n\tKey        string            `json:\"key\"`\n\tProductKey *string           `json:\"product_key\"`\n\tFields     []string          `json:\"fields\"`\n\tRevision   int64             `json:\"revision\"`\n}",
@@ -608,7 +610,7 @@
       "type CreateCreditGrantBatchResult struct {\n\tItems []CreditGrant `json:\"items\"`\n}",
       "type CreateCreditGrantParams struct {\n\tCustomerID  CustomerID `json:\"customer_id\"`\n\tCurrency    string     `json:\"currency\"`\n\tAmount      int64      `json:\"amount,string\"`\n\tSourceID    string     `json:\"source_id\"`\n\tSource      string     `json:\"source\"`\n\tInvoker     string     `json:\"invoker,omitempty\"`\n\tExpiresAt   *time.Time `json:\"expires_at,omitempty\"`\n\tDescription *string    `json:\"description,omitempty\"`\n}",
       "type CreateMerchantParams struct {\n\tName        string `json:\"name\"`\n\tDisplayName string `json:\"display_name\"`\n}",
-      "type CreateMyOrderParams struct {\n\tLines         []OrderLineParams   `json:\"lines\"`\n\tExpectedTotal *int64              `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool               `json:\"reusable,omitempty\"`\n}",
+      "type CreateMyOrderParams struct {\n\tLines         []OrderLineParams   `json:\"lines,omitempty\"`\n\tCart          bool                `json:\"cart,omitempty\"`\n\tExpectedTotal *int64              `json:\"expected_total,omitempty,string\"`\n\tPayment       *OrderPaymentParams `json:\"payment,omitempty\"`\n\tReusable      *bool               `json:\"reusable,omitempty\"`\n}",
       "type CreateOrderParams struct {\n\tCustomerID     CustomerID        `json:\"customer_id\"`\n\tLines          []OrderLineParams `json:\"lines\"`\n\tExpiresAt      *time.Time        `json:\"expires_at,omitempty\"`\n\tIdempotencyKey string            `json:\"-\"`\n}",
       "type CreatePSPParams struct {\n\tKey         string            `json:\"key\"`\n\tRail        Rail              `json:\"rail\"`\n\tAccountID   string            `json:\"account_id\"`\n\tSettings    map[string]any    `json:\"settings\"`\n\tCredentials map[string]string `json:\"credentials\"`\n}",
       "type CreatePaymentMethodParams struct {\n\tPSPID          PSPID           `json:\"psp_id\"`\n\tToken          string          `json:\"token,omitempty\"`\n\tCard           *Card           `json:\"card,omitempty\"`\n\tBillingDetails *BillingDetails `json:\"billing_details,omitempty\"`\n}",
@@ -802,7 +804,7 @@
       "type PaymentSettledEvent struct {\n\tPaymentID      PaymentID       `json:\"payment_id\"`\n\tCustomerID     CustomerID      `json:\"customer_id\"`\n\tOrderID        *OrderID        `json:\"order_id,omitempty\"`\n\tPriceID        *PriceID        `json:\"price_id,omitempty\"`\n\tSubscriptionID *SubscriptionID `json:\"subscription_id,omitempty\"`\n\tAmount         int64           `json:\"amount,string\"`\n\tCurrency       string          `json:\"currency\"`\n}",
       "type PaymentStatus string",
       "type PendingAction struct {\n\tPSP           string                                  `json:\"psp\"`\n\tAction        string                                  `json:\"action\"`\n\tHint          string                                  `json:\"hint\"`\n\tPatchRequired map[string]map[string]map[string]string `json:\"patch_required\"`\n}",
-      "type PreviewMyOrderParams struct {\n\tLines []OrderLineParams `json:\"lines\"`\n}",
+      "type PreviewMyOrderParams struct {\n\tLines []OrderLineParams `json:\"lines,omitempty\"`\n\tCart  bool              `json:\"cart,omitempty\"`\n}",
       "type PreviewOrderParams struct {\n\tCustomerID CustomerID        `json:\"customer_id\"`\n\tLines      []OrderLineParams `json:\"lines\"`\n}",
       "type PreviewPSPRoutingParams struct {\n\tPriceID PriceID `json:\"price_id\"`\n\n\tCountry string `json:\"country\"`\n\tPSP     string `json:\"psp\"`\n}",
       "type Price struct {\n\tCustomerAmount *catalog.CustomerAmount `json:\"customer_amount,omitempty\"`\n\n\tQuantity *catalog.Quantity `json:\"quantity\"`\n\n\tRevision int64 `json:\"revision\"`\n\n\tVersion              int64                   `json:\"version\"`\n\tID                   PriceID                 `json:\"id\"`\n\tKey                  string                  `json:\"key\"`\n\tProductID            ProductID               `json:\"product_id\"`\n\tArchived             bool                    `json:\"archived\"`\n\tUnitAmount           int64                   `json:\"unit_amount,string\"`\n\tCurrency             string                  `json:\"currency\"`\n\tAccessDurationHours  *int                    `json:\"access_duration_hours\"`\n\tBillingIntervalHours *int                    `json:\"billing_interval_hours\"`\n\tTrialUnitAmount      *int64                  `json:\"trial_unit_amount,string\"`\n\tTrialDurationHours   *int                    `json:\"trial_duration_hours\"`\n\tPSPs                 map[string]PSPLinkState `json:\"psps\"`\n\n\tPendingManualActions []PendingAction `json:\"pending_manual_actions\"`\n\tCreatedAt            time.Time       `json:\"created_at\"`\n\tUpdatedAt            time.Time       `json:\"updated_at\"`\n}",
@@ -876,6 +878,7 @@
       "type SHA256 [sha256.Size]byte",
       "type ScheduledChange struct {\n\tPriceID PriceID `json:\"price_id\"`\n\n\tQuantity    *int                  `json:\"quantity\"`\n\tEffectiveAt time.Time             `json:\"effective_at\"`\n\tSource      ScheduledChangeSource `json:\"source\"`\n\n\tPriceMigrationID *PriceMigrationID `json:\"price_migration_id\"`\n\tCreatedAt        time.Time         `json:\"created_at\"`\n\n\tPrice   *Price          `json:\"price,omitempty\"`\n\tProduct *ProductSummary `json:\"product,omitempty\"`\n}",
       "type ScheduledChangeSource string",
+      "type SetCartLineParams struct {\n\tQuantity *int   `json:\"quantity,omitempty\"`\n\tAmount   *int64 `json:\"amount,omitempty,string\"`\n}",
       "type SetDashboardParams struct {\n\tWidgets []DashboardWidget `json:\"widgets\"`\n}",
       "type SetDefaultPaymentMethodParams struct {\n\tPaymentMethodID PaymentMethodID `json:\"payment_method_id\"`\n}",
       "type SetMeterParams struct {\n\tEventType     string                             `json:\"event_type,omitempty\"`\n\tValueProperty string                             `json:\"value_property,omitempty\"`\n\tAggregation   catalog.Aggregation                `json:\"aggregation\"`\n\tUnit          string                             `json:\"unit,omitempty\"`\n\tGroupBy       map[string]string                  `json:\"group_by,omitempty\"`\n\tRateCard      catalog.Field[MeterRateCardParams] `json:\"rate_card,omitzero\"`\n\n\tExpectedRevision *int64 `json:\"expected_revision,omitempty\"`\n}",
@@ -1576,6 +1579,9 @@
       "type CounterDrift struct {\n\tAccountID     uuid.UUID  `json:\"account_id\"`\n\tMerchantID    uuid.UUID  `json:\"merchant_id\"`\n\tCurrency      string     `json:\"currency\"`\n\tAccountType   string     `json:\"account_type\"`\n\tCustomerID    *uuid.UUID `json:\"customer_id,omitempty\"`\n\tStoredCredits int64      `json:\"stored_credits\"`\n\tLoggedCredits int64      `json:\"logged_credits\"`\n\tStoredDebits  int64      `json:\"stored_debits\"`\n\tLoggedDebits  int64      `json:\"logged_debits\"`\n}",
       "type IntegrityReport struct {\n\tConservation []ConservationBreach `json:\"conservation_breaches\"`\n\tCounters     []CounterDrift       `json:\"counter_drifts\"`\n}"
     ],
+    "internal/modules/orders": [
+      "type cartLine struct {\n\tPriceID  uuid.UUID `json:\"price_id\"`\n\tQuantity *int      `json:\"quantity,omitempty\"`\n\tAmount   *int64    `json:\"amount,omitempty,string\"`\n}"
+    ],
     "internal/modules/paymentmethods": [
       "type CardRefreshArgs struct {\n\tMerchantID      uuid.UUID `json:\"merchant_id\"`\n\tPaymentMethodID uuid.UUID `json:\"payment_method_id\"`\n}"
     ],
@@ -1818,6 +1824,9 @@
     },
     "billing/card.go": {
       "cardguard": "github.com/open-rails/openrails/internal/cardguard"
+    },
+    "billing/carts.go": {
+      "time": "time"
     },
     "billing/catalog.go": {
       "catalog": "github.com/open-rails/openrails/catalog",
@@ -3598,6 +3607,21 @@
       "time": "time",
       "uuid": "github.com/google/uuid",
       "uuidutil": "github.com/open-rails/openrails/internal/shared/uuidutil",
+      "v5": "github.com/jackc/pgx/v5"
+    },
+    "internal/modules/orders/cart.go": {
+      "apperr": "github.com/open-rails/openrails/internal/shared/apperr",
+      "billing": "github.com/open-rails/openrails/billing",
+      "context": "context",
+      "db": "github.com/open-rails/openrails/internal/db",
+      "gen": "github.com/open-rails/openrails/internal/db/gen",
+      "http": "net/http",
+      "json": "encoding/json",
+      "merchant": "github.com/open-rails/openrails/internal/merchant",
+      "retention": "github.com/open-rails/openrails/internal/retention",
+      "slices": "slices",
+      "time": "time",
+      "uuid": "github.com/google/uuid",
       "v5": "github.com/jackc/pgx/v5"
     },
     "internal/modules/paymentmethods/card_versions.go": {

@@ -693,6 +693,7 @@ pkg openrails/billing, const MandateRevoked MandateStatus = "revoked"
 pkg openrails/billing, const MandateUnscheduled MandateKind = "unscheduled"
 pkg openrails/billing, const MaxAdmissionBatchItems untyped int = 1000
 pkg openrails/billing, const MaxBatchItems untyped int = 100
+pkg openrails/billing, const MaxCartLines untyped int = 100
 pkg openrails/billing, const MaxEntitlementChecks untyped int = 100
 pkg openrails/billing, const MaxEntitlementPrefixes untyped int = 10
 pkg openrails/billing, const MaxHeldEntitlements untyped int = 10000
@@ -1279,6 +1280,13 @@ pkg openrails/billing, type CardDetails struct, ExpMonth *int `json:"exp_month"`
 pkg openrails/billing, type CardDetails struct, ExpYear *int `json:"exp_year"`
 pkg openrails/billing, type CardDetails struct, Last4 *string `json:"last4"`
 pkg openrails/billing, type CardExpiryStatus string
+pkg openrails/billing, type Cart struct
+pkg openrails/billing, type Cart struct, Currency string `json:"currency"`
+pkg openrails/billing, type Cart struct, ExpiresAt *time.Time `json:"expires_at"`
+pkg openrails/billing, type Cart struct, LastChangedAt *time.Time `json:"last_changed_at"`
+pkg openrails/billing, type Cart struct, Lines []OrderPreviewLine `json:"lines"`
+pkg openrails/billing, type Cart struct, PaymentOptions []OrderPaymentOption `json:"payment_options"`
+pkg openrails/billing, type Cart struct, Total int64 `json:"total,string"`
 pkg openrails/billing, type CatalogAnswer struct
 pkg openrails/billing, type CatalogAnswer struct, Answer string `json:"answer"`
 pkg openrails/billing, type CatalogAnswer struct, Drafts []CatalogDraft `json:"drafts"`
@@ -1449,8 +1457,9 @@ pkg openrails/billing, type CreateMerchantParams struct
 pkg openrails/billing, type CreateMerchantParams struct, DisplayName string `json:"display_name"`
 pkg openrails/billing, type CreateMerchantParams struct, Name string `json:"name"`
 pkg openrails/billing, type CreateMyOrderParams struct
+pkg openrails/billing, type CreateMyOrderParams struct, Cart bool `json:"cart,omitempty"`
 pkg openrails/billing, type CreateMyOrderParams struct, ExpectedTotal *int64 `json:"expected_total,omitempty,string"`
-pkg openrails/billing, type CreateMyOrderParams struct, Lines []OrderLineParams `json:"lines"`
+pkg openrails/billing, type CreateMyOrderParams struct, Lines []OrderLineParams `json:"lines,omitempty"`
 pkg openrails/billing, type CreateMyOrderParams struct, Payment *OrderPaymentParams `json:"payment,omitempty"`
 pkg openrails/billing, type CreateMyOrderParams struct, Reusable *bool `json:"reusable,omitempty"`
 pkg openrails/billing, type CreateOrderParams struct
@@ -2526,7 +2535,8 @@ pkg openrails/billing, type PendingAction struct, Hint string `json:"hint"`
 pkg openrails/billing, type PendingAction struct, PSP string `json:"psp"`
 pkg openrails/billing, type PendingAction struct, PatchRequired map[string]map[string]map[string]string `json:"patch_required"`
 pkg openrails/billing, type PreviewMyOrderParams struct
-pkg openrails/billing, type PreviewMyOrderParams struct, Lines []OrderLineParams `json:"lines"`
+pkg openrails/billing, type PreviewMyOrderParams struct, Cart bool `json:"cart,omitempty"`
+pkg openrails/billing, type PreviewMyOrderParams struct, Lines []OrderLineParams `json:"lines,omitempty"`
 pkg openrails/billing, type PreviewOrderParams struct
 pkg openrails/billing, type PreviewOrderParams struct, CustomerID CustomerID `json:"customer_id"`
 pkg openrails/billing, type PreviewOrderParams struct, Lines []OrderLineParams `json:"lines"`
@@ -2930,6 +2940,9 @@ pkg openrails/billing, type ScheduledChange struct, Product *ProductSummary `jso
 pkg openrails/billing, type ScheduledChange struct, Quantity *int `json:"quantity"`
 pkg openrails/billing, type ScheduledChange struct, Source ScheduledChangeSource `json:"source"`
 pkg openrails/billing, type ScheduledChangeSource string
+pkg openrails/billing, type SetCartLineParams struct
+pkg openrails/billing, type SetCartLineParams struct, Amount *int64 `json:"amount,omitempty,string"`
+pkg openrails/billing, type SetCartLineParams struct, Quantity *int `json:"quantity,omitempty"`
 pkg openrails/billing, type SetDashboardParams struct
 pkg openrails/billing, type SetDashboardParams struct, Widgets []DashboardWidget `json:"widgets"`
 pkg openrails/billing, type SetDefaultPaymentMethodParams struct

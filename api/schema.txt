@@ -54,6 +54,7 @@ migration 0050_drop_card_attempt_failures.up.sql sha256:c4c0ac057a2c8b9fa47cf9aa
 migration 0051_authkit_identity.up.sql sha256:71f7acea342dbecbc5d756fc5d46b01fa3040008dc5d227f1027bb0a4b0bd9ff
 migration 0052_order_payment_axis.up.sql sha256:1eec63a28d535dd6d3fc6f7fd685adf88baee521e3e003698500dea8ac0154d5
 migration 0053_payment_method_requires_action.up.sql sha256:39c955586b5501daf527a9adff3e2073297c77a5d4e09706d981e9938285d61a
+migration 0054_carts.up.sql sha256:e3b0fe2260a225edcb603597d6991b0316190841feb177c86893d6d48aa64dd7
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -158,6 +159,19 @@ table billing.book_identity
   constraint book_identity_pkey PRIMARY KEY (singleton)
   constraint book_identity_singleton_check CHECK (singleton)
   index CREATE UNIQUE INDEX book_identity_pkey ON billing.book_identity USING btree (singleton)
+
+table billing.carts
+  column merchant_id uuid NOT NULL
+  column customer_id uuid NOT NULL
+  column lines jsonb NOT NULL
+  column last_changed_at timestamp with time zone NOT NULL
+  column created_at timestamp with time zone NOT NULL DEFAULT now()
+  constraint carts_customer_id_fkey FOREIGN KEY (merchant_id, customer_id) REFERENCES billing.customers(merchant_id, id)
+  constraint carts_lines_check CHECK (((jsonb_typeof(lines) = 'array'::text) AND (jsonb_array_length(lines) <= 100)))
+  constraint carts_merchant_id_fkey FOREIGN KEY (merchant_id) REFERENCES billing.merchants(id) ON DELETE RESTRICT
+  constraint carts_pkey PRIMARY KEY (merchant_id, customer_id)
+  index CREATE INDEX carts_last_changed_at_idx ON billing.carts USING btree (last_changed_at)
+  index CREATE UNIQUE INDEX carts_pkey ON billing.carts USING btree (merchant_id, customer_id)
 
 table billing.catalog_applications
   column merchant_id uuid NOT NULL
@@ -3070,6 +3084,7 @@ function billing.guard_billing_restore_receipt()
                     'account_updater_batches',
                     'admission_denials_hourly',
                     'admission_operations',
+                    'carts',
                     'catalog_applications',
                     'catalog_field_owners',
                     'catalog_meters',

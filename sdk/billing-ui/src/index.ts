@@ -36,6 +36,7 @@ export {
   type SavePaymentMethodProps,
 } from "./save-payment-method"
 export { OrderCheckout, type OrderCheckoutProps } from "./order-checkout"
+export { Cart, type CartProps } from "./cart"
 export { authenticatePayment } from "./authenticate"
 export {
   canAuthenticatePayment,

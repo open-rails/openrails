@@ -24,6 +24,7 @@ import {
   invoiceSchema,
   listPageSchema,
   orderSchema,
+  cartSchema,
   pageSchema,
   paymentMethodSchema,
   paymentSchema,
@@ -41,6 +42,7 @@ import {
   type ListPage,
   type NewCard,
   type NextAction,
+  type Cart,
   type Order,
   type OrderPaymentInput,
   type Page,
@@ -483,6 +485,58 @@ export function createBillingClient(options: BillingClientOptions = {}) {
       return json(paymentMethodSchema, "/me/payment-methods", {
         method: "POST",
         body: card,
+      })
+    },
+
+    /** The customer's cart, priced now. */
+    getCart(signal?: AbortSignal): Promise<Cart> {
+      return json(cartSchema, "/me/cart", { signal })
+    },
+
+    /**
+     * Puts a price in the cart or changes its line, and answers the cart.
+     * `quantity` 0 removes the line; omitted, the price's default. `amount`
+     * is the customer's choice on a price that takes one.
+     */
+    setCartLine(
+      priceId: string,
+      input: { quantity?: number; amount?: string } = {}
+    ): Promise<Cart> {
+      return json(cartSchema, `/me/cart/lines/${id(priceId)}`, {
+        method: "PUT",
+        body: input satisfies wire.SetCartLineParams,
+      })
+    },
+
+    /** Empties the cart. */
+    async clearCart(): Promise<void> {
+      await send("/me/cart", { method: "DELETE" })
+    },
+
+    /**
+     * Creates an order from `lines` or the cart (`cart: true`), and with
+     * `payment` pays it in the same call; `expectedTotal` is the total the
+     * customer saw. A failed payment resolves as payOrder's does.
+     */
+    createOrder(input: {
+      lines?: { price_id: string; quantity?: number; amount?: string }[]
+      cart?: boolean
+      expectedTotal?: string
+      payment?: OrderPaymentInput
+      reusable?: boolean
+      idempotencyKey: string
+    }): Promise<OrderResult> {
+      return orderResult("/me/orders", {
+        method: "POST",
+        body: {
+          ...(input.cart ? { cart: true } : { lines: input.lines ?? [] }),
+          ...(input.expectedTotal === undefined
+            ? {}
+            : { expected_total: input.expectedTotal }),
+          ...(input.payment === undefined ? {} : { payment: input.payment }),
+          ...(input.reusable === undefined ? {} : { reusable: input.reusable }),
+        },
+        headers: { "Idempotency-Key": input.idempotencyKey },
       })
     },
 

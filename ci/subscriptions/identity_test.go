@@ -253,7 +253,8 @@ func TestCustomerRoutesRefuseAnotherCustomersObjects(t *testing.T) {
 	}
 	probed := 0
 	for _, route := range routes.Catalog() {
-		if route.Group != routes.Customer || !strings.Contains(route.Path, "{") {
+		// A catalog price is the merchant's, never another customer's object.
+		if route.Group != routes.Customer || !strings.Contains(strings.ReplaceAll(route.Path, "{price_id}", ""), "{") {
 			continue
 		}
 		probe, ok := probes[route.Key()]

@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (173), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (176), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `session_id` (the id in the path), `checkout_session` (an opaque checkout capability that also selects its stored merchant), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -51,6 +51,9 @@ A customer acting on its own account.
 | POST | `/v1/me/orders/{id}/pay` | customer | — | `PayOrderParams` | 200 `Order` | `Idempotency-Key` |
 | POST | `/v1/me/orders/{id}/confirm` | customer | — | — | 200 `Order` |  |
 | POST | `/v1/me/orders/{id}/cancel` | customer | — | — | 200 `Order` |  |
+| GET | `/v1/me/cart` | customer | — | — | 200 `Cart` |  |
+| PUT | `/v1/me/cart/lines/{price_id}` | customer | — | `SetCartLineParams` | 200 `Cart` |  |
+| DELETE | `/v1/me/cart` | customer | — | — | 204 — |  |
 | POST | `/v1/me/subscriptions/{id}/cancel` | customer | — | `CustomerCancelSubscriptionParams` | 200 `Subscription` |  |
 | POST | `/v1/me/subscriptions/{id}/resume` | customer | — | — | 200 `Subscription` |  |
 | PUT | `/v1/me/subscriptions/{id}/payment-method` | customer | — | `SetSubscriptionPaymentMethodParams` | 200 `Subscription` |  |

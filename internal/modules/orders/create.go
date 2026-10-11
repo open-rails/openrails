@@ -38,6 +38,9 @@ type CreateInput struct {
 	IdempotencyKey string
 	RequestDigest  []byte
 	TTL            time.Duration
+	// FromCart buys the customer's cart instead of Lines, emptying it in the
+	// order's transaction.
+	FromCart bool
 }
 
 // Create freezes lines into an order and claims what its unique lines buy.
@@ -62,8 +65,16 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 		if _, err := q.LockCustomerForSpend(ctx, gen.LockCustomerForSpendParams{MerchantID: mid.UUID(), ID: in.CustomerID}); err != nil {
 			return err
 		}
+		lines := in.Lines
+		if in.FromCart {
+			taken, err := s.takeCart(ctx, q, mid.UUID(), in.CustomerID)
+			if err != nil {
+				return err
+			}
+			lines = taken
+		}
 		now := s.now()
-		quote, err := s.quote(ctx, q, mid.UUID(), in.CustomerID, in.Lines, uuid.Nil, now)
+		quote, err := s.quote(ctx, q, mid.UUID(), in.CustomerID, lines, uuid.Nil, now)
 		if err != nil {
 			return err
 		}

@@ -663,3 +663,18 @@ func TestWritersRaceIntoANewMonth(t *testing.T) {
 		}
 	}
 }
+
+// A cart goes 30 days after its last change, in the cleanup pass's indexed
+// delete across merchants; a fresher cart stays.
+func TestCartsExpireAfterTheirLastChange(t *testing.T) {
+	w, _ := newRetentionWorld(t)
+	now := w.clock.Now()
+	stale, fresh := uuid.New(), uuid.New()
+	for customer, changed := range map[uuid.UUID]time.Time{stale: now.Add(-retention.Carts - time.Hour), fresh: now.Add(-retention.Carts + time.Hour)} {
+		w.exec(`INSERT INTO billing.customers (merchant_id, id) VALUES ($1, $2)`, w.merchant, customer)
+		w.exec(`INSERT INTO billing.carts (merchant_id, customer_id, lines, last_changed_at) VALUES ($1, $2, '[]', $3)`, w.merchant, customer, changed)
+	}
+	require.EqualValues(t, 1, w.sweep(0).Carts)
+	require.Equal(t, 1, w.count(`SELECT count(*) FROM billing.carts WHERE merchant_id = $1 AND customer_id = $2`, w.merchant, fresh))
+	require.Zero(t, w.sweep(0).Carts)
+}

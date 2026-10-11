@@ -50,13 +50,19 @@ type orderCall struct {
 
 func (c *customer) order(method, path, key string, body any) orderCall {
 	c.w.t.Helper()
+	return c.orderAt(c.w.server.URL, method, path, key, body)
+}
+
+// orderAt is order on the process serving base: another host of the merchant.
+func (c *customer) orderAt(base, method, path, key string, body any) orderCall {
+	c.w.t.Helper()
 	var data io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
 		require.NoError(c.w.t, err)
 		data = bytes.NewReader(raw)
 	}
-	req, err := http.NewRequestWithContext(c.w.t.Context(), method, c.w.server.URL+mountPrefix+"/v1/me"+path, data)
+	req, err := http.NewRequestWithContext(c.w.t.Context(), method, base+mountPrefix+"/v1/me"+path, data)
 	require.NoError(c.w.t, err)
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Content-Type", "application/json")

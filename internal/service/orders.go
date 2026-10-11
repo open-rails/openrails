@@ -86,7 +86,11 @@ func (s *Service) PreviewOrder(ctx context.Context, actor OrderActor, params bil
 	if err != nil {
 		return nil, err
 	}
-	quote, err := rt.Orders.Preview(ctx, actor.Customer.UUID(), params.Lines)
+	lines, err := orderLinesOf(ctx, rt, actor.Customer, params.Lines, params.Cart)
+	if err != nil {
+		return nil, err
+	}
+	quote, err := rt.Orders.Preview(ctx, actor.Customer.UUID(), lines)
 	if err != nil {
 		return nil, err
 	}
@@ -140,7 +144,7 @@ func (s *Service) CreateOrder(ctx context.Context, actor OrderActor, params bill
 	if err != nil {
 		return OrderAnswer{}, err
 	}
-	if err := orders.CheckLines(params.Lines); err != nil {
+	if err := checkOrderLines(params.Lines, params.Cart); err != nil {
 		return OrderAnswer{}, err
 	}
 	pay, err := readOrderPayment(params.Payment, params.Reusable)
@@ -199,7 +203,11 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 	}
 	if params.Payment != nil {
 		// A payment that cannot be made refuses the order before it exists.
-		quote, err := rt.Orders.Preview(ctx, customer, params.Lines)
+		lines, err := orderLinesOf(ctx, rt, actor.Customer, params.Lines, params.Cart)
+		if err != nil {
+			return uuid.Nil, false, checkout.OrderCharge{}, err
+		}
+		quote, err := rt.Orders.Preview(ctx, customer, lines)
 		if err == nil {
 			err = s.orderPaymentUsable(ctx, quote, pay, actor.Customer)
 		}
@@ -207,7 +215,7 @@ func (s *Service) createClaimed(ctx context.Context, rt *orderRuntime, actor Ord
 			return uuid.Nil, false, checkout.OrderCharge{}, err
 		}
 	}
-	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: customer, Origin: billing.OrderOriginCustomer, Lines: params.Lines,
+	order, err := rt.Orders.Create(ctx, orders.CreateInput{CustomerID: customer, Origin: billing.OrderOriginCustomer, Lines: params.Lines, FromCart: params.Cart,
 		ExpectedTotal: params.ExpectedTotal, IdempotencyKey: key, RequestDigest: digest, TTL: orders.CustomerTTL})
 	if err != nil {
 		return uuid.Nil, false, checkout.OrderCharge{}, err

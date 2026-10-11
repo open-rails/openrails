@@ -972,6 +972,7 @@ Row retention:
 | `maintenance_runs` | reconciliation runs no finding names, 12 months after they started; every other kind is permanent |
 | `checkout_attempts` | attempts that expired without reaching a provider, 90 days after `expires_at` |
 | `checkout_sessions` | at `purge_at`, 24 hours after the session expired |
+| `carts` | 30 days after `last_changed_at` |
 | `payment_attempts`, `rebill_cycles`, `nmi_history_months` | 25 months |
 | `notifications` (customers') | 90 days once read, 180 days if never read |
 | `webhook_events` | 90 days after completion |

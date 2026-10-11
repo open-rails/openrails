@@ -50,6 +50,7 @@ sql:
       - "internal/migrate/postgres/0051_authkit_identity.up.sql"
       - "internal/migrate/postgres/0052_order_payment_axis.up.sql"
       - "internal/migrate/postgres/0053_payment_method_requires_action.up.sql"
+      - "internal/migrate/postgres/0054_carts.up.sql"
     database:
       uri: "${SQLC_DATABASE_URL}"
     rules:
