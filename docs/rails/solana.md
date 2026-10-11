@@ -76,8 +76,8 @@ The registry is a mint lookup table, **not** an acceptance list. `tokens` is the
 accepted set: declare `{USDC: {}, SOL: {}}` and buyers can pay in exactly those
 two. Declare nothing and you accept **USDC only** — the one token present on
 every network that is also recurring-eligible, so a zero-configuration merchant
-can take one-off payments and rebill. `GET /v1/config` (`payment.solana.tokens`)
-advertises exactly this set, never more.
+can take one-off payments and rebill. `GET /v1/me/config`
+(`payment.solana.tokens`) advertises exactly this set, never more.
 
 - **Built-in symbol** — select it (`USDC: {}`); `name:` may be overridden.
   Declaring `mint:` is an error *even when the address is correct*: a mint you
@@ -99,8 +99,8 @@ whose stored settings are misdeclared does not arm.
 ### One-time payments (buyer's view)
 
 Prices are defined in fiat; the token amount is quoted at checkout from live
-token pricing (quotes carry an expiry). `GET /v1/config` (public) lists the
-accepted tokens in `payment.solana.tokens`.
+token pricing (quotes carry an expiry). `GET /v1/me/config` lists the
+merchant's accepted tokens to its customers in `payment.solana.tokens`.
 
 1. An order of one-time lines lists the Solana PSP among its
    `payment_options` (`accepts: ["solana_pay"]`). Paying it with

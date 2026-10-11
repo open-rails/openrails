@@ -214,7 +214,7 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | `CreateHostedCheckoutSession`, `CreateCheckoutSession(…)`, `GetCheckoutSession`, `ConfirmCheckoutSession` | `client.CreateOrder(` with `billing.CreateOrderParams` (`CustomerID`, `Lines`, `IdempotencyKey`): an unpaid order the customer pays signed in (`POST /v1/me/orders/{id}/pay`) |
 | `LookupCheckoutSession`, `GetCheckoutSessionByKey` | Removed: repeat the same request with the same `IdempotencyKey` |
 | `ListCheckoutRailOptions`, `ListCheckoutRailOptionsByKey` | `client.PreviewOrder(`: the preview's `PaymentOptions` |
-| `GetCheckoutConfig(ctx)` | Removed: the public `GET /v1/config` carries the PSPs as its `payment` |
+| `GetCheckoutConfig(ctx)` | Removed: `GET /v1/me/config` answers a merchant's customers its PSPs as `payment` |
 | `billing.CheckoutSessionID`, `cs_` ids, `CheckoutSession` | `billing.OrderID`, `ord_` ids, `billing.Order` |
 | `next_action` as `redirect_to_url`, `solana_qr`, `solana_transaction`, with a top-level `url` | `billing.NextAction` with `type` (`redirect_to_url`, `solana_pay`, `solana_sign_transactions`), `url` and `transactions` |
 | `CheckoutPaymentOptions` (`Card`, `Rail`, flat `NameOnCard`, `Address1`, `Zip`, …) | Removed: a Client never pays; the customer's order payment names a saved card, a token with `billing.BillingDetails`, a Solana token or a return URL |
@@ -352,6 +352,9 @@ fields (`400 unknown_field`), and every error code is in
 | `PUT /v1/me/default-payment-method` with `currency` | `PUT /v1/me/default-payment-methods/{currency}`; a subscription's `payment_method_id` is its own card, `null` follows the default |
 | `/v1/me/subscriptions/{id}/solana-cancel…`, `/solana-tier-change…` | `/v1/me/subscriptions/{id}/cancel` and `/v1/me/subscriptions/{id}/change` answer a `next_action`; the wallet signs and the same request is repeated with `signature` |
 | `/v1/merchant/webhooks…` | `/v1/admin/alert-webhooks` |
+| `GET /v1/catalog/products` found its merchant by the request's Host or the configured merchant | It takes `merchant=<merchant id>` beside `keys`, signed in or out: `400 invalid_query` without one id, `404 resource_not_found` for no live merchant |
+| `GET /v1/config` carried the merchant's `payment` and `merchant` | It is the deployment's part alone (`capabilities`, `currencies`, `rails`, `captcha`, `network`). `GET /v1/me/config` answers `{payment, merchant}` to a credential bound to the merchant: a customer's token, or a checkout URL's secret on the checkout host |
+| `GET` and `POST /v1/orders/{id}/solana-pay` needed a Host or header naming the merchant on a server of many | The order names its merchant; a public route no longer answers `merchant_not_found` |
 | `/v1/merchant/catalog/reprice-all-prior-versions`, `/v1/merchant/reprices/batches`, `/v1/merchant/plan-migrations/{id}`, `/v1/admin/reprice-batches`, `/v1/admin/plan-migrations`, `/v1/admin/reprices` | `/v1/admin/price-migrations`, `/v1/admin/price-migrations/{id}` |
 | `/v1/merchant/catalog/meters/{key}/overrides`; product and price `activate`, `deactivate`, `key` routes | `GET /v1/admin/catalog/rate-overrides`; `PATCH` the product or price |
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/admin/catalog/*` |
@@ -466,8 +469,11 @@ calendar ([data retention](operations.md#data-retention)):
 |---|---|
 | `createHttpSource`, `CheckoutSourceError`, `<Checkout>`, `<CheckoutModal>` | `<OrderCheckout orderId>` pays an order; `<BuyButton>` creates and pays one |
 | `checkoutRails`, `CheckoutRailOffer`, `PaymentRailOption` | The order's `payment_options` |
-| `getSolanaConfig()` | `getConfig()`; the network is `payment.solana.network` |
-| `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/config` themselves |
+| `getSolanaConfig()` | `getCustomerConfig()`; the network is `payment.solana.network` |
+| `getConfig()` and `useConfig()` with `payment` and `merchant` | `getConfig()` and `useConfig()` are the deployment's part; `getCustomerConfig()` and `useCustomerConfig()` read the merchant's `payment` and `merchant` (`GET /v1/me/config`) |
+| `listProducts({ keys })`, `useProducts({ keys })`, `<BuyButton product price>`, `<Offers keys>` | Each takes the merchant's id: `listProducts({ merchant, keys })`, `<BuyButton merchant>`, `<Offers merchant keys>` |
+| A `getToken` you refresh yourself | `tokenSource({ fetchToken })` keeps the token in memory and replaces it before it expires; `redeemAssertion` redeems a backend's customer assertion |
+| `psps` on `AccountBilling` and `PaymentMethodsPanel` | Removed: they read `/v1/me/config` themselves |
 | `getStatus()` | Removed: read `/v1/me/entitlements`, and `listSubscriptions()` |
 | Offset pages from `listPaymentMethods`, `listPayments`, `listInvoices`, `listSubscriptions` | Cursor pages: pass `cursor`, read `next_cursor`; invoices are usage orders, `listOrders({ origin: "usage" })` |
 | `NewCard` with `provider`, `name_on_card` and address fields | `NewCard` with `psp_id` and `billing_details` |

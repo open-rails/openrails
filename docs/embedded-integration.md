@@ -401,7 +401,7 @@ if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 | `Routes` | Exposed surface |
 |---|---|
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
-| (always) | The public configuration (`GET /v1/config`: what this mount serves, the currency registry, the merchant's payment setup), products, prices, Solana Pay, the customer routes (`/v1/me/*` for `Config.Merchant`, orders included) and signature-checked provider callbacks |
+| (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), the public catalog (`?merchant=<merchant id>`), Solana Pay, the customer routes (`/v1/me/*` for `Config.Merchant`, orders and the merchant's payment setup included) and signature-checked provider callbacks |
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
 | `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `root:billing:read`, updates `root:billing:manage` |
 | `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With `Config.Catalog`, the file skips what an edit changed |

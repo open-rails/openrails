@@ -42,11 +42,33 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 </BillingProvider>
 ```
 
+Where your backend mints the customer's token, `tokenSource` keeps it: in
+memory only, replaced `skew` seconds (60) before it expires with one request
+however many calls wait, and once more when a call answers 401
+`credential_expired`.
+
+```ts
+import { createBillingClient, redeemAssertion, tokenSource } from "@openrails/billing-ui"
+
+const billing = createBillingClient({
+  baseUrl: "https://billing.example/v1",
+  getToken: tokenSource({
+    // { access_token, expires_in } from your backend, or its signed assertion redeemed here.
+    fetchToken: async () => {
+      const { assertion } = await (await fetch("/api/billing/assertion", { method: "POST" })).json()
+      return redeemAssertion({ tokenEndpoint: "https://billing.example/oauth2/token", assertion })
+    },
+  }),
+})
+```
+
 `<BuyButton>` buys one price, `<Offers>` the products your server names by
 key (a course, its bundle and the membership that also unlocks it; the Go
 `Client.ListOffers` finds the products granting an entitlement): a
 `BuyButton` per price ("$4.99", "Rent for 3 days, $1.99",
-"$10.00 every 30 days"). The purchase is theirs from start to payment: a
+"$10.00 every 30 days"). Both look prices up in the public catalog of the
+merchant whose id you pass as `merchant`, signed in or out. The purchase is
+theirs from start to payment: a
 button creates the customer's order and pays it in a dialog
 (`<OrderCheckout>`); a second click before it is paid opens the same order.
 Signing in is the host's: with `signedIn={false}`, or when OpenRails answers
@@ -56,6 +78,7 @@ granting anything.
 
 ```tsx
 <BuyButton
+  merchant={merchantId} // your merchant's id, from your server
   product="course-101"
   price="rent" // labelled from the catalog unless you pass label
   signedIn={signedIn}
@@ -64,6 +87,7 @@ granting anything.
 />
 
 <Offers
+  merchant={merchantId}
   keys={["course-101", "course-bundle", "channel-membership"]} // from your server, or products={...} from its Client.ListOffers
   signedIn={signedIn}
   onSignInRequired={() => openSignIn()}
@@ -87,7 +111,7 @@ const amount = decimalToAmount(enteredAmount, currency.decimals)
 const bounds = depositPrice.customer_amount
 const valid = amount && bounds && BigInt(amount) >= BigInt(bounds.min_amount) && BigInt(amount) <= BigInt(bounds.max_amount)
 
-<BuyButton product="api-credits" price="deposit" amount={valid ? amount : undefined} label="Add credits" {...handlers} />
+<BuyButton merchant={merchantId} product="api-credits" price="deposit" amount={valid ? amount : undefined} label="Add credits" {...handlers} />
 ```
 
 OpenRails validates the bounds and whole currency minor units before accepting
@@ -140,23 +164,25 @@ const billing = createBillingClient({ baseUrl: "/billing/v1", fetch: auth.authFe
 </BillingProvider>
 ```
 
-The panels read OpenRails' public configuration (`GET /config`) themselves,
-once per `BillingProvider`: "Add card" offers each PSP of its `payment` that
-saves a card in the page, and says so while the configuration fails or its
-card PSPs are temporarily unavailable; amounts use its currency registry over
-the pinned copy. `useConfig()` and `useCurrencyScales()` read the same copy
-for host components.
+The panels read OpenRails' configuration themselves, once per
+`BillingProvider`: the customer's merchant's (`GET /me/config`), where "Add
+card" offers each PSP of its `payment` that saves a card in the page, and says
+so while the read fails or its card PSPs are temporarily unavailable; and the
+deployment's (`GET /config`), whose currency registry amounts use over the
+pinned copy. `useCustomerConfig()`, `useConfig()` and `useCurrencyScales()`
+read the same copies for host components.
 
 ## Catalog and plan changes
 
 The client also reads the public catalog and changes a subscription's plan.
-The catalog read is a public route, served only when the host mounts
-OpenRails' checkout routes; `GET /config` is always served.
+The catalog read and `GET /config` are public routes: the client sends them
+no bearer.
 
 | Call                                                                                                | Route                                                           |
 | --------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `listProducts({ keys })`: the products on sale named by `keys` (1 to 100 product keys), each with its prices, in one page; `useProducts` reads the same | `GET /catalog/products` |
-| `getConfig()` (capabilities, `currencies`, `payment` with PSPs, `solana.network` and tokens; `client.currencies` is the pinned registry) | `GET /config` |
+| `listProducts({ merchant, keys })`: the products `merchant` (its id) has on sale named by `keys` (1 to 100 product keys), each with its prices, in one page; `useProducts` reads the same | `GET /catalog/products` |
+| `getConfig()` (capabilities, `currencies`, `captcha`; `client.currencies` is the pinned registry) | `GET /config` |
+| `getCustomerConfig()` (the customer's merchant: `payment` with PSPs, `solana.network` and tokens, and `merchant`, its name) | `GET /me/config` |
 | `previewSubscriptionChange(id, { priceId?, quantity? })`                                            | `POST /me/subscriptions/{id}/change/preview`                    |
 | `changeSubscription(id, { priceId?, quantity?, idempotencyKey, signature? })`                       | `POST /me/subscriptions/{id}/change`                            |
 
@@ -189,7 +215,7 @@ const change = await billing.changeSubscription(sub.id, {
 
 ## Provider-neutral flows
 
-OpenRails's browser PSP configs (`GET /config`'s `payment.psps`) pick the
+OpenRails's browser PSP configs (`GET /me/config`'s `payment.psps`) pick the
 browser flow from each PSP's `flow` and public `config`
 (Collect.js, native card inputs, Stripe Elements, redirect, wallet). Hosts never branch on a
 provider:

@@ -39,6 +39,34 @@ token (RFC 9068 `at+jwt`) from an issuer the merchant trusts ([auth](auth.md#tru
    not automatically repeat a financial mutation without its documented
    durable operation key.
 
+billing-ui keeps that token for you. `tokenSource({ fetchToken, skew })` is a
+`getToken` for `createBillingClient`: it asks your `fetchToken` for
+`{ access_token, expires_in }`, keeps the token in memory (never in browser
+storage) until `skew` seconds before it expires (60 by default), and fetches
+the next one with a single request however many calls are waiting. A call
+answered 401 `credential_expired` is sent once more with a new token; the
+gate refused it before the route ran, so this is safe for a write too.
+
+```ts
+import { createBillingClient, redeemAssertion, tokenSource } from "@openrails/billing-ui"
+
+const billing = createBillingClient({
+  baseUrl: "https://billing.example/v1",
+  getToken: tokenSource({
+    // Your backend signs an assertion for the signed-in customer; the browser redeems it.
+    fetchToken: async () => {
+      const { assertion } = await (await fetch("/api/billing/assertion", { method: "POST" })).json()
+      return redeemAssertion({ tokenEndpoint: "https://billing.example/oauth2/token", assertion })
+    },
+  }),
+})
+```
+
+`redeemAssertion` posts the RFC 7523 grant (`scope=openrails:self`) with the
+`fetch` you give it; one that adds a DPoP proof (auth-ui's `dpopFetch`) binds
+the token to the browser's key. A backend that redeems the assertion itself
+answers `fetchToken` the token response directly.
+
 Self-service CORS allows any origin without credentials (`credentials: "omit"`)
 and exposes the headers the server's AuthKit advertises.
 
@@ -65,29 +93,42 @@ GET|POST /v1/me/payment-methods           list (cursor page) / add a card with a
 PATCH|DELETE /v1/me/payment-methods/{id}  edit expiry, billing details, reuse / provider-aware delete
 POST /v1/me/orders[/{id}/pay]             buy priced lines, or pay an open order
 POST /v1/me/stripe/billing-portal-sessions → {"url": ...} Stripe's portal (merchants with a Stripe PSP)
+GET  /v1/me/config                        the merchant's payment setup and name
 GET  /v1/me/notifications                 billing notifications
 ```
 
-The public catalog needs no auth and is a lookup by product key:
-`GET /v1/catalog/products?keys=course-101&keys=course-bundle` returns each named product on
-sale, with its current prices, in one page. It takes `keys` alone, 1 to 100 of them: no
-entitlement filter, no listing, and any other parameter is `400 invalid_query`. Which
-products to offer is your server's call: the Go `Client.ListOffers` (`GET
+The public catalog needs no auth and is a lookup by product key in one
+merchant's catalog:
+`GET /v1/catalog/products?merchant=<merchant id>&keys=course-101&keys=course-bundle`
+returns each named product that merchant has on sale, with its current prices,
+in one page. It reads no credential, so `merchant` is required signed in or
+out: one merchant id (not its name), else `400 invalid_query`; `404
+resource_not_found` when no live merchant has it. It takes `keys` beside it, 1
+to 100 of them: no entitlement filter, no listing, and any other parameter is
+`400 invalid_query`. billing-ui's `<BuyButton merchant>`, `<Offers merchant
+keys>` and `listProducts({ merchant, keys })` send it. Which products to offer
+is your server's call: the Go `Client.ListOffers` (`GET
 /v1/app/catalog/products`) finds the products on sale granting an entitlement.
 
-### Public configuration: `GET /v1/config`
+### Configuration: `GET /v1/config` and `GET /v1/me/config`
 
-Public, unauthenticated, always mounted, cacheable (`Cache-Control: public,
-max-age=300` with an `ETag`). It holds the mount's `capabilities`, the currency
-and rail registries (`currencies`, `rails`), the `captcha` to solve when a request
-answers 403 `captcha_required` (null when none is configured), and `payment`, which answers "what can this merchant take
-money with, and what do I need in the browser to do it?" so you never hard-code a
-rail or duplicate a tokenization key in your own config. The merchant is resolved
-from the request `Host` (its `api_host`), exactly like the public catalog;
-`payment` is null when none resolves. An order carries its own
-`payment_options`; `payment` is what the page loads to take a card. `@openrails/billing-ui`
-reads the document once and shares it: `AccountBilling` and `PaymentMethodsPanel`
-take their PSPs from it.
+`GET /v1/config` is the deployment's: public, unauthenticated, always mounted,
+the same for every caller and cacheable (`Cache-Control: public, max-age=300`
+with an `ETag`). It holds the mount's `capabilities`, the currency and rail
+registries (`currencies`, `rails`), the `captcha` to solve when a request
+answers 403 `captcha_required` (null when none is configured) and the customer
+network's sign-in (`network`). It names no merchant.
+
+`GET /v1/me/config` is the merchant's, for a credential bound to that merchant:
+a customer's token, or a checkout URL's secret on the checkout host. It holds
+`merchant` (its `display_name`, https `logo_url` and `support_url`, and
+`embed_origins`) and `payment`, which answers "what can this merchant take
+money with, and what do I need in the browser to do it?" so you never hard-code
+a rail or duplicate a tokenization key in your own config. It is `Cache-Control:
+private`. An order carries its own `payment_options`; `payment` is what the page
+loads to take a card. `@openrails/billing-ui` reads each document once and shares
+it (`useConfig()`, `useCustomerConfig()`): `OrderCheckout`, `AccountBilling` and
+`PaymentMethodsPanel` take their PSPs from the second.
 
 `payment` looks like this:
 
@@ -121,8 +162,8 @@ take their PSPs from it.
 - `checkout` is true for PSPs that take new purchases and new cards under the
   merchant's checkout routing (a catch-all `checkout_routing` rule naming one PSP
   makes it the only checkout PSP). Other armed PSPs stay listed for existing cards.
-  - `wallet` — the buyer's wallet pays; the document's `solana` object carries the
-    network and accepted tokens.
+  - `wallet` — the buyer's wallet pays; `payment.solana` carries the network and
+    accepted tokens.
 - `status: "temporarily_unavailable"` marks a PSP whose credentials could not be
   checked just now: it is listed without `config`, the document is not cached, and
   `retry_after` says how many seconds to wait before asking again.
@@ -266,11 +307,11 @@ the customer comes back to `return_url` (an allowed origin) once they paid.
 
 An order of one-time lines can be paid from a Solana wallet: a payment option
 with `accepts: ["solana_pay"]` takes `payment: {token_symbol, psp_id?}`
-(the tokens are in `GET /v1/config`'s `payment.solana`). The order answers
+(the tokens are in `GET /v1/me/config`'s `payment.solana`). The order answers
 `requires_action` with `next_action.type: solana_pay`: render its `url` as a
-QR code or a wallet link. The wallet fetches the transaction itself; the order
-completes when the transfer lands, and `confirm` asks OpenRails to read the
-chain now.
+QR code or a wallet link. The wallet fetches the transaction itself, with no
+credential: the order names its merchant. The order completes when the
+transfer lands, and `confirm` asks OpenRails to read the chain now.
 
 billing-ui's `<OrderCheckout orderId=…>` shows an order and pays it: a saved
 card, a new card in the PSP's fields, the PSP's hosted page (`returnUrl`) or a
@@ -280,8 +321,8 @@ page's host must be a payment-method domain registered on that Stripe account.
 `<EmbeddedCheckout url>` frames a merchant order's embedded checkout
 (`checkout.ui_mode: embedded`) on the merchant's own page; see [Hosted
 checkout](hosted-checkout.md#embedded-checkout).
-It uses only the order API and `GET /v1/config`, through the provider's client
-or one passed as `client`.
+It uses only the order API and the two configuration reads, through the
+provider's client or one passed as `client`.
 
 ### Cart
 

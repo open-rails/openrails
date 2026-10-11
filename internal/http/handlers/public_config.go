@@ -123,7 +123,7 @@ func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.
 func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, bool) {
 	name, settings, err := r.State.Merchants.MerchantSettings(r.Request.Context(), mid)
 	if err != nil {
-		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("public config: merchant settings could not be loaded")
+		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("customer config: merchant settings could not be loaded")
 		r.ErrorCode(billing.CodeInternalError, "failed to load the merchant")
 		return billing.PublicMerchant{}, false
 	}

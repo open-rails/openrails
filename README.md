@@ -707,9 +707,11 @@ function useEntitlements() {
   return held
 }
 
-// BuyButton creates the customer's order and pays it in a dialog; your gate
-// confirms access once it is paid.
+// BuyButton looks its price up in your merchant's public catalog, creates the
+// customer's order and pays it in a dialog; your gate confirms access once it
+// is paid.
 const handlers = {
+  merchant: "<your merchant's id>", // shop.MerchantID(), from your server
   onPaid: () => location.reload(),
   onSignInRequired: () => auth.signIn(),
 }
@@ -730,9 +732,9 @@ Mounting gives your users these routes under `/billing`:
 
 | Route | What it does |
 |---|---|
-| `GET /billing/v1/catalog/products` | products on sale, each with its current prices (`?limit=`, `?cursor=`) |
+| `GET /billing/v1/catalog/products` | a merchant's products on sale named by key, each with its current prices (`?merchant=<merchant id>&keys=`) |
 | `GET`, `POST /billing/v1/orders/{id}/solana-pay` | the Solana Pay request a wallet signs for an order (when a Solana PSP is declared) |
-| `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, the rails a PSP can be declared on, the payment methods a buyer can use with their browser config, and the captcha to solve when asked (always mounted) |
+| `GET /billing/v1/config` | which route groups and features are mounted, each currency's decimal places, the rails a PSP can be declared on, and the captcha to solve when asked (always mounted) |
 
 **Your customers' own billing** (always mounted; signed in, always as the caller)
 
@@ -743,6 +745,7 @@ Mounting gives your users these routes under `/billing`:
 | `POST /billing/v1/me/orders/{id}/pay`, `/confirm`, `/cancel` | pay an open order (a renewal or usage order with a saved card), finish the bank's challenge, cancel a purchase |
 | `GET`, `DELETE /billing/v1/me/cart` | their cart, priced now with the ways it can be paid; empty it |
 | `PUT /billing/v1/me/cart/lines/{price_id}` | add a price or change its line (quantity 0 removes it); the cart is shared by every site of the merchant |
+| `GET /billing/v1/me/config` | the merchant's name and the payment methods a buyer can use, with their browser config |
 | `GET /billing/v1/me/entitlements` | everything they currently have access to |
 | `GET /billing/v1/me/subscriptions` | their subscriptions |
 | `GET /billing/v1/me/subscriptions/{id}` | one subscription |
@@ -1115,8 +1118,8 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 | `RouteGroups.Catalog` off | Not mounted | Available |
 | on | Readable and changeable by staff holding `root:catalog:manage`; with `Config.Catalog`, the file skips what an edit changed | Available |
 
-Customers and your site read the live catalog at `/v1/catalog/products` either
-way. Turning HTTP changes off does not make the database read-only or prevent
+Customers and your site read the live catalog at
+`/v1/catalog/products?merchant=<merchant id>` either way. Turning HTTP changes off does not make the database read-only or prevent
 later client edits. The startup example above applies `catalog.yaml` through
 `Config.Catalog` on every boot; with the group on, staff edits and the file
 share the catalog as above. The standalone server mounts them with

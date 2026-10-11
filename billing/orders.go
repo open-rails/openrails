@@ -85,7 +85,7 @@ type OrderPaymentParams struct {
 	PSPID          *PSPID          `json:"psp_id,omitempty"`
 	BillingDetails *BillingDetails `json:"billing_details,omitempty"`
 	// TokenSymbol pays from a Solana wallet in this token (one of GET
-	// /v1/config's payment.solana.tokens): the order answers requires_action
+	// /v1/me/config's payment.solana.tokens): the order answers requires_action
 	// with a solana_pay next_action, a Solana Pay transaction request the
 	// wallet completes.
 	TokenSymbol string `json:"token_symbol,omitempty"`

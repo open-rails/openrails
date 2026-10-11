@@ -1,5 +1,29 @@
 # Changelog
 
+## Public reads name their merchant; token source
+
+- Breaking: `listProducts({ merchant, keys })`, `useProducts({ merchant, keys
+  })` and `<BuyButton merchant>` take the merchant's id, and `<Offers>` takes
+  it with `keys`: `GET /catalog/products?merchant=<id>&keys=…`. The read sends
+  no bearer, signed in or out.
+- Breaking: `getConfig()` and `useConfig()` are the deployment's part alone
+  (`capabilities`, `currencies`, `captcha`, `network`); `PublicConfig` loses
+  `payment` and `merchant`. `getCustomerConfig()` and `useCustomerConfig()`
+  read the customer's merchant (`GET /me/config`, `CustomerConfig`: `payment`
+  and `merchant`); `<OrderCheckout>`, `<AccountBilling>` and
+  `<PaymentMethodsPanel>` take their PSPs from it.
+- Breaking: `createConfigStore(read)` takes the read it shares, and
+  `ConfigStore` and `ConfigState` name what they hold (`ConfigStore<T>`).
+- `tokenSource({ fetchToken, skew = 60 })` is a `getToken` that keeps the
+  customer's access token in memory (never in browser storage), replaces it
+  `skew` seconds before it expires with one request in flight, and has
+  `invalidate()`. With one, the client sends a call answered 401
+  `credential_expired` once more with a new token.
+- `redeemAssertion({ tokenEndpoint, assertion, fetch })` redeems the
+  assertion a merchant's backend signed for its customer (RFC 7523,
+  `scope=openrails:self`) with the fetch it is given, so a DPoP fetch binds
+  the token to the browser's key.
+
 ## Payment operations removed
 
 - Breaking: `getPaymentAuthentication`, `confirmPaymentAuthentication`,
@@ -245,15 +269,6 @@
 - `listPrices` is removed with `GET /prices`: `listProducts()` returns every
   product on sale with its current prices. Filter by currency, product or
   renewal in the browser.
-
-## Paying on a customer surface
-
-- `client.checkoutSource(id, { customerBase })` reads and pays a checkout
-  session as its signed-in customer at a customer surface's
-  `/checkout-sessions/{id}` (for example a host's
-  `/api/v1/merchants/acme/billing/me`), so its saved cards pay. Without
-  `customerBase` the session id alone pays at `/checkout-sessions/{id}` as
-  before. `<CheckoutPage customerBase>` passes it through.
 
 ## 1.0.0
 

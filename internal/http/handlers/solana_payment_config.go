@@ -72,8 +72,8 @@ func acceptedSolanaTokens(r *httprequest.Request, solanaConf *config.SolanaRailC
 	return tokens
 }
 
-// solanaPaymentConfig projects the armed Solana rail onto the shared
-// public configuration; nil when Solana is not armed for the merchant.
+// solanaPaymentConfig projects the armed Solana rail onto the merchant's
+// payment setup; nil when Solana is not armed for the merchant.
 func solanaPaymentConfig(r *httprequest.Request) (*billing.SolanaPaymentConfig, error) {
 	solanaConf, err := effectiveSolanaRailConfig(r)
 	if err != nil || solanaConf == nil {

@@ -62,7 +62,7 @@ A decline answers `402` with the order open again and keeps no card.
 
 ## Solana Pay
 
-A Solana payment option takes a token from `GET /v1/config`'s
+A Solana payment option takes a token from `GET /v1/me/config`'s
 `payment.solana.tokens`; the pay sends its `token_symbol`. The order answers a
 `solana_pay` next action whose `url` the package shows as a QR code and a
 wallet link, and it confirms the order until the transfer lands.

@@ -51,9 +51,9 @@ type SettingKey struct {
 	Name     string
 	Kind     ValueKind
 	Required bool
-	// Public: safe to serve to an unauthenticated browser. This is the
-	// whitelist GET /v1/config's payment section reads — a setting not marked
-	// here never leaves the server.
+	// Public: safe to serve to a browser. This is the whitelist GET
+	// /v1/me/config's payment section reads — a setting not marked here never
+	// leaves the server.
 	Public bool
 	// PublicField is the wire name in the payment section (Public only).
 	PublicField string

@@ -401,17 +401,19 @@ with that merchant's own signing secret, and updates
 subscriptions/entitlements; your app just reads the results. For local rail
 sandboxes see [dev/local-webhooks.md](dev/local-webhooks.md).
 
-**Per-merchant API hosts.** The public routes (the catalog, checkout) know
-their merchant only from the request's Host, so every merchant needs a
-canonical hostname, a single-merchant server's too; a Host no merchant answers
-to is `404 merchant_not_found`. The operator declares it (`api_host` in the
-merchant manifest, or the server's `SetMerchantAPIHost`), and a hosted
-product lets a merchant claim one it proves with a DNS TXT record
-(`ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`). `GET /v1/admin/api-host`
-reads it. It resolves live on the next request, no restart.
-The public routes then resolve the merchant from the Host header, and every
-merchant-scoped route refuses a credential bound to another merchant: a token
-minted for merchant A is rejected on merchant B's host even though it verifies.
+**Public routes.** The routes that take no credential name their merchant in
+the request, whatever host they are called at: the public catalog as
+`?merchant=<merchant id>`, a wallet's Solana Pay request by its order.
+`GET /v1/config` is the deployment's and names none.
+
+**Per-merchant API hosts.** A merchant may have a canonical hostname. The
+operator declares it (`api_host` in the merchant manifest, or the server's
+`SetMerchantAPIHost`), and a hosted product lets a merchant claim one it
+proves with a DNS TXT record (`ClaimMerchantAPIHost`,
+`VerifyMerchantAPIHost`). `GET /v1/admin/api-host` reads it. It resolves live
+on the next request, no restart. Every merchant-scoped route there refuses a
+credential bound to another merchant: a token minted for merchant A is
+rejected on merchant B's host even though it verifies.
 
 **CORS** is a fixed policy — not configurable, no origin registration: the
 API routes (checkout, `/v1/me/*`, `/v1/admin/*`, `/v1/app/*`) answer

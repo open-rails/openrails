@@ -1387,11 +1387,11 @@ provider incident returning a short page — never 850 customers all leaving.
 
 ## Per-merchant API hosts + browser CORS
 
-Every merchant a standalone server serves needs its own canonical API
-hostname, a single merchant's too: the public routes (catalog, checkout)
-resolve their merchant only from the Host, and a Host no merchant answers to
-is `404 merchant_not_found`. Browser CORS is a **separate, fixed,
-engine-wide policy**, not a per-merchant setting.
+A merchant a standalone server serves may have its own canonical API
+hostname, where merchant-scoped routes refuse another merchant's credential.
+The public routes do not depend on it: the catalog names its merchant
+(`?merchant=<merchant id>`) and a Solana Pay request its order. Browser CORS
+is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
 
 - **Configuring a merchant's host**: the operator binds it (the merchant
   manifest's `api_host`, or the server's `SetMerchantAPIHost`); a hosted

@@ -67,7 +67,8 @@ The URL carries a secret in its fragment, which browsers never send to a
 server. The page keeps it for the tab, drops it from the address bar, and
 sends it as a bearer token to its own origin. It acts as the order's
 customer for that order alone: `GET /v1/me/orders/{id}`, `pay`, `confirm`,
-`GET /v1/config` and, when offered, `GET /v1/me/payment-methods`. It opens
+`GET /v1/config`, `GET /v1/me/config` (the order's merchant's payment setup
+and name) and, when offered, `GET /v1/me/payment-methods`. It opens
 nothing else, and the API's own origin does not accept it. Past the
 checkout's expiry it answers `410 checkout_expired`.
 

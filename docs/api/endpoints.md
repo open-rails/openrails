@@ -72,8 +72,9 @@ behave. From v1.0.0 the API [changes only by addition](../compatibility.md).
 
 | Routes | Credential |
 |---|---|
-| Public: `/v1/config`, `/v1/catalog/products` | none |
-| Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link |
+| Public: `/v1/config` | none: it is the deployment's, the same for every caller |
+| Public: `/v1/catalog/products` | none: the request names its merchant, `?merchant=<merchant id>` |
+| Solana Pay: `/v1/orders/{id}/solana-pay` | none: the wallet opens the order's Solana Pay link, and the order names its merchant |
 | Customer: `/v1/me/*` | embedded: the host's own user credential. Standalone: a token of the merchant's trusted issuer with scope `openrails:self` ([auth](../auth.md#trusted-issuers)) |
 | Admin, catalog, merchant configuration and metrics: `/v1/admin/*` | embedded: a credential the host's auth admits, holding the route's permission. Standalone: a user session of the server's AuthKit, a trusted issuer's access token with scope `openrails:merchant`, or an API key of the merchant's AuthKit group |
 | Programmatic: `/v1/app/*` | the host backend's application credential, never a person's, holding the route's permission; each write sends an `Idempotency-Key`. Standalone: bound to the merchant (an API key of its group, its trusted issuer's token). SCIM names no permission; embedded, it also takes the merchant's provisioning token |
@@ -108,22 +109,13 @@ the merchant's backend may create one for them. See [checkout](commerce.md).
 
 ## Public configuration
 
-`GET /v1/config` is public, always mounted and cacheable for five minutes (with
-an `ETag`). It holds what a browser needs before anything else:
+`GET /v1/config` is public, always mounted, the same for every caller and
+cacheable for five minutes (with an `ETag`). It holds what a browser needs to
+know about the deployment, and names no merchant:
 
 - `capabilities`: the route groups the mount serves and its features.
 - `currencies`: every currency's `decimals` (the native scale) and
   `minor_decimals`.
-- `payment`: the merchant's browser payment setup, null when the request
-  resolves no merchant. `psps` lists the armed PSPs as `{psp_id, key, rail,
-  custodian, display_name, flow, checkout, config}`: `flow` is `tokenize`,
-  `card`, `elements`, `redirect` or `wallet`, `checkout` marks the PSPs that
-  take new purchases, and `config` holds only values that are public by nature
-  (an NMI `tokenization_key`, a Stripe `publishable_key`, a Basis Theory
-  `public_api_key`). A PSP whose credentials could not be checked just now has
-  `status: "temporarily_unavailable"` and `retry_after` (seconds) instead of
-  `config`, and then the document is not cached. With a Solana PSP armed,
-  `solana` carries the network and accepted tokens.
 - `rails`: every rail a PSP can be declared on, with the credential and
   setting keys it takes.
 - `captcha`: the challenge to solve when a request answers 403
@@ -131,6 +123,25 @@ an `ETag`). It holds what a browser needs before anything else:
   token_header}`: load `script_url`, solve with `site_key` and `action`, and
   resend the request with the token in `token_header`. Null when the
   deployment challenges nobody.
+- `network`: the checkout page's sign-in to the customer network, null without
+  the network or a hosted checkout.
+
+`GET /v1/me/config` is a merchant's part, answered only to a credential bound
+to that merchant: a customer's token, or a checkout URL's secret on the
+checkout host. `Cache-Control: private`.
+
+- `merchant`: how the merchant presents itself: `display_name`, its https
+  `logo_url` and `support_url`, and the `embed_origins` that may frame its
+  embedded checkouts.
+- `payment`: the merchant's browser payment setup. `psps` lists the armed PSPs
+  as `{psp_id, key, rail, custodian, display_name, flow, checkout, config}`:
+  `flow` is `tokenize`, `card`, `elements`, `redirect` or `wallet`, `checkout`
+  marks the PSPs that take new purchases, and `config` holds only values that
+  are public by nature (an NMI `tokenization_key`, a Stripe `publishable_key`,
+  a Basis Theory `public_api_key`). A PSP whose credentials could not be
+  checked just now has `status: "temporarily_unavailable"` and `retry_after`
+  (seconds) instead of `config`, and then the document is `no-store`. With a
+  Solana PSP armed, `solana` carries the network and accepted tokens.
 
 An order's `payment_options`, and a preview's, list the PSPs that can take its
 lines.
