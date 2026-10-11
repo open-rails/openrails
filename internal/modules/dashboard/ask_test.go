@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,21 +13,10 @@ import (
 	"github.com/open-rails/openrails/internal/modules/metrics"
 )
 
-// scriptLLM plays turns (tool loop) or responses (Generate) in order, the last
-// repeating, and records every conversation it was sent.
+// scriptLLM records and plays tool-use turns, repeating the last.
 type scriptLLM struct {
-	turns     []*ToolTurn
-	responses []string
-	convs     [][]ToolMessage
-	calls     [][]LLMMessage
-}
-
-func (f *scriptLLM) Complete(_ context.Context, _ string, msgs []LLMMessage) (string, error) {
-	f.calls = append(f.calls, append([]LLMMessage(nil), msgs...))
-	if len(f.responses) == 0 {
-		return "", errors.New("not scripted")
-	}
-	return f.responses[min(len(f.calls), len(f.responses))-1], nil
+	turns []*ToolTurn
+	convs [][]ToolMessage
 }
 
 func (f *scriptLLM) CompleteTools(_ context.Context, _ string, _ []ToolDef, msgs []ToolMessage, _ int) (*ToolTurn, error) {
@@ -148,7 +136,6 @@ func TestAskRequiresConsent(t *testing.T) {
 
 	llm := &scriptLLM{turns: []*ToolTurn{{Text: "never reached"}}}
 	svc := NewService(Deps{LLM: llm})
-	require.True(t, svc.NLConfigured())
 	require.False(t, svc.AskConfigured())
 	_, err = svc.Ask(context.Background(), "q")
 	require.ErrorIs(t, err, ErrAskNotConfigured)
@@ -170,10 +157,10 @@ func TestAskToolPayloadTruncatesOversizedResults(t *testing.T) {
 	require.Len(t, res.Rows, 20000)
 }
 
-// Both prompts embed the metrics schema as parseable JSON; the tool schema is valid JSON.
+// The metrics prompt embeds parseable schema JSON; the tool schema is valid JSON.
 func TestPromptsEmbedValidSchema(t *testing.T) {
 	now := time.Date(2026, 7, 4, 0, 0, 0, 0, time.UTC)
-	for _, p := range []string{askSystemPrompt(now), generateSystemPrompt(now)} {
+	for _, p := range []string{askSystemPrompt(now)} {
 		start, end := strings.Index(p, "<schema>\n"), strings.Index(p, "\n</schema>")
 		require.Greater(t, end, start)
 		require.Greater(t, start, -1)

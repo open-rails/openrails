@@ -200,7 +200,6 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/cancel",
 		"customer_network POST /v1/network/links/{link_id}/subscriptions/{id}/resume",
 		"customer_network PUT /v1/network/links/{link_id}/subscriptions/{id}/payment-method",
-		"dashboard_generation POST /v1/metrics/dashboard/widgets/generate",
 		"merchant_config_edits DELETE /v1/merchant/alert-webhooks/{id}",
 		"merchant_config_edits PATCH /v1/merchant/alert-webhooks/{id}",
 		"merchant_config_edits PATCH /v1/merchant/configuration",

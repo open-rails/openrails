@@ -165,8 +165,6 @@ func (e *Env) enabled(f Feature) bool {
 		return rt != nil && rt.CopilotService.Configured()
 	case FeatureMetricsAsk:
 		return rt != nil && rt.DashboardService.AskConfigured()
-	case FeatureDashboardGeneration:
-		return rt != nil && rt.DashboardService.NLConfigured()
 	case FeatureCustomerProvisioning:
 		return rt != nil && !rt.HostUserInfo && (e.Groups.Programmatic || !e.SCIMMerchant.IsZero())
 	case FeatureCustomerNetwork:

@@ -21,8 +21,7 @@ type MetricsExecutor interface {
 	Execute(ctx context.Context, plan *metrics.Plan) (*metrics.Result, error)
 }
 
-// Service persists per-merchant dashboards and drives widget generation and
-// metrics Q&A, every read and write scoped to the context's merchant.
+// Service persists per-merchant dashboards and runs metrics Q&A, every read and write scoped to the context's merchant.
 type Service struct {
 	db         *db.DB
 	metrics    MetricsExecutor
@@ -31,7 +30,7 @@ type Service struct {
 	clock      clockwork.Clock
 }
 
-// Deps are the dashboard module's collaborators. LLM may be nil (NL features
+// Deps are the dashboard module's collaborators. LLM may be nil (metrics questions
 // fail closed); AskEnabled is the llm.ask_enabled consent flag.
 // Clock nil = wall clock. HTTP abuse limits belong to the shared route middleware.
 type Deps struct {
@@ -59,12 +58,9 @@ func NewService(d Deps) *Service {
 // SetLLM swaps the model backend (tests inject a deterministic stub).
 func (s *Service) SetLLM(l LLM) { s.llm = l }
 
-// NLConfigured reports whether natural-language generation is available.
-func (s *Service) NLConfigured() bool { return s != nil && s.llm != nil }
-
 // AskConfigured reports whether metrics Q&A is available: an LLM AND the
 // explicit llm.ask_enabled consent (query results flow to the provider).
-func (s *Service) AskConfigured() bool { return s.NLConfigured() && s.askEnabled }
+func (s *Service) AskConfigured() bool { return s != nil && s.llm != nil && s.askEnabled }
 
 // Get returns the merchant's saved dashboard, or the seeded default template
 // when none exists (usage widgets only if the merchant has usage activity).

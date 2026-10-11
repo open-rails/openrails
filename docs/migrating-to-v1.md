@@ -415,7 +415,7 @@ fields (`400 unknown_field`), and every error code is in
 | A creator's catalog at `/v1/catalog/*`; `/v1/merchant/catalogs`, `/v1/merchant/catalogs/{id}`, `/v1/merchant/catalogs/by-owner`; the `OpenRails-Catalog-Owner` header and `owner_subject` | Removed: a merchant has one catalog, at `/v1/catalog/*` |
 | `POST /v1/import/billing` | `POST /v1/merchant/billing-import` |
 | `/scim/v2/*`; a client-credentials token with scope `scim` | `/v1/app/scim/v2/*`, in the programmatic routes: an application credential, or the merchant's provisioning token |
-| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard`, `POST /v1/metrics/ask` behind `AdminRead`; `POST /v1/metrics/dashboard/widgets/generate` behind `MerchantConfig`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes in the metrics and catalog groups (`billing.MerchantMetricsRead`, `billing.MerchantCatalogManage`, or their `root:` twins); `GET /v1/admin/access` answers what the caller holds |
+| `POST /v1/metrics/query`, `GET /v1/metrics/schema`, `GET /v1/metrics/dashboard`, `POST /v1/metrics/ask` behind `AdminRead`; catalog reads, the catalog ask and price migrations behind `AdminRead` and `AdminWrite` | The same routes in the metrics and catalog groups (`billing.MerchantMetricsRead`, `billing.MerchantCatalogManage`, or their `root:` twins); `GET /v1/admin/access` answers what the caller holds |
 | `POST /v1/merchant/catalog/copilot/confirm`; an untyped catalog ask | `POST /v1/catalog/ask` answers `{answer, evidence, drafts}`; there is no confirm route |
 | A failed model call answered `502 api_error` | `502 model_unavailable` |
 
@@ -578,7 +578,7 @@ The unused general-purpose cache dependency and public cache interface are remov
 Hosts no longer supply a cache to construct OpenRails. FX quote caching and the
 shared rate-limit/captcha state remain separate runtime features.
 
-Metrics questions, catalog questions/drafting and dashboard widget generation
+Metrics questions and catalog questions/drafting
 use the normal configurable HTTP feature buckets described in
 [rate limiting](rate-limiting.md). The former separate per-merchant AI daily quota
 is removed. Standalone and embedded HTTP use the same counters (Redis, else

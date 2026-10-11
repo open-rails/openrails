@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-// LLMMessage is one conversation turn for the generator loop.
-type LLMMessage struct {
-	Role    string // "user" | "assistant"
-	Content string
-}
-
 // ToolDef declares one tool for a tool-use turn.
 type ToolDef struct {
 	Name        string
@@ -55,18 +49,15 @@ type ToolTurn struct {
 	StopReason string
 }
 
-// LLM is the provider seam for model calls: text completion (widget
-// generation) and tool-use turns (Q&A). AnthropicLLM and OpenAILLM implement
-// it; tests inject stubs via Service.SetLLM.
+// LLM is the tool-use provider shared by metrics Q&A and the catalog copilot.
 type LLM interface {
-	Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error)
 	CompleteTools(ctx context.Context, system string, tools []ToolDef, msgs []ToolMessage, maxTokens int) (*ToolTurn, error)
 }
 
 const (
 	anthropicBaseURL    = "https://api.anthropic.com"
 	anthropicAPIVersion = "2023-06-01"
-	// generation output is one small JSON object; cap generously.
+	// Default cap for one tool-use turn.
 	anthropicMaxTokens = 2048
 )
 
@@ -91,18 +82,6 @@ func NewAnthropicLLM(apiKey, model, baseURL string) *AnthropicLLM {
 		baseURL: strings.TrimRight(baseURL, "/"),
 		client:  &http.Client{Timeout: 60 * time.Second},
 	}
-}
-
-type anthropicRequest struct {
-	Model     string             `json:"model"`
-	MaxTokens int                `json:"max_tokens"`
-	System    string             `json:"system,omitempty"`
-	Messages  []anthropicMessage `json:"messages"`
-}
-
-type anthropicMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
 }
 
 type anthropicToolsRequest struct {
@@ -187,30 +166,6 @@ func (a *AnthropicLLM) send(ctx context.Context, reqBody any) (*anthropicRespons
 		return nil, fmt.Errorf("dashboard llm: anthropic API error (status %d): %s", resp.StatusCode, msg)
 	}
 	return &out, nil
-}
-
-// Complete sends one Messages-API turn and returns the concatenated text
-// content.
-func (a *AnthropicLLM) Complete(ctx context.Context, system string, msgs []LLMMessage) (string, error) {
-	req := anthropicRequest{Model: a.model, MaxTokens: anthropicMaxTokens, System: system}
-	for _, m := range msgs {
-		req.Messages = append(req.Messages, anthropicMessage(m))
-	}
-	out, err := a.send(ctx, req)
-	if err != nil {
-		return "", err
-	}
-	var b strings.Builder
-	for _, block := range out.Content {
-		if block.Type == "text" {
-			b.WriteString(block.Text)
-		}
-	}
-	text := strings.TrimSpace(b.String())
-	if text == "" {
-		return "", fmt.Errorf("dashboard llm: empty response (stop_reason %q)", out.StopReason)
-	}
-	return text, nil
 }
 
 // CompleteTools sends one tool-use turn: the conversation (with prior

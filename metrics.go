@@ -52,13 +52,3 @@ func (c *Client) SetDashboard(ctx context.Context, req billing.SetDashboardParam
 	}
 	return &out, nil
 }
-
-// GenerateDashboardWidget writes a widget from a description; the deployment
-// must enable it.
-func (c *Client) GenerateDashboardWidget(ctx context.Context, req billing.GenerateDashboardWidgetParams, options ...RequestOption) (*billing.GeneratedWidget, error) {
-	var out billing.GeneratedWidget
-	if err := c.do(ctx, http.MethodPost, "/v1/metrics/dashboard/widgets/generate", req, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

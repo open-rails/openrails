@@ -24,7 +24,7 @@ func TestCapabilities(t *testing.T) {
 	require.Equal(t, map[string]bool{
 		"solana_one_time_payments": true, "stripe_billing_portal": false,
 		"solana_subscription_management": false, "merchant_config_edits": false,
-		"catalog_copilot": false, "metrics_ask": false, "dashboard_generation": false,
+		"catalog_copilot": false, "metrics_ask": false,
 		"hosted_extra": true, "customer_provisioning": false,
 	}, caps.Features)
 

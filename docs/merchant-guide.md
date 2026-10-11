@@ -309,10 +309,8 @@ view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
 PSPs, credit limit, trust level), **Dashboard**. A hosted product adds its own
 pages, such as the team and API keys. Each area shows only to staff holding its
 route group's permission (`GET /v1/admin/access`).
-- **Dashboard**: a widget grid over the metrics API. Widget queries are written by a
-  server-side LLM from natural language ("count of cancels per day, past 7 days") —
-  requires `llm.api_key`; without it everything else still works and the add-widget
-  button explains the fix.
+- **Dashboard**: a widget grid over the metrics API. Saved and default dashboards remain available. Operators can move, resize, rename and remove existing widgets, choose their chart type and change whether they follow the dashboard's date range. Metrics questions are read-only; AI widget creation and refinement are not available.
+
 - **Decline metrics**, all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
   (`psp`):
   - `attempt_failure_rate`: the new-card decline rate is `kind` in (`verify`, `initial`)

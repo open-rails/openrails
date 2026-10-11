@@ -1,11 +1,9 @@
 // #741 configurable dashboard: a per-merchant widget grid over the metrics
 // API. Tile registry + serialized Layout[] on react-grid-layout v2 — drag,
-// resize, add, edit, remove; the layout persists via PUT (debounced). First
+// resize, edit, remove; the layout persists via PUT (debounced). First
 // load with no saved row shows the seeded default template.
 import type { AdminAccess } from "@/lib/api/generated/wire"
 import { useAccess, useDashboardLayout } from "@/lib/capabilities"
-import { HugeiconsIcon } from "@hugeicons/react"
-import { Add01Icon } from "@hugeicons/core-free-icons"
 import * as React from "react"
 import { Navigate } from "react-router-dom"
 import { GridLayout, type Layout } from "react-grid-layout"
@@ -13,21 +11,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 
 import "react-grid-layout/css/styles.css"
 
-import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/lib/confirm"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getBootstrap } from "@/lib/api/client"
-import {
-  type MetricsQuery,
-  type Widget,
-  type WidgetViz,
-} from "@/lib/api/metrics"
+import type { Widget } from "@/lib/api/metrics"
 import { adminMutations } from "@/lib/mutations"
 import { toastApiError } from "@/lib/toast"
 import { adminQueries } from "@/lib/queries"
 
 import { AskPanel } from "./ask-panel"
-import { newWidgetId } from "./lib"
 import { RangePicker } from "./range-picker"
 import { useDashboardRange } from "./use-range"
 import { WidgetEditor, type WidgetDraft } from "./widget-editor"
@@ -67,25 +59,12 @@ function stackedWidgets<T extends { id: string }>(
   )
 }
 
-function nlWidgetsEnabled(): boolean {
-  try {
-    return getBootstrap().nl_widgets_enabled
-  } catch {
-    return false
-  }
-}
-
 function askEnabled(): boolean {
   try {
     return getBootstrap().ask_enabled
   } catch {
     return false
   }
-}
-
-// Default tile size per viz for newly added widgets.
-function defaultSize(viz: WidgetViz): { w: number; h: number } {
-  return viz === "stat" ? { w: 3, h: 2 } : { w: 6, h: 4 }
 }
 
 // DashboardPage is the console's home: the metrics dashboard for a caller
@@ -118,12 +97,6 @@ function MetricsDashboard() {
   const widgets = draftWidgets ?? data?.widgets ?? null
   const [editorOpen, setEditorOpen] = React.useState(false)
   const [editing, setEditing] = React.useState<Widget | null>(null)
-  // seed pre-fills the editor for a NEW widget (ask evidence → add-as-widget).
-  const [seed, setSeed] = React.useState<{
-    title: string
-    viz: WidgetViz
-    query: MetricsQuery
-  } | null>(null)
   const { width, containerRef, mounted } = useMeasuredWidth()
   const [range] = useDashboardRange()
   const confirm = useConfirm()
@@ -178,23 +151,6 @@ function MetricsDashboard() {
     if (changed) update(next)
   }
 
-  const addWidget = (draft: WidgetDraft) => {
-    if (!widgets) return
-    const size = defaultSize(draft.viz)
-    const y = widgets.reduce((max, w) => Math.max(max, w.grid.y + w.grid.h), 0)
-    update([
-      ...widgets,
-      {
-        id: newWidgetId(),
-        title: draft.title,
-        viz: draft.viz,
-        query: draft.query,
-        grid: { x: 0, y, ...size },
-        fixed_range: draft.fixed_range,
-      },
-    ])
-  }
-
   const editWidget = (id: string, draft: WidgetDraft) => {
     if (!widgets) return
     update(widgets.map((w) => (w.id === id ? { ...w, ...draft } : w)))
@@ -205,17 +161,11 @@ function MetricsDashboard() {
     const removing = await confirm({
       title: `Remove "${widget.title}"?`,
       description:
-        "It leaves this merchant's dashboard for everyone. You can add it again later.",
+        "This removes it from the merchant dashboard for everyone.",
       confirmLabel: "Remove widget",
       tone: "destructive",
     })
     if (removing) update(widgets.filter((w) => w.id !== widget.id))
-  }
-
-  const openAdd = () => {
-    setEditing(null)
-    setSeed(null)
-    setEditorOpen(true)
   }
 
   const header = (
@@ -223,11 +173,6 @@ function MetricsDashboard() {
       <h1 className="text-2xl font-semibold tracking-tight">Dashboard</h1>
       <div className="flex flex-wrap items-center gap-3">
         <RangePicker />
-        {editable && (
-          <Button size="sm" onClick={openAdd}>
-            <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
-          </Button>
-        )}
       </div>
     </div>
   )
@@ -261,28 +206,13 @@ function MetricsDashboard() {
   return (
     <div className="flex flex-col gap-4">
       {header}
-      <AskPanel
-        enabled={askEnabled()}
-        onAddWidget={
-          editable
-            ? (draft) => {
-                setEditing(null)
-                setSeed(draft)
-                setEditorOpen(true)
-              }
-            : undefined
-        }
-      />
+
+      <AskPanel enabled={askEnabled()} />
 
       <div ref={containerRef} className="min-h-0 w-full">
         {widgets.length === 0 ? (
           <div className="flex h-48 flex-col items-center justify-center gap-3 rounded-xl border border-dashed">
             <p className="text-sm text-muted-foreground">No widgets yet</p>
-            {editable && (
-              <Button size="sm" variant="outline" onClick={openAdd}>
-                <HugeiconsIcon icon={Add01Icon} className="size-4" /> Add widget
-              </Button>
-            )}
           </div>
         ) : (
           <>
@@ -298,7 +228,6 @@ function MetricsDashboard() {
                     editable={editable}
                     onEdit={() => {
                       setEditing(w)
-                      setSeed(null)
                       setEditorOpen(true)
                     }}
                     onDelete={() => void removeWidget(w)}
@@ -327,8 +256,7 @@ function MetricsDashboard() {
                         editable={editable}
                         onEdit={() => {
                           setEditing(w)
-                          setSeed(null)
-                          setEditorOpen(true)
+                              setEditorOpen(true)
                         }}
                         onDelete={() => void removeWidget(w)}
                       />
@@ -341,15 +269,11 @@ function MetricsDashboard() {
         )}
       </div>
 
-      {editorOpen ? (
+      {editorOpen && editing ? (
         <WidgetEditor
           onOpenChange={setEditorOpen}
           initial={editing}
-          seed={seed}
-          nlEnabled={nlWidgetsEnabled()}
-          onSave={(draft) =>
-            editing ? editWidget(editing.id, draft) : addWidget(draft)
-          }
+          onSave={(draft) => editWidget(editing.id, draft)}
         />
       ) : null}
     </div>

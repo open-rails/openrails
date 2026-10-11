@@ -3,7 +3,6 @@ package handlers
 import (
 	"errors"
 	"net/http"
-	"strings"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
@@ -58,51 +57,6 @@ func PutMerchantDashboard(r *httprequest.Request) {
 		return
 	}
 	r.JSON(http.StatusOK, d)
-}
-
-// GenerateDashboardWidget handles POST /v1/metrics/dashboard/widgets/generate:
-// a prompt becomes a validated {query, title, viz}. The LLM sees only the
-// metrics schema, never data, and the route mounts only with an LLM. An
-// optional base_query (validated like any client query) is refined rather
-// than replaced.
-func GenerateDashboardWidget(r *httprequest.Request) {
-	svc := r.State.DashboardService
-	if !svc.NLConfigured() {
-		r.ErrorCode(billing.CodeServiceUnavailable, "widget generation unavailable")
-		return
-	}
-	var body billing.GenerateDashboardWidgetParams
-	if !r.BindJSON(&body) {
-		return
-	}
-	if strings.TrimSpace(body.Prompt) == "" {
-		r.APIError(api.Coded(billing.CodeInvalidParam, "prompt is required").WithParam("prompt"))
-		return
-	}
-	base := body.BaseQuery
-	if base != nil {
-		if _, verr := metrics.Validate(base); verr != nil {
-			for i := range verr.Errors {
-				verr.Errors[i].Param = "base_query." + verr.Errors[i].Param
-			}
-			dashboardValidationError(r, verr)
-			return
-		}
-	}
-	res, err := svc.Generate(r.Request.Context(), strings.TrimSpace(body.Prompt), base)
-	if err != nil {
-		var invalid *dashboard.GenerateInvalidError
-		switch {
-		case errors.As(err, &invalid):
-			r.APIError(api.NewAPIError(http.StatusUnprocessableEntity, api.ErrorTypeInvalidRequest, "widget_generation_invalid",
-				"the model could not produce a valid query for that prompt — try rephrasing").
-				WithMetadata(map[string]any{"errors": invalid.Errors}))
-		default:
-			modelFailure(r, err, false)
-		}
-		return
-	}
-	r.JSON(http.StatusOK, res)
 }
 
 func dashboardValidationError(r *httprequest.Request, verr *metrics.ValidationError) {

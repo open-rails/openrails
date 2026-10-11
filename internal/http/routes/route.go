@@ -123,8 +123,6 @@ const (
 	FeatureCatalogCopilot Feature = "catalog_copilot"
 	// FeatureMetricsAsk: llm.api_key and llm.ask_enabled.
 	FeatureMetricsAsk Feature = "metrics_ask"
-	// FeatureDashboardGeneration: llm.api_key.
-	FeatureDashboardGeneration Feature = "dashboard_generation"
 	// FeatureCustomerNetwork: the deployment runs the customer network
 	// (openrails.dev).
 	FeatureCustomerNetwork Feature = "customer_network"
