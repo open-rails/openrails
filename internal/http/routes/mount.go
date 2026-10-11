@@ -154,8 +154,6 @@ func (e *Env) enabled(f Feature) bool {
 		return rt.MerchantConfigManageable()
 	case FeatureCatalogCopilot:
 		return rt != nil && rt.CopilotService.Configured()
-	case FeatureMetricsAsk:
-		return rt != nil && rt.DashboardService.AskConfigured()
 	case FeatureCustomerNetwork:
 		return rt != nil && rt.Network != nil
 	}

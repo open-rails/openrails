@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
 )
 
 // Ask-loop caps bound every cost axis so a cheap model can run the loop. One
@@ -29,7 +28,7 @@ func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAns
 	now := s.now().UTC()
 	system := s.systemPrompt(ctx, now)
 	tools := s.toolDefs()
-	msgs := []dashboard.ToolMessage{{Role: "user", Text: question}}
+	msgs := []ToolMessage{{Role: "user", Text: question}}
 	evidence := []billing.CatalogEvidence{}
 	drafts := []billing.CatalogDraft{}
 	attempts := 0
@@ -46,13 +45,13 @@ func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAns
 			}
 			return &billing.CatalogAnswer{Answer: answer, Evidence: evidence, Drafts: drafts}, nil
 		}
-		results := make([]dashboard.ToolResult, 0, len(resp.ToolCalls))
+		results := make([]ToolResult, 0, len(resp.ToolCalls))
 		for _, call := range resp.ToolCalls {
 			results = append(results, s.runTool(ctx, call, &evidence, &drafts, &attempts))
 		}
 		msgs = append(msgs,
-			dashboard.ToolMessage{Role: "assistant", Text: resp.Text, ToolCalls: resp.ToolCalls},
-			dashboard.ToolMessage{Role: "user", ToolResults: results},
+			ToolMessage{Role: "assistant", Text: resp.Text, ToolCalls: resp.ToolCalls},
+			ToolMessage{Role: "user", ToolResults: results},
 		)
 	}
 	return nil, &NoAnswerError{ToolCalls: attempts}
@@ -60,8 +59,8 @@ func (s *Service) Ask(ctx context.Context, question string) (*billing.CatalogAns
 
 // toolDefs appends drafting tools only when armed: off means absent, never
 // present-but-erroring.
-func (s *Service) toolDefs() []dashboard.ToolDef {
-	defs := []dashboard.ToolDef{
+func (s *Service) toolDefs() []ToolDef {
+	defs := []ToolDef{
 		toolDefListCatalog(), toolDefGetPrice(), toolDefPriceHistory(), toolDefListRepriceBatches(),
 	}
 	if s.DraftingConfigured() {
@@ -70,7 +69,7 @@ func (s *Service) toolDefs() []dashboard.ToolDef {
 	return defs
 }
 
-func toolNames(defs []dashboard.ToolDef) []string {
+func toolNames(defs []ToolDef) []string {
 	names := make([]string, len(defs))
 	for i, d := range defs {
 		names[i] = d.Name
@@ -80,9 +79,9 @@ func toolNames(defs []dashboard.ToolDef) []string {
 
 // runTool dispatches one tool call against the shared budget, collecting Q&A
 // results into evidence and drafts into drafts.
-func (s *Service) runTool(ctx context.Context, call dashboard.ToolCall, evidence *[]billing.CatalogEvidence, drafts *[]billing.CatalogDraft, attempts *int) dashboard.ToolResult {
-	errResult := func(msg string) dashboard.ToolResult {
-		return dashboard.ToolResult{ToolUseID: call.ID, Content: msg, IsError: true}
+func (s *Service) runTool(ctx context.Context, call ToolCall, evidence *[]billing.CatalogEvidence, drafts *[]billing.CatalogDraft, attempts *int) ToolResult {
+	errResult := func(msg string) ToolResult {
+		return ToolResult{ToolUseID: call.ID, Content: msg, IsError: true}
 	}
 	known := map[string]bool{
 		toolListCatalog: true, toolGetPrice: true, toolPriceHistory: true, toolListRepriceBatches: true,
@@ -96,21 +95,21 @@ func (s *Service) runTool(ctx context.Context, call dashboard.ToolCall, evidence
 	}
 	*attempts++
 
-	qa := func(content string, err error) dashboard.ToolResult {
+	qa := func(content string, err error) ToolResult {
 		if err != nil {
 			return errResult(err.Error())
 		}
 		*evidence = append(*evidence, billing.CatalogEvidence{Tool: call.Name, Args: string(call.Input), Summary: content})
-		return dashboard.ToolResult{ToolUseID: call.ID, Content: content}
+		return ToolResult{ToolUseID: call.ID, Content: content}
 	}
-	draftResult := func(content string, draft *billing.CatalogDraft, err error) dashboard.ToolResult {
+	draftResult := func(content string, draft *billing.CatalogDraft, err error) ToolResult {
 		if err != nil {
 			return errResult(err.Error())
 		}
 		if draft != nil {
 			*drafts = append(*drafts, *draft)
 		}
-		return dashboard.ToolResult{ToolUseID: call.ID, Content: content}
+		return ToolResult{ToolUseID: call.ID, Content: content}
 	}
 
 	switch call.Name {

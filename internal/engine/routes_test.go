@@ -320,7 +320,7 @@ func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Contains(t, rec.Body.String(), `<base href="/billing/admin/">host build`)
 	rec = serve(mux, http.MethodGet, "/billing/admin/config.json", "")
-	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","ask_enabled":false,"catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null,"exchange":null,
+	require.JSONEq(t, `{"auth_base_url":"/api/v1","api_base_url":"/billing/v1","catalog_copilot_enabled":false,"catalog_drafting_enabled":false,"extensions":{},"issuer":null,"exchange":null,
 		"merchant":{"id":"11111111-1111-4111-8111-111111111111","slug":"acme","display_name":"Acme"}}`, rec.Body.String(), "the console acts for the merchant its sign-in binds, and exchanges nothing")
 
 	// An assistant shows where the deployment has an LLM and its group is mounted.
@@ -328,12 +328,12 @@ func TestAdminConsoleMountsWithTheAdminAPI(t *testing.T) {
 		sel  config.Routes
 		want string
 	}{
-		{sel, `"ask_enabled":false,"catalog_copilot_enabled":false`},
-		{config.Routes{Prefix: "/billing", RouteGroups: authtest.Groups(), AdminConsole: true, Auth: fake}, `"ask_enabled":true,"catalog_copilot_enabled":true`},
+		{sel, `"catalog_copilot_enabled":false`},
+		{config.Routes{Prefix: "/billing", RouteGroups: authtest.Groups(), AdminConsole: true, Auth: fake}, `"catalog_copilot_enabled":true`},
 	} {
 		assisted := consoleRuntime()
 		assisted.App.ConsoleAssets = rt.App.ConsoleAssets
-		assisted.App.Config.LLM = &config.LLMConfig{APIKey: "k", AskEnabled: true, CatalogCopilotEnabled: true}
+		assisted.App.Config.LLM = &config.LLMConfig{APIKey: "k", CatalogCopilotEnabled: true}
 		require.Contains(t, serve(mountAt(t, assisted, tc.sel, ""), http.MethodGet, "/billing/admin/config.json", "").Body.String(), tc.want)
 	}
 

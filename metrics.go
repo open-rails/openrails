@@ -25,16 +25,6 @@ func (c *Client) GetMetricsSchema(ctx context.Context, options ...RequestOption)
 	return &out, nil
 }
 
-// AskMetrics answers a question about the merchant's metrics with a model that
-// runs queries; the deployment must enable it.
-func (c *Client) AskMetrics(ctx context.Context, req billing.AskMetricsParams, options ...RequestOption) (*billing.MetricsAnswer, error) {
-	var out billing.MetricsAnswer
-	if err := c.do(ctx, http.MethodPost, "/v1/metrics/ask", req, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}
-
 // GetDashboard returns the merchant's widget layout.
 func (c *Client) GetDashboard(ctx context.Context, options ...RequestOption) (*billing.Dashboard, error) {
 	var out billing.Dashboard

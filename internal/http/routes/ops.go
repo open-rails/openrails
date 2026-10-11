@@ -20,10 +20,6 @@ var opsRoutes = []Route{
 		Responses: []Reply{{200, billing.MetricsSchema{}}}, Handler: h(handlers.MerchantMetricsSchema)},
 	{Method: GET, Path: "/v1/metrics/dashboard", Group: Metrics, Auth: AuthMerchant, Name: "GetDashboard",
 		Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetMerchantDashboard)},
-	// Metrics questions send aggregate results to the LLM provider, requiring
-	// both llm.api_key and the llm.ask_enabled consent.
-	{Method: POST, Path: "/v1/metrics/ask", Group: Metrics, Auth: AuthMerchant, Name: "AskMetrics", When: FeatureMetricsAsk,
-		Request: billing.AskMetricsParams{}, Responses: []Reply{{200, billing.MetricsAnswer{}}}, Errors: codes("invalid_param", "model_unavailable", "rate_limit_exceeded", "service_unavailable"), Handler: h(handlers.MerchantMetricsAsk)},
 	{Method: PUT, Path: "/v1/merchant/dashboard", Group: MerchantConfig, Auth: AuthMerchant, Name: "SetDashboard",
 		Request: billing.SetDashboardParams{}, Responses: []Reply{{200, billing.Dashboard{}}}, Errors: codes("dashboard_invalid", "service_unavailable"), Handler: h(handlers.PutMerchantDashboard)},
 	{Method: GET, Path: "/v1/merchant/findings", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListFindings",

@@ -139,21 +139,3 @@ type DashboardGrid struct {
 type SetDashboardParams struct {
 	Widgets []DashboardWidget `json:"widgets"`
 }
-
-// AskMetricsParams is a question about the merchant's metrics.
-type AskMetricsParams struct {
-	Question string `json:"question"`
-}
-
-// MetricsAnswer is a model's answer to a metrics question, with every query
-// it ran and its result.
-type MetricsAnswer struct {
-	Answer   string            `json:"answer"`
-	Evidence []MetricsEvidence `json:"evidence"`
-}
-
-// MetricsEvidence is one query a metrics answer ran, and its result.
-type MetricsEvidence struct {
-	Query MetricsQuery `json:"query"`
-	MetricsResult
-}

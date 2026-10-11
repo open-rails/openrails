@@ -307,7 +307,7 @@ view), **Ops** (findings queue, the merchant inbox), **Settings** (profile,
 PSPs, credit limit, trust level), **Dashboard**. A hosted product adds its own
 pages, such as the team and API keys. Each area shows only to staff holding its
 route group's permission (`GET /v1/admin/access`).
-- **Dashboard**: a widget grid over the metrics API. Saved and default dashboards remain available. Operators can move, resize, rename and remove existing widgets, choose their chart type and change whether they follow the dashboard's date range. Metrics questions are read-only; AI widget creation and refinement are not available.
+- **Dashboard**: a widget grid over the metrics API. Saved and default dashboards remain available. Operators can move, resize, rename and remove existing widgets, choose their chart type and change whether they follow the dashboard's date range. Built-in AI metrics questions, widget creation and refinement are not available.
 
 - **Decline metrics**, all by owner (`engine`, `nmi_schedule`, `provider`) and PSP
   (`psp`):
@@ -324,9 +324,6 @@ route group's permission (`GET /v1/admin/access`).
   are NMI's own transaction history, read daily and kept 25 months, including the months
   before OpenRails recorded attempts. `one_off_sale` cannot separate initial sales from
   retries of declined rebills.
-- **Ask your metrics** (opt-in `llm.ask_enabled`): free-form Q&A where the model runs
-  validated, merchant-scoped aggregate queries and shows every result as evidence tables —
-  numbers come from the API, never model prose.
 - **Catalog copilot** (opt-in `llm.catalog_copilot_enabled`): Q&A over products,
   prices, subscriber counts, and pending migrations. With
   `llm.catalog_drafting_enabled`, it can additionally *draft* a price change or new

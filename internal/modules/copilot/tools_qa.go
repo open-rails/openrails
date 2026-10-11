@@ -11,7 +11,6 @@ import (
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/models"
 	"github.com/open-rails/openrails/internal/merchant"
-	"github.com/open-rails/openrails/internal/modules/dashboard"
 	"github.com/open-rails/openrails/internal/modules/subscriptions"
 	"github.com/open-rails/openrails/internal/shared/cadence"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
@@ -113,8 +112,8 @@ func itoa(n int) string { return fmt.Sprintf("%d", n) }
 
 const toolListCatalog = "list_catalog"
 
-func toolDefListCatalog() dashboard.ToolDef {
-	return dashboard.ToolDef{
+func toolDefListCatalog() ToolDef {
+	return ToolDef{
 		Name:        toolListCatalog,
 		Description: "List every active product and its current (live) prices, 3-4 fields each, with the active-subscriber count and grandfathered (still on a prior version) count already computed inline — never call another tool to learn the blast radius of a price. Optionally scope to one product. Amounts are rendered in whole currency units. Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
@@ -145,8 +144,8 @@ func (s *Service) runListCatalog(ctx context.Context, raw json.RawMessage) (stri
 
 const toolGetPrice = "get_price"
 
-func toolDefGetPrice() dashboard.ToolDef {
-	return dashboard.ToolDef{
+func toolDefGetPrice() ToolDef {
+	return ToolDef{
 		Name:        toolGetPrice,
 		Description: "Full detail for ONE price key: amount, currency, interval, product, active-subscriber count, grandfathered count, and whether a reprice migration is currently pending for it. The escape hatch beyond list_catalog's lean rows. Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
@@ -214,8 +213,8 @@ func (s *Service) runGetPrice(ctx context.Context, raw json.RawMessage) (string,
 
 const toolPriceHistory = "price_history"
 
-func toolDefPriceHistory() dashboard.ToolDef {
-	return dashboard.ToolDef{
+func toolDefPriceHistory() ToolDef {
+	return ToolDef{
 		Name:        toolPriceHistory,
 		Description: "The full version-chain history for a price key, most-recent-first, resolved from the durable pointer-movement log (not each row's own creation date — a reactivated amount shows its most recent movement). Each entry carries the active-subscriber count STILL on that specific historical amount (\"who's still on the old price?\"). Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
@@ -273,8 +272,8 @@ func (s *Service) runPriceHistory(ctx context.Context, raw json.RawMessage) (str
 
 const toolListRepriceBatches = "list_reprice_batches"
 
-func toolDefListRepriceBatches() dashboard.ToolDef {
-	return dashboard.ToolDef{
+func toolDefListRepriceBatches() ToolDef {
+	return ToolDef{
 		Name:        toolListRepriceBatches,
 		Description: "List a price key's bulk reprice (migration) operations, most-recent-first, with progress (applied/scheduled/canceled counts out of the total matched). \"0 pending migrations\" is stated explicitly, never an empty list to interpret. Idempotent, safe to retry.",
 		InputSchema: json.RawMessage(`{
