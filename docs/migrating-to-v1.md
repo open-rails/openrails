@@ -33,10 +33,11 @@ Before the code:
 | `openrails.Migrate(ctx, pool, cfg)` before `New` | Removed: `New` creates or upgrades OpenRails' tables, River's and this month's partitions before anything else touches the database |
 | `VaultConfig.Enabled`; `vault.enabled` (env `VAULT_ENABLED`) on the standalone server | Removed: a non-nil `Config.Vault` (or `Deps.Vault`) connects to Vault; on the standalone server a `vault:` section or any `VAULT_*` setting declares it, and `vault.enabled` refuses boot |
 | `catalog_edits` (env `CATALOG_EDITS`) on the standalone server | Removed: catalog edits over HTTP are always on, documents skip what an edit set, and `catalog_edits` refuses boot |
-| `Config.SecretBackend`, `Config.Encryption`, `CredentialSnapshotID`, `CredentialReadOnly`, `AlertSecretBackend`; `secret_backend`, `encryption` (env `SECRET_BACKEND`, `ENCRYPTION_MASTER_KEY`) | Removed, and refused at boot: merchant configuration lives in `Config.Merchant` (the manifest) or, with `Config.Vault.KVMount`, in Vault; Postgres stores no credential. Export a database-held configuration with the previous release's `dump-merchant-config` before upgrading ([vault.md](vault.md)) |
+| `Config.SecretBackend`, `Config.Encryption`, `CredentialSnapshotID`, `CredentialReadOnly`, `AlertSecretBackend`; `secret_backend`, `encryption` (env `SECRET_BACKEND`, `ENCRYPTION_MASTER_KEY`) | Removed, and refused at boot: merchant configuration lives in `Config.Merchants` (the manifest) or, with `Config.Vault.KVMount`, in Vault; Postgres stores no credential. Export a database-held configuration with the previous release's `dump-merchant-config` before upgrading ([vault.md](vault.md)) |
 | `Config.Schema`, `Config.RiverSchema` | `Config.Database` (`openrails.DatabaseConfig`) with `Schema` and `RiverSchema`; in `config.yaml`, `database.schema` and `database.river_schema` (env `DATABASE_SCHEMA`, `DATABASE_RIVER_SCHEMA`) |
 | `Config.River` (`RiverManaged`, `RiverHostOwned`) | `New` always creates River's tables in `Config.Database.RiverSchema` (default: the schema plus `_river`). The engine's `Start(ctx)` runs OpenRails' own River there; `Start(ctx, openrails.WithRiverClient(fleet))` runs on a host fleet built with the engine's `RiverJobs()` in that schema. `New` starts nothing |
-| `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `Config.Catalog` is a `*catalog.Application` from `catalog.ReadFile`, `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
+| `Config.Catalog *billing.CatalogApplyParams`, `billing.ParseCatalogApplicationYAML` | `MerchantDeclaration.Catalog` is a `*catalog.Application` from `catalog.ReadFile`, `catalog.ParseApplicationYAML` or `catalog.ParseApplicationJSON` |
+| `Config.Merchant` and `Config.Catalog`: one merchant per engine | `Config.Merchants`, one `openrails.MerchantDeclaration` per merchant keyed by its slug, each with its `Catalog` and, for a host whose own users sign in, its `Issuer` (set in Go; a merchant file's `issuer` is refused). An issuer binds its credentials to one merchant: declaring it twice fails `New` |
 | `PSPConfig` as a one-entry map keyed by rail; `CustodianConfig` keyed by kind | `openrails.PSPConfig` with `Rail`, `AccountID`, `Archived`, `Custodian`, `Signer`, `Secrets`, `Settings`; `openrails.CustodianConfig` with `Kind` |
 | `openrails.PSPFromEnv` | Removed: build each PSP from your own configuration with the rail's typed struct (`openrails.NMIPSP`, `StripePSP`, `CCBillPSP`, `SolanaPSP`) and its `PSPConfig()`, or keep the merchant in a file read by `openrails.ReadMerchantFile` |
 | `MerchantDeclaration` with `Profile`, `Invoice`, `BillingPolicies`, `CheckoutRouting` and their `*Config` types | `MerchantDeclaration.Settings` is the `billing.MerchantSettings` document the configuration API reads and applies |
@@ -46,12 +47,12 @@ Before the code:
 | `server.AuthConfig`, `server.ResourceServerConfig`, `server.TrustedIssuerConfig`, `server.AuthRateLimit`; `server.Config`'s `Registration`, `ResourceServer`, `PasswordlessLogin`, `PasswordlessAutoRegistration`, `FrontendBaseURL`, `TrustedProxies`, `CloudflareProxies`, `AuthRateLimits`; `server.Deps`' `SMS` and `AuthEmail`; the `auth` keys `issuer`, `schema`, `keys_path`, `mint_disabled`, `allow_*`, `direct_peer_ip`, `request_origin` and `naming`, and the `resource_server` section | `server.Config.Auth` is AuthKit's own configuration (`authkit.Config`), passed through: `auth:` in AuthKit's keys, `AUTH_<PATH>` in the environment ([runtime configuration](runtime-configuration.md#authentication)); `server.Deps.Auth` is AuthKit's dependencies; merchant names follow `server.Config.Naming`; a merchant's trusted issuers are AuthKit remote applications in its group ([auth](auth.md#trusted-issuers)). A retired key refuses boot and names its replacement |
 | A hand-written `ALTER … OWNER` pass after migrating a shared schema | The role of the pool `New` runs with owns every object; for another owner, have that pool's connections `SET ROLE` to it |
 | `Routes.CookieOrigin` and cookie admission; `Routes.Provisioning`; the `AdminConsole` struct (`Path`, `AuthBaseURL`, `Extensions`) | Removed: ambient cookies never authenticate, a browser sends its credential in a header; SCIM mounts with `RouteGroups.Programmatic`; `AdminConsole: true` serves the console at the prefix's `/admin`, signing staff in at `Routes.AdminConsoleAuthBase`, `/api/v1` by default (a standalone server's path and extensions are `server.Config.AdminConsole`'s) |
-| `CustomerRoutesConfig{Authenticate: fn}` per profile, further customer surfaces | Removed: one customer surface, `/v1/me`; a standalone server selects the merchant per request, and `Routes.Auth` names the customer |
+| `CustomerRoutesConfig{Authenticate: fn}` per profile, further customer surfaces | Removed: one customer surface, `/v1/me`; every route acts on the merchant its credential is bound to, and `Routes.Auth` names the customer |
 | `Deps.AuthKit`, `Deps.CustomerFor`, `Deps.AuthorityFor`, `Deps.Authenticate`, `Deps.Authorize`, `Deps.RecentSignIn`, `Deps.AuthenticateCustomer` | `New` takes no auth. `Routes.Auth`, an `openrails.Authenticator` that says who a request is, is given at `Mount`; a route group fails the mount without one that is a helpers/auth `Root` |
 | `Deps.UserExists`, `Deps.UserEmail`, `Deps.ResolveUsername`, `Deps.CheckoutCustomer` | `Deps.UserInfo` (your AuthKit) answers each customer's email, username and name when OpenRails needs them; a standalone server keeps what your directory pushes over SCIM. Your auth decides who may sign in |
 | `Deps.Contacts: ak`, `openrails.Contacts`, `openrails.Contact`, `openrailstest.Contacts` | `Deps.UserInfo: ak.UserInfo()` (AuthKit v1.14.0), `openrails.UserInfo` (helpers' `userinfo.Lookup`: `Get`, `Search`), `userinfo.User`, `openrailstest.UserInfo` |
 | `openrails.Identity` (`Kind`, `SubjectID`, `CustomerID`, `CredentialClass`, `Permissions`), `PrincipalKind`, `CredentialClass`, `Requirement`, `Authority`, `Target`, `Scope`, `DelegatedPrincipal`, `GateError`, `RequestAuthenticator`, `ErrForbidden` | `openrails.Identity`: `Subject` and `SubjectKind`, `Invoker`, `Credential`, from `Auth.Identity` |
-| `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
+| `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchants` (`PSPConfig.Secrets`) or the secret store |
 | `MerchantDeclaration.APIHost` (`api_host` in a merchant file or manifest); `Deps.DNSResolver` | Removed: a merchant has no API host, and a request names its merchant by its credential. A file or manifest that still sets `api_host` refuses boot |
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
@@ -157,7 +158,7 @@ on one merchant from either, and no call names its merchant.
 
 | Before | After |
 |---|---|
-| `openrails.New(ctx, cfg, deps, opts...)` returned the `*Client` | `openrails.New(ctx, cfg, deps)` returns the `*openrails.Engine`. A merchant's operations are on its handle: `MerchantBySlug` for the one `Config.Merchant` declares, `Merchant(id)` for any live merchant |
+| `openrails.New(ctx, cfg, deps, opts...)` returned the `*Client` | `openrails.New(ctx, cfg, deps)` returns the `*openrails.Engine`. A merchant's operations are on its handle: `MerchantBySlug` for one `Config.Merchants` declares, `Merchant(id)` for any live merchant |
 | `client.Start`, `Close`, `Ready`, `Probes`, `Routes`, `RiverJobs` | The same methods on the `*openrails.Engine`; each adapter's `Mount` takes the engine |
 | `openrails.NewRemote(url, opts...)` returned the `*Client` | `openrails.NewRemote` takes `openrails.RemoteOptions` and returns the `*openrails.Remote`: `Merchant(id)` is a merchant's handle, `Ready` and `Close` are the remote's. `openrails.NewRemoteMerchant` is one merchant's handle directly |
 | `WithAPIKey`, `WithTokenProvider`, `WithCredentialProvider`, `CredentialTarget` | An `openrails.RemoteCredential` (`APIKey` or `Token`) per merchant, in `RemoteOptions.Credentials` by merchant ID. A response naming another merchant fails the call with an `openrails.BoundMerchantError` |
@@ -298,8 +299,9 @@ upgrade; its buyer buys through an order.
 
 ## 4. HTTP routes and shapes
 
-One merchant selector header, `OpenRails-Merchant: <slug>` or `id:<uuid>`; the
-`/v2` mirror is gone. Every list is `{data, next_cursor}` with `?cursor=` and
+No request names its merchant: a merchant route acts on the merchant its
+credential is bound to, and the response names it in `OpenRails-Bound-Merchant`.
+The `/v2` mirror is gone. Every list is `{data, next_cursor}` with `?cursor=` and
 `?limit=`; there is no `offset`, `total` or `has_more`. A `DELETE` answers 204.
 Optional members are present as `null`. A request body may hold only declared
 fields (`400 unknown_field`), and every error code is in
@@ -347,7 +349,8 @@ fields (`400 unknown_field`), and every error code is in
 | Before | After |
 |---|---|
 | `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
-| The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential of another merchant is `409 merchant_binding_mismatch`; a missing permission `403 permission_required` |
+| The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential bound to no merchant here is `403 merchant_unresolved`; a missing permission `403 permission_required` |
+| The `OpenRails-Merchant` header (a merchant's slug or `id:<uuid>`) and its codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | Removed: the credential binds the merchant, by its group (the merchant id), its declared issuer or the OpenRails object it was issued for; anything else is `403 merchant_unresolved`. A customer of another issuer whose subject is already taken is `403 customer_issuer_mismatch` |
 | `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; rails in `GET /v1/config` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions`, `/v1/merchant/checkout-sessions…` (engine checkout) | `POST /v1/app/orders` (an unpaid order for a customer), `POST /v1/me/orders` and `POST /v1/me/orders/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/credit-grants?customer_id=`, `/v1/admin/credit-grants/{id}/revoke` |
@@ -553,7 +556,7 @@ Catalog documents carry `schema_version` and their changes. Remove `application_
 content hash per merchant. Replays remain no-ops after later edits. A new hash
 applies atomically; hashes do not determine which unseen batch is newer.
 `Routes.MerchantConfig` controls HTTP catalog-write route exposure only; authorized
-in-process client calls always work. `Config.Catalog` is optional startup shorthand,
+in-process client calls always work. `MerchantDeclaration.Catalog` is optional startup shorthand,
 not a catalog ownership mode.
 
 A price key is scoped to its product: `ListPrices` with `ProductKey` and `Key`

@@ -3,7 +3,7 @@
 A merchant's configuration is its display name, settings, alert webhooks, PSPs
 and custodians, credentials included. It lives in one of two places:
 
-- **A file** (`Config.Merchant`, or a standalone server's merchant manifest):
+- **A file** (`Config.Merchants`, or a standalone server's merchant manifest):
   read at startup. Reads work; the edit routes are not mounted, so change the
   file and restart.
 - **Vault**, when a KV mount is named ([vault.md](vault.md)): staff edit it over

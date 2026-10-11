@@ -49,7 +49,7 @@ milestone order, each verifiable before the next:
    upgrades its billing schema and its River tables first. Verify: boot
    succeeds and the `billing` schema (or the configured one) exists; a missing
    posture field refuses to boot (that is correct behavior, not a bug).
-2. **Merchant + rails.** Set `Config.Merchant` with the user's sandbox PSP entries
+2. **Merchant + rails.** Set `Config.Merchants` with the user's sandbox PSP entries
    (per-rail setup: [rails/](rails/)). Verify: boot logs show the rail armed; for NMI
    the sandbox probe passes.
 3. **Catalog.** Author products/prices per [merchant-guide.md](merchant-guide.md);

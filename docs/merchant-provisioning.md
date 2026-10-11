@@ -36,8 +36,8 @@ staff edit it over HTTP ([vault.md](vault.md)).
 AuthKit authority bootstrap remains first-run only. Catalog manifests are
 applied explicitly and are not replayed at ordinary boot.
 
-Embedded hosts declare their merchant programmatically
-(`Config.Merchant`, the same shape) and pass their auth in `Deps`; the
+Embedded hosts declare their merchants programmatically
+(`Config.Merchants`, the same shape) and pass their auth in `Deps`; the
 issuer-as-owner path below is the standalone mechanism.
 
 ## Merchant identity and names
@@ -252,7 +252,7 @@ an unknown field, or secrets for a PSP the manifest never declared, is an
 error, never a silent drop.
 
 - Embedded hosts merge them in their own config loader and pass the result as
-  `Config.Merchant` (`openrails.ParseMerchantDeclaration` parses one merchant's
+  `Config.Merchants` (`openrails.ParseMerchantDeclaration` parses one merchant's
   YAML; secrets are `PSPConfig.Secrets`).
 - The standalone server lists mounted files in `merchant_manifest_overlays`
   (env `MERCHANT_MANIFEST_OVERLAYS`).
@@ -322,7 +322,7 @@ Inbound rail webhooks resolve the merchant first, then verify. Each deployment
 shape mounts the same account-addressed surface:
 
 ```text
-POST /v1/webhooks/{rail}/{account_id}                        # standalone: configured account resolves merchant
+POST /v1/webhooks/{rail}/{account_id}                        # standalone
 POST /billing/v1/webhooks/{rail}/{account_id}                # embedded under /billing
 ```
 
@@ -333,8 +333,7 @@ There is no accountless route, and the payload's account identity must agree
 with the selected account.
 
 Provider account identity resolves the merchant in the runtime's configured
-sandbox/live environment. A runtime bound to one merchant refuses another
-merchant's account. The account's signature or provider-specific verification
+sandbox/live environment, among every merchant the runtime serves. The account's signature or provider-specific verification
 must pass, and payload account identity must agree. Host headers and merchant
 slugs do not grant callback authority. The public billing base supplies only the
 external mount prefix; generated Stripe URLs use this same path.

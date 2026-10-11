@@ -8,7 +8,7 @@ mount and it only signs.
 | **Merchant configuration** | every merchant's display name, settings, alert webhooks, PSPs and custodians, credentials included | `vault.kv_mount` (a KV v2 mount) |
 | **Transit signing** | Solana `vault_transit` signers: Vault signs, the key never leaves | `vault.transit_mount` (default `transit`) |
 
-Without a KV mount the merchant's configuration is its file (`Config.Merchant`,
+Without a KV mount the merchant's configuration is its file (`Config.Merchants`,
 or a standalone server's merchant manifest): read at startup and read-only.
 Postgres never holds merchant configuration in either mode; it keeps the
 identities history points at (merchants, PSP and custodian accounts) and what
@@ -25,7 +25,8 @@ With a KV mount named, Vault is the only source:
 - A file that declares configuration beside Vault is refused at startup, naming
   what it declares (`display_name`, `psps`, `custodians`, `settings`,
   `alert_webhooks`, `secrets`). The declaration names the merchant only: its
-  slug, and on the standalone server `remote_application`.
+  slug, an embedded host's `Issuer` and `Catalog`, and on the standalone server
+  `remote_application`.
 
 There is no import or seeding step.
 

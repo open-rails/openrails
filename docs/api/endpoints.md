@@ -95,8 +95,9 @@ with the first response; the key sent with another request is
 `422 idempotency_key_reused`.
 
 A `/v1/me` route acts on the credential's own customer; no path names a user.
-The merchant a request acts on comes from its credential, or from the
-`OpenRails-Merchant` header ([choosing the merchant](../client-merchant-selection.md)).
+The merchant a request acts on is the one its credential is bound to; nothing
+in the request names it ([auth](../auth.md)). Every merchant-bound answer names
+it in the `OpenRails-Bound-Merchant` header.
 
 Browser-facing routes (the public catalog, checkout, `/v1/me`) answer
 `Access-Control-Allow-Origin: *` and never set credentials; every other route

@@ -19,13 +19,27 @@ network hop, no second credential. Concretely:
   routes and every merchant in its directory. It has `Start`, `Close`,
   `Routes`, `RiverJobs`, `Ready` and `Probes`.
 - A merchant's operations are on its handle, an `*openrails.Client`:
-  `MerchantBySlug` for the merchant `Config.Merchant` declares, `Merchant(id)`
+  `MerchantBySlug` for a merchant `Config.Merchants` declares, `Merchant(id)`
   for any live merchant in the engine's directory. It is the **same** type a
   standalone consumer gets from `openrails.NewRemote`. Parity is structural:
   one client implementation, one handler surface, joined by an in-process
   `http.RoundTripper` instead of a socket.
 - A handle acts on its own merchant and no call names one. Holding the engine
   is the authority: an in-process handle carries no credential.
+- An HTTP request acts on the merchant its credential is bound to, and nothing
+  in the request names it: the merchant whose AuthKit group the credential is
+  bound to (its `BoundScope`, the group id being the merchant's id), else the
+  merchant whose `Issuer` is the credential's issuer. A host serving one
+  merchant with its own AuthKit declares that AuthKit's issuer on it:
+
+  ```go
+  merchant.Issuer = "https://shop.example" // your AuthKit's Token.Issuer
+  cfg.Merchants = map[string]openrails.MerchantDeclaration{merchant.Slug: merchant}
+  ```
+
+  Its users are then the merchant's own customers and staff. A credential
+  bound to no merchant is refused `403 merchant_unresolved`. Each merchant-bound
+  answer names the merchant it acted on in `OpenRails-Bound-Merchant`.
 
 ```mermaid
 flowchart LR
@@ -99,7 +113,7 @@ explicit:
 |---|---|
 | `Postgres` | Your pool. Nil opens one from `Config.DB`. |
 | `Redis` | Rate limits, admin lockouts, captcha challenges and card-testing declines shared by every instance, and abuse statistics. Without it they live in each process's memory: one instance only. |
-| `Vault` | A borrowed Vault client. PSP secrets come from `Config.Merchant`'s PSPs or the secret store. |
+| `Vault` | A borrowed Vault client. PSP secrets come from a declared merchant's PSPs or the secret store. |
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
@@ -134,7 +148,7 @@ if err != nil { return err }
 ```
 
 Only Postgres (including the migrations `New` applies first) and a refused
-`Config.Catalog` can fail `New`; it starts no workers. Vault login, PSP posture checks and Redis reconnect in the background
+`MerchantDeclaration.Catalog` can fail `New`; it starts no workers. Vault login, PSP posture checks and Redis reconnect in the background
 (capped full-jitter backoff, forever); until then only their features answer
 503. `Ready` is the readiness check (Postgres, the merchant directory, the
 declared catalog, River). Register `Probes` with the host's
@@ -192,8 +206,11 @@ process, never the age of a live job.
 
 ### 5. Declaring the merchant
 
-`Config.Merchant` is create-if-missing, reconcile-if-present on every boot,
-before routes or workers can observe it. The fields are the merchant manifest's
+Each entry of `Config.Merchants`, keyed by slug, is create-if-missing,
+reconcile-if-present on every boot, before routes or workers can observe it.
+`Issuer` and `Catalog` are set in your code, never in a merchant file: an
+issuer belongs to one merchant of an engine, and `New` refuses one declared
+twice. The fields are the merchant manifest's
 (same shape as `config/merchants_config.example.yaml`). `Settings` is the
 `billing.MerchantSettings` document the configuration API reads and applies:
 one shape, one validator, in YAML and over the API.
@@ -245,11 +262,12 @@ A `settings` or `secrets` key outside its rail's row, in YAML or in a
 naming the PSP, the key and the keys the rail takes. A standalone manifest
 refuses it the same way.
 
-The merchant's configuration lives in `Config.Merchant` or in Vault, never in
+The merchant's configuration lives in `Config.Merchants` or in Vault, never in
 the database ([merchant configuration](merchant-configuration.md)). Declared in
-`Config.Merchant`, it is read at `New` and is read-only: change the declaration
+`Config.Merchants`, it is read at `New` and is read-only: change the declaration
 and construct a new engine. With `Config.Vault.KVMount` named, Vault holds it:
-`Config.Merchant` names the merchant only (`Slug`; declaring more is refused),
+the declaration names the merchant, its `Issuer` and `Catalog` (declaring
+configuration is refused),
 and `Client.UpdateMerchantConfiguration`, `CreatePSP`, `UpdatePSP`
 and the alert-webhook methods edit it at the revision they read
 ([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
@@ -259,7 +277,7 @@ identity first: `client.DeclarePSP(ctx, billing.PSPDeclaration{...})`
 during setup.
 
 **Startup catalog batch:** read a YAML or JSON document with `catalog.ReadFile`
-and set it as `Config.Catalog`; `New` applies it on every start, like calling
+and set it as `MerchantDeclaration.Catalog`; `New` applies it on every start, like calling
 `client.ApplyCatalog(ctx, document, billing.ApplyCatalogParams{})`. Documents
 and individual edits (the console, the catalog routes, the client's edit
 methods) share the merchant's catalog: a document skips a product, price or
@@ -279,7 +297,7 @@ to retire an entry and `archived: false` to restore it. `prune: true` explicitly
 opts into archiving omitted products/prices that only documents set; no catalog
 operation deletes them.
 The apply makes no provider writes. It may read a provider to verify an explicit
-reference. `Config.Catalog` can finish a temporarily unavailable provider check in
+reference. `MerchantDeclaration.Catalog` can finish a temporarily unavailable provider check in
 the background, with `Ready` failing until that startup batch succeeds.
 
 **Catalog authoring**: storage is always the database.
@@ -297,7 +315,7 @@ zero. New financial terms create a new revision; repeating or reactivating old
 terms reuses their original ID and revision. Keys, terms and product association
 are immutable; products and prices can be archived but never deleted. Changing a
 price never silently reprices existing subscriptions. For dynamic products with host-owned Stripe credentials declare
-the account in `Config.Merchant`; rotate by updating it and constructing a new engine.
+the account in `Config.Merchants`; rotate by updating it and constructing a new engine.
 
 ### 6. Authentication and HTTP
 
@@ -401,17 +419,17 @@ if err := openrailsfiber.Mount(app, bill, routes); err != nil { return err }
 | `Routes` | Exposed surface |
 |---|---|
 | `Prefix` | Where the API lives: `/billing` serves `/billing/v1/*`; empty is the root |
-| (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), the public catalog (`?merchant=<merchant id>`), Solana Pay, the customer routes (`/v1/me/*` for `Config.Merchant`, orders and the merchant's payment setup included) and signature-checked provider callbacks |
+| (always) | The public configuration (`GET /v1/config`: what this mount serves and the currency registry), the public catalog (`?merchant=<merchant id>`), Solana Pay, the customer routes (`/v1/me/*` at the customer's merchant, orders and the merchant's payment setup included) and signature-checked provider callbacks |
 | `Auth` | Your auth (above); required. An order is read and paid only by its own customer, admitted by it |
-| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) for `Config.Merchant`: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `root:billing:read`, updates `root:billing:manage` |
-| `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With `Config.Catalog`, the file skips what an edit changed |
+| `RouteGroups.Admin` | Customer support (`/v1/admin/*`) at the credential's merchant: payments and refunds, subscriptions, orders, credits, access, usage, operations; reads need `root:billing:read`, updates `root:billing:manage` |
+| `RouteGroups.Catalog` | The catalog: products, prices, meters and their rates, archiving a product, applying a catalog document, price migrations; needs `root:catalog:manage`. With a declared merchant's `Catalog`, the file skips what an edit changed |
 | `RouteGroups.MerchantConfig` | The merchant's own configuration: PSPs and pulling their state again (`RefreshPSPs`), settings, billing import and export, the dashboard layout; needs `root:config:manage` |
 | `RouteGroups.Metrics` | Business metrics, read-only: the metrics queries and the dashboard; needs `root:metrics:read` |
 | `RouteGroups.Programmatic` | Your backend's routes (`/v1/app/*`): the content gate, offers, usage events and admissions, provider operations, host events and SCIM provisioning. They refuse a person; each needs its own permission (`root:entitlements:read`, `root:catalog:read`, `root:usage:manage`, `root:costs:manage`, `root:events:read`, `root:orders:manage`; SCIM needs none); each write takes an `Idempotency-Key`. In process, the `Client` calls them without it |
-| `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`; needs a staff group on |
+| `AdminConsole` | The staff dashboard at `Prefix`'s `/admin`, for the one merchant whose `Issuer` you declare; needs a staff group on. Over several merchants bound by group, `Mount` refuses it |
 | `AdminConsoleAuthBase` | Where your AuthKit's JSON API is mounted on the same origin, AuthKit's `APIBase()`; the console signs staff in there. Empty is `/api/v1` |
 
-The customer surface, `/v1/me`, serves `Config.Merchant`. Every customer route
+The customer surface, `/v1/me`, serves each customer at its merchant. Every customer route
 acts only on the admitted subject: no path, query or body names a customer, and
 another customer's resource reads exactly like a missing one. Ambient cookies
 never reach your `Auth`: a browser call carries its credential in a header.

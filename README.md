@@ -138,6 +138,9 @@ import (
 	"github.com/open-rails/openrails/catalog"
 )
 
+// issuer is your AuthKit's: the tokens it issues act at your merchant.
+const issuer = "https://shop.example"
+
 func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*openrails.Engine, *openrails.Client, error) {
 	// You, the seller, and your payment processor accounts (PSPs), declared in merchant.yaml.
 	merchant, err := openrails.ReadMerchantFile("merchant.yaml")
@@ -152,12 +155,13 @@ func newBilling(ctx context.Context, db *pgxpool.Pool, ak *authkit.Client) (*ope
 		return nil, nil, err
 	}
 
+	merchant.Catalog = products
+	merchant.Issuer = issuer // your users, signed in at your AuthKit, are this merchant's customers and staff
 	cfg := openrails.Config{
 		Database:          openrails.DatabaseConfig{Schema: "billing"}, // the Postgres schema OpenRails' tables go in
 		TestMode:          openrails.Sandbox,                           // Enforces that supplied PSP credentials must give access to test / sandbox environments only, or it throws an error
 		ProviderWriteMode: openrails.ProviderWritesFull,                // Set to ProviderWritesReadOnly to prevent any billing
-		Merchant:          merchant,
-		Catalog:           products,
+		Merchants:         map[string]openrails.MerchantDeclaration{merchant.Slug: merchant},
 	}
 
 	// Build the billing engine; it creates or upgrades its own tables. It has no logins
@@ -256,7 +260,7 @@ you turn it on, embedded or standalone:
 | customer (`/v1/me`) | always on | a sign-in | a signed-in customer, for their own billing |
 | webhooks (`/v1/webhooks`) | always on | a valid signature | payment processors |
 | admin: customer support (`/v1/admin`) | `RouteGroups.Admin` | `root:billing:read`; changes `root:billing:manage` | staff, or your backend |
-| catalog (`/v1/admin/catalog`, `/v1/admin/price-migrations`) | `RouteGroups.Catalog`; with `Config.Catalog`, the file skips what an edit changed | `root:catalog:manage` | staff |
+| catalog (`/v1/admin/catalog`, `/v1/admin/price-migrations`) | `RouteGroups.Catalog`; with a declared merchant's `Catalog`, the file skips what an edit changed | `root:catalog:manage` | staff |
 | merchant config (`/v1/admin`) | `RouteGroups.MerchantConfig` | `root:config:manage` | staff |
 | business metrics, read-only (`/v1/admin/metrics`, `/v1/admin/dashboard`) | `RouteGroups.Metrics` | `root:metrics:read` | staff, or your backend |
 | programmatic (`/v1/app`) | `RouteGroups.Programmatic` | an application credential holding the route's permission (`root:entitlements:read`, `root:usage:manage`, …) | your backend, never a person |
@@ -394,7 +398,7 @@ cfg := openrails.Config{
 	Database:          openrails.DatabaseConfig{Schema: "billing"},
 	TestMode:          openrails.Sandbox,
 	ProviderWriteMode: openrails.ProviderWritesFull,
-	Merchant:          openrails.MerchantDeclaration{Slug: "onlydemo"}, // the slug only: Vault holds the rest
+	Merchants:         map[string]openrails.MerchantDeclaration{"onlydemo": {Issuer: "https://shop.example"}}, // Vault holds the rest
 	Vault: &openrails.VaultConfig{
 		Address:    "https://vault.internal:8200",
 		AuthMethod: "kubernetes", // or "approle", "token"
@@ -531,7 +535,7 @@ until `RouteGroups` turns it on:
   change.
 - `RouteGroups.Catalog`: the catalog: products, prices, meters and their rates,
   archiving a product, applying a catalog document, moving subscribers
-  between prices. Callers need `root:catalog:manage`. With `Config.Catalog`
+  between prices. Callers need `root:catalog:manage`. With `MerchantDeclaration.Catalog`
   too, the file skips what an edit changed (below); your Go code can edit the
   catalog either way.
 - `RouteGroups.MerchantConfig`: the merchant's own configuration: settings,
@@ -878,7 +882,7 @@ migrated. Omitted entries stay unchanged; use `archived: true` to retire an offe
 The following files form a catalog migration: update products in place, create
 new price revisions, retire offers, and restore an earlier revision. All changes
 are YAML applications. Apply each file through the same
-`catalog.ReadFile` → `Config.Catalog` startup path shown above, through
+`catalog.ReadFile` → `MerchantDeclaration.Catalog` startup path shown above, through
 `client.ApplyCatalog`, or through `openrails apply-catalog --merchant onlydemo --file FILE.yaml`.
 There are no caller-managed application IDs or version numbers. These examples
 build on the initial `catalog.yaml` above.
@@ -1035,7 +1039,7 @@ product/price ordering do not make a new application. Different, previously
 unseen documents have no ordering guarantee, so apply intended changes in order.
 
 **A file and the console share the catalog.** OpenRails records which manager
-last set each field: the file (`Config.Catalog`, `ApplyCatalog`, the
+last set each field: the file (`MerchantDeclaration.Catalog`, `ApplyCatalog`, the
 applications route, `openrails apply-catalog`) or an edit (the console, the
 product, price and meter routes, `UpdateProduct` and the other edit methods).
 A product, a price key and a meter each apply whole. When a document names a
@@ -1055,7 +1059,7 @@ whole. To resolve one, change the file to agree (equal values are shared, never
 a conflict), drop the field or entry from the file (the live value stays), or
 apply with `ApplyCatalogParams{Force: true}`, `?force=true` or
 `openrails apply-catalog --force-conflicts`, which overwrites the edit and takes
-the field. `Config.Catalog` never forces, and a conflict never fails `New`.
+the field. `MerchantDeclaration.Catalog` never forces, and a conflict never fails `New`.
 
 All these examples preserve omitted entries. `prune: true` makes a document the
 whole catalog: an omitted product or price is archived only when no edit set any
@@ -1125,12 +1129,12 @@ err = openrailsgin.Mount(r, bill, openrails.Routes{
 | Mount | The catalog over HTTP | In-process `client.ApplyCatalog`, `CreateProduct`, `CreatePrice`, etc. |
 |---|---|---|
 | `RouteGroups.Catalog` off | Not mounted | Available |
-| on | Readable and changeable by staff holding `root:catalog:manage`; with `Config.Catalog`, the file skips what an edit changed | Available |
+| on | Readable and changeable by staff holding `root:catalog:manage`; with a declared merchant's `Catalog`, the file skips what an edit changed | Available |
 
 Customers and your site read the live catalog at
 `/v1/catalog/products?merchant=<merchant id>` either way. Turning HTTP changes off does not make the database read-only or prevent
 later client edits. The startup example above applies `catalog.yaml` through
-`Config.Catalog` on every boot; with the group on, staff edits and the file
+`MerchantDeclaration.Catalog` on every boot; with the group on, staff edits and the file
 share the catalog as above. The standalone server mounts them with
 `route_groups.catalog`.
 
@@ -1166,7 +1170,7 @@ products:
 ### Prepaid API-balance catalog
 
 An API service can apply this separate catalog through the same
-`catalog.ReadFile` and `Config.Catalog` flow. These products top
+`catalog.ReadFile` and `MerchantDeclaration.Catalog` flow. These products top
 up a currency balance that metered API usage consumes; they are independent of
 the creator-site catalog above.
 
@@ -1446,7 +1450,7 @@ build yourself, badly, under deadline:
   alone. A lost webhook, a dead pipe, or stale data parks the subscription for
   verification with access intact. Terminal cancellation is the last resort, not the
   default.
-- **Explicit merchant isolation.** Authorization selects the merchant; scoped SQL
+- **Explicit merchant isolation.** The credential binds the merchant; scoped SQL
   predicates and composite relationships keep its records separate. Isolation
   works with the application's owning database connection. Platform discovery
   and cross-merchant operations have explicit entrypoints.
@@ -1632,7 +1636,7 @@ The agent-facing guide itself lives at [docs/agent-integration.md](docs/agent-in
 - [`@openrails/billing-ui`](sdk/billing-ui/README.md) — the embeddable checkout and account-billing React UI, on npm.
 - [The auth model](docs/auth.md) — one credential per trust domain: why embedded uses your session credential and standalone uses trusted issuers' access tokens.
 - [Customer contacts](docs/customer-contacts.md) — where customers' emails and names come from: your AuthKit in process, or your directory's SCIM 2.0 pushes.
-- [Products and prices through the Client](docs/catalog-client.md) and [choosing the merchant a call acts on](docs/client-merchant-selection.md).
+- [Products and prices through the Client](docs/catalog-client.md).
 - [Batch import / legacy migration](docs/batch-import.md) — moving an existing subscriber base onto OpenRails: the import surface, the phased playbook, and the limited-mode cutover.
 
 **API** — the contract:

@@ -15,6 +15,7 @@ to concrete code (enum, table, or manifest key).
 | Credential | How a subject proved itself (`Identity.Credential`): a session, a device key, an API key, a signed token or an access token, with its id. Never the subject: rotating a key changes no one. Recorded for audit. |
 | Trusted issuer | An OAuth 2.0 authorization server whose RFC 9068 access tokens the standalone server's AuthKit accepts: a remote application in a merchant's AuthKit group. It acts for that merchant only, never by a token claim. |
 | Remote application | AuthKit-registered issuer/JWKS principal nested under a merchant's permission-group: a trusted issuer for that merchant, within its role there. |
+| Merchant binding | How a merchant route finds its merchant: the credential's bound group (whose id is the merchant id), the merchant's declared `Issuer`, or the OpenRails object the credential was issued for, checked in that order. A request never names its merchant; the response carries `OpenRails-Bound-Merchant`. Anything else is `403 merchant_unresolved`. |
 | Invoker | The party actually acting (`Identity.Invoker`): the subject itself, or someone acting on its behalf, possibly another issuer's user spending the subject's balance. Spend limits and staff rate limits key on it; usage records it (`invoker`, `invoker_type`). |
 
 ## Money & access
@@ -46,7 +47,7 @@ to concrete code (enum, table, or manifest key).
 
 | Term | Meaning |
 |---|---|
-| Merchant configuration | Display name, settings, alert webhooks, PSPs and custodians, credentials included. Lives in a file (`Config.Merchant`, the merchant manifest; read-only) or, with `vault.kv_mount`, in Vault (edited over HTTP at a revision). Never in PostgreSQL, which keeps the identities history points at. |
+| Merchant configuration | Display name, settings, alert webhooks, PSPs and custodians, credentials included. Lives in a file (`Config.Merchants`, the merchant manifest; read-only) or, with `vault.kv_mount`, in Vault (edited over HTTP at a revision). Never in PostgreSQL, which keeps the identities history points at. |
 | Deployment shape | Only how the process/routes are hosted: **embedded** (a Go host runs `openrails.New` and mounts `/billing/v1/*`), **standalone** (`openrails run-server` serves `/v1/*`), **OpenRails-SaaS** (one hosted standalone engine, one merchant binding per tenant client). Every shape chooses where merchant configuration lives independently; application code uses the same `*openrails.Client` in all three. |
 | `provider_write_mode` | How much OpenRails may do against providers: `full` (normal) / `limited` (no system-initiated writes) / `readonly` (no writes). Required: boot refuses it unset. |
 | `test_mode` | Credential posture: `sandbox` or `live`, two explicit states. Sandbox attaches credential guarantees (live Stripe keys refuse boot, NMI accounts probed, CCBill sandbox URL, Solana devnet). Independent of environment — production can legitimately run sandbox rails. |

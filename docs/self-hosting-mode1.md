@@ -1,7 +1,7 @@
 # Self-hosting with the configuration in a file
 
 Without a Vault KV mount, a merchant's configuration is its file: the
-standalone server's merchant manifest, or `Config.Merchant` for an embedded
+standalone server's merchant manifest, or `Config.Merchants` for an embedded
 host. It is read at startup and held in memory, credentials included; Postgres
 keeps only the merchant and PSP identities history points at. Changing the
 configuration is changing the file and restarting. The configuration routes
@@ -13,8 +13,8 @@ instead, put the configuration in Vault ([vault.md](vault.md)).
 | File | Owns | Loaded by |
 |---|---|---|
 | `config.yaml` | process/infrastructure config (DB, Redis, `provider_write_mode`, `test_mode`, `vault`) | the standalone server / `openrails.Config`, built programmatically (embedded hosts) |
-| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, display name, settings, alert webhooks, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchant` |
-| catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `Config.Catalog`, applied by `openrails.New` (embedded hosts) |
+| merchant manifest (`/etc/openrails/merchants.yaml`, or `run-server` / `run-worker --merchant-manifest <path>`) | merchant identity, display name, settings, alert webhooks, **PSPs**: accounts on rails and their secrets (`merchants.<slug>.psps.<key>`, each with its `rail:`) | standalone server and worker boot, every boot; embedded hosts pass the same shape as `Config.Merchants` |
+| catalog document (`/etc/openrails/catalog.yaml`) | products / prices / entitlements / PSP links | `openrails apply-catalog --merchant NAME --file PATH` (standalone) / `MerchantDeclaration.Catalog`, applied by `openrails.New` (embedded hosts) |
 
 Manifest anatomy and field semantics:
 [merchant-provisioning.md](merchant-provisioning.md).

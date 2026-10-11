@@ -97,9 +97,8 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
 - Card-testing attack mode is per merchant and decided by the ledger below. While it
   holds, every subject on that merchant's captcha buckets must solve a captcha; each decline
   seen in attack mode keeps it up for another hour, so it lapses an hour after the declines stop
-  or the ledger's window drops below the threshold. It applies where the merchant is known
-  before authentication (the configured merchant); an individual solve never
-  clears it. Without a captcha configured, nothing is challenged and the ledger's blocks are the
+  or the ledger's window drops below the threshold. It is checked once the route's credential
+  has bound the merchant; an individual solve never clears it. Without a captcha configured, nothing is challenged and the ledger's blocks are the
   whole policy.
 - A client renders the challenge from `GET /v1/config`'s `captcha` block, or from the
   `captcha_required` error's metadata, and resends with `X-Captcha-Token`.

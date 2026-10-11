@@ -82,16 +82,23 @@ its URLs are relative to the `<base href="/admin/">` in `index.html`, which the
 server rewrites to the path, and the SPA derives its routes and `config.json`
 URL from `document.baseURI`.
 
-**Which merchant.** OpenRails lists no user's merchants. The console acts for
-the merchant its mount serves (an embedded engine's, in `config.json`'s
-`merchant`); on the standalone server staff open a merchant by name, and the
-admin API decides their access. A host with a directory of its users'
-merchants declares it in its console extension (`merchants`, below): the
-switcher lists them with each role, and a user with none sees an empty state
-that points at an operator or, with a creation page (`newMerchantPath`),
-offers "New merchant". Any link may open the console on a merchant with
-`#merchant=<slug>` (e.g. `/admin/#merchant=acme`); the console selects it and
-drops the fragment.
+**Which merchant.** Every admin request acts on the merchant its credential
+is bound to; nothing in the request names one. Embedded, the console serves
+the single merchant its engine declares with an `Issuer` (`config.json`'s
+`merchant`); a console over several merchants refuses to mount. Standalone
+with a trusted issuer (`admin_console.issuer`), the issuer's tokens are bound
+to the merchant that issuer belongs to. Standalone with local sign-in, the
+console exchanges the person's session for a token bound to the chosen
+merchant (RFC 8693, `group_id` = the merchant id, through the server's
+`openrails-console` client, `config.json`'s `exchange`), keeps it in memory and
+exchanges again before it expires; the exchange refuses a merchant where the
+person holds no role. OpenRails lists no user's merchants: staff open one by
+id, or a host with a directory declares it in its console extension
+(`merchants`, below), and the switcher lists them with each role. A user with
+none sees an empty state that points at an operator or, with a creation page
+(`newMerchantPath`), offers "New merchant". Any link may open the console on a
+merchant with `#merchant=<id>`: the console asks for an exchange, drops the
+fragment, and says so when it is refused.
 
 **Where staff sign in.** Embedded, at the host's AuthKit JSON API on the
 console's origin: `Routes.AdminConsoleAuthBase`, AuthKit's `APIBase()` (such as

@@ -27,9 +27,14 @@ client brings its own host authority.
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
 | application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
-OpenRails binds the merchant a customer route serves before it asks
-`Authenticate`; the host says who the request is and never resolves
-`OpenRails-Merchant` itself.
+Every gated route acts on the merchant the credential is bound to, read once
+right after `Authenticate`: the merchant whose scope its `BoundScope` is (the
+group id being the merchant's id, in the `RootScope`'s authority), else the
+merchant that declares the identity's issuer (`MerchantDeclaration.Issuer`),
+else, for OpenRails' own credentials (a checkout URL's secret, a provisioning
+token, the in-process handle), the merchant of their row. Nothing in the
+request names it. A credential bound to none, or to a scope that is not a live
+merchant's, is `403 merchant_unresolved`.
 
 OpenRails answers every refusal itself, the same for every host, with the
 status and challenge `auth.Refuse` gives: 401 with `WWW-Authenticate`
@@ -178,22 +183,23 @@ AuthKit groups and nothing more:
 - **A merchant's scope is its AuthKit group**, whose id is the merchant's id
   (`Server.MerchantScope`). Staff routes ask `Can` for the `merchant:` name
   there, else for the `root:` name in the root group.
-- **The merchant a request is for** comes from its `OpenRails-Merchant`
-  selector, the scope its credential is bound to (an API key's group, a
-  trusted issuer's group) and the configured merchant. They must agree, else
-  `409 merchant_binding_mismatch`; with none it is `403 merchant_unresolved`.
-  The request's Host names none. A person names the merchant: holding a role
-  in one merchant never picks it.
-- **Customer (`/v1/me`) and programmatic (`/v1/app`) credentials must be bound**
-  to the request's merchant: a trusted issuer's token, or an API key of the
-  merchant's group. A credential bound to no merchant is refused there.
+- **The merchant a request is for** is the AuthKit group its credential is
+  bound to: an API key's group, a trusted issuer's group, a token exchanged for
+  a group. A person's own sign-in is bound to none and reaches no merchant:
+  the admin console exchanges it for a token bound to the merchant chosen
+  (RFC 8693 with `group_id`, through the `openrails-console` client the server
+  declares), and holding a role in one merchant never picks it.
+- **Customer (`/v1/me`) and programmatic (`/v1/app`) credentials are bound** to
+  their merchant: a trusted issuer's token, a customer token minted for a
+  merchant's backend, or an API key of the merchant's group.
 - **A customer is its issuer's subject** (OIDC Core §5.7): the customer id is
   the token's `sub`, and `billing.customers` records the issuer that made it.
   Another issuer's credential with the same `sub` is refused
-  (`409 merchant_binding_mismatch`). A customer with no recorded issuer is the
-  host's own user, such as one made through the Go API or the admin API; no
-  trusted issuer reaches it, so let a trusted issuer's customer make itself
-  with its first request.
+  (`403 customer_issuer_mismatch`). A customer with no recorded issuer is the
+  merchant's own: one made through the Go API or the admin API, one its own
+  backend names in a customer token (RFC 7523), a user of the issuer it
+  declares. No foreign trusted issuer reaches it, so let a foreign issuer's
+  customer make itself with its first request.
 
 ## Trusted issuers
 

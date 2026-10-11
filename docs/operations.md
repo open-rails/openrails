@@ -105,8 +105,8 @@ instance and no sticky session. Without Redis, run one instance.
 ### What must be identical
 
 - **Configuration**: the schemas, `TestMode`, `ProviderWriteMode`, the
-  merchant's configuration (`Config.Merchant` with its PSPs and secrets, or the
-  same Vault KV mount), `Config.Catalog`,
+  merchant's configuration (`Config.Merchants` with its PSPs and secrets, or the
+  same Vault KV mount), `MerchantDeclaration.Catalog`,
   `Config.RateLimits`, `Config.Captcha`, `Config.TrustedProxies` and
   `Config.ReturnOrigins`. Every start applies the declaration: instances
   declaring different SCIM tokens replace each other's token at each start.
@@ -1398,13 +1398,14 @@ is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
   the engine doesn't enforce it — the host does.
 - **Webhook surface**: `<prefix>/v1/webhooks/{rail}/{account_id}` in embedded and
   standalone deployments. The provider account resolves its merchant in the
-  configured environment; an explicit runtime merchant binding is enforced.
+  configured environment.
   Provider signature/source verification and matching payload identity remain
   required. Host headers do not choose callback authority.
-- **Consistency with credentials**: a credential bound to merchant A (an API
-  key of its group, a token of its trusted issuer) is refused
-  `409 merchant_binding_mismatch` against merchant B's selector, even though
-  it verifies.
+- **One merchant per credential**: a request acts on the merchant its
+  credential is bound to (an API key's group, a trusted issuer's group, a
+  token exchanged for a group, the issuer a merchant declares); nothing in the
+  request names one, and a credential bound to none is `403
+  merchant_unresolved`.
 
 ### Browser CORS doctrine
 

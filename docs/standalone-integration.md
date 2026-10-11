@@ -222,7 +222,9 @@ receipt, err := client.CaptureAdmission(ctx, requestID, billing.CaptureAdmission
 
 A `RemoteCredential` is exactly one of `Token` (a bearer minted per call) and
 `APIKey` (a static key, such as a hosted product's); the credential's merchant
-is the one every call acts on ([the merchant a call acts on](client-merchant-selection.md)).
+is the one every call acts on, and the server names it on every answer
+(`OpenRails-Bound-Merchant`): a credential filed under another merchant's ID
+fails each call with `*openrails.BoundMerchantError`.
 A backend acting for several merchants, or one that sets a transport or a
 per-call timeout, uses `openrails.NewRemote` with `openrails.RemoteOptions`
 (`Credentials` by merchant ID, `HTTPClient`, `Timeout`) and takes each
@@ -333,13 +335,16 @@ merchants:
   scopes: `openrails:merchant` grants the merchant permissions,
   `openrails:self` none (a customer's own billing, `/v1/me/*`, `sub` a UUID:
   the customer's id).
-- A token acts for its issuer's merchant only. The request may name it
-  (`OpenRails-Merchant`); naming another is `409 merchant_binding_mismatch`.
+- A token acts for its issuer's merchant only, the merchant whose group trusts
+  the issuer; nothing in the request names it.
 - A token with `sub` equal to its `client_id` is a machine acting for itself.
 - Your console signs staff in at the issuer: register a client with the
   redirect URI `<console URL>/callback` and set `admin_console.issuer` to the
   issuer and its `client_id`. OpenRails' own sign-in is off unless you set
-  `local_sign_in: true`.
+  `local_sign_in: true`; with it, a person's session acts at a merchant through
+  a token exchanged for it (RFC 8693 `group_id`, the `openrails-console`
+  client the server declares), so the server needs its resource: `auth.resource.id`,
+  which defaults to `public_billing_base_url`.
 - A sensitive operation (one that moves money or grants access) needs a
   person's token's `auth_time` within 15 minutes; otherwise `401
   step_up_required` (`WWW-Authenticate: Bearer
@@ -367,7 +372,7 @@ merchants:
   person's token is refused there.
 - Refusals: `401 authentication_required` (an untrusted issuer, a bad
   signature, audience or lifetime), `401 credential_expired`,
-  `409 merchant_binding_mismatch` (another merchant), `403 permission_required`.
+  `403 merchant_unresolved` (bound to no merchant), `403 permission_required`.
   AuthKit's challenge headers pass through; how sender-constrained tokens are
   proven is AuthKit's
   ([DPoP](https://github.com/open-rails/authkit/blob/master/docs/resource-server.md#dpop)).

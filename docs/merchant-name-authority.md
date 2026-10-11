@@ -13,8 +13,9 @@ that can change.
   or deleting a merchant releases its name and aliases. The rename interval and
   how long a former name is kept are the deployment's naming policy
   ([merchant provisioning](merchant-provisioning.md#merchant-identity-and-names)).
-- **Resolution.** Name-bearing boundaries (CLI `--merchant`, a manifest, the
-  `OpenRails-Merchant` header) resolve the current name or a valid alias once.
+- **Resolution.** Name-bearing boundaries (CLI `--merchant`, a manifest)
+  resolve the current name or a valid alias once. No HTTP request names a
+  merchant: its credential is bound to one.
   Everything after runs against the merchant UUID: imports, ledger operations,
   jobs and foreign keys never store a name.
 - **Reclaimed names.** Provisioning a name another merchant released creates a
@@ -24,6 +25,5 @@ that can change.
 
 On the command line a bare `--merchant` value is a name, even a UUID-shaped
 one; `--merchant id:<uuid>` addresses the merchant directly. In Go a handle
-is made for the UUID (`Merchant(id)`), or with `MerchantBySlug` for the name
-`Config.Merchant` declares
-([the merchant a call acts on](client-merchant-selection.md)).
+is made for the UUID (`Merchant(id)`), or with `MerchantBySlug` for a name
+`Config.Merchants` declares.

@@ -9,14 +9,11 @@ account (`/v1/webhooks/{rail}/{account_id}`) in every posture.
 
 The customer is the subject of the identity `Routes.Auth` admits: a user acting
 itself. An invoker acting for someone else, or an application, is refused. The
-surface serves `Config.Merchant` embedded; on a standalone server it serves the
-merchant each request selects by its `OpenRails-Merchant` header. A request
-that selects none is refused
-`merchant_unresolved`, and an unknown or deleted merchant `merchant_not_found`.
-OpenRails binds the merchant before the `Auth` runs; the `Auth` says who the
-request is and never resolves the header itself. The
-customer is the identity's subject at that merchant, so selecting another
-merchant never reaches another subject's billing.
+merchant is the one the credential is bound to: its AuthKit group, else the
+merchant whose `Issuer` the credential's issuer is. Nothing in the request
+names it, and a credential bound to none is refused `merchant_unresolved`.
+The customer is the identity's subject at that merchant, so no request reaches
+another merchant's or another subject's billing.
 
 The `Auth` verifies the actual credential; a URL parameter or request-body
 field is never authority. Ambient cookies never reach it: a browser call carries

@@ -71,7 +71,7 @@ payment and access; a browser's return is navigation only.
 
 ## What a host declares
 
-Declare the merchant in `Config.Merchant`, and a host whose `catalog.yaml` is the
-truth in `Config.Catalog` (`catalog.ParseApplicationYAML`). Everything else is
+Declare the merchant in `Config.Merchants`, and a host whose `catalog.yaml` is the
+truth in `MerchantDeclaration.Catalog` (`catalog.ParseApplicationYAML`). Everything else is
 a Client method. See [embedding](embedded-integration.md) and the
 [merchant guide](merchant-guide.md).

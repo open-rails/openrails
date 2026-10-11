@@ -2,7 +2,7 @@
 
 A merchant's catalog changes in two ways, and both may be used at once:
 
-- **Documents**, the `apply` manager: `Config.Catalog` on every start,
+- **Documents**, the `apply` manager: `MerchantDeclaration.Catalog` on every start,
   `Client.ApplyCatalog`, `POST /v1/admin/catalog/applications` and
   `openrails apply-catalog`.
 - **Edits**, the `edit` manager: the console, the product, price, meter and
