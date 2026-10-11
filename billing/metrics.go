@@ -116,12 +116,15 @@ type Dashboard struct {
 }
 
 // DashboardWidget is one tile: a metrics query, how to draw it, and where.
+// A dashboard shows every widget over the range its viewer picks; a
+// FixedRange widget keeps its query's own range ("today" tiles).
 type DashboardWidget struct {
-	ID    string        `json:"id"`
-	Title string        `json:"title"`
-	Viz   string        `json:"viz"`
-	Query MetricsQuery  `json:"query"`
-	Grid  DashboardGrid `json:"grid"`
+	ID         string        `json:"id"`
+	Title      string        `json:"title"`
+	Viz        string        `json:"viz"`
+	Query      MetricsQuery  `json:"query"`
+	Grid       DashboardGrid `json:"grid"`
+	FixedRange bool          `json:"fixed_range"`
 }
 
 // DashboardGrid places a widget on the dashboard's grid.

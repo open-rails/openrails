@@ -63,7 +63,7 @@ func decodeFieldError(err error) metrics.FieldError {
 		return metrics.FieldError{
 			Code:    "unknown_body_key",
 			Param:   field,
-			Message: fmt.Sprintf("unknown key %q in dashboard body; valid widget keys: id, title, viz, query, grid — query keys follow the metrics schema", field),
+			Message: fmt.Sprintf("unknown key %q in dashboard body; valid widget keys: id, title, viz, query, grid, fixed_range — query keys follow the metrics schema", field),
 		}
 	}
 	return metrics.FieldError{Code: "invalid_body", Param: "body", Message: fmt.Sprintf("malformed JSON body: %v", err)}
