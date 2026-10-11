@@ -83,7 +83,8 @@ server rewrites to the path, and the SPA derives its routes and `config.json`
 URL from `document.baseURI`.
 
 **Which merchant.** Every admin request acts on the merchant its credential
-is bound to; nothing in the request names one. Embedded, the console serves
+is bound to; nothing in the request names one
+([merchant binding](merchant-binding.md)). Embedded, the console serves
 the single merchant its engine declares with an `Issuer` (`config.json`'s
 `merchant`); a console over several merchants refuses to mount. Standalone
 with a trusted issuer (`admin_console.issuer`), the issuer's tokens are bound

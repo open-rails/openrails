@@ -307,7 +307,8 @@ secret is in the result once and never stored; the non-secret `prefix`
 authenticates with a client-credentials access token from the merchant's
 trusted issuer ([standalone](standalone-integration.md#deployment)).
 
-A key holds one role. The declared ones (`server.MerchantRoles`) are `viewer`
+A key acts at its merchant alone ([merchant binding](merchant-binding.md))
+and holds one role. The declared ones (`server.MerchantRoles`) are `viewer`
 (`billing.MerchantBillingRead`: read-only, the right choice for LLM agents),
 `support` (`billing.MerchantBillingRead` and `billing.MerchantBillingManage`:
 acts on customers) and `owner` (everything, the merchant's configuration and

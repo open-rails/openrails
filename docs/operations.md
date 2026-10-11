@@ -1405,7 +1405,7 @@ is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
   credential is bound to (an API key's group, a trusted issuer's group, a
   token exchanged for a group, the issuer a merchant declares); nothing in the
   request names one, and a credential bound to none is `403
-  merchant_unresolved`.
+  merchant_unresolved` ([merchant binding](merchant-binding.md)).
 
 ### Browser CORS doctrine
 

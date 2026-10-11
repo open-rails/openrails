@@ -27,7 +27,7 @@ network hop, no second credential. Concretely:
 - A handle acts on its own merchant and no call names one. Holding the engine
   is the authority: an in-process handle carries no credential.
 - An HTTP request acts on the merchant its credential is bound to, and nothing
-  in the request names it: the merchant whose AuthKit group the credential is
+  in the request names it ([merchant binding](merchant-binding.md)): the merchant whose AuthKit group the credential is
   bound to (its `BoundScope`, the group id being the merchant's id), else the
   merchant whose `Issuer` is the credential's issuer. A host serving one
   merchant with its own AuthKit declares that AuthKit's issuer on it:

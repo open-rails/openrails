@@ -411,9 +411,10 @@ the request, whatever host they are called at: the public catalog as
 `GET /v1/config` is the deployment's and names none.
 
 **One API host.** The server answers every merchant on one host: a request's
-Host names no merchant, and a merchant has no hostname of its own. Every
-merchant-scoped route refuses a credential bound to another merchant: a token
-minted for merchant A is rejected for merchant B even though it verifies.
+Host names no merchant, and a merchant has no hostname of its own. Each
+request acts on the merchant its credential is bound to
+([merchant binding](merchant-binding.md)): a token minted for merchant A never
+reaches merchant B, even though it verifies.
 
 **CORS** is a fixed policy — not configurable, no origin registration: the
 API routes (checkout, `/v1/me/*`, `/v1/admin/*`, `/v1/app/*`) answer

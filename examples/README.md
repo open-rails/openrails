@@ -21,9 +21,14 @@ with their browser tests (`web/e2e`).
 | **Customer contacts** | `Deps.UserInfo`: AuthKit asked on each read | AuthKit pushes users over SCIM to the server's AuthKit (`/directory/scim/v2`) with its client credentials | the same push to the platform's directory, with the service token |
 | **Receipts** | `Config.SMTP` (unset here) | the server's `email_smtp` | the platform sends them |
 | **PSP webhooks** | `/billing/v1/webhooks/{rail}/{account_id}` on the app | `/v1/webhooks/{rail}/{account_id}` on the server | the URL the console shows for each PSP |
-| **Route groups** | `Routes.RouteGroups`, with the app's permissions | the server's `route_groups` | on |
+| **Route groups** | `Routes.RouteGroups`; staff roles hold `billing.Permissions()` | the server's `route_groups` | on |
 
 Only `main.go`, `web/src/clients.ts` and each folder's run files differ.
 OpenRails emails a customer only at an address they proved, so the
 standalone and hosted apps make AuthKit verify each sign-up's email. Each
 folder's README says how to run it and its tests.
+
+[`own-auth`](own-auth) stands apart: a backend with no AuthKit and no web
+app, two merchants on one engine, whose own users, sessions and roles tables
+answer OpenRails through helpers/auth's `Authenticator`. Its tests run
+OpenRails' conformance check and its gates against them.

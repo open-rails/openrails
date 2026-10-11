@@ -19,9 +19,11 @@ routing order; the page pays with one of them ([Orders](#orders)).
 
 ### Authentication
 
-Embedded applications use their normal user credential through the host's
-AuthKit request verifier, sent in a header: the mount strips ambient cookies.
-AuthKit's own auth routes keep their refresh/CSRF cookie protocol.
+Every call acts on the merchant its token is bound to, and the browser names
+no merchant ([merchant binding](merchant-binding.md)). Embedded applications
+use their normal user credential through the host's auth, sent in a header:
+the mount strips ambient cookies. AuthKit's own auth routes keep their
+refresh/CSRF cookie protocol.
 
 Standalone and SaaS browser clients call OpenRails with an OAuth 2.0 access
 token (RFC 9068 `at+jwt`) from an issuer the merchant trusts ([auth](auth.md#trusted-issuers)):

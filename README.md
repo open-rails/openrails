@@ -303,17 +303,20 @@ keep a pushed copy in OpenRails instead: leave `UserInfo` out, turn on
 
 #### Using your own auth
 
-Without AuthKit, tell OpenRails who a request is. You write no middleware:
-OpenRails checks each route's permission and a person's recent sign-in
-itself, and answers refusals (401, 403, sign in again) the same way for
-every host:
+Without AuthKit, tell OpenRails who a request is and what they hold. You write
+no middleware: OpenRails checks each route's permission and a person's recent
+sign-in itself, and answers refusals (401, 403, sign in again) the same way
+for every host. [`examples/own-auth`](examples/own-auth) is a complete one,
+over its own users, sessions and roles tables, with its tests:
 
 ```go
-// shopAuth says who a request is; OpenRails decides what to admit.
+// shopAuth says who a request is and what they hold; OpenRails decides what to admit.
 type shopAuth struct{ sessions *Sessions }
 
+var root = auth.Scope{Authority: "https://shop.example", ID: "root"} // your staff of every merchant
+
 func (a shopAuth) Authenticate(r *http.Request) (auth.Verified, error) {
-	s, err := a.sessions.Lookup(r) // your session cookie, checked live: signed out, banned or deleted is refused
+	s, err := a.sessions.Lookup(r) // the session the bearer token names, read live; OpenRails passes no cookies
 	switch {
 	case errors.Is(err, ErrNoSession):
 		return nil, auth.ErrUnauthenticated
@@ -323,25 +326,40 @@ func (a shopAuth) Authenticate(r *http.Request) (auth.Verified, error) {
 	return session{s}, nil
 }
 
+func (shopAuth) RootScope(context.Context) (auth.Scope, error) { return root, nil }
+
+func (shopAuth) KnownPermission(p string) bool {
+	return slices.Contains(billing.Permissions(), billing.Permission(p))
+}
+
 type session struct{ s *Session }
 
 func (v session) Identity() auth.Identity {
 	return auth.Identity{
-		Issuer: "https://shop.example", Subject: v.s.UserID, SubjectKind: auth.SubjectUser, // a UUID
-		Invoker:    auth.Invoker{Issuer: "https://shop.example", ID: v.s.UserID}, // acting itself
+		Issuer: root.Authority, Subject: v.s.UserID, SubjectKind: auth.SubjectUser, // a UUID
+		Invoker:    auth.Invoker{Issuer: root.Authority, ID: v.s.UserID}, // acting itself
 		Credential: auth.Credential{Kind: auth.CredentialSession, ID: v.s.ID},
 	}
 }
 
-// Can: exactly this permission, in exactly this scope. OpenRails asks a
-// route's root: name (root:billing:read) in RootScope, and its merchant:
-// name (merchant:billing:read) in {Authority: RootScope's, ID: the merchant's id}.
-func (v session) Can(_ context.Context, scope auth.Scope, permission string) (bool, error) {
-	return v.s.Has(scope.ID, permission) && scope.Authority == root.Authority, nil
+// BoundScope: the merchant this session acts at, which your own records say
+// (the store it signed in at, the merchant staff switched to). Zero for none.
+func (v session) BoundScope() auth.Scope {
+	if v.s.MerchantID == "" {
+		return auth.Scope{}
+	}
+	return auth.Scope{Authority: root.Authority, ID: v.s.MerchantID}
 }
 
-// RootScope: where your staff hold the root: permissions, for every merchant.
-func (shopAuth) RootScope(context.Context) (auth.Scope, error) { return root, nil }
+// Can: exactly this permission in exactly this scope. OpenRails asks a route's
+// merchant: name (merchant:billing:read) in {root.Authority, the merchant's id}
+// and its root: name (root:billing:read) in root.
+func (v session) Can(ctx context.Context, scope auth.Scope, permission string) (bool, error) {
+	if scope.Authority != root.Authority || (scope != root && v.s.MerchantID != "" && scope.ID != v.s.MerchantID) {
+		return false, nil // another authority's scope, or another merchant's while bound to one
+	}
+	return v.s.Holds(ctx, scope.ID, permission) // the user's roles there, read live
+}
 
 // CheckRecentSignIn: signed in within 15 minutes, for writes that move money.
 func (v session) CheckRecentSignIn(context.Context) error {
@@ -350,15 +368,14 @@ func (v session) CheckRecentSignIn(context.Context) error {
 	}
 	return nil
 }
-
-var root = auth.Scope{Authority: "https://shop.example", ID: "staff"}
 ```
 
 The types are `github.com/open-rails/helpers/auth`. Mount with
-`Routes{Auth: shopAuth{sessions}, ...}`, grant your staff the names of
-`billing.Permissions()`, and check your adapter in CI with
+`Routes{Auth: shopAuth{sessions}, ...}`, build your roles from
+`billing.Permissions()`, and check your auth in CI with
 `openrailstest.CheckAuth(t, routes, authtest.Cases{...})`
-(`github.com/open-rails/helpers/auth/authtest`).
+(`github.com/open-rails/helpers/auth/authtest`). Serving one merchant, set
+`MerchantDeclaration.Issuer` to your issuer and return a zero `BoundScope`.
 
 If your app already loads its own configuration (koanf, kong, flags), build the
 same declaration in Go instead of reading `merchant.yaml`. Each rail has a typed
@@ -565,7 +582,18 @@ catalog, merchant-config, metrics and programmatic route is a method on it,
 and it checks no permission, since code that holds the engine is trusted. An
 engine that serves several merchants hands out a handle for each,
 `bill.Merchant(id)`; over HTTP the same `Client` comes from
-`openrails.NewRemoteMerchant` with the merchant's credential.
+`openrails.NewRemoteMerchant` with the merchant's credential. Every request
+acts on the merchant its credential is bound to ([merchant
+binding](docs/merchant-binding.md)).
+
+Against a standalone or hosted OpenRails, your backend mints each signed-in
+customer a 15-minute token for the browser with its registered signing key:
+
+```go
+shop, err := openrails.NewRemoteMerchant(serverURL, openrails.RemoteCredential{APIKey: apiKey, Assertion: &signingKey})
+token, err := shop.CustomerToken(ctx, billing.CustomerTokenParams{CustomerID: customer})
+// the browser sends token.AccessToken to /v1/me; mint another before token.ExpiresAt
+```
 
 That is the whole server integration, and it is the program in
 [`examples/embedded`](examples/embedded). Your server never touches a card

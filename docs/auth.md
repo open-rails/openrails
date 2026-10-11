@@ -15,7 +15,8 @@ for a staff or programmatic route's permission, and its recent sign-in
 (helpers/auth `RecentSignInChecker`) for a person. The host names no
 permission and no scope: the names are OpenRails' own ([below](#permissions)),
 and the scopes come from the Authenticator's `RootScope` (helpers/auth `Root`).
-AuthKit provides one as `ak.Authenticator()`. The standalone server mounts its routes
+AuthKit provides one as `ak.Authenticator()`; a host without AuthKit writes
+its own ([below](#your-own-auth)). The standalone server mounts its routes
 with its own AuthKit's, exactly like an embedded host, and the in-process Go
 client brings its own host authority.
 
@@ -27,8 +28,9 @@ client brings its own host authority.
 | access (`GET /v1/admin/access`) | `Authenticate`, then `Can` for each mounted group's permission | any person or application; it answers what they hold |
 | application (`/v1/app`) | `Authenticate`, then `Can` for the route's permission, as a merchant route does | an application (its `Identity.SubjectKind`) holding that permission, never a person |
 
-Every gated route acts on the merchant the credential is bound to, read once
-right after `Authenticate`: the merchant whose scope its `BoundScope` is (the
+Every gated route acts on the merchant the credential is bound to
+([merchant binding](merchant-binding.md)), read once right after
+`Authenticate`: the merchant whose scope its `BoundScope` is (the
 group id being the merchant's id, in the `RootScope`'s authority), else the
 merchant that declares the identity's issuer (`MerchantDeclaration.Issuer`),
 else, for OpenRails' own credentials (a checkout URL's secret, a provisioning
@@ -152,6 +154,43 @@ AuthKit's group routes, then shows the root group's roles and their holders as
 all-merchants staff, and the merchant's group's, each to those holding its
 persona's `roles:read` there. A host that grants only root roles has no group
 for its merchant, and the page shows the root group alone.
+
+## Your own auth
+
+A host without AuthKit implements the same contract over its own users and
+roles: [examples/own-auth](../examples/own-auth) is one, with its tests.
+helpers/auth names no provider, so nothing in it is AuthKit's:
+
+- `Authenticate(r)` reads the request's credential, live: `ErrUnauthenticated`
+  for none or an unknown one (joined with `ErrRevoked` once signed out),
+  `ErrUnavailable` when your store cannot answer. OpenRails passes it no
+  cookies: a browser sends the credential in `Authorization`.
+- `Identity()` names your issuer, the user's UUID as the subject (it is the
+  customer's id), the user as its own invoker, and the credential.
+- `RootScope` is a `Scope{Authority, ID}` naming your root group, where staff
+  of every merchant hold the `root:` names. A merchant's scope is
+  `{Authority: the same, ID: the merchant's id}`: your own name for that
+  merchant's staff group. OpenRails builds it from the merchant's id and keeps
+  no list of scopes.
+- `BoundScope` is the merchant the credential acts at, from your own record
+  (the merchant a session chose), never a request field; zero for none.
+- `Can(ctx, scope, permission)` answers exactly that `billing.Permission` in
+  exactly that scope, read live: a merchant role's `merchant:` names in its
+  merchant's scope, a root role's `root:` names in the root scope. A
+  credential bound to one merchant holds nothing at another; a person keeps
+  their root roles.
+- The recent sign-in check (helpers/auth `RecentSignInChecker`) is nil
+  within your step-up window, else an `auth.Challenge` with
+  `ErrStepUpRequired` and the window as `MaxAge`.
+- `KnownPermission` knows `billing.Permissions()`, so `Mount` checks every
+  route's names.
+
+A host serving one merchant declares its issuer on that merchant
+(`MerchantDeclaration.Issuer`) and returns a zero `BoundScope`.
+`openrailstest.CheckAuth` checks the result in CI. A host's directory is
+`Deps.UserInfo` (`Get` and `Search` over its users).
+
+## Identities
 
 An identity has three parts:
 

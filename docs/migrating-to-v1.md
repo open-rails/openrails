@@ -18,6 +18,26 @@ Before the code:
   rail (`mobius`). The payer is a *customer*, the opaque caller an *invoker*,
   and a stopped subscription is `canceled`.
 
+## The merchant a request acts on
+
+v0 let a request name its merchant several ways; v1 has one, the merchant its
+credential is bound to ([merchant binding](merchant-binding.md)). Each way
+that went, and what replaced it; the sections below give the details.
+
+| Before | After |
+|---|---|
+| The `OpenRails-Merchant` header (a slug or `id:<uuid>`) | The credential binds the merchant; nothing in the request names it |
+| Merchant API hosts (`<slug>.api.…`): `api_host`, `MerchantDeclaration.APIHost`, the host claim and verify, `GET /v1/admin/api-host` | One API host serves every merchant; a request's Host names none |
+| The merchant in the path: billing-ui's `customerBase`, `/v1/merchants/{id}/…` | A customer token is bound to its merchant |
+| The configured merchant, filling in when nothing named one: `Config.Merchant` | `Config.Merchants`; a single-merchant host's own sign-ins bind by `MerchantDeclaration.Issuer` |
+| `WithMerchant`, `ForMerchantID`, `WithDefaultMerchant`, `WithMerchantID`, `CredentialTarget`, `openrails.RequestMerchant` | The merchant's handle: `Merchant(id)` on the engine or the remote, or `openrails.NewRemoteMerchant` |
+| `Routes.Scope`, `Routes.Permissions` and the host's own permission names | Each route checks its `billing.Permission` pair: the `merchant:` name in the merchant's scope, the `root:` name in the Authenticator's `RootScope` |
+| Codes `merchant_selector_invalid`, `merchant_not_found`, `merchant_binding_mismatch`, `merchant_directory_unavailable` | `403 merchant_unresolved` (bound to no live merchant), `403 customer_issuer_mismatch` (another issuer's customer) |
+| Public reads finding their merchant by Host or the configured merchant | `GET /v1/catalog/products` takes `merchant=<merchant id>`; `GET /v1/config` is the deployment's, `GET /v1/me/config` the merchant's for a bound credential |
+| billing-ui's `anonymous` call option | Public reads send no token; customer calls send a merchant-bound one (`tokenSource`) |
+| The console's merchant in `sessionStorage`, sent as the header | A token exchanged for the chosen merchant, held in memory |
+| The client merchant-selection guide | [Merchant binding](merchant-binding.md) |
+
 ## 1. Configuration
 
 ### `openrails.Config` and `Deps`
