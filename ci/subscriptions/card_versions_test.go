@@ -222,3 +222,34 @@ func TestBasisTheoryUpdaterKeepsTheMethod(t *testing.T) {
 	require.Equal(t, []string{"customer_save/saved", "basis_theory_updater/updated", "basis_theory_updater/brand_changed", "basis_theory_updater/closed"}, w.methodVersions(method))
 	require.Equal(t, []string{"card_on_file/ended/closed"}, w.mandateStates(method))
 }
+
+// A card the provider pull finds changed (NMI's updater reissued it and no
+// notice arrived) is taken as a card version, as a notice's is. Reading the
+// same card again writes none, by the scheduled pull or the operator's; the
+// next change is its own version.
+func TestPullCardChangeWritesACardVersion(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	w.armDestructive()
+	e := enroll(t, w, "nmi", embedded)
+	vault := w.vaultOf(e.method)
+	w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Card.Exp = "0331" })
+
+	w.refreshProviders()
+	require.Equal(t, []string{"customer_save/saved", "provider_read/updated"}, w.methodVersions(e.method))
+	require.Equal(t, "3/2031", w.methodRow(e.method, "card_exp_month::text || '/' || card_exp_year::text"))
+	var ref, expiry string
+	require.NoError(t, w.pool.QueryRow(t.Context(), w.q(`SELECT event_ref, card_exp_month::text || '/' || card_exp_year::text FROM billing.payment_method_versions
+		WHERE payment_method_id = $1 AND source = 'provider_read'`), strings.TrimPrefix(e.method, "pm_")).Scan(&ref, &expiry))
+	require.Equal(t, "3/2031", expiry, "the version holds the card the pull read")
+	require.Regexp(t, `^pull:[0-9a-f-]{36}$`, ref, "the version names the pull that read it")
+
+	w.refreshProviders()
+	w.cliPull("nmi", true)
+	require.Equal(t, []string{"customer_save/saved", "provider_read/updated"}, w.methodVersions(e.method), "the same card read again writes no version")
+
+	w.nmi.EditVault(vault, func(v *nmimock.Vault) { v.Card.Exp = "0433" })
+	w.cliPull("nmi", true)
+	require.Equal(t, []string{"customer_save/saved", "provider_read/updated", "provider_read/updated"}, w.methodVersions(e.method))
+	require.Equal(t, "4/2033", w.methodRow(e.method, "card_exp_month::text || '/' || card_exp_year::text"))
+}

@@ -16,6 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/grants"
+	"github.com/open-rails/openrails/internal/modules/paymentmethods"
 	"github.com/open-rails/openrails/internal/modules/payments"
 	"github.com/open-rails/openrails/internal/shared/moneyutil"
 )
@@ -167,10 +168,30 @@ func (w *PGLocalWriter) RecordRefund(ctx context.Context, a RecordRefundAction) 
 	return n > 0, nil
 }
 
+// AdoptPaymentMethod takes the provider's card onto the method through the
+// card writer every source uses, so the change is a card version
+// (provider_read) and a pull that reads the same card again writes nothing. A
+// method that writer no longer versions (its status is final) keeps the
+// in-place adoption.
 func (w *PGLocalWriter) AdoptPaymentMethod(ctx context.Context, a AdoptPaymentMethodAction) (bool, error) {
 	tid, err := merchant.Require(ctx)
 	if err != nil {
 		return false, err
+	}
+	var life paymentmethods.CardLifecycle
+	err = w.DB.MerchantTx(ctx, func(ctx context.Context, tx pgx.Tx) error {
+		life, err = paymentmethods.ApplyCardLifecycle(ctx, gen.New(tx), paymentmethods.CardEvent{
+			MerchantID: tid.UUID(), PaymentMethodID: a.PaymentMethodID,
+			Source: paymentmethods.SourceProviderRead, EventRef: a.EventRef,
+			Card: paymentmethods.Card{Card: a.Card}, At: w.now(),
+		})
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	if life.Method.Status == paymentmethods.StatusActive {
+		return life.Change != "", nil
 	}
 	_, last4, month, year := a.Card.Columns()
 	n, err := w.DB.Gen(ctx).ReconcileAdoptPaymentMethod(ctx, gen.ReconcileAdoptPaymentMethodParams{

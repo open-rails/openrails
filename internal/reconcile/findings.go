@@ -252,6 +252,8 @@ type AdoptPaymentMethodAction struct {
 	PaymentMethodID uuid.UUID
 	// Card is the rail's record: its last four and expiry are adopted.
 	Card models.Card
+	// EventRef names the pull that read the card; its card version carries it.
+	EventRef string
 }
 
 // GrantAccessAction grants a subscription's product for one window (PS-4

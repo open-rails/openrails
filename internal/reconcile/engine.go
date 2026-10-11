@@ -497,7 +497,7 @@ func (e *Engine) runProvider(ctx context.Context, runID uuid.UUID, provider Prov
 		}
 	}
 	findings = confirmPaymentMethodFindings(ctx, provider, fetcher, local, findings)
-	bindApplyActions(findings, binding.ID)
+	bindApplyActions(findings, binding.ID, runID)
 
 	if snap.Capabilities.Transactions {
 		history, historyNote := e.fetchHistory(ctx, provider, params)
@@ -766,9 +766,9 @@ func (e *Engine) fetchHistory(ctx context.Context, provider Provider, params Run
 }
 
 // bindApplyActions stamps the pull's PSP onto every local write the pass will
-// perform. runProvider refuses a section without a PSP, so no mirror row the
-// pull path creates is unattributed.
-func bindApplyActions(findings []Finding, psp uuid.UUID) {
+// perform, and its run onto a card it adopts. runProvider refuses a section
+// without a PSP, so no mirror row the pull path creates is unattributed.
+func bindApplyActions(findings []Finding, psp, runID uuid.UUID) {
 	pspID := &psp
 	for i := range findings {
 		a := findings[i].Apply
@@ -786,6 +786,9 @@ func bindApplyActions(findings []Finding, psp uuid.UUID) {
 			if a.Materialize.Backfill != nil {
 				a.Materialize.Backfill.PspID = pspID
 			}
+		}
+		if a.AdoptPaymentMethod != nil {
+			a.AdoptPaymentMethod.EventRef = "pull:" + runID.String()
 		}
 	}
 }
