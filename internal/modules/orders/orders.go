@@ -172,6 +172,10 @@ func (o *Order) View(nextAction *billing.NextAction, options []billing.OrderPaym
 	if o.AwaitsCustomer() {
 		out.Payment.NextAction = nextAction
 	}
+	if o.CheckoutExpiresAt != nil && o.CheckoutSuccessUrl != nil && o.CheckoutSavedPaymentMethods != nil {
+		out.Checkout = &billing.OrderCheckout{ExpiresAt: o.CheckoutExpiresAt.UTC(), SuccessURL: *o.CheckoutSuccessUrl,
+			CancelURL: o.CheckoutCancelUrl, SavedPaymentMethods: *o.CheckoutSavedPaymentMethods}
+	}
 	if o.Status == string(billing.OrderOpen) && options != nil {
 		out.PaymentOptions = options
 	}

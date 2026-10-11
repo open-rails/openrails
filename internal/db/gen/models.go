@@ -933,6 +933,13 @@ type BillingOrder struct {
 	UpdatedAt        time.Time
 	// The payment's own status: requires_payment_method (none yet, or the last declined: last_payment_error), requires_action, processing or succeeded. A closed order paid late is succeeded with its payment refunded.
 	PaymentStatus string
+	// sha256 of the hosted checkout URL's secret; the secret is never stored. Set once, on a merchant order.
+	CheckoutSecretHash []byte
+	// When the checkout URL stops working; no later than the order's own expiry.
+	CheckoutExpiresAt           *time.Time
+	CheckoutSuccessUrl          *string
+	CheckoutCancelUrl           *string
+	CheckoutSavedPaymentMethods *bool
 }
 
 // One line of an order, frozen at creation: a price, its quantity (seats on a per-seat recurring price, units of a consumable, NULL on any other recurring price) and amounts, the ownership rule it was sold under, and what paying it produced (subscription_id, product_access_id). Retention: deleted with their order.

@@ -6,9 +6,13 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/api"
+	identity "github.com/open-rails/openrails/internal/billingidentity"
 	"github.com/open-rails/openrails/internal/cardguard"
+	"github.com/open-rails/openrails/internal/hostedcheckout"
 	httprequest "github.com/open-rails/openrails/internal/http/request"
 	"github.com/open-rails/openrails/internal/modules/checkout"
 	"github.com/open-rails/openrails/internal/modules/orders"
@@ -140,6 +144,9 @@ func CreateMyOrder(r *httprequest.Request) {
 func PayMyOrder(r *httprequest.Request) {
 	var body billing.PayOrderParams
 	if !r.BindJSON(&body) {
+		return
+	}
+	if !checkoutPayment(r, body) {
 		return
 	}
 	actor := orderActor(r, true)
@@ -383,4 +390,46 @@ func CancelMerchantOrder(r *httprequest.Request) {
 		return
 	}
 	writeOrder(r, order)
+}
+
+// checkoutPayment refuses on the hosted checkout host what its secret does
+// not open: a saved card the checkout does not offer (the merchant's opt-in,
+// and cards the customer allowed to be shown again), or another attempt once
+// the order took its most declines.
+func checkoutPayment(r *httprequest.Request, body billing.PayOrderParams) bool {
+	c, ok := hostedcheckout.FromContext(r.Request.Context())
+	if !ok {
+		return true
+	}
+	ctx := r.Request.Context()
+	if pm := body.Payment.PaymentMethodID; pm != nil {
+		offered := false
+		if c.SavedPaymentMethods {
+			methods, err := r.State.PaymentMethodService.ListByIDs(ctx, c.CustomerID.UUID(), []uuid.UUID{pm.UUID()})
+			if err != nil {
+				r.InternalError("failed to read the payment method", err)
+				return false
+			}
+			views, err := paymentMethodsView(r, identity.CustomerID(c.CustomerID.UUID()), methods, false)
+			if err != nil {
+				r.InternalError("failed to read the payment method", err)
+				return false
+			}
+			offered = len(hostedcheckout.SavedCards(views)) == 1
+		}
+		if !offered {
+			r.APIError(api.Coded(billing.CodeResourceNotFound, "payment method not found").WithParam("payment.payment_method_id"))
+			return false
+		}
+	}
+	exhausted, err := hostedcheckout.NewStore(r.State.DB).Exhausted(ctx, c)
+	if err != nil {
+		r.InternalError("failed to count the checkout's attempts", err)
+		return false
+	}
+	if exhausted {
+		r.ErrorCode("checkout_attempts_exhausted", "")
+		return false
+	}
+	return true
 }

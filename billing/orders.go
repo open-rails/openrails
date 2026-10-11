@@ -110,14 +110,18 @@ type PreviewOrderParams struct {
 
 // CreateOrderParams creates a merchant order: an unpaid order for one
 // customer, which they pay on the merchant's own site
-// (POST /v1/me/orders/{id}/pay). It never charges. ExpiresAt defaults to 30
-// days and is at most 120 days away. IdempotencyKey is required: a retry
-// with it answers the same order.
+// (POST /v1/me/orders/{id}/pay), or, with Checkout, at a hosted checkout. It
+// never charges. ExpiresAt defaults to 30 days, or to the checkout's expiry
+// with Checkout, and is at most 120 days away. IdempotencyKey is required: a
+// retry with it answers the same order.
 type CreateOrderParams struct {
-	CustomerID     CustomerID        `json:"customer_id"`
-	Lines          []OrderLineParams `json:"lines"`
-	ExpiresAt      *time.Time        `json:"expires_at,omitempty"`
-	IdempotencyKey string            `json:"-"`
+	CustomerID CustomerID        `json:"customer_id"`
+	Lines      []OrderLineParams `json:"lines"`
+	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
+	// Checkout asks for a hosted checkout: the order's Checkout.URL, where
+	// the customer pays. The deployment must serve one.
+	Checkout       *OrderCheckoutParams `json:"checkout,omitempty"`
+	IdempotencyKey string               `json:"-"`
 }
 
 // PayOrderParams pays an open order; Reusable as in CreateMyOrderParams.
@@ -142,11 +146,13 @@ type Order struct {
 	Payment  OrderPayment `json:"payment"`
 	// PaymentOptions are the PSPs that can take this order while it is open.
 	PaymentOptions []OrderPaymentOption `json:"payment_options"`
-	ExpiresAt      time.Time            `json:"expires_at"`
-	CompletedAt    *time.Time           `json:"completed_at"`
-	CanceledAt     *time.Time           `json:"canceled_at"`
-	ExpiredAt      *time.Time           `json:"expired_at"`
-	CreatedAt      time.Time            `json:"created_at"`
+	// Checkout is the order's hosted checkout; null without one.
+	Checkout    *OrderCheckout `json:"checkout"`
+	ExpiresAt   time.Time      `json:"expires_at"`
+	CompletedAt *time.Time     `json:"completed_at"`
+	CanceledAt  *time.Time     `json:"canceled_at"`
+	ExpiredAt   *time.Time     `json:"expired_at"`
+	CreatedAt   time.Time      `json:"created_at"`
 }
 
 // OrderPayment is an order's payment, as a Stripe PaymentIntent reads.

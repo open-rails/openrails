@@ -8,6 +8,7 @@ import (
 	"errors"
 	"maps"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/open-rails/openrails/billing"
@@ -45,6 +46,11 @@ func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Reques
 				return
 			}
 			doc.Payment = &payment
+			who, ok := loadPublicMerchant(r, mid)
+			if !ok {
+				return
+			}
+			doc.Merchant = &who
 		}
 		// A document listing a temporarily unavailable PSP is never cached:
 		// the next request may find it available.
@@ -161,6 +167,31 @@ func loadPaymentConfig(r *httprequest.Request, mid billing.MerchantID) (billing.
 		return billing.PaymentConfig{}, false
 	}
 	return billing.PaymentConfig{PSPs: psps, Solana: solana}, true
+}
+
+// loadPublicMerchant is the merchant's display name, and its logo and
+// support page when they are https URLs.
+func loadPublicMerchant(r *httprequest.Request, mid billing.MerchantID) (billing.PublicMerchant, bool) {
+	name, settings, err := r.State.Merchants.MerchantSettings(r.Request.Context(), mid)
+	if err != nil {
+		log.WithContext(r.Request.Context()).WithError(err).WithField("merchant_id", mid.String()).Error("public config: merchant settings could not be loaded")
+		r.ErrorCode(billing.CodeInternalError, "failed to load the merchant")
+		return billing.PublicMerchant{}, false
+	}
+	who := billing.PublicMerchant{DisplayName: name}
+	if p := settings.Profile; p != nil {
+		who.LogoURL, who.SupportURL = httpsURL(p.LogoURL), httpsURL(p.SupportURL)
+	}
+	return who, true
+}
+
+func httpsURL(raw string) *string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
+		return nil
+	}
+	out := u.String()
+	return &out
 }
 
 // pspArmed reports whether a declared account resolves with its full credential

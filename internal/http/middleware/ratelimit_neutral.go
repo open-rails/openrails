@@ -555,20 +555,39 @@ func CheckoutSessionRateLimit(rt *app.Runtime, bucket string, perMinute int) rou
 				return
 			}
 			sum := sha256.Sum256([]byte(id))
-			subject := "ocs:" + hex.EncodeToString(sum[:16])
-			result := allow(r.Request.Context(), rt.AbuseState, subject, bucket, perMinute)
-			if !result.allowed {
-				retryAfter := int(math.Ceil(result.reset.Seconds()))
-				if retryAfter <= 0 {
-					retryAfter = 60
-				}
-				r.SetHeader("Retry-After", strconv.Itoa(retryAfter))
-				r.AbortCode(billing.CodeRateLimitExceeded, "Rate limit exceeded")
-				return
+			if limitSubject(r, rt, "ocs:"+hex.EncodeToString(sum[:16]), bucket, perMinute) {
+				next(r)
 			}
-			next(r)
 		}
 	}
+}
+
+// CheckoutURLRateLimit limits the requests under one hosted checkout URL,
+// keyed by its order (key; "" passes), whatever address presents it.
+func CheckoutURLRateLimit(rt *app.Runtime, bucket string, perMinute int, key func(*request.Request) string) router.Middleware {
+	return func(next router.Handler) router.Handler {
+		return func(r *request.Request) {
+			order := key(r)
+			if rt == nil || rt.Config == nil || rt.Config.RateLimits == nil || order == "" || limitSubject(r, rt, "cks:"+order, bucket, perMinute) {
+				next(r)
+			}
+		}
+	}
+}
+
+// limitSubject counts one request of subject in bucket; false answered 429.
+func limitSubject(r *request.Request, rt *app.Runtime, subject, bucket string, perMinute int) bool {
+	result := allow(r.Request.Context(), rt.AbuseState, subject, bucket, perMinute)
+	if result.allowed {
+		return true
+	}
+	retryAfter := int(math.Ceil(result.reset.Seconds()))
+	if retryAfter <= 0 {
+		retryAfter = 60
+	}
+	r.SetHeader("Retry-After", strconv.Itoa(retryAfter))
+	r.AbortCode(billing.CodeRateLimitExceeded, "Rate limit exceeded")
+	return false
 }
 
 // LogPath is r's path for logs. A checkout session id is a bearer

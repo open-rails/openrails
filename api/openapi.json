@@ -13362,6 +13362,9 @@
           "expires_at": {
             "type": "string",
             "format": "date-time"
+          },
+          "checkout": {
+            "$ref": "#/components/schemas/OrderCheckoutParams"
           }
         }
       },
@@ -17023,6 +17026,16 @@
               "$ref": "#/components/schemas/OrderPaymentOption"
             }
           },
+          "checkout": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/OrderCheckout"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "expires_at": {
             "type": "string",
             "format": "date-time"
@@ -17076,12 +17089,73 @@
           "lines",
           "payment",
           "payment_options",
+          "checkout",
           "expires_at",
           "completed_at",
           "canceled_at",
           "expired_at",
           "created_at"
         ]
+      },
+      "OrderCheckout": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "success_url": {
+            "type": "string"
+          },
+          "cancel_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "saved_payment_methods": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "url",
+          "expires_at",
+          "success_url",
+          "cancel_url",
+          "saved_payment_methods"
+        ]
+      },
+      "OrderCheckoutParams": {
+        "type": "object",
+        "properties": {
+          "success_url": {
+            "type": "string"
+          },
+          "cancel_url": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "saved_payment_methods": {
+            "type": "boolean"
+          }
+        }
       },
       "OrderHostEvent": {
         "type": "object",
@@ -20225,6 +20299,16 @@
               }
             ]
           },
+          "merchant": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/PublicMerchant"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "captcha": {
             "oneOf": [
               {
@@ -20241,7 +20325,41 @@
           "currencies",
           "rails",
           "payment",
+          "merchant",
           "captcha"
+        ]
+      },
+      "PublicMerchant": {
+        "type": "object",
+        "properties": {
+          "display_name": {
+            "type": "string"
+          },
+          "logo_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "support_url": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "display_name",
+          "logo_url",
+          "support_url"
         ]
       },
       "Quantity": {
@@ -22603,6 +22721,21 @@
       "type": "invalid_request_error",
       "meaning": "The checkout attempt expired before it was paid."
     },
+    "checkout_attempts_exhausted": {
+      "status": 409,
+      "type": "invalid_request_error",
+      "meaning": "The checkout took its most card attempts; the merchant creates a new order."
+    },
+    "checkout_expired": {
+      "status": 410,
+      "type": "invalid_request_error",
+      "meaning": "The checkout URL expired; the merchant creates a new order."
+    },
+    "checkout_not_found": {
+      "status": 404,
+      "type": "invalid_request_error",
+      "meaning": "The checkout URL is unknown or no longer valid."
+    },
     "checkout_offer_unavailable": {
       "status": 422,
       "type": "invalid_request_error",
@@ -22757,6 +22890,11 @@
       "status": 401,
       "type": "authentication_error",
       "meaning": "The in-process host principal is bound to no merchant."
+    },
+    "hosted_checkout_unavailable": {
+      "status": 400,
+      "type": "invalid_request_error",
+      "meaning": "This deployment serves no hosted checkout, or the order cannot take one."
     },
     "idempotency_key_in_progress": {
       "status": 409,

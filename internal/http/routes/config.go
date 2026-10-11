@@ -10,7 +10,7 @@ import (
 // currency registry and the merchant's browser payment setup. It is always
 // mounted, so even a minimal deployment is discoverable.
 var configRoutes = []Route{
-	{Method: GET, Path: "/v1/config", Group: Meta, Auth: AuthPublic,
+	{Method: GET, Path: "/v1/config", Group: Meta, Auth: AuthPublic, Checkout: CheckoutPublic,
 		Responses: []Reply{{200, billing.PublicConfig{}}}, Bind: publicConfig},
 }
 

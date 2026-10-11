@@ -287,6 +287,10 @@ trust domain. The token contract and checkout flows are in
 [frontend-integration.md](frontend-integration.md); the trust model is in
 [auth.md](auth.md). CORS requires zero configuration (see below).
 
+To let customers pay off your site instead, turn on the server's hosted
+checkout and create merchant orders with `checkout`: see
+[hosted-checkout.md](hosted-checkout.md).
+
 ### Trusted issuers: staff, machines and customers
 
 Your identity provider lets your staff, admin UI, machines and customers call

@@ -143,6 +143,20 @@ const (
 	ThrottleSessionPay  Throttle = "checkout_session_pay"
 )
 
+// CheckoutAccess is how the hosted checkout host serves a route under a
+// checkout URL's secret, which acts as its order's customer.
+type CheckoutAccess string
+
+const (
+	// CheckoutPublic: a public route, at the secret's merchant.
+	CheckoutPublic CheckoutAccess = "public"
+	// CheckoutOrder: a customer route whose {id} is the secret's order.
+	CheckoutOrder CheckoutAccess = "order"
+	// CheckoutSavedCards: a customer route served only when the checkout
+	// offers saved cards.
+	CheckoutSavedCards CheckoutAccess = "saved_cards"
+)
+
 // Reply is one success outcome of a route: its status and body. Body is a
 // zero value of the body's type; nil for none.
 type Reply struct {
@@ -281,6 +295,9 @@ type Route struct {
 	NoConn bool
 	// IdempotencyKey: the route reads the Idempotency-Key header.
 	IdempotencyKey bool
+	// Checkout is what a checkout URL's secret opens of the route on the
+	// hosted checkout host; none is not served there.
+	Checkout CheckoutAccess
 
 	// Query lists the query parameters; Request is a zero value of the JSON
 	// body's type (nil for none); Responses is every success outcome.
@@ -368,6 +385,19 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		}
 		if (r.Auth == AuthApplication) != (r.Permission != "") || r.Permission != "" && !slices.Contains(AppNeeds, r.Permission) {
 			panic(fmt.Sprintf("routes: %s: a programmatic route, and only one, names its permission, one of %v (a new one is added to AppNeeds)", r.Key(), AppNeeds))
+		}
+		switch r.Checkout {
+		case "":
+		case CheckoutPublic:
+			if r.Auth != AuthPublic {
+				panic("routes: " + r.Key() + ": a public checkout route takes no credential")
+			}
+		case CheckoutOrder, CheckoutSavedCards:
+			if r.Auth != AuthCustomer || (r.Checkout == CheckoutOrder) != strings.Contains(r.Path, "{id}") {
+				panic("routes: " + r.Key() + ": a checkout customer route is a customer route; an order route names the order as {id}")
+			}
+		default:
+			panic("routes: " + r.Key() + ": unknown checkout access " + string(r.Checkout))
 		}
 		byKey[r.Key()] = r
 	}

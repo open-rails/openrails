@@ -17,6 +17,7 @@ import (
 	"github.com/open-rails/openrails/internal/db"
 	"github.com/open-rails/openrails/internal/db/gen"
 	"github.com/open-rails/openrails/internal/db/models"
+	"github.com/open-rails/openrails/internal/hostedcheckout"
 	"github.com/open-rails/openrails/internal/intents"
 	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/modules/checkout"
@@ -707,11 +708,41 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	if key == "" {
 		return nil, false, apperr.New(http.StatusBadRequest, "idempotency_key_required", "Idempotency-Key header is required")
 	}
+	now := s.now()
 	ttl := orders.MerchantTTL
 	if params.ExpiresAt != nil {
-		ttl = params.ExpiresAt.Sub(s.now())
+		ttl = params.ExpiresAt.Sub(now)
 		if ttl < time.Hour || ttl > orders.MaxMerchantTTL {
 			return nil, false, errMerchantOrderExpiry
+		}
+	}
+	// A hosted checkout is checked before the order exists; without an
+	// expiry of its own, the order expires with it (Stripe).
+	var attach func(context.Context, *gen.Queries, uuid.UUID) error
+	var checkoutURL string
+	if params.Checkout != nil {
+		origin := s.rt.HostedCheckoutOrigin
+		if origin == "" {
+			return nil, false, apperr.New(http.StatusBadRequest, "hosted_checkout_unavailable", "this deployment serves no hosted checkout").WithParam("checkout")
+		}
+		plan, err := hostedcheckout.Plan(*params.Checkout, billing.OrderID{}, now, params.ExpiresAt)
+		if err != nil {
+			return nil, false, err
+		}
+		if params.ExpiresAt == nil {
+			ttl = plan.ExpiresAt.Sub(now)
+		}
+		attach = func(ctx context.Context, q *gen.Queries, id uuid.UUID) error {
+			mid, err := merchant.Require(ctx)
+			if err != nil {
+				return err
+			}
+			c, err := hostedcheckout.Plan(*params.Checkout, billing.OrderID(id), now, params.ExpiresAt)
+			if err != nil {
+				return err
+			}
+			checkoutURL, err = hostedcheckout.Attach(ctx, q, origin, mid, c, now)
+			return err
 		}
 	}
 	if err := s.orderCustomerAllowed(ctx, params.CustomerID); err != nil {
@@ -729,7 +760,7 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 	order := existing
 	if !replayed {
 		if order, err = rt.Orders.Create(ctx, orders.CreateInput{CustomerID: params.CustomerID.UUID(), Origin: billing.OrderOriginMerchant, Lines: params.Lines,
-			IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl}); err != nil {
+			IdempotencyKey: scoped, RequestDigest: digest, TTL: ttl, Attach: attach}); err != nil {
 			if db.IsUniqueViolation(err) {
 				return nil, false, ErrIdempotencyKeyInUse
 			}
@@ -737,6 +768,10 @@ func (s *Service) CreateMerchantOrder(ctx context.Context, params billing.Create
 		}
 	}
 	view, err := s.merchantOrderView(ctx, order)
+	if err == nil && checkoutURL != "" && view.Checkout != nil {
+		// Shown once: only the hash is kept.
+		view.Checkout.URL = &checkoutURL
+	}
 	return view, replayed, err
 }
 

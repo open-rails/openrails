@@ -165,6 +165,9 @@ type Runtime struct {
 	// AppRequests replays the programmatic routes' writes by their
 	// Idempotency-Key.
 	AppRequests *idempotency.Store
+	// HostedCheckoutOrigin is where a server serving the hosted checkout
+	// serves it; merchant orders take a checkout only when it is set.
+	HostedCheckoutOrigin string
 	// AlertService delivers immediate merchant notifications and manages webhooks.
 	AlertService *alerting.Service
 	// WebhookHealth records inbound-webhook liveness per (merchant, rail) at the

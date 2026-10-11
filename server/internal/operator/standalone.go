@@ -1,6 +1,8 @@
 package operator
 
 import (
+	"io/fs"
+
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/server/internal/controlplane"
@@ -17,6 +19,10 @@ type Surface struct {
 	// Resource is AuthKit's resource identifier, the console's audience at a
 	// trusted issuer.
 	Resource string
+	// CheckoutOrigin serves the hosted checkout there, from CheckoutAssets;
+	// empty serves none.
+	CheckoutOrigin string
+	CheckoutAssets fs.FS
 }
 
 // StandaloneServer builds the standalone surface over the engine graph a and
@@ -24,13 +30,15 @@ type Surface struct {
 // Authenticator, AuthKit's own and the admin console.
 func StandaloneServer(a *app.App, cp *controlplane.ControlPlane, s Surface) (*server.Server, error) {
 	return server.New(server.Dependencies{
-		Config:        a.Config,
-		Runtime:       a.Runtime,
-		ControlPlane:  cp,
-		Resource:      s.Resource,
-		ConsoleIssuer: s.ConsoleIssuer,
-		ConsoleAssets: a.ConsoleAssets,
-		RouteGroups:   s.RouteGroups,
-		AdminConsole:  s.AdminConsole,
+		Config:         a.Config,
+		Runtime:        a.Runtime,
+		ControlPlane:   cp,
+		Resource:       s.Resource,
+		ConsoleIssuer:  s.ConsoleIssuer,
+		ConsoleAssets:  a.ConsoleAssets,
+		RouteGroups:    s.RouteGroups,
+		AdminConsole:   s.AdminConsole,
+		CheckoutOrigin: s.CheckoutOrigin,
+		CheckoutAssets: s.CheckoutAssets,
 	})
 }

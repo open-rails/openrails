@@ -13,9 +13,20 @@ type PublicConfig struct {
 	// Payment is the merchant's browser payment setup; null when the request
 	// resolves no merchant.
 	Payment *PaymentConfig `json:"payment"`
+	// Merchant is how the merchant presents itself to its customers; null
+	// when the request resolves no merchant.
+	Merchant *PublicMerchant `json:"merchant"`
 	// Captcha is the challenge to solve when a request answers 403
 	// captcha_required; null when the deployment challenges nobody.
 	Captcha *CaptchaConfig `json:"captcha"`
+}
+
+// PublicMerchant is the merchant as its customers see it: its name, and its
+// logo and support page when its settings name https ones.
+type PublicMerchant struct {
+	DisplayName string  `json:"display_name"`
+	LogoURL     *string `json:"logo_url"`
+	SupportURL  *string `json:"support_url"`
 }
 
 // CaptchaConfig is how a browser solves the deployment's captcha: load

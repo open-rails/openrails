@@ -577,6 +577,7 @@ export type CreateOrderParams = {
   customer_id?: string
   lines?: OrderLineParams[]
   expires_at?: string
+  checkout?: OrderCheckoutParams
 }
 
 export type CreatePSPParams = {
@@ -1401,11 +1402,27 @@ export type Order = {
   lines: OrderLine[]
   payment: OrderPayment
   payment_options: OrderPaymentOption[]
+  checkout: OrderCheckout | null
   expires_at: string
   completed_at: string | null
   canceled_at: string | null
   expired_at: string | null
   created_at: string
+}
+
+export type OrderCheckout = {
+  url: string | null
+  expires_at: string
+  success_url: string
+  cancel_url: string | null
+  saved_payment_methods: boolean
+}
+
+export type OrderCheckoutParams = {
+  success_url?: string
+  cancel_url?: string
+  expires_at?: string
+  saved_payment_methods?: boolean
 }
 
 export type OrderHostEvent = {
@@ -2011,7 +2028,14 @@ export type PublicConfig = {
   currencies: CurrencyUnits[]
   rails: RailDefinition[]
   payment: PaymentConfig | null
+  merchant: PublicMerchant | null
   captcha: CaptchaConfig | null
+}
+
+export type PublicMerchant = {
+  display_name: string
+  logo_url: string | null
+  support_url: string | null
 }
 
 export type Quantity = {

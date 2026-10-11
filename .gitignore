@@ -25,10 +25,11 @@ go.work.sum
 .gobuildcache
 .gopath
 
-# Build artifacts (goreleaser, frontend builds). web/admin/dist keeps only
-# its committed placeholder (web/admin/embed.go, #754).
+# Build artifacts (goreleaser, frontend builds). web/admin/dist and
+# web/checkout/dist keep only their committed placeholders (embed.go).
 dist/
 !web/admin/dist/
+!web/checkout/dist/
 build/
 bin/
 /openrails

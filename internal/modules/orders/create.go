@@ -41,6 +41,9 @@ type CreateInput struct {
 	// FromCart buys the customer's cart instead of Lines, emptying it in the
 	// order's transaction.
 	FromCart bool
+	// Attach runs in the order's transaction once the order exists, before a
+	// zero total completes it: the hosted checkout is written with it.
+	Attach func(ctx context.Context, q *gen.Queries, order uuid.UUID) error
 }
 
 // Create freezes lines into an order and claims what its unique lines buy.
@@ -137,6 +140,11 @@ func (s *Service) Create(ctx context.Context, in CreateInput) (*Order, error) {
 					return err
 				}
 				return &LineError{Index: i, Refusal: *claimRefusal(held)}
+			}
+		}
+		if in.Attach != nil {
+			if err := in.Attach(ctx, q, id); err != nil {
+				return err
 			}
 		}
 		if quote.Total > 0 {

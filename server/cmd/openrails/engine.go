@@ -26,8 +26,9 @@ func serverConfig(ctx context.Context) (server.Config, error) {
 	cfg := server.Config{
 		Engine: *h.Config, Auth: h.Auth, LocalSignIn: h.LocalSignIn, Naming: h.Naming,
 		RouteGroups: h.RouteGroups, AdminConsole: h.AdminConsole, ConsoleIssuer: h.ConsoleIssuer,
-		Addr:       net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
-		DrainDelay: h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
+		HostedCheckoutURL: h.HostedCheckoutURL,
+		Addr:              net.JoinHostPort(h.Host, strconv.Itoa(h.Port)),
+		DrainDelay:        h.DrainDelay, ShutdownTimeout: h.ShutdownTimeout,
 	}
 	if h.PrivatePort != 0 {
 		cfg.PrivateAddr = net.JoinHostPort(h.Host, strconv.Itoa(h.PrivatePort))
