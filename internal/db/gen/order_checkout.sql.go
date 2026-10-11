@@ -67,6 +67,39 @@ func (q *Queries) GetOrderCheckout(ctx context.Context, arg GetOrderCheckoutPara
 	return i, err
 }
 
+const getOrderMerchant = `-- name: GetOrderMerchant :many
+SELECT o.merchant_id
+FROM billing.orders o
+JOIN billing.merchants m ON m.id = o.merchant_id
+WHERE o.id = $1::uuid
+  AND m.deleted_at IS NULL AND m.status = 'active'
+LIMIT 2
+`
+
+// Merchant directory: the live merchant an order id names, read before any
+// merchant connection is pinned: a wallet's Solana Pay request carries
+// nothing else. The id is not a credential; two rows reveal ambiguity, never
+// a choice.
+func (q *Queries) GetOrderMerchant(ctx context.Context, id uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, getOrderMerchant, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var merchant_id uuid.UUID
+		if err := rows.Scan(&merchant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, merchant_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveEmbeddedCheckoutMerchant = `-- name: ResolveEmbeddedCheckoutMerchant :many
 SELECT o.merchant_id
 FROM billing.orders o

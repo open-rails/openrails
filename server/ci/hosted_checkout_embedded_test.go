@@ -65,8 +65,7 @@ func TestHostedCheckoutEmbedded(t *testing.T) {
 
 	// The page reads the merchant's origins to tell its frame it completed,
 	// and its order reads its mode.
-	cfg := decode[billing.PublicConfig](t, s.call(checkoutHost, http.MethodGet, "/v1/config", secret, "", nil))
-	require.NotNil(t, cfg.Merchant)
+	cfg := decode[billing.CustomerConfig](t, s.call(checkoutHost, http.MethodGet, "/v1/me/config", secret, "", nil))
 	require.Equal(t, []string{"https://shop.e2e.test", "http://localhost:3000"}, cfg.Merchant.EmbedOrigins)
 	read := decode[billing.Order](t, s.call(checkoutHost, http.MethodGet, "/v1/me/orders/"+embedded.ID.String(), secret, "", nil))
 	require.Equal(t, billing.CheckoutEmbedded, read.Checkout.UIMode)

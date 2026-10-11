@@ -517,14 +517,19 @@ func (w *world) start() {
 	require.NoError(t, err)
 	w.client = map[topology]*openrails.Client{embedded: local, remote: over}
 	require.Eventually(t, func() bool { return rt.Ready(t.Context()) == nil }, 10*time.Second, 50*time.Millisecond, "runtime readiness")
-	config := publicConfig(t, rt)
+	// Each rail's PSP: the one keyed as its rail where a world declares more.
+	archived := false
+	listed, err := local.ListPSPs(t.Context(), billing.PSPListParams{Archived: &archived})
+	require.NoError(t, err)
 	w.psp = map[string]billing.PSPID{}
-	for _, psp := range config.Payment.PSPs {
-		w.psp[psp.Rail] = psp.PSPID
+	for _, psp := range listed.Items {
+		if rail := string(psp.Rail); w.psp[rail].IsZero() || psp.Key == rail {
+			w.psp[rail] = psp.ID
+		}
 	}
 	for _, rail := range []string{"stripe", "nmi"} {
 		if _, declared := psps[rail]; declared {
-			require.False(t, w.psp[rail].IsZero(), "%+v stripe odd=%v nmi odd=%v", config, w.stripe.Unexpected(), w.nmi.Unexpected())
+			require.False(t, w.psp[rail].IsZero(), "%+v stripe odd=%v nmi odd=%v", listed.Items, w.stripe.Unexpected(), w.nmi.Unexpected())
 		}
 	}
 }

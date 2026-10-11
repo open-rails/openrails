@@ -22,42 +22,17 @@ import (
 )
 
 // publicConfigMaxAge is how long a browser may reuse GET /v1/config. The
-// document changes when a deployment changes or an operator arms a PSP; its
-// ETag makes a revalidation a 304.
+// document changes when the deployment does; its ETag makes a revalidation
+// a 304.
 const publicConfigMaxAge = "public, max-age=300"
 
-// GetPublicConfig serves GET /v1/config, unauthenticated: what the mount
-// serves, the currency registry and, when the request resolves a merchant
-// (the Host/api_host mechanism every public route uses), its browser payment
-// setup.
-//
-// Every value is public by nature (an NMI Collect.js key, a Basis Theory
-// public application key). That is enforced structurally by
-// merchants.publicRailProfiles, a whitelist of settings keys: merchant
-// SECRETS live in the secret store, which this path never opens, and a
-// settings key that is not on the whitelist cannot reach the response at all.
+// GetPublicConfig serves GET /v1/config, without a credential: what the
+// mount serves, the currency and rail registries, the captcha and the
+// customer network's sign-in. It names no merchant, so every caller reads
+// the same document and a cache may share it.
 func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Request) {
 	return func(r *httprequest.Request) {
 		doc := publicConfigDocument(r, capabilities)
-		if mid, ok := merchant.FromContext(r.Request.Context()); ok && !mid.IsZero() && r.State != nil && r.State.Merchants != nil {
-			payment, ok := loadPaymentConfig(r, mid)
-			if !ok {
-				return
-			}
-			doc.Payment = &payment
-			who, ok := loadPublicMerchant(r, mid)
-			if !ok {
-				return
-			}
-			doc.Merchant = &who
-		}
-		// A document listing a temporarily unavailable PSP is never cached:
-		// the next request may find it available.
-		if doc.Payment != nil && degraded(*doc.Payment) {
-			r.SetHeader("Cache-Control", "no-store")
-			r.SuccessJSON(doc)
-			return
-		}
 		encoded, err := json.Marshal(doc)
 		if err != nil {
 			r.ErrorCode(billing.CodeInternalError, "failed to encode the configuration")
@@ -75,9 +50,40 @@ func GetPublicConfig(capabilities billing.Capabilities) func(*httprequest.Reques
 	}
 }
 
+// GetCustomerConfig serves GET /v1/me/config: the payment setup and the
+// public name of the merchant the customer's credential is bound to.
+//
+// Every value is public by nature (an NMI Collect.js key, a Basis Theory
+// public application key). That is enforced structurally by
+// merchants.publicRailProfiles, a whitelist of settings keys: merchant
+// SECRETS live in the secret store, which this path never opens, and a
+// settings key that is not on the whitelist cannot reach the response at all.
+func GetCustomerConfig(r *httprequest.Request) {
+	mid, ok := merchant.FromContext(r.Request.Context())
+	if !ok || r.State == nil || r.State.Merchants == nil {
+		r.ErrorCode(billing.CodeServiceUnavailable, "merchant configuration is unavailable")
+		return
+	}
+	payment, ok := loadPaymentConfig(r, mid)
+	if !ok {
+		return
+	}
+	who, ok := loadPublicMerchant(r, mid)
+	if !ok {
+		return
+	}
+	// A document listing a temporarily unavailable PSP is never stored: the
+	// next request may find it available.
+	cache := "private"
+	if degraded(payment) {
+		cache = "no-store"
+	}
+	r.SetHeader("Cache-Control", cache)
+	r.SuccessJSON(billing.CustomerConfig{Payment: payment, Merchant: who})
+}
+
 // publicConfigDocument is the configuration every merchant of the
-// deployment shares: capabilities, the currency and rail registries and the
-// captcha.
+// deployment shares.
 func publicConfigDocument(r *httprequest.Request, capabilities billing.Capabilities) billing.PublicConfig {
 	doc := billing.PublicConfig{Capabilities: capabilities, Currencies: billing.Currencies(), Rails: merchants.RailDefinitions()}
 	if r.State != nil {

@@ -1556,6 +1556,9 @@ pkg openrails/billing, type CustomerAccount struct, Balances []Balance `json:"ba
 pkg openrails/billing, type CustomerAccount struct, DefaultPaymentMethods []DefaultPaymentMethod `json:"default_payment_methods"`
 pkg openrails/billing, type CustomerAccount struct, ID CustomerID `json:"id"`
 pkg openrails/billing, type CustomerAccount struct, UnreadNotifications int64 `json:"unread_notifications"`
+pkg openrails/billing, type CustomerConfig struct
+pkg openrails/billing, type CustomerConfig struct, Merchant PublicMerchant `json:"merchant"`
+pkg openrails/billing, type CustomerConfig struct, Payment PaymentConfig `json:"payment"`
 pkg openrails/billing, type CustomerContact struct
 pkg openrails/billing, type CustomerContact struct, Active *bool `json:"active"`
 pkg openrails/billing, type CustomerContact struct, Email *string `json:"email"`
@@ -2810,9 +2813,7 @@ pkg openrails/billing, type PublicConfig struct
 pkg openrails/billing, type PublicConfig struct, Capabilities Capabilities `json:"capabilities"`
 pkg openrails/billing, type PublicConfig struct, Captcha *CaptchaConfig `json:"captcha"`
 pkg openrails/billing, type PublicConfig struct, Currencies []CurrencyUnits `json:"currencies"`
-pkg openrails/billing, type PublicConfig struct, Merchant *PublicMerchant `json:"merchant"`
 pkg openrails/billing, type PublicConfig struct, Network *PublicNetwork `json:"network"`
-pkg openrails/billing, type PublicConfig struct, Payment *PaymentConfig `json:"payment"`
 pkg openrails/billing, type PublicConfig struct, Rails []RailDefinition `json:"rails"`
 pkg openrails/billing, type PublicMerchant struct
 pkg openrails/billing, type PublicMerchant struct, DisplayName string `json:"display_name"`

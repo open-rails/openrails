@@ -142,6 +142,11 @@ export type CustomerChangeSubscriptionParams = {
   signature?: string
 }
 
+export type CustomerConfig = {
+  payment: PaymentConfig
+  merchant: PublicMerchant
+}
+
 export type CustomerEntitlement = {
   customer_id: string
   entitlement: string
@@ -574,8 +579,6 @@ export type PublicConfig = {
   capabilities: Capabilities
   currencies: CurrencyUnits[]
   rails: RailDefinition[]
-  payment: PaymentConfig | null
-  merchant: PublicMerchant | null
   captcha: CaptchaConfig | null
   network: PublicNetwork | null
 }

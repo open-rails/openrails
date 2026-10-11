@@ -143,13 +143,26 @@ const (
 	LevelUpdate Level = "update"
 )
 
+// MerchantSource is where a public route, which takes no credential, finds
+// the merchant whose rows it reads.
+type MerchantSource string
+
+const (
+	// MerchantQuery: the merchant id its ?merchant= parameter names.
+	MerchantQuery MerchantSource = "query"
+	// MerchantOrder: the merchant of the order its {id} names.
+	MerchantOrder MerchantSource = "order"
+)
+
 // CheckoutAccess is how the hosted checkout host serves a route under a
 // checkout URL's secret, which acts as its order's customer.
 type CheckoutAccess string
 
 const (
-	// CheckoutPublic: a public route, at the secret's merchant.
+	// CheckoutPublic: a public route.
 	CheckoutPublic CheckoutAccess = "public"
+	// CheckoutMerchant: a customer route about the order's merchant.
+	CheckoutMerchant CheckoutAccess = "merchant"
 	// CheckoutOrder: a customer route whose {id} is the secret's order.
 	CheckoutOrder CheckoutAccess = "order"
 	// CheckoutSavedCards: a customer route served only when the checkout
@@ -179,10 +192,15 @@ type Param struct {
 	// Checked: the mount refuses a value that is not a non-negative integer
 	// (400 invalid_query) before the handler reads it.
 	Checked bool
+	// Required: the route refuses a request without it.
+	Required bool
 }
 
 func text(name string) Param    { return Param{Name: name, Kind: "string"} }
 func integer(name string) Param { return Param{Name: name, Kind: "integer", Checked: true} }
+
+// required is p, which its route refuses a request without.
+func required(p Param) Param { p.Required = true; return p }
 
 // repeated is a parameter given once per value, for values that may hold a
 // comma.
@@ -294,6 +312,9 @@ type Route struct {
 	When Feature
 	// NoConn: the route pins no merchant database connection.
 	NoConn bool
+	// Merchant is where a public route finds its merchant; a public route
+	// that reads no merchant's rows is NoConn instead.
+	Merchant MerchantSource
 	// IdempotencyKey: the route reads the Idempotency-Key header.
 	IdempotencyKey bool
 	// Checkout is what a checkout URL's secret opens of the route on the
@@ -393,13 +414,26 @@ var allRoutes, index = func() ([]Route, map[string]Route) {
 		if err := r.Needs().check(); err != nil {
 			panic("routes: " + r.Key() + ": " + err.Error())
 		}
+		switch r.Merchant {
+		case "":
+			if r.Auth == AuthPublic && !r.NoConn {
+				panic("routes: " + r.Key() + ": a public route names its merchant in the request, or reads no merchant's rows (NoConn)")
+			}
+		case MerchantQuery, MerchantOrder:
+			named := slices.Contains(r.Query, required(text("merchant")))
+			if r.Auth != AuthPublic || r.NoConn || (r.Merchant == MerchantQuery) != named || r.Merchant == MerchantOrder && !strings.Contains(r.Path, "{id}") {
+				panic("routes: " + r.Key() + ": only a public route names its merchant, as ?merchant= or by the order its {id} names")
+			}
+		default:
+			panic("routes: " + r.Key() + ": unknown merchant source " + string(r.Merchant))
+		}
 		switch r.Checkout {
 		case "":
 		case CheckoutPublic:
 			if r.Auth != AuthPublic {
 				panic("routes: " + r.Key() + ": a public checkout route takes no credential")
 			}
-		case CheckoutOrder, CheckoutSavedCards, CheckoutLink:
+		case CheckoutOrder, CheckoutSavedCards, CheckoutLink, CheckoutMerchant:
 			if r.Auth != AuthCustomer || (r.Checkout == CheckoutOrder) != strings.Contains(r.Path, "{id}") {
 				panic("routes: " + r.Key() + ": a checkout customer route is a customer route; an order route names the order as {id}")
 			}
@@ -436,8 +470,6 @@ func TierErrors(tier Tier) []string {
 	staff := []string{billing.CodeHostPrincipalInvalid}
 	var own []string
 	switch tier {
-	case AuthPublic:
-		own = []string{billing.CodeMerchantNotFound} // the Host names no merchant
 	case AuthCustomer:
 		// network_account_linked: an account linked to another customer of
 		// the merchant, where the customer network runs.
@@ -451,6 +483,8 @@ func TierErrors(tier Tier) []string {
 	case AuthNetwork:
 		own = append([]string{billing.CodeNetworkTermsRequired, billing.CodeStepUpRequired, billing.CodeStepUpUnavailable, billing.CodeResourceNotFound}, authenticated...)
 	default:
+		// No credential and no selector: a public route names its own
+		// merchant, a provider's callback its PSP.
 		return sortedCodes(common)
 	}
 	return sortedCodes(append(append(common, own...), selectorErrors...))

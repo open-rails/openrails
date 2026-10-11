@@ -64,6 +64,7 @@ migration 0060_checkout_ui_mode.up.sql sha256:131f7e20e0a12d75b7fcacec2a06211b9f
 migration 0061_usage_orders.up.sql sha256:25aebf6b45129dec964eb9f0c148f653da7c17d0177d17929b5a21792a53414f
 migration 0062_drop_checkout_sessions.up.sql sha256:382f3a65cea76992fbe02cf0d0e17361465201a650b688a03eb8fab9c3644641
 migration 0063_running_charges.up.sql sha256:8c834227903ff7b607c51d288140b0e7787743fdc0073fe146f3f9e03dc02839
+migration 0064_orders_id_index.up.sql sha256:81f306bb5a9112ac65feb459a4c518102c71de7a4b1b1a8c48e97558cad736b2
 
 table billing.access_cutover_approvals
   column id uuid NOT NULL DEFAULT uuidv7()
@@ -1359,6 +1360,7 @@ table billing.orders
   index CREATE UNIQUE INDEX orders_customer_id_id_key ON billing.orders USING btree (merchant_id, customer_id, id)
   index CREATE INDEX orders_due_at_open_idx ON billing.orders USING btree (merchant_id, due_at) WHERE ((status = 'open'::text) AND (due_at IS NOT NULL))
   index CREATE INDEX orders_expires_at_live_idx ON billing.orders USING btree (merchant_id, expires_at) WHERE (status = 'open'::text)
+  index CREATE INDEX orders_id_idx ON billing.orders USING btree (id)
   index CREATE UNIQUE INDEX orders_idempotency_key_key ON billing.orders USING btree (merchant_id, customer_id, idempotency_key) WHERE (idempotency_key IS NOT NULL)
   index CREATE UNIQUE INDEX orders_number_key ON billing.orders USING btree (merchant_id, number) WHERE (number IS NOT NULL)
   index CREATE INDEX orders_payment_method_id_idx ON billing.orders USING btree (merchant_id, payment_method_id) WHERE (payment_method_id IS NOT NULL)

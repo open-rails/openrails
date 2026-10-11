@@ -205,7 +205,10 @@ func (e *Env) gates(route Route) []router.Middleware {
 	}
 	var mw []router.Middleware
 	switch route.Auth {
-	case AuthPublic, AuthProvider:
+	case AuthPublic:
+		// The request names its merchant before a connection is pinned to it.
+		mw = append(e.publicMerchant(route), conn...)
+	case AuthProvider:
 		mw = conn
 	case AuthProvisioning:
 		if e.SCIMMerchant.IsZero() {

@@ -42,3 +42,15 @@ JOIN billing.merchants m ON m.id = o.merchant_id
 WHERE o.id = sqlc.arg(id)::uuid AND o.checkout_ui_mode = 'embedded'
   AND m.deleted_at IS NULL AND m.status = 'active'
 LIMIT 2;
+
+-- Merchant directory: the live merchant an order id names, read before any
+-- merchant connection is pinned: a wallet's Solana Pay request carries
+-- nothing else. The id is not a credential; two rows reveal ambiguity, never
+-- a choice.
+-- name: GetOrderMerchant :many
+SELECT o.merchant_id
+FROM billing.orders o
+JOIN billing.merchants m ON m.id = o.merchant_id
+WHERE o.id = sqlc.arg(id)::uuid
+  AND m.deleted_at IS NULL AND m.status = 'active'
+LIMIT 2;

@@ -245,13 +245,13 @@ func TestHostedCheckoutSecretOpensOneOrder(t *testing.T) {
 	require.Equal(t, customer, read.CustomerID)
 	require.NotEmpty(t, read.PaymentOptions)
 
-	config := s.call(checkoutHost, http.MethodGet, "/v1/config", secretA, "", nil)
+	config := s.call(checkoutHost, http.MethodGet, "/v1/me/config", secretA, "", nil)
 	require.Equal(t, http.StatusOK, config.Code, config.Body.String())
 	require.Equal(t, "no-store", config.Header().Get("Cache-Control"))
-	doc := decode[billing.PublicConfig](t, config)
-	require.NotNil(t, doc.Payment, "the secret names its merchant")
-	require.NotNil(t, doc.Merchant)
+	doc := decode[billing.CustomerConfig](t, config)
+	require.Len(t, doc.Payment.PSPs, 1, "the secret names its merchant")
 	require.Equal(t, "Checkout Shop", doc.Merchant.DisplayName)
+	require.Equal(t, http.StatusOK, s.call(checkoutHost, http.MethodGet, "/v1/config", secretA, "", nil).Code)
 
 	refused(t, s.call(checkoutHost, http.MethodGet, "/v1/me/orders/"+orderB.ID.String(), secretA, "", nil), http.StatusNotFound, billing.CodeResourceNotFound)
 	refused(t, s.call(checkoutHost, http.MethodPost, "/v1/me/orders/"+orderB.ID.String()+"/confirm", secretA, "", nil), http.StatusNotFound, billing.CodeResourceNotFound)

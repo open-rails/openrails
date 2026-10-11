@@ -11,10 +11,8 @@ import (
 	"github.com/open-rails/openrails/billing"
 )
 
-// armedKeys are the keys of the PSPs a merchant's public config lists armed.
-func armedKeys(t *testing.T, cfg *billing.PublicConfig) []string {
-	t.Helper()
-	require.NotNil(t, cfg.Payment)
+// armedKeys are the keys of the PSPs a merchant's customers are told are armed.
+func armedKeys(cfg billing.CustomerConfig) []string {
 	var keys []string
 	for _, psp := range cfg.Payment.PSPs {
 		keys = append(keys, psp.Key)
@@ -43,8 +41,7 @@ func TestSecondDeclarationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		psps["nmi-again"] = openrails.NMIPSP{AccountID: "e2e-nmi-again", SecurityKey: "e2e-nmi-key", WebhookSigningSecret: "nmi_again_webhook_e2e"}.PSPConfig()
 	}
 	w.start()
-	cfg := publicConfig(t, w.rt)
-	keys := armedKeys(t, &cfg)
+	keys := armedKeys(customerConfig(t, w.rt))
 	require.Contains(t, keys, "nmi", "the first declaration stays armed")
 	require.NotContains(t, keys, "nmi-again", "the second declaration of the account is disarmed")
 	require.Equal(t, 1, duplicateFindings(t, w, "nmi-again"))

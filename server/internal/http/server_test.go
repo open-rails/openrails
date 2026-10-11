@@ -47,15 +47,15 @@ func TestStandaloneMetaRoutes(t *testing.T) {
 	require.Contains(t, ready.Body.String(), `"service_unavailable"`)
 	require.NotContains(t, ready.Body.String(), "postgres")
 
-	// #623: the standalone server publishes the route groups it turns on; a
-	// request that resolves no merchant has no payment setup.
+	// #623: the standalone server publishes the route groups it turns on, and
+	// nothing of any merchant.
 	doc := get("/v1/config")
 	require.Equal(t, http.StatusOK, doc.Code)
 	var served billing.PublicConfig
 	require.NoError(t, json.Unmarshal(doc.Body.Bytes(), &served), doc.Body.String())
 	require.Equal(t, map[string]bool{"admin": true, "catalog": true, "merchant_config": true, "metrics": true, "app": true}, served.Capabilities.RouteGroups)
-	require.Nil(t, served.Payment)
-	require.Contains(t, doc.Body.String(), `"payment":null`)
+	require.NotContains(t, doc.Body.String(), `"payment"`)
+	require.NotContains(t, doc.Body.String(), `"merchant"`)
 	require.Equal(t, "public, max-age=300", doc.Header().Get("Cache-Control"))
 	revalidate := httptest.NewRequest(http.MethodGet, "/v1/config", nil)
 	revalidate.Header.Set("If-None-Match", doc.Header().Get("ETag"))

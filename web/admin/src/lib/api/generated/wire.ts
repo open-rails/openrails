@@ -663,6 +663,11 @@ export type CustomerChangeSubscriptionParams = {
   signature?: string
 }
 
+export type CustomerConfig = {
+  payment: PaymentConfig
+  merchant: PublicMerchant
+}
+
 export type CustomerContact = {
   email: string | null
   name: string | null
@@ -1941,8 +1946,6 @@ export type PublicConfig = {
   capabilities: Capabilities
   currencies: CurrencyUnits[]
   rails: RailDefinition[]
-  payment: PaymentConfig | null
-  merchant: PublicMerchant | null
   captcha: CaptchaConfig | null
   network: PublicNetwork | null
 }

@@ -1,7 +1,8 @@
 package billing
 
-// PublicConfig is what a browser needs to know about this deployment and
-// its merchant, at GET /v1/config. Every value is public by nature.
+// PublicConfig is what a browser needs to know about this deployment, at
+// GET /v1/config: no credential, the same for every merchant. Every value
+// is public by nature.
 type PublicConfig struct {
 	// Capabilities is what the mount serving the request serves.
 	Capabilities Capabilities `json:"capabilities"`
@@ -10,18 +11,22 @@ type PublicConfig struct {
 	// Rails is the rail registry: each rail a PSP can be declared on, with
 	// the credentials and settings it takes.
 	Rails []RailDefinition `json:"rails"`
-	// Payment is the merchant's browser payment setup; null when the request
-	// resolves no merchant.
-	Payment *PaymentConfig `json:"payment"`
-	// Merchant is how the merchant presents itself to its customers; null
-	// when the request resolves no merchant.
-	Merchant *PublicMerchant `json:"merchant"`
 	// Captcha is the challenge to solve when a request answers 403
 	// captcha_required; null when the deployment challenges nobody.
 	Captcha *CaptchaConfig `json:"captcha"`
 	// Network is how the checkout page signs a shopper in to the customer
 	// network; null without the network or a hosted checkout.
 	Network *PublicNetwork `json:"network"`
+}
+
+// CustomerConfig is what a customer's browser needs to know about the
+// merchant it pays, at GET /v1/me/config: the merchant its credential is
+// bound to.
+type CustomerConfig struct {
+	// Payment is the merchant's browser payment setup.
+	Payment PaymentConfig `json:"payment"`
+	// Merchant is how the merchant presents itself to its customers.
+	Merchant PublicMerchant `json:"merchant"`
 }
 
 // PublicNetwork is the checkout page's sign-in to the customer network: an

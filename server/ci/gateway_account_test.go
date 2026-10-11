@@ -5,11 +5,11 @@ package ci_test
 import (
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/open-rails/authkit"
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
@@ -34,9 +34,10 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: gateway.URL()}
+		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 	})
-	// publish arms a merchant's NMI PSP and binds its API host, where its
-	// browsers read GET /v1/config.
+	// publish arms a merchant's NMI PSP and answers one of its customers'
+	// tokens, which reads GET /v1/me/config.
 	publish := func(account string) string {
 		slug := "seller-" + uuid.NewString()[:8]
 		m, err := srv.ProvisionMerchant(ctx, billing.ProvisionMerchantParams{Slug: slug})
@@ -45,17 +46,15 @@ func TestSecondPublicationOfAGatewayAccountStaysDisarmed(t *testing.T) {
 			Settings:    map[string]any{"tokenization_key": "e2e-tokenization"},
 			Credentials: map[string]string{"security_key": "e2e-one-gateway-key", "webhook_signing_secret": "e2e-nmi-webhook"}})
 		require.NoError(t, err)
-		host := slug + ".e2e.test"
-		require.NoError(t, srv.SetMerchantAPIHost(ctx, m.MerchantID, host))
-		return host
+		login := newIssuerKey(t, "https://"+slug+".e2e.test")
+		trust(t, srv, m.MerchantID, login.app(t, "viewer", nil))
+		return customerOf(t, login, uuid.NewString())
 	}
-	armed := func(host string) []string {
-		w := httptest.NewRecorder()
-		srv.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "https://"+host+"/v1/config", nil))
+	armed := func(customer string) []string {
+		w := serve(srv.Handler(), rsRequest{path: "/v1/me/config", authorization: customer})
 		require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-		var cfg billing.PublicConfig
+		var cfg billing.CustomerConfig
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &cfg))
-		require.NotNil(t, cfg.Payment, w.Body.String())
 		var keys []string
 		for _, psp := range cfg.Payment.PSPs {
 			keys = append(keys, psp.Key)

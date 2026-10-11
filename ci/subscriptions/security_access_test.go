@@ -311,7 +311,7 @@ func TestSecurityProviderConfigurationSafety(t *testing.T) {
 		psps := map[string]openrails.PSPConfig{"nmi": {Rail: "nmi", AccountID: "script-nmi", Secrets: map[string]string{"security_key": "script-nmi-key", "webhook_signing_secret": "script-whsec"},
 			Settings: map[string]any{"tokenization_key": "script-tokenization", "tokenization_url": "https://evil.example/token/Collect.js"}}}
 		r := w.peer("script-"+uuid.NewString()[:8], w.auth, psps)
-		cfg := publicConfig(t, r.rt)
+		cfg := customerConfig(t, r.rt)
 		found := false
 		for _, psp := range cfg.Payment.PSPs {
 			if psp.Rail == "nmi" {

@@ -39,8 +39,6 @@ const capabilities = (edits: () => boolean) => () => ({
   },
   rails,
   currencies: [],
-  payment: null,
-  merchant: null,
 })
 
 const configuration = (

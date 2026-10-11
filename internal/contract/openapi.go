@@ -180,6 +180,10 @@ func (m *model) operation(r routes.Route) *obj {
 		params = append(params, newObj("name", p, "in", "path", "required", true, "schema", newObj("type", "string")))
 	}
 	for _, q := range r.Query {
+		param := newObj("name", q.Name, "in", "query")
+		if q.Required {
+			param.set("required", true)
+		}
 		schema := newObj("type", "string")
 		switch q.Kind {
 		case "integer", "boolean":
@@ -188,14 +192,15 @@ func (m *model) operation(r routes.Route) *obj {
 			schema = newObj("type", "string", "format", "date-time")
 		case "ids":
 			schema = newObj("type", "array", "items", newObj("type", "string"), "minItems", 1, "maxItems", billing.MaxBatchItems)
-			params = append(params, newObj("name", q.Name, "in", "query", "style", "form", "explode", false, "schema", schema))
-			continue
+			param.set("style", "form")
+			param.set("explode", false)
 		case "strings":
 			schema = newObj("type", "array", "items", newObj("type", "string"), "maxItems", billing.MaxBatchItems)
-			params = append(params, newObj("name", q.Name, "in", "query", "style", "form", "explode", true, "schema", schema))
-			continue
+			param.set("style", "form")
+			param.set("explode", true)
 		}
-		params = append(params, newObj("name", q.Name, "in", "query", "schema", schema))
+		param.set("schema", schema)
+		params = append(params, param)
 	}
 	if r.IdempotencyKey {
 		params = append(params, newObj("name", "Idempotency-Key", "in", "header", "schema", newObj("type", "string")))

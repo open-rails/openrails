@@ -223,7 +223,7 @@ func TestProductsWithoutALivePriceAreNotForSale(t *testing.T) {
 
 	public := func() map[string]bool {
 		listed := map[string]bool{}
-		for _, item := range w.public("/v1/catalog/products?keys=" + sold.Key + "&keys=" + granted.Key)["data"].([]any) {
+		for _, item := range w.public(sold.Key, granted.Key)["data"].([]any) {
 			listed[item.(map[string]any)["key"].(string)] = true
 		}
 		return listed
@@ -267,11 +267,12 @@ func TestProductKeyCap(t *testing.T) {
 	require.ErrorIs(t, err, billing.ErrInvalid)
 }
 
-// The public catalog is a lookup by product key: the products on sale named
-// by ?keys=, at most billing.MaxBatchItems, in one page. It refuses a missing
-// keys, an entitlement filter and any other parameter. The Go client's
-// ListOffers is the host backend's read: by entitlement too, in process and
-// remote.
+// The public catalog is a lookup by product key: the products on sale of the
+// merchant ?merchant= names, named by ?keys=, at most billing.MaxBatchItems,
+// in one page. It refuses a missing or malformed merchant, a missing keys, an
+// entitlement filter and any other parameter, and answers 404 for a merchant
+// that does not exist. The Go client's ListOffers is the host backend's read:
+// by entitlement too, in process and remote.
 func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 	t.Parallel()
 	w := newWorld(t)
@@ -300,7 +301,6 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 		t.Helper()
 		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/catalog/products?"+query, nil)
 		require.NoError(t, err)
-		req.Header.Set("OpenRails-Merchant", w.slug)
 		res, err := http.DefaultClient.Do(req)
 		require.NoError(t, err)
 		defer res.Body.Close()
@@ -308,10 +308,11 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 		require.NoError(t, json.NewDecoder(res.Body).Decode(&body))
 		return res.StatusCode, body
 	}
+	mid := w.client[embedded].MerchantID().String()
 	sorted := func(keys ...string) []string { slices.Sort(keys); return keys }
 	public := func(keys ...string) []string {
 		t.Helper()
-		q := url.Values{"keys": keys}
+		q := url.Values{"merchant": {mid}, "keys": keys}
 		status, body := get(q.Encode())
 		require.Equal(t, http.StatusOK, status, body)
 		require.Nil(t, body["next_cursor"], "one page")
@@ -329,19 +330,26 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 	}
 	require.Equal(t, []string{course.Key}, public(atCap...), "up to the cap")
 
+	named := "merchant=" + mid
 	for _, refused := range []struct{ query, param string }{
-		{"", "keys"},
-		{"entitlement=course:101", "entitlement"},
-		{"entitlement=course:102&keys=" + bundle.Key, "entitlement"},
-		{"keys=", "keys"},
-		{"keys=" + course.Key + "&limit=1", "limit"},
-		{url.Values{"keys": append(atCap, "one-more")}.Encode(), "keys"},
+		{named, "keys"},
+		{named + "&entitlement=course:101", "entitlement"},
+		{named + "&entitlement=course:102&keys=" + bundle.Key, "entitlement"},
+		{named + "&keys=", "keys"},
+		{named + "&keys=" + course.Key + "&limit=1", "limit"},
+		{url.Values{"merchant": {mid}, "keys": append(atCap, "one-more")}.Encode(), "keys"},
+		{"keys=" + course.Key, "merchant"},
+		{"merchant=" + w.slug + "&keys=" + course.Key, "merchant"},
+		{named + "&" + named + "&keys=" + course.Key, "merchant"},
 	} {
 		status, body := get(refused.query)
 		require.Equal(t, http.StatusBadRequest, status, refused.query)
 		require.Equal(t, billing.CodeInvalidQuery, errorCode(body), refused.query)
 		require.Equal(t, refused.param, body["error"].(map[string]any)["param"], refused.query)
 	}
+	status, body := get("merchant=" + uuid.NewString() + "&keys=" + course.Key)
+	require.Equal(t, http.StatusNotFound, status, body)
+	require.Equal(t, billing.CodeResourceNotFound, errorCode(body))
 
 	for _, top := range []topology{embedded, remote} {
 		page, err := w.client[top].ListOffers(t.Context(), billing.OfferListParams{Entitlements: []string{"course:101"}})
@@ -356,7 +364,7 @@ func TestPublicCatalogIsAKeyLookup(t *testing.T) {
 		_, err = w.client[top].ListOffers(t.Context(), billing.OfferListParams{})
 		require.Error(t, err, top)
 	}
-	status, body := w.merchantCall(w.auth.hostToken(t), http.MethodGet, "/v1/app/catalog/products")
-	require.Equal(t, http.StatusBadRequest, status, body)
-	require.Contains(t, body, billing.CodeInvalidQuery, "the backend's read needs a filter too")
+	appStatus, appBody := w.merchantCall(w.auth.hostToken(t), http.MethodGet, "/v1/app/catalog/products")
+	require.Equal(t, http.StatusBadRequest, appStatus, appBody)
+	require.Contains(t, appBody, billing.CodeInvalidQuery, "the backend's read needs a filter too")
 }

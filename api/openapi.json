@@ -92,6 +92,40 @@
         ]
       }
     },
+    "/v1/me/config": {
+      "get": {
+        "tags": [
+          "customer"
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CustomerConfig"
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "x-openrails-auth": "customer",
+        "x-openrails-errors": [
+          "service_unavailable"
+        ],
+        "x-openrails-error-sets": [
+          "tier:customer"
+        ]
+      }
+    },
     "/v1/me/orders/preview": {
       "post": {
         "tags": [
@@ -1311,6 +1345,7 @@
           {
             "name": "keys",
             "in": "query",
+            "required": true,
             "style": "form",
             "explode": true,
             "schema": {
@@ -1319,6 +1354,14 @@
                 "type": "string"
               },
               "maxItems": 100
+            }
+          },
+          {
+            "name": "merchant",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -1358,7 +1401,8 @@
         "security": [],
         "x-openrails-auth": "public",
         "x-openrails-errors": [
-          "invalid_query"
+          "invalid_query",
+          "resource_not_found"
         ],
         "x-openrails-error-sets": [
           "tier:public",
@@ -14119,6 +14163,21 @@
           }
         }
       },
+      "CustomerConfig": {
+        "type": "object",
+        "properties": {
+          "payment": {
+            "$ref": "#/components/schemas/PaymentConfig"
+          },
+          "merchant": {
+            "$ref": "#/components/schemas/PublicMerchant"
+          }
+        },
+        "required": [
+          "payment",
+          "merchant"
+        ]
+      },
       "CustomerContact": {
         "type": "object",
         "properties": {
@@ -20383,26 +20442,6 @@
               "$ref": "#/components/schemas/RailDefinition"
             }
           },
-          "payment": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PaymentConfig"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "merchant": {
-            "oneOf": [
-              {
-                "$ref": "#/components/schemas/PublicMerchant"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "captcha": {
             "oneOf": [
               {
@@ -20428,8 +20467,6 @@
           "capabilities",
           "currencies",
           "rails",
-          "payment",
-          "merchant",
           "captcha",
           "network"
         ]
@@ -22677,10 +22714,6 @@
       "captcha_required",
       "database_busy",
       "internal_error",
-      "merchant_binding_mismatch",
-      "merchant_directory_unavailable",
-      "merchant_not_found",
-      "merchant_selector_invalid",
       "rate_limit_exceeded"
     ],
     "tier:signed_in": [

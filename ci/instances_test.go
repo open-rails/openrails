@@ -258,7 +258,7 @@ products:
 		require.NoError(t, err)
 		require.Equal(t, "Renamed", read.DisplayName)
 		rec := httptest.NewRecorder()
-		instances[1].mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/catalog/products?keys="+key, nil))
+		instances[1].mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/catalog/products?merchant="+instances[1].client.MerchantID().String()+"&keys="+key, nil))
 		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 		require.Contains(t, rec.Body.String(), `"Renamed"`, "the public catalog of another replica")
 	})

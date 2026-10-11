@@ -11,8 +11,8 @@ import (
 )
 
 // One PSP whose credentials cannot be checked never takes checkout down: the
-// document still lists every other PSP with its public values, and that one as
-// temporarily unavailable, without them.
+// customer's configuration still lists every other PSP with its public
+// values, and that one as temporarily unavailable, without them.
 func TestPublicConfigDegradesOnePSP(t *testing.T) {
 	t.Parallel()
 	w := newVaultWorld(t)
@@ -23,7 +23,7 @@ func TestPublicConfigDegradesOnePSP(t *testing.T) {
 	})
 
 	for _, tp := range []topology{embedded} {
-		cfg := publicConfig(t, w.rt)
+		cfg := customerConfig(t, w.rt)
 		byRail := map[string]billing.PSPPaymentConfig{}
 		for _, psp := range cfg.Payment.PSPs {
 			byRail[psp.Rail] = psp

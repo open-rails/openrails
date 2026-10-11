@@ -16,7 +16,7 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth/authtest"
 )
 
-// publicConfig reads bill's public GET /v1/config, as a browser does.
+// publicConfig reads the deployment's GET /v1/config, as any browser does.
 func publicConfig(t *testing.T, bill *openrails.Engine) billing.PublicConfig {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -25,6 +25,26 @@ func publicConfig(t *testing.T, bill *openrails.Engine) billing.PublicConfig {
 	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/config", nil))
 	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
 	var cfg billing.PublicConfig
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &cfg))
+	return cfg
+}
+
+// configReader is the customer whose browser reads the merchant's setup.
+const configReader = "00000000-0000-4000-8000-0000000c0f19"
+
+// customerConfig reads GET /v1/me/config as one of bill's merchant's
+// customers, as a signed-in browser does.
+func customerConfig(t *testing.T, bill *openrails.Engine) billing.CustomerConfig {
+	t.Helper()
+	auth := &authtest.Fake{}
+	mux := http.NewServeMux()
+	require.NoError(t, openrailshttp.Mount(mux, bill, openrails.Routes{Auth: auth}))
+	req := httptest.NewRequest(http.MethodGet, "/v1/me/config", nil)
+	req.Header.Set("Authorization", "Bearer "+auth.Person(configReader))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+	var cfg billing.CustomerConfig
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &cfg))
 	return cfg
 }

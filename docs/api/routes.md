@@ -2,7 +2,7 @@
 
 # Routes
 
-Every route of the HTTP API (180), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
+Every route of the HTTP API (181), from the API root: a standalone server serves them at `/`, an embedded host beneath its mount (usually `/billing`). Request and response names are the schemas of [`api/openapi.json`](../../api/openapi.json), which also lists each route's query parameters and error codes. Error codes are in [error-codes.md](error-codes.md).
 
 **Tier** is what the route checks before its handler: `public` (nothing), `optional` (a user credential when present), `customer`, `merchant` (a credential the host's Auth admits for the route's permission, on the request's merchant), `signed_in` (any person or application the host's Auth admits, on the request's merchant), `application` (an application the host's Auth admits, never a person, on the request's merchant), `provider_signature`, `provisioning` (the merchant's provisioning token, or what `application` admits).
 
@@ -36,6 +36,7 @@ A customer acting on its own account.
 
 | Method | Path | Tier | Permission | Request | Response | Notes |
 |---|---|---|---|---|---|---|
+| GET | `/v1/me/config` | customer | — | — | 200 `CustomerConfig` |  |
 | POST | `/v1/me/orders/preview` | customer | — | `PreviewMyOrderParams` | 200 `OrderPreview` |  |
 | POST | `/v1/me/orders` | customer | — | `CreateMyOrderParams` | 200 `Order`<br>201 `Order` | `Idempotency-Key` |
 | GET | `/v1/me/orders` | customer | — | — | 200 `ListPage<Order>` |  |

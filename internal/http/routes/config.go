@@ -6,12 +6,15 @@ import (
 	"github.com/open-rails/openrails/internal/http/router"
 )
 
-// configRoutes serve the public configuration: what the mount serves, the
-// currency registry and the merchant's browser payment setup. It is always
-// mounted, so even a minimal deployment is discoverable.
+// configRoutes serve what a browser needs to know before it pays. The
+// deployment's part takes no credential and is always mounted, so even a
+// minimal deployment is discoverable; the merchant's part (its payment setup
+// and name) answers only a credential bound to that merchant.
 var configRoutes = []Route{
-	{Method: GET, Path: "/v1/config", Group: Meta, Auth: AuthPublic, Checkout: CheckoutPublic,
+	{Method: GET, Path: "/v1/config", Group: Meta, Auth: AuthPublic, NoConn: true, Checkout: CheckoutPublic,
 		Responses: []Reply{{200, billing.PublicConfig{}}}, Bind: publicConfig},
+	{Method: GET, Path: "/v1/me/config", Group: Customer, Auth: AuthCustomer, Checkout: CheckoutMerchant,
+		Responses: []Reply{{200, billing.CustomerConfig{}}}, Errors: codes("service_unavailable"), Handler: h(handlers.GetCustomerConfig)},
 }
 
 // publicConfig binds the public read to the capabilities its assembly

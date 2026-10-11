@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 	"testing"
 
 	"github.com/google/uuid"
@@ -44,12 +45,12 @@ func (w *world) staffCall(method, path string, body, out any) int {
 	return res.StatusCode
 }
 
-// public reads a buyer route with no credential.
-func (w *world) public(path string) map[string]any {
+// public reads the merchant's public catalog for keys, with no credential.
+func (w *world) public(keys ...string) map[string]any {
 	w.t.Helper()
-	req, err := http.NewRequestWithContext(w.t.Context(), http.MethodGet, w.server.URL+mountPrefix+path, nil)
+	query := url.Values{"merchant": {w.client[embedded].MerchantID().String()}, "keys": keys}
+	req, err := http.NewRequestWithContext(w.t.Context(), http.MethodGet, w.server.URL+mountPrefix+"/v1/catalog/products?"+query.Encode(), nil)
 	require.NoError(w.t, err)
-	req.Header.Set("OpenRails-Merchant", w.slug)
 	res, err := http.DefaultClient.Do(req)
 	require.NoError(w.t, err)
 	defer res.Body.Close()
@@ -123,7 +124,7 @@ func TestCatalogOneShapePerNoun(t *testing.T) {
 	archived := true
 	_, err = c.UpdateProduct(t.Context(), products[2].ID, billing.UpdateProductParams{Archived: catalog.Value(archived)})
 	require.NoError(t, err)
-	listed := w.public("/v1/catalog/products?keys=" + products[0].Key + "&keys=" + products[2].Key)
+	listed := w.public(products[0].Key, products[2].Key)
 	keys := map[string]bool{}
 	for _, item := range listed["data"].([]any) {
 		product := item.(map[string]any)

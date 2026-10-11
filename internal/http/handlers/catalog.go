@@ -12,9 +12,10 @@ import (
 )
 
 // ListPublicProducts is the public catalog, a lookup by product key: the
-// products on sale named by ?keys= (1 to billing.MaxBatchItems), each with its
-// live prices, in one page. It takes no other parameter: no entitlement
-// filter, no listing. A product no live price sells is not on sale.
+// products on sale of the merchant ?merchant= names (the route's gate read
+// it), named by ?keys= (1 to billing.MaxBatchItems), each with its live
+// prices, in one page. It takes no other parameter: no entitlement filter,
+// no listing. A product no live price sells is not on sale.
 func ListPublicProducts(r *httprequest.Request) {
 	query := r.Request.URL.Query()
 	names := make([]string, 0, len(query))
@@ -23,8 +24,8 @@ func ListPublicProducts(r *httprequest.Request) {
 	}
 	slices.Sort(names)
 	for _, name := range names {
-		if name != "keys" {
-			r.APIError(api.Coded(billing.CodeInvalidQuery, "the public catalog takes only keys, not "+name).WithParam(name))
+		if name != "keys" && name != "merchant" {
+			r.APIError(api.Coded(billing.CodeInvalidQuery, "the public catalog takes only merchant and keys, not "+name).WithParam(name))
 			return
 		}
 	}

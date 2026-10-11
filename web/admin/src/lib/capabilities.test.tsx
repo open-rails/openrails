@@ -64,8 +64,6 @@ const configured = (features: Record<string, boolean> | null) => {
       capabilities: { route_groups: { merchant_config: true }, features },
       currencies: [],
       rails: [],
-      payment: null,
-      merchant: null,
       captcha: null,
       network: null,
     })
