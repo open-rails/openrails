@@ -26,6 +26,7 @@ psps:
 		"slug: x\ndisplay_name: X\nacounts: {}\n":                "acounts",
 		"slug: x\ndisplay_name: X\nrail_merchant_accounts: {}\n": "rail_merchant_accounts was renamed to psps",
 		"slug: x\ndisplay_name: X\nprovider_accounts: {}\n":      "provider_accounts was renamed to psps",
+		"slug: x\ndisplay_name: X\napi_host: api.x.example\n":    "api_host was removed",
 		"display_name: X\n":              "slug is required",
 		"slug: \" \"\ndisplay_name: X\n": "slug is required",
 		"slug: -x-\ndisplay_name: X\n":   "invalid merchant slug",

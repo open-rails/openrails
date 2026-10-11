@@ -3,7 +3,6 @@ package config
 import (
 	"context"
 	"io/fs"
-	"net"
 	"net/http"
 
 	vaultapi "github.com/hashicorp/vault/api"
@@ -45,13 +44,11 @@ type Deps struct {
 
 	// Test seams, refused with Config.TestMode live. StripeTransport and
 	// NMITransport replace the provider wires; FXTransport replaces the FX
-	// source's, which each process reads its rates from into memory;
-	// DNSResolver answers api_host proofs; Clock drives renewal dates,
-	// retries and entitlement windows.
+	// source's, which each process reads its rates from into memory; Clock
+	// drives renewal dates, retries and entitlement windows.
 	StripeTransport http.RoundTripper
 	NMITransport    http.RoundTripper
 	FXTransport     http.RoundTripper
-	DNSResolver     *net.Resolver
 	Clock           clockwork.Clock
 }
 

@@ -678,12 +678,10 @@ type BillingMerchant struct {
 	Slug   string
 	Status string
 	// The merchant's own AuthKit permission-group id: a merchant IS a top-level `merchant` group, child of `root`. Bare `text`, NO FK into the auth schema. NULL for a host-owned merchant without a control plane.
-	PermissionGroupID *string
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	DeletedAt         *time.Time
-	// Canonical Host-header value this merchant resolves from, e.g. "api.acme.example". NULL = no Host resolution for this merchant. Lowercase, no scheme/port.
-	ApiHost                 *string
+	PermissionGroupID       *string
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
+	DeletedAt               *time.Time
 	RetiredAt               *time.Time
 	GroupReleaseCompletedAt *time.Time
 	CatalogRevision         int64
@@ -691,14 +689,6 @@ type BillingMerchant struct {
 	SlugChangedAt *time.Time
 	// Steps with every statement that changes a product's keys: a cached key set from an older generation is stale.
 	EntitlementGeneration int64
-}
-
-// A merchant's unproven api_host claim, one per merchant. The token must appear in a TXT record at _openrails-challenge.<api_host> before the host binds to merchants.api_host. Routes nothing.
-type BillingMerchantApiHostClaim struct {
-	MerchantID uuid.UUID
-	ApiHost    string
-	Token      string
-	CreatedAt  time.Time
 }
 
 // Per-merchant destructive-action policy: destructive_actions_enabled is the per-merchant emergency stop (the instance switch in destructive_action_switch gates it globally); enforce_armed_at is the first-enforce gate — NULL means the merchant's provider pull runs advisory (findings only, zero mutations) until an operator reviews the first pull and arms it.

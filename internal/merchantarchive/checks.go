@@ -19,9 +19,8 @@ import (
 // data or unsupported opaque evidence, not additional archive row profiles.
 var excludedTables = map[string]string{
 	"catalog_restore_receipts":  "local restore replay receipts, excluded from re-export like billing_restore maintenance receipts",
-	"merchants":                 "destination identity and host authority are explicitly provisioned",
+	"merchants":                 "destination identity is explicitly provisioned",
 	"merchant_slug_aliases":     "former names are directory identity, not billing history",
-	"merchant_api_host_claims":  "an unproven host claim; the destination claims and proves its own host",
 	"worker_state":              "deployment-wide worker health and fair sweep cursors",
 	"destructive_action_switch": "deployment-wide safety switch",
 	"book_identity":             "the deployment's database identity",
@@ -70,9 +69,8 @@ var excludedColumns = map[string]string{
 	"book_identity":                 "singleton system_identifier database_oid schema_oid armed_by armed_at",
 	"merchant_write_posture":        "merchant_id mode reason set_by set_at",
 	"worker_state":                  "worker_kind cursor_merchant_id cursor_version registered_at expected_period_seconds last_success_at last_error_at last_error consecutive_failures last_alerted_at updated_at",
-	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at api_host retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
+	"merchants":                     "id slug status permission_group_id created_at updated_at deleted_at retired_at group_release_completed_at catalog_revision slug_changed_at entitlement_generation",
 	"merchant_slug_aliases":         "slug merchant_id expires_at created_at",
-	"merchant_api_host_claims":      "merchant_id api_host token created_at",
 	"webhook_health":                "merchant_id psp_id custodian_id last_accepted_at last_pull_at created_at updated_at",
 	"webhook_health_daily":          "merchant_id psp_id custodian_id day_at rejected drift",
 	"admission_denials_hourly":      "merchant_id customer_id denial_reason hour_at denials updated_at",

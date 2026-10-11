@@ -23,13 +23,6 @@ func (s *Server) ProvisionMerchant(ctx context.Context, req billing.ProvisionMer
 	return operator.ProvisionMerchant(ctx, s.cp, req)
 }
 
-// SetMerchantAPIHost binds the host name requests resolve to this merchant
-// from, as the operator and without the DNS proof ClaimMerchantAPIHost asks
-// of a merchant: a host of the deployment's own. Empty clears it.
-func (s *Server) SetMerchantAPIHost(ctx context.Context, id billing.MerchantID, apiHost string) error {
-	return operator.SetMerchantAPIHost(ctx, s.cp, id, apiHost)
-}
-
 // ListMerchantsForSubject returns the live merchants where subject is a
 // customer.
 func (s *Server) ListMerchantsForSubject(ctx context.Context, subject string) ([]billing.MerchantRef, error) {

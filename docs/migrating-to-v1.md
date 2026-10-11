@@ -52,6 +52,7 @@ Before the code:
 | `Deps.Contacts: ak`, `openrails.Contacts`, `openrails.Contact`, `openrailstest.Contacts` | `Deps.UserInfo: ak.UserInfo()` (AuthKit v1.14.0), `openrails.UserInfo` (helpers' `userinfo.Lookup`: `Get`, `Search`), `userinfo.User`, `openrailstest.UserInfo` |
 | `openrails.Identity` (`Kind`, `SubjectID`, `CustomerID`, `CredentialClass`, `Permissions`), `PrincipalKind`, `CredentialClass`, `Requirement`, `Authority`, `Target`, `Scope`, `DelegatedPrincipal`, `GateError`, `RequestAuthenticator`, `ErrForbidden` | `openrails.Identity`: `Subject` and `SubjectKind`, `Invoker`, `Credential`, from `Auth.Identity` |
 | `Deps.ProviderCredentials`, `ProviderCredentialSnapshot` | Removed: PSP secrets come from `Config.Merchant` (`PSPConfig.Secrets`) or the secret store |
+| `MerchantDeclaration.APIHost` (`api_host` in a merchant file or manifest); `Deps.DNSResolver` | Removed: a merchant has no API host, and a request names its merchant by its credential. A file or manifest that still sets `api_host` refuses boot |
 | No parser for a merchant's YAML | `openrails.ReadMerchantFile`, `openrails.ParseMerchantDeclaration`; the file names its merchant with a required `slug:` |
 | `HTTP.Checkout` needed `Deps.Authenticate` | `Routes.Storefront` needs none: the routes are public or addressed by session id |
 | Helper methods on `Config` and its nested types (`IsTestMode`, `SchemaName`, `Validate`, …) | Removed. `openrails.New` validates; compare fields (`cfg.TestMode == openrails.Live`) |
@@ -275,9 +276,10 @@ Every entitlement now derives from a grant; `source_type` is `purchase`,
 | Merchant webhooks | `client.ListAlertWebhooks(`, `client.CreateAlertWebhook(`, `client.UpdateAlertWebhook(`, `client.DeleteAlertWebhook(` |
 | `FleetAnalytics` and `FleetTimeseries` clamped an out-of-range window | `billing.ErrInvalid` |
 | `ExportMerchantBilling`, `ImportMerchantBilling` | `client.ExportBillingArchive(`, `client.ImportBillingArchive(` |
-| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. The API host is `client.GetAPIHost(`; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.UpdateMerchantConfiguration(`; a rename is the server's `RenameMerchant`; a user's merchants are their merchant groups in the server's AuthKit |
+| `GetMerchantAPIHost`, `SetMerchantDisplayName`, `RenameMerchant`, `ListUserMerchants` on the in-process Client | Removed. A merchant has no API host; the display name is `billing.ProvisionMerchantParams` at provisioning, then `client.UpdateMerchantConfiguration(`; a rename is the server's `RenameMerchant`; a user's merchants are their merchant groups in the server's AuthKit |
 | The server's `AuthenticateUser`, `UserActor`, `CredentialActor`, `OperatorActor`, `CheckRecentSignIn`, `ResolveAuthorizedMerchant`, `ResolveMerchantForGroup`, `HasRootPermission`, `CredentialRefusal`, and its team, API key and federated grant methods | AuthKit's: authenticate with the server's AuthKit Authenticator and ask its answer's `Can` in the merchant's scope (`srv.MerchantScope(ctx, id)`); teams, invitations and API keys are AuthKit's, in the merchant's group, with the roles `server.MerchantRoles` names; a name resolves with `MerchantByName`; `ListUserMerchants` takes the user's id |
-| `client.ListWorkerHealth(`, `client.SetAPIHost(`, `client.VerifyAPIHost(` | The server's `ListWorkerHealth` (`openrails workers`, the private listener's `/metrics`), `ClaimMerchantAPIHost` and `VerifyMerchantAPIHost` |
+| `client.ListWorkerHealth(`, `client.SetAPIHost(`, `client.VerifyAPIHost(` | The server's `ListWorkerHealth` (`openrails workers`, the private listener's `/metrics`); API hosts are removed |
+| Merchant API hosts: `client.GetAPIHost(`, `billing.MerchantAPIHost`, `APIHostClaim`, `APIHostRecord`, `MerchantConfigurationState.APIHost`; the server's `SetMerchantAPIHost`, `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost` and its `ErrInvalidAPIHost`, `ErrAPIHostReserved`, `ErrAPIHostTaken`, `ErrAPIHostClaimMissing`, `ErrAPIHostUnproven` | Removed: a request's Host names no merchant. A request names its merchant by its credential |
 | `GetUnreadNotificationCount` (merchant) | Removed: count open findings with `client.QueryMetrics(` (`open_findings`) |
 | `ListRepairAlerts` | Removed: ledger repairs and worker stalls are critical findings in `client.ListFindings(` |
 | `ListActiveMerchantIDs(ctx, limit, offset)` | The server's `ListActiveMerchantIDs` takes a `billing.PageRequest` and returns a page |
@@ -306,8 +308,9 @@ fields (`400 unknown_field`), and every error code is in
   `GET /v1/merchant/checkout-options`.
 - The purchase-review routes (`/v1/merchant/purchase-reviews`): a purchase under
   review is a finding.
-- `api_host` in a configuration application: the operator binds a host (the
-  merchant manifest, the server's `SetMerchantAPIHost`).
+- Merchant API hosts: `GET /v1/admin/api-host`, `api_host` in a configuration
+  application and in `GET /v1/admin/configuration`, and the capability
+  `api_host`. A request's Host names no merchant.
 - `GET /v1/merchant/repair-alerts`: read `/v1/merchant/notifications`.
 - Delegated access tokens (`delegated-access+jwt`), remote-application tokens
   (`remote-application-access+jwt`) and service JWTs, with the
@@ -335,7 +338,7 @@ fields (`400 unknown_field`), and every error code is in
 | Before | After |
 |---|---|
 | `/v1/merchant/…` (staff and configuration routes) | `/v1/admin/…` |
-| The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential or Host of another merchant is `409 merchant_binding_mismatch`; a missing permission `403 permission_required` |
+| The standalone server's own credential codes: `sender_proof_required` and its nonce refusal, `access_token_invalid`, `access_token_issuer_unknown`, `access_token_merchant_not_bound`, `insufficient_scope`, `service_credential_invalid`, `service_credential_merchant_unresolved`, `service_credential_resource_scope_denied`, `host_merchant_mismatch`, `merchant_context_mismatch` | A refused credential is `401 authentication_required` (or `credential_expired`, `credential_revoked`) with the auth provider's challenge headers; a credential of another merchant is `409 merchant_binding_mismatch`; a missing permission `403 permission_required` |
 | `/v1/merchant/payment-providers…` | `/v1/admin/psps`, `/v1/admin/psps/{id}` (`PATCH` with `expected_revision`, or `{archived: true}`), `/v1/admin/psps/routing-preview`, `/v1/admin/psps/refresh`; rails in `GET /v1/config` |
 | `POST /v1/merchant/hosted-checkout-sessions`, `POST /v1/me/checkout/sessions`, `/v1/merchant/checkout-sessions…` (engine checkout) | `POST /v1/app/orders` (an unpaid order for a customer), `POST /v1/me/orders` and `POST /v1/me/orders/{id}/pay` |
 | `/v1/merchant/credits/deposit`, `/v1/merchant/customers/{id}/credits` | `POST /v1/admin/credit-grants`, `/v1/admin/credit-grants?customer_id=`, `/v1/admin/credit-grants/{id}/revoke` |
@@ -508,6 +511,7 @@ up there.
 | Postgres enums `payment_status`, `subscription_status` | `text` with a CHECK |
 | `payments.rail` holding `manual` or `admin` | `payments.channel` (`rail`, `manual`); `rail` is null off-channel |
 | `catalogs`; `products.catalog_id`, `catalog_applications.catalog_id` | Removed: a merchant has one catalog, `billing.products` keyed by `merchant_id` |
+| `merchants.api_host` and its index `merchants_api_host_key`; `merchant_api_host_claims` | Removed: a merchant has no API host |
 | `entitlements.start_at`, `end_at` | `starts_at`, `ends_at` |
 | Instant columns without `_at`: `invoices.period_from`, `period_to`; `metered_rating_watermarks.period_from`, `rated_through`; `customer_delinquency.overdue_since`; `maintenance_runs.window_since`, `window_until`; `nmi_bulk_checkpoints.since`, `until`; `nmi_history_months.month`; `payment_method_updates.at`; `product_archive_operations.purchased_since`; `provider_intents.claimed_until`; `solana_pay_references.settle_until`, `watch_until`; `solana_subscriptions.last_pulled_period_start`; `subscription_status_transitions.from_paid_through`, `to_paid_through`; `subscription_verifications.since`; `cost_observations.query_start`, `query_end`; `cost_qualifications.provider_lifetime_start`, `provider_lifetime_end` | In the same order: `period_starts_at`, `period_ends_at`; `period_starts_at`, `rated_through_at`; `overdue_started_at`; `window_starts_at`, `window_ends_at`; `window_starts_at`, `window_ends_at`; `month_at`; `occurred_at`; `purchase_window_starts_at`; `lease_expires_at`; `expires_at`, `watch_ends_at`; `last_pulled_period_starts_at`; `from_current_period_ends_at`, `to_current_period_ends_at`; `unverified_at`; `query_starts_at`, `query_ends_at`; `provider_lifetime_starts_at`, `provider_lifetime_ends_at`. Every `timestamptz` column ends in `_at` |
 | Session settings `app.merchant_id`, `app.billing_restore_id`, `app.catalog_batch`, `billing.decision`, `openrails.retention` | One namespace: `openrails.merchant_id`, `openrails.billing_restore_id`, `openrails.catalog_batch_merchant_id`, `openrails.subscription_decision`, `openrails.retention_table`. A host that sets the merchant for `billing.current_merchant_id()` sets `openrails.merchant_id` |

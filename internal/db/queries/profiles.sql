@@ -10,7 +10,7 @@ WHERE billing.merchants.permission_group_id IS NULL
 RETURNING id;
 
 -- name: GetMerchantDirectoryByID :one
-SELECT id,slug,status,permission_group_id,api_host
+SELECT id,slug,status,permission_group_id
 FROM billing.merchants WHERE id=sqlc.arg(id)::uuid AND deleted_at IS NULL;
 
 -- name: BindUnboundMerchantGroup :execrows

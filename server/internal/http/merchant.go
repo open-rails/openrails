@@ -8,16 +8,15 @@ import (
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/billingauth"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/merchanttarget"
 )
 
 // resolveMerchant is the merchant a request acts on, from what names one:
-// the API host it called, its OpenRails-Merchant selector, the scope its
-// credential is bound to (helpers/auth Bound: an API key's or a trusted
-// issuer's group, whose id is the merchant's) and the deployment's
-// configured merchant. They must all agree; none, or a merchant that is not
-// live with its AuthKit group, is merchant_unresolved.
+// its OpenRails-Merchant selector, the scope its credential is bound to
+// (helpers/auth Bound: an API key's or a trusted issuer's group, whose id is
+// the merchant's) and the deployment's configured merchant. They must all
+// agree; none, or a merchant that is not live with its AuthKit group, is
+// merchant_unresolved.
 func (s *Server) resolveMerchant(r *http.Request, v billingauth.Verified) (billingauth.Target, error) {
 	ctx := r.Context()
 	var target billingauth.Target
@@ -33,9 +32,6 @@ func (s *Server) resolveMerchant(r *http.Request, v billingauth.Verified) (billi
 			target.MerchantSlug = t.MerchantSlug
 		}
 		return nil
-	}
-	if host, ok := merchant.HostMerchant(ctx); ok {
-		_ = agree(billingauth.Target{MerchantID: host})
 	}
 	if selected, ok := merchanttarget.FromContext(ctx); ok {
 		if err := agree(selected); err != nil {

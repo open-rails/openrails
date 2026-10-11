@@ -51,7 +51,7 @@ func ConfiguredRoutes(a *app.App, sel config.Routes) (*router.Table, error) {
 	// startup. Request-time account/signature verification is authoritative.
 	providers.Webhooks = true
 	table := asm.NewRoutes(Options{Groups: sel.RouteGroups, ProviderRoutes: &providers})
-	extra, err := BuildCustomerRoutes(a, sel.Auth, nil)
+	extra, err := BuildCustomerRoutes(a, sel.Auth)
 	if err != nil {
 		return nil, err
 	}

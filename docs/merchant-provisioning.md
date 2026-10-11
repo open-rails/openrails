@@ -166,7 +166,6 @@ version: 1
 merchants:
   myapp:
     display_name: MyApp
-    api_host: api.myapp.example    # canonical Host for public-route resolution
     remote_application:            # issuer-as-owner
       issuer: https://myapp.example
       jwks_uri: https://myapp.example/.well-known/jwks.json
@@ -194,12 +193,6 @@ merchants:
 
 Per merchant:
 
-- `api_host` — the merchant's canonical API host (bare lowercase hostname,
-  globally unique): the `Host` header public routes and Host-routed webhooks
-  resolve this merchant from. Declared hosts are asserted on every apply;
-  omitted leaves the stored value untouched. A hosted product lets an owner
-  claim one at runtime, bound once a TXT record proves control of the domain
-  (the server's `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`).
 - `remote_application` — the host app's issuer (JWKS URI, inline static
   `jwks`, or raw `public_keys`), a trusted issuer of the server's AuthKit in the
   merchant's group, holding its **owner** role: its RFC 9068 access tokens act

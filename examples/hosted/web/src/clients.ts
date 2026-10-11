@@ -8,8 +8,8 @@ import { createBillingClient } from "@openrails/billing-ui"
 // client, for DPoP-bound access tokens to the platform.
 export const auth = createAuthClient({ resourceTokens: { clientId: "courses-web" } })
 
-// The merchant's API host on the platform, which the app's server names
-// (/api/billing), and the platform's resource identifier, its tokens' aud.
+// The platform's API, which the app's server names (/api/billing), and its
+// resource identifier, its tokens' aud.
 const server: { base_url: string; resource: string } = await fetch("/api/billing").then((res) => res.json())
 
 // The browser calls the platform directly. Signed in, each call carries an

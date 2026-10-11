@@ -25,7 +25,7 @@ With a KV mount named, Vault is the only source:
 - A file that declares configuration beside Vault is refused at startup, naming
   what it declares (`display_name`, `psps`, `custodians`, `settings`,
   `alert_webhooks`, `secrets`). The declaration names the merchant only: its
-  slug, `api_host`, and on the standalone server `remote_application`.
+  slug, and on the standalone server `remote_application`.
 
 There is no import or seeding step.
 

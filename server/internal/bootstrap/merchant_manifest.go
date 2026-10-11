@@ -238,7 +238,7 @@ type ProvisionMerchantParams struct {
 // ReconcileMerchantManifestData provisions the merchants a manifest declares:
 // it registers missing ones (with Insert) and, with the manifest as the
 // configuration, puts each declaration in place. With Vault as the source a
-// manifest names merchants only (slug, api_host, remote_application) and is
+// manifest names merchants only (slug, remote_application) and is
 // refused when it declares more. Issuer registration is declarative and does
 // not fetch the JWKS.
 func ReconcileMerchantManifestData(ctx context.Context, cfg *config.Config, cp *controlplane.ControlPlane, manifest *BillingConfig, opts ReconcileOptions) error {

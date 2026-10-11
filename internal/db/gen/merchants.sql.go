@@ -39,52 +39,8 @@ func (q *Queries) CountMatchingPurgeInventories(ctx context.Context, arg CountMa
 	return count, err
 }
 
-const deleteMerchantAPIHostClaim = `-- name: DeleteMerchantAPIHostClaim :exec
-DELETE FROM billing.merchant_api_host_claims WHERE merchant_id = $1::uuid
-`
-
-func (q *Queries) DeleteMerchantAPIHostClaim(ctx context.Context, merchantID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, deleteMerchantAPIHostClaim, merchantID)
-	return err
-}
-
-const deleteProvenMerchantAPIHostClaim = `-- name: DeleteProvenMerchantAPIHostClaim :execrows
-DELETE FROM billing.merchant_api_host_claims
-WHERE merchant_id = $1::uuid AND api_host = $2::text AND token = $3::text
-`
-
-type DeleteProvenMerchantAPIHostClaimParams struct {
-	MerchantID uuid.UUID
-	ApiHost    string
-	Token      string
-}
-
-func (q *Queries) DeleteProvenMerchantAPIHostClaim(ctx context.Context, arg DeleteProvenMerchantAPIHostClaimParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteProvenMerchantAPIHostClaim, arg.MerchantID, arg.ApiHost, arg.Token)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const getMerchantAPIHostClaim = `-- name: GetMerchantAPIHostClaim :one
-SELECT merchant_id, api_host, token, created_at FROM billing.merchant_api_host_claims WHERE merchant_id = $1::uuid
-`
-
-func (q *Queries) GetMerchantAPIHostClaim(ctx context.Context, merchantID uuid.UUID) (BillingMerchantApiHostClaim, error) {
-	row := q.db.QueryRow(ctx, getMerchantAPIHostClaim, merchantID)
-	var i BillingMerchantApiHostClaim
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ApiHost,
-		&i.Token,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getMerchantByGroupID = `-- name: GetMerchantByGroupID :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants WHERE permission_group_id = $1::text
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants WHERE permission_group_id = $1::text
 `
 
 // Includes retired rows so a group cannot silently acquire a new identity.
@@ -99,7 +55,6 @@ func (q *Queries) GetMerchantByGroupID(ctx context.Context, groupID string) (Bil
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.ApiHost,
 		&i.RetiredAt,
 		&i.GroupReleaseCompletedAt,
 		&i.CatalogRevision,
@@ -142,7 +97,7 @@ func (q *Queries) GetMerchantBySlugOrAlias(ctx context.Context, slug string) (Ge
 }
 
 const getUnretiredLiveMerchant = `-- name: GetUnretiredLiveMerchant :one
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
 WHERE id = $1::uuid AND deleted_at IS NULL AND retired_at IS NULL
 `
 
@@ -157,7 +112,6 @@ func (q *Queries) GetUnretiredLiveMerchant(ctx context.Context, id uuid.UUID) (B
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
-		&i.ApiHost,
 		&i.RetiredAt,
 		&i.GroupReleaseCompletedAt,
 		&i.CatalogRevision,
@@ -179,7 +133,7 @@ type InsertMerchantParams struct {
 	GroupID string
 }
 
-// Merchant directory: provisioning, names and API hosts.
+// Merchant directory: provisioning and names.
 func (q *Queries) InsertMerchant(ctx context.Context, arg InsertMerchantParams) error {
 	_, err := q.db.Exec(ctx, insertMerchant, arg.ID, arg.Slug, arg.GroupID)
 	return err
@@ -256,48 +210,8 @@ func (q *Queries) ListAllMerchantIDs(ctx context.Context) ([]uuid.UUID, error) {
 	return items, nil
 }
 
-const listLiveMerchantsByAPIHost = `-- name: ListLiveMerchantsByAPIHost :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
-WHERE api_host = $1::text AND deleted_at IS NULL
-LIMIT 2
-`
-
-func (q *Queries) ListLiveMerchantsByAPIHost(ctx context.Context, apiHost string) ([]BillingMerchant, error) {
-	rows, err := q.db.Query(ctx, listLiveMerchantsByAPIHost, apiHost)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []BillingMerchant
-	for rows.Next() {
-		var i BillingMerchant
-		if err := rows.Scan(
-			&i.ID,
-			&i.Slug,
-			&i.Status,
-			&i.PermissionGroupID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.DeletedAt,
-			&i.ApiHost,
-			&i.RetiredAt,
-			&i.GroupReleaseCompletedAt,
-			&i.CatalogRevision,
-			&i.SlugChangedAt,
-			&i.EntitlementGeneration,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLiveMerchantsByGroupID = `-- name: ListLiveMerchantsByGroupID :many
-SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, api_host, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
+SELECT id, slug, status, permission_group_id, created_at, updated_at, deleted_at, retired_at, group_release_completed_at, catalog_revision, slug_changed_at, entitlement_generation FROM billing.merchants
 WHERE permission_group_id = $1::text AND deleted_at IS NULL
 LIMIT 2
 `
@@ -320,7 +234,6 @@ func (q *Queries) ListLiveMerchantsByGroupID(ctx context.Context, groupID string
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
-			&i.ApiHost,
 			&i.RetiredAt,
 			&i.GroupReleaseCompletedAt,
 			&i.CatalogRevision,
@@ -399,25 +312,6 @@ func (q *Queries) LockMerchantNameForRename(ctx context.Context, id uuid.UUID) (
 	return i, err
 }
 
-const merchantAPIHostTaken = `-- name: MerchantAPIHostTaken :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.merchants
-    WHERE api_host = $1::text AND id <> $2::uuid AND deleted_at IS NULL
-)
-`
-
-type MerchantAPIHostTakenParams struct {
-	ApiHost string
-	ID      uuid.UUID
-}
-
-func (q *Queries) MerchantAPIHostTaken(ctx context.Context, arg MerchantAPIHostTakenParams) (bool, error) {
-	row := q.db.QueryRow(ctx, merchantAPIHostTaken, arg.ApiHost, arg.ID)
-	var exists bool
-	err := row.Scan(&exists)
-	return exists, err
-}
-
 const recordPurgeInventory = `-- name: RecordPurgeInventory :one
 INSERT INTO billing.maintenance_runs (merchant_id, kind, status, inventory_manifest, inventory_total_rows, finished_at)
 VALUES ($1::uuid, 'purge_inventory', 'completed', $2::jsonb,
@@ -450,49 +344,4 @@ type RenameMerchantParams struct {
 func (q *Queries) RenameMerchant(ctx context.Context, arg RenameMerchantParams) error {
 	_, err := q.db.Exec(ctx, renameMerchant, arg.Slug, arg.ID)
 	return err
-}
-
-const setMerchantAPIHost = `-- name: SetMerchantAPIHost :execrows
-UPDATE billing.merchants SET api_host = NULLIF($1::text, ''), updated_at = current_timestamp
-WHERE id = $2::uuid AND deleted_at IS NULL
-`
-
-type SetMerchantAPIHostParams struct {
-	ApiHost string
-	ID      uuid.UUID
-}
-
-func (q *Queries) SetMerchantAPIHost(ctx context.Context, arg SetMerchantAPIHostParams) (int64, error) {
-	result, err := q.db.Exec(ctx, setMerchantAPIHost, arg.ApiHost, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
-const upsertMerchantAPIHostClaim = `-- name: UpsertMerchantAPIHostClaim :one
-INSERT INTO billing.merchant_api_host_claims (merchant_id, api_host, token)
-SELECT id, $1::text, $2::text
-FROM billing.merchants WHERE id = $3::uuid AND deleted_at IS NULL
-ON CONFLICT (merchant_id) DO UPDATE
-    SET api_host = EXCLUDED.api_host, token = EXCLUDED.token, created_at = now()
-RETURNING merchant_id, api_host, token, created_at
-`
-
-type UpsertMerchantAPIHostClaimParams struct {
-	ApiHost    string
-	Token      string
-	MerchantID uuid.UUID
-}
-
-func (q *Queries) UpsertMerchantAPIHostClaim(ctx context.Context, arg UpsertMerchantAPIHostClaimParams) (BillingMerchantApiHostClaim, error) {
-	row := q.db.QueryRow(ctx, upsertMerchantAPIHostClaim, arg.ApiHost, arg.Token, arg.MerchantID)
-	var i BillingMerchantApiHostClaim
-	err := row.Scan(
-		&i.MerchantID,
-		&i.ApiHost,
-		&i.Token,
-		&i.CreatedAt,
-	)
-	return i, err
 }

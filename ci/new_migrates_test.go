@@ -19,6 +19,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/open-rails/openrails"
+	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/app"
 	postgresmigrations "github.com/open-rails/openrails/internal/migrate/postgres"
 )
@@ -182,4 +183,64 @@ func TestOlderBuildBootsOnANewerSchema(t *testing.T) {
 	client, err := openrails.New(t.Context(), f.config(), openrails.Deps{FXTransport: testFX.Transport(), Postgres: f.pool})
 	require.NoError(t, err)
 	require.NoError(t, client.Close(t.Context()))
+}
+
+// The migration that removes merchant API hosts applies over a merchant
+// holding a host and an open claim: both go, and the merchant still serves.
+func TestAPIHostMigrationDropsHosts(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("OPENRAILS_E2E_DSN"))
+	require.NotEmpty(t, dsn, "OPENRAILS_E2E_DSN must point at a disposable PostgreSQL database")
+	pool := openPool(t, dsn)
+	f := &fixture{pool: pool, schema: "e2e_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:16]}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{f.schema}.Sanitize()+" CASCADE")
+	})
+	files, err := fs.Glob(postgresmigrations.FS, "*.up.sql")
+	require.NoError(t, err)
+	before := fstest.MapFS{}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_drop_merchant_api_hosts.up.sql") {
+			break
+		}
+		body, err := fs.ReadFile(postgresmigrations.FS, name)
+		require.NoError(t, err)
+		before[name] = &fstest.MapFile{Data: body}
+	}
+	require.Less(t, len(before), len(files), "the migration is in this build's chain")
+	cfg := f.config()
+	cfg.DB = &openrails.DBConfig{URL: dsn}
+	application, err := app.BootstrapWithOptions(t.Context(), &cfg, &app.BootstrapOptions{PGXPool: pool, Migrations: before})
+	require.NoError(t, err)
+	require.NoError(t, application.Close(t.Context()))
+
+	table := func(name string) string { return pgx.Identifier{f.schema, name}.Sanitize() }
+	slug, host := "hosted-"+uuid.NewString()[:8], "api-"+uuid.NewString()[:8]+".e2e.test"
+	var merchantID uuid.UUID
+	require.NoError(t, pool.QueryRow(t.Context(), `INSERT INTO `+table("merchants")+` (slug, status, api_host) VALUES ($1, 'active', $2) RETURNING id`, slug, host).Scan(&merchantID))
+	_, err = pool.Exec(t.Context(), `INSERT INTO `+table("merchant_api_host_claims")+` (merchant_id, api_host, token) VALUES ($1, $2, 'open-claim')`, merchantID, "next-"+host)
+	require.NoError(t, err)
+
+	client := f.runtime(t, slug)
+	var column bool
+	require.NoError(t, pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM information_schema.columns
+		WHERE table_schema = $1 AND table_name = 'merchants' AND column_name = 'api_host')`, f.schema).Scan(&column))
+	require.False(t, column, "merchants.api_host is dropped")
+	for _, relation := range []string{"merchant_api_host_claims", "merchants_api_host_key"} {
+		var found *string
+		require.NoError(t, pool.QueryRow(t.Context(), "SELECT to_regclass($1)::text", table(relation)).Scan(&found))
+		require.Nil(t, found, relation)
+	}
+
+	var kept uuid.UUID
+	require.NoError(t, pool.QueryRow(t.Context(), `SELECT id FROM `+table("merchants")+` WHERE slug = $1 AND deleted_at IS NULL`, slug).Scan(&kept))
+	require.Equal(t, merchantID, kept, "the merchant is the one that held the host")
+	state, err := client.GetMerchantConfiguration(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, slug, state.DisplayName)
+	product, err := client.CreateProduct(t.Context(), billing.CreateProductParams{Key: "course", DisplayName: "Course"})
+	require.NoError(t, err)
+	page, err := client.ListProducts(t.Context(), billing.ProductListParams{})
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Equal(t, product.ID, page.Items[0].ID)
 }

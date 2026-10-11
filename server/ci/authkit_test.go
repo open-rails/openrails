@@ -138,8 +138,8 @@ func TestControlPlaneOperatorPaths(t *testing.T) {
 	require.NoError(t, err)
 }
 
-// A person names the merchant they act on (its API host or the
-// OpenRails-Merchant selector, as the console does); holding roles in
+// A person names the merchant they act on (the OpenRails-Merchant
+// selector, as the console does); holding roles in
 // several, or one, never picks it for them. Their permission is asked of
 // AuthKit in that merchant's group.
 func TestStaffNameTheirMerchant(t *testing.T) {

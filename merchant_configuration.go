@@ -27,12 +27,3 @@ func (c *Client) UpdateMerchantConfiguration(ctx context.Context, params billing
 	}
 	return &out, nil
 }
-
-// GetAPIHost returns the merchant's proven API host and its open claim.
-func (c *Client) GetAPIHost(ctx context.Context, options ...RequestOption) (*billing.MerchantAPIHost, error) {
-	var out billing.MerchantAPIHost
-	if err := c.do(ctx, http.MethodGet, "/v1/admin/api-host", nil, &out, options...); err != nil {
-		return nil, err
-	}
-	return &out, nil
-}

@@ -31,10 +31,10 @@ func TestHostedCheckoutEmbedded(t *testing.T) {
 		return res.Header()
 	}
 
-	res := s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{"customer_id": customer,
+	res := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{"customer_id": customer,
 		"lines": []map[string]any{{"price_id": s.price()}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks", "ui_mode": "embedded"}})
 	refused(t, res, http.StatusBadRequest, "checkout_embed_origins_required")
-	res = s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{"customer_id": customer,
+	res = s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{"customer_id": customer,
 		"lines": []map[string]any{{"price_id": s.price()}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks", "ui_mode": "popup"}})
 	refused(t, res, http.StatusBadRequest, "invalid_param")
 

@@ -36,7 +36,7 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 	srv := f.newServer(t, func(cfg *server.Config, _ *server.Deps) {
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{SolanaRPCURL: chain.URL()}
-		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 	})
 	type shop struct {
@@ -108,7 +108,7 @@ func TestSolanaPayFindsItsMerchantByOrder(t *testing.T) {
 		require.Equal(t, http.StatusOK, paid.Code, paid.Body.String())
 		require.NoError(t, json.Unmarshal(paid.Body.Bytes(), &order))
 		require.NotNil(t, order.Payment.NextAction, paid.Body.String())
-		require.Equal(t, "solana:https://"+apiHost+"/v1/orders/"+order.ID.String()+"/solana-pay", *order.Payment.NextAction.URL)
+		require.Equal(t, "solana:https://"+serverHost+"/v1/orders/"+order.ID.String()+"/solana-pay", *order.Payment.NextAction.URL)
 		return order.ID
 	}
 	// wallet is a wallet's request: no credential, and a Host and a merchant

@@ -178,12 +178,12 @@ AuthKit groups and nothing more:
 - **A merchant's scope is its AuthKit group**, whose id is the merchant's id
   (`Server.MerchantScope`). Staff routes ask `Can` for the `merchant:` name
   there, else for the `root:` name in the root group.
-- **The merchant a request is for** comes from its API host, its
-  `OpenRails-Merchant` selector, the scope its credential is bound to (an API
-  key's group, a trusted issuer's group) and the configured merchant. They must
-  agree, else `409 merchant_binding_mismatch`; with none it is
-  `403 merchant_unresolved`. A person names the merchant: holding a role in
-  one merchant never picks it.
+- **The merchant a request is for** comes from its `OpenRails-Merchant`
+  selector, the scope its credential is bound to (an API key's group, a
+  trusted issuer's group) and the configured merchant. They must agree, else
+  `409 merchant_binding_mismatch`; with none it is `403 merchant_unresolved`.
+  The request's Host names none. A person names the merchant: holding a role
+  in one merchant never picks it.
 - **Customer (`/v1/me`) and programmatic (`/v1/app`) credentials must be bound**
   to the request's merchant: a trusted issuer's token, or an API key of the
   merchant's group. A credential bound to no merchant is refused there.

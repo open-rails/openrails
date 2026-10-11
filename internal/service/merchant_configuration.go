@@ -57,25 +57,19 @@ func (s *Service) GetMerchantConfigurationState(ctx context.Context) (*billing.M
 }
 
 func (s *Service) configurationState(ctx context.Context, mid billing.MerchantID, set merchantdocs.Set) (*billing.MerchantConfigurationState, error) {
-	var host *string
 	err := s.rt.DB.RunInMerchantConn(ctx, func(ctx context.Context) error {
-		row, err := s.rt.DB.Gen(ctx).GetMerchantDirectoryByID(ctx, mid.UUID())
+		_, err := s.rt.DB.Gen(ctx).GetMerchantDirectoryByID(ctx, mid.UUID())
 		if errors.Is(err, pgx.ErrNoRows) {
 			return merchants.ErrMerchantNotFound
 		}
-		host = row.ApiHost
 		return err
 	})
 	if err != nil {
 		return nil, err
 	}
-	state := &billing.MerchantConfigurationState{
+	return &billing.MerchantConfigurationState{
 		Revision: set.Merchant.Revision, DisplayName: set.Merchant.Value.DisplayName, Settings: set.Merchant.Value.Settings,
-	}
-	if host != nil {
-		state.APIHost = *host
-	}
-	return state, nil
+	}, nil
 }
 
 // UpdateMerchantConfiguration merges params into the merchant document at the

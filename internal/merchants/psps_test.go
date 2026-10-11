@@ -177,16 +177,3 @@ func TestStripeCredentialProbeBindsAccountAndEnvironment(t *testing.T) {
 		})
 	}
 }
-
-// #850: api_host is operator-supplied; normalize then validate.
-func TestAPIHostValidation(t *testing.T) {
-	for _, host := range []string{"api.myapp.example", "api.host-late.test", "localhost", "a1.b2.c3"} {
-		require.NoError(t, ValidateAPIHost(host), host)
-	}
-	for _, host := range []string{"", "https://api.myapp.example", "api.myapp.example/path", "api my app", "API.Upper.Case", ".leading.dot", "double..dot", "-leading.hyphen", "trailing-.hyphen", "under_score.example", strings.Repeat("a", 64) + ".example"} {
-		require.ErrorIs(t, ValidateAPIHost(host), ErrInvalidAPIHost, host)
-	}
-	require.Equal(t, "api.myapp.example", NormalizeAPIHost("  API.MyApp.Example:8443 "))
-	require.Empty(t, NormalizeAPIHost("   "))
-	require.NoError(t, ValidateAPIHost(NormalizeAPIHost("API.MyApp.Example:8443")))
-}

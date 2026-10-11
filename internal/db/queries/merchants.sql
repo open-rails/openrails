@@ -1,4 +1,4 @@
--- Merchant directory: provisioning, names and API hosts.
+-- Merchant directory: provisioning and names.
 
 -- name: InsertMerchant :exec
 INSERT INTO billing.merchants (id, slug, status, permission_group_id)
@@ -34,11 +34,6 @@ SELECT * FROM billing.merchants
 WHERE permission_group_id = sqlc.arg(group_id)::text AND deleted_at IS NULL
 LIMIT 2;
 
--- name: ListLiveMerchantsByAPIHost :many
-SELECT * FROM billing.merchants
-WHERE api_host = sqlc.arg(api_host)::text AND deleted_at IS NULL
-LIMIT 2;
-
 -- name: LockMerchantNameForRename :one
 SELECT slug, slug_changed_at, now()::timestamptz AS now
 FROM billing.merchants
@@ -68,34 +63,6 @@ FROM billing.merchant_slug_aliases a
 JOIN billing.merchants m ON m.id = a.merchant_id
 WHERE a.slug = sqlc.arg(slug)::text AND (a.expires_at IS NULL OR a.expires_at > now()) AND m.deleted_at IS NULL
 LIMIT 1;
-
--- name: MerchantAPIHostTaken :one
-SELECT EXISTS (
-    SELECT 1 FROM billing.merchants
-    WHERE api_host = sqlc.arg(api_host)::text AND id <> sqlc.arg(id)::uuid AND deleted_at IS NULL
-);
-
--- name: SetMerchantAPIHost :execrows
-UPDATE billing.merchants SET api_host = NULLIF(sqlc.arg(api_host)::text, ''), updated_at = current_timestamp
-WHERE id = sqlc.arg(id)::uuid AND deleted_at IS NULL;
-
--- name: UpsertMerchantAPIHostClaim :one
-INSERT INTO billing.merchant_api_host_claims (merchant_id, api_host, token)
-SELECT id, sqlc.arg(api_host)::text, sqlc.arg(token)::text
-FROM billing.merchants WHERE id = sqlc.arg(merchant_id)::uuid AND deleted_at IS NULL
-ON CONFLICT (merchant_id) DO UPDATE
-    SET api_host = EXCLUDED.api_host, token = EXCLUDED.token, created_at = now()
-RETURNING *;
-
--- name: GetMerchantAPIHostClaim :one
-SELECT * FROM billing.merchant_api_host_claims WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
-
--- name: DeleteProvenMerchantAPIHostClaim :execrows
-DELETE FROM billing.merchant_api_host_claims
-WHERE merchant_id = sqlc.arg(merchant_id)::uuid AND api_host = sqlc.arg(api_host)::text AND token = sqlc.arg(token)::text;
-
--- name: DeleteMerchantAPIHostClaim :exec
-DELETE FROM billing.merchant_api_host_claims WHERE merchant_id = sqlc.arg(merchant_id)::uuid;
 
 -- name: RecordPurgeInventory :one
 INSERT INTO billing.maintenance_runs (merchant_id, kind, status, inventory_manifest, inventory_total_rows, finished_at)

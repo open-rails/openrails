@@ -206,7 +206,6 @@ func TestRegistrationsMountTheWholeCatalog(t *testing.T) {
 		"merchant_config_edits PATCH /v1/admin/psps/{id}",
 		"merchant_config_edits POST /v1/admin/alert-webhooks",
 		"merchant_config_edits POST /v1/admin/psps",
-		"merchant_directory GET /v1/admin/api-host",
 		"metrics_ask POST /v1/admin/metrics/ask",
 	}, sorted(unmounted))
 

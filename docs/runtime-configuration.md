@@ -67,8 +67,7 @@ permission never allows plaintext stored secrets.
   `https://shop.example/billing/v1/...`. Configure it only for features needing
   external callbacks or billing links.
 - `auth.resource.public_url` names the server's public origin for
-  sender-constrained tokens' proofs, for example `https://shop.example`;
-  a merchant's API host is admitted too.
+  sender-constrained tokens' proofs, for example `https://shop.example`.
 - `auth.token.issuer` independently defines the server's own token trust.
 - `dashboard_base_url` independently names the administrative console destination.
 - A remote Client's server URL selects its transport destination; it does not

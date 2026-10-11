@@ -23,11 +23,6 @@ type MerchantDeclaration struct {
 	// entry's key in a manifest, which refuses the field.
 	Slug        string `yaml:"-"`
 	DisplayName string `yaml:"display_name"`
-	// APIHost is the merchant's canonical API host (e.g. "api.myapp.example"):
-	// the Host-header value public routes resolve this merchant from.
-	// Globally unique across active merchants. Omitted leaves the stored value
-	// untouched.
-	APIHost string `yaml:"api_host,omitempty"`
 	// PSPs is the operator-declared PSP catalog: the merchant's payment
 	// service providers, keyed by PSP key (e.g. mobius).
 	PSPs map[string]PSPConfig `yaml:"psps,omitempty"`
@@ -178,16 +173,34 @@ type merchantFile struct {
 	MerchantDeclaration `yaml:",inline"`
 }
 
+// retiredDeclarationKeys are the keys a merchant declaration no longer takes
+// and what became of each.
+var retiredDeclarationKeys = []struct{ key, fate string }{
+	{"rail_merchant_accounts", "was renamed to psps"},
+	{"provider_accounts", "was renamed to psps"},
+	{"api_host", "was removed: a request names its merchant by its credential, never by its host"},
+}
+
+// RetiredDeclarationKey is the first retired key doc sets, with what became
+// of it. The strict parser would refuse it as an unknown field, which reads
+// like a typo.
+func RetiredDeclarationKey(doc map[string]any) (string, bool) {
+	for _, retired := range retiredDeclarationKeys {
+		if _, ok := doc[retired.key]; ok {
+			return retired.key + " " + retired.fate, true
+		}
+	}
+	return "", false
+}
+
 // ParseMerchantDeclaration parses one merchant YAML document, which names its
 // merchant with a required slug. Unknown fields are refused, so a typo fails
 // loudly instead of declaring a merchant with no PSPs.
 func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	var probe map[string]any
 	if yaml.Unmarshal(raw, &probe) == nil {
-		for _, old := range []string{"rail_merchant_accounts", "provider_accounts"} {
-			if _, ok := probe[old]; ok {
-				return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %s was renamed to psps", old)
-			}
+		if retired, ok := RetiredDeclarationKey(probe); ok {
+			return MerchantDeclaration{}, fmt.Errorf("parse merchant declaration: %s", retired)
 		}
 	}
 	var f merchantFile
@@ -210,8 +223,8 @@ func ParseMerchantDeclaration(raw []byte) (MerchantDeclaration, error) {
 	return m, nil
 }
 
-// ConfigurationFields names what m sets beyond its merchant's identity (slug,
-// api_host): what Vault holds when it is the source.
+// ConfigurationFields names what m sets beyond its merchant's slug: what
+// Vault holds when it is the source.
 func ConfigurationFields(m MerchantDeclaration) []string {
 	var out []string
 	if strings.TrimSpace(m.DisplayName) != "" {
@@ -237,7 +250,7 @@ func ConfigurationFields(m MerchantDeclaration) []string {
 
 // ErrDeclarationBesideVault refuses a file declaring merchant configuration
 // while Vault holds it.
-var ErrDeclarationBesideVault = errors.New("Vault holds merchant configuration (vault.kv_mount); a merchant declaration names only its slug and api_host")
+var ErrDeclarationBesideVault = errors.New("Vault holds merchant configuration (vault.kv_mount); a merchant declaration names only its slug")
 
 // RefuseDeclarationBesideVault refuses m when Vault is the source and m
 // declares configuration, naming its fields.

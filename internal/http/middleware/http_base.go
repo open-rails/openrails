@@ -304,27 +304,3 @@ func ResolveMerchantHTTP(resolve func() billing.MerchantID) HTTPMiddleware {
 func StaticMerchant(id billing.MerchantID) func() billing.MerchantID {
 	return func() billing.MerchantID { return id }
 }
-
-// ResolveMerchantFromHostHTTP resolves the merchant owning the request's Host
-// on every request (no boot-time map) and pins it both as merchant.WithID, so
-// public merchant-scoped routes work per Host, and as WithHostMerchant, which
-// credential resolution checks: another merchant's credential fails closed. A
-// nil resolver or an unresolvable Host is a no-op; it only narrows context.
-func ResolveMerchantFromHostHTTP(resolve merchant.HostResolver) HTTPMiddleware {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if resolve == nil {
-				next.ServeHTTP(w, r)
-				return
-			}
-			mid, err := resolve(r.Context(), r.Host)
-			if err != nil || mid.IsZero() {
-				next.ServeHTTP(w, r)
-				return
-			}
-			ctx := merchant.WithID(r.Context(), mid)
-			ctx = merchant.WithHostMerchant(ctx, mid)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}

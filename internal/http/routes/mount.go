@@ -157,8 +157,6 @@ func (e *Env) enabled(f Feature) bool {
 		return e.providers.SolanaSigning
 	case FeatureStripePortal:
 		return e.providers.StripePortal
-	case FeatureMerchantDirectory:
-		return rt != nil && rt.Merchants != nil
 	case FeatureMerchantConfigEdits:
 		return rt.MerchantConfigEditable()
 	case FeatureCatalogCopilot:
@@ -432,7 +430,7 @@ func RegisterCheckoutRoutes(rr router.Router, rt *app.Runtime, opts Options) {
 	opts.Auth, opts.ResolveMerchant = hostedcheckout.Authenticator{}, nil
 	env := newEnv(rt, opts)
 	// The host middleware pinned the secret's merchant as the request's.
-	env.Customers, env.SelectedMerchant, env.checkout = opts.Auth, true, true
+	env.Customers, env.checkout = opts.Auth, true
 	env.mount(rr, "", func(r Route) bool { return r.Checkout != "" })
 }
 

@@ -3,7 +3,6 @@ package app
 import (
 	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
-	"net"
 	"net/http"
 
 	"github.com/open-rails/helpers/userinfo"
@@ -77,7 +76,6 @@ type runtimeOverrides struct {
 	StripeTransport http.RoundTripper
 	NMITransport    http.RoundTripper
 	FXTransport     http.RoundTripper
-	DNSResolver     *net.Resolver
 	DB              *db.DB
 	Redis           *redis.Client
 	Clock           clockwork.Clock
@@ -499,10 +497,6 @@ func buildRuntimeWithOverrides(ctx context.Context, cfg *config.Config, override
 	// nmi_payment_source_update intent (ambiguity ⇒ pending_verify, never a
 	// silent local↔remote split).
 	runtime.PaymentSourceUpdateIntents = &intents.PaymentSourceUpdateThrough{Runner: intentRunner, DB: database}
-	runtime.ReserveAPIHosts(cfg.PublicBillingBaseURL, cfg.DashboardBaseURL)
-	if overrides != nil {
-		runtime.DNSResolver = overrides.DNSResolver
-	}
 	runtime.Contacts, runtime.HostUserInfo = directory, hostUserInfo
 
 	return runtime, nil

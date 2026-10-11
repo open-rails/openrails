@@ -9,8 +9,8 @@ and custodians, credentials included. It lives in one of two places:
 - **Vault**, when a KV mount is named ([vault.md](vault.md)): staff edit it over
   HTTP or in the console, and automation may write the documents directly.
 
-`GetMerchantConfiguration` returns the display name, the API host, the settings
-and a `revision`; credentials are never returned. `UpdateMerchantConfiguration`
+`GetMerchantConfiguration` returns the display name, the settings and a
+`revision`; credentials are never returned. `UpdateMerchantConfiguration`
 merges the fields it names: omitted fields keep their values and an explicit
 empty list clears one. Name the `expected_revision` you read and an edit made
 since is refused with `409 revision_mismatch`; without one, the edit merges

@@ -10,14 +10,12 @@ import (
 	"github.com/open-rails/openrails/internal/billingauth"
 	"github.com/open-rails/openrails/internal/http/router"
 	httproutes "github.com/open-rails/openrails/internal/http/routes"
-	"github.com/open-rails/openrails/internal/merchant"
 )
 
 // BuildCustomerRoutes mounts the customer surface, /v1/me, whose customers
 // auth says who they are, at the merchant on a server each request selects,
-// else the configured one. host resolves a merchant's API host: the
-// standalone server's; nil embedded.
-func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator, host merchant.HostResolver) (*router.Table, error) {
+// else the configured one.
+func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator) (*router.Table, error) {
 	if httproutes.IsNilAuth(auth) {
 		return nil, fmt.Errorf("openrails: the customer routes need Routes.Auth")
 	}
@@ -28,7 +26,7 @@ func BuildCustomerRoutes(a *app.App, auth billingauth.Authenticator, host mercha
 	table := &router.Table{}
 	httproutes.RegisterCustomerRoutes(router.NewMux(table, CustomerPrefix, a.Runtime), a.Runtime,
 		httproutes.CustomerMount{Auth: auth, Providers: providers, SelectedMerchant: a.Standalone})
-	return wrapCustomerRoutes(a.Runtime, table, host, auth), nil
+	return wrapCustomerRoutes(a.Runtime, table, auth), nil
 }
 
 // CustomerPrefix is the customer surface's path beneath the mount.

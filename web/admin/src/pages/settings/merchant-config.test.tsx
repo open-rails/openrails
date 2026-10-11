@@ -47,7 +47,6 @@ const configuration = (
 ): MerchantConfigurationState => ({
   revision,
   display_name: displayName,
-  api_host: "",
   settings: {
     profile: { from_email: "billing@acme.test" },
     alert_email: "ops@acme.test",

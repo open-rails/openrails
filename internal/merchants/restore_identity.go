@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/db/gen"
@@ -70,4 +71,9 @@ func (s *Service) restoreIdentity(ctx context.Context, id billing.MerchantID, sl
 		return nil, false, ErrMerchantRestoreConflict
 	}
 	return m, created, nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }

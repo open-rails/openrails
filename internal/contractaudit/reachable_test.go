@@ -17,7 +17,7 @@ func TestPublicInternalTypeMutationsDrift(t *testing.T) {
 	}
 	for _, tc := range []struct{ name, before, after string }{
 		{"internal/config/embedding.go", "Prefix string", "Prefix bool"},
-		{"internal/config/merchant_declaration.go", "APIHost string", "APIHost bool"},
+		{"internal/config/merchant_declaration.go", "DisplayName string", "DisplayName bool"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw, err := fs.ReadFile(base, tc.name)

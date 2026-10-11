@@ -30,7 +30,7 @@ import (
 
 const (
 	checkoutHost = "checkout.e2e.test"
-	apiHost      = "api.e2e.test"
+	serverHost   = "api.e2e.test"
 )
 
 var checkoutPage = fstest.MapFS{
@@ -61,7 +61,7 @@ func newCheckoutShop(t *testing.T) *checkoutShop {
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{NMIGatewayURL: s.gateway.URL()}
-		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
 		cfg.Engine.RateLimitsDisabled = true
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 		cfg.HostedCheckoutURL = "https://" + checkoutHost
@@ -126,7 +126,7 @@ func (s *checkoutShop) call(host, method, path, bearer, key string, body any) *h
 // POST /v1/app/orders.
 func (s *checkoutShop) order(customer billing.CustomerID, checkout map[string]any) (billing.Order, string) {
 	s.t.Helper()
-	res := s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{
+	res := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{
 		"customer_id": customer, "lines": []map[string]any{{"price_id": s.price()}}, "checkout": checkout,
 	})
 	require.Equal(s.t, http.StatusCreated, res.Code, res.Body.String())
@@ -168,7 +168,7 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 	key := uuid.NewString()
 	body := map[string]any{"customer_id": customer, "lines": []map[string]any{{"price_id": s.price()}},
 		"checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks?order={ORDER_ID}", "cancel_url": "https://shop.e2e.test/cart"}}
-	first := s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, key, body)
+	first := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, key, body)
 	require.Equal(t, http.StatusCreated, first.Code, first.Body.String())
 	order := decode[billing.Order](t, first)
 	require.NotNil(t, order.Checkout.URL)
@@ -176,11 +176,11 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 	require.Equal(t, s.clock.Now().Add(hostedcheckout.DefaultLifetime), order.Checkout.ExpiresAt)
 	require.NotNil(t, order.ExpiresAt)
 	require.Equal(t, order.Checkout.ExpiresAt, *order.ExpiresAt, "the order expires with its checkout")
-	again := decode[billing.Order](t, s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, key, body))
+	again := decode[billing.Order](t, s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, key, body))
 	require.Equal(t, order.ID, again.ID)
 	require.Equal(t, *order.Checkout.URL, *again.Checkout.URL)
 
-	staff := s.call(apiHost, http.MethodGet, "/v1/admin/orders/"+order.ID.String(), s.backend, "", nil)
+	staff := s.call(serverHost, http.MethodGet, "/v1/admin/orders/"+order.ID.String(), s.backend, "", nil)
 	require.Equal(t, http.StatusOK, staff.Code, staff.Body.String())
 	read := decode[billing.Order](t, staff)
 	require.NotNil(t, read.Checkout)
@@ -189,7 +189,7 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 
 	// An order of its own outlives the checkout.
 	longer := s.clock.Now().Add(48 * time.Hour)
-	res := s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{"customer_id": customer,
+	res := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(), map[string]any{"customer_id": customer,
 		"lines": []map[string]any{{"price_id": s.price()}}, "expires_at": longer, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}})
 	require.Equal(t, http.StatusCreated, res.Code, res.Body.String())
 	kept := decode[billing.Order](t, res)
@@ -202,7 +202,7 @@ func TestHostedCheckoutOnMerchantOrders(t *testing.T) {
 		"checkout.cancel_url":  {"success_url": "https://shop.e2e.test/thanks", "cancel_url": "javascript:alert(1)"},
 		"checkout.expires_at":  {"success_url": "https://shop.e2e.test/thanks", "expires_at": s.clock.Now().Add(10 * time.Minute)},
 	} {
-		res := s.call(apiHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(),
+		res := s.call(serverHost, http.MethodPost, "/v1/app/orders", s.backend, uuid.NewString(),
 			map[string]any{"customer_id": customer, "lines": []map[string]any{{"price_id": s.price()}}, "checkout": checkout})
 		refused(t, res, http.StatusBadRequest, billing.CodeInvalidParam)
 		require.Contains(t, res.Body.String(), `"param":"`+name+`"`)
@@ -266,7 +266,7 @@ func TestHostedCheckoutSecretOpensOneOrder(t *testing.T) {
 	wrong, _, err := hostedcheckout.NewSecret()
 	require.NoError(t, err)
 	refused(t, s.call(checkoutHost, http.MethodGet, "/v1/me/orders/"+orderA.ID.String(), wrong, "", nil), http.StatusNotFound, "checkout_not_found")
-	onAPI := s.call(apiHost, http.MethodGet, "/v1/me/orders/"+orderA.ID.String(), secretA, "", nil)
+	onAPI := s.call(serverHost, http.MethodGet, "/v1/me/orders/"+orderA.ID.String(), secretA, "", nil)
 	require.Equal(t, http.StatusUnauthorized, onAPI.Code, onAPI.Body.String())
 
 	// Past its expiry the URL stops working; the order expires with it.

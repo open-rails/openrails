@@ -224,7 +224,7 @@ func TestCheckoutSecretReadsItsMerchantConfig(t *testing.T) {
 
 	refused(t, read(checkoutHost, "/v1/me/config", ""), http.StatusNotFound, "checkout_not_found")
 	// The secret is a credential on the checkout host alone.
-	require.Equal(t, http.StatusUnauthorized, read(apiHost, "/v1/me/config", shop).Code)
+	require.Equal(t, http.StatusUnauthorized, read(serverHost, "/v1/me/config", shop).Code)
 }
 
 // customerOf is a customer token of a merchant's own login.

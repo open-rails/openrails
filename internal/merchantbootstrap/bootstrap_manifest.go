@@ -7,7 +7,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/config"
 	"github.com/open-rails/openrails/internal/db/models"
-	"github.com/open-rails/openrails/internal/merchants"
 	"github.com/open-rails/openrails/internal/modules/merchantconfig"
 )
 
@@ -30,11 +29,6 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		slug := strings.ToLower(strings.TrimSpace(rawSlug))
 		if slug == "" {
 			return fmt.Errorf("merchant key is required")
-		}
-		if host := merchants.NormalizeAPIHost(t.APIHost); host != "" {
-			if err := merchants.ValidateAPIHost(host); err != nil {
-				return fmt.Errorf("merchant %q api_host: %w", slug, err)
-			}
 		}
 		// The configuration API's own validator: a manifest cannot declare
 		// settings the API would refuse.

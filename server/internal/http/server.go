@@ -12,7 +12,6 @@ import (
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/open-rails/openrails/billing"
 	"github.com/open-rails/openrails/internal/abusestate"
 	"github.com/open-rails/openrails/internal/app"
 	"github.com/open-rails/openrails/internal/billingauth"
@@ -339,26 +338,8 @@ func (s *Server) wrapHandler(next http.Handler, browser func(*http.Request) bool
 		// is configured, in which case merchant-owned operations hard-fail (there is
 		// no default merchant).
 		middleware.ResolveMerchantHTTP(s.runtime.ConfiguredMerchant),
-		// #734: Host-based multi-merchant resolution, sharing the SAME control-plane
-		// directory lookup as CORS above and as the JWT-issuer resolution
-		// (internal/controlplane.merchantForIssuer checks the marker this pins).
-		// Runs after the static ResolveMerchantHTTP so a live per-request Host match
-		// is authoritative over any process-wide configured merchant. A Host with no
-		// api_host configured for any merchant is a no-op — behavior is unchanged.
-		middleware.ResolveMerchantFromHostHTTP(s.hostMerchantResolver),
 		limiter,
 	)
-}
-
-// hostMerchantResolver is the standalone #734 Host->merchant resolver: the
-// control plane's; nil-safe for hand-built *Server{} unit tests that skip
-// New(). Unrelated to CORS since #765 (CORS is a static per-route
-// policy, not sourced from Host/merchant resolution).
-func (s *Server) hostMerchantResolver(ctx context.Context, host string) (billing.MerchantID, error) {
-	if s == nil || s.controlPlane == nil {
-		return billing.MerchantID{}, nil
-	}
-	return s.controlPlane.ResolveMerchantByHost(ctx, host)
 }
 
 // Handler returns the full public HTTP surface: health + user + self/customer

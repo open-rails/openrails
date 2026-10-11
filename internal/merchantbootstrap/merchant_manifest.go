@@ -203,13 +203,11 @@ func ParseMerchantConfigManifest(raw []byte) (*BillingConfig, error) {
 	return &manifest, nil
 }
 
-// RejectMisplacedMerchantConfigKeys fails a manifest entry that still spells
-// the psps key by a retired name (psps <- accounts <- rail_merchant_accounts
-// <- provider_accounts), or that names its own slug: the entry's key is the
-// slug, so the two can never disagree. The strict parser would reject these
-// as unknown fields anyway, but "unknown field" reads like a typo — each
-// deserves a pointer. Silent-ignore is the worst failure here: it would apply
-// an empty account set.
+// RejectMisplacedMerchantConfigKeys fails a manifest entry that sets a
+// retired key (config.RetiredDeclarationKey), or that names its own slug:
+// the entry's key is the slug, so the two can never disagree. The strict
+// parser would reject these as unknown fields anyway, but "unknown field"
+// reads like a typo: each deserves a pointer.
 func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 	var probe struct {
 		Merchants map[string]map[string]any `yaml:"merchants"`
@@ -226,10 +224,8 @@ func RejectMisplacedMerchantConfigKeys(raw []byte) error {
 		if _, ok := probe.Merchants[slug]["slug"]; ok {
 			return fmt.Errorf("merchants.%s.slug is not accepted: the entry's key is its slug", slug)
 		}
-		for _, old := range []string{"rail_merchant_accounts", "provider_accounts"} {
-			if _, ok := probe.Merchants[slug][old]; ok {
-				return fmt.Errorf("merchants.%s.%s was renamed to psps", slug, old)
-			}
+		if retired, ok := config.RetiredDeclarationKey(probe.Merchants[slug]); ok {
+			return fmt.Errorf("merchants.%s.%s", slug, retired)
 		}
 	}
 	return nil
@@ -258,9 +254,6 @@ func mergeMerchantConfigManifest(dst, src *BillingConfig) {
 func MergeMerchantConfig(dst *config.MerchantDeclaration, src config.MerchantDeclaration) {
 	if strings.TrimSpace(src.DisplayName) != "" {
 		dst.DisplayName = src.DisplayName
-	}
-	if strings.TrimSpace(src.APIHost) != "" {
-		dst.APIHost = src.APIHost
 	}
 	if strings.TrimSpace(src.Secrets.SCIMToken) != "" {
 		dst.Secrets.SCIMToken = src.Secrets.SCIMToken
@@ -375,7 +368,7 @@ type ProvisionMerchantParams struct {
 // ProvisionMerchant registers a declared merchant and, with a file as the
 // source, puts its declaration in place: the declaration IS the
 // configuration. With Vault as the source a declaration names only the
-// merchant (slug, api_host); Vault alone holds its configuration.
+// merchant (its slug); Vault alone holds its configuration.
 func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merchants.Merchant, error) {
 	slug := billing.NormalizeMerchantSlug(req.Slug)
 	mt := req.Merchant
@@ -412,13 +405,6 @@ func ProvisionMerchant(ctx context.Context, req ProvisionMerchantParams) (*merch
 		return nil, fmt.Errorf("merchant bootstrap: merchant %q is missing; rerun with --insert to create it", slug)
 	case err != nil:
 		return nil, fmt.Errorf("merchant bootstrap: lookup %q: %w", slug, err)
-	}
-	// #850: a declared api_host is asserted on every start; omitted leaves the
-	// stored one, so a host claimed over HTTP survives.
-	if host := merchants.NormalizeAPIHost(mt.APIHost); host != "" {
-		if err := directory.SetHostConfig(ctx, tn.ID, host); err != nil {
-			return nil, fmt.Errorf("set api_host %q: %w", host, err)
-		}
 	}
 	if err := PutDeclaration(ctx, req, tn.ID, mt); err != nil {
 		return nil, fmt.Errorf("merchant bootstrap: configure %q: %w", slug, err)
@@ -598,11 +584,6 @@ func ValidateMerchantDeclaration(cfg *config.Config, mt config.MerchantDeclarati
 	// An existing merchant must not turn malformed input into a successful boot.
 	if _, err := merchantconfig.Normalize(mt.DisplayName, mt.Settings); err != nil {
 		return fmt.Errorf("settings: %w", err)
-	}
-	if host := merchants.NormalizeAPIHost(mt.APIHost); host != "" {
-		if err := merchants.ValidateAPIHost(host); err != nil {
-			return err
-		}
 	}
 	for key, account := range mt.PSPs {
 		rail := NormalizeManifestRail(string(account.Rail))

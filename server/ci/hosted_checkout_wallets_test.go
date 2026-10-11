@@ -43,7 +43,7 @@ func TestHostedCheckoutRegistersItsHostForWallets(t *testing.T) {
 		cfg.Engine.ProviderWriteMode = openrails.ProviderWritesFull
 		cfg.Engine.Vault = vault.Config()
 		cfg.Engine.ProviderSandbox = &openrails.ProviderSandboxConfig{StripeAPIURL: stripe.URL()}
-		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
 		cfg.Engine.RateLimitsDisabled = true
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 		cfg.HostedCheckoutURL = "https://" + checkoutHost
@@ -59,7 +59,7 @@ func TestHostedCheckoutRegistersItsHostForWallets(t *testing.T) {
 	sum := sha256.Sum256(res.Body.Bytes())
 	require.Equal(t, stripeApplePayAssociationSHA256, hex.EncodeToString(sum[:]))
 	res = httptest.NewRecorder()
-	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "https://"+apiHost+hostedcheckout.ApplePayDomainAssociationPath, nil))
+	handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, "https://"+serverHost+hostedcheckout.ApplePayDomainAssociationPath, nil))
 	require.Equal(t, http.StatusNotFound, res.Code, "only the checkout host serves it")
 
 	entry, err := srv.ProvisionMerchant(t.Context(), billing.ProvisionMerchantParams{Slug: uniqueName("wallets"), DisplayName: "Wallet Shop"})

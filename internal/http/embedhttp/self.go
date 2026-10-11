@@ -15,14 +15,13 @@ import (
 	"github.com/open-rails/openrails/internal/http/middleware"
 	"github.com/open-rails/openrails/internal/http/router"
 	"github.com/open-rails/openrails/internal/http/routesurface"
-	"github.com/open-rails/openrails/internal/merchant"
 	"github.com/open-rails/openrails/internal/shared/iputil"
 )
 
 // wrapCustomerRoutes applies the browser-tier base chain to the customer
 // routes: permissive CORS, body limits, credential admission, merchant
 // resolution and the rate limiter. Each route's own gate runs inside it.
-func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant.HostResolver, credentials billingauth.Authenticator) *router.Table {
+func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, credentials billingauth.Authenticator) *router.Table {
 	// OpenRails-native rate-limiting + captcha, matching the base NewHTTPHandler
 	// chain. IP-keyed: the delegated principal is pinned per-route inside the mux,
 	// after this outer chain — exactly like the standalone self surface.
@@ -57,8 +56,6 @@ func wrapCustomerRoutes(rt *app.Runtime, mux *router.Table, hostResolve merchant
 			// Resolve current authority on each request, including privileged
 			// restore/bootstrap integrations that bind after graph construction.
 			middleware.ResolveMerchantHTTP(rt.ConfiguredMerchant),
-			// #734: a no-op when hostResolve is nil (no control plane attached).
-			middleware.ResolveMerchantFromHostHTTP(hostResolve),
 			limiter,
 		)
 	})

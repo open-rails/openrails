@@ -9,8 +9,6 @@ import (
 
 	"github.com/open-rails/openrails/internal/merchantbootstrap"
 	"github.com/open-rails/openrails/internal/service"
-
-	"github.com/open-rails/openrails/internal/merchants"
 )
 
 const (
@@ -32,11 +30,6 @@ func validateMerchantManifestShape(m *BillingConfig) error {
 		slug := strings.ToLower(strings.TrimSpace(rawSlug))
 		if slug == "" {
 			return fmt.Errorf("merchant key is required")
-		}
-		if host := merchants.NormalizeAPIHost(t.APIHost); host != "" {
-			if err := merchants.ValidateAPIHost(host); err != nil {
-				return fmt.Errorf("merchant %q api_host: %w", slug, err)
-			}
 		}
 		if t.RemoteApplication != nil {
 			if err := validateManifestRemoteApplication(slug, t.RemoteApplication); err != nil {

@@ -205,8 +205,6 @@ same public origin to `public_billing_base_url`, `auth.token.issuer` and
   Without it the server ignores `X-Forwarded-For`, and rate limits, abuse
   tracking and webhook source addresses all see the controller. Behind
   Cloudflare, list its ranges in `cloudflare_proxies` as well.
-- **Per-merchant API hosts.** Add a wildcard host (`*.api.example.com`) and a
-  wildcard certificate, which needs a DNS-01 challenge.
 - **Body size.** Requests are capped at 1 MiB, but a billing archive import
   (`POST /v1/admin/billing-archive`) streams up to 1 GiB: raise the controller's
   limit if you import over HTTP.

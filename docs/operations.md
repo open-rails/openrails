@@ -1385,31 +1385,17 @@ Investigate the roster before clearing it. The usual causes are a misdeclared
 `psps.account_id`, a credential rotated onto a sibling sub-account, or a
 provider incident returning a short page — never 850 customers all leaving.
 
-## Per-merchant API hosts + browser CORS
+## One API host + browser CORS
 
-A merchant a standalone server serves may have its own canonical API
-hostname, where merchant-scoped routes refuse another merchant's credential.
-The public routes do not depend on it: the catalog names its merchant
+A server answers every merchant on one API host: a request's Host names no
+merchant. A credentialed request's merchant is its credential's, and the
+public routes name theirs in the request: the catalog its merchant
 (`?merchant=<merchant id>`) and a Solana Pay request its order. Browser CORS
 is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
 
-- **Configuring a merchant's host**: the operator binds it (the merchant
-  manifest's `api_host`, or the server's `SetMerchantAPIHost`); a hosted
-  product lets the owner claim and prove one (`ClaimMerchantAPIHost`, then
-  `VerifyMerchantAPIHost`). It is
-  `billing.merchants.api_host` (globally unique among live merchants),
-  resolved LIVE on the next
-  request; no boot-time host map, so a merchant configured on one node
-  resolves immediately on every node sharing the database. Leave `api_host`
-  unset for a merchant that should never resolve from any Host.
-- **Local-dev hostnames**: `api_host` compares against the request Host with
-  the port stripped, so
-  `api_host = "api.acme.localhost"` resolves on any listen port — point
-  `/etc/hosts` at `127.0.0.1` per name.
 - **Reserved names**: `billing.ReservedMerchantSlugs` is the advisory list
-  a hosted product should refuse to let a merchant self-provision as a slug
-  (a slug commonly becomes `api.<slug>.<domain>`); the engine doesn't enforce
-  it — the host does.
+  a hosted product should refuse to let a merchant self-provision as a slug;
+  the engine doesn't enforce it — the host does.
 - **Webhook surface**: `<prefix>/v1/webhooks/{rail}/{account_id}` in embedded and
   standalone deployments. The provider account resolves its merchant in the
   configured environment; an explicit runtime merchant binding is enforced.
@@ -1417,8 +1403,8 @@ is a **separate, fixed, engine-wide policy**, not a per-merchant setting.
   required. Host headers do not choose callback authority.
 - **Consistency with credentials**: a credential bound to merchant A (an API
   key of its group, a token of its trusted issuer) is refused
-  `409 merchant_binding_mismatch` against merchant B's Host or selector, even
-  though it verifies.
+  `409 merchant_binding_mismatch` against merchant B's selector, even though
+  it verifies.
 
 ### Browser CORS doctrine
 
@@ -1441,9 +1427,8 @@ route tier:
 - **Every other surface** (the admin console, inbound webhooks, the
   server's AuthKit routes, an embedded host's staff routes) emits NO CORS
   headers at all.
-- This is engine code, not a database column or config key, and it does not
-  depend on `api_host` or Host resolution: OpenRails' CORS posture is not
-  configurable.
+- This is engine code, not a database column or config key: OpenRails' CORS
+  posture is not configurable.
 
 ## Payment-method update notices
 

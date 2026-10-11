@@ -29,7 +29,6 @@ func TestValidateMerchantDeclaration(t *testing.T) {
 		{"bare prefix", sandbox, stripeKey("pk_test_"), false},
 		{"secret key as publishable", sandbox, stripeKey("sk_test_abc"), false},
 		{"non-string key", sandbox, config.MerchantDeclaration{PSPs: map[string]config.PSPConfig{"main": {Rail: "stripe", Settings: map[string]any{"publishable_key": 1}}}}, false},
-		{"invalid api host", live, config.MerchantDeclaration{APIHost: "bad_host.example"}, false},
 		{"ccbill with salt", sandbox, ccbill(map[string]string{"salt": "s", "datalink_username": "u", "datalink_password": "p"}), true},
 		{"ccbill credentials without salt", sandbox, ccbill(map[string]string{"datalink_username": "u", "datalink_password": "p"}), false},
 		{"ccbill blank salt", sandbox, ccbill(map[string]string{"salt": " "}), false},

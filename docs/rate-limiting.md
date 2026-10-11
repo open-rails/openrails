@@ -98,7 +98,7 @@ URLs, thresholds, and TTLs are hardcoded policy, not config.
   holds, every subject on that merchant's captcha buckets must solve a captcha; each decline
   seen in attack mode keeps it up for another hour, so it lapses an hour after the declines stop
   or the ledger's window drops below the threshold. It applies where the merchant is known
-  before authentication (the configured merchant or its `api_host`); an individual solve never
+  before authentication (the configured merchant); an individual solve never
   clears it. Without a captcha configured, nothing is challenged and the ledger's blocks are the
   whole policy.
 - A client renders the challenge from `GET /v1/config`'s `captcha` block, or from the

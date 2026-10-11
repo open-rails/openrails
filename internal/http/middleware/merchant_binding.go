@@ -8,7 +8,7 @@ import (
 )
 
 // EnforceMerchantBinding checks assertions after authentication and before the
-// principal is pinned. Neither a Client header nor an existing runtime/Host
+// principal is pinned. Neither a Client header nor an existing runtime
 // binding may silently select a merchant different from the verified one.
 func EnforceMerchantBinding(r *request.Request, actual billing.MerchantID) bool {
 	selector, present, err := merchant.ParseSelector(r.Request.Header)

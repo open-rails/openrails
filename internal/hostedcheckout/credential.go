@@ -63,7 +63,7 @@ func ResolveHTTP(store *Store, now func() time.Time) func(http.Handler) http.Han
 				billingauth.WriteJSONError(w, http.StatusServiceUnavailable, billing.CodeServiceUnavailable, "")
 				return
 			}
-			ctx := merchant.WithHostMerchant(merchant.WithID(WithCheckout(r.Context(), c), c.MerchantID), c.MerchantID)
+			ctx := merchant.WithID(WithCheckout(r.Context(), c), c.MerchantID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

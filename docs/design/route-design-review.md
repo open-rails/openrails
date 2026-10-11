@@ -1895,13 +1895,15 @@ Route sections: [Customer routes — 36](#customer-routes--36) · [Application r
 
 **Code:** [internal/service/merchant_configuration.go:162](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/service/merchant_configuration.go#L162) · [internal/modules/merchantconfig/settings.go:55](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/modules/merchantconfig/settings.go#L55) · [web/admin/src/pages/settings/index.tsx:227](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/web/admin/src/pages/settings/index.tsx#L227) · [internal/service/merchant_configuration.go:83](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/service/merchant_configuration.go#L83) · [internal/http/routes/merchant.go:16](https://github.com/open-rails/openrails/blob/17ccbcf6a100cc762bb6cf79f37047b8df7696a3/internal/http/routes/merchant.go#L16)
 
-### 135. `GET /v1/admin/api-host`
+### 135. Historical route: `GET admin/api-host`
+
+**Removed from master:** This path is relative to the version-one API root. Merchant API hosts were removed after this review: a request's Host names no merchant. The assessment below records behavior at the reviewed commit; it is not a recommendation to restore the route.
 
 **Keep · No change needed**
 
-**Current:** MerchantConfig permission guards a feature-gated directory read. The handler reads the bound API host and open claim, including proof information; it does not bind or verify a host itself.
+**At the reviewed commit:** MerchantConfig permission guards a feature-gated directory read. The handler reads the bound API host and open claim, including proof information; it does not bind or verify a host itself.
 
-**Our recommendation:** Keep the read-only status endpoint and the distinction between proven host and pending claim. Host ownership changes should remain with the existing operator/host-controlled proof workflow.
+**Our recommendation at the reviewed commit:** Keep the read-only status endpoint and the distinction between proven host and pending claim. Host ownership changes should remain with the existing operator/host-controlled proof workflow.
 
 **Why / tradeoff:** Combining an unverified requested hostname with the active hostname would confuse public routing. The current projection lets a hosting product explain DNS work without granting ordinary settings writes the authority to claim another host.
 

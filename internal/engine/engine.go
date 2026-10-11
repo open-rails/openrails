@@ -108,7 +108,6 @@ func New(ctx context.Context, cfg config.Config, deps config.Deps) (*Engine, err
 		StripeTransport: deps.StripeTransport,
 		NMITransport:    deps.NMITransport,
 		FXTransport:     deps.FXTransport,
-		DNSResolver:     deps.DNSResolver,
 		Clock:           deps.Clock,
 		EmailSender:     deps.Email,
 		UserInfo:        deps.UserInfo,
@@ -197,7 +196,7 @@ func validate(cfg *config.Config, deps config.Deps) error {
 	if cfg.TestMode == config.CredentialPostureLive {
 		for name, set := range map[string]bool{
 			"StripeTransport": deps.StripeTransport != nil, "NMITransport": deps.NMITransport != nil, "FXTransport": deps.FXTransport != nil,
-			"DNSResolver": deps.DNSResolver != nil, "Clock": deps.Clock != nil,
+			"Clock": deps.Clock != nil,
 		} {
 			if set {
 				return fmt.Errorf("openrails: Deps.%s is a test seam and is refused with TestMode live", name)

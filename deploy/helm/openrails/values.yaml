@@ -99,7 +99,7 @@ ingress:
   className: ""
   annotations: {}
   # Every path of each host goes to the server: the API, webhooks and the
-  # admin console. Per-merchant API hosts can be a wildcard (*.api.example.com).
+  # admin console.
   hosts: []
   tls: []
 

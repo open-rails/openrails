@@ -6,8 +6,8 @@ import (
 	"github.com/open-rails/openrails/internal/http/handlers"
 )
 
-// merchantRoutes is the merchant itself: its configuration, API host,
-// outbound webhooks, portable archive and bulk import.
+// merchantRoutes is the merchant itself: its configuration, outbound
+// webhooks, portable archive and bulk import.
 var merchantRoutes = []Route{
 	{Method: GET, Path: "/v1/admin/configuration", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetMerchantConfiguration", NoConn: true,
 		Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Handler: h(handlers.GetMerchantConfiguration)},
@@ -15,10 +15,6 @@ var merchantRoutes = []Route{
 	// read-only.
 	{Method: PATCH, Path: "/v1/admin/configuration", Group: MerchantConfig, Auth: AuthMerchant, Name: "UpdateMerchantConfiguration", Sensitive: true, When: FeatureMerchantConfigEdits, NoConn: true,
 		Request: billing.UpdateMerchantConfigurationParams{}, Responses: []Reply{{200, billing.MerchantConfigurationState{}}}, Errors: codes("invalid_param", "revision_mismatch", "service_unavailable"), Handler: h(handlers.UpdateMerchantConfiguration)},
-
-	// The host the merchant's public routes resolve from (#734).
-	{Method: GET, Path: "/v1/admin/api-host", Group: MerchantConfig, Auth: AuthMerchant, Name: "GetAPIHost", When: FeatureMerchantDirectory, NoConn: true,
-		Responses: []Reply{{200, billing.MerchantAPIHost{}}}, Errors: codes("merchant_unresolved", "resource_not_found", "service_unavailable"), Handler: h(handlers.GetMerchantAPIHost)},
 
 	// Where the merchant's operational alerts are posted.
 	{Method: GET, Path: "/v1/admin/alert-webhooks", Group: MerchantConfig, Auth: AuthMerchant, Name: "ListAlertWebhooks",

@@ -2,7 +2,6 @@ package billing
 
 import (
 	"encoding/json"
-	"time"
 )
 
 // UpdateMerchantConfigurationParams merges into the merchant's configuration:
@@ -53,31 +52,7 @@ func (p UpdateMerchantConfigurationParams) MarshalJSON() ([]byte, error) {
 type MerchantConfigurationState struct {
 	Revision    int64            `json:"revision"`
 	DisplayName string           `json:"display_name"`
-	APIHost     string           `json:"api_host"`
 	Settings    MerchantSettings `json:"settings"`
-}
-
-// MerchantAPIHost is the host the merchant's public routes are served at
-// (null until one is proven) and its open claim, if any.
-type MerchantAPIHost struct {
-	APIHost *string       `json:"api_host"`
-	Claim   *APIHostClaim `json:"claim"`
-}
-
-// APIHostClaim is a host the merchant claimed and has yet to prove: publish
-// DNSRecord, then verify.
-type APIHostClaim struct {
-	APIHost   string        `json:"api_host"`
-	CreatedAt time.Time     `json:"created_at"`
-	DNSRecord APIHostRecord `json:"dns_record"`
-}
-
-// APIHostRecord is the DNS record that proves a claim: a TXT record at Name
-// carrying Value.
-type APIHostRecord struct {
-	Type  string `json:"type"`
-	Name  string `json:"name"`
-	Value string `json:"value"`
 }
 
 // Capabilities is what this deployment serves: each optional route group

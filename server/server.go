@@ -137,7 +137,7 @@ type Deps struct {
 	// its signing key source and the rest of authkit.Deps. Nil Postgres is a
 	// pool of its own on the engine's database, nil Redis the engine's, and
 	// nil Email renders AuthKit's email and sends it through the engine's
-	// sender. The server sets ResourceHosts: its merchants' API hosts.
+	// sender.
 	Auth authkit.Deps
 	// HasVaultedPaymentMethod answers whether a user has a payment method on
 	// file, unlocking merchant creation beyond MerchantCreation.FreeAllowance.
@@ -233,13 +233,6 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 	if akDeps.Email == nil && s.graph.Runtime.EmailSender != nil {
 		akDeps.Email = controlplane.AuthKitSender{Sender: s.graph.Runtime.EmailSender}
 	}
-	akDeps.ResourceHosts = func(ctx context.Context, host string) (bool, error) {
-		mid, err := s.cp.ResolveMerchantByHost(ctx, host)
-		if errors.Is(err, controlplane.ErrHostMerchantUnknown) {
-			return false, nil
-		}
-		return !mid.IsZero(), err
-	}
 	akCfg, err := controlplane.AuthKit(s.graph.Config, cfg.Auth, opts)
 	if err != nil {
 		return fail(err)
@@ -266,7 +259,7 @@ func New(ctx context.Context, cfg Config, deps Deps) (*Server, error) {
 		_ = ak.Close(context.WithoutCancel(ctx))
 		return fail(err)
 	}
-	if err := operator.Join(s.graph, s.cp, akCfg); err != nil {
+	if err := operator.Join(s.graph, s.cp); err != nil {
 		return fail(err)
 	}
 	if s.surface, err = operator.StandaloneServer(s.graph, s.cp, operator.Surface{

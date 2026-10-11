@@ -154,8 +154,7 @@ func TestCourseList(t *testing.T) {
 // The merchant's setup on the platform, exercised: a user who signs up and
 // proves their email reaches the platform over SCIM with it, the service
 // token reads them, their purchase emails them a receipt, and the PSP's
-// signed webhooks are accepted at the merchant's API host while a forged one
-// is refused.
+// signed webhooks are accepted at the platform while a forged one is refused.
 func TestPlatformSetup(t *testing.T) {
 	app := startStack(t)
 	ctx := context.Background()
@@ -227,7 +226,7 @@ const (
 
 type stack struct {
 	URL       string // the app: AuthKit's issuer, as the platform registered it
-	ServerURL string // the merchant's API host
+	ServerURL string // the platform's API
 	resource  string // the platform's resource identifier
 	inbox     string // Mailpit's API: the app's and the platform's mail
 	auth      *authkit.Client
@@ -235,7 +234,7 @@ type stack struct {
 }
 
 // startStack runs this app against a platform it is connected to (README.md):
-// OPENRAILS_HOSTED_API_HOST, _RESOURCE and _SERVICE_TOKEN as main.go reads
+// OPENRAILS_HOSTED_URL, _RESOURCE and _SERVICE_TOKEN as main.go reads
 // them; _APP_URL, the issuer the platform registered, whose signing key is
 // in _KEYS; _MAILPIT, the API of the inbox the app's and platform's mail
 // reach; and the app's own fresh database in OPENRAILS_E2E_DSN's server.
@@ -243,7 +242,7 @@ func startStack(t *testing.T) *stack {
 	t.Helper()
 	env := func(name string) string { return os.Getenv("OPENRAILS_HOSTED_" + name) }
 	dsn := os.Getenv("OPENRAILS_E2E_DSN")
-	if dsn == "" || env("API_HOST") == "" {
+	if dsn == "" || env("URL") == "" {
 		t.Skip("OPENRAILS_E2E_DSN and OPENRAILS_HOSTED_* name no database and connected platform")
 	}
 	ctx := context.Background()
@@ -254,7 +253,7 @@ func startStack(t *testing.T) *stack {
 	smtpPort, err := strconv.Atoi(cmpOr(env("SMTP_PORT"), "1025"))
 	require.NoError(t, err)
 	s := settings{
-		PublicURL: env("APP_URL"), APIHost: env("API_HOST"),
+		PublicURL: env("APP_URL"), OpenRailsURL: env("URL"),
 		Resource: env("RESOURCE"), ServiceToken: env("SERVICE_TOKEN"), Directory: env("DIRECTORY"), SCIMInterval: time.Second, KeysPath: env("KEYS"),
 		SMTP: smtp.Server{Host: inbox.Hostname(), Port: smtpPort, From: "OnlyDemo <hello@onlydemo.example>"},
 	}
@@ -269,7 +268,7 @@ func startStack(t *testing.T) *stack {
 	app := &httptest.Server{Listener: listener, Config: &http.Server{Handler: r}}
 	app.Start()
 	t.Cleanup(app.Close)
-	return &stack{URL: s.PublicURL, ServerURL: s.APIHost, resource: s.Resource, inbox: inbox.String(), auth: ak, bill: bill}
+	return &stack{URL: s.PublicURL, ServerURL: s.OpenRailsURL, resource: s.Resource, inbox: inbox.String(), auth: ak, bill: bill}
 }
 
 func cmpOr(a, b string) string {

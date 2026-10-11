@@ -334,8 +334,7 @@ merchants:
   `openrails:self` none (a customer's own billing, `/v1/me/*`, `sub` a UUID:
   the customer's id).
 - A token acts for its issuer's merchant only. The request may name it
-  (`OpenRails-Merchant`, or the merchant's API host); naming another is
-  `409 merchant_binding_mismatch`.
+  (`OpenRails-Merchant`); naming another is `409 merchant_binding_mismatch`.
 - A token with `sub` equal to its `client_id` is a machine acting for itself.
 - Your console signs staff in at the issuer: register a client with the
   redirect URI `<console URL>/callback` and set `admin_console.issuer` to the
@@ -406,14 +405,10 @@ the request, whatever host they are called at: the public catalog as
 `?merchant=<merchant id>`, a wallet's Solana Pay request by its order.
 `GET /v1/config` is the deployment's and names none.
 
-**Per-merchant API hosts.** A merchant may have a canonical hostname. The
-operator declares it (`api_host` in the merchant manifest, or the server's
-`SetMerchantAPIHost`), and a hosted product lets a merchant claim one it
-proves with a DNS TXT record (`ClaimMerchantAPIHost`,
-`VerifyMerchantAPIHost`). `GET /v1/admin/api-host` reads it. It resolves live
-on the next request, no restart. Every merchant-scoped route there refuses a
-credential bound to another merchant: a token minted for merchant A is
-rejected on merchant B's host even though it verifies.
+**One API host.** The server answers every merchant on one host: a request's
+Host names no merchant, and a merchant has no hostname of its own. Every
+merchant-scoped route refuses a credential bound to another merchant: a token
+minted for merchant A is rejected for merchant B even though it verifies.
 
 **CORS** is a fixed policy — not configurable, no origin registration: the
 API routes (checkout, `/v1/me/*`, `/v1/admin/*`, `/v1/app/*`) answer
@@ -486,7 +481,7 @@ foundation; the `openrails` CLI covers the operator's (`merchants`,
 
 | Area | Methods |
 |---|---|
-| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `RenameMerchant`, `MerchantByName`, `SetMerchantAPIHost`, `ClaimMerchantAPIHost`, `VerifyMerchantAPIHost`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
+| Merchants | `ProvisionMerchant` (create, or the merchant a name holds), `ListMerchants`, `GetMerchant`, `DeleteMerchant` (soft), `RestoreMerchant`, `RenameMerchant`, `MerchantByName`, `ListActiveMerchantIDs`, `ListMerchantsForSubject` |
 | Authority | `MerchantScope` (a merchant's AuthKit group, as an `auth.Scope`), `ListUserMerchants` (the merchants a user holds a role in), `AuthKit`, `EnsureCustomerPermissionGroup`; `server.MerchantRoles` names the declared merchant roles and `server.MerchantRole` resolves a declared or custom one ([roles](auth.md#roles)) |
 | Operations | `ListWorkerHealth`, `UnlockAdminLockout`, `PrivateHandler`, `FleetAnalytics`, `FleetTimeseries`, `ListMerchantRetirementCandidates`, `RetireUnusedMerchant`, `CompletePendingMerchantRetirements`, `SubjectHasVaultedPaymentMethod` |
 

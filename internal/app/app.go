@@ -5,7 +5,6 @@ import (
 	"fmt"
 	vaultapi "github.com/hashicorp/vault/api"
 	"io/fs"
-	"net"
 	"net/http"
 
 	"github.com/open-rails/helpers/userinfo"
@@ -45,8 +44,6 @@ type BootstrapOptions struct {
 	NMITransport http.RoundTripper
 	// FXTransport replaces the FX sources' wire (test seam).
 	FXTransport http.RoundTripper
-	// DNSResolver answers api_host proof lookups (test seam).
-	DNSResolver *net.Resolver
 	PGXPool     *pgxpool.Pool
 	Redis       *redis.Client
 	Clock       clockwork.Clock
@@ -127,12 +124,6 @@ func BootstrapWithOptions(ctx context.Context, cfg *config.Config, opts *Bootstr
 		FXTransport: func() http.RoundTripper {
 			if opts != nil {
 				return opts.FXTransport
-			}
-			return nil
-		}(),
-		DNSResolver: func() *net.Resolver {
-			if opts != nil {
-				return opts.DNSResolver
 			}
 			return nil
 		}(),

@@ -2,9 +2,7 @@ package middleware
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -219,34 +217,20 @@ func TestRequestLogHTTPCorrelatesRequestID(t *testing.T) {
 }
 
 // There is no default merchant: an unresolved merchant pins nothing, so
-// downstream merchant.Require fails. A resolved Host also pins the host marker.
+// downstream merchant.Require fails. The request's Host names none.
 func TestResolveMerchant(t *testing.T) {
 	id := billing.MerchantID(uuid.New())
-	byHost := func(want billing.MerchantID, err error) HTTPMiddleware {
-		return ResolveMerchantFromHostHTTP(func(_ context.Context, host string) (billing.MerchantID, error) {
-			if host != "shop.example" {
-				return id, errors.New("wrong host")
-			}
-			return want, err
-		})
-	}
 	for i, tc := range []struct {
-		mw           HTTPMiddleware
-		pinned, host bool
+		mw     HTTPMiddleware
+		pinned bool
 	}{
-		{ResolveMerchantHTTP(StaticMerchant(id)), true, false},
-		{byHost(id, nil), true, true},
-		{ResolveMerchantHTTP(nil), false, false},
-		{ResolveMerchantHTTP(StaticMerchant(billing.MerchantID{})), false, false},
-		{ResolveMerchantFromHostHTTP(nil), false, false},
-		{byHost(id, errors.New("ambiguous")), false, false},
-		{byHost(billing.MerchantID{}, nil), false, false},
+		{ResolveMerchantHTTP(StaticMerchant(id)), true},
+		{ResolveMerchantHTTP(nil), false},
+		{ResolveMerchantHTTP(StaticMerchant(billing.MerchantID{})), false},
 	} {
 		tc.mw(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got, ok := merchant.FromContext(r.Context())
-			_, host := merchant.HostMerchant(r.Context())
 			require.Equal(t, tc.pinned, ok, "case %d", i)
-			require.Equal(t, tc.host, host, "case %d", i)
 			if ok {
 				require.Equal(t, id, got)
 			}

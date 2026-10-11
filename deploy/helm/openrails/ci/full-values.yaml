@@ -40,10 +40,10 @@ metrics:
 ingress:
   enabled: true
   className: traefik
-  hosts: [billing.example.com, "*.api.billing.example.com"]
+  hosts: [billing.example.com]
   tls:
     - secretName: billing-tls
-      hosts: [billing.example.com, "*.api.billing.example.com"]
+      hosts: [billing.example.com]
 podDisruptionBudget:
   enabled: true
 topologySpreadConstraints:

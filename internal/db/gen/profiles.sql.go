@@ -30,7 +30,7 @@ func (q *Queries) BindUnboundMerchantGroup(ctx context.Context, arg BindUnboundM
 }
 
 const getMerchantDirectoryByID = `-- name: GetMerchantDirectoryByID :one
-SELECT id,slug,status,permission_group_id,api_host
+SELECT id,slug,status,permission_group_id
 FROM billing.merchants WHERE id=$1::uuid AND deleted_at IS NULL
 `
 
@@ -39,7 +39,6 @@ type GetMerchantDirectoryByIDRow struct {
 	Slug              string
 	Status            string
 	PermissionGroupID *string
-	ApiHost           *string
 }
 
 func (q *Queries) GetMerchantDirectoryByID(ctx context.Context, id uuid.UUID) (GetMerchantDirectoryByIDRow, error) {
@@ -50,7 +49,6 @@ func (q *Queries) GetMerchantDirectoryByID(ctx context.Context, id uuid.UUID) (G
 		&i.Slug,
 		&i.Status,
 		&i.PermissionGroupID,
-		&i.ApiHost,
 	)
 	return i, err
 }

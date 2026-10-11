@@ -1,15 +1,15 @@
 // Command hosted is the embedded example's course site on the hosted
 // platform: OpenRails runs there, for many merchants, and this app is one
-// merchant's. Its backend calls the merchant's API host with the service
-// token the console issued, and applies catalog.yaml with it at boot; its
+// merchant's. Its backend calls the platform with the service token the
+// console issued, and applies catalog.yaml with it at boot; its
 // AuthKit mints the browser's DPoP-bound tokens for /v1/me and pushes its
 // users over SCIM. content.go and web/src/pages.tsx are the embedded
 // example's, unchanged.
 //
 // Run it from this directory with DATABASE_URL, after building the app
 // (cd web && pnpm install && pnpm build) and connecting it (README.md):
-// OPENRAILS_API_HOST is the merchant's API host, OPENRAILS_RESOURCE the
-// platform's resource identifier, OPENRAILS_SERVICE_TOKEN the service token.
+// OPENRAILS_URL is the platform's API, OPENRAILS_RESOURCE its resource
+// identifier, OPENRAILS_SERVICE_TOKEN the service token.
 // PUBLIC_URL is this app's origin (default http://localhost:8080), which is
 // AuthKit's issuer. ADDR is the listen address (default :8080);
 // EXAMPLE_CHECK_ONLY=1 boots, checks the platform and exits.
@@ -44,7 +44,7 @@ import (
 // platform, and its mail server.
 type settings struct {
 	PublicURL    string        // this app: AuthKit's issuer and the browser's origin
-	APIHost      string        // the merchant's API host on the platform
+	OpenRailsURL string        // the platform's API
 	Resource     string        // the platform's resource identifier: its tokens' aud
 	ServiceToken string        // the console's service token for this app, bound to its registration
 	Directory    string        // the platform's directory for this app's users (its AuthKit's /directory/scim/v2)
@@ -103,11 +103,11 @@ func newAuth(ctx context.Context, db *pgxpool.Pool, s settings) (*authkit.Client
 }
 
 // newBilling is the remote handle: the same *openrails.Client as embedded,
-// over HTTP to the merchant's API host, with the service token, which is the
+// over HTTP to the platform, with the service token, which is the
 // merchant's: every call acts on that merchant. Like embedded, catalog.yaml
 // is the truth: each distinct document applies once.
 func newBilling(ctx context.Context, s settings) (*openrails.Client, error) {
-	bill, err := openrails.NewRemoteMerchant(s.APIHost, openrails.RemoteCredential{APIKey: s.ServiceToken})
+	bill, err := openrails.NewRemoteMerchant(s.OpenRailsURL, openrails.RemoteCredential{APIKey: s.ServiceToken})
 	if err != nil {
 		return nil, err
 	}
@@ -142,7 +142,7 @@ func newApp(ctx context.Context, db *pgxpool.Pool, s settings, media mediaKey) (
 		return nil, nil, nil, err
 	}
 	r.GET("/api/billing", func(c *gin.Context) { // where the browser's billing client calls
-		c.JSON(http.StatusOK, gin.H{"base_url": s.APIHost + "/v1", "resource": s.Resource})
+		c.JSON(http.StatusOK, gin.H{"base_url": s.OpenRailsURL + "/v1", "resource": s.Resource})
 	})
 	courseRoutes(r, ak, bill, media) // the course list, the gate on each course and its media
 	serveApp(r, "web/dist")          // the React app: its pages, the buy page among them
@@ -160,7 +160,7 @@ func main() {
 func run(ctx context.Context) error {
 	s := settings{
 		PublicURL:    cmp.Or(os.Getenv("PUBLIC_URL"), "http://localhost:8080"),
-		APIHost:      os.Getenv("OPENRAILS_API_HOST"),
+		OpenRailsURL: os.Getenv("OPENRAILS_URL"),
 		Resource:     os.Getenv("OPENRAILS_RESOURCE"),
 		ServiceToken: os.Getenv("OPENRAILS_SERVICE_TOKEN"),
 		Directory:    os.Getenv("OPENRAILS_DIRECTORY"),
@@ -172,8 +172,8 @@ func run(ctx context.Context) error {
 			From: "OnlyDemo <hello@onlydemo.example>",
 		},
 	}
-	if s.APIHost == "" || s.Resource == "" || s.ServiceToken == "" || s.Directory == "" {
-		return errors.New("OPENRAILS_API_HOST, OPENRAILS_RESOURCE, OPENRAILS_SERVICE_TOKEN and OPENRAILS_DIRECTORY are required: see README.md")
+	if s.OpenRailsURL == "" || s.Resource == "" || s.ServiceToken == "" || s.Directory == "" {
+		return errors.New("OPENRAILS_URL, OPENRAILS_RESOURCE, OPENRAILS_SERVICE_TOKEN and OPENRAILS_DIRECTORY are required: see README.md")
 	}
 	db, err := pgxpool.New(ctx, os.Getenv("DATABASE_URL"))
 	if err != nil {

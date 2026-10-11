@@ -103,7 +103,7 @@ explicit:
 | `ConsoleAssets` | A host-built admin console, which `Routes.AdminConsole` serves (section 6). |
 | `Email` | Your own sender for OpenRails' rendered email; replaces `Config.SMTP` (set one). An empty `From` is the deployment's own mail. |
 | `UserInfo` | Your directory (AuthKit's `ak.UserInfo()`, or your own `openrails.UserInfo`): who each customer is, asked whenever OpenRails emails or shows one. See [customer contacts](customer-contacts.md). |
-| `StripeTransport`, `NMITransport`, `FXTransport`, `DNSResolver`, `Clock` | Test seams, refused with `TestMode` live. |
+| `StripeTransport`, `NMITransport`, `FXTransport`, `Clock` | Test seams, refused with `TestMode` live. |
 
 `Deps` holds no auth: the engine authenticates nobody. Your auth guards the
 routes you mount (section 6) and decides who may sign in; OpenRails keeps no
@@ -249,8 +249,8 @@ The merchant's configuration lives in `Config.Merchant` or in Vault, never in
 the database ([merchant configuration](merchant-configuration.md)). Declared in
 `Config.Merchant`, it is read at `New` and is read-only: change the declaration
 and construct a new engine. With `Config.Vault.KVMount` named, Vault holds it:
-`Config.Merchant` names the merchant only (`Slug`, `APIHost`; declaring more is
-refused), and `Client.UpdateMerchantConfiguration`, `CreatePSP`, `UpdatePSP`
+`Config.Merchant` names the merchant only (`Slug`; declaring more is refused),
+and `Client.UpdateMerchantConfiguration`, `CreatePSP`, `UpdatePSP`
 and the alert-webhook methods edit it at the revision they read
 ([vault.md](vault.md)). `RouteGroups.MerchantConfig` publishes those routes
 with the rest of the merchant's configuration; the edits mount only with
@@ -446,7 +446,7 @@ The merchant's handle, the shared concrete `*openrails.Client`, grouped by job:
 |---|---|
 | Admission (hot path) | `Admit`, `CaptureAdmission`, `ReleaseAdmissions`, `ExtendAdmissions` |
 | Usage | `RecordUsage` (metered events outside the hold/capture cycle, failed usage included); reports through `QueryMetrics` |
-| Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration`, `GetAPIHost` |
+| Configuration | `GetMerchantConfiguration`, `UpdateMerchantConfiguration` |
 | Credits | `CreateCreditGrants`, `ListCreditGrants`, `GetCreditGrant`, `RevokeCreditGrant`, `ListBalanceTransactions`, `GetBalance` |
 | Customers / entitlements | `ListCustomers`, `GetCustomer` (contact, settings, balances, default cards), `UpdateCustomer` (credit limits, trust levels, billing policy, invoice profile), `CheckEntitlements` (programmatic), `ListEntitlements`, `ListProductAccess`, `CreateProductAccess`, `RevokeProductAccess` |
 | Catalog (API hosts) | `ListOffers` (programmatic: what a customer may buy, by entitlement or product key), `ApplyCatalog`, `GetCatalogRevision`, `CreateProduct`, `GetProduct`, `ListProducts`, `UpdateProduct`, `CreatePrice`, `GetPrice`, `ListPrices`, `ListPriceHistory`, `UpdatePrice`, `ListMeters`, `GetMeter`, `SetMeter` (with its rate card), `ListRateOverrides`, `SetRateOverride`, `DeleteRateOverride` |

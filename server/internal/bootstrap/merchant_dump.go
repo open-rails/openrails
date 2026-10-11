@@ -51,20 +51,16 @@ func DumpMerchantConfig(ctx context.Context, cfg *config.Config, cp *controlplan
 	if err != nil {
 		return nil, err
 	}
-	host, err := svc.GetHostConfig(ctx, selected.ID)
-	if err != nil {
-		return nil, err
-	}
 	return &BillingConfig{Version: BootstrapManifestVersion, Merchants: map[string]MerchantConfig{
-		selected.Slug: {MerchantDeclaration: dumpDeclaration(set, selected.Slug, host.APIHost, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))},
+		selected.Slug: {MerchantDeclaration: dumpDeclaration(set, selected.Slug, config.ExpectedProviderEnvironment(config.IsTestMode(cfg)))},
 	}}, nil
 }
 
 // dumpDeclaration is a configuration as its manifest declares it: the
 // documents of environment, without credentials.
-func dumpDeclaration(set merchantdocs.Set, slug, apiHost, environment string) config.MerchantDeclaration {
+func dumpDeclaration(set merchantdocs.Set, slug, environment string) config.MerchantDeclaration {
 	doc := set.Merchant.Value
-	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, APIHost: apiHost, Settings: doc.Settings}
+	out := config.MerchantDeclaration{DisplayName: doc.DisplayName, Settings: doc.Settings}
 	if out.DisplayName == "" {
 		out.DisplayName = slug
 	}

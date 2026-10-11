@@ -14,9 +14,9 @@ that can change.
   how long a former name is kept are the deployment's naming policy
   ([merchant provisioning](merchant-provisioning.md#merchant-identity-and-names)).
 - **Resolution.** Name-bearing boundaries (CLI `--merchant`, a manifest, the
-  `OpenRails-Merchant` header, a Host) resolve the current name or a valid
-  alias once. Everything after runs against the merchant UUID: imports, ledger
-  operations, jobs and foreign keys never store a name.
+  `OpenRails-Merchant` header) resolve the current name or a valid alias once.
+  Everything after runs against the merchant UUID: imports, ledger operations,
+  jobs and foreign keys never store a name.
 - **Reclaimed names.** Provisioning a name another merchant released creates a
   distinct billing identity. The former merchant keeps its UUID, money and
   provider state. A display name updates the selected UUID; it never upserts

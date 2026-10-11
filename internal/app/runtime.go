@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -107,14 +105,6 @@ type Runtime struct {
 	// resolves through this ONE instance instead of reading
 	// RemoteAddr/X-Forwarded-For itself.
 	TrustedProxies *iputil.TrustedProxies
-
-	// ReservedAPIHosts are the hostnames the deployment itself serves: its
-	// public billing URL, console and AuthKit issuer. No merchant may claim one
-	// as its api_host. Written before serving (ReserveAPIHosts).
-	ReservedAPIHosts []string
-	// DNSResolver answers api_host proof lookups (#1107); nil is the system
-	// resolver.
-	DNSResolver *net.Resolver
 
 	Clock clockwork.Clock
 	// Contacts is who customers are: the host's directory when HostUserInfo
@@ -298,15 +288,6 @@ type Runtime struct {
 	// Verifier reads unverified subscriptions from their provider as soon as
 	// they become unverified (#1094); started with the billing workers.
 	Verifier *reconcile.Verifier
-}
-
-// ReserveAPIHosts adds the hostnames urls name to ReservedAPIHosts.
-func (r *Runtime) ReserveAPIHosts(urls ...string) {
-	for _, raw := range urls {
-		if host := merchants.DeploymentHost(raw); host != "" && !slices.Contains(r.ReservedAPIHosts, host) {
-			r.ReservedAPIHosts = append(r.ReservedAPIHosts, host)
-		}
-	}
 }
 
 // MerchantConfigEditable reports whether merchant configuration can change at

@@ -117,7 +117,7 @@ func newWorldAt(t *testing.T, clock *clockwork.FakeClock) *world {
 	}))
 	t.Cleanup(ts.Close)
 	srv := f.newServer(t, func(cfg *server.Config, deps *server.Deps) {
-		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
 		cfg.HostedCheckoutURL = "https://" + checkoutHost
 		deps.CheckoutAssets = checkoutPage
 		cfg.Auth.Token.Issuer = ts.URL
@@ -443,7 +443,7 @@ func TestCustomerLinkAtCheckout(t *testing.T) {
 		t.Helper()
 		sub := uuid.NewString()
 		require.Equal(t, http.StatusOK, w.me(http.MethodGet, "", w.customer(w.shopLogin, sub, nil), nil).Code)
-		r := host(apiHost, http.MethodPost, "/v1/app/orders", w.shopKey.Secret, map[string]any{"customer_id": sub,
+		r := host(serverHost, http.MethodPost, "/v1/app/orders", w.shopKey.Secret, map[string]any{"customer_id": sub,
 			"lines": []map[string]any{{"price_id": price.ID}}, "checkout": map[string]any{"success_url": "https://shop.e2e.test/thanks"}})
 		require.Equal(t, http.StatusCreated, r.Code, r.Body.String())
 		var o billing.Order
@@ -501,7 +501,7 @@ func TestCustomerLinkAtCheckout(t *testing.T) {
 	require.Equal(t, http.StatusOK, r.Code, "the page answers its sign-in's return")
 	require.Contains(t, r.Header().Get("Content-Security-Policy"), "connect-src 'self' ")
 	require.Regexp(t, `connect-src [^;]*`+regexp.QuoteMeta(w.as.URL), r.Header().Get("Content-Security-Policy"), "the page redeems its code at the server's AuthKit")
-	r = host(apiHost, http.MethodPost, "/v1/me/network-link/challenges", secret, nil)
+	r = host(serverHost, http.MethodPost, "/v1/me/network-link/challenges", secret, nil)
 	require.Equal(t, http.StatusUnauthorized, r.Code, "a checkout URL opens nothing on the API host: %s", r.Body.String())
 }
 
@@ -961,7 +961,7 @@ func TestTheServerDeclaresTheCheckoutClient(t *testing.T) {
 		cfg.Auth.Resource = authkit.ResourceConfig{ID: resourceID, PublicURL: rsOrigin}
 		cfg.Auth.Agreements = []authkit.AgreementConfig{{Key: network.TermsAgreement, Version: networkTerms, URL: "https://openrails.e2e.test/terms"}}
 		cfg.Auth.AuthorizationServer.Clients = []authkit.OAuthClientConfig{{ID: network.CheckoutClientID, RedirectURIs: []string{checkoutReturn}}}
-		cfg.Engine.PublicBillingBaseURL = "https://" + apiHost
+		cfg.Engine.PublicBillingBaseURL = "https://" + serverHost
 		cfg.HostedCheckoutURL = "https://" + checkoutHost
 		deps.CheckoutAssets = checkoutPage
 	})
